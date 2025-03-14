@@ -109,6 +109,12 @@ iframe {
     border: 1px solid rgba(255, 255, 255, 0.18);
     /* Remova qualquer grid-gap, grid-template, etc. daqui */
 }
+@media (max-width: 768px) {
+    .cards {
+        grid-template-columns: 1fr; /* Uma única coluna em telas pequenas */
+        grid-gap: 10px;
+    }
+}
 
 
 
