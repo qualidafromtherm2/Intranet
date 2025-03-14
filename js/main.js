@@ -66,7 +66,6 @@ function displayResults(results) {
     } else {
       // Em dispositivos móveis, não carrega a imagem nos cards.
       // Você pode mostrar um placeholder ou deixar vazio.
-      cardTop.innerHTML = '<div class="no-image-placeholder">Imagem não carregada</div>';
     }
 
     // Cria o container das informações do card
