@@ -247,3 +247,10 @@ src: local('Titillium WebLight'),
   background-image: url("../img/logo.png");
   transition: all 0.1s ease-in-out;
 }
+
+@media (max-width: 768px) {
+    .main-menu {
+        width: 55px; /* Ou até esconder e criar um menu responsivo */
+    }
+}
+
