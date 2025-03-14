@@ -61,11 +61,15 @@ input[type="radio"] {
 }
 
 .slide {
+   position: relative;
+   pointer-events: none; /* Os cliques passam para o pai */
    width: 90%;
    height: 100%;
    background-size: cover;
    background-position: center;
-}
+ }
+ 
+ 
 
 /*===================
    BUTTONS
@@ -78,6 +82,21 @@ input[type="radio"] {
    transition: all .5s cubic-bezier(0.785, 0.135, 0.15, 0.86);
 }
 
+.update-slide-btn {
+   pointer-events: auto; /* Permite os cliques neste botão */
+   position: absolute;
+   bottom: 5px;
+   right: 5px;
+   z-index: 1000;
+   background: rgba(0, 0, 0, 0.5);
+   color: white;
+   border: none;
+   border-radius: 50%;
+   padding: 5px;
+   cursor: pointer;
+ }
+ 
+ 
 .btn {
    border: 1px solid rgba(0, 0, 0, 0.281);
    background: rgb(255, 255, 255);
@@ -156,7 +175,9 @@ input[type="radio"]:checked#slide-5-trigger ~ .slide-wrapper > #slide-role {
 input[type="radio"]:checked#slide-6-trigger ~ .slide-wrapper > #slide-role {
    left: -500%;
 }
-
+input[type="radio"]:checked#slide-7-trigger ~ .slide-wrapper > #slide-role {
+   left: -600%;
+}
 
 
 /* button logic */

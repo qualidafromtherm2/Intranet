@@ -6,6 +6,7 @@ const { flattenObject, convertToCSV } = require('../utils/csvUtils');
 const Papa = require('papaparse');  // <-- Adicione esta linha
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config');
 
+
 exports.generateCsv = async (req, res) => {
   try {
     const createPayload = (page) => ({
@@ -23,6 +24,7 @@ exports.generateCsv = async (req, res) => {
       app_key: OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET
     });
+
 
     // Primeira página
     const response1 = await axiosPostWithRetry(
@@ -113,6 +115,7 @@ exports.detalhes = async (req, res) => {
 };
 
 exports.alterar = async (req, res) => {
+  console.log("Recebido request para alterar produto:", req.body);
   try {
     const camposEdicao = req.body;
     await salvarAlteracoesOmie(camposEdicao);
@@ -123,6 +126,8 @@ exports.alterar = async (req, res) => {
   }
 };
 
+
+
 async function salvarAlteracoesOmie(camposEdicao) {
   try {
     const payload = {
@@ -132,18 +137,31 @@ async function salvarAlteracoesOmie(camposEdicao) {
       param: [camposEdicao]
     };
 
-    console.log("Enviando payload para Omie:", JSON.stringify(payload, null, 2));
+    console.log("=== Enviando payload para Omie ===");
+    console.log(JSON.stringify(payload, null, 2));
+
     const response = await axios.post(
       'https://app.omie.com.br/api/v1/geral/produtos/',
       payload,
       { headers: { 'Content-Type': 'application/json' } }
     );
-    console.log("Resposta da Omie:", response.data);
+
+    console.log("=== Resposta da Omie ===");
+    console.log(JSON.stringify(response.data, null, 2));
+
+    return response.data;
   } catch (error) {
-    console.error("Erro na chamada Omie:", error.message);
+    console.error("=== Erro na chamada Omie ===");
+    if (error.response && error.response.data) {
+      console.error(JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error(error.message);
+    }
     throw error;
   }
 }
+
+
 
 exports.estoque = async (req, res) => {
   try {
@@ -217,4 +235,53 @@ exports.alterarNoCSV = (req, res) => {
     estoque: exports.estoque,
     alterarNoCSV: exports.alterarNoCSV
   };
+  
+  
+  async function enviarParaOmie(camposEdicao) {
+    try {
+      const payload = {
+        call: "AlterarProduto",
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [camposEdicao]
+      };
+  
+      console.log("=== Enviando payload para Omie ===");
+      console.log(JSON.stringify(payload, null, 2));
+  
+      const response = await axios.post(
+        'https://app.omie.com.br/api/v1/geral/produtos/',
+        payload,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+  
+      console.log("=== Resposta da Omie ===");
+      console.log(JSON.stringify(response.data, null, 2));
+  
+      return response.data;
+    } catch (error) {
+      console.error("=== Erro na chamada Omie ===");
+      if (error.response && error.response.data) {
+        console.error(JSON.stringify(error.response.data, null, 2));
+      } else {
+        console.error(error.message);
+      }
+      throw error;
+    }
+  }
+  
+  
+  // Exporte a função ou a utilize na função 'alterar'
+  exports.alterar = async (req, res) => {
+    console.log("Recebido request para alterar produto (foto):", req.body);
+    try {
+      const camposEdicao = req.body;
+      await enviarParaOmie(camposEdicao);
+      res.json({ success: true, message: 'Produto atualizado com sucesso!' });
+    } catch (error) {
+      console.error("Erro ao alterar produto:", error?.message || error);
+      res.status(500).json({ success: false, error: 'Erro ao alterar produto na Omie' });
+    }
+  };
+  
   

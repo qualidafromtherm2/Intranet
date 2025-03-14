@@ -19,6 +19,12 @@ Interface moderna Fromtherm/
 ├── server.js
 
 
+
+http://localhost:5001/index.html#edit // Meu site
+
+
+npm run dev // Para iniciar o servidor altomaticamente
+
 Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
 no terminal integrado do VS Code:
 git status
@@ -29,3 +35,8 @@ git push
 
 https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
 https://codepen.io/cjl750/pen/mXbMyo // exemplo de linha do tempo
+https://codepen.io/jkantner/pen/vEBQZYe // exemplo para a pagina do SAC
+https://codepen.io/leonam-silva-de-souza/pen/vYoazQq // exemplo para login
+https://codepen.io/cbolson/pen/YzmENGy // Para deixar a foto dos aniversariantes do mês
+https://codepen.io/dilums/pen/ZEBowxX // dashboard para report
+https://codepen.io/fainder/pen/qBwBeO // menu do modal

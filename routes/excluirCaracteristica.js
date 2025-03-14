@@ -4,6 +4,7 @@ const router = express.Router();
 const axios = require('axios');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.js');
 
+
 router.post('/', async (req, res) => {
   const { cCodIntProd, cCodIntCaract } = req.body;
   const payload = {
@@ -15,7 +16,7 @@ router.post('/', async (req, res) => {
     app_key: OMIE_APP_KEY,
     app_secret: OMIE_APP_SECRET
   };
-
+  
   console.log("Payload para exclusão:", JSON.stringify(payload, null, 2));
 
   try {

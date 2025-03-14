@@ -19,13 +19,14 @@ iframe {
     z-index: 1500;
 }
 .search {
+
     display: inline-block;
     position: relative;
     height: 35px;
     width: 35px;
     box-sizing: border-box;
     margin: 0 8px 7px 0;
-    padding: 7px 9px 0 9px;
+    padding: 7px 5px 0 5px;
     border: 3px solid #00bbbb;
     border-radius: 25px;
     transition: all 200ms ease;
@@ -338,3 +339,42 @@ iframe {
 
 
 
+.table-scroll {
+  /* Altura máxima que a tabela poderá ter antes de surgir a rolagem */
+  max-height: 300px;  
+
+  /* Cria barra de rolagem vertical se passar do limite */
+  overflow-y: auto;
+
+  /* Margem opcional para evitar que a tabela fique colada no botão flutuante */
+  margin-top: 10px;
+  margin-right: 10px;
+
+  /* position: relative se precisar de posicionamento específico */
+  position: relative;
+}
+
+.table-scroll table {
+  width: 100%;              /* Faz a tabela ocupar toda a largura do container */
+  border-collapse: collapse; 
+}
+
+.table-scroll th,
+.table-scroll td {
+  border: 1px solid #ccc;   /* Borda para cada célula */
+  padding: 5px;             /* Espaçamento interno */
+  text-align: left;         /* Alinhamento do texto */
+}
+
+.table-scroll thead th {
+  position: sticky;
+  top: 0;
+  background-color: #fff; /* Ajuste para a cor de fundo desejada */
+  z-index: 2;
+}
+
+
+.add-row-container {
+  position: relative;
+  top: -10px; /* ou 100px */
+}
