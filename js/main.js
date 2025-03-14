@@ -32,6 +32,9 @@ document.getElementById('btnAtualizarCSV').addEventListener('click', async () =>
  * Se o código estiver em lockedCodes, não deixa clicar para abrir modal.
  */
 function displayResults(results) {
+  // Define um critério para mobile (ex: telas com largura <= 768px)
+  const isMobile = window.innerWidth <= 768;
+
   const resultsContainer = document.getElementById('searchResults');
   resultsContainer.innerHTML = '';
 
@@ -47,16 +50,26 @@ function displayResults(results) {
     const card = document.createElement('div');
     card.className = 'card';
 
-    // Topo do card (imagem)
+    // Cria o container do topo do card
     const cardTop = document.createElement('div');
     cardTop.className = 'card-top';
-    const img = document.createElement('img');
-    img.src = result.url_imagem || 'img/logo.png';
-    img.onerror = () => { img.src = 'img/logo.png'; };
-    img.alt = 'Produto';
-    cardTop.appendChild(img);
 
-    // Corpo do card (título, subtítulo, etc.)
+    if (!isMobile) {
+      // Em dispositivos não móveis, adiciona a imagem
+      const img = document.createElement('img');
+      img.src = result.url_imagem || 'img/logo.png';
+      img.onerror = () => { img.src = 'img/logo.png'; };
+      img.alt = 'Produto';
+      // Adiciona lazy loading para melhorar o desempenho
+      img.setAttribute('loading', 'lazy');
+      cardTop.appendChild(img);
+    } else {
+      // Em dispositivos móveis, não carrega a imagem nos cards.
+      // Você pode mostrar um placeholder ou deixar vazio.
+      cardTop.innerHTML = '<div class="no-image-placeholder">Imagem não carregada</div>';
+    }
+
+    // Cria o container das informações do card
     const cardInfo = document.createElement('div');
     cardInfo.className = 'card-info';
 
@@ -78,30 +91,18 @@ function displayResults(results) {
     card.appendChild(cardTop);
     card.appendChild(cardInfo);
 
-    // Opcional: guardamos a unidade no dataset (caso precise)
-    card.dataset.unidade = result.unidade || '';
-
-    // Verifica se o código está travado
-    const codigoProduto = result.codigo || '';
-    if (!lockedCodes.has(codigoProduto)) {
-      // Se não estiver travado, pode clicar e abrir modal
-      card.addEventListener('click', async () => {
-        const omieData = await fetchDetalhes(codigoProduto);
-        showCardModal(card, omieData);
-      });
-    } else {
-      // Se ESTIVER travado, podemos opcionalmente dar alguma aparência
-      card.style.opacity = '0.6';
-      card.style.pointerEvents = 'none';
-      card.classList.add('locked');
-      // Você também pode exibir alguma badge “Bloqueado” etc.
-    }
+    // Ao clicar no card, abre o modal e carrega as imagens normalmente (independente do dispositivo)
+    card.addEventListener('click', async () => {
+      const omieData = await fetchDetalhes(result.codigo);
+      showCardModal(card, omieData);
+    });
 
     cardsContainer.appendChild(card);
   });
 
   resultsContainer.appendChild(cardsContainer);
 }
+
 
 /**
  * Ao digitar no campo de busca, filtra e exibe resultados.
