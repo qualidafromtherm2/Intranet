@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Modal de Produção</title>
+  <link rel="stylesheet" href="Producao/Producao.css">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+</head>
+<body>
+
+<div id="modalProducao" style="display: none;">
+  <div class="my-modal-content">
+    <button class="close-btn" onclick="fecharProducaoModal()">×</button>
+    
+    <!-- Mantemos a <nav> com .amazing-tabs -->
+    <nav class="amazing-tabs">
+      <div class="main-tabs-container">
+        <div class="main-tabs-wrapper">
+
+
+          
+          <!-- Linha de botões principais -->
+          <ul class="main-tabs">
+            <!-- Primeiro botão: Logo (imagem) – mantém seu tamanho original -->
+            <li>
+              <button class="round-button" data-color="red" title="Logo">
+                <span class="avatar">
+                  <img src="img/logo.png" alt="Logo" />
+                </span>
+              </button>
+            </li>
+          
+            <!-- Segundo botão: Preparação (representa os preparativos para iniciar a produção) -->
+            <li>
+              <button class="round-button" data-color="blue" data-group="P" title="Preparação">
+                <i class="fa fa-puzzle-piece icon" aria-hidden="true"></i>
+
+
+              </button>
+            </li>
+            <!-- Botão Inspeção: mostra o grupo T -->
+            <li>
+              <button class="round-button gallery active" data-color="green" data-group="T" title="Inspeção">
+                <i class="fa fa-flask icon" aria-hidden="true"></i>
+
+              </button>
+            </li>
+            <!-- Botão Montagem: mostra o grupo M -->
+            <li>
+              <button class="round-button" data-color="purple" data-group="M" title="Montagem">
+                <i class="fa fa-cubes icon" aria-hidden="true"></i>
+
+
+
+              </button>
+            </li>
+          
+            <!-- Quinto botão: Deslogar (representa a saída/desconexão) -->
+            <li>
+              <button class="round-button" style="--round-button-active-color: #ff6d00" data-color="orange" title="Deslogar">
+                <i class="fa fa-sign-out icon" aria-hidden="true"></i>
+              </button>
+            </li>
+          </ul>
+          
+          
+
+
+          <!-- O círculo transparente, para todos os ícones (principais e M/P) -->
+          <div class="main-slider" aria-hidden="true">
+            <div class="main-slider-circle">&nbsp;</div>
+          </div>
+
+          <!-- AQUI adicionamos dinamicamente 2 linhas de ícones:
+               1) M1, M2, ...
+               2) P1, P2, ...
+          -->
+          <div id="postoTrabalhoLinhas">
+            <!-- JS criará <ul class="sub-tabs-linha"> com .round-button ... -->
+          </div>
+        </div>
+      </div>
+    </nav>
+
+  </div>
+</div>
+
+<!-- Papa Parse (se não estiver no index) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<!-- Seu JS principal -->
+<script src="js/Producao.js"></script>
+</body>
+</html>

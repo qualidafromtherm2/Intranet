@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Gerador de Gráfico</title>
+  <link rel="stylesheet" href="GeradorGrafico.css">
+  <script src="https://cdn.plot.ly/plotly-2.22.0.min.js"></script>
+</head>
+<body>
+  <!-- Cabeçalho -->
+  <div class="center" style="margin-bottom:20px;">
+    <h1>GERADOR DE GRÁFICO</h1>
+  </div>
+
+  <!-- Botão para exibir/esconder formulário -->
+  <div class="row" style="justify-content:center;">
+    <button id="toggleRegistro">Adicionar Registro</button>
+  </div>
+
+  <!-- Formulário de "Novo Registro" -->
+  <div id="registroForm" class="col" style="display: none; max-width: 600px; margin: 0 auto 30px;">
+    <h3>Novo Registro</h3>
+    <div class="input-group">
+      <label for="temp">Temperatura da água:</label>
+      <input type="number" id="temp" value="30" step="0.1">
+    </div>
+    <div class="input-group">
+      <label for="pressao">Parâmetros de pressão:</label>
+      <input type="number" id="pressao" value="250" step="1">
+    </div>
+    <div class="input-group">
+      <label for="modelo">Modelo:</label>
+      <select id="modelo" onchange="gerarGrafico()">
+        <option value="3~380">3~380</option>
+        <option value="3~220">3~220</option>
+        <option value="1~220v">1~220v</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label for="tri_valor">Valor:</label>
+      <input type="number" id="tri_valor" value="12.4" step="0.1">
+    </div>
+    <button id="enviarRegistro">Enviar Registro</button>
+  </div>
+
+  <!-- Linha principal com os controles e o gráfico -->
+  <div class="row">
+    <!-- Coluna 1: Controles da Temperatura da água -->
+    <div class="col col-1">
+      <h3>Temperatura da água</h3>
+      <div class="input-group">
+        <label for="agua_temp_max">Máximo:</label>
+        <input type="number" id="agua_temp_max" value="40" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="agua_temp_min">Mínimo:</label>
+        <input type="number" id="agua_temp_min" value="16" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="agua_tick_y">Intervalo:</label>
+        <input type="number" id="agua_tick_y" value="2" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <!-- Linha separadora -->
+      <hr>
+      <!-- Novos campos inseridos abaixo do separador -->
+      <div class="input-group">
+        <label for="graph_title">Título do Gráfico:</label>
+        <input type="text" id="graph_title" value="Nome do grafico" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="y1_title">Eixo Y1:</label>
+        <input type="text" id="y1_title" value="Nome do eixo y1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="x_title">Eixo X:</label>
+        <input type="text" id="x_title" value="Nome do eixo x" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label>Exibir Eixos:</label>
+        <div>
+          <input type="checkbox" id="chk_3_380" value="3~380" checked onchange="updateAxesFromControl()">
+          <label for="chk_3_380">3~380</label>
+        </div>
+        <div>
+          <input type="checkbox" id="chk_3_220" value="3~220" checked onchange="updateAxesFromControl()">
+          <label for="chk_3_220">3~220</label>
+        </div>
+        <div>
+          <input type="checkbox" id="chk_1_220v" value="1~220v" checked onchange="updateAxesFromControl()">
+          <label for="chk_1_220v">1~220v</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Coluna 2: Gráfico -->
+    <div class="col col-3">
+      <h3>Gráfico 1</h3>
+      <div id="graph1" class="graph-container"></div>
+    </div>
+
+    <!-- Coluna 3: Parâmetros (Modelos) renomeado para "Corrente" -->
+    <div class="col col-1">
+      <h3>Corrente</h3>
+      <!-- 3~380 -->
+      <div class="input-group">
+        <label for="tri380_max">3~380 - Máx.:</label>
+        <input type="number" id="tri380_max" value="15.5" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="tri380_min">3~380 - Mín.:</label>
+        <input type="number" id="tri380_min" value="9.5" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <hr>
+      <!-- 3~220 -->
+      <div class="input-group">
+        <label for="tri220_max">3~220 - Máx.:</label>
+        <input type="number" id="tri220_max" value="28.5" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="tri220_min">3~220 - Mín.:</label>
+        <input type="number" id="tri220_min" value="22.5" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <hr>
+      <!-- 1~220v -->
+      <div class="input-group">
+        <label for="tri300_max">1~220v - Máx.:</label>
+        <input type="number" id="tri300_max" value="22" step="0.1" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="tri300_min">1~220v - Mín.:</label>
+        <input type="number" id="tri300_min" value="16" step="0.1" oninput="gerarGrafico()">
+      </div>
+    </div>
+  </div>
+
+  <!-- Parâmetros de pressão (Gráfico 1) com controles para o eixo X -->
+  <div class="row" style="justify-content: center;">
+    <div class="col col-2" style="max-width: 500px;">
+      <div class="input-group">
+        <label for="pressao_inicial">Mínimo:</label>
+        <input type="number" id="pressao_inicial" value="180" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="pressao_final">Máximo:</label>
+        <input type="number" id="pressao_final" value="300" oninput="gerarGrafico()">
+      </div>
+      <div class="input-group">
+        <label for="pressao_tick">Intervalo:</label>
+        <input type="number" id="pressao_tick" value="10" oninput="gerarGrafico()">
+      </div>
+    </div>
+  </div>
+
+  <!-- Script principal -->
+  <script src="GeradorGrafico.js"></script>
+</body>
+</html>

@@ -284,4 +284,23 @@ exports.alterarNoCSV = (req, res) => {
     }
   };
   
+  async function loadFamiliasData() {
+    try {
+      const response = await fetch('/api/familias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
   
+      // Verifique se a resposta é válida
+      if (!response.ok) {
+        throw new Error(`Erro na requisição: ${response.status} ${response.statusText}`);
+      }
+  
+      const data = await response.json();
+      console.log("Resposta da API Omie para famílias:", data);
+      return data.famCadastro || [];
+    } catch (error) {
+      console.error("Erro ao carregar famílias:", error);
+      return [];
+    }
+  }

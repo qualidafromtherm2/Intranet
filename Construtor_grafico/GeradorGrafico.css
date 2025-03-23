@@ -1,0 +1,90 @@
+/* Fundo da página transparente */
+body {
+    margin: 10px 0 0 50px; /* top right bottom left */
+    background: transparent;
+    color: white;
+    font-family: Arial, sans-serif;
+  }
+  
+  
+  /* Layout em colunas */
+  .row {
+    display: flex;
+    flex-direction: row;
+    margin-bottom: 20px;
+  }
+  
+  .col {
+    border: 1px solid #ccc;
+    padding: 10px;
+    margin-right: 10px;
+    background: transparent;
+  }
+  
+  .col:last-child {
+    margin-right: 0;
+  }
+  
+/* Colunas "col-1" passam a ter largura fixa (ex.: 200px) */
+.col-1 {
+    flex: 0 0 200px;  /* não expande, nem encolhe, largura 200px */
+    max-width: 200px; /* garante que não passe de 200px */
+  }
+  
+  
+  .col-2 {
+    flex: 2;
+  }
+  
+  .col-3 {
+    flex: 3;  /* Coluna mais larga */
+  }
+  
+  .center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  /* Container do gráfico: fundo branco somente no gráfico (definido pelo Plotly) */
+  .graph-container {
+    width: 100%;
+    height: 500px;
+    margin: 0 auto;
+    background: transparent;
+  }
+  
+  /* Grupos de inputs */
+  .input-group {
+    margin: 5px 0;
+  }
+  
+  label {
+    margin-right: 5px;
+    display: inline-block;
+    width: 130px;
+    color: white;  /* rótulos em branco */
+  }
+  
+  select, input {
+    background: #fff;
+    color: #000;
+    border: 1px solid #ccc;
+  }
+  
+  /* Botões */
+  button {
+    margin-top: 10px;
+    cursor: pointer;
+    color: white;  /* texto do botão em branco */
+    background: #042444;
+    border: 1px solid #042444;
+    padding: 5px 10px;
+  }
+  
+  /* Separador horizontal */
+  hr {
+    margin: 20px 0;
+    border-color: #ccc;
+  }
+  

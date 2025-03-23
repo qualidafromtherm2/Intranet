@@ -35,7 +35,7 @@ overflow-x: hidden;
 
 .scrollbar:hover {
 overflow-y: scroll;
-}
+}*/
 
 /* Scrollbar Style */
 #style-1::-webkit-scrollbar-track {
@@ -69,7 +69,7 @@ font-size: 20px;
 
 .main-menu:hover,
 nav.main-menu.expanded {
-width: 250px;
+width: 200px;
 overflow: hidden;
 opacity: 1;
 }
@@ -92,7 +92,7 @@ top: 0;
 bottom: 0;
 height: 100%;
 left: 0;
-width: 55px;
+width: 45px;
 overflow: hidden;
 transition: width .2s linear;
 transform: translateZ(0);
@@ -128,7 +128,7 @@ text-shadow: 1px 1px 1px #fff;
   display: flex;
   align-items: center;
   padding: 10px;
-  color: #fff;
+  color: #042444;;
   text-decoration: none;
 }
 
@@ -137,7 +137,13 @@ text-shadow: 1px 1px 1px #fff;
 }
 
 /* Regra para alterar a cor dos ícones do menu lateral */
-.main-menu ul li a .fa,
+/* Alinha os ícones do menu lateral para a esquerda */
+nav.main-menu ul li a .fa {
+  display: inline-block !important;
+  margin-left: 5px !important; /* Ajuste esse valor para mover mais para a esquerda */
+  text-align: left !important;
+}
+
 .main-menu ul li a .nav-icon {
   color: #042444; /* Cor azul */
   text-shadow: 1px 1px 0 #fff, 2px 2px 1px rgba(0, 0, 0, 0.15); /* Efeito 3D com múltiplas sombras */
@@ -247,3 +253,10 @@ src: local('Titillium WebLight'),
   background-image: url("../img/logo.png");
   transition: all 0.1s ease-in-out;
 }
+
+@media (max-width: 768px) {
+  .main-menu {
+      width: 55px; /* Ou até esconder e criar um menu responsivo */
+  }
+}
+

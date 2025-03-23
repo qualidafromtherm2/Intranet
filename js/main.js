@@ -2,6 +2,9 @@
 import { showCardModal } from './modal.js';
 import { toggleEditMode } from './editFields.js';
 import { loadCSV, searchInCSV, fetchDetalhes } from './utils.js';
+import { updateCSV } from './updateCSV.js';
+import { initializeSearch } from './searchHandler.js';
+import { loadLockedCodes } from './lockedCodes.js';
 
 let produtosData = [];
 let lockedCodes = new Set(); // Aqui guardaremos os códigos "travados"
@@ -31,7 +34,14 @@ document.getElementById('btnAtualizarCSV').addEventListener('click', async () =>
  * Exibe resultados (cards) na tela.
  * Se o código estiver em lockedCodes, não deixa clicar para abrir modal.
  */
+/**
+ * Exibe resultados (cards) na tela.
+ * Se o código estiver em lockedCodes, não deixa clicar para abrir modal.
+ */
 function displayResults(results) {
+  // Define um critério para mobile (ex: telas com largura <= 768px)
+  const isMobile = window.innerWidth <= 768;
+
   const resultsContainer = document.getElementById('searchResults');
   resultsContainer.innerHTML = '';
 
@@ -47,16 +57,25 @@ function displayResults(results) {
     const card = document.createElement('div');
     card.className = 'card';
 
-    // Topo do card (imagem)
+    // Cria o container do topo do card
     const cardTop = document.createElement('div');
     cardTop.className = 'card-top';
-    const img = document.createElement('img');
-    img.src = result.url_imagem || 'img/logo.png';
-    img.onerror = () => { img.src = 'img/logo.png'; };
-    img.alt = 'Produto';
-    cardTop.appendChild(img);
 
-    // Corpo do card (título, subtítulo, etc.)
+    if (!isMobile) {
+      // Em dispositivos não móveis, adiciona a imagem
+      const img = document.createElement('img');
+      img.src = result.url_imagem || 'img/logo.png';
+      img.onerror = () => { img.src = 'img/logo.png'; };
+      img.alt = 'Produto';
+      // Adiciona lazy loading para melhorar o desempenho
+      img.setAttribute('loading', 'lazy');
+      cardTop.appendChild(img);
+    } else {
+      // Em dispositivos móveis, não carrega a imagem nos cards.
+      // Você pode mostrar um placeholder ou deixar vazio.
+    }
+
+    // Cria o container das informações do card
     const cardInfo = document.createElement('div');
     cardInfo.className = 'card-info';
 
@@ -78,43 +97,74 @@ function displayResults(results) {
     card.appendChild(cardTop);
     card.appendChild(cardInfo);
 
-    // Opcional: guardamos a unidade no dataset (caso precise)
-    card.dataset.unidade = result.unidade || '';
-
-    // Verifica se o código está travado
-    const codigoProduto = result.codigo || '';
-    if (!lockedCodes.has(codigoProduto)) {
-      // Se não estiver travado, pode clicar e abrir modal
-      card.addEventListener('click', async () => {
-        const omieData = await fetchDetalhes(codigoProduto);
-        showCardModal(card, omieData);
-      });
-    } else {
-      // Se ESTIVER travado, podemos opcionalmente dar alguma aparência
-      card.style.opacity = '0.6';
-      card.style.pointerEvents = 'none';
-      card.classList.add('locked');
-      // Você também pode exibir alguma badge “Bloqueado” etc.
-    }
+    // Ao clicar no card, abre o modal e carrega as imagens normalmente (independente do dispositivo)
+    card.addEventListener('click', async () => {
+      const omieData = await fetchDetalhes(result.codigo);
+      showCardModal(card, omieData);
+    });
 
     cardsContainer.appendChild(card);
   });
 
   resultsContainer.appendChild(cardsContainer);
+
+  // Ajusta o posicionamento dos cards conforme o estado do menu lateral
+  adjustCardsAlignment();
 }
 
 /**
- * Ao digitar no campo de busca, filtra e exibe resultados.
+ * Ajusta o alinhamento do container de resultados (#searchResults)
+ * - Se o menu lateral estiver expandido (classe "expanded"), posiciona os cards à direita.
+ * - Se estiver fechado, centraliza o container.
  */
-document.getElementById('inpt_search').addEventListener('input', function() {
-  const term = this.value.trim();
-  if (!term) {
-    document.getElementById('searchResults').innerHTML = '';
-    return;
+function adjustCardsAlignment() {
+  const searchResults = document.getElementById('searchResults');
+  const menu = document.querySelector('nav.main-menu');
+
+  if (menu && menu.classList.contains('expanded')) {
+    // Menu aberto: posiciona os cards à direita (para não atrapalhar o menu)
+    searchResults.style.left = "auto";
+    searchResults.style.right = "20px"; // ajuste conforme necessário
+    searchResults.style.transform = "none";
+  } else {
+    // Menu fechado: centraliza os cards
+    searchResults.style.left = "50%";
+    searchResults.style.right = "auto";
+    searchResults.style.transform = "translateX(-50%)";
   }
-  const results = searchInCSV(produtosData, term);
-  displayResults(results);
-});
+}
+
+
+// Obtenha o campo de busca
+const searchInput = document.getElementById('inpt_search');
+// Define se é dispositivo móvel com base na largura da janela
+const isMobile = window.innerWidth <= 768;
+
+// Para dispositivos móveis, realiza a busca somente quando o usuário pressionar "Enter"
+if (isMobile) {
+  searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      const term = this.value.trim();
+      if (!term) {
+        document.getElementById('searchResults').innerHTML = '';
+        return;
+      }
+      const results = searchInCSV(produtosData, term);
+      displayResults(results);
+    }
+  });
+} else {
+  // Para desktops, a busca ocorre conforme o usuário digita
+  searchInput.addEventListener('input', function() {
+    const term = this.value.trim();
+    if (!term) {
+      document.getElementById('searchResults').innerHTML = '';
+      return;
+    }
+    const results = searchInCSV(produtosData, term);
+    displayResults(results);
+  });
+}
 
 /**
  * Animações visuais de foco/perda de foco no campo de busca
@@ -131,54 +181,31 @@ document.getElementById('inpt_search').addEventListener('blur', function() {
 /**
  * Inicializa a página: carrega dados dos produtos, carrega “lockedCodes” e exibe busca
  */
+/**
+ * Inicializa a página: carrega dados dos produtos, carrega “lockedCodes” e exibe busca
+ */
 (async function initialize() {
   // Carrega CSV dos produtos
-  produtosData = await loadCSV();  
+  produtosData = await loadCSV();
   console.log("produtosData carregados:", produtosData);
 
-  // Carrega logsDeCodigo.csv
+  // Carrega os códigos "travados" a partir do logsDeCodigo.csv
   lockedCodes = await loadLockedCodes();
   console.log("lockedCodes (códigos travados):", lockedCodes);
+
+  // Inicializa os eventos do campo de busca utilizando os dados carregados
+  // initializeSearch(produtosData); // REMOVA ou COMENTE ESSA LINHA
 })();
 
+
 /**
- * Carrega e retorna um Set de códigos presentes no logsDeCodigo.csv
+ * Esta função recarrega o CSV e atualiza a aparência/bloqueio dos cards já exibidos.
  */
-async function loadLockedCodes() {
-  try {
-    // Busca o logsDeCodigo.csv
-    const response = await fetch('./logsDeCodigo.csv');
-    if (!response.ok) {
-      console.warn("logsDeCodigo.csv não encontrado ou erro ao carregar.");
-      return new Set();
-    }
-
-    const csvText = await response.text();
-    // Quebra em linhas, removendo linhas vazias
-    const lines = csvText.split('\n').filter(l => l.trim() !== '');
-
-    const lockedSet = new Set();
-    for (let line of lines) {
-      // Cada linha: "codigo,hora"
-      const [codigo] = line.split(',');
-      if (codigo) {
-        lockedSet.add(codigo.trim());
-      }
-    }
-    return lockedSet;
-  } catch (error) {
-    console.error("Erro ao carregar logsDeCodigo.csv:", error);
-    return new Set();
-  }
-}
-
-
-// Esta função recarrega o CSV e atualiza a aparência/bloqueio dos cards já exibidos.
 window.reloadLockedCodesAndRefreshCards = async function() {
-  // 1) Recarrega logsDeCodigo.csv
+  // Recarrega os códigos travados
   lockedCodes = await loadLockedCodes();
 
-  // 2) Atualiza todos os cards
+  // Atualiza todos os cards
   const allCards = document.querySelectorAll('#searchResults .cards .card');
   allCards.forEach(card => {
     const h2 = card.querySelector('.card-info h2');
@@ -195,4 +222,24 @@ window.reloadLockedCodesAndRefreshCards = async function() {
     }
   });
 };
+
+
+document.getElementById('btnSincronizarNCM').addEventListener('click', async () => {
+  try {
+    const hostname = window.location.hostname;
+    const endpoint = (hostname === 'localhost' || hostname === '127.0.0.1')
+      ? 'http://localhost:5001/api/produtos/sincronizar-ncm'
+      : 'https://intranet-fromtherm.onrender.com/api/produtos/sincronizar-ncm';
+    const response = await fetch(endpoint, { method: 'POST' });
+    const result = await response.json();
+    if (result.success) {
+      alert('Sincronização NCM concluída com sucesso!');
+    } else {
+      alert('Erro ao sincronizar NCM.');
+    }
+  } catch (error) {
+    console.error(error);
+    alert('Erro ao sincronizar NCM. Verifique o console.');
+  }
+});
 

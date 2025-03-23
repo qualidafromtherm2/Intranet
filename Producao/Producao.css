@@ -1,0 +1,315 @@
+/*****************************************************
+ * MODAL - estrutura base
+ *****************************************************/
+ #modalProducao {
+  display: none;
+  position: fixed;
+  top: 10%;
+  left: 10%;
+  width: 80%;
+  max-width: 800px;
+  height: auto;
+  padding: 20px;
+  background-color: rgba(0, 0, 0, 0.103);
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+  
+/* No CSS do modal, aumente a largura máxima e permita overflow visível */
+.my-modal-content {
+  background-color: #fff;
+  margin: 3rem; /* Aumentamos a margem para que a área transparente fique maior */
+  width: calc(90% - 6rem); /* Ajustamos a largura para compensar a margem maior */
+  max-width: 600px;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+  overflow: visible;
+}
+
+
+
+
+  
+  /* Botão de fechar (opcional) */
+  #modalProducao .close-btn {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    font-size: 2rem;
+    color: #666;
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+  
+  /*****************************************************
+   * AMAZING TABS - estilo do snippet
+   *****************************************************/
+  
+  /* Variáveis para cores e animações */
+  :root {
+    --background-color: #bbdefb;
+    --blue-50: #e3f2fd;
+    --blue-100: #bbdefb;
+    --blue-A700: #2962ff;
+    --orange-50: #fff3e0;
+    --orange-100: #ffe0b2;
+    --orange-700: #f57c00;
+    --white: #ffffff;
+    --grey-900: #212121;
+  
+    --filters-container-height: 3.8rem;
+    --filters-wrapper-opacity: 1;
+    --translate-filters-slider: 0;
+    --translate-main-slider: 0;
+    --main-slider-color: #e3f2fd;
+    --round-button-active-color: #212121;
+  }
+  
+  /* Container principal (amazing-tabs) */
+  .amazing-tabs {
+    background-color: var(--white);
+    border-radius: 2.5rem;
+    user-select: none;
+    padding-top: 1rem;
+  }
+  
+  /* Filtros (parte superior: New, Popular, Following) */
+  .filters-container {
+    overflow: hidden;
+    padding: 0 3rem;
+    transition: max-height 0.4s ease-in-out;
+    max-height: var(--filters-container-height);
+  }
+  .filters-wrapper {
+    position: relative;
+    transition: opacity 0.2s ease-in-out;
+    opacity: var(--filters-wrapper-opacity);
+  }
+  
+  .filter-tabs {
+    list-style-type: none;
+    display: flex;
+    border-radius: 1rem;
+    padding: 0.3rem;
+    overflow: hidden;
+    background-color: var(--orange-50);
+  }
+  .filter-tabs li {
+    flex: 1;
+    display: flex;
+  }
+  .filter-button {
+    flex-grow: 1;
+    height: 3rem;
+    padding: 0 1.5rem;
+    background: none;
+    border: none;
+    color: var(--orange-700);
+    font-size: 1.4rem;
+    border-radius: 0.8rem;
+    cursor: pointer;
+  }
+  .filter-button.filter-active {
+    color: var(--grey-900);
+  }
+  
+  .filter-slider {
+    position: absolute;
+    padding: 0.3rem;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .filter-slider-rect {
+    height: 3rem;
+    width: calc(100% / 3); /* pois são 3 botões */
+    border-radius: 0.8rem;
+  
+    /* Troque o background opaco por algo semitransparente */
+    /* Ex: 30% opaco (0.3) */
+    background-color: rgba(255, 255, 255, 0.3);
+  
+    /* Opcional: borda semitransparente */
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  
+    box-shadow: 0 0.1rem 1rem -0.4rem rgba(0,0,0,0.12);
+    transition: transform 0.4s ease-in-out;
+    transform: translateX(var(--translate-filters-slider));
+  }
+  
+  
+  /* Main tabs (botões redondos) */
+  .main-tabs-container {
+    padding: 0 1.5rem; /* ou o valor que se adequa ao seu layout */
+  }
+
+  .main-tabs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex; 
+    flex-direction: row; /* ou simplesmente display: flex, que por padrão é row */
+    justify-content: center;
+    align-items: center;
+    flex-wrap: nowrap; /* se quiser evitar que quebre de linha */
+  }
+  
+  .main-tabs li {
+    margin: 0;
+    padding: 0.5rem; /* ou até 0 */
+  }
+  
+  
+  .round-button {
+    height: 4.8rem;
+    width: 4.8rem;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--grey-900);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.2s ease-in-out;
+  }
+  .round-button:hover,
+  .round-button.active {
+    color: var(--round-button-active-color);
+  }
+
+  .round-button .icon {
+    font-size: 50px;
+    line-height: 1;
+    vertical-align: middle;
+    position: relative;
+    top: -1px; /* ajuste esse valor conforme necessário */
+  }
+  
+
+  
+  .avatar,
+  .avatar img {
+    height: 4rem;
+    width: 4rem;
+    border-radius: 50%;
+    pointer-events: none;
+    object-fit: cover;
+  }
+  
+
+  
+  .main-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    transition: transform 0.4s ease-in-out;
+  }
+  
+
+  
+  
+  
+  
+  
+  
+
+
+@keyframes jello-horizontal {
+  0%   { transform: scale3d(1, 1, 1); }
+  30%  { transform: scale3d(1.25, 0.75, 1); }
+  40%  { transform: scale3d(0.75, 1.25, 1); }
+  50%  { transform: scale3d(1.15, 0.85, 1); }
+  65%  { transform: scale3d(0.95, 1.05, 1); }
+  75%  { transform: scale3d(1.05, 0.95, 1); }
+  100% { transform: scale3d(1, 1, 1); }
+}
+  
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative; /* se for necessário para posicionamento absoluto do botão filho */
+  }
+  
+  .main-tabs-wrapper {
+    position: relative;
+    overflow: visible;
+  }
+  
+  .main-slider-circle {
+    position: absolute;
+    width: 76.8px;
+    height: 76.8px;
+    border-radius: 50%;
+    /* Duas cores no border */
+    border: 4px solid #042444;   /* cor base */
+    border-top: 4px solid #f00909; /* cor do “top” */
+    
+    /* Girar continuamente */
+    animation: spin 1s linear infinite;
+    
+    display: none; /* se estiver ocultando até o primeiro clique */
+  }
+  
+  @keyframes spin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  
+  
+  
+  
+  .animate-jello {
+    animation: jello-horizontal 0.9s both;
+  }
+  /* ... keyframes jello-horizontal ... */
+  
+  /* Para as linhas de M/P (sub-tabs-linha) */
+  .sub-tabs-linha {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+    list-style: none;
+    padding: 0;
+    /* Se quiser centralizar */
+    justify-content: center;
+  }
+  
+  /* Cada round-button. Você pode reutilizar .round-button se quiser. */
+  .sub-tabs-linha .round-button {
+    width: 4rem;
+    height: 4rem;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    font-size: 0.8rem; /* se quiser texto "M1" menor */
+    color: #333;
+    cursor: pointer;
+    display: flex; 
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  
+  /* Se quiser icone ou texto "M1" no centro */
+  .sub-tabs-linha .round-button span {
+    pointer-events: none;
+  }
+  
+  
+  #postoTrabalhoLinhas {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem; /* Espaço entre as linhas */
+  }
+  

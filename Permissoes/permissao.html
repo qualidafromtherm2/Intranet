@@ -1,0 +1,39 @@
+<!-- Permissoes/permissao.html -->
+<div id="modalPermissoes" class="modal" style="display: none;">
+  <div class="modal-content">
+    <!-- Botão de fechar -->
+    <span class="close-modal" id="closeModal">&times;</span>
+    <h2>Configurar Permissões do Usuário</h2>
+    
+    <!-- Seleciona o usuário -->
+    <label for="userSelect">Selecione o usuário:</label>
+    <input list="usersList" id="userSelect" placeholder="Digite ou selecione um usuário">
+    <datalist id="usersList">
+      <option value="joao">
+      <option value="maria">
+      <!-- Outros usuários poderão ser carregados via AJAX -->
+    </datalist>
+    
+    <h3>Permissões Disponíveis</h3>
+    <div id="permissoesContainer">
+      <label>
+        <input type="checkbox" value="MENU_INICIO" class="permissao-checkbox">
+        Início
+      </label>
+      <label>
+        <input type="checkbox" value="MENU_MENSAGENS" class="permissao-checkbox">
+        Mensagens
+      </label>
+      <label>
+        <input type="checkbox" value="MENU_COMPRAS" class="permissao-checkbox">
+        Compras
+      </label>
+      <label>
+        <input type="checkbox" value="MENU_SINCRONIZAR" class="permissao-checkbox">
+        Sincronizar
+      </label>
+    </div>
+    
+    <button id="btnSalvarPermissoes">Salvar Permissões</button>
+  </div>
+</div>

@@ -1,0 +1,90 @@
+<!-- Login/login.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Login Fromtherm</title>
+  
+  <!-- Importa o CSS específico desse login -->
+  <link rel="stylesheet" href="login.css">
+  
+  <!-- Fonte Montserrat -->
+  <link rel="preconnect" href="https://fonts.gstatic.com">
+  <link href="https://fonts.googleapis.com/css?family=Montserrat:400,800" rel="stylesheet">
+
+  <!-- Aqui você pode incluir o FontAwesome se precisar dos ícones ou trocar por Ionicons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+  <h2>Bem vindo a Intranet Fromtherm</h2>
+
+  <div class="container" id="container">
+    <!-- FORMULÁRIO: CRIAR CONTA -->
+    <div class="form-container sign-up-container">
+      <!-- Aqui adicionamos o id para o form de criar conta -->
+      <form id="formCriarConta" action="#">
+        <h1>Criar conta</h1>
+        <div class="social-container">
+          <a href="#" class="social"><i class="fab fa-google-plus-g"></i></a>
+        </div>
+        <span>ou use seu email para se registrar</span>
+        <input type="text" placeholder="Name" name="user" />
+        <input type="email" placeholder="Email" name="email" />
+        <input type="password" placeholder="Password" name="password" />
+        <button type="submit">Inscrever-se</button>
+      </form>
+    </div>
+
+    <!-- FORMULÁRIO: ENTRAR -->
+    <div class="form-container sign-in-container">
+      <!-- FORM de Entrar -->
+      <form id="formSignIn" action="#">
+        <h1>Entrar</h1>
+        <div class="social-container">
+          <a href="#" class="social"><i class="fab fa-google-plus-g"></i></a>
+        </div>
+        <span>ou use sua conta</span>
+        <input type="email" placeholder="Email" id="signInEmail" />
+        <input type="password" placeholder="Password" id="signInPassword" />
+        <a href="#">Esqueceu sua senha?</a>
+        <button type="submit">Entrar</button>
+      </form>
+    
+      <!-- DIV de bem-vindo (oculta por CSS inline) -->
+      <div id="loggedInContainer" style="display: none;">
+        <h2 id="welcomeMsg">Bem vindo!!!</h2>
+        <button id="btnLogout">Deslogar</button>
+      </div>
+    </div>
+
+    <!-- OVERLAY -->
+    <div class="overlay-container">
+      <div class="overlay">
+        <div class="overlay-panel overlay-left">
+          <h1>Bem vindo de volta!</h1>
+          <p>Para continuar conectado conosco, faça login com suas informações pessoais</p>
+          <button class="ghost" id="signIn">Entrar</button>
+        </div>
+        <div class="overlay-panel overlay-right">
+          <!-- Bloco quando NÃO logado (conteúdo original) -->
+          <div id="overlayNotLoggedIn">
+            <h1>Olá colaborador!</h1>
+            <p>Solicite acesso ao suporte</p>
+            <button class="ghost" id="signUp">Inscrever-se</button>
+          </div>
+        
+          <!-- Bloco quando LOGADO (oculto por padrão) -->
+          <div id="overlayLoggedIn" style="display: none;">
+            <h1>Olá, seja bem vindo</h1>
+            <p id="nomeUsuarioOverlay">Fulano (Aqui o nome do user)</p>
+            <button class="ghost" id="btnOverlayLogout">Deslogar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script do login -->
+  <script src="login.js"></script>
+</body>
+</html>

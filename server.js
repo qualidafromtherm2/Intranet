@@ -13,7 +13,12 @@ const prodcaractRouter = require('./routes/prodcaract');
 const excluirCaracteristicaRouter = require('./routes/excluirCaracteristica');
 const uploadImageRouter = require('./routes/uploadImage');
 const incluirCaracteristicaRouter = require('./routes/incluirCaracteristica');
-
+const familiasRouter = require('./routes/familias'); // Certifique-se de que o caminho está correto
+const sincronizarNCMRouter = require('./routes/Sincronizar_NCM');
+const loginRoute = require('./Login/loginRoute');
+// Importa o controlador para as requisições à Omie (por exemplo, inclusão de produto)
+const requisicaoOmie = require('./controllers/Requisição_Omie');
+const session = require('express-session');
 // 3) Inicializa a aplicação Express e configura porta
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -22,7 +27,7 @@ const PORT = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname)));
-
+app.use(express.urlencoded({ extended: true }));
 // 5) Registra as rotas
 app.use('/api/produtos', produtosRouter);
 app.use('/api/caracteristicas', caracteristicasRouter);
@@ -30,13 +35,34 @@ app.use('/api/prodcaract', prodcaractRouter);
 app.use('/api/excluir-caracteristica', excluirCaracteristicaRouter);
 app.use('/api/uploadImage', uploadImageRouter);
 app.use('/api/incluir-caracteristica', incluirCaracteristicaRouter);
+app.use('/api/familias', familiasRouter);
+app.use('/api/produtos/sincronizar-ncm', sincronizarNCMRouter);
 
-/**
- * A nova formatação do CSV:
- *   codigo, DD/MM/YYYY, HH:MM:SS
- * Exemplo de linha: "03.MP.I.60701,12/03/2025,07:00:00"
- */
+// ...
+app.use(session({
+  secret: 'Picole@546879', // Troque por algo seguro
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 1000 * 60 * 60 * 8, // Exemplo: 8 horas (em ms)
+  }
+}));
 
+// Rota de login
+app.use('/api/login', loginRoute);
+// Novo endpoint para inclusão de produto na Omie
+app.post('/api/produtos/incluir', requisicaoOmie.incluirProduto);
+
+app.post('/api/produtos/total-produtos', async (req, res) => {
+  const { fetchTotalProdutos } = require('./controllers/Requisição_Omie');
+  try {
+    const total = await fetchTotalProdutos();
+    res.json({ total_de_registros: total });
+  } catch (error) {
+    console.error("Erro ao obter total de produtos:", error);
+    res.status(500).json({ error: "Erro ao obter total de produtos" });
+  }
+});
 /**
  * Rota /api/log-codigo:
  *   - Lê se já existe no CSV => atualiza data/hora
@@ -79,7 +105,7 @@ app.post('/api/log-codigo', (req, res) => {
     // data existe => split em linhas
     const linhas = data.split('\n').filter(l => l.trim() !== '');
 
-    // Se já existir esse codigo, substituímos a linha
+    // Se já existir esse código, substituímos a linha
     let encontrou = false;
     for (let i = 0; i < linhas.length; i++) {
       const [codExistente] = linhas[i].split(',');
@@ -102,6 +128,8 @@ app.post('/api/log-codigo', (req, res) => {
     });
   });
 });
+
+
 
 /**
  * Função para verificar se a data/hora CSV é mais antiga que 1 minuto
@@ -160,7 +188,6 @@ app.post('/api/log-codigo/cleanup', (req, res) => {
     const novasLinhas = linhas.filter(l => {
       const partes = l.split(',');
       if (partes.length < 3) {
-        // Se tiver menos de 3 colunas => mal formada
         alterou = true;
         return false;
       }
@@ -196,3 +223,6 @@ app.post('/api/log-codigo/cleanup', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+
+

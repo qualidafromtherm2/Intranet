@@ -23,15 +23,26 @@ Interface moderna Fromtherm/
 http://localhost:5001/index.html#edit // Meu site
 
 
-npm run dev // Para iniciar o servidor altomaticamente
+(npm run dev // Para iniciar o servidor altomaticamente)
 
-Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
+(Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
 no terminal integrado do VS Code:
 git status
 git add .
 git commit -m "Minhas alterações: atualização do layout do modal, correções e melhorias"
+git push)
+
+
+(Para enviar apenas alguns arquivos para o GitHub, você pode adicionar
+os arquivos desejados com o comando git add, criar um commit e depois
+fazer o push. Por exemplo:
+
+git add arquivo1.js arquivo2.css
+git commit -m "Adicionando somente os arquivos selecionados"
 git push
 
+Isso fará com que somente as alterações de arquivo1.js e arquivo2.css
+sejam incluídas no commit e enviados para o repositório remoto.)
 
 https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
 https://codepen.io/cjl750/pen/mXbMyo // exemplo de linha do tempo
@@ -40,3 +51,4 @@ https://codepen.io/leonam-silva-de-souza/pen/vYoazQq // exemplo para login
 https://codepen.io/cbolson/pen/YzmENGy // Para deixar a foto dos aniversariantes do mês
 https://codepen.io/dilums/pen/ZEBowxX // dashboard para report
 https://codepen.io/fainder/pen/qBwBeO // menu do modal
+https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script

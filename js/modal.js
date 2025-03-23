@@ -219,6 +219,7 @@ export async function showCardModal(cardElement, omieData) {
 
   // Clona o card original e desativa a edição de características
   const clone = cardElement.cloneNode(true);
+  
   clone.dataset.characteristicsEditing = "false";
 
   const clonedCardInfo = clone.querySelector('.card-info');
@@ -228,6 +229,8 @@ export async function showCardModal(cardElement, omieData) {
     modal.style.display = "flex";
     return;
   }
+
+  
   const h2title = clonedCardInfo.querySelector('h2');
 
   // Remove todos os elementos de .card-info, exceto o <h2>
@@ -625,7 +628,6 @@ modalBody.appendChild(iconContainer);
     container.appendChild(clone);
     modalBody.appendChild(container);
 
-// --- Carrega o menu via fetch ---
 // --- Carrega o menu via fetch ---
 const accordionMenu = await loadAccordionMenu();
 if (accordionMenu) {

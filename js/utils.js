@@ -27,6 +27,25 @@ export async function fetchCaracteristicas() {
     }
   }
   
+
+  // utils.js
+export async function loadTipoCSV() {
+  try {
+    const response = await fetch('./Tipo.csv'); // Ajuste o caminho se necessário
+    const csvText = await response.text();
+    const parsed = Papa.parse(csvText, {
+      header: true,
+      dynamicTyping: false,
+      skipEmptyLines: true,
+      trim: true
+    });
+    if (parsed.errors.length) return [];
+    return parsed.data;
+  } catch (error) {
+    console.error('Erro ao carregar CSV de tipos:', error);
+    return [];
+  }
+}
   
   
   

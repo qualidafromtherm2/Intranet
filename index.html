@@ -1,121 +1,182 @@
-<!-- index.html  -->
-
 <!DOCTYPE html>
-  <html class="menu">
-  <head>
-    <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="google" content="notranslate" />
-    <title>Side Menu</title>
-    
-    <!-- Carrega os estilos do menu lateral -->
-    <link rel="stylesheet" type="text/css" href="css/menu.css">
-    <!-- Carrega os estilos gerais -->
-    <link rel="stylesheet" type="text/css" href="css/style.css">
-    <!-- Seu novo CSS para o carrossel -->
-    <link rel="stylesheet" type="text/css" href="css/slider.css">
-    <!-- spinner circular -->
-    <link rel="stylesheet" type="text/css" href="css/Spinner.css">
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-    <link rel="stylesheet" href="css/block.css">
-    <link rel="stylesheet" type="text/css" href="css/menu_produto.css">
-
-    <!-- Ionicons (para os ícones) -->
+<html class="menu">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="google" content="notranslate" />
+  <title>Side Menu</title>
+  
+  <!-- Estilos do menu lateral -->
+  <link rel="stylesheet" type="text/css" href="css/menu.css">
+  <!-- Estilos gerais -->
+  <link rel="stylesheet" type="text/css" href="css/style.css">
+  <!-- CSS para o carrossel -->
+  <link rel="stylesheet" type="text/css" href="css/slider.css">
+  <!-- Spinner circular -->
+  <link rel="stylesheet" type="text/css" href="css/Spinner.css">
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="css/block.css">
+  <link rel="stylesheet" type="text/css" href="Producao/Producao.css">
+  <!-- CSS do modal de permissões -->
+  <link rel="stylesheet" type="text/css" href="Permissoes/permissao.css">
+  <!-- Ionicons -->
   <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
-
-
-
+  <!-- Animate.css -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+  <!-- Animate.css -->
+  <link rel="stylesheet" type="text/css" href="css/menu_produto.css">
 
-    <!-- jQuery -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    
-    <!-- Papa Parse -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-  </head>
-  <body>
-    <!-- Campo de pesquisa -->
-    <div class="search-container">
-      <label class="search" for="inpt_search">
-        <input id="inpt_search" type="text" placeholder="FROMTHERM Search" />
-      </label>
-      <div class="search-results" id="searchResults"></div>
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <!-- Papa Parse -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+
+</head>
+<body>
+  <!-- Campo de pesquisa -->
+  <div class="search-container">
+    <label class="search" for="inpt_search">
+      <input id="inpt_search" type="text" placeholder="FROMTHERM Search" />
+    </label>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+
+  <!-- MENU LATERAL -->
+  <nav class="main-menu">
+    <div class="settings"></div>
+    <div class="scrollbar" id="style-1">
+      <ul>
+        <li>
+          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-home fa-lg"></i>
+            <span class="nav-text">Início</span>
+          </a>
+        </li>
+        <li>
+          <a href="Login/login.html" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-user fa-lg"></i>
+            <span class="nav-text">Usuário</span>
+          </a>
+        </li>
+        <li>
+          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-envelope-o fa-lg"></i>
+            <span class="nav-text">Mensagens</span>
+          </a>
+        </li>
+        <li>
+          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-heart-o fa-lg"></i>
+            <span class="nav-text">Recados gerais</span>
+          </a>
+        </li>
+        <li>
+          <a href="index.html" id="btnAtualizarCSV" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-refresh fa-lg"></i>
+            <span class="nav-text">Sincronizar OMIE</span>
+          </a>
+        </li>
+        <!-- Novo botão "Sincronizar NCM" -->
+        <li>
+          <a href="#" id="btnSincronizarNCM" data-permissao="MENU_INICIO">
+            <i class="fa fa-refresh fa-lg"></i>
+            <span class="nav-text">Sincronizar NCM</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" id="btnProducao" data-permissao="MENU_INICIO">
+            <i class="fa fa-industry fa-lg"></i>
+            <span class="nav-text">Produção</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" id="btnConfigurarPermissoes" class="menu-btn" data-permissao="CONFIGURAR">
+            <i class="fa fa-cog fa-lg"></i>
+            <span class="nav-text">Configurar Permissões</span>
+          </a>
+        </li>
+      </ul>
+      <ul class="logout">
+        <li>
+          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-lightbulb-o fa-lg"></i>
+            <span class="nav-text">Manuais</span>
+          </a>
+        </li>
+        <li>
+          <a href="Construtor_grafico/GeradorGrafico.html" target="conteudo" data-permissao="MENU_INICIO">
+            <i class="fa fa-bar-chart fa-lg"></i>
+            <span class="nav-text">Gerador de gráfico</span>
+          </a>
+        </li>            
+      </ul>
     </div>
+  </nav>
 
-    <!-- MENU LATERAL -->
-    <nav class="main-menu">
+  <!-- IFRAME para exibir conteúdos -->
+  <iframe name="conteudo"></iframe>
 
-      <div class="settings"></div>
-      <div class="scrollbar" id="style-1">
-        <ul>
-          <li>
-            <a href="http://startific.com" target="conteudo">
-              <i class="fa fa-home fa-lg"></i>
-              <span class="nav-text">Início</span>
-            </a>
-          </li>
-          <li>
-            <a href="http://startific.com" target="conteudo">
-              <i class="fa fa-user fa-lg"></i>
-              <span class="nav-text">Usuário</span>
-            </a>
-          </li>
-          <li>
-            <a href="http://startific.com" target="conteudo">
-              <i class="fa fa-envelope-o fa-lg"></i>
-              <span class="nav-text">Mensagens</span>
-            </a>
-          </li>
-          <li>
-            <a href="http://startific.com" target="conteudo">
-              <i class="fa fa-heart-o fa-lg"></i>
-              <span class="nav-text">Recados gerais</span>
-            </a>
-          </li>
-          <li class="darkerlishadow">
-            <a href="index.html" id="btnAtualizarCSV" target="conteudo">
-              <i class="fa fa-refresh fa-lg"></i>
-              <span class="nav-text">Sincronizar OMIE</span>
-            </a>
-          </li>
-        </ul>
-        <ul class="logout">
-          <li>
-            <a href="http://startific.com" target="conteudo">
-              <i class="fa fa-lightbulb-o fa-lg"></i>
-              <span class="nav-text">Manuais</span>
-            </a>
-          </li>
-          <li>
-            <a href="Compras/public/index.html" target="conteudo">
-              <i class="fa fa-shopping-cart fa-lg"></i>
-              <span class="nav-text">Compras</span>
-            </a>
-          </li>            
-        </ul>
-      </div>
-    </nav>
-
-    <!-- IFRAME para exibir conteúdos -->
-    <iframe name="conteudo"></iframe>
-
-    <!-- Modal para exibir o card expandido -->
-    <div id="cardModal" class="card-modal">
-      <div class="card-modal-content">
-        <span class="card-modal-close"><i class="ion-ios-close"></i></span>
-        <div id="cardModalBody">
-          <!-- Conteúdo do card expandido existente -->
-          <div class="produto-detalhes">
-            <div class="descricao-detalhada">
-              <!-- descrição detalhada do produto -->
-            </div>
+  <!-- Modal para exibir o card expandido -->
+  <div id="cardModal" class="card-modal">
+    <div class="card-modal-content">
+      <span class="card-modal-close"><i class="ion-ios-close"></i></span>
+      <div id="cardModalBody">
+        <!-- Conteúdo do card expandido existente -->
+        <div class="produto-detalhes">
+          <div class="descricao-detalhada">
+            <!-- descrição detalhada do produto -->
           </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Carrega o script principal -->
-    <script type="module" src="js/main.js"></script>
-  </body>
-  </html>
+  <!-- Container para o modal de permissões -->
+  <div id="modalContainer"></div>
+  <!-- Container para o modal de produção -->
+  <div id="modalProducaoContainer"></div>
+
+  <!-- Scripts Principais -->
+  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/Criar_produto.js"></script>
+  <script type="module" src="js/Duplicar_produto.js"></script>
+  <script src="Producao/Posto_trabalho.js"></script>
+
+  <!-- Carrega o modal de permissões dinamicamente -->
+  <script>
+    $(document).ready(function(){
+      $("#modalContainer").load("Permissoes/permissao.html", function() {
+        $.getScript("Permissoes/permissao.js", function(){
+          console.log("Script do modal de permissões carregado.");
+          const btnConfigurarPermissoes = document.getElementById('btnConfigurarPermissoes');
+          if (btnConfigurarPermissoes) {
+            btnConfigurarPermissoes.addEventListener('click', function(e) {
+              e.preventDefault();
+              if (typeof abrirModalPermissoes === "function") {
+                abrirModalPermissoes();
+              } else {
+                console.error("Função abrirModalPermissoes não encontrada.");
+              }
+            });
+          } else {
+            console.error("Botão btnConfigurarPermissoes não encontrado.");
+          }
+        });
+      });
+    });
+  </script>
+
+  <!-- Carrega o modal de produção dinamicamente -->
+  <script>
+    $(document).ready(function(){
+      $("#modalProducaoContainer").load("Producao/modalProducao.html", function() {
+        $.getScript("Producao/Posto_trabalho.js", function(){
+          console.log("Modal de Produção carregado.");
+        });
+      });
+    });
+  </script>
+</body>
+</html>
