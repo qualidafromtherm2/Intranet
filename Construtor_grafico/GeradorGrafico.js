@@ -37,7 +37,7 @@ function updateAxisPositions() {
   let count = visibleAxes.length;
   let positions = [];
   if (count === 3) {
-    positions = [0.80, 0.90, 0.99];
+    positions = [0.80, 0.90, 1.00];
   } else if (count === 2) {
     positions = [0.80, 0.90];
   } else if (count === 1) {
@@ -203,7 +203,7 @@ function gerarGrafico() {
   const layout = {
     paper_bgcolor: '#fff',
     plot_bgcolor: '#fff',
-    margin: { l: 50, r: 50, t: 50, b: 50 },
+    margin: { l: 50, r: 60, t: 50, b: 50 },
     title: graphTitle,
     showlegend: false, // Remove a legenda nativa
     xaxis: {
