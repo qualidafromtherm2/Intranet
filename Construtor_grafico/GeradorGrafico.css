@@ -26,8 +26,7 @@ body {
     max-width: 200px;
   }
   .col-2 {
-    flex: 0 0 200px; 
-    max-width: 200px;
+    flex: 2;
   }
   .col-3 {
     flex: 3; /* Coluna mais larga */

@@ -101,8 +101,8 @@ function updateCorrenteLabels() {
 function gerarGrafico() {
   // Lê os rótulos dinâmicos; se os campos não existirem, usa valores padrão.
   const graphTitle = document.getElementById("graph_title")?.value || "Nome do grafico";
-  const y1Title = document.getElementById("y1_title")?.value || "Nome do eixo y1";
-  const xTitle = document.getElementById("x_title")?.value || "Nome do eixo x";
+  const y1Title = document.getElementById("y1_title")?.value || "Nome do eixo Y1";
+  const xTitle = document.getElementById("x_title")?.value || "Nome do eixo X";
 
   // Para os eixos secundários, os títulos são lidos dos campos de entrada
   const axis2Title = document.getElementById("axis2_name")?.value || "3~380";

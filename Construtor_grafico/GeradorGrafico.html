@@ -21,7 +21,7 @@
   <div id="registroForm" class="col" style="display: none; max-width: 600px; margin: 0 auto 30px;">
     <h3>Novo Registro</h3>
     <div class="input-group">
-      <label for="temp">Temperatura da água:</label>
+      <label for="temp">Eixo Y1:</label>
       <input type="number" id="temp" value="30" step="0.1">
     </div>
     <div class="input-group">
@@ -45,9 +45,9 @@
 
   <!-- Linha principal com 3 colunas: Esquerda, Meio (gráfico), Direita -->
   <div class="row" style="align-items: flex-start;">
-    <!-- Coluna Esquerda (Temperatura da água) -->
+    <!-- Coluna Esquerda (Eixo Y1) -->
     <div class="col col-1">
-      <h3>Temperatura da água</h3>
+      <h3>Eixo Y1</h3>
       <div class="input-group">
         <label for="agua_temp_max">Máximo:</label>
         <input type="number" id="agua_temp_max" value="40" step="0.1" oninput="gerarGrafico()">
@@ -140,7 +140,6 @@
 
     <!-- Coluna do Meio: Gráfico -->
     <div class="col col-3">
-      <h3>Gráfico 1</h3>
       <div id="graph1" class="graph-container"></div>
     </div>
 

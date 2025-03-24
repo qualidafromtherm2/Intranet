@@ -34,7 +34,7 @@ no terminal integrado do VS Code:
 git status
 git add .
 git commit -m "Minhas alterações: atualização do layout do modal, correções e melhorias"
-git push)
+git push
 
 
 (Para enviar apenas alguns arquivos para o GitHub, você pode adicionar
