@@ -22,8 +22,8 @@ iframe {
 
   display: inline-block;
   position: relative;
-  height: 39px;
-  width: 39px;
+  height: 35px;
+  width: 35px;
   box-sizing: border-box;
   margin: 0 8px 7px 0;
   padding: 7px 5px 0 5px;
@@ -37,13 +37,14 @@ iframe {
   content: "";
   position: absolute;
   width: 5px;
-  height: 30px;
-  right: -10px;
-  top: 28px;
+  height: 35px;
+  right: -11px;
+  top: 21px;
   background: #042444;
   border-radius: 3px;
   transform: rotate(-45deg);
   transition: all 200ms ease;
+  z-index: -1;
 }
 .search.active,
 .search:hover {
@@ -114,6 +115,12 @@ iframe {
       grid-template-columns: 1fr; /* Uma única coluna em telas pequenas */
       grid-gap: 10px;
   }
+}
+@media (max-width: 768px) {
+    .cards {
+        grid-template-columns: 1fr; /* Uma única coluna em telas pequenas */
+        grid-gap: 10px;
+    }
 }
 
 
@@ -407,3 +414,15 @@ padding: 10px;
   z-index: 101;   /* Garantir que fique acima dos elementos internos do modal */
   box-shadow: -2px 0 5px rgba(0, 0, 0, 0.2); /* Opcional: um efeito de sombra para destacar */
 }
+
+.no-image-placeholder {
+  background: #f0f0f0;
+  color: #888;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 14px;
+  padding: 10px;
+}
+

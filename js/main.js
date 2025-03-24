@@ -112,6 +112,7 @@ function displayResults(results) {
   adjustCardsAlignment();
 }
 
+
 /**
  * Ajusta o alinhamento do container de resultados (#searchResults)
  * - Se o menu lateral estiver expandido (classe "expanded"), posiciona os cards à direita.

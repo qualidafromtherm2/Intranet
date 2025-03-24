@@ -1,4 +1,4 @@
-/* Fundo da página transparente */
+/* GeradorGrafico.css */
 body {
     margin: 10px 0 0 50px; /* top right bottom left */
     background: transparent;
@@ -11,34 +11,33 @@ body {
   .row {
     display: flex;
     flex-direction: row;
+    /* Se quiser alinhar tudo no topo: */
+    align-items: flex-start;
     margin-bottom: 20px;
   }
-  
   .col {
-    border: 1px solid #ccc;
-    padding: 10px;
+    border: 1px solid #ccc; /* se desejar */
     margin-right: 10px;
+    padding: 10px;
     background: transparent;
   }
+  .col-1 {
+    flex: 0 0 200px; 
+    max-width: 200px;
+  }
+  .col-2 {
+    flex: 0 0 200px; 
+    max-width: 200px;
+  }
+  .col-3 {
+    flex: 3; /* Coluna mais larga */
+  }
+  
   
   .col:last-child {
     margin-right: 0;
   }
-  
-/* Colunas "col-1" passam a ter largura fixa (ex.: 200px) */
-.col-1 {
-    flex: 0 0 200px;  /* não expande, nem encolhe, largura 200px */
-    max-width: 200px; /* garante que não passe de 200px */
-  }
-  
-  
-  .col-2 {
-    flex: 2;
-  }
-  
-  .col-3 {
-    flex: 3;  /* Coluna mais larga */
-  }
+
   
   .center {
     display: flex;

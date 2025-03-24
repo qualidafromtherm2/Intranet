@@ -43,9 +43,9 @@
     <button id="enviarRegistro">Enviar Registro</button>
   </div>
 
-  <!-- Linha principal com os controles e o gráfico -->
-  <div class="row">
-    <!-- Coluna 1: Controles da Temperatura da água -->
+  <!-- Linha principal com 3 colunas: Esquerda, Meio (gráfico), Direita -->
+  <div class="row" style="align-items: flex-start;">
+    <!-- Coluna Esquerda (Temperatura da água) -->
     <div class="col col-1">
       <h3>Temperatura da água</h3>
       <div class="input-group">
@@ -60,9 +60,7 @@
         <label for="agua_tick_y">Intervalo:</label>
         <input type="number" id="agua_tick_y" value="2" step="0.1" oninput="gerarGrafico()">
       </div>
-      <!-- Linha separadora -->
       <hr>
-      <!-- Novos campos inseridos abaixo do separador -->
       <div class="input-group">
         <label for="graph_title">Título do Gráfico:</label>
         <input type="text" id="graph_title" value="Nome do grafico" oninput="gerarGrafico()">
@@ -75,59 +73,107 @@
         <label for="x_title">Eixo X:</label>
         <input type="text" id="x_title" value="Nome do eixo x" oninput="gerarGrafico()">
       </div>
+
+      <!-- Checkbox + Nome do eixo vermelho -->
       <div class="input-group">
-        <label>Exibir Eixos:</label>
-        <div>
-          <input type="checkbox" id="chk_3_380" value="3~380" checked onchange="updateAxesFromControl()">
-          <label for="chk_3_380">3~380</label>
-        </div>
-        <div>
-          <input type="checkbox" id="chk_3_220" value="3~220" checked onchange="updateAxesFromControl()">
-          <label for="chk_3_220">3~220</label>
-        </div>
-        <div>
-          <input type="checkbox" id="chk_1_220v" value="1~220v" checked onchange="updateAxesFromControl()">
-          <label for="chk_1_220v">1~220v</label>
-        </div>
+        <label style="color: red; display: inline-flex; align-items: center;">
+          <input 
+            type="checkbox" 
+            id="chk_3_380" 
+            checked 
+            onchange="updateAxesFromControl()" 
+            style="margin-right: 5px;"
+          >
+          Eixo vermelho:
+        </label>
+        <input 
+          type="text" 
+          id="axis2_name" 
+          value="3~380" 
+          oninput="gerarGrafico()" 
+          style="margin-left: 5px;"
+        >
+      </div>
+
+      <!-- Checkbox + Nome do eixo verde -->
+      <div class="input-group">
+        <label style="color: green; display: inline-flex; align-items: center;">
+          <input 
+            type="checkbox" 
+            id="chk_3_220" 
+            checked 
+            onchange="updateAxesFromControl()" 
+            style="margin-right: 5px;"
+          >
+          Eixo verde:
+        </label>
+        <input 
+          type="text" 
+          id="axis3_name" 
+          value="3~220" 
+          oninput="gerarGrafico()" 
+          style="margin-left: 5px;"
+        >
+      </div>
+
+      <!-- Checkbox + Nome do eixo roxo -->
+      <div class="input-group">
+        <label style="color: purple; display: inline-flex; align-items: center;">
+          <input 
+            type="checkbox" 
+            id="chk_1_220v" 
+            checked 
+            onchange="updateAxesFromControl()" 
+            style="margin-right: 5px;"
+          >
+          Eixo roxo:
+        </label>
+        <input 
+          type="text" 
+          id="axis4_name" 
+          value="1~220v" 
+          oninput="gerarGrafico()" 
+          style="margin-left: 5px;"
+        >
       </div>
     </div>
 
-    <!-- Coluna 2: Gráfico -->
+    <!-- Coluna do Meio: Gráfico -->
     <div class="col col-3">
       <h3>Gráfico 1</h3>
       <div id="graph1" class="graph-container"></div>
     </div>
 
-    <!-- Coluna 3: Parâmetros (Modelos) renomeado para "Corrente" -->
+    <!-- Coluna Direita: Parâmetros (Corrente) -->
     <div class="col col-1">
       <h3>Corrente</h3>
-      <!-- 3~380 -->
+      <!-- Eixo vermelho -->
       <div class="input-group">
-        <label for="tri380_max">3~380 - Máx.:</label>
+        <label for="tri380_max" style="color: red;">Eixo vermelho - Máx.:</label>
         <input type="number" id="tri380_max" value="15.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="tri380_min">3~380 - Mín.:</label>
+        <label for="tri380_min" style="color: red;">Eixo vermelho - Mín.:</label>
         <input type="number" id="tri380_min" value="9.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <hr>
-      <!-- 3~220 -->
+      <!-- Eixo verde -->
       <div class="input-group">
-        <label for="tri220_max">3~220 - Máx.:</label>
+        <label for="tri220_max" style="color: green;">Eixo verde - Máx.:</label>
         <input type="number" id="tri220_max" value="28.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="tri220_min">3~220 - Mín.:</label>
+        <label for="tri220_min" style="color: green;">Eixo verde - Mín.:</label>
         <input type="number" id="tri220_min" value="22.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <hr>
-      <!-- 1~220v -->
+      <!-- Eixo roxo -->
       <div class="input-group">
-        <label for="tri300_max">1~220v - Máx.:</label>
+        <label for="tri300_max" style="color: purple;">Eixo roxo - Máx.:</label>
         <input type="number" id="tri300_max" value="22" step="0.1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="tri300_min">1~220v - Mín.:</label>
+        <label for="tri300_min" style="color: purple;">Eixo roxo - Mín.:</label>
         <input type="number" id="tri300_min" value="16" step="0.1" oninput="gerarGrafico()">
       </div>
     </div>
