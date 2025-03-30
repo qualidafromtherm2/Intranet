@@ -629,19 +629,24 @@ modalBody.appendChild(iconContainer);
     modalBody.appendChild(container);
 
 // --- Carrega o menu via fetch ---
+// Após carregar o accordionMenu
 const accordionMenu = await loadAccordionMenu();
 if (accordionMenu) {
-  accordionMenu.id = "accordionMenu"; // Opcional, para facilitar remoção
-  // Obtenha as dimensões do modal para posicionamento
+  accordionMenu.id = "accordionMenu"; // opcional
+  // Posiciona o menu conforme já faz
   const modalRect = modal.getBoundingClientRect();
   accordionMenu.style.position = "fixed";
   accordionMenu.style.top = (modalRect.top + 450) + "px";
   accordionMenu.style.left = (modalRect.right + 1210) + "px";
-  accordionMenu.style.width = "180px"; // ajuste conforme necessário
+  accordionMenu.style.width = "180px";
   accordionMenu.style.zIndex = "11000";
   document.body.appendChild(accordionMenu);
 
-  // Inicializa o funcionamento do accordion com jQuery usando o elemento carregado:
+  // Aplique as permissões ao accordion apenas dentro desse container:
+  const permissoes = JSON.parse(localStorage.getItem('userPermissoes')) || [];
+  aplicarPermissoesNoContainer(permissoes, accordionMenu);
+
+  // Inicialize o accordion (como você já faz)
   var Accordion = function(el, multiple) {
     this.el = el || {};
     this.multiple = multiple || false;
@@ -660,9 +665,10 @@ if (accordionMenu) {
     }
   };
 
-  // Use o elemento carregado diretamente:
   var accordionObj = new Accordion($(accordionMenu), false);
 }
+
+
 
 
   // Exibe o modal
@@ -1114,4 +1120,20 @@ function createCharacteristicRow(c) {
   row.appendChild(tdExibirOrdemProd);
 
   return row;
+}
+
+
+function aplicarPermissoesNoContainer(permissoes, containerElement) {
+  const permissoesUpper = permissoes.map(p => p.toUpperCase());
+  // Seleciona apenas os elementos dentro do container passado
+  const elementos = containerElement.querySelectorAll('[data-permissao]');
+  elementos.forEach(el => {
+    const perm = el.getAttribute('data-permissao').trim().toUpperCase();
+    // Exibe sempre "Início" e "Usuário"
+    if (perm === 'INÍCIO' || perm === 'USUÁRIO') {
+      el.style.setProperty('display', 'block', 'important');
+    } else {
+      el.style.setProperty('display', permissoesUpper.includes(perm) ? 'block' : 'none', 'important');
+    }
+  });
 }

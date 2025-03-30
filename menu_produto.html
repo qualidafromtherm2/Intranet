@@ -1,3 +1,5 @@
+<!-- menu_produto.html -->
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -14,10 +16,10 @@
         <i class="fa fa-chevron-down"></i>
       </div>
       <ul class="submenu">
-        <li><a href="#" id="editarProduto">Editar produto</a></li>
-        <li><a href="#" id="editarCaracteristica">Editar característica</a></li>
-        <li><a href="#" id="criarProduto">Criar produto</a></li> <!-- Botão "Criar produto" -->
-        <li><a href="#" id="duplicarProduto">Duplicar produto</a></li>
+        <li><a href="#" id="editarProduto" data-permissao="EDITAR_PRODUTO">Editar produto</a></li>
+        <li><a href="#" id="editarCaracteristica" data-permissao="EDITAR_CARACTERISTICA">Editar característica</a></li>
+        <li><a href="#" id="criarProduto" data-permissao="CRIAR_PRODUTO">Criar produto</a></li>
+        <li><a href="#" id="duplicarProduto" data-permissao="DUPLICAR_PRODUTO">Duplicar produto</a></li>
       </ul>
     </li>
     <li>
@@ -26,9 +28,9 @@
         <i class="fa fa-chevron-down"></i>
       </div>
       <ul class="submenu">
-        <li><a href="#">Abrir OP</a></li>
-        <li><a href="#">RI</a></li>
-        <li><a href="#">Liberação de máquina</a></li>
+        <li><a href="#" data-permissao="ABRIR_OP">Abrir OP</a></li>
+        <li><a href="#" data-permissao="RI">RI</a></li>
+        <li><a href="#" data-permissao="LIBERAR_MAQUINA">Liberação de máquina</a></li>
       </ul>
     </li>
     <li>
@@ -37,9 +39,9 @@
         <i class="fa fa-chevron-down"></i>
       </div>
       <ul class="submenu">
-        <li><a href="#">PIR</a></li>
-        <li><a href="#">A.T.</a></li>
-        <li><a href="#">Auditoria</a></li>
+        <li><a href="#" data-permissao="PIR">PIR</a></li>
+        <li><a href="#" data-permissao="AT">A.T.</a></li>
+        <li><a href="#" data-permissao="AUDITORIA">Auditoria</a></li>
       </ul>
     </li>
     <li>
@@ -48,10 +50,42 @@
         <i class="fa fa-chevron-down"></i>
       </div>
       <ul class="submenu">
-        <li><a href="#">Etiqueta</a></li>
-        <li><a href="#">Inventário</a></li>
+        <li><a href="#" data-permissao="ETIQUETA">Etiqueta</a></li>
+        <li><a href="#" data-permissao="INVENTARIO">Inventário</a></li>
       </ul>
     </li>
   </ul>
+
+  <!-- Script para aplicar as permissões -->
+  <script>
+    function aplicarPermissoes(permissoes) {
+      const permissoesUpper = permissoes.map(p => p.toUpperCase());
+      console.log("Permissões do usuário (upper):", permissoesUpper);
+      const elementos = document.querySelectorAll('[data-permissao]');
+      elementos.forEach(el => {
+        const perm = el.getAttribute('data-permissao').trim().toUpperCase();
+        console.log("Elemento com permissão:", perm);
+        // Exibe sempre os botões de "Início" e "Usuário" (se houver)
+        if (perm === 'INÍCIO' || perm === 'USUÁRIO') {
+          el.style.setProperty('display', 'block', 'important');
+          console.log("Mantendo (sempre visível):", perm);
+        } else {
+          if (permissoesUpper.includes(perm)) {
+            el.style.setProperty('display', 'block', 'important');
+            console.log("Permitido:", perm);
+          } else {
+            el.style.setProperty('display', 'none', 'important');
+            console.log("Ocultando:", perm);
+          }
+        }
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+      const permissoes = JSON.parse(localStorage.getItem('userPermissoes')) || [];
+      console.log("LocalStorage userPermissoes:", permissoes);
+      aplicarPermissoes(permissoes);
+    });
+  </script>
 </body>
 </html>

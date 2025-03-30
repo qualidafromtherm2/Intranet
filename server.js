@@ -23,11 +23,24 @@ const session = require('express-session');
 const app = express();
 const PORT = process.env.PORT || 5001;
 
+const aberturaOpRouter = require('./routes/abertura_op');
+
+
+//  para gerar csv da op
+const aberturaOpCsvRouter = require('./abertura_op/abertura_op_csv');
+const planoOpRouter = require('./abertura_op/abertura_op_csv');
+
+
+
 // 4) Middlewares principais
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname)));
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/plano-op', planoOpRouter);
+// Registra as rotas de API ANTES do static
+app.use('/api/abertura-op', aberturaOpRouter);
+app.use('/api/plano-op', aberturaOpCsvRouter);
 // 5) Registra as rotas
 app.use('/api/produtos', produtosRouter);
 app.use('/api/caracteristicas', caracteristicasRouter);
