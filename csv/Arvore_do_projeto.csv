@@ -1,0 +1,166 @@
+INTRANET_FROMTHERM/
+├── .vs/
+├── abertura_op/
+│   ├── abertura_op.css
+│   ├── abertura_op.html
+│   ├── abertura_op.js  (U)
+│   └── abertura_op_csv.js
+├── Compras/
+│   ├── backend/
+│   │   └── ... (código de backend específico)
+│   └── public/
+│       └── ... (arquivos front-end de Compras, se houver)
+├── Construtor_grafico/
+│   ├── GeradorGrafico.css
+│   ├── GeradorGrafico.html
+│   └── GeradorGrafico.js
+├── controllers/
+│   ├── familiasController.js
+│   ├── produtosController.js
+│   └── Requisição_Omie.js
+├── css/
+│   ├── Block.css
+│   ├── menu.css
+│   ├── menu_produto.css
+│   ├── slider.css
+│   ├── Spinner.css
+│   └── style.css
+├── csv/
+│   ├── Estrutura_do_projeto.csv
+│   ├── ListarNCM.csv
+│   ├── Login.csv
+│   ├── Origem.csv
+│   ├── plano_op.csv
+│   ├── Posto_trabalho.csv
+│   ├── Resultado_teste.csv
+│   ├── Testes01.csv
+│   └── Tipo.csv
+├── img/
+│   ├── Produto/
+│   │   └── ... (imagens de produtos)
+│   ├── fundo.png
+│   └── logo.png
+├── js/
+│   ├── cardDisplay.js
+│   ├── Criar_produto.js
+│   ├── Duplicar_produto.js
+│   ├── editCard.js
+│   ├── editCharacteristics.js
+│   ├── editFields.js
+│   ├── lockedCodes.js
+│   ├── main.js
+│   ├── menu_produto.js
+│   ├── modal.js
+│   ├── searchHandler.js
+│   ├── updateCSV.js
+│   └── utils.js
+├── Login/
+│   ├── login.css
+│   ├── login.html
+│   ├── login.js
+│   └── loginRoute.js
+├── node_modules/
+│   └── ... (dependências NPM)
+├── Permissoes/
+│   ├── permissao.css    (M)
+│   ├── permissao.html   (M)
+│   ├── permissao.js     (M)
+│   └── Permissoes_server.js  (U)
+├── Producao/
+│   ├── Producao.css         (M)
+│   ├── modalProducao.html   (M)
+│   ├── modalProducao.js     (U)
+│   └── Posto_trabalho.js    (M)
+├── routes/
+│   ├── abertura_op.js       (U)
+│   ├── caracteristicas.js
+│   ├── excluirCaracteristica.js
+│   ├── familias.js
+│   ├── incluirCaracteristica.js
+│   ├── prodcaract.js
+│   ├── produtos.js
+│   ├── Sincronizar_NCM.js
+│   └── uploadImage.js
+├── teste01/
+│   └── teste01.js (U)
+├── utils/
+│   ├── axiosRetry.js
+│   └── csvUtils.js
+├── .gitmodules
+├── config.js
+├── Estrutura_do_projeto
+├── header.html
+├── index.html
+├── logsDeCodigo.csv
+├── menu_produto.html
+├── Middleware.js
+├── package-lock.json
+├── package.json
+├── Parateste.js
+├── Procfile.txt
+├── produtos.csv
+├── README.md
+└── server.js
+
+
+/* fechar porta 5001*/
+netstat -ano | findstr :5001 
+Stop-Process -Id 27084 -Force
+
+
+
+http://localhost:5001/index.html#edit // Meu site
+
+
+(npm run dev // Para iniciar o servidor altomaticamente)
+
+(Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
+no terminal integrado do VS Code:
+git status
+git add .
+git commit -m "Minhas alterações: atualização do layout do modal, correções e melhorias"
+git push
+
+
+(Para enviar apenas alguns arquivos para o GitHub, você pode adicionar
+os arquivos desejados com o comando git add, criar um commit e depois
+fazer o push. Por exemplo:
+
+git add arquivo1.js arquivo2.css
+git commit -m "Adicionando somente os arquivos selecionados"
+git push
+
+Isso fará com que somente as alterações de arquivo1.js e arquivo2.css
+sejam incluídas no commit e enviados para o repositório remoto.)
+
+https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
+https://codepen.io/cjl750/pen/mXbMyo // exemplo de linha do tempo
+https://codepen.io/jkantner/pen/vEBQZYe // exemplo para a pagina do SAC
+https://codepen.io/leonam-silva-de-souza/pen/vYoazQq // exemplo para login
+https://codepen.io/cbolson/pen/YzmENGy // Para deixar a foto dos aniversariantes do mês
+https://codepen.io/dilums/pen/ZEBowxX // dashboard para report
+https://codepen.io/fainder/pen/qBwBeO // menu do modal
+https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script
+https://codepen.io/peanav/pen/DmZEEp // calendario para auditoria escalonada
+https://codepen.io/karan12990/pen/pQzPdR // grafico para gerenciar andamentos de projetos
+https://codepen.io/Clonerrs/pen/qBEQmGQ // Chat para conversas internas da empresa
+https://codepen.io/mr_alien/pen/pNRQxK // Tipo kambam
+
+"Abaixo nomeclaturas de programação"
+span - campo amarelo para digitação, ou seja, inserção de dados.
+Modal - parecido com o card, porem flutuante.
+Card - Quadrado ou retangulo para gerar informações dentro dele.
+checkbox - campo de seleção de opções.
+radio - campo de seleção de opções.
+input - campo de digitação.
+button - botão de ação.
+select - campo de seleção de opções.
+textarea - campo de digitação de texto.
+label - campo de texto.
+form - campo de formulário.
+table - campo de tabela.
+div - campo de divisão.
+ul - campo de lista não ordenada.
+ol - campo de lista ordenada.
+li - campo de item de lista.
+h1 - campo de titulo.

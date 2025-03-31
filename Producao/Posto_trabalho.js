@@ -1,15 +1,16 @@
-/************************************************
- * Carrega CSV e separa os dados de Posto de Trabalho
+/*******Producao/Posto_trabalho.js*********************
+ * Carrega CSV e separa dados de Posto de Trabalho
  * Espera um CSV no formato:
- * M,Montagem
- * T,Teste01
- * M,Higienização
- * M,Teste final
- * P,Base
- * P,Painel
- * P,motor ventilador
- * P,Teste
+ *   M,Montagem
+ *   T,Teste01
+ *   M,Higienização
+ *   M,Teste final
+ *   P,Base
+ *   P,Painel
+ *   P,motor ventilador
+ *   P,Teste
  ************************************************/
+
 function carregarPostoTrabalho() {
   return fetch('csv/Posto_trabalho.csv')
     .then(resp => resp.text())
@@ -38,7 +39,7 @@ function criarLinhasMP() {
     const arrT = [];
     const arrP = [];
 
-    // Percorre cada linha do CSV: row[0] = "M", "T" ou "P"; row[1] = nome do posto
+    // Percorre cada linha do CSV
     for (const row of linhas) {
       const tipo = row[0] ? row[0].trim() : "";
       const nome = row[1] ? row[1].trim() : "";
@@ -53,8 +54,7 @@ function criarLinhasMP() {
       }
     }
 
-    // Função auxiliar para criar a lista de botões para cada grupo,
-    // adicionando uma classe extra para identificação (grupo-X)
+    // Função auxiliar para criar a lista de botões para cada grupo
     function criarListaBotao(arr, letra, cor) {
       const ul = document.createElement("ul");
       ul.classList.add("sub-tabs-linha", "grupo-" + letra);
@@ -63,15 +63,11 @@ function criarLinhasMP() {
         const button = document.createElement("button");
         button.classList.add("round-button");
         button.dataset.color = cor;
-        // Define o rótulo do botão (ex: "M1", "T1", "P1", etc.)
         button.innerHTML = `<span>${letra + (index + 1)}</span>`;
-        // Define o title para exibir o nome do posto ao passar o mouse
         button.title = nome;
-        // Ajusta os estilos do <span>
         const span = button.querySelector('span');
         span.style.fontSize = '25.6px';
         span.style.fontWeight = 'bold';
-        // Define um contorno circular
         button.style.border = '2px solid #000';
         li.appendChild(button);
         ul.appendChild(li);
@@ -79,12 +75,12 @@ function criarLinhasMP() {
       return ul;
     }
 
-    // Cria as três ULs para M, T e P
+    // Cria as ULs para M, T e P
     const ulM = criarListaBotao(arrM, "M", "green");
     const ulT = criarListaBotao(arrT, "T", "orange");
     const ulP = criarListaBotao(arrP, "P", "blue");
 
-    // Insere todas as ULs no container, mas vamos mostrar só uma por vez
+    // Insere no container
     const container = document.getElementById("postoTrabalhoLinhas");
     if (!container) {
       console.warn("Elemento #postoTrabalhoLinhas não encontrado.");
@@ -95,12 +91,10 @@ function criarLinhasMP() {
     container.appendChild(ulT);
     container.appendChild(ulP);
 
-    // Inicialmente, exibe apenas o grupo "P" (Preparação)
+    // Inicialmente, exibe apenas grupo P
     ulM.style.display = "none";
     ulT.style.display = "none";
     ulP.style.display = "flex";
-
-    return;
   });
 }
 
@@ -115,7 +109,7 @@ function abrirProducaoModal() {
   }
   modal.style.display = 'flex'; // Exibe o modal
 
-  // Aguarda um breve tempo para garantir que o modal esteja no DOM
+  // Aguarda um pouco para garantir que o modal esteja no DOM
   setTimeout(() => {
     initAmazingTabs();
     criarLinhasMP().then(() => {
@@ -142,6 +136,78 @@ function fecharProducaoModal() {
 }
 
 /************************************************
+ * Exemplo de função chamada ao clicar nos botões
+ ************************************************/
+function carregarResultadoTeste() {
+  console.log("Função carregarResultadoTeste foi chamada.");
+
+  // 1) Fetch do CSV de resultados
+  fetch('csv/Resultado_teste.csv')  // Ajuste o nome/pasta caso diferente
+    .then(response => {
+      if (!response.ok) {
+        throw new Error("Erro ao buscar Resultado_teste.csv: " + response.statusText);
+      }
+      return response.text();
+    })
+    .then(csvText => {
+      // 2) Usar PapaParse para converter CSV em array
+      return new Promise((resolve) => {
+        Papa.parse(csvText, {
+          skipEmptyLines: true,
+          complete: (results) => {
+            resolve(results.data);
+          }
+        });
+      });
+    })
+    .then((linhas) => {
+      if (!linhas || linhas.length === 0) {
+        console.warn("Resultado_teste.csv está vazio ou não foi encontrado.");
+        return;
+      }
+      // 3) Montar uma tabela simples
+      let html = '<table border="1" style="border-collapse: collapse; width:100%;">';
+      for (let row of linhas) {
+        html += '<tr>';
+        for (let cell of row) {
+          html += `<td style="padding:4px 8px;">${cell}</td>`;
+        }
+        html += '</tr>';
+      }
+      html += '</table>';
+
+      // 4) Exibir no modalProducao.html (ou onde desejar)
+      //     Exemplo: existe <div id="resultadoContainer"><form id="resultadoForm"></form></div>?
+      const container = document.getElementById('resultadoContainer');
+      const form = document.getElementById('resultadoForm');
+      if (container && form) {
+        container.style.display = 'block';  // Torna visível
+        form.innerHTML = html;              // Insere tabela
+      } else {
+        console.warn("Não encontrei #resultadoContainer / #resultadoForm no DOM. Ajuste para seu layout!");
+      }
+    })
+    .catch(err => {
+      console.error("Erro ao carregar dados de Resultado_teste.csv:", err);
+    });
+}
+
+/************************************************
+ * Caso seja 'Teste01'
+ ************************************************/
+document.addEventListener('click', function(e) {
+  const botao = e.target.closest('.round-button');
+  if (botao && botao.closest('#postoTrabalhoLinhas') && botao.title === 'Teste01') {
+    console.log("Botão Teste01 clicado");
+    const circle = document.querySelector('.main-slider-circle');
+    if (circle) {
+      circle.style.display = 'none';
+    }
+    carregarResultadoTeste();
+  }
+});
+
+/************************************************
  * Lógica das Amazing Tabs e controle dos grupos
  ************************************************/
 function initAmazingTabs() {
@@ -164,12 +230,12 @@ function initAmazingTabs() {
     target.classList.add(className);
   }
 
-  // Listener para cliques na área principal (.main-tabs-wrapper) – posiciona o círculo e realiza a troca de grupos
+  // Listener para cliques na área principal (.main-tabs-wrapper)
   wrapper.addEventListener("click", (event) => {
     const target = event.target.closest(".round-button");
     if (!target) return;
 
-    // Posiciona o círculo animado
+    // Posiciona o círculo
     mainSliderCircle.style.display = "block";
     const buttonRect = target.getBoundingClientRect();
     const wrapperRect = wrapper.getBoundingClientRect();
@@ -184,10 +250,10 @@ function initAmazingTabs() {
     mainSliderCircle.style.left = `${finalLeft}px`;
     mainSliderCircle.style.top = `${finalTop}px`;
     mainSliderCircle.classList.remove("animate-jello");
-    void mainSliderCircle.offsetWidth; // força reflow
+    void mainSliderCircle.offsetWidth; // reflow
     mainSliderCircle.classList.add("animate-jello");
 
-    // Atualiza a cor do círculo (exemplo)
+    // Atualiza cor do círculo (se quiser usar seu obj 'colors')
     const root = document.documentElement;
     const targetColor = target.dataset.color;
     if (typeof colors !== "undefined" && colors[targetColor]) {
@@ -200,25 +266,22 @@ function initAmazingTabs() {
 
     handleActiveTab(roundButtons, target, "active");
 
-    // Lógica de troca dos grupos:
-    // Os botões principais devem ter um atributo data-group: 
-    // Preparação → data-group="P", Inspeção → data-group="T", Montagem → data-group="M"
+    // Se o botão tiver data-group, troca as ULs
     const group = target.dataset.group;
     if (group) {
       const container = document.getElementById("postoTrabalhoLinhas");
       if (container) {
-        // Esconde todas as ULs
         container.querySelectorAll("ul.sub-tabs-linha").forEach(ul => {
           ul.style.display = "none";
         });
-        // Mostra a UL correspondente
-        const targetUL = container.querySelector("ul.sub-tabs-linha.grupo-" + group);
+        const targetUL = container.querySelector(`ul.sub-tabs-linha.grupo-${group}`);
         if (targetUL) {
           targetUL.style.display = "flex";
         }
       }
     }
 
+    // Se tiver classe "gallery", exiba filters
     if (target.classList.contains("gallery")) {
       root.style.setProperty("--filters-container-height", "3.8rem");
       root.style.setProperty("--filters-wrapper-opacity", "1");
@@ -244,7 +307,7 @@ function initAmazingTabs() {
  * Carrega o modal via fetch e configura o gatilho
  ************************************************/
 document.addEventListener('DOMContentLoaded', () => {
-  // Carrega o modal de Produção e insere no container "modalContainer"
+  // 1) Carrega o modalProducao.html e insere no #modalProducaoContainer
   fetch('Producao/modalProducao.html')
     .then(response => {
       if (!response.ok) {
@@ -254,18 +317,45 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .then(html => {
       const container = document.getElementById('modalProducaoContainer');
-
       if (container) {
         container.innerHTML = html;
         console.log("Modal de Produção carregado no container.");
-        // Opcional: configure listeners específicos aqui se necessário
+
+        // Depois de injetar o HTML do modalProducao.html:
+        const scriptTag = document.createElement('script');
+        scriptTag.src = 'Producao/modalProducao.js';
+        scriptTag.onload = function() {
+          if (typeof initModalProducao === 'function') {
+            initModalProducao();
+          }
+        };
+        document.body.appendChild(scriptTag);
+
+        // 2) Configure o botão OP (id="btnOP"), que está dentro do modalProducao.html
+        const btnOP = document.getElementById('btnOP');
+        if (btnOP) {
+          btnOP.addEventListener('click', function(e) {
+            e.preventDefault();
+            console.log("Botão OP clicado!");
+            // Fechamos o modal
+            fecharProducaoModal();
+            // Agora carregamos a página abertura_op.html dentro do IFRAME
+            const ifr = document.querySelector('iframe[name="conteudo"]');
+            if (ifr) {
+              ifr.src = 'abertura_op/abertura_op.html';
+            } else {
+              console.warn("Não achei <iframe name='conteudo'> no index.html!");
+            }
+          });
+        }
+        // Se o botão não existe no modal, não faz nada — removemos o warning.
       } else {
-        console.error("Container 'modalContainer' não encontrado.");
+        console.error("Container 'modalProducaoContainer' não encontrado.");
       }
     })
     .catch(error => console.error("Erro ao carregar o modal:", error));
 
-  // Configura o listener para o botão "Produção"
+  // 3) Configura o listener para o botão "Produção" (id="btnProducao" no index.html)
   const btnProducao = document.getElementById('btnProducao');
   if (btnProducao) {
     btnProducao.addEventListener('click', (e) => {
@@ -275,6 +365,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     console.log("Evento de clique configurado para btnProducao.");
   } else {
-    console.error("Botão 'btnProducao' não encontrado.");
+    console.error("Botão 'btnProducao' não encontrado no index.html.");
   }
 });

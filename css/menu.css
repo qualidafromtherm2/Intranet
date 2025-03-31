@@ -165,6 +165,13 @@ display: table-cell;
 vertical-align: middle;
 width: 190px;
 font-family: 'Titillium Web', sans-serif;
+display: none;
+}
+
+/* Quando o menu estiver aberto (por hover ou quando tiver a classe 'expanded'), exibe o texto */
+.main-menu:hover .nav-text,
+nav.main-menu.expanded .nav-text {
+  display: table-cell;
 }
 
 .main-menu .fb-like {

@@ -10,8 +10,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Site Interno da Fromtherm para gestão de informações",
   "dependencies": {
+    "@fortawesome/fontawesome": "^1.1.8",
     "axios": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -22,5 +23,13 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qualidafromtherm2/Intranet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qualidafromtherm2/Intranet/issues"
+  },
+  "homepage": "https://github.com/qualidafromtherm2/Intranet#readme"
 }

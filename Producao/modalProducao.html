@@ -1,3 +1,5 @@
+<!-- Producao/modalProducao.html -->
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -18,8 +20,6 @@
       <div class="main-tabs-container">
         <div class="main-tabs-wrapper">
 
-
-          
           <!-- Linha de botões principais -->
           <ul class="main-tabs">
             <!-- Primeiro botão: Logo (imagem) – mantém seu tamanho original -->
@@ -30,42 +30,47 @@
                 </span>
               </button>
             </li>
-          
-            <!-- Segundo botão: Preparação (representa os preparativos para iniciar a produção) -->
+
+            <!-- Abrir planejamento (OP) -->
             <li>
-              <button class="round-button" data-color="blue" data-group="P" title="Preparação">
-                <i class="fa fa-puzzle-piece icon" aria-hidden="true"></i>
-
-
+              <button class="round-button" style="--round-button-active-color: Yellow" data-color="Yellow" title="OP">
+                <i class="fa fa-tasks fa-3x" aria-hidden="true"></i>
               </button>
             </li>
+
+            <!--  Preparação (representa os preparativos para iniciar a produção) -->
+            <li>
+              <button class="round-button" style="--round-button-active-color: green" data-color="green" data-group="P" title="Preparação">
+                <i class="fa fa-puzzle-piece icon" aria-hidden="true"></i>
+              </button>
+            </li>
+
             <!-- Botão Inspeção: mostra o grupo T -->
             <li>
-              <button class="round-button gallery active" data-color="green" data-group="T" title="Inspeção">
+              <button class="round-button gallery active" style="--round-button-active-color: blue" data-color="blue" data-group="T" title="Inspeção">
                 <i class="fa fa-flask icon" aria-hidden="true"></i>
-
               </button>
             </li>
+
             <!-- Botão Montagem: mostra o grupo M -->
             <li>
-              <button class="round-button" data-color="purple" data-group="M" title="Montagem">
+              <button class="round-button" style="--round-button-active-color: purple" data-color="purple" data-group="M" title="Montagem">
                 <i class="fa fa-cubes icon" aria-hidden="true"></i>
-
-
-
               </button>
             </li>
-          
-            <!-- Quinto botão: Deslogar (representa a saída/desconexão) -->
+
+            <!--  Deslogar (representa a saída/desconexão) -->
             <li>
-              <button class="round-button" style="--round-button-active-color: #ff6d00" data-color="orange" title="Deslogar">
-                <i class="fa fa-sign-out icon" aria-hidden="true"></i>
+              <button class="round-button" style="--round-button-active-color: orange" data-color="orange" title="Enviar">
+                <i class="fa fa-paper-plane fa-3x" aria-hidden="true"></i>
               </button>
             </li>
           </ul>
           
-          
-
+          <!-- Exibir resultados de teste -->
+          <div id="resultadoContainer" style="display:none; margin-top:20px;">
+            <form id="resultadoForm"></form>
+          </div>
 
           <!-- O círculo transparente, para todos os ícones (principais e M/P) -->
           <div class="main-slider" aria-hidden="true">
@@ -79,16 +84,32 @@
           <div id="postoTrabalhoLinhas">
             <!-- JS criará <ul class="sub-tabs-linha"> com .round-button ... -->
           </div>
+
         </div>
       </div>
     </nav>
-
   </div>
 </div>
 
+<script>
+  // Listener para os botões dentro do container #postoTrabalhoLinhas
+  document.addEventListener('click', function(e) {
+    const subBtn = e.target.closest('.sub-tabs-linha .round-button');
+    if (subBtn) {
+      // Remove a classe "active" de todos os botões das sub-tabs
+      const allSubButtons = document.querySelectorAll('#postoTrabalhoLinhas .round-button');
+      allSubButtons.forEach(btn => btn.classList.remove('active'));
+      // Adiciona "active" somente no botão clicado
+      subBtn.classList.add('active');
+    }
+  });
+</script>
+
 <!-- Papa Parse (se não estiver no index) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-<!-- Seu JS principal -->
-<script src="js/Producao.js"></script>
+<!-- Scripts que rodam neste modal -->
+<script src="../teste01/teste01.js"></script>
+<script src="Posto_trabalho.js"></script>
+
 </body>
 </html>

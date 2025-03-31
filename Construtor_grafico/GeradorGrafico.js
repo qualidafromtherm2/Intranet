@@ -1,21 +1,14 @@
 // GeradorGrafico.js
 
-// Array para armazenar os registros (equivalente ao st.session_state["registros"])
 let registros = [];
-
-// Variável global para controlar a visibilidade dos eixos secundários
 let axisVisibility = {
   '3~380': true,
   '3~220': true,
   '1~220v': true
 };
 
-// Flag para garantir que o listener do gráfico seja adicionado apenas uma vez
 let graph1EventListenerAttached = false;
 
-/**
- * Lê o estado dos checkboxes para os eixos e atualiza a variável axisVisibility.
- */
 function updateAxesFromControl() {
   axisVisibility['3~380'] = document.getElementById("chk_3_380")?.checked || false;
   axisVisibility['3~220'] = document.getElementById("chk_3_220")?.checked || false;
@@ -23,31 +16,25 @@ function updateAxesFromControl() {
   updateAxisPositions();
 }
 
-/**
- * Atualiza a posição dos eixos secundários (yaxis2, yaxis3 e yaxis4) de modo que o primeiro eixo visível fique na posição 0.80, o segundo em 0.85 e o terceiro em 0.90.
- */
 function updateAxisPositions() {
-  // Verifica quais eixos estão visíveis, na ordem fixa: 3~380, 3~220, 1~220v
   let visibleAxes = [];
   if (axisVisibility['3~380']) visibleAxes.push('3~380');
   if (axisVisibility['3~220']) visibleAxes.push('3~220');
   if (axisVisibility['1~220v']) visibleAxes.push('1~220v');
 
-  // Define as posições com base na quantidade de eixos visíveis
   let count = visibleAxes.length;
   let positions = [];
   if (count === 3) {
-    positions = [0.80, 0.90, 1.00];
+    positions = [0.85, 0.90, 1.00];
   } else if (count === 2) {
-    positions = [0.80, 0.90];
+    positions = [0.85, 0.90];
   } else if (count === 1) {
-    positions = [0.80];
+    positions = [0.85];
   }
 
   let updateObj = {};
   let index = 0;
 
-  // Atualiza yaxis2 (primeiro eixo secundário, originalmente 3~380)
   if (axisVisibility['3~380']) {
     updateObj['yaxis2.visible'] = true;
     updateObj['yaxis2.position'] = positions[index++];
@@ -55,7 +42,6 @@ function updateAxisPositions() {
     updateObj['yaxis2.visible'] = false;
   }
 
-  // Atualiza yaxis3 (segundo eixo, originalmente 3~220)
   if (axisVisibility['3~220']) {
     updateObj['yaxis3.visible'] = true;
     updateObj['yaxis3.position'] = positions[index++];
@@ -63,7 +49,6 @@ function updateAxisPositions() {
     updateObj['yaxis3.visible'] = false;
   }
 
-  // Atualiza yaxis4 (terceiro eixo, originalmente 1~220v)
   if (axisVisibility['1~220v']) {
     updateObj['yaxis4.visible'] = true;
     updateObj['yaxis4.position'] = positions[index++];
@@ -73,38 +58,82 @@ function updateAxisPositions() {
 
   const graphDiv = document.getElementById('graph1');
   Plotly.relayout(graphDiv, updateObj);
+
+  // Precisamos também atualizar as anotações para refletir a nova posição dos eixos
+  // Então chamamos novamente a função que gera as anotações (sem recriar todo o gráfico).
+  const newAnnotations = getAnnotations(); 
+  Plotly.relayout(graphDiv, { annotations: newAnnotations });
 }
 
 /**
- * Atualiza os rótulos dos inputs na coluna "Corrente" (para os ranges dos eixos) com base
- * nos valores dos campos de edição dos nomes dos eixos secundários.
+ * Retorna o array de anotações para colocar os rótulos dos eixos secundários no topo.
+ * Aqui usamos a mesma position do eixo + ancoragem.
  */
-function updateCorrenteLabels() {
-  // Se os elementos não existirem, não faz nada
-  const labelTri380 = document.getElementById("label_tri380");
-  const labelTri220 = document.getElementById("label_tri220");
-  const labelTri300 = document.getElementById("label_tri300");
-
+function getAnnotations() {
   const axis2Title = document.getElementById("axis2_name")?.value || "3~380";
   const axis3Title = document.getElementById("axis3_name")?.value || "3~220";
   const axis4Title = document.getElementById("axis4_name")?.value || "1~220v";
 
-  if (labelTri380) labelTri380.innerText = axis2Title;
-  if (labelTri220) labelTri220.innerText = axis3Title;
-  if (labelTri300) labelTri300.innerText = axis4Title;
+  const graphDiv = document.getElementById('graph1');
+  const currentLayout = graphDiv._fullLayout || {};
+  const pos2 = (currentLayout.yaxis2 && currentLayout.yaxis2.position) || 0.80;
+  const pos3 = (currentLayout.yaxis3 && currentLayout.yaxis3.position) || 0.90;
+  const pos4 = (currentLayout.yaxis4 && currentLayout.yaxis4.position) || 0.99;
+
+  let annotations = [];
+
+  if (axisVisibility['3~380']) {
+    annotations.push({
+      xref: 'paper',
+      yref: 'paper',
+      x: pos2,
+      xanchor: 'left',
+      y: 1.02,         // Alterado para deslocar um pouco para cima
+      yanchor: 'bottom',
+      text: axis2Title,
+      showarrow: false,
+      font: { color: 'red' }
+    });
+  }
+  if (axisVisibility['3~220']) {
+    annotations.push({
+      xref: 'paper',
+      yref: 'paper',
+      x: pos3,
+      xanchor: 'left',
+      y: 1.02,
+      yanchor: 'bottom',
+      text: axis3Title,
+      showarrow: false,
+      font: { color: 'green' }
+    });
+  }
+  if (axisVisibility['1~220v']) {
+    annotations.push({
+      xref: 'paper',
+      yref: 'paper',
+      x: pos4,
+      xanchor: 'left',
+      y: 1.02,
+      yanchor: 'bottom',
+      text: axis4Title,
+      showarrow: false,
+      font: { color: 'purple' }
+    });
+  }
+
+  return annotations;
 }
 
+
 /**
- * Gera o gráfico único com 4 eixos (y, y2, y3, y4).
- * Os rótulos do gráfico, do eixo X e Y1, e dos eixos secundários são lidos de campos de entrada.
+ * Gera (ou regenera) o gráfico principal
  */
 function gerarGrafico() {
-  // Lê os rótulos dinâmicos; se os campos não existirem, usa valores padrão.
   const graphTitle = document.getElementById("graph_title")?.value || "Nome do grafico";
   const y1Title = document.getElementById("y1_title")?.value || "Nome do eixo Y1";
   const xTitle = document.getElementById("x_title")?.value || "Nome do eixo X";
 
-  // Para os eixos secundários, os títulos são lidos dos campos de entrada
   const axis2Title = document.getElementById("axis2_name")?.value || "3~380";
   const axis3Title = document.getElementById("axis3_name")?.value || "3~220";
   const axis4Title = document.getElementById("axis4_name")?.value || "1~220v";
@@ -174,6 +203,7 @@ function gerarGrafico() {
     }
   ];
 
+  // Adiciona registros personalizados
   registros.forEach((reg, idx) => {
     data.push({
       x: [reg.pressao],
@@ -205,7 +235,7 @@ function gerarGrafico() {
     plot_bgcolor: '#fff',
     margin: { l: 50, r: 60, t: 50, b: 50 },
     title: graphTitle,
-    showlegend: false, // Remove a legenda nativa
+    showlegend: false,
     xaxis: {
       domain: [0, 0.8],
       range: [pressao_inicial, pressao_final],
@@ -231,6 +261,7 @@ function gerarGrafico() {
       ticks: 'outside',
       mirror: false
     },
+    // Eixos secundários (sem 'title' para usar anotações)
     yaxis2: {
       range: [tri380_min, tri380_max],
       dtick: 0.5,
@@ -243,9 +274,8 @@ function gerarGrafico() {
       overlaying: 'y',
       side: 'right',
       anchor: 'free',
-      position: 0.79, // valor base; updateAxisPositions ajustará
-      visible: axisVisibility['3~380'],
-      title: axis2Title
+      position: 0.80,
+      visible: axisVisibility['3~380']
     },
     yaxis3: {
       range: [tri220_min, tri220_max],
@@ -259,9 +289,8 @@ function gerarGrafico() {
       overlaying: 'y',
       side: 'right',
       anchor: 'free',
-      position: 0.90, // valor base; updateAxisPositions ajustará
-      visible: axisVisibility['3~220'],
-      title: axis3Title
+      position: 0.90,
+      visible: axisVisibility['3~220']
     },
     yaxis4: {
       range: [tri300_min, tri300_max],
@@ -275,16 +304,15 @@ function gerarGrafico() {
       overlaying: 'y',
       side: 'right',
       anchor: 'free',
-      position: 0.99, // valor base; updateAxisPositions ajustará
-      visible: axisVisibility['1~220v'],
-      title: axis4Title
-    }
+      position: 0.99,
+      visible: axisVisibility['1~220v']
+    },
+    annotations: getAnnotations()  // Usa a função que criamos para gerar as anotações
   };
 
   Plotly.newPlot('graph1', data, layout);
-  updateAxisPositions();
-  updateCorrenteLabels();
 
+  // Listener para atualizar a visibilidade dos eixos clicando na legenda
   if (!graph1EventListenerAttached) {
     const graphDiv = document.getElementById('graph1');
     graphDiv.on('plotly_legendclick', function(eventData) {

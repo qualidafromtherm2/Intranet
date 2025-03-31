@@ -1,3 +1,5 @@
+<!-- index.html -->
+
 <!DOCTYPE html>
 <html class="menu">
 <head>
@@ -15,6 +17,8 @@
   <link rel="stylesheet" type="text/css" href="css/slider.css">
   <!-- Spinner circular -->
   <link rel="stylesheet" type="text/css" href="css/Spinner.css">
+    <!-- Spinner circular -->
+  <link rel="stylesheet" type="text/css" href="abertura_op/abertura_op.css">
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <link rel="stylesheet" href="css/block.css">
@@ -32,6 +36,10 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <!-- Papa Parse -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script src="Permissoes/permissao.js"></script>
+  <!-- No <head> ou antes de fechar o <body> de index.html -->
+<script src="Login/login.js"></script>
 
 </head>
 <body>
@@ -49,50 +57,50 @@
     <div class="scrollbar" id="style-1">
       <ul>
         <li>
-          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="http://startific.com" target="conteudo" data-permissao="Início">
             <i class="fa fa-home fa-lg"></i>
             <span class="nav-text">Início</span>
           </a>
         </li>
         <li>
-          <a href="Login/login.html" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="Login/login.html" target="conteudo" data-permissao="Usuário">
             <i class="fa fa-user fa-lg"></i>
             <span class="nav-text">Usuário</span>
           </a>
         </li>
         <li>
-          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="http://startific.com" target="conteudo" data-permissao="Mensagens">
             <i class="fa fa-envelope-o fa-lg"></i>
             <span class="nav-text">Mensagens</span>
           </a>
         </li>
         <li>
-          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="http://startific.com" target="conteudo" data-permissao="Recados gerais">
             <i class="fa fa-heart-o fa-lg"></i>
             <span class="nav-text">Recados gerais</span>
           </a>
         </li>
         <li>
-          <a href="index.html" id="btnAtualizarCSV" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="index.html" id="btnAtualizarCSV" target="conteudo" data-permissao="Sincronizar OMIE">
             <i class="fa fa-refresh fa-lg"></i>
             <span class="nav-text">Sincronizar OMIE</span>
           </a>
         </li>
         <!-- Novo botão "Sincronizar NCM" -->
         <li>
-          <a href="#" id="btnSincronizarNCM" data-permissao="MENU_INICIO">
+          <a href="#" id="btnSincronizarNCM" data-permissao="Sincronizar NCM">
             <i class="fa fa-refresh fa-lg"></i>
             <span class="nav-text">Sincronizar NCM</span>
           </a>
         </li>
         <li>
-          <a href="#" id="btnProducao" data-permissao="MENU_INICIO">
+          <a href="#" id="btnProducao" data-permissao="Produção">
             <i class="fa fa-industry fa-lg"></i>
             <span class="nav-text">Produção</span>
           </a>
         </li>
         <li>
-          <a href="#" id="btnConfigurarPermissoes" class="menu-btn" data-permissao="CONFIGURAR">
+          <a href="#" id="btnConfigurarPermissoes" class="menu-btn" data-permissao="Configurar Permissões">
             <i class="fa fa-cog fa-lg"></i>
             <span class="nav-text">Configurar Permissões</span>
           </a>
@@ -100,13 +108,13 @@
       </ul>
       <ul class="logout">
         <li>
-          <a href="http://startific.com" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="http://startific.com" target="conteudo" data-permissao="Manuais">
             <i class="fa fa-lightbulb-o fa-lg"></i>
             <span class="nav-text">Manuais</span>
           </a>
         </li>
         <li>
-          <a href="Construtor_grafico/GeradorGrafico.html" target="conteudo" data-permissao="MENU_INICIO">
+          <a href="Construtor_grafico/GeradorGrafico.html" target="conteudo" data-permissao="Gerador de gráfico">
             <i class="fa fa-bar-chart fa-lg"></i>
             <span class="nav-text">Gerador de gráfico</span>
           </a>
@@ -138,6 +146,7 @@
   <!-- Container para o modal de produção -->
   <div id="modalProducaoContainer"></div>
 
+
   <!-- Scripts Principais -->
   <script type="module" src="js/main.js"></script>
   <script type="module" src="js/Criar_produto.js"></script>
@@ -163,17 +172,6 @@
           } else {
             console.error("Botão btnConfigurarPermissoes não encontrado.");
           }
-        });
-      });
-    });
-  </script>
-
-  <!-- Carrega o modal de produção dinamicamente -->
-  <script>
-    $(document).ready(function(){
-      $("#modalProducaoContainer").load("Producao/modalProducao.html", function() {
-        $.getScript("Producao/Posto_trabalho.js", function(){
-          console.log("Modal de Produção carregado.");
         });
       });
     });
