@@ -97,7 +97,6 @@ router.post('/login', (req, res) => {
 // Exemplo de rota de perfil para checar se o usuário está logado e retornar dados:
 router.get('/profile', (req, res) => {
   if (!req.session.user) {
-<<<<<<< HEAD
     // Retorna status 200 com success: false
     return res.json({ success: false, message: 'Não autenticado.' });
   }
@@ -106,14 +105,6 @@ router.get('/profile', (req, res) => {
 });
 
 
-=======
-    return res.status(401).json({ success: false, message: 'Não autenticado.' });
-  }
-  // Se estiver logado, retorna dados do usuário (incluindo permissões)
-  return res.json({ success: true, user: req.session.user });
-});
-
->>>>>>> 0799c1e3bc5f7bd7c0a5744d62997c63f7cc0c6c
 // Logout
 router.post('/logout', (req, res) => {
   req.session.destroy((err) => {
