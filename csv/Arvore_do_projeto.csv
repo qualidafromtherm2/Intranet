@@ -19,7 +19,7 @@ INTRANET_FROMTHERM/
 │   ├── produtosController.js
 │   └── Requisição_Omie.js
 ├── css/
-│   ├── Block.css
+│   ├── block.css
 │   ├── menu.css
 │   ├── menu_produto.css
 │   ├── slider.css
@@ -107,6 +107,7 @@ INTRANET_FROMTHERM/
 netstat -ano | findstr :5001 
 Stop-Process -Id 27084 -Force
 
+grep -R "o valor que vc quer localizar" .  "Aqui é para ver qual arquivo utiliza uma palavra"
 
 
 http://localhost:5001/index.html#edit // Meu site
@@ -114,7 +115,7 @@ http://localhost:5001/index.html#edit // Meu site
 
 (npm run dev // Para iniciar o servidor altomaticamente)
 
-(Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
+Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
 no terminal integrado do VS Code:
 git status
 git add .

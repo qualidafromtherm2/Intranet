@@ -1,5 +1,5 @@
 // controllers/Requisição_Omie.js
-const fetch = require('node-fetch').default;
+const fetch = require('node-fetch');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config');
 module.exports.fetchTotalProdutos = fetchTotalProdutos;
 

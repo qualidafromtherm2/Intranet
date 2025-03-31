@@ -1,6 +1,7 @@
 // editCharacteristics.js
-import { fetchCaracteristicas } from './utils.js';
-import { OMIE_APP_KEY, OMIE_APP_SECRET } from '../config.js';
+import config from '../config.client.js';
+const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+
 
 
 async function populateDatalist() {
