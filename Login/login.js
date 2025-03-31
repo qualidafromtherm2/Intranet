@@ -11,6 +11,7 @@ const container = document.getElementById('container');
 if (signUpButton) {
   signUpButton.addEventListener('click', () => {
     if (container) container.classList.add("right-panel-active");
+    if (container) container.classList.add("right-panel-active");
   });
 }
 
@@ -131,15 +132,25 @@ const btnOverlayLogout = document.getElementById('btnOverlayLogout');
 if (btnOverlayLogout) {
   btnOverlayLogout.addEventListener('click', async () => {
     try {
-      const response = await fetch(`${API_URL}/api/login/logout`, {
+      const response = await fetch('/api/login/logout', {
         method: 'POST',
         credentials: 'include'
       });
       const result = await response.json();
       if (result.success) {
-        setTimeout(() => {
-          window.top.location.reload();
-        }, 500);
+        // Tornar o form visível novamente
+        formSignIn.style.visibility = 'visible';
+
+        // Restaura overlay para "não logado"
+        document.getElementById('overlayNotLoggedIn').style.display = 'block';
+        document.getElementById('overlayLoggedIn').style.display = 'none';
+
+        // Remove a classe que desloca o painel
+        container.classList.remove('right-panel-active');
+
+        // Limpa campos
+        document.getElementById('signInEmail').value = '';
+        document.getElementById('signInPassword').value = '';
       }
     } catch (error) {
       console.error('Erro no logout:', error);
@@ -151,7 +162,7 @@ if (btnOverlayLogout) {
 // ---------------------- CHECK LOGIN STATUS (PERSISTÊNCIA) ----------------------
 async function checkLoginStatus() {
   try {
-    const response = await fetch(`${API_URL}/api/login/profile`, {
+    const response = await fetch('/api/login/profile', {
       method: 'GET',
       credentials: 'include'
     });
@@ -189,11 +200,9 @@ function ajustarTelaDeslogado() {
   const overlayLoggedIn = document.getElementById('overlayLoggedIn');
   if (overlayLoggedIn) overlayLoggedIn.style.display = 'none';
 
-  // Limpa os campos de login
-  const signInEmail = document.getElementById('signInEmail');
-  const signInPassword = document.getElementById('signInPassword');
-  if (signInEmail) signInEmail.value = '';
-  if (signInPassword) signInPassword.value = '';
+  // Limpa campos
+  signInEmail.value = '';
+  signInPassword.value = '';
 
   if (container) container.classList.remove('right-panel-active');
   const signInDiv = document.querySelector('.sign-in-container');
@@ -229,7 +238,7 @@ document.addEventListener("DOMContentLoaded", function() {
   aplicarPermissoes(permissoes);
 });
 
-// ---------------------- MODAL DE PERMISSÕES ----------------------
+// Seleciona elementos do modal
 const modalPermissoes = document.getElementById('modalPermissoes');
 const closeModal = document.getElementById('closeModal');
 if (closeModal) {
@@ -252,44 +261,92 @@ if (btnConfigurarPermissoes) {
     abrirModalPermissoes();
   });
 }
+// Fecha o modal ao clicar fora dele
+window.addEventListener('click', (event) => {
+  if (event.target == modalPermissoes) {
+    modalPermissoes.style.display = 'none';
+  }
+});
 
-// ---------------------- ATUALIZAÇÃO DE PERMISSÕES (MODAL) ----------------------
-const btnSalvarPermissoes = document.getElementById('btnSalvarPermissoes');
-if (btnSalvarPermissoes) {
-  btnSalvarPermissoes.addEventListener('click', async () => {
-    const userSelectElem = document.getElementById('userSelect');
-    const userSelecionado = userSelectElem ? userSelectElem.value.trim() : '';
-    const checkboxes = document.querySelectorAll('.permissao-checkbox');
-    const permissoesSelecionadas = [];
-    checkboxes.forEach(checkbox => {
-      if (checkbox.checked) {
-        permissoesSelecionadas.push(checkbox.value);
-      }
-    });
-    if (!userSelecionado) {
-      alert('Por favor, selecione um usuário.');
-      return;
-    }
-    const payload = {
-      user: userSelecionado,
-      permissoes: permissoesSelecionadas
-    };
+
+async function carregarUsuarios() {
     try {
-      const response = await fetch(`${API_URL}/api/login/atualizar-permissoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const response = await fetch('/api/users'); // Suponha que este endpoint retorne os usuários
+      const data = await response.json();
+      const usersList = document.getElementById('usersList');
+      usersList.innerHTML = ''; // Limpa a lista
+  
+      data.forEach(user => {
+        const option = document.createElement('option');
+        option.value = user.user; // ou user.nome, conforme seu campo
+        usersList.appendChild(option);
       });
-      const result = await response.json();
-      if (response.ok && result.success) {
-        alert('Permissões atualizadas com sucesso!');
-        if (modalPermissoes) modalPermissoes.style.display = 'none';
-      } else {
-        alert("Erro ao atualizar permissões: " + result.message);
-      }
     } catch (error) {
-      console.error('Erro na atualização de permissões:', error);
-      alert("Ocorreu um erro ao atualizar as permissões.");
+      console.error("Erro ao carregar usuários:", error);
+    }
+  }
+  
+  // Chame essa função ao abrir o modal, por exemplo:
+  // abrirModalPermissoes() { carregarUsuarios(); ... }
+
+  
+  const btnSalvarPermissoes = document.getElementById('btnSalvarPermissoes');
+
+btnSalvarPermissoes.addEventListener('click', async () => {
+  const userSelecionado = document.getElementById('userSelect').value.trim();
+  // Seleciona todos os checkboxes de permissão
+  const checkboxes = document.querySelectorAll('.permissao-checkbox');
+  const permissoesSelecionadas = [];
+  
+  checkboxes.forEach(checkbox => {
+    if (checkbox.checked) {
+      permissoesSelecionadas.push(checkbox.value);
     }
   });
-}
+  
+  // Validação básica
+  if (!userSelecionado) {
+    alert('Por favor, selecione um usuário.');
+    return;
+  }
+  
+  // Exemplo de payload para o back-end:
+  const payload = {
+    user: userSelecionado,
+    permissoes: permissoesSelecionadas // array de strings
+  };
+  
+  try {
+    const response = await fetch('/api/login/atualizar-permissoes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (response.ok && result.success) {
+      alert('Permissões atualizadas com sucesso!');
+      modalPermissoes.style.display = 'none';
+    } else {
+      alert("Erro ao atualizar permissões: " + result.message);
+    }
+  } catch (error) {
+    console.error('Erro na atualização de permissões:', error);
+    alert("Ocorreu um erro ao atualizar as permissões.");
+  }
+});
+
+document.addEventListener("DOMContentLoaded", function() {
+    const btnConfigurarPermissoes = document.getElementById('btnConfigurarPermissoes');
+    if (btnConfigurarPermissoes) {
+      btnConfigurarPermissoes.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (typeof abrirModalPermissoes === "function") {
+          abrirModalPermissoes();
+        } else {
+          console.error("Função abrirModalPermissoes não encontrada.");
+        }
+      });
+    }
+  });
+  
+  
