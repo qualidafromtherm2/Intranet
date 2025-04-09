@@ -1,19 +1,13 @@
-<!-- abertura_op/abertura_op.html -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8"/>
   <title>Abertura OP - Kanban</title>
-
-
   <link rel="stylesheet" href="abertura_op.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-
-
 </head>
 <body>
-
   <!-- Kanban Board (HTML) -->
   <div class="overlay-bg" id="bg-image"></div>
 
@@ -25,10 +19,8 @@
       <div class="btnUrg">
         <button id="addUrgent" onclick="toggleUrgentColumn()"><i class="fa fa-exclamation"></i></button>
       </div>
-      
-
       <div class="btnComercial">
-        <button id="btnComercial"><i class="fa fa-briefcase"></i></button>
+        <button id="btnProducao"><i class="fa fa-industry fa-lg"></i></button>
       </div>
       <div class="btnPCP">
         <button id="btnPCP"><i class="fa fa-calendar"></i></button>
@@ -38,21 +30,11 @@
       </div>
     </div>
   </header>
-  
-  
-  
-
-
-  
-  
-  
 
   <div id="myLists">
-
-    <!-- Coluna 1: Aguardando confirmação -->
+    <!-- Coluna 1: LIDER DE PRODUÇÃO -->
     <div id="to-do">
       <h3>LIDER DE PRODUÇÃO <span></span></h3>
-      <!-- Restaure o <ul> vazio -->
       <ul id="ul-todo" class="section"
           ondrop="drop(event, this)"
           ondragover="allowDrop(event)"
@@ -60,49 +42,57 @@
           ondragleave="dragLeave(event)">
       </ul>
     </div>
-
-  <!-- Coluna 2: Logística -->
-  <div id="work-in">
-    <h3>LOGISTICA <span></span></h3>
-    <!-- Restaure o <ul> vazio -->
-    <ul id="ul-working" class="section"
-        ondrop="drop(event, this)"
-        ondragover="allowDrop(event)"
-        ondragenter="dragEnter(event)"
-        ondragleave="dragLeave(event)">
-    </ul>
+    <!-- Coluna 2: LOGISTICA -->
+    <div id="work-in">
+      <h3>LOGISTICA <span></span></h3>
+      <ul id="ul-working" class="section"
+          ondrop="drop(event, this)"
+          ondragover="allowDrop(event)"
+          ondragenter="dragEnter(event)"
+          ondragleave="dragLeave(event)">
+      </ul>
+    </div>
+<!-- Coluna 3: EM PRODUÇÃO (que vira PCP no modo PCP) -->
+<div id="do-ne">
+  <h3 id="doNeHeader">EM PRODUÇÃO</h3>
+  
+  <!-- Contêiner do listbox para PCP, inicialmente oculto, posicionado à direita -->
+  <div id="pcp-filter-container" style="display: none; margin-bottom: 5px; text-align: right;">
+    <label for="filterListbox" style="color: white;">Filtrar Produto: </label>
+    <select id="filterListbox">
+      <option value="">Todos</option>
+    </select>
+    <!-- Ícone para ordenar por Data Previsão -->
+    <i id="sortDateIcon" class="fa fa-sort" style="cursor: pointer; margin-left: 8px; color: white;"></i>
+    <!-- Texto adicional ao lado do ícone -->
+    <span id="sortDateText" style="color: white; margin-left: 4px;">classificar data previsão</span>
   </div>
+  
 
-  <!-- Coluna 3: Em Produção -->
-  <div id="do-ne">
-    <h3>EM PRODUÇÃO <span></span></h3>
-    <!-- Restaure o <ul> vazio -->
-    <ul id="ul-done" class="section"
-        ondrop="drop(event, this)"
-        ondragover="allowDrop(event)"
-        ondragenter="dragEnter(event)"
-        ondragleave="dragLeave(event)">
-    </ul>
-  </div>
-  </div>
+  <ul id="ul-done" class="section"
+      ondrop="drop(event, this)"
+      ondragover="allowDrop(event)"
+      ondragenter="dragEnter(event)"
+      ondragleave="dragLeave(event)">
+  </ul>
+</div>
 
-  <!-- MODAL (para criar/editar tasks / abrir pedidos) -->
-  <div id="modalOverlay"></div>
-  <div id="modalBox">
+</div>
+
+  <!-- MODAL (única instância, oculto por padrão) -->
+  <div id="modalOverlay" style="display: none;"></div>
+  <div id="modalBox" style="display: none;">
     <!-- Número do pedido -->
     <div id="pedidoInfo">
       <label for="pedidoField">Pedido:</label>
       <input type="text" id="pedidoField" readonly>
     </div>
-    
     <!-- Observação do pedido -->
     <p id="modalDesc">Observação do pedido</p>
     <textarea id="taskText"></textarea>
-    
     <!-- Container para os botões de produtos selecionados -->
     <div id="produtosSelecionadosContainer"></div>
-    
-    <!-- Opções extras (checkbox, select) -->
+    <!-- Opções extras -->
     <div>
       <input type="checkbox" id="checkboxAprovado">
       <label for="checkboxAprovado">Aprovado</label>
@@ -110,69 +100,18 @@
         <option value="">Selecione um pedido</option>
       </select>
     </div>
-
     <!-- Botão para mostrar pedidos -->
     <button id="btnGerarCards" style="margin-bottom: 10px;">Mostrar Pedidos</button>
-
-    <!-- Container com os "cards" de pedidos (injetado dinamicamente) -->
+    <!-- Container com os "cards" de pedidos -->
     <div id="cardsContainer"></div>
-
     <!-- Botões de controle do modal -->
     <button id="taskButton">Ok</button>
     <span id="modalClose">Cancel</span>
-      <!-- Dentro do modal, abaixo do botão Ok, adicione: -->
-<button id="deleteTaskButton" style="margin-left: 10px;">Excluir</button>
+    <button id="deleteTaskButton" style="margin-left: 10px;">Excluir</button>
   </div>
 
   <!-- CONFIRM BOX -->
   <div id="confirmDelete"></div>
-
-  <script>
-    // Função para aplicar estilos a um elemento
-    function setElementStyles(element, styles) {
-      for (const property in styles) {
-        if (styles.hasOwnProperty(property)) {
-          element.style[property] = styles[property];
-        }
-      }
-    }
-    
-    document.addEventListener('DOMContentLoaded', function() {
-      const btnsContainer = document.querySelector('div#btns');
-      if (btnsContainer) {
-        const children = Array.from(btnsContainer.children);
-        children.forEach((child, index) => {
-          // Define estilos para o contêiner de cada botão
-          // Queremos que o conteúdo (ícone) fique centralizado e que o traço vertical fique na direita.
-          const styles = {
-            display: 'flex',           // Usamos flex para centralizar o conteúdo
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxSizing: 'border-box',
-            paddingLeft: '0px',        // Sem padding à esquerda
-            paddingRight: '16px',      // Padding à direita para afastar o ícone da borda
-            marginLeft: '0px',
-            marginRight: '0px'
-          };
-          // Se não for o último botão, aplica a borda vertical à direita
-          if (index < children.length - 1) {
-            styles.borderRight = '0.8px solid rgb(0, 0, 0)';
-          }
-          setElementStyles(child, styles);
-        });
-        
-        // Define estilos para o contêiner pai para que fique alinhado à esquerda
-        const parentStyles = {
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          gap: '16px'
-        };
-        setElementStyles(btnsContainer, parentStyles);
-      }
-    });
-  </script>
 
   <script src="abertura_op.js"></script>
 </body>

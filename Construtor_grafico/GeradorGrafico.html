@@ -2,79 +2,75 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Gerador de Gráfico</title>
+  <title>Gerador de Gráfico - 6 Eixos (Sem Gaps)</title>
   <link rel="stylesheet" href="GeradorGrafico.css">
   <script src="https://cdn.plot.ly/plotly-2.22.0.min.js"></script>
 </head>
 <body>
-  <!-- Cabeçalho -->
   <div class="center" style="margin-bottom:20px;">
     <h1>GERADOR DE GRÁFICO</h1>
   </div>
 
-  <!-- Botão para exibir/esconder formulário -->
   <div class="row" style="justify-content:center;">
     <button id="toggleRegistro">Adicionar Registro</button>
   </div>
 
-  <!-- Formulário de "Novo Registro" -->
   <div id="registroForm" class="col" style="display: none; max-width: 600px; margin: 0 auto 30px;">
     <h3>Novo Registro</h3>
     <div class="input-group">
-      <label for="temp">Eixo Y1:</label>
+      <label>Eixo Y1:</label>
       <input type="number" id="temp" value="30" step="0.1">
     </div>
     <div class="input-group">
-      <label for="pressao">Parâmetros de pressão:</label>
+      <label>Pressão:</label>
       <input type="number" id="pressao" value="250" step="1">
     </div>
     <div class="input-group">
-      <label for="modelo">Modelo:</label>
-      <select id="modelo" onchange="gerarGrafico()">
+      <label>Modelo:</label>
+      <select id="modelo">
         <option value="3~380">3~380</option>
         <option value="3~220">3~220</option>
         <option value="1~220v">1~220v</option>
       </select>
     </div>
     <div class="input-group">
-      <label for="tri_valor">Valor:</label>
+      <label>Valor:</label>
       <input type="number" id="tri_valor" value="12.4" step="0.1">
     </div>
     <button id="enviarRegistro">Enviar Registro</button>
   </div>
 
-  <!-- Linha principal com 3 colunas: Esquerda, Meio (gráfico), Direita -->
   <div class="row" style="align-items: flex-start;">
     <!-- Coluna Esquerda (Eixo Y1) -->
     <div class="col col-1">
       <h3>Eixo Y1</h3>
       <div class="input-group">
-        <label for="agua_temp_max">Máximo:</label>
+        <label>Máximo Y1:</label>
         <input type="number" id="agua_temp_max" value="40" step="0.1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="agua_temp_min">Mínimo:</label>
+        <label>Mínimo Y1:</label>
         <input type="number" id="agua_temp_min" value="16" step="0.1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="agua_tick_y">Intervalo:</label>
+        <label>Intervalo Y1:</label>
         <input type="number" id="agua_tick_y" value="2" step="0.1" oninput="gerarGrafico()">
       </div>
       <hr>
       <div class="input-group">
-        <label for="graph_title">Título do Gráfico:</label>
+        <label>Título do Gráfico:</label>
         <input type="text" id="graph_title" value="Nome do grafico" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="y1_title">Eixo Y1:</label>
+        <label>Eixo Y1:</label>
         <input type="text" id="y1_title" value="Nome do eixo y1" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="x_title">Eixo X:</label>
+        <label>Eixo X:</label>
         <input type="text" id="x_title" value="Nome do eixo x" oninput="gerarGrafico()">
       </div>
 
-      <!-- Checkbox + Nome do eixo vermelho -->
+      <!-- Checkbox + Nome do eixo y2 -->
       <div class="input-group">
         <label style="color: red; display: inline-flex; align-items: center;">
           <input 
@@ -84,7 +80,7 @@
             onchange="updateAxesFromControl()" 
             style="margin-right: 5px;"
           >
-          Eixo vermelho:
+          Eixo vermelho (y2)
         </label>
         <input 
           type="text" 
@@ -95,7 +91,7 @@
         >
       </div>
 
-      <!-- Checkbox + Nome do eixo verde -->
+      <!-- Checkbox + Nome do eixo y3 -->
       <div class="input-group">
         <label style="color: green; display: inline-flex; align-items: center;">
           <input 
@@ -105,7 +101,7 @@
             onchange="updateAxesFromControl()" 
             style="margin-right: 5px;"
           >
-          Eixo verde:
+          Eixo verde (y3)
         </label>
         <input 
           type="text" 
@@ -116,7 +112,7 @@
         >
       </div>
 
-      <!-- Checkbox + Nome do eixo roxo -->
+      <!-- Checkbox + Nome do eixo y4 -->
       <div class="input-group">
         <label style="color: purple; display: inline-flex; align-items: center;">
           <input 
@@ -126,7 +122,7 @@
             onchange="updateAxesFromControl()" 
             style="margin-right: 5px;"
           >
-          Eixo roxo:
+          Eixo roxo (y4)
         </label>
         <input 
           type="text" 
@@ -136,6 +132,49 @@
           style="margin-left: 5px;"
         >
       </div>
+
+      <!-- Checkbox + Nome do eixo y5 -->
+      <div class="input-group">
+        <label style="color: orange; display: inline-flex; align-items: center;">
+          <input 
+            type="checkbox" 
+            id="chk_y5" 
+            checked 
+            onchange="updateAxesFromControl()" 
+            style="margin-right: 5px;"
+          >
+          Eixo laranja (y5)
+        </label>
+        <input 
+          type="text" 
+          id="axis5_name" 
+          value="y5 axis" 
+          oninput="gerarGrafico()" 
+          style="margin-left: 5px;"
+        >
+      </div>
+
+      <!-- Checkbox + Nome do eixo y6 -->
+      <div class="input-group">
+        <label style="color: teal; display: inline-flex; align-items: center;">
+          <input 
+            type="checkbox" 
+            id="chk_y6" 
+            checked 
+            onchange="updateAxesFromControl()" 
+            style="margin-right: 5px;"
+          >
+          Eixo teal (y6)
+        </label>
+        <input 
+          type="text" 
+          id="axis6_name" 
+          value="y6 axis" 
+          oninput="gerarGrafico()" 
+          style="margin-left: 5px;"
+        >
+      </div>
+
     </div>
 
     <!-- Coluna do Meio: Gráfico -->
@@ -143,60 +182,108 @@
       <div id="graph1" class="graph-container"></div>
     </div>
 
-    <!-- Coluna Direita: Parâmetros (Eixo Y2, Y3 e Y4) -->
+    <!-- Coluna Direita: Parâmetros (Eixo y2..y6) -->
     <div class="col col-1">
-      <h3>Eixo Y2, Y3 e Y4</h3>
-      <!-- Eixo vermelho -->
+      <h3>Eixos y2.. y6</h3>
+      
+      <!-- y2 -->
       <div class="input-group">
-        <label for="tri380_max" style="color: red;">Eixo vermelho - Máx.:</label>
+        <label style="color:red">Máx (3~380) y2:</label>
         <input type="number" id="tri380_max" value="15.5" step="0.1" oninput="gerarGrafico()">
       </div>
+      <button id="btnY2Ticks" style="margin-top:10px;">+</button>
+      <div id="panelY2" style="display:none; border:1px solid #ccc; padding:8px; margin:8px 0;">
+        <h4>Rótulos Eixo y2 (3~380)</h4>
+        <div id="y2TicksContainer"></div>
+      </div>
       <div class="input-group">
-        <label for="tri380_min" style="color: red;">Eixo vermelho - Mín.:</label>
+        <label style="color:red">Mín (3~380) y2:</label>
         <input type="number" id="tri380_min" value="9.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <hr>
-      <!-- Eixo verde -->
+
+      <!-- y3 -->
       <div class="input-group">
-        <label for="tri220_max" style="color: green;">Eixo verde - Máx.:</label>
+        <label style="color:green">Máx (3~220) y3:</label>
         <input type="number" id="tri220_max" value="28.5" step="0.1" oninput="gerarGrafico()">
       </div>
+      <button id="btnY3Ticks" style="margin-top:10px;">+</button>
+      <div id="panelY3" style="display:none; border:1px solid #ccc; padding:8px; margin:8px 0;">
+        <h4>Rótulos Eixo y3 (3~220)</h4>
+        <div id="y3TicksContainer"></div>
+      </div>
       <div class="input-group">
-        <label for="tri220_min" style="color: green;">Eixo verde - Mín.:</label>
+        <label style="color:green">Mín (3~220) y3:</label>
         <input type="number" id="tri220_min" value="22.5" step="0.1" oninput="gerarGrafico()">
       </div>
       <hr>
-      <!-- Eixo roxo -->
+
+      <!-- y4 -->
       <div class="input-group">
-        <label for="tri300_max" style="color: purple;">Eixo roxo - Máx.:</label>
+        <label style="color:purple">Máx (1~220v) y4:</label>
         <input type="number" id="tri300_max" value="22" step="0.1" oninput="gerarGrafico()">
       </div>
+      <button id="btnY4Ticks" style="margin-top:10px;">+</button>
+      <div id="panelY4" style="display:none; border:1px solid #ccc; padding:8px; margin:8px 0;">
+        <h4>Rótulos Eixo y4 (1~220v)</h4>
+        <div id="y4TicksContainer"></div>
+      </div>
       <div class="input-group">
-        <label for="tri300_min" style="color: purple;">Eixo roxo - Mín.:</label>
+        <label style="color:purple">Mín (1~220v) y4:</label>
         <input type="number" id="tri300_min" value="16" step="0.1" oninput="gerarGrafico()">
       </div>
-    </div>
-  </div>
+      <hr>
 
-  <!-- Parâmetros de pressão (Gráfico 1) com controles para o eixo X -->
+      <!-- y5 (laranja) -->
+      <div class="input-group">
+        <label style="color:orange">Máx y5:</label>
+        <input type="number" id="y5_max" value="30" step="5" oninput="gerarGrafico()">
+      </div>
+      <button id="btnY5Ticks" style="margin-top:10px;">+</button>
+      <div id="panelY5" style="display:none; border:1px solid #ccc; padding:8px; margin:8px 0;">
+        <h4>Rótulos Eixo y5 (laranja)</h4>
+        <div id="y5TicksContainer"></div>
+      </div>
+      <div class="input-group">
+        <label style="color:orange">Mín y5:</label>
+        <input type="number" id="y5_min" value="10" step="5" oninput="gerarGrafico()">
+      </div>
+      <hr>
+
+      <!-- y6 (teal) -->
+      <div class="input-group">
+        <label style="color:teal">Máx y6:</label>
+        <input type="number" id="y6_max" value="30" step="5" oninput="gerarGrafico()">
+      </div>
+      <button id="btnY6Ticks" style="margin-top:10px;">+</button>
+      <div id="panelY6" style="display:none; border:1px solid #ccc; padding:8px; margin:8px 0;">
+        <h4>Rótulos Eixo y6 (teal)</h4>
+        <div id="y6TicksContainer"></div>
+      </div>
+      <div class="input-group">
+        <label style="color:teal">Mín y6:</label>
+        <input type="number" id="y6_min" value="0" step="5" oninput="gerarGrafico()">
+      </div>
+    </div><!-- fim col-1 direita -->
+  </div><!-- fim row principal -->
+
   <div class="row" style="justify-content: center;">
     <div class="col col-2" style="max-width: 500px;">
       <div class="input-group">
-        <label for="pressao_inicial">Mínimo:</label>
+        <label>Mínimo X:</label>
         <input type="number" id="pressao_inicial" value="180" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="pressao_final">Máximo:</label>
+        <label>Máximo X:</label>
         <input type="number" id="pressao_final" value="300" oninput="gerarGrafico()">
       </div>
       <div class="input-group">
-        <label for="pressao_tick">Intervalo:</label>
+        <label>Intervalo X:</label>
         <input type="number" id="pressao_tick" value="10" oninput="gerarGrafico()">
       </div>
     </div>
   </div>
 
-  <!-- Script principal -->
   <script src="GeradorGrafico.js"></script>
 </body>
 </html>

@@ -5,6 +5,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs'); // Manipula arquivo CSV
+const paradasRoutes = require('./routes/paradas'); // ajuste o caminho conforme sua estrutura
+
 
 // 2) Importações das rotas existentes
 const produtosRouter = require('./routes/produtos');
@@ -50,7 +52,7 @@ app.use('/api/uploadImage', uploadImageRouter);
 app.use('/api/incluir-caracteristica', incluirCaracteristicaRouter);
 app.use('/api/familias', familiasRouter);
 app.use('/api/produtos/sincronizar-ncm', sincronizarNCMRouter);
-
+app.use('/api/paradas', paradasRoutes);
 // ...
 app.use(session({
   secret: 'Picole@546879', // Troque por algo seguro

@@ -2,6 +2,8 @@
  * abertura_op/abertura_op.js
  * Script que controla a lógica do Kanban (drag/drop etc.)
  ******************************************************/
+// Modo padrão: 'production' ou 'pcp'
+let activeMode = 'production';
 
 // Função auxiliar para acessar elementos
 function elem(id) {
@@ -62,7 +64,6 @@ window.saveBoards = function saveBoards() {
   localStorage.setItem('listToDo', toDoBoard);
   localStorage.setItem('listWorking', workingBoard);
   localStorage.setItem('listDone', doneBoard);
-
   const urgentUl = document.getElementById('ul-urgent');
   if (urgentUl) {
     localStorage.setItem('listUrgent', urgentUl.innerHTML);
@@ -72,82 +73,192 @@ window.saveBoards = function saveBoards() {
 };
 
 // Função para carregar tasks a partir do CSV
+// Atualização em loadTasksFromCSV:
+// Agora, logo após o parse do CSV, criamos o objeto global window.csvData para registrar a contagem
+// dos itens já presentes no CSV e possibilitar pintar de laranja os cards que já existem.
 async function loadTasksFromCSV() {
   try {
     const response = await fetch('/api/plano-op/ler-csv', { method: 'GET' });
     const csvText = await response.text();
     console.log("CSV carregado:", csvText);
-
     const parsed = Papa.parse(csvText, { 
       header: true, 
       skipEmptyLines: true,
       transformHeader: header => header.trim()
     });
-    
     const rows = parsed.data;
-
-    // Limpa as listas padrão
+    
+    // Reinicia o objeto global com os registros do CSV
+    window.csvData = {};
+    rows.forEach(row => {
+      if (row.Pedido && row.produto) {
+        const key = row.Pedido + "|" + row.produto;
+        window.csvData[key] = (window.csvData[key] || 0) + 1;
+      }
+    });
+    
+    // Limpa as listas
     document.getElementById('ul-todo').innerHTML = '';
     document.getElementById('ul-working').innerHTML = '';
     document.getElementById('ul-done').innerHTML = '';
-
-    // Verifica se existe a coluna URGENTE
     let urgentContainer = document.getElementById('ur-gent');
     if (urgentContainer) {
       document.getElementById('ul-urgent').innerHTML = '';
     }
-
-    // Filtra registros com status "LU3" para ver se precisamos mostrar a coluna URGENTE
-    const urgentRows = rows.filter(row => row.status && row.status.trim() === "LU3");
-    if (urgentRows.length > 0) {
-      // Se não existe a coluna URGENTE, cria
-      if (!urgentContainer) {
-        urgentContainer = document.createElement('div');
-        urgentContainer.id = 'ur-gent';
-        urgentContainer.innerHTML = `
-          <h3>URGENTE <span></span></h3>
-          <ul id="ul-urgent" class="section"
-              ondrop="drop(event, this)"
-              ondragover="allowDrop(event)"
-              ondragenter="dragEnter(event)"
-              ondragleave="dragLeave(event)">
-          </ul>
-        `;
-        // Insere a coluna urgente depois de #do-ne
-        const doNe = document.getElementById('do-ne');
-        doNe.parentNode.insertBefore(urgentContainer, doNe.nextSibling);
-      }
-    } else {
-      // Se não houver tasks urgentes, remove a coluna se existir
-      if (urgentContainer) {
-        urgentContainer.remove();
-      }
-    }
-
-    // Processa cada linha do CSV e adiciona no Kanban
+    
+    // Processa cada linha sem exigir "observação"
     rows.forEach(row => {
-      // Precisamos, em especial, de:
-      // row.status => "L0", "L1", "L2", "LU3"
-      // row.observação => para .txt
-      // row.Pedido, row.produto => para ID e detalhes
-      // row.local => se quiser exibir no card
-
-      if (row.Pedido && row.produto && row["observação"] && row.status) {
+      if (row.Pedido && row.produto && row.status) {
+        row["observação"] = row["observação"] || "";
+        row["data_previsao"] = row["data_previsao"] || "";
+        row["descricao"] = row["descricao"] || "";
+        row["caracteristica"] = row["caracteristica"] || "";
+        // ... (aplica o filtro por local, etc.)
         addTaskToKanban(row);
       } else {
         console.warn("Linha ignorada ou com campos incompletos:", row);
       }
     });
+    
+    
+    
+    updateHeaderCounts();
   } catch (error) {
     console.error("Erro ao carregar CSV:", error);
   }
+  countAllItems();
 }
 
+
+
+
+// Atualização em preencherKanban:
+function preencherKanban(data, tipo) {
+  console.log("Preenchendo kanban para tipo:", tipo);
+
+  if (!data || !data.pedido_venda_produto || data.pedido_venda_produto.length === 0) {
+    console.log("Nenhum pedido retornado para o tipo", tipo);
+    return;
+  }
+
+  let container;
+  if (tipo === 'comercial') {
+    container = document.getElementById('ul-working');
+  } else if (tipo === 'pcp') {
+    container = document.getElementById('ul-done');
+  }
+  if (!container) {
+    console.error("Container não encontrado para o tipo:", tipo);
+    return;
+  }
+  container.innerHTML = "";
+
+  data.pedido_venda_produto.forEach(pedido => {
+    // Ignora pedidos cancelados ou encerrados
+    if (
+      (pedido.infoCadastro && pedido.infoCadastro.cancelado === "S") ||
+      (pedido.cabecalho && pedido.cabecalho.encerrado === "S")
+    ) {
+      return;
+    }
+
+    const numeroPedido = pedido.cabecalho.numero_pedido;
+    const dataPrevisao = pedido.cabecalho.data_previsao || "N/A";
+    const obsVenda = (pedido.observacoes && pedido.observacoes.obs_venda) || "";
+
+    // Cria o container do grupo
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'pedido-group';
+    groupDiv.setAttribute('data-date-previsao', dataPrevisao);
+
+    const groupHeader = document.createElement('div');
+    groupHeader.className = 'pedido-group-header';
+    groupHeader.innerHTML = `<strong>Pedido: ${numeroPedido}</strong><hr>`;
+    groupDiv.appendChild(groupHeader);
+
+    // Variável para indicar se algum item foi válido
+    let temItensValidos = false;
+
+    if (pedido.det && Array.isArray(pedido.det)) {
+      pedido.det.forEach(item => {
+        if (item.cancelado === "S" || item.encerrado === "S") {
+          return;
+        }
+
+        if (item.produto && item.produto.codigo) {
+          const codigo = item.produto.codigo;
+          const descricao = item.produto.descricao || "";
+          const dadosAdicionais = (item.inf_adic && item.inf_adic.dados_adicionais_item) || "";
+
+          // Aplica o filtro para PCP/Comercial:
+          if ((tipo === 'pcp' || tipo === 'comercial') &&
+              codigo.startsWith("FTI") &&
+              !codigo.endsWith("BR")) {
+            // Se iniciar com FTI e não terminar com BR, ignora o item
+            return;
+          }
+
+          let quantidade = parseInt(item.produto.quantidade) || 1;
+
+          for (let i = 0; i < quantidade; i++) {
+            // Se chegar aqui, quer dizer que o item passou nos filtros
+            temItensValidos = true;
+
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'pedido-card draggable';
+            cardDiv.setAttribute('draggable', true);
+            cardDiv.setAttribute('ondragstart', 'drag(event)');
+            cardDiv.setAttribute('data-previsao', dataPrevisao);
+            cardDiv.id = `li-${numeroPedido}-${codigo}-${i}`;
+
+            cardDiv.innerHTML = `
+              <div class="pedido-header">
+                <strong>Pedido: ${numeroPedido}</strong>
+              </div>
+              <div class="pedido-info">
+                <p class="produto">Produto: ${codigo}</p>
+                <p class="descricao">Descrição: ${descricao}</p>
+                <p class="dados-adicionais-item">Dados Adicionais: ${dadosAdicionais}</p>
+                <p class="obs_venda">Obs Venda: ${obsVenda}</p>
+              </div>
+              <div class="data-previsao">
+                <p>Data Previsão: ${dataPrevisao}</p>
+              </div>
+              <hr>
+            `;
+
+            // Se o item já estiver no CSV, pinta o card de laranja
+            let key = numeroPedido + "|" + codigo;
+            if (window.csvData && window.csvData[key] && window.csvData[key] > 0) {
+              cardDiv.style.backgroundColor = "orange";
+              window.csvData[key]--;
+            }
+
+            // Adiciona o evento de clique para abrir o modal de detalhes
+            cardDiv.addEventListener('click', () => abrirModalDetalhes(cardDiv));
+
+            groupDiv.appendChild(cardDiv);
+          }
+        }
+      });
+    }
+
+    // Se ao final do loop, temItensValidos == true, então adiciona o groupDiv
+    if (temItensValidos) {
+      container.appendChild(groupDiv);
+    }
+  });
+  console.log("Preenchimento do kanban para", tipo, "finalizado.");
+}
+
+
+
+
+
+// Função para criar os cards a partir do CSV (mantida para produção)
 function addTaskToKanban(taskData) {
-  // Define o container com base no status (L0 => #ul-todo, etc.)
   let containerId = '';
   const status = taskData.status ? taskData.status.trim() : "";
-
   if (status === "L0") {
     containerId = 'ul-todo';
   } else if (status === "L1") {
@@ -157,51 +268,62 @@ function addTaskToKanban(taskData) {
   } else if (status === "LU3") {
     containerId = 'ul-urgent';
   } else {
-    // Se for algo fora do esperado, coloca no L0
     containerId = 'ul-todo';
   }
-
-  const container = document.getElementById(containerId);
+  
+  let container = document.getElementById(containerId);
+  if (!container && status === "LU3") {
+    const doNe = document.getElementById('do-ne');
+    let urgentContainer = document.getElementById('ur-gent');
+    if (!urgentContainer) {
+      urgentContainer = document.createElement('div');
+      urgentContainer.id = 'ur-gent';
+      urgentContainer.innerHTML = `
+        <h3>URGENTE <span></span></h3>
+        <ul id="ul-urgent" class="section"
+            ondrop="drop(event, this)"
+            ondragover="allowDrop(event)"
+            ondragenter="dragEnter(event)"
+            ondragleave="dragLeave(event)">
+        </ul>
+      `;
+      const myLists = document.getElementById('myLists');
+      myLists.insertBefore(urgentContainer, doNe);
+    }
+    container = document.getElementById('ul-urgent');
+  }
+  
   if (!container) {
     console.error("Contêiner não encontrado para o status:", status);
     return;
   }
-
+  
   const li = document.createElement('li');
   li.className = 'sample';
   li.draggable = true;
-
-  // Monta um ID único (por exemplo, li-<pedido>-<produto>)
   li.id = 'li-' + taskData.Pedido + '-' + taskData.produto;
   li.setAttribute('ondragstart', 'drag(event)');
   li.setAttribute('ontouchstart', 'drag(event)');
-
-  // Observação
-  const obs = taskData["observação"] || "";
-  // Local textual (ex.: "LIDER DE PRODUÇÃO", "LOGISTICA", etc.)
-  const localText = taskData.local || "";
-
-  // Cria o HTML interno
+  
+  const obsVenda = taskData["observação"] || "";
+  const dataPrevisao = taskData["data_previsao"] || "";
+  const descricao = taskData["descricao"] || "";
+  const caracteristica = taskData["caracteristica"] || "";
+  
   li.innerHTML = `
-    <span class="txt">${obs}</span>
+    <span class="txt">${obsVenda}</span>
     <div class="task-details">
       <span class="op">${taskData.OP || ""}</span>
       <span class="pedido">Pedido: ${taskData.Pedido}</span>
       <span class="produto">Produto: ${taskData.produto}</span>
-      <span class="localText">${localText}</span>
+      <span class="data-prev">Data Previsão: ${dataPrevisao}</span>
+      <span class="descricao">Descrição: ${descricao}</span>
+      <span class="caracteristica">Característica: ${caracteristica}</span>
     </div>
     <a class="up" href="#"></a>
     <a class="down" href="#"></a>
   `;
-
-  // Adiciona listener para abrir modal de edição ao clicar
-  li.addEventListener('click', function(e) {
-    // Se clicou em up/down, não abre modal
-    if (e.target.classList.contains('up') || e.target.classList.contains('down')) {
-      return;
-    }
-    editTask(e, li);
-  });
+  li.addEventListener('click', () => abrirModalDetalhes(li));
 
   container.appendChild(li);
   calcUpDown();
@@ -209,39 +331,14 @@ function addTaskToKanban(taskData) {
   countTask();
 }
 
-function editTask(event, li) {
-  event.stopPropagation();
 
-  const txtElem = li.querySelector('.txt');
-  if (!txtElem) {
-    console.error("Elemento .txt não encontrado na task:", li.id);
-    return;
-  }
-  const obs = txtElem.textContent;
 
-  const pedidoElem = li.querySelector('.task-details .pedido');
-  if (!pedidoElem) {
-    console.error("Elemento .pedido não encontrado na task:", li.id);
-    return;
-  }
-  const pedido = pedidoElem.textContent.replace("Pedido:", "").trim();
 
-  const opElem = li.querySelector('.task-details .op');
-  const op = opElem ? opElem.textContent.trim() : "";
-  const prodElem = li.querySelector('.task-details .produto');
-  const produto = prodElem ? prodElem.textContent.replace("Produto:", "").trim() : "";
-
-  // Armazena o ID da task em edição
-  window.currentEditingTaskId = li.id;
-
-  // Preenche os campos do modal
-  document.getElementById('pedidoField').value = pedido;
-  document.getElementById('taskText').value = obs;
-
-  // Abre o modal
-  document.getElementById('modalOverlay').style.display = 'block';
-  document.getElementById('modalBox').style.display = 'block';
+function formatObservacao(obs) {
+  return obs.replace(/\|\|/g, '<br><br>').replace(/\|/g, '<br>');
 }
+
+
 
 const myLists = document.getElementById('myLists');
 if (!myLists.classList.contains('fourCol')) {
@@ -251,7 +348,6 @@ if (!myLists.classList.contains('fourCol')) {
 function toggleUrgentColumn() {
   let urgentContainer = document.getElementById('ur-gent');
   if (!urgentContainer) {
-    // Cria a coluna urgente
     urgentContainer = document.createElement('div');
     urgentContainer.id = 'ur-gent';
     urgentContainer.innerHTML = `
@@ -266,87 +362,141 @@ function toggleUrgentColumn() {
     const doNe = document.getElementById('do-ne');
     doNe.parentNode.insertBefore(urgentContainer, doNe.nextSibling);
   } else {
-    // Toggle exibir/ocultar
     urgentContainer.style.display = (urgentContainer.style.display === 'none') ? 'block' : 'none';
   }
 }
 
+// Função para atualizar o listbox com os códigos de produto
+function updateProductCodesListbox() {
+  const filterContainer = document.getElementById('pcp-filter-container');
+  const selectElem = document.getElementById('filterListbox');
+
+  // Se não estiver no modo PCP, oculta o contêiner e sai
+  if (activeMode !== 'pcp') {
+    if (filterContainer) filterContainer.style.display = 'none';
+    return;
+  } else {
+    if (filterContainer) filterContainer.style.display = 'block';
+  }
+
+  if (!selectElem) {
+    console.log("Elemento select para filtro não encontrado.");
+    return;
+  }
+
+  // Coleta apenas os cards da coluna PCP (ul-done)
+  const doneCards = document.querySelectorAll('#ul-done .pedido-card');
+  const productMap = new Map();
+
+  doneCards.forEach(card => {
+    const productText = card.querySelector('.produto')?.textContent || "";
+    // Supondo que o texto seja "Produto: FT180F40T"
+    const code = productText.replace("Produto:", "").trim();
+    if (code) {
+      productMap.set(code, (productMap.get(code) || 0) + 1);
+    }
+  });
+
+  // Converte o Map para um array e ordena de forma decrescente pela quantidade
+  let productsArray = Array.from(productMap.entries());
+  productsArray.sort((a, b) => b[1] - a[1]);
+
+  // Atualiza o listbox
+  selectElem.innerHTML = '';
+  const allOption = document.createElement('option');
+  allOption.value = "";
+  allOption.textContent = "Todos";
+  selectElem.appendChild(allOption);
+
+  productsArray.forEach(([code, qty]) => {
+    const option = document.createElement('option');
+    option.value = code;
+    option.textContent = `${code} (${qty})`;
+    selectElem.appendChild(option);
+  });
+  
+  console.log("Listbox atualizado com produtos (apenas PCP):", productsArray);
+}
+
+
+
+
+
+
+  function handleListboxFilterChange() {
+    const selectElem = document.getElementById('filterListbox');
+    const selectedCode = selectElem.value.toLowerCase();
+    
+    // Se nenhum código for selecionado, mostra todos os cards da coluna PCP
+    if (selectedCode === "") {
+      const allCards = document.querySelectorAll('#ul-done .pedido-card');
+      allCards.forEach(card => card.style.display = '');
+      return;
+    }
+    
+    // Filtra apenas os cards da coluna PCP (ul-done)
+    const allCards = document.querySelectorAll('#ul-done .pedido-card');
+    allCards.forEach(card => {
+      const productText = card.querySelector('.produto')?.textContent.toLowerCase() || "";
+      const code = productText.replace("produto:", "").trim();
+      card.style.display = (code === selectedCode) ? '' : 'none';
+    });
+  }
+  
+
+// (3) Certifique-se de que o listener do ícone está sendo adicionado
+document.addEventListener('DOMContentLoaded', function() {
+  const sortIcon = document.getElementById('sortDateIcon');
+  if (sortIcon) {
+    sortIcon.addEventListener('click', sortGroupsByDataPrevisao);
+    console.log("Listener do sortDateIcon adicionado");
+  } else {
+    console.error("Elemento sortDateIcon não encontrado");
+  }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+  const selectElem = document.getElementById('filterListbox');
+  if (selectElem) {
+    selectElem.addEventListener('change', handleListboxFilterChange);
+  }
+});
+
 // Eventos e inicialização da página
 document.addEventListener('DOMContentLoaded', function() {
-  // Botão “+” para abrir o modal
   const toDoButton = elem('addToDo');
   toDoButton.addEventListener('click', function() {
     elem('taskText').value = 'New Task';
     elem('modalOverlay').style.display = 'block';
     elem('modalBox').style.display = 'block';
   });
-
-  // Botão “Ok” do modal: envia dados e recarrega tasks do CSV
   document.getElementById('taskButton').addEventListener('click', function() {
     const pedido = document.getElementById('pedidoField').value.trim();
     const observacao = document.getElementById('taskText').value.trim();
-
     if (!pedido) {
       alert("Campo Pedido está vazio.");
       return;
     }
-
-    // Se está editando (tem currentEditingTaskId)
-    if (window.currentEditingTaskId) {
-      // Atualiza a observação no CSV
-      const parts = window.currentEditingTaskId.split('-');
-      const pedidoEdit = parts[1];
-      const produtoEdit = parts.slice(2).join('-');
-
-      fetch('/api/plano-op/atualizar-observacao', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pedido: pedidoEdit, produto: produtoEdit, observacao: observacao })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          alert("Task atualizada com sucesso!");
-          loadTasksFromCSV();
-          fecharModal();
-          window.currentEditingTaskId = null;
-        } else {
-          alert("Erro ao atualizar a task.");
-        }
-      })
-      .catch(error => {
-        console.error("Erro ao atualizar observação:", error);
-        alert("Erro ao atualizar a task.");
-      });
-    } else {
-
-// Se não for edição, insere novo item no CSV
-const prodButtons = document.querySelectorAll('#produtosSelecionadosContainer .produto-selecionado-btn');
-if (prodButtons.length === 0) {
-  alert("Nenhum produto foi selecionado.");
-  return;
-}
-
-// Define local e status inicial
-const localInicial = "LIDER DE PRODUÇÃO";
-const statusInicial = "L0";
-// Data de hoje formatada como dd/mm/yy
-const dataAtual = formatDate(new Date());
-const userVal = ""; // por enquanto vazio
-
-// Monta o array de dados para o CSV
-const dados = Array.from(prodButtons).map(btn => ({
-  pedido: pedido,
-  produto: btn.getAttribute('data-codigo'),
-  local: localInicial,
-  status: statusInicial,
-  data: dataAtual,
-  user: userVal,
-  observacao: observacao
-}));
-
-      console.log("Enviando ao CSV:", dados); // DEBUG
-
+ else {
+      const prodButtons = document.querySelectorAll('#produtosSelecionadosContainer .produto-selecionado-btn');
+      if (prodButtons.length === 0) {
+        alert("Nenhum produto foi selecionado.");
+        return;
+      }
+      const localInicial = "LIDER DE PRODUÇÃO";
+      const statusInicial = "L0";
+      const dataAtual = formatDate(new Date());
+      const userVal = "";
+      const dados = Array.from(prodButtons).map(btn => ({
+        pedido: pedido,
+        produto: btn.getAttribute('data-codigo'),
+        local: localInicial,
+        status: statusInicial,
+        data: dataAtual,
+        user: userVal,
+        observacao: observacao
+      }));
+      console.log("Enviando ao CSV:", dados);
       fetch('/api/plano-op', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -368,20 +518,16 @@ const dados = Array.from(prodButtons).map(btn => ({
       });
     }
   });
-
-  // Botão “Cancel” do modal
   const closeBtn = elem('modalClose');
   if (closeBtn) {
     closeBtn.addEventListener('click', fecharModal);
   } else {
     console.error("Botão Cancel não encontrado");
   }
-
   const overlay = document.getElementById('modalOverlay');
   if (overlay) {
     overlay.addEventListener('click', fecharModal);
   }
-
   calcUpDown();
   changeTask();
   countTask();
@@ -394,59 +540,118 @@ function allowDrop(ev) {
 function drag(ev) {
   ev.dataTransfer.setData("text", ev.target.id);
 }
-
 function drop(ev, el) {
   ev.preventDefault();
-  const data = ev.dataTransfer.getData("text");
-  if (data) {
-    const item = document.getElementById(data);
+  const draggedItemId = ev.dataTransfer.getData("text");
+  console.log("Drop event: item arrastado:", draggedItemId, "destino:", el.id);
+  if (activeMode === 'pcp' && el.id !== "ul-todo") {
+    console.log("Modo PCP: drop permitido somente na coluna LIDER DE PRODUÇÃO (ul-todo).");
+    return;
+  }
+  const item = document.getElementById(draggedItemId);
+  if (!item) {
+    console.error("Item não encontrado com o id:", draggedItemId);
+    return;
+  }
+  if (activeMode === 'pcp' && el.id === "ul-todo") {
     el.appendChild(item);
     changeTask();
     calcUpDown();
-
-    // Define o novo status com base no container de destino
+    const parts = item.id.split('-');
+    const pedido = parts[1];
+    const produto = parts.slice(2, parts.length - 1).join('-');
+    
+    // Use o elemento .txt para obs_venda
+    const obsVenda = item.querySelector('.txt') ? item.querySelector('.txt').textContent.trim() : "";
+    const descricaoElem = item.querySelector('.descricao');
+    const descricao = descricaoElem ? descricaoElem.textContent.replace("Descrição: ", "") : "";
+    const dadosAdicionaisElem = item.querySelector('.dados-adicionais-item');
+    const caracteristica = dadosAdicionaisElem ? dadosAdicionaisElem.textContent.replace("Dados Adicionais: ", "") : "";
+    
+    const dataAtual = formatDate(new Date());
+    const dataPrevisao = item.getAttribute('data-previsao') || "";
+    
+    const newData = {
+      pedido: pedido,
+      produto: produto,
+      local: "LIDER DE PRODUÇÃO",
+      status: "L0",
+      data: dataAtual,
+      user: "",
+      observacao: obsVenda,
+      data_previsao: dataPrevisao,
+      descricao: descricao,
+      caracteristica: caracteristica
+    };
+    console.log("Inserindo nova linha no CSV (modo PCP):", newData);
+    fetch('/api/plano-op', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dados: [newData] })
+    })
+    .then(response => response.json())
+    .then(result => {
+      console.log("Nova linha inserida no CSV:", result);
+    })
+    .catch(error => {
+      console.error("Erro ao inserir nova linha no CSV:", error);
+    });
+  }
+  
+  
+  
+   else {
+    el.appendChild(item);
+    changeTask();
+    calcUpDown();
     let newStatus = "L0";
-    if (el.id === "ul-todo") {
-      newStatus = "L0";
-    } else if (el.id === "ul-working") {
-      newStatus = "L1";
-    } else if (el.id === "ul-done") {
-      newStatus = "L2";
-    } else if (el.id === "ul-urgent") {
-      newStatus = "LU3";
+    if (el.id === "ul-todo") newStatus = "L0";
+    else if (el.id === "ul-working") newStatus = "L1";
+    else if (el.id === "ul-done") newStatus = "L2";
+    else if (el.id === "ul-urgent") newStatus = "LU3";
+    let newLocal;
+    if (activeMode === 'pcp') {
+      switch (newStatus) {
+        case "L1":
+          newLocal = "COMERCIAL";
+          break;
+        case "L2":
+          newLocal = "PCP";
+          break;
+        case "LU3":
+          newLocal = "URGENTE";
+          break;
+        case "L0":
+        default:
+          newLocal = "LIDER DE PRODUÇÃO";
+      }
+    } else {
+      switch (newStatus) {
+        case "L1":
+          newLocal = "LOGISTICA";
+          break;
+        case "L2":
+          newLocal = "EM PRODUÇÃO";
+          break;
+        case "LU3":
+          newLocal = "URGENTE";
+          break;
+        case "L0":
+        default:
+          newLocal = "LIDER DE PRODUÇÃO";
+      }
     }
-
-    // Define o novo local textual
-    let newLocal = "LIDER DE PRODUÇÃO";
-    switch (newStatus) {
-      case "L1":
-        newLocal = "LOGISTICA";
-        break;
-      case "L2":
-        newLocal = "EM PRODUÇÃO";
-        break;
-      case "LU3":
-        newLocal = "URGENTE";
-        break;
-      case "L0":
-      default:
-        newLocal = "LIDER DE PRODUÇÃO";
-    }
-
-    // Extrai os dados da task a partir do id do <li>
     const parts = item.id.split('-');
     const pedido = parts[1];
     const produto = parts.slice(2).join('-');
-
-    // Atualiza no CSV chamando o endpoint de atualização (local e status)
     fetch('/api/plano-op/atualizar-status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pedido, produto, local: newLocal, status: newStatus })
     })
     .then(response => response.json())
-    .then(data => {
-      console.log("Status/local atualizado no CSV:", data);
+    .then(result => {
+      console.log("Status/local atualizado no CSV:", result);
     })
     .catch(error => {
       console.error("Erro ao atualizar status no CSV:", error);
@@ -454,7 +659,6 @@ function drop(ev, el) {
   }
   el.classList.remove('drag-enter');
 }
-
 function dragEnter(ev) {
   ev.preventDefault();
   ev.target.classList.add('drag-enter');
@@ -462,14 +666,12 @@ function dragEnter(ev) {
 function dragLeave(ev) {
   ev.target.classList.remove('drag-enter');
 }
-
 // Função para remover task (opcional)
 function delTask(event, li) {
   event.preventDefault();
   if (!li) return;
-  // Caso tenha lógica de confirmação, etc.
+  // Lógica de confirmação, se necessário
 }
-
 // Pedidos (Omie)
 async function fetchPedidosCards() {
   console.log("fetchPedidosCards chamada");
@@ -479,15 +681,12 @@ async function fetchPedidosCards() {
       headers: { 'Content-Type': 'application/json' }
     });
     const data = await response.json();
-
     const container = document.getElementById('cardsContainer');
     container.innerHTML = '';
-
     if (data.pedido_venda_produto && data.pedido_venda_produto.length) {
       data.pedido_venda_produto.forEach(pedido => {
         const numeroPedido = pedido.cabecalho.numero_pedido;
         const obsVenda = (pedido.observacoes && pedido.observacoes.obs_venda) || '';
-
         const produtosArray = [];
         let produtosHTML = '';
         (pedido.det || []).forEach(item => {
@@ -498,7 +697,6 @@ async function fetchPedidosCards() {
             produtosHTML += `<button class="produto-button" data-codigo="${codigo}" data-pedido="${numeroPedido}">${codigo}</button>`;
           }
         });
-
         const card = document.createElement('div');
         card.className = 'pedido-card';
         card.innerHTML = `
@@ -513,7 +711,6 @@ async function fetchPedidosCards() {
         `;
         container.appendChild(card);
       });
-
       addPedidoButtonsEvents();
       addProdutoButtonsEvents();
     } else {
@@ -523,7 +720,6 @@ async function fetchPedidosCards() {
     console.error("Erro ao buscar pedidos:", error);
   }
 }
-
 function addPedidoButtonsEvents() {
   document.querySelectorAll('.pedido-order-btn').forEach(btn => {
     btn.addEventListener('click', function() {
@@ -532,7 +728,6 @@ function addPedidoButtonsEvents() {
       const obs = this.getAttribute('data-obs');
       const produtosArray = JSON.parse(this.getAttribute('data-produtos'));
       document.getElementById('pedidoField').value = pedido;
-      document.getElementById('taskText').value = obs;
 
       const prodContainer = document.getElementById('produtosSelecionadosContainer');
       prodContainer.innerHTML = '';
@@ -544,7 +739,6 @@ function addPedidoButtonsEvents() {
     });
   });
 }
-
 function addProdutoButtonsEvents() {
   document.querySelectorAll('.produto-button').forEach(btn => {
     btn.addEventListener('click', function(e) {
@@ -555,14 +749,11 @@ function addProdutoButtonsEvents() {
       const pedido = orderBtn.getAttribute('data-pedido');
       const obs = orderBtn.getAttribute('data-obs');
       const count = card.querySelectorAll(`.produto-button[data-codigo="${codigo}"]`).length;
-
       document.getElementById('cardsContainer').style.display = 'none';
       document.getElementById('pedidoField').value = pedido;
-      document.getElementById('taskText').value = obs;
 
       const prodContainer = document.getElementById('produtosSelecionadosContainer');
       prodContainer.innerHTML = '';
-
       if (count <= 1) {
         prodContainer.innerHTML = `<button class="produto-selecionado-btn" data-codigo="${codigo}">${codigo}</button>`;
       } else {
@@ -578,14 +769,12 @@ function addProdutoButtonsEvents() {
     });
   });
 }
-
 document.getElementById('addToDo').addEventListener('click', function() {
   document.getElementById('taskText').value = 'New Task';
-  document.getElementById('modalOverlay').style.display = 'block';
-  document.getElementById('modalBox').style.display = 'block';
+
+
   fetchPedidosCards();
 });
-
 document.getElementById('btnGerarCards').addEventListener('click', function() {
   console.log("Clicou em Mostrar Pedidos");
   document.getElementById('pedidoField').value = '';
@@ -595,7 +784,6 @@ document.getElementById('btnGerarCards').addEventListener('click', function() {
   cardsContainer.style.setProperty("display", "grid", "important");
   fetchPedidosCards();
 });
-
 document.addEventListener('DOMContentLoaded', () => {
   const closeBtn = document.getElementById('modalClose');
   if (closeBtn) {
@@ -604,21 +792,18 @@ document.addEventListener('DOMContentLoaded', () => {
     console.error("Botão Cancel não encontrado");
   }
 });
-
 document.addEventListener('DOMContentLoaded', function() {
   const overlay = document.getElementById('modalOverlay');
   if (overlay) {
     overlay.addEventListener('click', fecharModal);
   }
 });
-
 function fecharModal() {
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalBox');
   if (overlay) overlay.style.display = 'none';
   if (modal) modal.style.display = 'none';
 }
-
 function setElementStyles(element, styles) {
   for (const property in styles) {
     if (styles.hasOwnProperty(property)) {
@@ -626,19 +811,350 @@ function setElementStyles(element, styles) {
     }
   }
 }
-
 document.addEventListener('DOMContentLoaded', async function() {
   await loadTasksFromCSV();
   calcUpDown();
   changeTask();
   countTask();
 });
-
-
-// Função para formatar a data no padrão dd/mm/yy
 function formatDate(date) {
   const dd = String(date.getDate()).padStart(2, '0');
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const yy = String(date.getFullYear()).slice(-2);
   return `${dd}/${mm}/${yy}`;
 }
+document.getElementById('btnPCP').addEventListener('click', async function() {
+  console.log("Botão PCP clicado - iniciando fluxo PCP");
+  activeMode = 'pcp';
+  
+  // Obtém os elementos das colunas
+  const myLists = document.getElementById('myLists');
+  const toDo = document.getElementById('to-do');
+  const workIn = document.getElementById('work-in');
+  const doNe = document.getElementById('do-ne');
+  
+  // Reordena as colunas para que a ordem seja: to-do, work-in, do-ne
+  myLists.innerHTML = ''; // Limpa o container temporariamente
+
+  myLists.appendChild(workIn); // Segundo: Comercial/Logística
+  myLists.appendChild(doNe);   // Terceiro: PCP
+  myLists.appendChild(toDo);   // Primeiro: Líder de Produção
+  // Resto do código: carregamento de dados, preenchimento dos kanbans, etc.
+  await loadTasksFromCSV();
+  
+  console.log("Disparando requisição para COMERCIAL (etapa '20')");
+  const dadosComercial = await fetchPedidosByEtapa('20');
+  preencherKanban(dadosComercial, 'comercial');
+
+  console.log("Disparando requisição para PCP (etapa '80')");
+  const dadosPCP = await fetchPedidosByEtapa('80');
+  preencherKanban(dadosPCP, 'pcp');
+
+  // Ordena os grupos em cada coluna (se necessário)
+  sortGroupsByDataPrevisao('ul-working'); // Comercial
+  sortGroupsByDataPrevisao('ul-done');      // PCP
+
+  updateHeaderCounts();
+  countTask();
+  countAllItems();
+  updateProductCodesListbox();
+});
+
+
+document.getElementById('btnProducao').addEventListener('click', function() {
+  activeMode = 'production';
+  
+  const myLists = document.getElementById('myLists');
+  // Em vez de pegar 'ul-todo', pegue 'to-do'
+  const toDoDiv = document.getElementById('to-do');
+  
+  // Insira a div to-do como a primeira coluna
+  myLists.insertBefore(toDoDiv, myLists.firstChild);
+
+  const workIn = document.getElementById('work-in');
+  if (workIn) {
+    const h3WorkIn = workIn.querySelector('h3');
+    if (h3WorkIn) {
+      h3WorkIn.innerText = 'LOGISTICA';
+    }
+    workIn.style.backgroundColor = '';
+  }
+
+  const doNe = document.getElementById('do-ne');
+  if (doNe) {
+    const h3DoNe = document.getElementById('doNeHeader');
+    if (h3DoNe) {
+      h3DoNe.textContent = "EM PRODUÇÃO";
+    }
+    doNe.style.backgroundColor = '';
+  }
+
+  // Se existir o contêiner urgente (ou criar se necessário) e tiver itens, insira-o entre workIn e doNe
+  let urgentContainer = document.getElementById('ur-gent');
+  if (!urgentContainer) {
+    // Cria o contêiner urgente, se não existir
+    urgentContainer = document.createElement('div');
+    urgentContainer.id = 'ur-gent';
+    urgentContainer.innerHTML = `
+      <h3>URGENTE <span></span></h3>
+      <ul id="ul-urgent" class="section"
+          ondrop="drop(event, this)"
+          ondragover="allowDrop(event)"
+          ondragenter="dragEnter(event)"
+          ondragleave="dragLeave(event)">
+      </ul>
+    `;
+  }
+  myLists.insertBefore(urgentContainer, doNe);
+
+  // Oculta se estiver vazio
+  const ulUrgent = document.getElementById('ul-urgent');
+  if (ulUrgent && ulUrgent.childElementCount === 0) {
+    urgentContainer.style.display = 'none';
+  } else {
+    urgentContainer.style.display = 'block';
+  }
+
+  // Oculta o filtro do modo PCP, se estiver visível
+  const filterContainer = document.getElementById('pcp-filter-container');
+  if (filterContainer) {
+    filterContainer.style.display = 'none';
+  }
+
+  loadTasksFromCSV();
+});
+
+
+
+async function fetchPedidosByEtapa(etapa) {
+  console.log("Iniciando requisição para etapa:", etapa);
+  try {
+    const payload = { etapa: etapa };
+    const response = await fetch('/api/abertura-op/listar-pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    console.log("Resposta recebida para etapa", etapa, ":", data);
+    return data;
+  } catch (error) {
+    console.error("Erro ao buscar pedidos para etapa " + etapa + ":", error);
+    return null;
+  }
+}
+
+// Atualização em updateHeaderCounts:
+// Em modo PCP, só considera as colunas Comercial (ul-working) e PCP (ul-done)
+function updateHeaderCounts() {
+  if (activeMode === 'pcp') {
+    // Para os kanbans PCP e Comercial que usam grupos
+    let containerComercial = document.getElementById('ul-working');
+    let containerPCP = document.getElementById('ul-done');
+
+    // Se o container possui grupos (pedido-group), usamos eles
+    let pedComercial = 0, proComercial = 0;
+    let groupsComercial = containerComercial.querySelectorAll('.pedido-group');
+    if (groupsComercial.length > 0) {
+      pedComercial = groupsComercial.length;
+      groupsComercial.forEach(group => {
+        // Cada item dentro do grupo com classe 'pedido-card' conta como um produto
+        proComercial += group.querySelectorAll('.pedido-card').length;
+      });
+    } else {
+      // Se não estiver agrupado, usamos o número de itens no container
+      pedComercial = containerComercial.childElementCount;
+      proComercial = pedComercial;
+    }
+
+    let pedPCP = 0, proPCP = 0;
+    let groupsPCP = containerPCP.querySelectorAll('.pedido-group');
+    if (groupsPCP.length > 0) {
+      pedPCP = groupsPCP.length;
+      groupsPCP.forEach(group => {
+        proPCP += group.querySelectorAll('.pedido-card').length;
+      });
+    } else {
+      pedPCP = containerPCP.childElementCount;
+      proPCP = pedPCP;
+    }
+
+    const h3Comercial = document.querySelector('#work-in h3');
+    if (h3Comercial) {
+      h3Comercial.textContent = `COMERCIAL (${pedComercial} Ped)/(${proComercial} Pro)`;
+    }
+    const h3PCP = document.querySelector('#do-ne h3');
+    if (h3PCP) {
+      h3PCP.textContent = `PCP (${pedPCP} Ped)/(${proPCP} Pro)`;
+    }
+  } else {
+    // Para os modos sem agrupamento, mantemos a contagem simples
+    const countTodo = document.getElementById('ul-todo').childElementCount;
+    const countWorking = document.getElementById('ul-working').childElementCount;
+    const countDone = document.getElementById('ul-done').childElementCount;
+
+    const h3Todo = document.querySelector('#to-do h3');
+    if (h3Todo) {
+      h3Todo.textContent = `LIDER DE PRODUÇÃO (${countTodo})`;
+    }
+    const h3Working = document.querySelector('#work-in h3');
+    if (h3Working) {
+      h3Working.textContent = `LOGISTICA (${countWorking})`;
+    }
+    const h3Done = document.querySelector('#do-ne h3');
+    if (h3Done) {
+      h3Done.textContent = `EM PRODUÇÃO (${countDone})`;
+    }
+  }
+  console.log("Contadores atualizados:", {
+    pedComercial: activeMode === 'pcp' ? document.getElementById('ul-working').querySelectorAll('.pedido-group').length : null,
+    proComercial: activeMode === 'pcp' ? document.getElementById('ul-working').querySelectorAll('.pedido-card').length : null,
+    pedPCP: activeMode === 'pcp' ? document.getElementById('ul-done').querySelectorAll('.pedido-group').length : null,
+    proPCP: activeMode === 'pcp' ? document.getElementById('ul-done').querySelectorAll('.pedido-card').length : null
+  });
+}
+
+
+
+
+// Atualização em countAllItems:
+// Em modo PCP, não considera a coluna LIDER DE PRODUÇÃO (ul-todo)
+function countAllItems() {
+  let total = 0;
+  const ulUrgent = document.getElementById('ul-urgent');
+
+  if (activeMode === 'pcp') {
+    // Considera apenas os cards de COMERCIAL (ul-working) e PCP (ul-done)
+    total += document.querySelectorAll('#ul-working .pedido-card').length;
+    total += document.querySelectorAll('#ul-done .pedido-card').length;
+    if (ulUrgent) {
+      total += ulUrgent.childElementCount;
+    }
+  } else {
+    total += document.querySelector('#ul-todo').childElementCount;
+    total += document.querySelector('#ul-working').childElementCount;
+    total += document.querySelector('#ul-done').childElementCount;
+    if (ulUrgent) {
+      total += ulUrgent.childElementCount;
+    }
+  }
+
+  const qtdBtn = document.getElementById('totalTask');
+  if (qtdBtn) {
+    qtdBtn.textContent = total;
+  }
+  console.log("Total de itens no Kanban =", total);
+}
+
+
+
+
+// Variável global para alternar a ordem (true = ascendente, false = descendente)
+// (2) Crie a função para ordenar os grupos por data_previsao
+let sortAsc = true;
+
+function sortGroupsByDataPrevisao(containerId) {
+  const container = document.getElementById(containerId);
+  // Seleciona todos os grupos de pedido (.pedido-group) dentro do container
+  const groups = Array.from(container.querySelectorAll('.pedido-group'));
+
+  // Função auxiliar para converter data do formato dd/mm/aaaa em objeto Date
+  function parseDate(str) {
+    const parts = str.split('/');
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  }
+
+  // Ordena os grupos sempre em ordem ascendente (dateA - dateB)
+  groups.sort((a, b) => {
+    const dateAString = a.getAttribute('data-date-previsao') || "01/01/1970";
+    const dateBString = b.getAttribute('data-date-previsao') || "01/01/1970";
+    const dateA = parseDate(dateAString);
+    const dateB = parseDate(dateBString);
+    return dateA - dateB; // sempre crescente
+  });
+
+  // Reanexa os grupos no container na nova ordem
+  container.innerHTML = "";
+  groups.forEach(grupo => container.appendChild(grupo));
+
+  // (Opcional) Atualiza o ícone de ordenação (se houver)
+  const sortIcon = document.getElementById('sortDateIcon');
+  if (sortIcon) {
+    sortIcon.className = "fa fa-sort-amount-asc";
+  }
+
+  console.log(`Grupos no container '${containerId}' ordenados em ordem crescente.`);
+}
+
+
+
+
+
+// Adicione o listener ao ícone
+document.getElementById('sortDateIcon').addEventListener('click', sortGroupsByDataPrevisao);
+
+
+function abrirModalDetalhes(elemento) {
+  const pedido = elemento.querySelector('.pedido')?.textContent.replace("Pedido:", "").trim() || "";
+  const produto = elemento.querySelector('.produto')?.textContent.replace("Produto:", "").trim() || "";
+  const dataPrev = elemento.getAttribute('data-previsao') || "";
+  const descricao = elemento.querySelector('.descricao')?.textContent.replace("Descrição:", "").trim() || "";
+  const caracteristica = elemento.querySelector('.caracteristica, .dados-adicionais-item')?.textContent
+                         .replace(/(Característica|Dados Adicionais):/, "")
+                         .trim() || "";
+  // Obter o texto original da observação e substituir delimitadores
+  const observacaoRaw = elemento.querySelector('.txt')?.textContent.trim() || 
+                          elemento.querySelector('.obs_venda')?.textContent.replace("Obs Venda:", "").trim() || "";
+  // Substitui "||" por duas quebras de linha e "|" por uma quebra de linha
+  const observacao = observacaoRaw.replace(/\|\|/g, "\n\n").replace(/\|/g, "\n");
+  const op = elemento.querySelector('.op')?.textContent || null;
+
+  const modal = document.getElementById('modalBox');
+  modal.innerHTML = `
+    <div class="modal-header">
+      <h2 style="margin: 0;">Detalhes do Item</h2>
+      <span class="close-modal" onclick="fecharModal()">×</span>
+    </div>
+
+    <div class="modal-body">
+      <div class="modal-field">
+        <label>Pedido:</label>
+        <input type="text" value="${pedido}" readonly>
+      </div>
+      ${op ? `
+      <div class="modal-field">
+        <label>OP:</label>
+        <input type="text" value="${op}" readonly>
+      </div>
+      ` : ""}
+      <div class="modal-field">
+        <label>Produto:</label>
+        <input type="text" value="${produto}" readonly>
+      </div>
+      <div class="modal-field">
+        <label>Data Previsão:</label>
+        <input type="text" value="${dataPrev}" readonly>
+      </div>
+      <div class="modal-field">
+        <label>Descrição:</label>
+        <textarea readonly rows="3">${descricao}</textarea>
+      </div>
+      <div class="modal-field">
+        <label>Característica:</label>
+        <textarea readonly rows="3">${caracteristica}</textarea>
+      </div>
+      <div class="modal-field">
+        <label>Observação:</label>
+        <textarea readonly rows="7">${observacao}</textarea>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-fechar" onclick="fecharModal()">Fechar</button>
+    </div>
+  `;
+
+  document.getElementById('modalOverlay').style.display = 'block';
+  modal.style.display = 'block';
+}
+

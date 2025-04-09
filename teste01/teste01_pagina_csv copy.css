@@ -1,0 +1,362 @@
+:root {
+  --primary-gradient: linear-gradient(135deg, #FF6B6B, /* Rouge élégant */
+    #4ECDC4, /* Turquoise */
+    #45B7D1, /* Bleu clair */
+    #96C93D, /* Vert */
+    #A569BD  /* Violet */);
+  --text-gradient: linear-gradient(135deg, #FF6B6B 0%, #4ECDC4 25%, #45B7D1 50%, #96C93D 75%, #A569BD 100%);
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0F172A;
+  font-family: 'Raleway', sans-serif;
+  color: #fff;
+  overflow-x: hidden;
+}
+
+.background {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 107, 107, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(69, 183, 209, 0.1) 0%, transparent 50%);
+}
+
+.interface-container {
+  max-width: 900px;
+  margin: 0.5rem auto;
+  padding: 1.5rem;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.power-section {
+  margin: 0.5rem 0;
+}
+
+.power-title {
+  font-size: 1.3rem;
+  text-align: center;
+  margin-bottom: 1rem;
+  color: #fff;
+  font-weight: 300;
+}
+
+.slider-container {
+  position: relative;
+  padding: 0.8rem;
+}
+
+.power-slider {
+  width: 100%;
+  height: 20px;
+  background: var(--primary-gradient);
+  border-radius: 10px;
+  outline: none;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+}
+
+.power-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.power-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.5);
+}
+
+.power-indicators {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.power-indicator {
+  flex: 1;
+  min-width: 90px;
+  max-width: 130px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0.6;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  padding: 0.7rem;
+  border-radius: 12px;
+  background: var(--glass-bg);
+  border: 1px solid transparent;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.power-indicator:hover,
+.power-indicator:focus-within {
+  opacity: 1;
+  transform: scale(1.05);
+  border-color: var(--glass-border);
+  box-shadow: 0 8px 15px rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.power-indicator.active {
+  opacity: 1;
+  transform: scale(1.1);
+  border-color: var(--glass-border);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.power-slider:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+.power-indicator:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.power-icon {
+  font-size: 1.6rem;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.power-name {
+  font-size: 0.9rem;
+  text-align: center;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.power-display {
+  margin-top: 1rem;
+  padding: 1rem;
+  text-align: center;
+  background: var(--glass-bg);
+  border-radius: 15px;
+  transition: all 0.3s ease;
+}
+
+.power-display-title {
+  font-size: 1.6rem;
+  margin-bottom: 0.5rem;
+  background: var(--text-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.power-description {
+  font-size: 0.95rem;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 600px;
+  margin: 0 auto;
+  opacity: 0.9;
+}
+
+footer {
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Media Queries */
+@media (max-width: 1200px) {
+  .interface-container {
+    max-width: 95%;
+    margin: 2rem auto;
+  }
+
+  .power-indicator {
+    min-width: 110px;
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 992px) {
+  .power-indicator {
+    min-width: 100px;
+    max-width: 130px;
+    padding: 0.8rem;
+  }
+
+  .power-icon {
+    font-size: 1.8rem;
+  }
+
+  .power-name {
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .interface-container {
+    margin: 1rem;
+    padding: 1.5rem;
+  }
+
+  .power-section {
+    margin: 1rem 0;
+  }
+
+  .power-title {
+    font-size: 1.3rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .power-indicators {
+    justify-content: center;
+    gap: 0.8rem;
+  }
+
+  .power-indicator {
+    flex: 0 0 calc(33.33% - 1rem);
+    min-width: 90px;
+    max-width: 120px;
+    padding: 0.7rem;
+  }
+
+  .power-display {
+    margin-top: 1.5rem;
+    padding: 1.2rem;
+  }
+
+  .power-display-title {
+    font-size: 1.8rem;
+  }
+
+  .power-description {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+}
+
+@media (max-width: 576px) {
+  .interface-container {
+    margin: 0.5rem;
+    padding: 1rem;
+  }
+
+  .power-indicators {
+    gap: 0.6rem;
+  }
+
+  .power-indicator {
+    flex: 0 0 calc(50% - 0.6rem);
+    min-width: 80px;
+    max-width: none;
+    padding: 0.6rem;
+  }
+
+  .power-icon {
+    font-size: 1.6rem;
+  }
+
+  .power-name {
+    font-size: 0.8rem;
+  }
+
+  .power-slider {
+    height: 15px;
+  }
+
+  .power-slider::-webkit-slider-thumb {
+    width: 30px;
+    height: 30px;
+  }
+
+  .power-display-title {
+    font-size: 1.5rem;
+  }
+
+  .power-description {
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 380px) {
+  .power-indicator {
+    flex: 0 0 calc(50% - 0.5rem);
+    min-width: 70px;
+    padding: 0.5rem;
+  }
+
+  .power-icon {
+    font-size: 1.4rem;
+  }
+
+  .power-name {
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-height: 600px) and (orientation: landscape) {
+  .interface-container {
+    margin: 1rem auto;
+  }
+
+  .power-section {
+    margin: 0.5rem 0;
+  }
+
+  .power-indicators {
+    margin-top: 1rem;
+  }
+
+  .power-display {
+    margin-top: 1rem;
+    padding: 1rem;
+  }
+}

@@ -58,6 +58,7 @@ function criarLinhasMP() {
     function criarListaBotao(arr, letra, cor) {
       const ul = document.createElement("ul");
       ul.classList.add("sub-tabs-linha", "grupo-" + letra);
+    
       arr.forEach((nome, index) => {
         const li = document.createElement("li");
         const button = document.createElement("button");
@@ -65,15 +66,28 @@ function criarLinhasMP() {
         button.dataset.color = cor;
         button.innerHTML = `<span>${letra + (index + 1)}</span>`;
         button.title = nome;
+    
         const span = button.querySelector('span');
         span.style.fontSize = '25.6px';
         span.style.fontWeight = 'bold';
         button.style.border = '2px solid #000';
+    
+        // Se for o primeiro botão do grupo "M" (M1), adiciona um listener extra
+        if (letra === "M" && index === 0) {
+          button.addEventListener("click", function(e) {
+            e.preventDefault();
+            // Abre posto01.html em uma nova aba
+            window.open('posto01/posto01.html', '_blank');
+          });
+        }
+    
         li.appendChild(button);
         ul.appendChild(li);
       });
+    
       return ul;
     }
+    
 
     // Cria as ULs para M, T e P
     const ulM = criarListaBotao(arrM, "M", "green");
@@ -203,9 +217,14 @@ document.addEventListener('click', function(e) {
     if (circle) {
       circle.style.display = 'none';
     }
-    carregarResultadoTeste();
+    // Abre teste01_pagina.html em uma nova aba
+    window.open('teste01/teste01_pagina.html', '_blank');
+
+    // Ou, para abrir na mesma aba, use:
+    // window.location.href = 'teste01/teste01_pagina.html';
   }
 });
+
 
 /************************************************
  * Lógica das Amazing Tabs e controle dos grupos

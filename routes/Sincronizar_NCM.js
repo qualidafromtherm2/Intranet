@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch').default;
+const fetch = require('node-fetch');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config');
 
 // Define o diretório e o caminho do arquivo CSV na pasta "csv"

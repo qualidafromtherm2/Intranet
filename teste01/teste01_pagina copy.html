@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="teste01_pagina_csv copy.css">
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+</head>
+<body>
+  <div class="background"></div>
+  <div class="particles"></div>
+
+  <!-- Header removido -->
+
+  <main class="interface-container">
+    <section class="power-section">
+      <h2 class="power-title">Discover Your Ultimate Power</h2>
+
+      <div class="slider-container">
+        <label for="power-slider" class="sr-only">Select your superpower</label>
+        <input type="range" id="power-slider" class="power-slider" min="0" max="6" step="1" value="0" aria-label="Superpower selector" title="Slide to choose your superpower">
+
+        <div class="power-indicators">
+          <div class="power-indicator active" data-power="0" tabindex="0" role="button" aria-label="Select Superhuman Strength">
+            <span class="power-icon" aria-hidden="true">💪</span>
+            <span class="power-name">Superhuman Strength</span>
+          </div>
+          <div class="power-indicator" data-power="1" tabindex="0" role="button" aria-label="Select Super Speed">
+            <span class="power-icon" aria-hidden="true">⚡</span>
+            <span class="power-name">Super Speed</span>
+          </div>
+          <div class="power-indicator" data-power="2" tabindex="0" role="button" aria-label="Select Supreme Intelligence">
+            <span class="power-icon" aria-hidden="true">🧠</span>
+            <span class="power-name">Supreme Intelligence</span>
+          </div>
+          <div class="power-indicator" data-power="3" tabindex="0" role="button" aria-label="Select Supersonic Flight">
+            <span class="power-icon" aria-hidden="true">🦅</span>
+            <span class="power-name">Supersonic Flight</span>
+          </div>
+          <div class="power-indicator" data-power="4" tabindex="0" role="button" aria-label="Select Total Invisibility">
+            <span class="power-icon" aria-hidden="true">👻</span>
+            <span class="power-name">Total Invisibility</span>
+          </div>
+          <div class="power-indicator" data-power="5" tabindex="0" role="button" aria-label="Select Absolute Telepathy">
+            <span class="power-icon" aria-hidden="true">🔮</span>
+            <span class="power-name">Absolute Telepathy</span>
+          </div>
+          <div class="power-indicator" data-power="6" tabindex="0" role="button" aria-label="Select Miracle Healing">
+            <span class="power-icon" aria-hidden="true">💫</span>
+            <span class="power-name">Miracle Healing</span>
+          </div>
+        </div>
+
+        <div class="power-display">
+          <div class="power-display-title">Superhuman Strength</div>
+          <p class="power-description">The ability to lift mountains and protect the innocent with titanic strength.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p style="position: fixed; bottom: 0; left: 0; width: 100%; text-align: center; padding: 1rem; background: var(--glass-bg); backdrop-filter: blur(5px); margin: 0;">
+      Crafted with passion for superheroes worldwide
+    </p>
+  </footer>
+
+  <script src="teste01_pagina_csv copy.js"></script>
+</body>
+</html>

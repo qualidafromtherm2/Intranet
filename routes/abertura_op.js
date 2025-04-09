@@ -5,12 +5,15 @@ const axios = require('axios');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config');
 
 router.post('/listar-pedidos', async (req, res) => {
+  // Leia a etapa enviada pelo front-end (ex.: '10' ou '20')
+  const etapa = req.body.etapa || '20';
+
   const payload = {
     call: 'ListarPedidos',
     param: [{
       pagina: 1,
       registros_por_pagina: 100,
-      etapa: '20',
+      etapa: etapa,
       apenas_importado_api: 'N'
     }],
     app_key: OMIE_APP_KEY,
@@ -30,4 +33,9 @@ router.post('/listar-pedidos', async (req, res) => {
   }
 });
 
+
 module.exports = router;
+
+
+
+

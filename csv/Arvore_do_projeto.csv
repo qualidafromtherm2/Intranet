@@ -19,7 +19,7 @@ INTRANET_FROMTHERM/
 │   ├── produtosController.js
 │   └── Requisição_Omie.js
 ├── css/
-│   ├── Block.css
+│   ├── block.css
 │   ├── menu.css
 │   ├── menu_produto.css
 │   ├── slider.css
@@ -35,6 +35,8 @@ INTRANET_FROMTHERM/
 │   ├── Resultado_teste.csv
 │   ├── Testes01.csv
 │   └── Tipo.csv
+│   └── Paradas.csv
+│   └── Motvio_parada.csv
 ├── img/
 │   ├── Produto/
 │   │   └── ... (imagens de produtos)
@@ -82,7 +84,10 @@ INTRANET_FROMTHERM/
 │   ├── Sincronizar_NCM.js
 │   └── uploadImage.js
 ├── teste01/
+│   ├── teste01_pagina.css
+│   ├── teste01_pagina.html
 │   └── teste01.js (U)
+│   └── teste01_pagina_csv.js
 ├── utils/
 │   ├── axiosRetry.js
 │   └── csvUtils.js
@@ -107,6 +112,7 @@ INTRANET_FROMTHERM/
 netstat -ano | findstr :5001 
 Stop-Process -Id 27084 -Force
 
+grep -R "o valor que vc quer localizar" .  "Aqui é para ver qual arquivo utiliza uma palavra"
 
 
 http://localhost:5001/index.html#edit // Meu site
@@ -114,7 +120,7 @@ http://localhost:5001/index.html#edit // Meu site
 
 (npm run dev // Para iniciar o servidor altomaticamente)
 
-(Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
+Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
 no terminal integrado do VS Code:
 git status
 git add .
@@ -145,6 +151,7 @@ https://codepen.io/peanav/pen/DmZEEp // calendario para auditoria escalonada
 https://codepen.io/karan12990/pen/pQzPdR // grafico para gerenciar andamentos de projetos
 https://codepen.io/Clonerrs/pen/qBEQmGQ // Chat para conversas internas da empresa
 https://codepen.io/mr_alien/pen/pNRQxK // Tipo kambam
+https://codepen.io/heff/pen/DyoMvJ // Para incluir videos
 
 "Abaixo nomeclaturas de programação"
 span - campo amarelo para digitação, ou seja, inserção de dados.

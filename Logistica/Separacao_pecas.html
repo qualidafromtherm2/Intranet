@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Abertura OP - Kanban</title>
+  <link rel="stylesheet" href="Separacao_pecas.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+</head>
+<body>
+  <!-- Kanban Board (HTML) -->
+  <div class="overlay-bg" id="bg-image"></div>
+
+  <header>
+    <div id="btns">
+      <div class="btnAdd">
+        <button id="addToDo"><i class="fa fa-plus"></i></button>
+      </div>
+      <div class="btnUrg">
+        <button id="addUrgent" onclick="toggleUrgentColumn()"><i class="fa fa-exclamation"></i></button>
+      </div>
+      <div class="btnComercial">
+        <button id="btnProducao"><i class="fa fa-industry fa-lg"></i></button>
+      </div>
+      <div class="btnPCP">
+        <button id="btnPCP"><i class="fa fa-calendar"></i></button>
+      </div>
+      <div class="btnTotal">
+        <button id="totalTask">0</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="myLists">
+    <!-- Coluna 1: T1 -->
+    <div id="to-do">
+      <h3>T1<span></span></h3>
+      <ul id="ul-todo" class="section"
+          ondrop="drop(event, this)"
+          ondragover="allowDrop(event)"
+          ondragenter="dragEnter(event)"
+          ondragleave="dragLeave(event)">
+      </ul>
+    </div>
+
+
+</div>
+
+  <!-- MODAL (única instância, oculto por padrão) -->
+  <div id="modalOverlay" style="display: none;"></div>
+  <div id="modalBox" style="display: none;">
+    <!-- Número do pedido -->
+    <div id="pedidoInfo">
+      <label for="pedidoField">Pedido:</label>
+      <input type="text" id="pedidoField" readonly>
+    </div>
+    <!-- Observação do pedido -->
+    <p id="modalDesc">Observação do pedido</p>
+    <textarea id="taskText"></textarea>
+    <!-- Container para os botões de produtos selecionados -->
+    <div id="produtosSelecionadosContainer"></div>
+    <!-- Opções extras -->
+    <div>
+      <input type="checkbox" id="checkboxAprovado">
+      <label for="checkboxAprovado">Aprovado</label>
+      <select id="pedidoSelect" style="display:none;">
+        <option value="">Selecione um pedido</option>
+      </select>
+    </div>
+    <!-- Botão para mostrar pedidos -->
+    <button id="btnGerarCards" style="margin-bottom: 10px;">Mostrar Pedidos</button>
+    <!-- Container com os "cards" de pedidos -->
+    <div id="cardsContainer"></div>
+    <!-- Botões de controle do modal -->
+    <button id="taskButton">Ok</button>
+    <span id="modalClose">Cancel</span>
+    <button id="deleteTaskButton" style="margin-left: 10px;">Excluir</button>
+  </div>
+
+  <!-- CONFIRM BOX -->
+  <div id="confirmDelete"></div>
+
+  <script src="Separacao_pecas.js"></script>
+</body>
+</html>
