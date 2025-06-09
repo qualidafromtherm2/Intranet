@@ -1,0 +1,15 @@
+{"[javascript]": {
+  "editor.hover.enabled": false
+},
+"[javascriptreact]": {
+  "editor.hover.enabled": false
+},
+"[typescript]": {
+  "editor.hover.enabled": false
+},
+"[typescriptreact]": {
+  "editor.hover.enabled": false
+}
+
+
+}
