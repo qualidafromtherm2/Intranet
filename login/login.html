@@ -1,0 +1,98 @@
+<!-- login/login.html -->
+<div class="auth-popup">
+    <!-- botão de fechar -->
+    <button class="close-auth">&times;</button>
+  
+    <!-- título geral -->
+    <h2>Bem vindo a Intranet Fromtherm</h2>
+  
+    <div class="container" id="container">
+      <!-- criar conta -->
+      <div class="form-container sign-up-container">
+        <form id="formCriarConta">
+          <h1>Recuperar conta</h1>
+          <input type="text" placeholder="Usuário"    name="user"     readonly />
+          <input type="password" placeholder="Nova senha"   id="newPassword" />
+          <input type="password" placeholder="Repita a senha" id="confirmPassword" />
+          <button type="submit">Registrar</button>
+        </form>
+      </div>
+      
+  
+      <!-- entrar / painel logado -->
+      <div class="form-container sign-in-container">
+        <form id="formSignIn" novalidate>
+          <h1>Entrar</h1>
+          <!-- tipo text em vez de email + minlength -->
+          <input
+            type="text"
+            id="signInEmail"
+            placeholder="User"
+            minlength="5"
+            title="Digite pelo menos 5 caracteres"
+          />
+          <input
+            type="password"
+            id="signInPassword"
+            placeholder="Senha"
+            minlength="5"
+            title="Digite pelo menos 5 caracteres"
+          />
+
+          <button type="submit">Entrar</button>
+          <label>
+            <input type="checkbox" id="rememberMe" />
+            Lembrar-me
+          </label>
+        </form>
+         
+        <div id="loggedInContainer" style="display:none;">
+          <!-- 1ª linha unindo nome + sobrenome + data -->
+          <h3 id="uiNomeCompleto"></h3>
+          <p  id="uiDtNasc"></p>
+        
+          <!-- sequência solicitada -->
+          <p><strong>Cargo:</strong>          <span id="uiCargo"></span></p>
+          <p><strong>Celular:</strong>        <span id="uiCel"></span></p>
+          <p><strong>Email:</strong>          <span id="uiEmail"></span></p>
+          <p><strong>Endereço:</strong>       <span id="uiEndereco"></span></p>
+          <p><strong>Obs.:</strong>           <span id="uiObs"></span></p>
+          <p><strong>Cód. Omie:</strong>      <span id="uiNCod"></span></p>
+          <p><strong>Cód. Conta:</strong>     <span id="uiNCodConta"></span></p>
+          <p><strong>Cód. Vendedor:</strong>  <span id="uiNCodVend"></span></p>
+      
+        </div>
+        
+          
+          <button id="btnLogout" style="display:none">Deslogar</button>
+          
+
+        </div>
+        
+      </div>
+  
+      <!-- overlay lateral -->
+      <div class="overlay-container">
+        <div class="overlay">
+          <div class="overlay-panel overlay-left">
+            <h1>Bem vindo de volta!</h1>
+            <p>Para continuar conectado conosco, redefina sua senha.</p>
+            <button class="ghost" id="signIn">Entrar</button>
+          </div>
+          <div class="overlay-panel overlay-right">
+            <div id="overlayNotLoggedIn">
+              <h1>Olá colaborador!</h1>
+              <p>Perdeu o acesso, solicite uma nova senha:</p>
+              <button class="ghost" id="signUp">Solicitar</button>
+            </div>
+            <div id="overlayLoggedIn" style="display: none;">
+              <h1>Olá, seja bem vindo</h1>
+              <p id="nomeUsuarioOverlay">Fulano</p>
+              <button class="ghost" id="btnOverlayLogout">Deslogar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  

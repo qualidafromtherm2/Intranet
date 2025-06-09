@@ -1,0 +1,28 @@
+# dependências do Node
+/node_modules/
+
+# pastas de build (se você gerar código compilado)
+/dist/
+/build/
+
+# arquivos de log
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# variáveis de ambiente
+.env
+.env.*.local
+
+# configurações do VS Code
+.vscode/
+
+# arquivos do sistema
+.DS_Store
+Thumbs.db
+
+# cache de Pacotes
+.npm
+config.server.js
+config.client.js
