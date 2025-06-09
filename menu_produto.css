@@ -2907,6 +2907,12 @@ ul#comprasList li ,
   box-shadow: 0 2px 6px rgba(0,0,0,0.3);
 }
 
+/* item sendo arrastado */
+.kanban-list li.dragging {
+  background-color: #fff59d !important; /* amarelo claro */
+  color: #333 !important;
+}
+
 
 /* ─── Placeholder de drag (pontilhado no tamanho dos cards) ─── */
 .kanban-list li.placeholder {
