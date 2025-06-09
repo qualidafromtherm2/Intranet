@@ -1,0 +1,3 @@
+[submodule "Compras"]
+	path = Compras
+	url = https://github.com/qualidafromtherm2/compras.git

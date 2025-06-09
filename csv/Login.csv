@@ -1,0 +1,4 @@
+User,Email,Senha,SenhaTemporaria,Permissoes
+Leandro,mrguim@hotmail.com,123,,Início;Usuário;Mensagens;Recados gerais;Sincronizar OMIE;Sincronizar NCM;Produção;Logística;Configurar Permissões;Manuais;Gerador de gráfico;EDITAR_PRODUTO;EDITAR_CARACTERISTICA;CRIAR_PRODUTO;DUPLICAR_PRODUTO;ABRIR_OP;RI;LIBERAR_MAQUINA;PIR;AT;AUDITORIA;ETIQUETA;INVENTARIO
+Sheyla,ylinhabraun@gmail.com,123,,Produção
+Guilherme,guilherme.ouriques@fromtherm.com.br,123,,Gerador de gráfico

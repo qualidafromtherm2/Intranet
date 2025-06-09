@@ -1,0 +1,24 @@
+[
+  {
+    "id": 2,
+    "username": "sheyla",
+    "passwordHash": "$2b$10$xM8C2pcePXeHgN5SXZIXfuFFyPHBxVQ3YBP2f.lDie1TDITLQYsbW",
+    "roles": [
+      "admin",
+      "editor"
+    ],
+    "msn": []
+  },
+  {
+    "id": 3,
+    "username": "leandro9808",
+    "passwordHash": "$2b$10$rbJ4C7wa8Whkn.evmXrROujtHqXiwwquWT1.OKo17iThvipLuE2Om",
+    "roles": [
+      "admin",
+      "editor"
+    ],
+    "msn": [
+      "Seja bem vindo ao SIGFT (Sistema Integrado de Gestão FromTherm) LEANDRO DOS SANTOS, seja bem vindo."
+    ]
+  }
+]

@@ -1,0 +1,3280 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@200;300;400;500;600;700&display=swap");
+* {
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* -------------------------------------------------
+   CSS original do seu form (cole TODO este bloco)
+   — lembrando de manter o @import do Montserrat no topo
+------------------------------------------------- */
+@import url("https://fonts.googleapis.com/css?family=Montserrat:400,800");
+
+
+/* === Galeria de Fotos === */
+/*@import url(https://pro.fontawesome.com/releases/v5.11.2/css/all.css);*/
+:root {
+  --user-button-circle: rgba(0,0,0,0.025);
+  --user-button-cardborder: rgba(255,255,255,0.25);
+  --user-button-text:#323133;
+  --user-button-shadow:rgba(0,0,0,0.1);
+}
+
+:root {
+  --theme-bg-color: rgba(16 18 27 / 40%);
+  --border-color: rgba(113 119 144 / 25%);
+  --theme-color: #f9fafb;
+  --inactive-color: rgb(113 119 144 / 78%);
+  --body-font: "Poppins", sans-serif;
+  --hover-menu-bg: rgba(12 15 25 / 30%);
+  --content-title-color: #999ba5;
+  --content-bg: rgb(146 151 179 / 13%);
+  --button-inactive: rgb(249 250 251 / 55%);
+  --dropdown-bg: #21242d;
+  --dropdown-hover: rgb(42 46 60);
+  --popup-bg: rgb(22 25 37);
+  --search-bg: #14162b;
+  --overlay-bg: rgba(36, 39, 59, 0.3);
+  --scrollbar-bg: rgb(1 2 3 / 40%);
+  --detalhes-offset: 360px;
+}
+
+.light-mode {
+  --theme-bg-color: rgb(255 255 255 / 31%);
+  --theme-color: #3c3a3a;
+  --inactive-color: #333333;
+  --button-inactive: #3c3a3a;
+  --search-bg: rgb(255 255 255 / 31%);
+  --dropdown-bg: #f7f7f7;
+  --overlay-bg: rgb(255 255 255 / 30%);
+  --dropdown-hover: rgb(236 236 236);
+  --border-color: rgb(255 255 255 / 35%);
+  --popup-bg: rgb(255 255 255);
+  --hover-menu-bg: rgba(255 255 255 / 35%);
+  --scrollbar-bg: rgb(255 253 253 / 57%);
+  --content-title-color: --theme-color;
+}
+
+html {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--body-font);
+  background-image: url("../img/fundo.png");
+
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  padding: 2em;
+  width: 100%;
+  height: 100vh;
+}
+@media screen and (max-width: 480px) {
+  body {
+    padding: 0.8em;
+  }
+}
+
+.video-bg {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+.video-bg video {
+  width: 100%;
+  height: 100%;
+  -o-object-fit: cover;
+     object-fit: cover;
+}
+
+img {
+  max-width: 100%;
+}
+
+.dark-light {
+  position: fixed;
+  bottom: 50px;
+  right: 30px;
+  background-color: var(--dropdown-bg);
+  box-shadow: -1px 3px 8px -1px rgba(0, 0, 0, 0.2);
+  padding: 8px;
+  border-radius: 50%;
+  z-index: 3;
+  cursor: pointer;
+}
+.dark-light svg {
+  width: 24px;
+  flex-shrink: 0;
+  fill: #ffce45;
+  stroke: #ffce45;
+  transition: 0.5s;
+}
+
+.light-mode .dark-light svg {
+  fill: transparent;
+  stroke: var(--theme-color);
+}
+.light-mode .profile-img {
+  border: 2px solid var(--theme-bg-color);
+}
+.light-mode .content-section ul {
+  background-color: var(--theme-bg-color);
+}
+.light-mode .pop-up__title {
+  border-color: var(--theme-color);
+}
+.light-mode .dropdown.is-active ul {
+  background-color: rgba(255, 255, 255, 0.94);
+}
+
+body.light-mode:before,
+body.light-mode .video-bg:before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100vh;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.45) 100%);
+  -webkit-backdrop-filter: saturate(3);
+          backdrop-filter: saturate(3);
+}
+
+.app {
+  background-color: var(--theme-bg-color);
+  max-width: 1250px;
+  max-height: 860px;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  border-radius: 14px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 58px;
+  width: 100%;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 30px;
+  white-space: nowrap;
+}
+@media screen and (max-width: 480px) {
+  .header {
+    padding: 0 16px;
+  }
+}
+.header-menu {
+  display: flex;
+  align-items: center;
+}
+.header-menu a {
+  padding: 20px 30px;
+  text-decoration: none;
+  color: var(--inactive-color);
+  border-bottom: 2px solid transparent;
+  transition: 0.3s;
+}
+@media screen and (max-width: 610px) {
+  .header-menu a:not(.main-header-link) {
+    display: none;
+  }
+}
+.header-menu a.is-active, .header-menu a:hover {
+  color: var(--theme-color);
+  border-bottom: 2px solid var(--theme-color);
+}
+
+.notify {
+  position: relative;
+}
+.notify:before {
+  content: "";
+  position: absolute;
+  background-color: #3a6df0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  right: 20px;
+  top: 16px;
+}
+@media screen and (max-width: 1055px) {
+  .notify {
+    display: none;
+  }
+}
+
+.search-bar {
+  height: 40px;
+  display: flex;
+  width: 100%;
+  max-width: 400px;
+  padding-left: 16px;
+  border-radius: 4px;
+}
+.search-bar input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background-color: var(--search-bg);
+  border-radius: 4px;
+  font-family: var(--body-font);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 0 20px 0 40px;
+  box-shadow: 0 0 0 2px rgba(134, 140, 160, 0.02);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
+  background-size: 14px;
+  background-repeat: no-repeat;
+  background-position: 16px 48%;
+  color: var(--theme-color);
+}
+.search-bar input::-moz-placeholder {
+  font-family: var(--body-font);
+  color: var(--inactive-color);
+  font-size: 15px;
+  font-weight: 500;
+}
+.search-bar input:-ms-input-placeholder {
+  font-family: var(--body-font);
+  color: var(--inactive-color);
+  font-size: 15px;
+  font-weight: 500;
+}
+.search-bar input::placeholder {
+  font-family: var(--body-font);
+  color: var(--inactive-color);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.header-profile {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 40px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.header-profile svg {
+  width: 22px;
+  color: #f9fafb;
+  flex-shrink: 0;
+}
+
+.notification {
+  position: relative;
+}
+.notification-number {
+  position: absolute;
+  background-color: #3a6df0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  right: -6px;
+  top: -6px;
+}
+.notification + svg {
+  margin-left: 22px;
+}
+@media screen and (max-width: 945px) {
+  .notification + svg {
+    display: none;
+  }
+}
+
+.profile-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  -o-object-fit: cover;
+     object-fit: cover;
+  border: 2px solid var(--theme-color);
+  margin-left: 22px;
+}
+
+.wide .header-menu,
+.wide .header-profile {
+  display: none;
+}
+.wide .search-bar {
+  max-width: 600px;
+  margin: auto;
+  transition: 0.4s;
+  box-shadow: 0 0 0 1px var(--border-color);
+  padding-left: 0;
+}
+.wide .menu-circle {
+  margin-right: 0;
+}
+
+.wrapper {
+  display: flex;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.left-side {
+  flex-basis: 240px;
+  border-right: 1px solid var(--border-color);
+  padding: 26px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+@media screen and (max-width: 945px) {
+  .left-side {
+    display: none;
+  }
+}
+
+.side-wrapper + .side-wrapper {
+  margin-top: 20px;
+}
+
+.side-title {
+  color: var(--inactive-color);
+  margin-bottom: 14px;
+}
+
+.side-menu {
+  display: flex;
+  flex-direction: column;
+  white-space: nowrap;
+}
+.side-menu a {
+  text-decoration: none;
+  color: var(--theme-color);
+  display: flex;
+  align-items: center;
+  font-weight: 400;
+  padding: 10px;
+  font-size: 14px;
+  border-radius: 6px;
+  transition: 0.3s;
+}
+.side-menu a:hover {
+  background-color: var(--hover-menu-bg);
+}
+.side-menu svg {
+  width: 16px;
+  margin-right: 8px;
+}
+
+.updates {
+  position: relative;
+  top: 0;
+  right: 0;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+
+.main-header {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  height: 58px;
+  flex-shrink: 0;
+}
+.main-header .header-menu {
+  margin-left: 150px;
+}
+@media screen and (max-width: 1055px) {
+  .main-header .header-menu {
+    margin: auto;
+  }
+}
+.main-header .header-menu a {
+  padding: 20px 24px;
+}
+
+.main-container {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
+.menu-link-main {
+  text-decoration: none;
+  color: var(--theme-color);
+  padding: 0 30px;
+}
+@media screen and (max-width: 1055px) {
+  .menu-link-main {
+    display: none;
+  }
+}
+
+.content-wrapper {
+  display: flex;
+  flex-direction: column;
+  color: var(--theme-color);
+  padding: 20px 40px;
+  height: 100%;
+  overflow: auto;
+  background-color: var(--theme-bg-color);
+}
+@media screen and (max-width: 510px) {
+  .content-wrapper {
+    padding: 20px;
+  }
+}
+.content-wrapper-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  justify-content: space-between;
+  background-image: url("https://www.transparenttextures.com/patterns/cubes.png"), linear-gradient(to right top, #cf4af3, #e73bd7, #f631bc, #fd31a2, #ff3a8b, #ff4b78, #ff5e68, #ff705c, #ff8c51, #ffaa49, #ffc848, #ffe652);
+  border-radius: 14px;
+  padding: 20px 40px;
+}
+@media screen and (max-width: 415px) {
+  .content-wrapper-header {
+    padding: 20px;
+  }
+}
+.content-wrapper.overlay {
+  pointer-events: none;
+  transition: 0.3s;
+  background-color: var(--overlay-bg);
+}
+
+.overlay-app {
+  width: 100%;
+  height: 100%;
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: all;
+  background-color: rgba(36, 39, 59, 0.8);
+  opacity: 0;
+  visibility: hidden;
+  transition: 0.3s;
+}
+.overlay-app.is-active {
+  visibility: visible;
+  opacity: 1;
+}
+
+.img-content {
+  font-weight: 500;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+.img-content svg {
+  width: 28px;
+  margin-right: 14px;
+}
+
+.content-text {
+  font-weight: 400;
+  font-size: 14px;
+  margin-top: 16px;
+  line-height: 1.7em;
+  color: #ebecec;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.content-wrapper-context {
+  max-width: 350px;
+}
+
+.content-button {
+  background-color: #3a6df0;
+  border: none;
+  padding: 8px 26px;
+  color: #fff;
+  border-radius: 20px;
+  margin-top: 16px;
+  cursor: pointer;
+  transition: 0.3s;
+  white-space: nowrap;
+}
+
+/* --- foto do produto ----------------------------------------------------- */
+.content-wrapper-img{
+  max-height:180px;       /* escolha a altura que caiba bem no card          */
+  width:auto;
+  object-fit:contain;     /* não estica a imagem                             */
+  margin-left:auto;       /* empurra a imagem para a borda direita do card   */
+  border-radius:6px;      /* opcional – deixa cantos suaves                  */
+}
+@media screen and (max-width: 570px) {
+  .content-wrapper-img {
+    width: 110px;
+  }
+}
+
+.content-section {
+  margin-top: 30px;
+  display: flex;
+  flex-direction: column;
+}
+.content-section-title {
+  color: var(--content-title-color);
+  margin-bottom: 14px;
+}
+.content-section ul {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  justify-content: space-around;
+  background-color: var(--content-bg);
+  padding-left: 0;
+  margin: 0;
+  border-radius: 14px;
+  border: 1px solid var(--theme-bg-color);
+  cursor: pointer;
+}
+.content-section ul li {
+  list-style: none;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  width: 100%;
+  height: 100%;
+  white-space: nowrap;
+  transition: 0.3s;
+}
+.content-section ul li:hover {
+  background-color: var(--theme-bg-color);
+}
+.content-section ul li:hover:first-child {
+  border-radius: 13px 13px 0 0;
+}
+.content-section ul li:hover:last-child {
+  border-radius: 0 0 13px 13px;
+}
+.content-section ul li + li {
+  border-top: 1px solid var(--border-color);
+}
+.content-section ul svg {
+  width: 28px;
+  border-radius: 6px;
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+
+.products {
+  display: flex;
+  align-items: center;
+  width: 150px;
+}
+@media screen and (max-width: 480px) {
+  .products {
+    width: 120px;
+  }
+}
+
+.status {
+  margin-left: auto;
+  width: 140px;
+  font-size: 15px;
+  position: relative;
+}
+@media screen and (max-width: 700px) {
+  .status {
+    display: none;
+  }
+}
+.status-circle {
+  width: 6px;
+  height: 6px;
+  background-color: #396df0;
+  position: absolute;
+  border-radius: 50%;
+  top: 4px;
+  left: -20px;
+}
+.status-circle.green {
+  background-color: #3bf083;
+}
+.status-button {
+  font-size: 15px;
+  margin-top: 0;
+  padding: 6px 24px;
+}
+@media screen and (max-width: 390px) {
+  .status-button {
+    padding: 6px 14px;
+  }
+}
+.status-button.open {
+  background: none;
+  color: var(--button-inactive);
+  border: 1px solid var(--button-inactive);
+}
+.status-button:not(.open):hover {
+  color: #fff;
+  border-color: #fff;
+}
+
+.content-button:not(.open):hover {
+  background: #1e59f1;
+}
+
+.menu {
+  width: 5px;
+  height: 5px;
+  background-color: var(--button-inactive);
+  border-radius: 50%;
+  box-shadow: 7px 0 0 0 var(--button-inactive), 14px 0 0 0 var(--button-inactive);
+  margin: 0 12px;
+}
+
+@media screen and (max-width: 415px) {
+  .adobe-product .menu {
+    display: none;
+  }
+}
+.dropdown {
+  position: relative;
+  height: 53px;
+  width: 40px;
+  top: -24px;
+  display: flex;
+  left: -5px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.dropdown ul {
+  position: absolute;
+  background: var(--dropdown-bg);
+  height: 110px;
+  width: 120px;
+  right: 0;
+  top: 20px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translatey(10px);
+  transition: all 0.4s ease;
+}
+.dropdown ul li a {
+  text-decoration: none;
+  color: var(--theme-color);
+  font-size: 12px;
+}
+
+.dropdown.is-active ul {
+  opacity: 1;
+  pointer-events: all;
+  transform: translatey(25px);
+}
+.dropdown.is-active ul li:hover {
+  background-color: var(--dropdown-hover);
+}
+
+.button-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 187px;
+  margin-left: auto;
+}
+@media screen and (max-width: 480px) {
+  .button-wrapper {
+    width: auto;
+  }
+}
+
+.pop-up {
+  position: absolute;
+  padding: 30px 40px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  overflow-y: auto;
+  box-shadow: 0px 6px 30px rgba(0, 0, 0, 0.4);
+  transition: all 0.3s;
+  z-index: 10;
+  background-color: var(--popup-bg);
+  width: 500px;
+  visibility: hidden;
+  opacity: 0;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  white-space: normal;
+}
+@media screen and (max-width: 570px) {
+  .pop-up {
+    width: 100%;
+  }
+}
+.pop-up.visible {
+  visibility: visible;
+  opacity: 1;
+}
+.pop-up__title {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pop-up__subtitle {
+  white-space: normal;
+  margin: 20px 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.8em;
+}
+.pop-up__subtitle a {
+  color: var(--theme-color);
+}
+
+.content-button-wrapper .content-button.status-button.open.close {
+  width: auto;
+}
+
+.content-section .close {
+  margin-right: 0;
+  width: 24px;
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 400;
+}
+.checkbox-wrapper + .checkbox-wrapper {
+  margin: 20px 0 40px;
+}
+
+.checkbox {
+  display: none;
+}
+
+.checkbox + label {
+  display: flex;
+  align-items: center;
+}
+.checkbox + label:before {
+  content: "";
+  margin-right: 10px;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--theme-color);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checkbox:checked + label:before {
+  background-color: #3a6df0;
+  border-color: #3a6df0;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' class='feather feather-check'%3e%3cpath d='M20 6L9 17l-5-5'/%3e%3c/svg%3e");
+  background-position: 50%;
+  background-size: 12px;
+  background-repeat: no-repeat;
+}
+
+.content-button-wrapper {
+  margin-top: auto;
+  margin-left: auto;
+}
+.content-button-wrapper .open {
+  margin-right: 8px;
+}
+
+.apps-card {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  width: calc(100% + 20px);
+}
+
+.app-card {
+  display: flex;
+  flex-direction: column;
+  width: calc(33.3% - 20px);
+  font-size: 16px;
+  background-color: var(--content-bg);
+  border-radius: 14px;
+  border: 1px solid var(--theme-bg-color);
+  padding: 20px;
+  cursor: pointer;
+  transition: 0.3s ease;
+}
+.app-card:hover {
+  transform: scale(1.02);
+  background-color: var(--theme-bg-color);
+}
+.app-card svg {
+  width: 28px;
+  border-radius: 6px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+.app-card + .app-card {
+  margin-left: 20px;
+}
+.app-card span {
+  display: flex;
+  align-items: center;
+}
+.app-card__subtext {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6em;
+  margin-top: 20px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 20px;
+}
+.app-card-buttons {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  margin-top: 16px;
+}
+@media screen and (max-width: 1110px) {
+  .app-card {
+    width: calc(50% - 20px);
+  }
+  .app-card:last-child {
+    margin-top: 20px;
+    margin-left: 0px;
+  }
+}
+@media screen and (max-width: 565px) {
+  .app-card {
+    width: calc(100% - 20px);
+    margin-top: 20px;
+  }
+  .app-card + .app-card {
+    margin-left: 0;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-bg);
+  border-radius: 10px;
+}
+
+.product-details {
+  max-height: 600px;    /* ajuste pra caber bem no layout */
+  overflow-y: auto;     /* aparece a scrollbar quando ultrapassar */
+  padding-right: 8px;    /* para o scroll não cobrir o conteúdo */
+}
+.product-details::-webkit-scrollbar {
+  width: 6px;
+}
+.product-details::-webkit-scrollbar-thumb {
+  background: rgba(134, 140, 160, 0.3);
+  border-radius: 4px;
+}
+
+/* ====== Estilo moderno para os S/N ====== */
+.product-details .submenu select.sn-toggle {
+  /* remove estilos nativos */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+
+  /* cores e borda */
+  background-color: var(--dropdown-bg);
+  color: var(--theme-color);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+
+  /* tamanho e padding */
+  padding: 6px 12px;
+  font-size: 14px;
+  width: 70px;
+  text-align: center;
+
+  /* ESPAÇO extra entre o label e o select */
+  margin-left: 12px;
+
+  /* seta customizada (SVG inline) */
+  background-image: url("data:image/svg+xml,%3Csvg fill='%23fff' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l5 6 5-6H0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+}
+
+/* foco mais evidente */
+.product-details .submenu select.sn-toggle:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-color);
+}
+
+
+/* ==== Truncamento + ellipsis na coluna de valor dos detalhes ==== */
+/* 1) fazemos com que cada <li> seja um flex container */
+.product-details li {
+  display: flex;
+  align-items: center;
+}
+
+/* 2) aumentamos um pouco a coluna de rótulo (se quiser) */
+.product-details .products {
+  flex: 0 0 200px;    /* antes era 150px, agora cabe um pouco mais */
+}
+
+/* 3) e deixamos a coluna de valor crescer livremente */
+.product-details .status {
+  flex: 1 1 auto;     /* cresce pra preencher o que sobrar */
+  min-width: 0;       /* importante para o texto poder ser truncado */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: max-height 0.2s ease;
+}
+
+/* estado expanded: mostra tudo */
+.product-details .status.expanded {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  max-height: none;
+}
+/* 4) mantém o botão sempre à direita */
+.product-details .button-wrapper {
+  flex: 0 0 auto;
+}
+
+/* ————————————————————————————————
+   Destacar e reposicionar o código do produto
+   ———————————————————————————————— */
+  
+  .content-wrapper-header .img-content #productTitle {
+    /* dobra o tamanho do texto, coloca em negrito e afasta um pouco do ícone */
+    font-size: 1.5em;
+    font-weight: 500;
+    margin-left: 0.5rem;
+  }
+  
+  /* ————————————————————————————————
+   Aumentar tamanho da descrição do produto
+   ———————————————————————————————— */
+.content-wrapper-header .content-text {
+  font-size: 1.2em; /* ajuste o valor conforme sua preferência */
+  line-height: 1.5em;
+}
+
+/* esconde de vez a bolinha antiga */
+.menu-circle {
+  display: none !important;
+}
+
+/* novo logo no lugar das bolinhas */
+.menu-logo {
+  width: 100px;           /* mesma largura da bolinha original */
+  height: 15px;          /* mesma altura */
+  object-fit: cover;     /* garante proporção */
+  margin-right: 195px;   /* mantém o espaçamento para a direita */
+  flex-shrink: 0;        /* não deixa encolher */
+}
+
+.detail-input {
+  width: calc(100% - 8px);
+  padding: 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.fault-message {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background-color: #ffe5e5;
+  color: #c00;
+  border-radius: 4px;
+  font-weight: bold;
+}
+
+
+.pagination-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.pagination-wrapper .content-button {
+  padding: 6px 12px;
+  font-size: 14px;
+  border-radius: 20px;
+  border: 1px solid var(--theme-color);
+  background: transparent;
+  color: var(--theme-color);
+  cursor: pointer;
+  transition: 0.2s;
+}
+.pagination-wrapper .content-button:hover:not(:disabled) {
+  background-color: var(--theme-color);
+  color: var(--theme-bg-color);
+}
+.pagination-wrapper .content-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pagination-wrapper .content-button.active {
+  background-color: var(--theme-color);
+  color: var(--theme-bg-color);
+}
+.pagination-wrapper span {
+  color: var(--theme-color);
+  font-size: 14px;
+  margin: 0 4px;
+}
+
+/* filtro de código (mesmo estilo da search-bar) */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.filter-bar input {
+  width: 100%;
+  height: 40px;
+  border: none;
+  flex: 1;
+  background-color: var(--search-bg);
+  border-radius: 4px;
+  font-family: var(--body-font);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 0 20px 0 40px;
+  box-shadow: 0 0 0 2px rgba(134, 140, 160, 0.02);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
+  background-size: 14px;
+  background-repeat: no-repeat;
+  background-position: 16px 48%;
+  color: var(--theme-color);
+  max-width: 300px;     /* ou o valor que fizer sentido */
+}
+.filter-bar input::placeholder {
+  color: var(--inactive-color);
+}
+
+
+
+/* === Spinner SVG com porcentagem === */
+
+.title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5em; /* espaçamento entre texto e spinner */
+}
+
+#productSpinner {
+  display: block;
+  width: 50px;
+  height: 50px;
+  margin: 0;          /* fica colado ao lado do título */
+  position: relative;
+}
+
+#productSpinner svg {
+  width: 100%;
+  height: 100%;
+}
+
+#svg circle {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1s linear;
+  stroke: #666;
+  stroke-width: 0.5em; /* ajuste da espessura pra ficar proporcional */
+}
+
+#svg #bar {
+  stroke: #ff9f1e;
+}
+
+#productSpinner:after {
+  /* o tamanho do pseudo-elemento também se ajusta automaticamente
+     à nova largura/altura do container */
+  content: attr(data-pct) "%";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8em;    /* reduz fonte pra caber no 50×50 */
+  line-height: 1;
+  width: auto;
+  height: auto;
+}
+
+
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.filter-row label {
+  white-space: nowrap;
+}
+
+/* Ajusta o botão do filtro para ficar igual aos outros ícones */
+.filter-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+/* se precisar, força o stroke do SVG */
+.filter-icon svg {
+  stroke: currentColor;
+}
+.filter-icon.active {
+  color: #ff0000; /* ou qualquer cor que você queira para "ativo" */
+}
+
+
+
+
+
+
+
+body #user-button {
+  z-index: 1000;
+  bottom: 1rem !important;
+  right: 1rem !important;
+  color: var(--user-button-text);
+  transition: 1s 0s ease-out;
+  -webkit-animation: slide 3s ease-out forwards;
+          animation: slide 3s ease-out forwards;
+}
+@-webkit-keyframes slide {
+  0%, 50% {
+    opacity: 0;
+    display: block !important;
+  }
+  100% {
+    opacity: 1;
+    display: block !important;
+  }
+}
+@keyframes slide {
+  0%, 50% {
+    opacity: 0;
+    display: block !important;
+  }
+  100% {
+    opacity: 1;
+    display: block !important;
+  }
+}
+body #user-button .u-card {
+  border-radius: 100%;
+  box-shadow: 0 0 1rem -0.25rem var(--user-button-shadow), inset 0 0 1rem -0.75rem var(--user-button-shadow);
+}
+body #user-button .u-main {
+  cursor: pointer;
+  --user-button-background:var(--user-button-main, #EC87C0);
+}
+body #user-button .u-main img {
+  height: 100%;
+  width: 100%;
+}
+body #user-button .u-main iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4rem;
+  height: 4rem;
+  opacity: 1;
+  transition: 0s 4s;
+}
+body #user-button .u-icons {
+  position: relative;
+  z-index: 950;
+  transform: translate(-50%, -50%);
+  background: var(--user-button-circle);
+  box-shadow: 0 0 0 0.125rem var(--user-button-cardborder);
+  border-radius: 100%;
+  transition: 0.25s;
+  opacity: 1 !important;
+  -webkit-backdrop-filter: blur(10px);
+          backdrop-filter: blur(10px);
+  /*&:before {
+     z-index:-1;
+     position:absolute;
+     top:0; right:0; bottom:0; left:0;
+     content:'';
+
+     backdrop-filter: blur(10px);
+  }*/
+}
+body #user-button .u-icons a {
+  color: inherit;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  text-decoration: none;
+}
+body #user-button .u-icons a div {
+  padding: 0.5rem;
+  transition: 0s;
+}
+body #user-button .u-icons a[href="https://twitter.com/zed_dash"] {
+  position: relative;
+}
+body #user-button .u-icons a[href="https://twitter.com/zed_dash"]:before {
+  content: "Middle Click";
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  white-space: pre;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: 0.25s ease-in;
+  background: #fffc;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+body #user-button .u-icons a[href="https://twitter.com/zed_dash"].show:before {
+  opacity: 1;
+  transition: 0.25s ease-out;
+}
+body #user-button .u-icons a[href="https://twitter.com/zed_dash"] div {
+  color: #1da1f2;
+}
+body #user-button .u-icons a[href="https://codepen.io/z-"] div {
+  background: black;
+  color: white;
+}
+body #user-button .u-icons a.u-random div {
+  position: relative;
+  top: -1px;
+  -webkit-animation: diespin 2s linear infinite;
+          animation: diespin 2s linear infinite;
+}
+@-webkit-keyframes diespin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+@keyframes diespin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+body #user-button .u-icons a.u-random:not(:hover) div {
+  -webkit-animation-play-state: paused;
+          animation-play-state: paused;
+}
+body #user-button .u-icons > * {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background: var(--singlecolour);
+  border-radius: 100%;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: 0.25s -0.05s;
+}
+body #user-button .u-icons > *:before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+body #user-button .u-icons > *:hover, body #user-button .u-icons > *:focus-within {
+  background: var(--hcolour);
+}
+body #user-button .u-icons > *:first-child:nth-last-child(1):nth-child(1), body #user-button .u-icons > *:first-child:nth-last-child(1) ~ *:nth-child(1) {
+  left: 25%;
+  top: 25%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(2):nth-child(1), body #user-button .u-icons > *:first-child:nth-last-child(2) ~ *:nth-child(1) {
+  left: 37.5%;
+  top: 18.75%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(2):nth-child(2), body #user-button .u-icons > *:first-child:nth-last-child(2) ~ *:nth-child(2) {
+  left: 18.75%;
+  top: 37.5%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(3):nth-child(1), body #user-button .u-icons > *:first-child:nth-last-child(3) ~ *:nth-child(1) {
+  left: 50%;
+  top: 15.625%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(3):nth-child(2), body #user-button .u-icons > *:first-child:nth-last-child(3) ~ *:nth-child(2) {
+  left: 25%;
+  top: 25%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(3):nth-child(3), body #user-button .u-icons > *:first-child:nth-last-child(3) ~ *:nth-child(3) {
+  left: 15.625%;
+  top: 50%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(4):nth-child(1), body #user-button .u-icons > *:first-child:nth-last-child(4) ~ *:nth-child(1) {
+  left: 62.5%;
+  top: 18.75%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(4):nth-child(2), body #user-button .u-icons > *:first-child:nth-last-child(4) ~ *:nth-child(2) {
+  left: 37.5%;
+  top: 18.75%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(4):nth-child(3), body #user-button .u-icons > *:first-child:nth-last-child(4) ~ *:nth-child(3) {
+  left: 18.75%;
+  top: 37.5%;
+}
+body #user-button .u-icons > *:first-child:nth-last-child(4):nth-child(4), body #user-button .u-icons > *:first-child:nth-last-child(4) ~ *:nth-child(4) {
+  left: 18.75%;
+  top: 62.5%;
+}
+body #user-button:hover .u-icons, body #user-button:focus-within .u-icons {
+  width: 300% !important;
+  height: 300% !important;
+}
+
+body {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  height: 100vh;
+  font-family: "Roboto", sans-serif;
+  transition: 0.25s;
+}
+body.dark {
+  background: #232223;
+  color: white;
+}
+@media (prefers-color-scheme: dark) {
+  body:not(.light) {
+    background: #232223;
+    color: white;
+  }
+}
+body .credit {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  color: inherit;
+}
+body .options {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  overflow: hidden;
+  min-width: 600px;
+  max-width: 900px;
+  width: calc(100% - 100px);
+  height: 400px;
+}
+@media screen and (max-width: 718px) {
+  body .options {
+    min-width: 520px;
+  }
+  body .options .option:nth-child(5) {
+    display: none;
+  }
+}
+@media screen and (max-width: 638px) {
+  body .options {
+    min-width: 440px;
+  }
+  body .options .option:nth-child(4) {
+    display: none;
+  }
+}
+@media screen and (max-width: 558px) {
+  body .options {
+    min-width: 360px;
+  }
+  body .options .option:nth-child(3) {
+    display: none;
+  }
+}
+@media screen and (max-width: 478px) {
+  body .options {
+    min-width: 280px;
+  }
+  body .options .option:nth-child(2) {
+    display: none;
+  }
+}
+body .options .option {
+  position: relative;
+  overflow: hidden;
+  min-width: 60px;
+  margin: 10px;
+  background: var(--optionBackground, var(--defaultBackground, #E6E9ED));
+  background-size: auto 120%;
+  background-position: center;
+  cursor: pointer;
+  transition: 0.5s cubic-bezier(0.05, 0.61, 0.41, 0.95);
+}
+body .options .option:nth-child(1) {
+  --defaultBackground:#ED5565;
+}
+body .options .option:nth-child(2) {
+  --defaultBackground:#FC6E51;
+}
+body .options .option:nth-child(3) {
+  --defaultBackground:#FFCE54;
+}
+body .options .option:nth-child(4) {
+  --defaultBackground:#2ECC71;
+}
+body .options .option:nth-child(5) {
+  --defaultBackground:#5D9CEC;
+}
+body .options .option:nth-child(6) {
+  --defaultBackground:#AC92EC;
+}
+body .options .option.active {
+  flex-grow: 10000;
+  transform: scale(1);
+  max-width: 600px;
+  margin: 0px;
+  border-radius: 40px;
+  background-size: auto 100%;
+  /*&:active {
+     transform:scale(0.9);
+  }*/
+}
+body .options .option.active .shadow {
+  box-shadow: inset 0 -120px 120px -120px black, inset 0 -120px 120px -100px black;
+}
+body .options .option.active .label {
+  bottom: 20px;
+  left: 20px;
+}
+body .options .option.active .label .info > div {
+  left: 0px;
+  opacity: 1;
+}
+body .options .option:not(.active) {
+  flex-grow: 1;
+  border-radius: 30px;
+}
+body .options .option:not(.active) .shadow {
+  bottom: -40px;
+  box-shadow: inset 0 -120px 0px -120px black, inset 0 -120px 0px -100px black;
+}
+body .options .option:not(.active) .label {
+  bottom: 10px;
+  left: 10px;
+}
+body .options .option:not(.active) .label .info > div {
+  left: 20px;
+  opacity: 0;
+}
+body .options .option .shadow {
+  position: absolute;
+  bottom: 0px;
+  left: 0px;
+  right: 0px;
+  height: 120px;
+  transition: 0.5s cubic-bezier(0.05, 0.61, 0.41, 0.95);
+}
+body .options .option .label {
+  display: flex;
+  position: absolute;
+  right: 0px;
+  height: 40px;
+  transition: 0.5s cubic-bezier(0.05, 0.61, 0.41, 0.95);
+}
+body .options .option .label .icon {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  min-width: 40px;
+  max-width: 40px;
+  height: 40px;
+  border-radius: 100%;
+  background-color: white;
+  color: var(--defaultBackground);
+}
+body .options .option .label .info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-left: 10px;
+  color: white;
+  white-space: pre;
+}
+body .options .option .label .info > div {
+  position: relative;
+  transition: 0.5s cubic-bezier(0.05, 0.61, 0.41, 0.95), opacity 0.5s ease-out;
+}
+body .options .option .label .info .main {
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+body .options .option .label .info .sub {
+  transition-delay: 0.1s;
+}
+/* === Carousel Foto: ocupar 100% da largura interna da faixa azul === */
+#listaFotos .options {
+  /* remover limites de largura */
+  min-width: 0 !important;
+  max-width: none !important;
+  /* ocupar toda a largura do container pai */
+  width: 100% !important;
+  /* (opcional) centralizar, caso o pai tenha padding */
+  margin: 0 auto;
+  /* manter altura e overflow */
+  height: 400px;
+  overflow: hidden;
+}
+
+.foto-modal-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+
+
+
+/* ────────────────────────────────────────────────────────────────
+   E S T R U T U R A   D E   P R O D U T O   (#estruturaProduto)
+   Bloco completo e autossuficiente
+   ──────────────────────────────────────────────────────────────── */
+
+/* — container da lista — */
+#estruturaProduto .content-section ul#malha{
+  display:block;               /* força UL a bloco */
+  list-style:none;
+  margin:0;
+  padding:0;
+  max-height:600px;            /* scroll vertical */
+  overflow-y:auto;
+  overflow-x:auto;             /* scroll horiz. se apertar */
+}
+
+/* — cabeçalho fixo (6 colunas) — */
+#estruturaProduto .content-section ul#malha li.header-row{
+  display:grid;
+  grid-template-columns:
+      120px                       /* Código   */
+      minmax(220px,1fr)           /* Descrição*/
+      60px                        /* QTD      */
+      70px                        /* Unidade  */
+      90px                        /* Custo    */
+      80px;                       /* Editar   */
+  column-gap:1rem;
+  align-items:center;
+  padding:8px 18px;
+  position:sticky; top:0; z-index:2;
+  background:rgba(113,119,144,.15);
+  font-weight:bold;
+  text-align:center;             /* centraliza todos os th */
+}
+#estruturaProduto .content-section ul#malha li.header-row div:nth-child(1),
+#estruturaProduto .content-section ul#malha li.header-row div:nth-child(2){
+  text-align:left;               /* Código e Descrição à esquerda */
+}
+
+/* — linhas de dados (mesma grade) — */
+#estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row){
+  display:grid;
+  grid-template-columns:
+      120px minmax(220px,1fr) 60px 70px 90px 80px;
+  column-gap:1rem;
+  align-items:center;
+  padding:8px 18px;
+}
+
+/* — células alinhadas — */
+#estruturaProduto .content-section ul#malha li.header-row > *,
+#estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > *{
+  justify-self:start;
+  margin:0; width:auto;
+}
+
+/* — cabeçalhos de categoria (full-width) — */
+#estruturaProduto .content-section ul#malha li.category-header{
+  display:block;
+  background:rgba(144,119,119,.41);
+  font-size:1.1em;
+  padding:8px 18px;
+  cursor:default;
+}
+
+/* — remove pontinho verde e recuos na descrição — */
+#estruturaProduto #malha .status-circle{ display:none; }
+#estruturaProduto #malha .status{
+  display:block;
+  margin:0; padding:0;
+  white-space:normal;            /* quebra linha se precisar */
+}
+#estruturaProduto #malha .status-text{ margin-left:0; }
+
+/* — centraliza valores numéricos — */
+#estruturaProduto #malha .qtd,
+#estruturaProduto #malha .unidade,
+#estruturaProduto #malha .custo-real{
+  text-align:center;
+}
+
+/* — centraliza o botão “Editar” (6.ª coluna) — */
+#estruturaProduto #malha .button-wrapper{
+  display:flex;
+  justify-content:center;
+}
+
+/* ── Destaque visual do cabeçalho sticky ───────────────────────── */
+#estruturaProduto .content-section ul#malha li.header-row{
+  background: rgba(16,18,27,0.92);   /* fundo bem mais opaco       */
+  backdrop-filter: blur(4px);        /* leve desfoque atrás (edge) */
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* (opcional) se quiser um efeito “barra flutuante” ainda mais visível */
+#estruturaProduto .content-section ul#malha li.header-row::after{
+  content:'';
+  position:absolute; left:0; right:0; bottom:-1px; height:1px;
+  background: var(--border-color);   /* linha divisória fina       */
+}
+
+/* ──────────────────────────────────────────────────
+   Layout de Lista de Peças idêntico à Estrutura de produto
+   ────────────────────────────────────────────────── */
+   #listaPecasTab .content-section ul#listaPecasList {
+    display: block;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 600px;    /* altura fixa com scroll */
+    overflow-y: auto;
+    overflow-x: auto;
+  }
+  
+  #listaPecasTab .content-section ul#listaPecasList li.header-row {
+    display: grid;
+    grid-template-columns:
+        120px                       /* Código          */
+        minmax(220px,1fr)           /* Descrição       */
+        60px                        /* QTD             */
+        70px                        /* Unidade         */
+        90px                        /* Valor sugerido  */
+        80px;                       /* Abrir           */
+    column-gap: 1rem;
+    align-items: center;
+    padding: 8px 18px;
+    position: sticky; top: 0; z-index: 2;
+    background: rgba(16,18,27,0.92);
+    backdrop-filter: blur(4px);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: bold;
+    text-align: center;
+  }
+  #listaPecasTab .content-section ul#listaPecasList li.header-row div:nth-child(-n+2) {
+    text-align: left;  /* Código e Descrição à esquerda */
+  }
+  
+  #listaPecasTab .content-section ul#listaPecasList li:not(.category-header):not(.header-row) {
+    display: grid;
+    grid-template-columns:
+        120px minmax(220px,1fr) 60px 70px 90px 80px;
+    column-gap: 1rem;
+    align-items: center;
+    padding: 8px 18px;
+  }
+  
+  #listaPecasTab .content-section ul#listaPecasList li.category-header {
+    display: block;
+    background: rgba(144,119,119,0.41);
+    font-size: 1.1em;
+    padding: 8px 18px;
+    cursor: default;
+  }
+  
+  /* remove pontinho e recuo na descrição */
+  #listaPecasTab #listaPecasList .status-circle { display: none; }
+  #listaPecasTab #listaPecasList .status {
+    display: block;
+    margin: 0;
+    padding: 0;
+    white-space: normal;
+  }
+  #listaPecasTab #listaPecasList .status-text {
+    margin-left: 0;
+    word-break: break-word;
+  }
+  
+  /* centraliza colunas numéricas */
+  #listaPecasTab #listaPecasList .qtd,
+  #listaPecasTab #listaPecasList .unidade,
+  #listaPecasTab #listaPecasList .valor {
+    text-align: center;
+  }
+  
+  /* botão “Abrir” centralizado */
+  #listaPecasTab #listaPecasList .button-wrapper {
+    width: auto;
+    display: flex;
+    justify-content: center;
+  }
+  
+  /* ajusta largura das colunas para não herdar os estilos globais */
+  #listaPecasTab #listaPecasList .products,
+  #listaPecasTab #listaPecasList .status {
+    width: auto;
+    margin-left: 0;
+  }
+  #listaPecasTab #listaPecasList .button-wrapper .status-button {
+    padding: 6px 18px;
+  }
+
+
+
+
+
+/* submenu (detalhes) dentro da Estrutura de produto */
+#estruturaProduto #malha .submenu{
+  grid-column: 1 / -1;               /* ocupa todas as colunas */
+  padding: 8px 18px 8px calc(120px + 1rem);  /* recuo alinhado ao texto */
+  background: rgba(255,255,255,.04);  /* leve contraste */
+  font-size: 14px;
+  line-height: 1.4em;
+}
+
+#estruturaProduto #malha .submenu ul{
+  margin:0; padding:0; list-style:none;
+}
+
+#estruturaProduto #malha .submenu li + li{
+  margin-top:4px;
+}
+
+/* -------------------------------------------------
+   CSS original do seu form (cole TODO este bloco)
+   — lembrando de manter o @import do Montserrat no topo
+------------------------------------------------- */
+/* ─────────── Scoped Form CSS (cole aqui) ─────────── */
+.auth-popup,
+.auth-popup * {
+  box-sizing: border-box;
+  outline: none;
+}
+
+.auth-popup {
+  background: #f6f5f7;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  font-family: "Montserrat", sans-serif;
+  width: 768px;
+  max-width: 100%;
+  min-height: 480px;
+  margin: auto;
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 14px 28px rgba(0,0,0,0.25),
+              0 10px 10px rgba(0,0,0,0.22);
+}
+
+.auth-popup h1 {
+  font-weight: bold;
+  margin: 0;
+}
+
+.auth-popup h2 {
+  text-align: center;
+}
+
+.auth-popup p {
+  font-size: 14px;
+  font-weight: 100;
+  line-height: 20px;
+  letter-spacing: 0.5px;
+  margin: 20px 0 30px;
+}
+
+.auth-popup span {
+  font-size: 12px;
+}
+
+.auth-popup a {
+  color: #333;
+  font-size: 14px;
+  text-decoration: none;
+  margin: 15px 0;
+}
+
+.auth-popup button {
+  border-radius: 20px;
+  border: 1px solid #ff4b2b;
+  background-color: #ff4b2b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 12px 45px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: transform 80ms ease-in;
+}
+
+.auth-popup button:active {
+  transform: scale(0.95);
+}
+
+.auth-popup button:focus {
+  outline: none;
+}
+
+.auth-popup button.ghost {
+  background-color: transparent;
+  border-color: #fff;
+}
+
+.auth-popup form {
+  background-color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 0 50px;
+  height: 100%;
+  text-align: center;
+}
+
+.auth-popup input {
+  background-color: #eee;
+  border: none;
+  padding: 12px 15px;
+  margin: 8px 0;
+  width: 100%;
+}
+
+.auth-popup .container {
+  width: 100%;
+  max-width: 768px;
+  min-height: 480px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.6s ease-in-out;
+}
+
+.auth-popup .form-container {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transition: all 0.6s ease-in-out;
+}
+
+.auth-popup .sign-in-container {
+  left: 0;
+  width: 50%;
+  z-index: 2;
+}
+
+.auth-popup .container.right-panel-active .sign-in-container {
+  transform: translateX(100%);
+}
+
+.auth-popup .sign-up-container {
+  left: 0;
+  width: 50%;
+  opacity: 0;
+  z-index: 1;
+}
+
+.auth-popup .container.right-panel-active .sign-up-container {
+  transform: translateX(100%);
+  opacity: 1;
+  z-index: 5;
+  animation: show 0.6s;
+}
+
+@keyframes show {
+  0%, 49.99% {
+    opacity: 0;
+    z-index: 1;
+  }
+  50%, 100% {
+    opacity: 1;
+    z-index: 5;
+  }
+}
+
+.auth-popup .overlay-container {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+  transition: transform 0.6s ease-in-out;
+  z-index: 100;
+}
+
+.auth-popup .container.right-panel-active .overlay-container {
+  transform: translateX(-100%);
+}
+
+.auth-popup .overlay {
+  background: #002547;
+  background: -webkit-linear-gradient(to right, #E72D34, #002547);
+  background: linear-gradient(to right, #E72D34, #002547);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: 0 0;
+  color: #FFFFFF;
+  position: relative;
+  left: -100%;
+  height: 100%;
+  width: 200%;
+  transform: translateX(0);
+  transition: transform 0.6s ease-in-out;
+}
+
+.auth-popup .container.right-panel-active .overlay {
+  transform: translateX(50%);
+  position: relative; /* Já definido, mas reforça o contexto */
+}
+
+.auth-popup .overlay-panel {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 0 40px;
+  text-align: center;
+  top: 0;
+  height: 100%;
+  width: 50%;
+  transition: transform 0.6s ease-in-out;
+}
+
+.auth-popup .overlay-left {
+  transform: translateX(-20%);
+}
+
+.auth-popup .container.right-panel-active .overlay-left {
+  transform: translateX(0);
+}
+
+.auth-popup .overlay-right {
+  right: 0;
+  transform: translateX(0);
+}
+
+.auth-popup .container.right-panel-active .overlay-right {
+  transform: translateX(20%);
+}
+
+.auth-popup .social-container {
+  margin: 20px 0;
+}
+
+.auth-popup .social-container a {
+  border: 1px solid #ddd;
+  border-radius: 50%;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 5px;
+  height: 40px;
+  width: 40px;
+}
+
+.auth-popup footer {
+  background-color: #222;
+  color: #fff;
+  font-size: 14px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  text-align: center;
+}
+
+.auth-popup footer p {
+  margin: 10px 0;
+}
+
+.auth-popup footer i {
+  color: red;
+}
+
+.auth-popup footer a {
+  color: #3c97bf;
+  text-decoration: none;
+}
+
+/* botão “×” */
+.auth-popup .close-auth {
+  position: absolute;
+  top: 1rem;       /* afasta 16px do topo do modal */
+  right: 1rem;     /* afasta 16px da borda direita */
+  background: none;
+  border: none;
+  font-size: 1.5rem;  /* ou ajuste como preferir */
+  line-height: 1;
+  cursor: pointer;
+  color: #333;     /* mesma cor dos títulos */
+  padding: 0;
+}
+/* ─────────────────────────────────────────────────────────── */
+
+.title-wrapper { display:flex; align-items:center; gap:0.5em; }
+
+#estoqueSpinner {          /* clone exato do productSpinner */
+  display:block; width:50px; height:50px; margin:0; position:relative;
+}
+#estoqueSpinner svg  { width:100%; height:100%; }
+#svgEst circle       { stroke-dashoffset:0; transition:stroke-dashoffset 1s linear;
+                       stroke:#666; stroke-width:0.5em; }
+#svgEst #barEst      { stroke:#ff9f1e; }   /* mesma cor */
+#estoqueSpinner:after{
+  content:attr(data-pct) "%"; position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%); font-size:0.8em; line-height:1;
+}
+
+/* --- spinner de Estrutura de produto --------------------------------- */
+.spinner-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;                     /* distância entre círculo e texto */
+}
+
+#estoqueSpinner {
+  display: block;
+  width: 50px;
+  height: 50px;
+  margin: 0;
+  position: relative;
+}
+
+#estoqueSpinner svg { width: 100%; height: 100%; }
+
+#svgEst circle {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 1s linear;
+  stroke: #666;
+  stroke-width: 0.5em;
+}
+
+#svgEst #barEst { stroke: #ff9f1e; }
+
+#estoqueSpinner:after {
+  content: attr(data-pct) "%";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8em;
+  line-height: 1;
+}
+
+.spinner-label {
+  font-size: 0.9em;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* ─── Faz o sub-painel de Detalhes ocupar tudo e rolar internamente ─── */
+/* ==============================
+   CONTROLE DE TAMANHO + SCROLL
+   ============================== */
+
+/* ======================================
+   1) CONTROLE DE ALTURA + SCROLL DAS LISTAS
+   ====================================== */
+   :root {
+    --inner-max-items: 8;         /* quantas linhas quer ver sem scroll */
+    --inner-row-height: 40px;     /* altura de cada <li> */
+  }
+  
+  /* aplica a todas as 4 listas de detalhes */
+  ul#detalhesList,
+  ul#cadastroList,
+  ul#financeiroList,
+  ul#pdvList,
+ul#comprasList,
+  ul#logisticaList {
+    max-height: calc(var(--inner-max-items) * var(--inner-row-height));
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 8px; /* evita o conteúdo “sumir” sob o scroll */
+  }
+  
+  /* garante que cada item fique visível (remove hides antigos) */
+  ul#detalhesList li,
+  ul#cadastroList li,
+  ul#financeiroList li,
+  ul#pdvList li,
+ul#comprasList li ,
+  ul#logisticaList li {
+    display: flex !important;
+  }
+  
+  /* ======================================
+     2) COMPACTAR ALTURA DAS SUB-TABS E WRAPPER
+     ====================================== */
+  
+  /* Barrazinha de subtabs (aba interna do “Dados do produto”) */
+  #dadosProduto > .main-header {
+    height: 48px;         /* diminui de 58px para 48px */
+    padding: 0 20px;      /* menos padding lateral */
+  }
+  
+  /* Links dentro dela */
+  #dadosProduto > .main-header .header-menu a {
+    padding: 8px 16px;    /* reduz o padding vertical e horizontal */
+    font-size: 14px;
+  }
+  
+  /* Remove margens/paddings extras antes da lista */
+  #dadosProduto .content-section {
+    margin-top: 8px;
+    padding: 0;
+  }
+  #dadosProduto .content-section-title {
+    margin-bottom: 8px;
+  }
+  
+  .status-msg {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 4px 8px;
+    background: #333;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 0.9em;
+    position: relative;
+    top: -2px;
+    opacity: 0.9;
+  }
+  /* para cada <li class="adobe-product"> */
+.adobe-product {
+  display: flex;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+
+/* coluna de label (“Tipo item”, “Marca”, etc) */
+.adobe-product .products {
+  flex-shrink: 0;
+  width: 150px; /* ajusta conforme seu layout */
+  margin-right: 16px;
+}
+
+/* coluna de valor */
+.adobe-product .status-text {
+  flex: 1;
+  white-space: pre-wrap;      /* preserva quebras que você queira */
+  word-break: break-word;     /* quebra palavras muito longas */
+  overflow-wrap: break-word;  /* compatibilidade */
+  margin-right: 16px;
+}
+
+/* wrapper do botão */
+.adobe-product .button-wrapper {
+  flex-shrink: 0;
+}
+
+/* opcional: ajuste nos botões pra ficarem alinhados no topo */
+.adobe-product .content-button {
+  align-self: flex-start;
+}
+/* ==== Quebra de linha em “Descrição detalhada” e “Obs internas” ==== */
+/* Aplica somente na aba “Detalhes do produto” (#dadosProduto) */
+#dadosProduto .content-section ul#detalhesList li .status-text {
+  white-space: normal !important;    /* permite múltiplas linhas */
+  word-break: break-word !important; /* quebra palavras muito longas */
+  overflow-wrap: break-word !important;
+}
+
+/* Garante que o botão fique sempre no topo direito */
+#dadosProduto .content-section ul#detalhesList li .button-wrapper {
+  align-self: flex-start !important;
+}
+
+/* ─── Mesma formatação de “product-details” para PDV e Compras ─── */
+/* ─── Mesma formatação “tabela” para PDV e Compras ─── */
+.content-section ul#pdvList,
+.content-section ul#comprasList {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background-color: var(--content-bg);
+  padding-left: 0;
+  margin: 0;
+  border-radius: 14px;
+  border: 1px solid var(--theme-bg-color);
+  cursor: default;
+  overflow-y: auto;
+}
+
+.content-section ul#pdvList li,
+.content-section ul#comprasList li {
+  list-style: none;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  font-size: 16px;
+  white-space: nowrap;
+  transition: background-color 0.3s;
+}
+
+.content-section ul#pdvList li + li,
+.content-section ul#comprasList li + li {
+  border-top: 1px solid var(--border-color);
+}
+
+.content-section ul#pdvList li:hover,
+.content-section ul#comprasList li:hover {
+  background-color: var(--theme-bg-color);
+}
+
+.content-section ul#pdvList li:hover:first-child,
+.content-section ul#comprasList li:hover:first-child {
+  border-radius: 13px 13px 0 0;
+}
+
+.content-section ul#pdvList li:hover:last-child,
+.content-section ul#comprasList li:hover:last-child {
+  border-radius: 0 0 13px 13px;
+}
+
+/* colunas internas */
+.content-section ul#pdvList .products,
+.content-section ul#comprasList .products {
+  flex-shrink: 0;
+  width: 150px;
+}
+
+.content-section ul#pdvList .status-text,
+.content-section ul#comprasList .status-text {
+  flex: 1;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.content-section ul#pdvList .button-wrapper,
+.content-section ul#comprasList .button-wrapper {
+  flex-shrink: 0;
+}
+
+
+/* detalhes da estrutura, full-width abaixo da linha */
+#estruturaProduto .structure-details {
+  background: rgba(0,0,0,0.03);
+  padding: 0.5rem 1rem;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+#estruturaProduto .structure-details ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem 1rem;
+}
+#estruturaProduto .structure-details li {
+  margin: 0;
+}
+
+.estrutura-item { border-bottom: 1px solid #ddd; padding: 0.5rem; }
+.estrutura-summary { display: flex; gap: 1rem; }
+.estrutura-details {
+  padding: 0.5rem 1rem;
+  background: #f9f9f9;
+}
+.estrutura-details ul {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0;
+}
+
+.category-filter { margin-bottom: 1rem; }
+.category-filter .tag-input { margin: 0.5rem 0; }
+.category-filter .tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.category-filter .tag {
+  background: rgba(255,255,255,0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.category-filter .tag button.remove-tag {
+  background: none;
+  border: none;
+  color: #f55;
+  margin-left: 4px;
+  cursor: pointer;
+}
+
+
+/* 4) Faz o título ocupar toda a largura */
+#pecasFilterForm > strong {
+  grid-column: 1 / -1;
+  margin-bottom: 0.5rem;
+}
+#pecasFilterForm > br {
+  display: none;
+}
+
+/* 5) Cada bloco de categoria também vira um pequeno grid interno */
+#pecasFilterForm .category-filter {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  row-gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--dropdown-bg);
+  border-radius: 6px;
+}
+
+/* 6) Checklist e label alinhados horizontalmente */
+#pecasFilterForm .category-filter label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+/* 7) Input de tag e container de tags ocupam 100% do bloco */
+#pecasFilterForm .category-filter .tag-input input,
+#pecasFilterForm .category-filter .tags {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 8) As tags internas ficam flex-wrap, mas dentro do grid do bloco */
+#pecasFilterForm .category-filter .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* no final do seu menu_produto.css, depois de tudo */
+.filter-panel.show {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem 1.5rem;
+  padding: 1rem;
+}
+
+/* estiliza cada “célula” do grid, que agora são .filter-row */
+.filter-panel.show .filter-row {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 1rem;
+  background: var(--dropdown-bg);
+  border-radius: 6px;
+}
+
+/* alinha o label+select horizontalmente dentro do .filter-row */
+.filter-panel.show .filter-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+/* faz os selects/tags ocuparem 100% da célula */
+.filter-panel.show .filter-row select,
+.filter-panel.show .filter-row .tags {
+  width: 100%;
+  box-sizing: border-box;
+}
+#pecasFilterForm{
+  display:contents;
+}
+.filter-panel.show{
+  display:grid !important;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:1rem 1.5rem;
+  padding:1rem;
+}
+
+
+/* cabeçalho clicável */
+.category-header.collapsible  { cursor:pointer; }
+
+/* ícone de expandir/retrair */
+.expand-icon {
+  margin-left: 8px;
+  font-size: 14px;
+  pointer-events:none;         /* clique vai no <li>, não no <i>  */
+}
+
+/* toolbar de Características */
+.caract-toolbar i.fa-wrench,
+.caract-toolbar i.fas.fa-wrench {
+  font-size: 1.2em;
+  cursor: pointer;
+}
+.caract-toolbar .caract-menu {
+  display: none;
+  flex-direction: row;
+  align-items: center;
+  position: absolute;
+  background: var(--dropdown-bg);
+  padding: 0.5rem;
+  list-style: none;
+  margin-top: 0.5rem;
+  border-radius: 6px;
+    width: max-content !important;
+  height: auto !important;
+  white-space: nowrap;      /* evita quebra de linha nos ícones */
+}
+
+.caract-menu.show {
+  display: flex;
+}
+
+.caract-toolbar .caract-menu.show {
+  display: flex;
+}
+.caract-toolbar .caract-menu li + li {
+  margin-left: 1rem;
+}
+
+.caract-toolbar .caract-menu i {
+  margin: 0 4px;
+  cursor: pointer;
+}
+/* quando JS fizer menu.style.display = 'flex', aí aparece */
+.delete-icon {
+  margin-left: 12px;  /* ajuste até ficar na posição desejada */
+}
+/* filtro oculto por padrão */
+.filter-panel {
+  display: none;
+}
+
+/* quando receber a classe .show (clicou no ícone), exibe o painel */
+.filter-panel.show {
+  display: block; /* ou flex, se seu layout usar flexbox */
+}
+/* Itens da lista na aba Acessos */
+#sideMenuList li,
+#topMenuList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Listbox padrão da intranet */
+/* mantém o estilo do select */
+.content-select {
+  margin-left: 1rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--input-bg-color);
+  color: var(--text-color);
+  min-width: 120px;
+}
+
+/* realça a borda do select quando focado */
+.content-select:focus {
+  outline: 2px solid var(--primary-color);
+}
+
+/* Reset das opções para branco/preto */
+.content-select option {
+  background-color: #fff;
+  color: #000;
+}
+
+/* Destaque ao passar o mouse ou focar */
+.content-select option:hover,
+.content-select option:focus {
+  background-color: var(--primary-color);
+  color: #fff;
+}
+
+/* Garante que a opção “checked” continue preta sobre branco */
+.content-select option:checked {
+  background-color: #fff;
+  color: #000;
+}
+/* Remove scroll das listas individuais */
+#sideMenuList,
+#topMenuList {
+  max-height: none;
+  overflow: visible;
+}
+
+/* Novo container que engloba ambas as listas */
+.menu-scroll {
+  max-height: 450px;      /* altura máxima do bloco inteiro */
+  overflow-y: auto;       /* barra única para tudo que ultrapassar */
+  padding-right: 0.5rem;  /* mantém espaço interno à direita */
+}
+
+/* painel lateral de notificações */
+.side-panel {
+  position: fixed;          /* flutuante, não dentro do flow */
+  top: 70px;                /* ajuste à altura do cabeçalho */
+  right: 0;
+  width: 320px;
+  max-width: 90vw;
+  height: calc(100% - 70px);
+  background: #fff;
+  border-left: 1px solid #ddd;
+  box-shadow: -2px 0 6px rgba(0,0,0,.1);
+  overflow-y: auto;
+  z-index: 2000;
+}
+/* começa invisível; será exibido com JS */
+.hidden   { display: none; }
+.visible  { display: block; }
+
+/* lista simples das mensagens */
+#listaNotificacoes {
+  list-style: disc inside;
+  padding-left: 0;
+}
+
+#listaNotificacoes li {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: center;
+}
+#listaNotificacoes button {
+  padding: 2px 6px;
+  font-size: .75rem;
+  cursor: pointer;
+}
+
+.btn-reset  { background-color: var(--success-color); }
+.btn-del    { background-color: var(--danger-color);  }
+
+/* =========  BLOCO DE INFORMAÇÕES DO COLABORADOR  ========== */
+#loggedInContainer{
+  padding: 18px 12px;          /* espaçamento interno */
+  line-height: 1.35;
+}
+
+#loggedInContainer h3{
+  margin: 0 0 6px;
+  font-size: 1.1rem;           /* ligeiramente maior que o <p> */
+  font-weight: 600;
+}
+
+#loggedInContainer p{
+  margin: 4px 0;
+  font-size: 0.95rem;
+}
+/* quando o bloco de dados estiver sobre o fundo roxo */
+#loggedInContainer.on-overlay {
+  color: #fff;             /* texto branco */
+}
+#loggedInContainer.on-overlay p {
+  color: #e6e6e6;          /* um branco levemente cinza pros parágrafos */
+}
+/* Quando os dados da Omie estão sobre o overlay roxo */
+#loggedInContainer.on-overlay {
+  color:#fff;                    /* títulos em branco */
+}
+#loggedInContainer.on-overlay p {
+  color:#e6e6e6;                 /* parágrafos cinza-claro */
+}
+/* centraliza o conteúdo da coluna cinza quando logado */
+.sign-in-container.centered {
+  display:          flex    !important;   /* sobrepõe display:block original  */
+  flex-direction:   column;
+  justify-content:  center;               /* centra na vertical              */
+  align-items:      center;               /* centra na horizontal            */
+  text-align:       center;
+}
+
+.sign-in-container.centered h1,
+.sign-in-container.centered p,
+.sign-in-container.centered button{
+  width: 100%;             /* garante alinhamento */
+  margin: 8px 0;           /* espaçamento suave   */
+}
+/* botão Deslogar ganha o mesmo vermelho do #btnLogout
+   somente quando está no painel cinza (.centered) */
+   .sign-in-container.centered #btnOverlayLogout{
+    background-color:#ff4b2b !important;
+    border-color:#ff4b2b   !important;
+    color:#fff             !important;
+  }
+  #loggedInContainer p{
+    margin:4px 0;
+  }
+  #loggedInContainer span{
+    font-weight:300;
+  }
+/* garante que o cabeçalho fique sempre na frente do overlay */
+.auth-popup h2{
+  position: relative;   /* cria novo contexto */
+  z-index: 150;         /* maior que .overlay-container (100) */
+}
+/* Barra cinza que corre de fora a fora atrás do <h2> */
+.auth-popup::before{
+  content:"";
+  position:absolute;
+  top:0; left:0;
+  width:100%;
+  height:60px;                /* ajuste → mesma altura do <h2> */
+  background:#f6f5f7;         /* mesma cor do painel cinza     */
+  z-index:120;                /* fica acima do overlay (100) e
+                                 abaixo do h2 (150)             */
+}
+
+/* garante que o título continue no topo da nova barra */
+.auth-popup h2{
+  position:relative;
+  z-index:150;                /* já havia sido colocado antes  */
+  margin:0;
+  padding:16px 0;             /* opcional: afasta texto da borda */
+  width:100%;
+  text-align:center;
+}
+/* Ajuste do espaçamento interno nas linhas de detalhes */
+#colabDetailsList li.detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* aumenta padding à esquerda e à direita */
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+#colabDetailsList li .detail-label {
+  font-weight: 600;
+  flex: 0 0 180px;   /* largura fixa para o label */
+  margin-right: 5rem;
+}
+
+#colabDetailsList li .detail-value {
+  flex: 1;           /* ocupa o resto */
+  word-break: break-word;
+}
+/* Limita a altura do painel de detalhes e ativa scroll interno */
+#colabDetailsList {
+  max-height: 480px;      /* ajuste este valor até ficar certinho até "Código do Vendedor" */
+  overflow-y: auto;
+  /* opcional: deixa o scroll sempre visível, se quiser */
+  /* scrollbar-width: thin; */
+}
+
+/* mantém o título fixo ao rolar (se quiser) */
+#colabDetails .title-wrapper {
+  position: sticky;
+  top: 0;
+  background: var(--bg-color);
+  z-index: 1;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+/* Container geral dos botões e lista */
+#colabDetails .title-wrapper {
+  /* transforma o wrapper num flex-container em coluna */
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+/* Primeira linha: Anexo + Voltar à lista */
+#anexoRow1 {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* Segunda linha: Foto do perfil + Outros arquivos */
+#anexoRow2 {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* Lista de anexos logo abaixo */
+#anexosList {
+  /* limita altura e adiciona scroll */
+  max-height: 200px;
+  overflow-y: auto;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: var(--bg-elevated);
+  border-radius: 0.375rem;
+}
+
+/* Ajuste para botões (opcional) */
+#anexoRow1 .content-button,
+#anexoRow2 .content-button {
+  flex-shrink: 0;
+}
+.icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--theme-color);
+  font-size: 1.5rem;
+  margin-left: auto;
+  transition: color 0.3s;
+}
+
+.icon-button:hover {
+  color: var(--button-inactive);
+}
+/* container com posicionamento relativo + espaço interno só para empurrar o conteúdo */
+#colabDetails {
+  position: relative;
+  padding-top: 80px; /* empurra o restante para baixo, acomodando a foto */
+}
+
+/* placeholder absoluto, colado ao topo e centralizado */
+/* Remove o absolute antigo e força o img a preencher o wrapper */
+#colabPhoto {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  transform: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* garante container relativo para o posicionamento absoluto */
+#colabDetails {
+  position: relative;
+}
+
+/* desfaz o flex/margin/padding do título */
+#colabDetails .title-wrapper {
+  display: block;
+  margin: 0;
+  padding: 0;
+}
+
+/* fixa o botão de voltar no topo, à direita */
+#colabDetails #backToList {
+  position: absolute;
+  top: 16px;
+  right: 24px;  /* afaste da borda direita conforme precisar */
+  margin: 0;
+}
+/* garante que o container continue com position:relative */
+#colabDetails {
+  position: relative;
+}
+
+/* botão “Voltar” permanece colado à direita */
+#colabDetails #backToList {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  margin: 0;
+}
+
+/* botão “Anexo” fica à esquerda do “Voltar” */
+#colabDetails #attachAnexo {
+  position: absolute;
+  top: 16px;
+  right: 72px;    /* 24px (do back) + botão de 40px + gap */
+  margin: 0;
+}
+
+/* título centralizado na mesma linha */
+#colabDetails .content-section-title {
+  position: absolute;
+  top: calc(8px + 27px + 16px) !important;       
+  left: 50%;      
+  transform: translateX(-50%);
+  margin: 0;
+}
+
+/* wrapper circular que “segura” o drag em todo o círculo */
+#colabPhotoWrapper {
+  position: absolute;
+  top: 8px;              /* mesmo top que o img tinha */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  overflow: hidden;      /* esconde partes fora do círculo */
+  cursor: grab;          /* cursor aparece em todo o wrapper */
+}
+.caract-toolbar .caract-menu .content-button {
+  all: unset;                /* remove todos os estilos de botão */
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  background: none;
+  color: inherit;
+}
+.caract-toolbar .caract-menu .content-button i {
+  margin: 0 4px;
+}
+.content-section-title i#wrenchIcon {
+  margin-left: 12px;
+}
+/* --- Colaborador inativo --- */
+.inactive-row {
+  color: #b30000;              /* texto vermelho escuro */
+}
+
+/* ─── Wrappers principais: empilham em coluna ─── */
+.main-container,
+.tab-content,
+.tab-pane,
+#kanbanPedidos .content-wrapper,
+#kanbanPedidos .content-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;   /* habilita scroll interno nos filhos */
+}
+
+/* ─── Cards ─── */
+.kanban-list li:not(.placeholder) {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 4px;
+  cursor: grab;
+  color: #fff;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.kanban-list li:not(.placeholder):hover {
+  background: rgba(255,255,255,0.12);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+
+/* ─── Placeholder de drag (pontilhado no tamanho dos cards) ─── */
+.kanban-list li.placeholder {
+  border: 2px dashed rgba(255,255,255,0.3);
+  border-radius: 4px;
+  margin: 0 0 4px;
+  padding: 12px;
+}
+
+
+/* ─── Título do card ─── */
+.kanban-card-header {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* ─── Itens dentro do card ─── */
+.kanban-card-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kanban-card-items li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+}
+/* ─── Kanban Board: mantém em linha ─── */
+.kanban-board {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: auto; /* Adiciona rolagem vertical também */
+  max-height: 100vh; /* Garante que não ultrapasse a tela */
+  justify-content: center;
+  /* garante que cada coluna fique alinhada ao topo */
+  align-items: flex-start;
+  margin-top: 16px; /* ajuste o valor a gosto (px, rem, etc.) */
+}
+/* ─── Cada coluna ocupa espaço na largura e faz scroll interno ─── */
+.kanban-column {
+  flex: 0 0 300px;      /* largura fixa mínima */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;        /* <— habilita scroll no conteúdo */
+  background: rgba(32,34,50,0.8);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  color: #fff;
+}
+/* ─── Cabeçalho sticky ─── */
+.kanban-header {
+  flex: 0 0 auto;
+  padding: 8px;
+  background: rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  text-align: center;
+  color: #fff;
+}
+/* ─── Lista de cards: scroll vertical ─── */
+.kanban-list {
+  flex: 1 1 auto;
+  min-height: 0;       /* <— muito importante */
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+
+/* ─── Barra de scroll interna ─── */
+.kanban-list::-webkit-scrollbar {
+  width: 6px;
+}
+.kanban-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.3);
+  border-radius: 3px;
+}
+#coluna-comercial {
+  max-height: 680px; /* Ajuste este valor conforme necessário */
+  overflow-y: auto; /* Garantir que a barra de rolagem apareça quando o conteúdo exceder o max-height */
+}
+
+
+/* ─── Caixa de Detalhes ─── */
+.detalhes-box {
+  background: var(--content-bg);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  padding: 16px;
+  margin: 16px 8px; /* 16px em cima/baixo e 8px nas laterais */
+  color: #fff;    /* ← letras agora em branco */
+}
+
+/* cabeçalho dentro da caixa */
+.detalhes-box .box-header {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+.detalhes-box .box-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+/* conteúdo interno */
+.detalhes-box .box-content p {
+  margin: 6px 0;
+  line-height: 1.4;
+}
+
+/* tabela de itens */
+.table-det {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+.table-det th,
+.table-det td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+}
+.table-det th {
+  font-weight: 600;
+}
+/* força branco em todos os textos da caixa de detalhes */
+.detalhes-box .box-header,
+.detalhes-box .box-content,
+.detalhes-box .box-content p,
+.table-det th,
+.table-det td {
+  color: #fff;
+}
+/* ─── Popup de Cliente ─── */
+.cliente-popup {
+  position: absolute;
+  background: var(--popup-bg);
+  color: var(--theme-color);
+  padding: 12px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 1000;
+  font-size: 0.9em;
+  line-height: 1.4em;
+  max-width: 240px;
+}
+/* saldo suficiente */
+/* estoque OK: verde */
+.kanban-list li.stock-ok {
+  background-color: #e6ffed !important;
+}
+
+/* estoque insuficiente: amarelo */
+.kanban-list li.stock-low {
+  background-color: #fff8e1 !important;
+}
+/* verde claro com texto escuro */
+.kanban-list li.stock-ok {
+  background-color: #e6ffed !important;
+  color: #333 !important;           /* texto mais escuro */
+}
+
+/* amarelo claro com texto escuro */
+.kanban-list li.stock-low {
+  background-color: #fff8e1 !important;
+  color: #333 !important;           /* texto mais escuro */
+}
+
+/* garantir que a cor dos spans internos também seja ajustada */
+.kanban-list li.stock-ok .item-code,
+.kanban-list li.stock-low .item-code {
+  color: inherit !important;
+}
+/* vermelho para itens com qt=0 e tipoItem≠04 */
+.kanban-list li.stock-error {
+  background-color: #ffe5e5 !important;
+  color: #333 !important;
+}
+
+/* --- seta após Obs. item --- */
+.item-obs {
+  position: relative;
+  padding-right: 34px;      /* deixa espaço para a seta */
+}
+.item-obs .obs-arrow {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  cursor: pointer;     /* mostra a mãozinha ao passar o mouse */
+  /* deixa a seta verde e destacada */
+  color: #28a745;      /* verde “bootstrap success” */
+  font-weight: 900;    /* negrito */
+  font-size: 18px;     /* opcional – aumente ou remova se não quiser */
+}
+/* Destaque para o texto de carregamento na aba Detalhes */
+#detalhesContainer .loading-details {
+  color: #39FF14;      /* verde fluorescente */
+  padding: 4px;        /* espaçamento interno */
+  margin: 8px 0;       /* espaço acima e abaixo */
+  font-weight: 600;    /* deixa o texto mais forte */
+}
+
+/* ícone de proibição junto ao Estq.(0) */
+.no-drag-icon {
+  margin-left: 4px;
+  color: #F44336;
+  font-size: 0.9em;
+  vertical-align: middle;
+}
+
+/* Y – spinner visível em qualquer fundo */
+.kanban-spinner {
+  margin-left: 8px;
+  display: none;        /* fica invisível até ser ativado */
+  font-size: 1.25rem;   /* 20 px aprox. – ligeiramente maior */
+  color: #e60000 !important;  /* vermelho forte para não “sumir” */
+}
+
+
+
+/* ─── Marcador de pedido duplicado ─── */
+/* remove qualquer .duplicate-marker que ainda exista */
+.duplicate-marker{display:none!important;}
+
+/* classe aplicada ao <li> que é duplicado */
+li.duplicado{
+  /* já existe `position:relative` nos cards que tinham o span,
+     mas garantimos para todos: */
+  position:relative;
+}
+
+/* sobrepõe 50 % à direita em vermelho */
+li.duplicado::after{
+  content:'';
+  position:absolute;
+  top:0;
+  right:0;
+  width:2%;            /* metade do card */
+  height:100%;
+  background:#F44336;   /* vermelho alerta */
+  border-top-right-radius:4px;     /* mantém o mesmo arredondado */
+  border-bottom-right-radius:4px;  /*   usado nos seus cards */
+  pointer-events:none;  /* não atrapalha drag & drop */
+}
+
+/* ≡ Container Geral dos Detalhes ≡ */
+.detalhes-wrapper {
+  /* Use cor de fundo suave para destacar sobre o restante da página */
+  background-color: #f5f7fa;  
+  border-radius: 8px;
+  padding: 1.5rem;
+  /* Sombra suave para “levantar” o cartão */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin: 1rem 0;
+}
+
+/* ≡ Cabeçalho dos Dados do Pedido ≡ */
+.detalhes-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+/* Cada bloco (Quantidade / Observação) fica num “cardzinho” secundário */
+.campo-detalhe {
+  display: flex;
+  flex-direction: column;
+  background-color: #ffffff;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  /* Borda fina para destacar levemente */
+  border: 1px solid #e1e6ee;
+  min-width: 200px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+.campo-detalhe .label-detalhe {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #334155;
+  margin-bottom: 0.25rem;
+}
+.campo-detalhe .valor-detalhe {
+  font-size: 1.1rem;
+  color: #1e293b;
+}
+
+/* ≡ Tabela de Itens ≡ */
+.tabela-detalhes {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background-color: #ffffff;
+  border-radius: 6px;
+  overflow: hidden;
+  /* Sombra sutil para o “cartão de tabela” */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+.tabela-detalhes thead {
+  background-color: #0284c7; /* Azul-acento; ajuste conforme tema */
+}
+.tabela-detalhes th,
+.tabela-detalhes td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.95rem;
+  color: #1e293b;
+}
+.tabela-detalhes th {
+  font-weight: 600;
+  color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+.tabela-detalhes tbody tr {
+  background-color: #ffffff;
+}
+/* Alternar cor de fundo nas linhas para facilitar leitura */
+.tabela-detalhes tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+/* Efeito hover para destacar a linha */
+.tabela-detalhes tbody tr:hover {
+  background-color: #e2e8f0;
+}
+
+/* ===== Mensagem de Erro / Loading ===== */
+.loading-details,
+.fault-message {
+  font-size: 1rem;
+  color: #475569;
+  text-align: center;
+  padding: 1rem;
+  background-color: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin: 1rem 0;
+}
+.fault-message {
+  color: #b91c1c;
+  background-color: #fef2f2;
+  border-color: #fecaca;
+}
+
+/* ===== Ajustes de Responsividade ===== */
+@media (max-width: 768px) {
+  .detalhes-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .campo-detalhe {
+    width: 100%;
+  }
+  .tabela-detalhes th,
+  .tabela-detalhes td {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+  }
+}
