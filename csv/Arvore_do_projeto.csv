@@ -1,0 +1,121 @@
+INTRANET_FROMTHERM/
+├── .vs/
+├── csv/
+│   ├── Estrutura_do_projeto.csv
+│   ├── Estrutura_do_produto.csv
+│   ├── ListarNCM.csv
+│   ├── Login.csv
+│   ├── Origem.csv
+│   ├── plano_op.csv
+│   ├── Posto_trabalho.csv
+│   ├── Resultado_teste.csv
+│   ├── resumo_erro_estrutura.csv
+│   ├── Testes01.csv
+│   └── Tipo.csv
+│   └── Paradas.csv
+│   └── Motvio_parada.csv
+├── img/
+│   ├── Produto/
+│   │   └── ... (imagens de produtos)
+│   ├── fundo.png
+│   └── logo.png
+├── login/
+│   ├── login.html
+│   ├── login.js
+├── produtos/
+│   ├── Enviar_estrutura.js
+│   ├── lista_Pecas.js
+│   ├── produto_foto.js
+├── requisicoes_omie/
+│   ├── Dados_produto.js
+│   ├── editar_produto.js
+│   ├── filtro_produto.js
+│   ├── ListarProdutos.js
+│   ├── Pesquisar_produto.js
+├── routes/
+│   ├── estoque.js
+│   ├── estoqueResumo.js
+├── node_modules/
+│   └── ... (dependências NPM)
+├── utils/
+│   ├── axiosRetry.js
+│   └── csvUtils.js
+├── .gitmodules
+├── config.client.js
+├── config.server.js
+├── menu_produto.css
+├── menu_produto.html
+├── package.json
+├── package-lock.json
+├── server.js
+
+
+/* fechar porta 5001*/
+netstat -ano | findstr :5001 
+Stop-Process -Id 27084 -Force
+
+grep -R "o valor que vc quer localizar" .  "Aqui é para ver qual arquivo utiliza uma palavra"
+
+
+http://localhost:5001/# // Meu site
+
+
+(npm run dev // Para iniciar o servidor altomaticamente)
+
+
+chmod +x ./node_modules/.bin/nodemon
+npm run dev // Para iniciar o servidor altomaticamente
+
+Limpe cache (Ctrl+Shift+R).
+
+Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
+no terminal integrado do VS Code:
+git status
+git add .
+git commit -m "Minhas alterações: atualização do layout do modal, correções e melhorias"
+git push
+
+
+(Para enviar apenas alguns arquivos para o GitHub, você pode adicionar
+os arquivos desejados com o comando git add, criar um commit e depois
+fazer o push. Por exemplo:
+
+git add arquivo1.js arquivo2.css
+git commit -m "Adicionando somente os arquivos selecionados"
+git push
+
+Isso fará com que somente as alterações de arquivo1.js e arquivo2.css
+sejam incluídas no commit e enviados para o repositório remoto.)
+
+https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
+https://codepen.io/cjl750/pen/mXbMyo // exemplo de linha do tempo
+https://codepen.io/jkantner/pen/vEBQZYe // exemplo para a pagina do SAC
+https://codepen.io/leonam-silva-de-souza/pen/vYoazQq // exemplo para login
+https://codepen.io/cbolson/pen/YzmENGy // Para deixar a foto dos aniversariantes do mês
+https://codepen.io/dilums/pen/ZEBowxX // dashboard para report
+https://codepen.io/fainder/pen/qBwBeO // menu do modal
+https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script
+https://codepen.io/peanav/pen/DmZEEp // calendario para auditoria escalonada
+https://codepen.io/karan12990/pen/pQzPdR // grafico para gerenciar andamentos de projetos
+https://codepen.io/Clonerrs/pen/qBEQmGQ // Chat para conversas internas da empresa
+https://codepen.io/mr_alien/pen/pNRQxK // Tipo kambam
+https://codepen.io/heff/pen/DyoMvJ // Para incluir videos
+
+"Abaixo nomeclaturas de programação"
+span - campo amarelo para digitação, ou seja, inserção de dados.
+Modal - parecido com o card, porem flutuante.
+Card - Quadrado ou retangulo para gerar informações dentro dele.
+checkbox - campo de seleção de opções.
+radio - campo de seleção de opções.
+input - campo de digitação.
+button - botão de ação.
+select - campo de seleção de opções.
+textarea - campo de digitação de texto.
+label - campo de texto.
+form - campo de formulário.
+table - campo de tabela.
+div - campo de divisão.
+ul - campo de lista não ordenada.
+ol - campo de lista ordenada.
+li - campo de item de lista.
+h1 - campo de titulo.

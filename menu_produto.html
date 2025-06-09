@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Produtos</title>
+  <!-- Font Awesome para os ícones das fotos -->
+  <link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+  integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+/>
+  <!-- Seu CSS principal -->
+  <link rel="stylesheet" href="menu_produto.css"/>
+</head>
+<body>
+
+  <div class="dark-light">
+    <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+    </svg>
+  </div>
+
+  <div class="app">
+    <!-- Cabeçalho principal -->
+    <div class="header">
+      <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
+      <div class="header-menu">
+        <a class="menu-link" href="#">Inicio</a>
+        <a id="menu-produto" class="menu-link notify" href="#">Produto</a>
+        <a class="menu-link" href="#">Qualidade</a>
+        <a id="menu-acessos" class="menu-link notify" href="#">Acessos</a>
+        <a id="menu-notificacoes" class="menu-link notify" href="#">Notificações</a>
+
+
+
+
+
+        
+      </div>
+      <div class="search-bar">
+        <input type="text" placeholder="Pesquisar produto"/>
+      </div>
+      <div class="header-profile">
+        <div class="notification">
+          <span class="notification-number">5</span>
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 01-3.46 0"/>
+          </svg>
+        </div>
+        <svg viewBox="0 0 512 512" fill="currentColor">
+          <path d="M448.773 235.551A135.893 135.893 0 00451 211
+                   c0-74.443-60.557-135-135-135
+                   -47.52 0-91.567 25.313-115.766 65.537
+                   -32.666-10.59-66.182-6.049-93.794 12.979
+                   -27.612 19.013-44.092 49.116-45.425 82.031
+                   C24.716 253.788 0 290.497 0 331
+                   c0 7.031 1.703 13.887 3.006 20.537
+                   l.015.015C12.719 400.492 56.034 436 106 436
+                   h300c57.891 0 106-47.109 106-105
+                   0-40.942-25.053-77.798-63.227-95.449z"/>
+        </svg>
+        <img class="profile-img"
+             src="https://images.unsplash.com/photo-1600353068440-6361ef3a86e8?auto=format&fit=crop&w=1000&q=80"
+             alt="Perfil">
+      </div>
+    </div>
+
+    <div class="wrapper">
+      <!-- Menu lateral -->
+      <div class="left-side">
+        <div class="side-wrapper">
+          <div class="side-title">Produtos</div>
+          <div class="side-menu">
+            <a href="#" id="btn-omie-list1">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
+                   style="margin-right:8px;flex-shrink:0;">
+                <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+              </svg>
+              Lista de produtos
+            </a>
+            <a href="#" id="btn-omie-list">
+              <svg viewBox="0 0 512 512"><!-- ícone --></svg>
+              em construção 2
+            </a>
+            <a href="#">
+              <svg viewBox="0 0 488.932 488.932" fill="currentColor"><!-- ícone --></svg>
+              em construção 3
+              <span class="notification-number updates">3</span>
+            </a>
+          </div>
+        </div>
+        <div class="side-wrapper">
+          <div class="side-title">Recursos humanos</div>
+          <div class="side-menu">
+
+<a href="#" id="btn-colaboradores">
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
+       style="margin-right:8px; flex-shrink:0;">
+    <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/>
+  </svg>
+  Cadastro de colaboradores
+</a>
+            <a href="#" class="menu-link">Aniversariantes</a>
+
+            <!-- … até em construção 18 … -->
+            <a href="#">… em construção 18 …</a>
+          </div>
+
+
+
+<!-- Nova categoria: Logística -->
+<div class="side-wrapper">
+  <div class="side-title">Logística</div>
+  <div class="side-menu">
+    <a href="#" id="menu-pedidos" class="menu-link">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+      </svg>
+      Pedidos
+    </a>
+  </div>
+</div>
+
+
+        </div>
+      </div>
+
+      <!-- Conteúdo principal -->
+      <div class="main-container">
+
+        <!-- Painel de Lista de Produtos -->
+        <div id="listaPecas" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section">
+              <div class="title-wrapper">
+                <div class="content-section-title">
+                  Lista de produtos (<span id="productCount">0</span>)
+                </div>
+                <div id="productSpinner" data-pct="0" style="display:none;">
+                  <svg id="svg" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
+                    <circle r="90" cx="100" cy="100" fill="transparent"
+                            stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+                    <circle id="bar" r="90" cx="100" cy="100" fill="transparent"
+                            stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+                  </svg>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <input type="text" id="codeFilter"  placeholder="Pesquisar código"/>
+                <input type="text" id="descFilter"  placeholder="Pesquisar descrição"/>
+                <button id="filterBtn" class="filter-icon">
+                  <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
+                       stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 4h18l-7 8v6l-4 2v-8l-7-8z"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="filterPanel" class="filter-panel">
+                <div class="filter-row">
+                  <label for="familySelect">Família:</label>
+                  <select id="familySelect"><option value="">– selecione –</option></select>
+                  <label for="tipoItemSelect">Tipo de Item:</label>
+                  <select id="tipoItemSelect"><option value="">– selecione –</option></select>
+                </div>
+                <div class="filter-row">
+                  <label for="caracteristicaSelect">Característica:</label>
+                  <select id="caracteristicaSelect"><option value="">– selecione –</option></select>
+                  <label for="conteudoSelect" id="conteudoLabel" style="display:none">Conteúdo:</label>
+                  <select id="conteudoSelect" style="display:none"><option value="">– selecione –</option></select>
+                </div>
+              </div>
+              <ul id="listaProdutosList" class="content-list product-details"></ul>
+              <div id="pagination" class="pagination-wrapper"></div>
+            </div>
+          </div>
+        </div>
+
+<div id="produtoTabs">
+
+        <!-- Abas internas principais -->
+        <div class="main-header">
+          <div class="header-menu">
+            <a class="main-header-link is-active" href="#" data-target="dadosProduto">Dados do produto</a>
+            <a class="main-header-link"       href="#" data-target="estruturaProduto">Estrutura de produto</a>
+            <a class="main-header-link"       href="#" data-target="listaPecasTab">Lista de peças</a>
+            <a class="main-header-link"       href="#" data-target="listaCaracteristica">Características</a>
+            <a class="main-header-link"       href="#" data-target="listaFotos">Fotos</a>
+          </div>
+        </div>
+
+
+        <div class="tab-content">
+
+          <!-- Dados do produto -->
+          <div id="dadosProduto" class="tab-pane" style="display:none;">
+            <!-- 1) Cabeçalho com título, descrição e imagem -->
+            <div class="content-wrapper">
+              <div class="content-wrapper-header">
+                <div class="content-wrapper-context">
+                  <h3 class="img-content">
+                    <svg viewBox="0 0 512 512"><!-- ícone --></svg>
+                    <span id="productTitle">Código do produto</span>
+                  </h3>
+                  <div class="content-text" id="productDesc"></div>
+                  <button class="content-button">Pedido de compra</button>
+                </div>
+                <img class="content-wrapper-img"
+                     id="productImg"
+                     src="../img/logo.png"
+                     alt="Produto">
+              </div>
+            </div>
+
+<!-- 2) Novo conjunto de abas dentro de Dados do produto -->
+<div class="main-header sub-tabs" style="margin-top: 20px;">
+  <div class="header-menu">
+    <a class="main-header-link is-active" href="#" data-subtarget="detalhesTab">
+      Detalhes do produto
+    </a>
+    <a class="main-header-link" href="#" data-subtarget="cadastroTab">
+      Dados de cadastro
+    </a>
+    <a class="main-header-link" href="#" data-subtarget="financeiroTab">
+      Financeiro
+    </a>
+    <a class="main-header-link" href="#" data-subtarget="logisticaTab">
+      Logística
+    </a>
+    <a href="#" class="main-header-link" data-subtarget="pdv">PDV</a>
+    <a href="#" class="main-header-link" data-subtarget="compras">Compras</a>
+    
+  </div>
+</div>
+
+<!-- 3) Blocos de conteúdo secundário (um para cada aba) -->
+<div class="sub-content" id="detalhesTab">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Detalhes do produto</div>
+      <ul id="detalhesList" class="content-list product-details">
+        <!-- Será preenchido via JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="sub-content" id="cadastroTab" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Dados de cadastro</div>
+      <ul id="cadastroList" class="content-list product-details">
+        <!-- Será preenchido via JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="sub-content" id="financeiroTab" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Financeiro</div>
+      <ul id="financeiroList" class="content-list product-details">
+        <!-- Será preenchido via JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+
+<div class="sub-content" id="logisticaTab" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Logística</div>
+      <ul id="logisticaList" class="content-list product-details">
+        <!-- Será preenchido via JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Aba PDV -->
+<div id="pdv" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">PDV</div>
+      <ul id="pdvList" class="content-list product-details">
+        <!-- Preenchido por JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Aba Compras -->
+<div id="compras" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Compras</div>
+      <ul id="comprasList" class="content-list product-details">
+        <!-- Preenchido por JS -->
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+          </div>
+
+          <!-- Estrutura do produto -->
+          <div id="estruturaProduto" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section">
+                <div class="title-wrapper">
+                  <div class="content-section-title">Estrutura de produto</div>
+                  <!-- Spinner + texto -->
+                  <div id="estoqueSpinnerBox" class="spinner-box" style="display:none;">
+                    <div id="estoqueSpinner" data-pct="0">
+                      <svg id="svgEst" viewBox="0 0 200 200">
+                        <circle r="90" cx="100" cy="100" fill="transparent"
+                                stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+                        <circle id="barEst" r="90" cx="100" cy="100" fill="transparent"
+                                stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+                      </svg>
+                    </div>
+                    <span class="spinner-label">Carregando custo real…</span>
+                  </div>
+                </div>
+                <ul id="malha" class="content-list">
+                  <li class="header-row">
+                    <div>Código</div>
+                    <div>Descrição</div>
+                    <div>QTD</div>
+                    <div>Unidade</div>
+                    <div>Custo real</div>
+                    <div>Editar</div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div id="listaPecasTab" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section">
+          
+                <!-- É importante ter esta title-wrapper -->
+                <div class="title-wrapper">
+                  <div class="content-section-title">Lista de peças</div>
+                </div>
+          
+                <!-- É aqui que o renderListaPecas / applyPecasFilter vai injetar -->
+                <ul id="listaPecasList" class="content-list"></ul>
+              </div>
+            </div>
+          </div>
+          
+<!-- Características -->
+<div id="listaCaracteristica" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Características</div>
+      <ul id="listacaracteristica" class="content-list product-details"></ul>
+    </div>
+  </div>
+</div>
+
+
+          <!-- Aba Fotos -->
+          <div id="listaFotos" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <h3 class="content-section-title">Fotos</h3>
+              <div class="options"></div>
+            </div>
+          </div>
+            
+          <div id="acessos" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section">
+          
+                <!-- 1) Título -->
+                <div class="title-wrapper">
+                  <div class="content-section-title">Gerenciar Acessos</div>
+                </div>
+          
+                <!-- 2) Lista de usuários -->
+                <div id="userList" class="content-list"></div>
+          
+                <!-- 3) Botão Novo Usuário -->
+                <button id="btnNewUser" class="content-button">Novo Usuário</button>
+          
+                <!-- 4) Formulário oculto -->
+                <div id="userForm" style="display:none; margin-top:1rem;">
+                  <input id="inpUsername" placeholder="Usuário"/>
+                  <button id="btnSaveUser" class="content-button">Criar Usuário</button>
+                </div>
+          
+                <hr style="margin:2rem 0; border-color: var(--border-color)" />
+
+                <div class="menu-scroll">
+                  <!-- Categoria 1: Menu Lateral -->
+                  <div class="title-wrapper">
+                    <div class="content-section-title">Menu Lateral</div>
+                  </div>
+                  <ul id="sideMenuList" class="content-list">
+                    <!-- …itens… -->
+                  </ul>
+                
+                  <!-- Divisor interno entre categorias -->
+                  <hr style="margin:1.5rem 0; border-color: var(--border-color)" />
+                
+                  <!-- Categoria 2: Menu Superior -->
+                  <div class="title-wrapper">
+                    <div class="content-section-title">Menu Superior</div>
+                  </div>
+                  <ul id="topMenuList" class="content-list">
+                    <!-- …itens… -->
+                  </ul>
+                </div> <!-- /.menu-scroll -->
+                
+          
+              </div> <!-- /.content-section -->
+            </div> <!-- /.content-wrapper -->
+          </div> <!-- /#acessos -->
+          
+<!-- Painel de notificações ------------------------------------------------>
+<div id="notificacoes" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="title-wrapper">
+        <div class="content-section-title">Notificações</div>
+      </div>
+
+      <ul id="listaNotificacoes" class="content-list"></ul>
+    </div>
+  </div>
+</div>
+
+          
+            
+
+
+
+        </div> <!-- /.tab-content -->
+
+</div> <!-- /#produtoTabs -->
+
+<!-- Abas de Pedidos (inicialmente ocultas) -->
+<div id="kanbanTabs" class="main-header" style="display:none; margin-top:1rem;">
+  <div class="header-menu">
+    <a href="#" data-kanban-tab="comercial" class="main-header-link is-active">Comercial</a>
+    <a href="#" data-kanban-tab="pcp"       class="main-header-link">PCP</a>
+    <a href="#" data-kanban-tab="producao"  class="main-header-link">Produção</a>
+    <a href="#" data-kanban-tab="detalhes"  class="main-header-link">Detalhes</a>
+  </div>
+</div>
+
+
+
+<div id="kanbanContent" style="display:none;">
+  <div id="conteudo-comercial" class="kanban-page">
+<div class="kanban-board">
+<div class="kanban-column">
+  <div class="kanban-header">
+    <div class="title-wrapper">
+      <span>Pedido aprovado</span>
+      <!-- Spinner escondido por CSS até ser exibido pelo JS -->
+      <i class="fas fa-spinner fa-spin kanban-spinner"></i>
+    </div>
+  </div>
+  <ul id="coluna-comercial" class="kanban-list"></ul>
+</div>
+
+
+  <div class="kanban-column">
+    <div class="kanban-header">Separação logistica</div>
+    <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
+  </div>
+
+  <div class="kanban-column">
+    <div class="kanban-header">Fila de produção</div>
+    <ul id="coluna-pcp-op" class="kanban-list"></ul>
+  </div>
+</div>
+
+    <div class="kanban-board">…</div>
+  </div>
+  <div id="conteudo-pcp"      class="kanban-page" style="display:none;"></div>
+  <div id="conteudo-producao" class="kanban-page" style="display:none;"></div>
+  <div id="conteudo-detalhes" class="kanban-page" style="display:none;">
+  <div id="detalhesContainer" class="detalhes-container">
+    <!-- Detalhes do pedido serão inseridos aqui -->
+  </div>
+</div>
+
+</div>
+
+
+
+
+
+
+
+
+      </div> <!-- /.main-container -->
+
+
+
+
+
+    </div> <!-- /.wrapper -->
+
+    <div class="overlay-app" id="authOverlay"></div>
+  </div> <!-- /.app -->
+
+  <!-- Scripts -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script type="module" src="menu_produto.js"></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
+  <script type="module" src="./requisicoes_omie/Dados_produto.js" defer></script>
+  <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
+  <script src="produtos/produto_foto.js" defer></script>
+  <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
+  <script type="module" src="login/login.js"></script>
+  <script type="module" src="./kanban/kanban.js" defer></script>
+
+</body>
+</html>

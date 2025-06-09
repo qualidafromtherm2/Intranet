@@ -1,0 +1,5 @@
+{
+    "watch": ["server.js", "routes/", "requisicoes_omie/"], 
+    "delay": "500ms"
+  }
+  

@@ -12,7 +12,6 @@ yarn-debug.log*
 pnpm-debug.log*
 
 # variáveis de ambiente
-.env
 .env.*.local
 
 # configurações do VS Code
@@ -24,5 +23,6 @@ Thumbs.db
 
 # cache de Pacotes
 .npm
+.env
 config.server.js
 config.client.js
