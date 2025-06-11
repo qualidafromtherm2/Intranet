@@ -27,7 +27,7 @@ const PAUSE_MS  = 1200;            // 1,2 s entre páginas
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
-    : 'https://intranet-fromtherm.onrender.com';
+    : 'https://intranet-30av.onrender.com';
 
 /* ----------------------- SPINNER ------------------------------------ */
 const $ = id => document.getElementById(id);
