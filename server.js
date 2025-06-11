@@ -1034,12 +1034,18 @@ app.post('/api/kanban', express.json(), (req, res) => {
 
 
 // ────────────────────────────────────────────
-// 4) Resto dos assets estáticos e SPA fallback
+// 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
 app.use(express.static(path.join(__dirname)));
-app.get('*', (req, res) => {
+
+// ────────────────────────────────────────────
+// 5) Só para rotas HTML do seu SPA, devolva o index
+// ────────────────────────────────────────────
+// Isso não intercepta /menu_produto.js, /requisicoes_omie/xx.js, etc.
+app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
   res.sendFile(path.join(__dirname, 'menu_produto.html'));
 });
+
 
 
   // ——————————————————————————————
