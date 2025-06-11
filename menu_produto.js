@@ -1,5 +1,8 @@
 // menu_produto.js
 import config from './config.client.js';
+const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+const API_BASE = window.location.origin; // já serve https://intranet-30av.onrender.com
+
 import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
@@ -12,11 +15,6 @@ function showMainTab(tabId) {
 }
 
 window.showMainTab = showMainTab;   // expõe p/ outros módulos
-
-
-
-
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 // referências ao container principal e ao painel de Acessos
 const wrapper      = document.querySelector('.wrapper');
 const acessosPanel = document.getElementById('acessos');
@@ -175,11 +173,23 @@ const ulList     = document.getElementById('listaProdutosList');
           filtrar_apenas_omiepdv: 'N'
         }]
       };
-      const resResumo = await fetch('/api/omie/produtos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+ const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
+   method:      'POST',
+   credentials: 'include',
+   headers:     { 'Content-Type':'application/json' },
+   body:        JSON.stringify({
+     call:       'ListarProdutosResumido',
+     app_key:    OMIE_APP_KEY,
+     app_secret: OMIE_APP_SECRET,
+     param:      [{
+       pagina: 1,
+       registros_por_pagina: 50,
+       filtrar_apenas_descricao: `%${termo}%`,
+       apenas_importado_api: 'N',
+       filtrar_apenas_omiepdv: 'N'
+     }]
+   })
+ });
       const dados = await resResumo.json();
       resumoItems = dados.produto_servico_resumido || [];
       countEl.textContent = resumoItems.length;

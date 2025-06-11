@@ -61,7 +61,7 @@ async function fetchPagina(nPagina = 1) {
     app_secret: OMIE_APP_SECRET
   };
 
-  const r = await fetch(`${API_BASE}/api/omie/estoque/pagina`, {
+  const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
     method :'POST',
     headers:{ 'Content-Type':'application/json' },
     body   : JSON.stringify(payload)
