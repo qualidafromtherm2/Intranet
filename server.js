@@ -158,7 +158,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 
   // para imprimir etiquetas ZPL
-const fs   = require('fs');
+
 const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
 
 
