@@ -81,6 +81,20 @@ const upload = multer({ storage: multer.memoryStorage() });
   const { Octokit } = await import('@octokit/rest');
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
+    // ─── Bootstrapping de ZPL já existentes ───
+  const existing = fs.readdirSync(etiquetasDir)
+                    .filter(f => f.endsWith('.zpl'));
+  for (const fileName of existing) {
+    const m = fileName.match(/^etiqueta_(.+)\.zpl$/);
+    if (m) {
+      const id = m[1];
+      if (!pendingLabels.has(id)) {
+        pendingLabels.set(id, { fileName, printed: false });
+        console.log(`[Boot] Etiqueta pendente carregada: ${id}`);
+      }
+    }
+  }
+
     // ────────────────────────────────────────────
   // 3.0) ROTAS DE ETIQUETAS (geração & polling)
   // ────────────────────────────────────────────
