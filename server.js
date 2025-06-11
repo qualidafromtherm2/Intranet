@@ -1018,7 +1018,19 @@ app.post('/api/kanban', express.json(), (req, res) => {
   }
 });
 
-// static + fallback abaixo...
+// ────────────────────────────────────────────
+// Serve ZPLs estáticos em /etiquetas
+// ────────────────────────────────────────────
+const etiquetasDir = path.join(__dirname, 'etiquetas');
+// garante que exista
+if (!fs.existsSync(etiquetasDir)) fs.mkdirSync(etiquetasDir, { recursive: true });
+// monta como rota antes do SPA fallback
+app.use('/etiquetas', express.static(etiquetasDir));
+
+
+// ────────────────────────────────────────────
+// 4) Resto dos assets estáticos e SPA fallback
+// ────────────────────────────────────────────
 app.use(express.static(path.join(__dirname)));
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'menu_produto.html'));
@@ -1026,22 +1038,13 @@ app.get('*', (req, res) => {
 
 
   // ——————————————————————————————
-  // 4) Servir arquivos estáticos e SPA fallback
-  // ——————————————————————————————
-  app.use(express.static(path.join(__dirname)));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'menu_produto.html'));
-  });
-
-
-  // ——————————————————————————————
   // 5) Inicia o servidor
   // ——————————————————————————————
- const PORT = process.env.PORT || 5001;
- const HOST = '0.0.0.0';
- app.listen(PORT, HOST, () =>
-   console.log(`Servidor rodando em http://${HOST}:${PORT}`)
- );
+const PORT = process.env.PORT || 5001;
+const HOST = '0.0.0.0';
+app.listen(PORT, HOST, () =>
+  console.log(`Servidor rodando em http://${HOST}:${PORT}`)
+);
 
 
 })();
