@@ -25,4 +25,3 @@ Thumbs.db
 .npm
 .env
 config.server.js
-config.client.js
