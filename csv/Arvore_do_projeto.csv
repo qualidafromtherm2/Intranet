@@ -67,7 +67,10 @@ chmod +x ./node_modules/.bin/nodemon
 npm run dev // Para iniciar o servidor altomaticamente
 
 Puxar (pull) as alterações do repositório remoto do github para ca
-git pull origin master
+git add server.js
+git commit -m "Ajusta rota /etiquetas e faz Express escutar em 0.0.0.0"
+git push
+
 
 
 
