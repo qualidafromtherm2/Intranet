@@ -64,20 +64,20 @@ function updateSpinnerPct(val) {
 }
 /* --------------------- Omie → uma página ----------------------------- */
 async function fetchPage(pagina = 1) {
-const body = {
-  call:       'ListarProdutos',
-  app_key:    OMIE_APP_KEY,
-  app_secret: OMIE_APP_SECRET,
-  param: [{
-    pagina,
-    registros_por_pagina: PAGE_SIZE,
-    apenas_importado_api: 'N',
-    filtrar_apenas_omiepdv: 'N',
-    exibir_caracteristicas: 'S',
-    exibir_obs: 'S',
-    exibir_kit: 'S'
-  }]
-};
+  const body = {
+    call:       'ListarProdutos',
+    app_key:    OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      pagina,
+      registros_por_pagina: PAGE_SIZE,
+      apenas_importado_api: 'N',
+      filtrar_apenas_omiepdv: 'N',
+      exibir_caracteristicas: 'S',
+      exibir_obs: 'S',
+      exibir_kit: 'S'
+    }]
+  };
 
 await fetch(`${API_BASE}/api/omie/produtos`, {
   method:      'POST',
