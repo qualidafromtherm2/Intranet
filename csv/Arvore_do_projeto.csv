@@ -66,10 +66,22 @@ http://localhost:5001/# // Meu site
 chmod +x ./node_modules/.bin/nodemon
 npm run dev // Para iniciar o servidor altomaticamente
 
-Puxar (pull) as alterações do repositório remoto do github para ca
-git add server.js
-git commit -m "Ajusta rota /etiquetas e faz Express escutar em 0.0.0.0"
-git push
+
+
+
+
+Puxar (pull) as alterações do repositório local para o github:
+
+
+# No diretório do seu repositório
+git add .
+
+# Agora commit com uma mensagem que reflita todas as mudanças
+git commit -m "Atualiza front para usar API_BASE e credentials em várias requisições"
+
+# Envie para o master remoto (que o Render consome)
+git push origin main:master
+
 
 
 

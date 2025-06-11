@@ -11,6 +11,9 @@
  * ======================================================================= */
 
 import config from '../config.client.js';
+const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+const API_BASE = window.location.origin;  // 'https://intranet-30av.onrender.com'
+
 import { loadDadosProduto } from './Dados_produto.js';
 import {
   initFiltros,
@@ -18,8 +21,6 @@ import {
   getFiltered,
   populateFilters
 } from './filtro_produto.js';
-
-const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
 /* --------------------- CONSTANTES ------------------------------------ */
 const PAGE_SIZE = 500;
@@ -64,10 +65,10 @@ function updateSpinnerPct(val) {
 /* --------------------- Omie → uma página ----------------------------- */
 async function fetchPage(pagina = 1) {
   const body = {
-    call :'ListarProdutos',
-    app_key   : OMIE_APP_KEY,
+    call:       'ListarProdutos',
+    app_key:    OMIE_APP_KEY,
     app_secret: OMIE_APP_SECRET,
-    param:[{
+    param: [{
       pagina,
       registros_por_pagina: PAGE_SIZE,
       apenas_importado_api: 'N',
@@ -77,12 +78,19 @@ async function fetchPage(pagina = 1) {
       exibir_kit: 'S'
     }]
   };
-  const res = await fetch('/api/omie/produtos', {
-    method :'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body   : JSON.stringify(body)
+
+  const res = await fetch(`${API_BASE}/api/omie/produtos`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type': 'application/json' },
+    body:        JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(await res.text());
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Erro ${res.status}: ${text}`);
+  }
+
   return res.json();
 }
 

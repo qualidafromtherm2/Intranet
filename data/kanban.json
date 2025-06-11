@@ -127,5 +127,25 @@
     ],
     "estoque": 0,
     "_codigoProd": 10661798957
+  },
+  {
+    "pedido": "17706",
+    "codigo": "FTI115DPTBR",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": -1,
+    "_codigoProd": 10538072919
+  },
+  {
+    "pedido": "17727",
+    "codigo": "FT180F35",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353807
   }
 ]

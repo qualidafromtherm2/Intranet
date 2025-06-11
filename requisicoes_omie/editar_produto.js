@@ -200,7 +200,7 @@ export function ensureSaveAllBtn() {
   
         try {
 // dentro do if (f.key === 'estoque_minimo') { ... }
-await fetch('/api/omie/estoque/ajuste/', {
+await fetch('${API_BASE}/api/omie/estoque/ajuste/', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
