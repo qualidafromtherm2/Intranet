@@ -16,6 +16,19 @@ let ulListenersInitialized = false;
 let draggedIndex = null;
 let draggedFromColumn = null;
 
+// No início do arquivo, adicione:
+function showSpinnerOnCard(card) {
+  if (!card) return;
+  card.innerHTML = '<i class="fas fa-spinner fa-spin kanban-spinner"></i>';
+}
+
+function restoreCardContent(card, originalContent) {
+  if (!card || !originalContent) return;
+  card.textContent = originalContent;
+  card.setAttribute('draggable', 'true');
+}
+
+
 function getUlIdByColumn(columnName) {
   return COLUMN_MAP[columnName] || COLUMN_MAP["Pedido aprovado"];
 }
@@ -39,10 +52,11 @@ export function renderKanbanDesdeJSON(itemsKanban) {
   });
 
   itemsKanban.forEach((item, index) => {
-    const counts = item.local.reduce((acc, col) => {
-      acc[col] = (acc[col] || 0) + 1;
-      return acc;
-    }, {});
+    const counts = item.local.reduce((acc, raw) => {
+  const col = raw.split(',')[0];       // pega tudo antes da vírgula
+  acc[col] = (acc[col]||0) + 1;
+  return acc;
+}, {})
 
     Object.entries(counts).forEach(([columnName, count]) => {
       const ulId = getUlIdByColumn(columnName);
@@ -135,102 +149,141 @@ export function enableDragAndDrop(itemsKanban) {
         if (e.target === ul) removePlaceholder();
       });
 
-      ul.addEventListener('drop', async e => {
-        console.log('[DROP] evento drop em', e.currentTarget.id,
-                    'indice=', draggedIndex);
-        e.preventDefault();
-        removePlaceholder();
+ul.addEventListener('drop', async e => {
+  console.log('[DROP] evento drop em', e.currentTarget.id,
+              'indice=', draggedIndex);
+  e.preventDefault();
+  removePlaceholder();
 
-        if (draggedIndex === null || !draggedFromColumn) {
-          console.log('[DROP] drag não iniciado corretamente');
-          return;
-        }
+  if (draggedIndex === null || !draggedFromColumn) {
+    console.log('[DROP] drag não iniciado corretamente');
+    return;
+  }
 
-        const destinationUlId = e.currentTarget.id;
-        const newColumn = Object.entries(COLUMN_MAP)
-          .find(([, id]) => id === destinationUlId)?.[0];
-        if (!newColumn) {
-          console.log('[DROP] coluna destino inválida:', destinationUlId);
-          return;
-        }
+  const destinationUlId = e.currentTarget.id;
+  const newColumn = Object.entries(COLUMN_MAP)
+    .find(([, id]) => id === destinationUlId)?.[0];
+  if (!newColumn) {
+    console.log('[DROP] coluna destino inválida:', destinationUlId);
+    return;
+  }
 
-        const originColumn = draggedFromColumn; // captura a coluna de origem
-        console.log('[DROP] movendo', itemsKanban[draggedIndex].codigo,
-                    'de', originColumn, 'para', newColumn);
+  const originColumn = draggedFromColumn;
+  const item = itemsKanban[draggedIndex];
+  
+  // 1. Encontra todos os cards com este índice (pode haver múltiplos se o mesmo item está em várias colunas)
+  const cards = document.querySelectorAll(`.kanban-card[data-index="${draggedIndex}"]`);
+  
+  // 2. Encontra o card específico que está sendo movido (na coluna de origem)
+  const movedCard = Array.from(cards).find(card => card.dataset.column === originColumn);
+  
+  if (!movedCard) {
+    console.log('[DROP] card não encontrado');
+    return;
+  }
 
-        // 1) atualiza status no array
-        const item = itemsKanban[draggedIndex];
-        const idx = item.local.findIndex(c => c === originColumn);
-        if (idx !== -1) item.local[idx] = newColumn;
+  // 3. Salva o conteúdo original e mostra o spinner imediatamente
+  const originalContent = movedCard.innerHTML;
+  if (newColumn === "Separação logística") {
+    movedCard.innerHTML = '<i class="fas fa-spinner fa-spin kanban-spinner"></i>';
+    movedCard.style.pointerEvents = 'none'; // Impede interação durante o processamento
+  }
 
-        try {
-          const respProd = await fetch(
-            `/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`
-          );
-          const prodData = await respProd.json();
-          console.log('[OP] detalhes:', prodData);
+  // 4. Atualiza o modelo de dados
+  const idx = item.local.findIndex(c => c === originColumn);
+  if (idx !== -1) item.local[idx] = newColumn;
 
-          const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
-          console.log('[OP] tipoItem:', tipoItem);
-          console.log('[OP] origem armazenada:', originColumn,
-                      'destino:', newColumn);
+  try {
+    // 5. Processa a criação da OP (se aplicável)
+    const respProd = await fetch(
+      `/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`
+    );
+    const prodData = await respProd.json();
+    console.log('[OP] detalhes:', prodData);
 
-          if (
-            originColumn === 'Pedido aprovado' &&
-            newColumn === 'Separação logística' &&
-            (tipoItem === '04' || parseInt(tipoItem, 10) === 4)
-          ) {
-            console.log('[OP] condição satisfeita, incluindo OP');
+    const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
+    
+    if (
+      originColumn === 'Pedido aprovado' &&
+      newColumn === 'Separação logística' &&
+      (tipoItem === '04' || parseInt(tipoItem, 10) === 4)
+    ) {
+      console.log('[OP] condição satisfeita, incluindo OP');
 
-            // gera código OP
-            const prefix = item.codigo[0];
-            const now = new Date();
-            const mm = String(now.getMonth()+1).padStart(2,'0');
-            const yy = String(now.getFullYear()).slice(-2);
-            const seqKey = 'kanban_op_seq';
-            const last = parseInt(localStorage.getItem(seqKey),10)||0;
-            const seq = last + 1;
-            localStorage.setItem(seqKey, seq);
-            const seqStr = String(seq).padStart(4,'0');
-            const cCodIntOP = `${prefix}${mm}${yy}${seqStr}`;
+      // Gera código OP
+      const prefix = item.codigo[0];
+      const now = new Date();
+      const mm = String(now.getMonth()+1).padStart(2,'0');
+      const yy = String(now.getFullYear()).slice(-2);
+      const seqKey = 'kanban_op_seq';
+      const last = parseInt(localStorage.getItem(seqKey),10)||0;
+      const seq = last + 1;
+      localStorage.setItem(seqKey, seq);
+      const seqStr = String(seq).padStart(4,'0');
+      const cCodIntOP = `${prefix}${mm}${yy}${seqStr}`;
 
-            const tom = new Date(now.getTime() + 24*60*60*1000);
-            const d = String(tom.getDate()).padStart(2,'0');
-            const m2 = String(tom.getMonth()+1).padStart(2,'0');
-            const y2 = tom.getFullYear();
-            const dDtPrevisao = `${d}/${m2}/${y2}`;
+      const tom = new Date(now.getTime() + 24*60*60*1000);
+      const d = String(tom.getDate()).padStart(2,'0');
+      const m2 = String(tom.getMonth()+1).padStart(2,'0');
+      const y2 = tom.getFullYear();
+      const dDtPrevisao = `${d}/${m2}/${y2}`;
 
-            const payloadOP = {
-              call: 'IncluirOrdemProducao',
-              param: [{ identificacao: { cCodIntOP, dDtPrevisao, nCodProduto: item._codigoProd, nQtde: 1 }}],
-              app_key: OMIE_APP_KEY,
-              app_secret: OMIE_APP_SECRET
-            };
-            console.log('[OP] payload OP:', payloadOP);
+      const payloadOP = {
+        call: 'IncluirOrdemProducao',
+        param: [{ identificacao: { cCodIntOP, dDtPrevisao, nCodProduto: item._codigoProd, nQtde: 1 }}],
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET
+      };
 
-            const respOP = await fetch('/api/omie/produtos/op', {
-              method: 'POST',
-              headers: {'Content-Type':'application/json'},
-              body: JSON.stringify(payloadOP)
-            });
-            console.log('[OP] status OP:', respOP.status);
-            const dataOP = await respOP.json();
-            console.log('[OP] resposta OP:', dataOP);
-          } else {
-            console.log('[OP] sem OP: movimento ou tipoItem não correspondem');
-          }
-        } catch (err) {
-          console.error('[OP] erro inclusão OP:', err);
-        }
-
-        // 3) re-renderiza e salva
-        renderKanbanDesdeJSON(itemsKanban);
-        enableDragAndDrop(itemsKanban);
-        await salvarKanbanLocal(itemsKanban);
-
-        draggedIndex = null;
-        draggedFromColumn = null;
+      // 6. Chama API para criar OP
+      const respOP = await fetch('/api/omie/produtos/op', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payloadOP)
       });
+      const dataOP = await respOP.json();
+
+      if (!dataOP.faultstring && !dataOP.error) {
+        const arr = item.local;
+        const colunaLimpa = newColumn;
+        const idxMov = arr.findIndex(s => s === colunaLimpa);
+        if (idxMov !== -1) {
+          arr[idxMov] = `${colunaLimpa},${cCodIntOP}`;
+
+          // 7. Gera etiqueta
+          try {
+            await fetch('/api/etiquetas', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ numeroOP: cCodIntOP })
+            });
+          } catch (err) {
+            console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[OP] erro inclusão OP:', err);
+    
+    // 8. Em caso de erro, restaura o conteúdo original
+    movedCard.innerHTML = originalContent;
+    movedCard.style.pointerEvents = '';
+    
+    // Atualiza a interface sem salvar as mudanças
+    renderKanbanDesdeJSON(itemsKanban);
+    enableDragAndDrop(itemsKanban);
+    return;
+  }
+
+  // 9. Atualiza a interface com os novos dados
+  renderKanbanDesdeJSON(itemsKanban);
+  enableDragAndDrop(itemsKanban);
+  await salvarKanbanLocal(itemsKanban);
+
+  draggedIndex = null;
+  draggedFromColumn = null;
+});
     });
     ulListenersInitialized = true;
   }
