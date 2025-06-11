@@ -1032,15 +1032,6 @@ app.post('/api/kanban', express.json(), (req, res) => {
   }
 });
 
-// ────────────────────────────────────────────
-// Serve ZPLs estáticos em /etiquetas
-// ────────────────────────────────────────────
-const etiquetasDir = path.join(__dirname, 'etiquetas');
-// garante que exista
-if (!fs.existsSync(etiquetasDir)) fs.mkdirSync(etiquetasDir, { recursive: true });
-// monta como rota antes do SPA fallback
-app.use('/etiquetas', express.static(etiquetasDir));
-
 
 // ────────────────────────────────────────────
 // 4) Resto dos assets estáticos e SPA fallback
