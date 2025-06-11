@@ -1,12 +1,22 @@
 [
   {
+    "pedido": "17183",
+    "codigo": "FTI35D40PT",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 106,
+    "_codigoProd": 10408354006
+  },
+  {
     "pedido": "17369",
     "codigo": "FTI35D40PT",
     "quantidade": 1,
     "local": [
       "Pedido aprovado"
     ],
-    "estoque": 109,
+    "estoque": 106,
     "_codigoProd": 10408354006
   },
   {
@@ -16,18 +26,8 @@
     "local": [
       "Pedido aprovado"
     ],
-    "estoque": 92,
+    "estoque": 89,
     "_codigoProd": 10408354018
-  },
-  {
-    "pedido": "17510",
-    "codigo": "FTI35D40PT",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 109,
-    "_codigoProd": 10408354006
   },
   {
     "pedido": "17569",
@@ -51,16 +51,6 @@
     "_codigoProd": 10621791873
   },
   {
-    "pedido": "17610",
-    "codigo": "FTI75DPTBR",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 0,
-    "_codigoProd": 10476605682
-  },
-  {
     "pedido": "17621",
     "codigo": "FH160L60T",
     "quantidade": 6,
@@ -76,56 +66,6 @@
     "_codigoProd": 10408353626
   },
   {
-    "pedido": "17642",
-    "codigo": "FTI35DPTBR",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 0,
-    "_codigoProd": 10438396618
-  },
-  {
-    "pedido": "17656",
-    "codigo": "FT160L35T",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 0,
-    "_codigoProd": 10408353805
-  },
-  {
-    "pedido": "17663",
-    "codigo": "FTI145DPTBR",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 4,
-    "_codigoProd": 10536379431
-  },
-  {
-    "pedido": "17668",
-    "codigo": "FT80F35T",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 1,
-    "_codigoProd": 10408353963
-  },
-  {
-    "pedido": "17668",
-    "codigo": "FT100F35T",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 0,
-    "_codigoProd": 10408353745
-  },
-  {
     "pedido": "17677",
     "codigo": "FTI145LPTBR",
     "quantidade": 2,
@@ -135,16 +75,6 @@
     ],
     "estoque": 2,
     "_codigoProd": 10520726398
-  },
-  {
-    "pedido": "17183",
-    "codigo": "FTI35D40PT",
-    "quantidade": 1,
-    "local": [
-      "Pedido aprovado"
-    ],
-    "estoque": 109,
-    "_codigoProd": 10408354006
   },
   {
     "pedido": "17683",
@@ -177,25 +107,25 @@
     "_codigoProd": 10538072919
   },
   {
-    "pedido": "17694",
-    "codigo": "FT180F40T",
+    "pedido": "17696",
+    "codigo": "FH160F60T",
+    "quantidade": 3,
+    "local": [
+      "Separação logística,F06250016",
+      "Separação logística,F06250017",
+      "Separação logística,F06250018"
+    ],
+    "estoque": 1,
+    "_codigoProd": 10408353610
+  },
+  {
+    "pedido": "17712",
+    "codigo": "FT240J35W",
     "quantidade": 1,
     "local": [
       "Pedido aprovado"
     ],
     "estoque": 0,
-    "_codigoProd": 10408353811
-  },
-  {
-    "pedido": "17696",
-    "codigo": "FH160F60T",
-    "quantidade": 3,
-    "local": [
-      "Pedido aprovado",
-      "Pedido aprovado",
-      "Pedido aprovado"
-    ],
-    "estoque": 1,
-    "_codigoProd": 10408353610
+    "_codigoProd": 10661798957
   }
 ]

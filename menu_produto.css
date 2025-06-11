@@ -3138,7 +3138,10 @@ ul#comprasList li ,
   color: #e60000 !important;  /* vermelho forte para não “sumir” */
 }
 
-
+.kanban-card {
+  position: relative;
+  min-height: 50px; /* Garante espaço para o spinner */
+}
 
 /* ─── Marcador de pedido duplicado ─── */
 /* remove qualquer .duplicate-marker que ainda exista */

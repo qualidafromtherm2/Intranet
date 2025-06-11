@@ -1,6 +1,10 @@
 // server.js
 // Carrega as variáveis de ambiente definidas em .env
 require('dotenv').config();
+// Em server.js (topo do arquivo)
+const pendingLabels = new Map(); 
+// chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
+
 // ——————————————————————————————
 // 1) Imports e configurações iniciais
 // ——————————————————————————————
@@ -42,6 +46,14 @@ const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 // ——————————————————————————————
 const app = express();
 
+
+// ─── 2.1) Cria pasta de etiquetas se não existir ───
+const etiquetasDir = path.join(__dirname, 'etiquetas');
+if (!fs.existsSync(etiquetasDir)) {
+  fs.mkdirSync(etiquetasDir, { recursive: true });
+  console.log('✔️  Pasta etiquetas criada em', etiquetasDir);
+}
+
 // Sessão (cookies) para manter usuário logado
 app.use(session({
   secret: 'uma_chave_secreta_forte', // troque por algo mais seguro
@@ -56,7 +68,8 @@ app.use(session({
 
 // Parser JSON para todas as rotas
 app.use(express.json());
-
+// Serve arquivos em /etiquetas como estáticos
+app.use('/etiquetas', express.static(etiquetasDir));
 // Multer para upload de imagens
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -68,6 +81,49 @@ const upload = multer({ storage: multer.memoryStorage() });
   const { Octokit } = await import('@octokit/rest');
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
+    // ────────────────────────────────────────────
+  // 3.0) ROTAS DE ETIQUETAS (geração & polling)
+  // ────────────────────────────────────────────
+  // POST  /api/etiquetas            → gera o .zpl e marca como pendente
+  app.post('/api/etiquetas', (req, res) => {
+    const { numeroOP } = req.body;
+    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
+    const zpl =
+      `^XA
+^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
+^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
+^XZ`;
+    const fileName = `etiqueta_${numeroOP}.zpl`;
+    const filePath = path.join(etiquetasDir, fileName);
+    fs.writeFileSync(filePath, zpl, 'utf8');
+    pendingLabels.set(numeroOP, { fileName, printed: false });
+    return res.json({
+      id:    numeroOP,
+      zplUrl:`${req.protocol}://${req.get('host')}/etiquetas/${fileName}`
+    });
+  });
+
+  // GET   /api/etiquetas/pending    → lista as etiquetas ainda não imprimidas
+  app.get('/api/etiquetas/pending', (req, res) => {
+    const list = [];
+    for (const [id, { fileName, printed }] of pendingLabels) {
+      if (!printed) {
+        list.push({
+          id,
+          zplUrl:`${req.protocol}://${req.get('host')}/etiquetas/${fileName}`
+        });
+      }
+    }
+    res.json(list);
+  });
+
+  // POST  /api/etiquetas/:id/printed → marca como já impressa
+  app.post('/api/etiquetas/:id/printed', (req, res) => {
+    const id = req.params.id;
+    if (!pendingLabels.has(id)) return res.sendStatus(404);
+    pendingLabels.get(id).printed = true;
+    res.sendStatus(200);
+  });
   // ——————————————————————————————
   // 3.1) Rotas CSV (Tipo.csv)
   // ——————————————————————————————
@@ -85,6 +141,12 @@ const upload = multer({ storage: multer.memoryStorage() });
     fs.writeFileSync(csvPath, csvStringify(updated, { header: true }), 'utf8');
     res.json({ ok: true });
   });
+
+
+  // para imprimir etiquetas ZPL
+const fs   = require('fs');
+const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
+
 
   app.post('/api/omie/updateNaoListar', (req, res) => {
     const { groupId, prefix } = req.body;
@@ -975,6 +1037,11 @@ app.get('*', (req, res) => {
   // ——————————————————————————————
   // 5) Inicia o servidor
   // ——————————————————————————————
-  const PORT = process.env.PORT || 5001;
-  app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+ const PORT = process.env.PORT || 5001;
+ const HOST = '0.0.0.0';
+ app.listen(PORT, HOST, () =>
+   console.log(`Servidor rodando em http://${HOST}:${PORT}`)
+ );
+
+
 })();
