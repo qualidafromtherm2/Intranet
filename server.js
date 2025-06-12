@@ -194,7 +194,10 @@ app.post('/api/omie/produtos/op', async (req, res) => {
       app_secret: OMIE_APP_SECRET,
       param:[{ pagina:1, registros_por_pagina:1, ordem_decrescente:'S' }]
     };
-    const lastJson = await omieCall('/produtos/op/', bodyLast);   // já existe util
+ const lastJson = await omieCall(
+   'https://app.omie.com.br/api/v1/produtos/op/',
+   bodyLast
+ );
 
     const today   = new Date();
     const mm      = String(today.getMonth()+1).padStart(2,'0');
@@ -223,7 +226,10 @@ app.post('/api/omie/produtos/op', async (req, res) => {
     let tentativa = 0;
     let resposta;
     while (tentativa < 5) {
-      resposta = await omieCall('/produtos/op/', front);
+ resposta = await omieCall(
+   'https://app.omie.com.br/api/v1/produtos/op/',
+   front
+ );
       if (resposta?.faultcode === 'SOAP-ENV:Client-102') {   // duplicado
         tentativa++;
         front.param[0].identificacao.cCodIntOP =
