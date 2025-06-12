@@ -213,7 +213,7 @@ export async function initKanban() {
           app_key:OMIE_APP_KEY, app_secret:OMIE_APP_SECRET
         };
         try{
-          const r = await fetch('${API_BASE}/api/omie/estoque/consulta',{
+          const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`,{
             method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payloadEst)});
           const d = r.ok?await r.json():{};
