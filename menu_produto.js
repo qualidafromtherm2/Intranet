@@ -163,33 +163,24 @@ const ulList     = document.getElementById('listaProdutosList');
 
     showSpinner();
     try {
-      const payload = {
-        call: 'ListarProdutosResumido',
-        param: [{
-          pagina: 1,
-          registros_por_pagina: 50,
-          filtrar_apenas_descricao: `%${termo}%`,
-          apenas_importado_api: 'N',
-          filtrar_apenas_omiepdv: 'N'
-        }]
-      };
- const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
-   method:      'POST',
-   credentials: 'include',
-   headers:     { 'Content-Type':'application/json' },
-   body:        JSON.stringify({
-     call:       'ListarProdutosResumido',
-     app_key:    OMIE_APP_KEY,
-     app_secret: OMIE_APP_SECRET,
-     param:      [{
-       pagina: 1,
-       registros_por_pagina: 50,
-       filtrar_apenas_descricao: `%${termo}%`,
-       apenas_importado_api: 'N',
-       filtrar_apenas_omiepdv: 'N'
-     }]
-   })
- });
+const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
+  method:      'POST',
+  credentials: 'include',
+  headers:     { 'Content-Type':'application/json' },
+  body:        JSON.stringify({
+    call:       'ListarProdutosResumido',
+    app_key:    OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      pagina: 1,
+      registros_por_pagina: 50,
+      filtrar_apenas_descricao: `%${termo}%`,
+      apenas_importado_api: 'N',
+      filtrar_apenas_omiepdv: 'N'
+    }]
+  })
+});
+
       const dados = await resResumo.json();
       resumoItems = dados.produto_servico_resumido || [];
       countEl.textContent = resumoItems.length;

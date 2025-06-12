@@ -112,7 +112,7 @@
     "quantidade": 3,
     "local": [
       "Separação logística,F06250019",
-      "Pedido aprovado",
+      "Separação logística,F06250020",
       "Pedido aprovado"
     ],
     "estoque": 1,
@@ -147,5 +147,15 @@
     ],
     "estoque": 0,
     "_codigoProd": 10408353807
+  },
+  {
+    "pedido": "17737",
+    "codigo": "FT60B35W",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10515669902
   }
 ]

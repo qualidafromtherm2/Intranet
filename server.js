@@ -326,36 +326,31 @@ app.post('/api/omie/estoque/resumo', express.json(), async (req, res) => {
 // server.js (ou onde você centraliza as rotas OMIE)
 
 // Rota para servir de proxy à chamada de PosicaoEstoque do OMIE
-app.post('/api/omie/estoque/consulta', async (req, res) => {
+app.post('/api/omie/estoque/consulta', express.json(), async (req, res) => {
+  console.log('[estoque/consulta] req.body →', JSON.stringify(req.body, null, 2));
   try {
-    // O req.body que o kanban.js enviou (com call, param, app_key e app_secret)
-    const payload = req.body;
-
-    // Faz fetch para a URL oficial do OMIE
     const omieResponse = await fetch('https://app.omie.com.br/api/v1/estoque/consulta/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(req.body)
     });
-
-    // Se a OMIE devolver erro de status, propaga
+    const text = await omieResponse.text();
+    console.log('[estoque/consulta] OMIE responded status', omieResponse.status, 'body:', text);
     if (!omieResponse.ok) {
-      return res.status(omieResponse.status).json({
-        error: `OMIE retornou status ${omieResponse.status}`
-      });
+      return res.status(omieResponse.status).send(text);
     }
-
-    // Extrai o JSON retornado pela OMIE
-    const json = await omieResponse.json();
-
-    // Devolve a mesma resposta pro frontend (kanban.js)
+    const json = JSON.parse(text);
     return res.json(json);
-
   } catch (err) {
-    console.error('Erro no servidor ao chamar OMIE/PosicaoEstoque:', err);
-    return res.status(500).json({ error: 'Erro interno ao consultar OMIE' });
+    console.error('[estoque/consulta] Erro ao chamar OMIE:', err);
+    // devolve o erro para o cliente para depuração
+    return res.status(err.status || 500).json({
+      error: err.faultstring || err.message,
+      stack: err.stack
+    });
   }
 });
+
 
 
 // server.js
