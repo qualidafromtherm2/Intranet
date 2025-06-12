@@ -96,15 +96,10 @@ export const TIPO_ITEM_MAP = {
    * Define o cache completo e limpa filtros
    */
 export function setCache(items) {
-  if (!Array.isArray(items)) {
-    console.warn('[filtro_produto] setCache recebeu valor inválido:', items);
-    allItems     = [];
-    lastFiltered = [];
-  } else {
-    allItems     = items;
-    lastFiltered = items.slice();
-  }
+  allItems     = Array.isArray(items) ? items : [];
+  lastFiltered = allItems.slice();
 }
+
 
 
   
