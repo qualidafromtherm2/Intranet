@@ -8,6 +8,11 @@ let initX  = 50, initY  = 50;
 
 const photoPositionCache = {};
 
+const API_BASE =
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : window.location.origin;      // Render ou outro domínio
+    
 export function initDadosColaboradoresUI() {
   const btnColab = document.getElementById('btn-colaboradores');
   if (!btnColab) return;
