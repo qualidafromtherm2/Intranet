@@ -103,26 +103,33 @@ window.__listaReady    = null;   // Promise de preload
 
 /* --------------------- MONTA CACHE COMPLETO -------------------------- */
 async function buildListaCache() {
-  showProductSpinner();
+  try {
+    showProductSpinner();
 
-  const first = await fetchPage(1);
-  const totalPag = first.total_de_paginas   || 1;
-  const totalReg = first.total_de_registros || first.produto_servico_cadastro.length;
-  const items    = [...(first.produto_servico_cadastro || [])];
+    const first    = await fetchPage(1);
+    const totalReg = first.total_de_registros;
+    const totalPag = first.total_de_paginas;
+    const items    = [...first.produto_servico_cadastro];
 
-  updateSpinnerPct((items.length / totalReg) * 100);
-
-  for (let p = 2; p <= totalPag; p++) {
-    const page = await fetchPage(p);
-    items.push(...(page.produto_servico_cadastro || []));
     updateSpinnerPct((items.length / totalReg) * 100);
+
+    for (let p = 2; p <= totalPag; p++) {
+      const page = await fetchPage(p);
+      items.push(...page.produto_servico_cadastro);
+      updateSpinnerPct((items.length / totalReg) * 100);
+    }
+
+    window.__omieFullCache = items;        // ✅ sempre array
+    updateSpinnerPct(100);
+  } catch (err) {
+    console.error('[ListarProdutos] preload falhou:', err);
+    window.__omieFullCache = [];           // ✅ fallback
+    throw err;                             // para quem quiser tratar
+  } finally {
+    hideProductSpinner();
   }
-
-  updateSpinnerPct(100);
-  hideProductSpinner();
-
-  window.__omieFullCache = items;        // cache preenchido
 }
+
 
 /* --------------------- RENDER & EVENTOS ------------------------------ */
 function attachOpenHandlers(ul) {

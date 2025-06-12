@@ -97,17 +97,17 @@ export const TIPO_ITEM_MAP = {
    */
 // logo em cima, onde exporta setCache
 export function setCache(items) {
-  console.log('[filtro_produto] setCache recebeu:', items);
-  const arr = Array.isArray(items) ? items : [];
-  allItems     = arr;
-  lastFiltered = arr.slice();
+  if (!Array.isArray(items)) {
+    console.warn('[filtro_produto] setCache recebeu valor inválido:', items);
+    allItems     = [];           // garante array vazio
+    lastFiltered = [];
+    return;
+  }
+  allItems     = items;
+  lastFiltered = items.slice();  // cópia defensiva
 }
 
 
-
-
-
-  
   /** Retorna lista filtrada */
   export function getFiltered() {
     return lastFiltered;
