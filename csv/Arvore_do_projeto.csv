@@ -72,17 +72,23 @@ npm run dev // Para iniciar o servidor altomaticamente
 
 Puxar (pull) as alterações do repositório local para o github:
 
+# Primeiro, abra o terminal integrado do VS Code (Ctrl + `).
+# Navegue até o diretório do seu projeto, se ainda não estiver lá.
+# depois de editar arquivos...
+git add config.server.js 
 
-# No diretório do seu repositório
-git add .
+git commit -m "Descrição do que você mudou"
+git push
 
-# Agora commit com uma mensagem que reflita todas as mudanças
-git commit -m "Atualiza front para usar API_BASE e credentials em várias requisições"
+# Para adicionar arquivos específicos ao commit, você pode usar o comando git add seguido dos nomes dos arquivos.
+# Por exemplo, se você fez alterações em config.server.js e requisicoes_omie/filtro_produto.js, você pode fazer o seguinte:
+git add requisicoes_omie/ListarProdutos.js \
+        requisicoes_omie/filtro_produto.js
 
-# Envie para o master remoto (que o Render consome)
-git push origin main:master
+git commit -m "Ajustado setCache para só chamar slice() quando o parâmetro é um array válido
 
-
+Alterado initListarProdutosUI para inicializar o cache quando necessário antes de utilizá-lo"
+git push
 
 
 

@@ -25,3 +25,5 @@ Thumbs.db
 .npm
 .env
 config.server.js
+etiquetas/*.zpl
+etiquetas/*.zpl
