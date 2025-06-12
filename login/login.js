@@ -152,7 +152,7 @@ if (hBemVindo) {
   if (savedP) inpPass.value = savedP;
 
   // 8) Ao abrir a página, verifica se já está logado
-  const status = await fetch('/api/auth/status').then(r => r.json());
+  const status = await fetch(`${API_BASE}/api/auth/status`).then(r => r.json());
   // só conta como “já logado” se a senha salva NÃO for a padrão
   const savedPass = localStorage.getItem('password');
   if (status.loggedIn && savedPass && savedPass !== '123') {
@@ -195,8 +195,8 @@ bindAuthModal(
 const btnLogout = overlay.querySelector('#btnLogout');
 btnLogout.addEventListener('click', async () => {
   // chama o endpoint que você já tem em routes/auth.js
-  await fetch('/api/auth/logout', { method: 'POST' });
-  
+  await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+
   // limpa localStorage (caso tenha marcado "Lembrar-me")
   localStorage.removeItem('user');
   localStorage.removeItem('password');
@@ -272,7 +272,7 @@ overlay.querySelector('#signUp').addEventListener('click', async () => {
   }
 
   // envia o pedido para que os admins vejam em users.json
-  const res = await fetch('/api/users/request-reset', {
+  const res = await fetch(`${API_BASE}/api/users/request-reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username })
@@ -304,7 +304,7 @@ formSignIn.addEventListener('submit', async e => {
 
   if (password === '123') {
     // confirma que o usuário ainda está com senha 123
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -324,7 +324,7 @@ formSignIn.addEventListener('submit', async e => {
   
 
   // 2) fluxo normal de login
-  const res = await fetch('/api/auth/login', {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user: username, senha: password }),
@@ -383,7 +383,7 @@ formCriar.addEventListener('submit', async e => {
 
   /* 2. NOVO fluxo -------------------------------------------------- */
   // encerra a sessão temporária (senha 123)
-  await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+  await fetch(`${API_BASE}/api/auth/logout`, { method:'POST', credentials:'include' });
 
   // volta para o painel de login
   overlay.querySelector('#container').classList.remove('right-panel-active');
@@ -405,7 +405,7 @@ async function updateMessageCount() {
   const badge = document.querySelector('.notification-number');
   if (!badge) return;
 
-  const res = await fetch('/api/users/me/messages', {
+  const res = await fetch(`${API_BASE}/api/users/me/messages`, {
     credentials: 'include'
   });
   if (!res.ok) {
@@ -425,7 +425,7 @@ async function openNotificacoes() {
 
   const ul = document.getElementById('listaNotificacoes');
 
-  const res = await fetch('/api/users/me/messages', { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/users/me/messages`, { credentials: 'include' });
   if (!res.ok) {
     ul.innerHTML = '<li>Erro ao carregar mensagens.</li>';
     return;
@@ -471,7 +471,7 @@ document.getElementById('listaNotificacoes')
     if (!m) return alert('Formato inválido.');
     const username = m[1];
 
-    const ok = await fetch('/api/users/reset-password', {
+    const ok = await fetch(`${API_BASE}/api/users/reset-password`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials:'include',
@@ -480,7 +480,7 @@ document.getElementById('listaNotificacoes')
 
     if (!ok) return alert('Falha ao resetar senha.');
 
-    await fetch('/api/users/me/messages/delete', {
+    await fetch(`${API_BASE}/api/users/me/messages/delete`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials:'include',
@@ -491,7 +491,7 @@ document.getElementById('listaNotificacoes')
 
   /* EXCLUIR ----------------------------------------------------- */
   if (e.target.classList.contains('btn-del')) {
-    const ok = await fetch('/api/users/me/messages/delete', {
+    const ok = await fetch(`${API_BASE}/api/users/me/messages/delete`, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials:'include',

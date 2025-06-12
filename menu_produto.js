@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const codeFilter = document.getElementById('codeFilter');
   const descFilter = document.getElementById('descFilter');
     // 0) Esconde a aba “Acessos” se não for admin
-    const status = await fetch('/api/auth/status', {
+    const status = await fetch(`${API_BASE}/api/auth/status`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include'
@@ -257,7 +257,7 @@ async function loadUsers() {
   const container = document.getElementById('userList');
 
   // 1) Busca usuários
-  const res = await fetch('/api/users', {
+  const res = await fetch(`${API_BASE}/api/users`, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include'
@@ -311,7 +311,7 @@ document.getElementById('btnSaveUser')
     const password = '123';      // senha fixa
     const roles    = [];         // sem definição prévia de roles
 
-    await fetch('/api/users', {
+    await fetch(`${API_BASE}/api/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
