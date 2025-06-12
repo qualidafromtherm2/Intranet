@@ -20,6 +20,17 @@ function dbg(...msg) {
 
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
+
+// no topo do arquivo, logo após `const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;`
+function hojeDDMMYYYY() {
+  const d = new Date();
+  const day   = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year  = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+
 /* --------------------- PARÂMETROS ------------------------------------ */
 const PAGE_SIZE = 50;
 const PAUSE_MS  = 1200;            // 1,2 s entre páginas
@@ -48,27 +59,34 @@ window.__posEstoqueReady = null;   // Promise de carregamento
 
 /* ------------------ CONSULTA 1 PÁGINA -------------------------------- */
 async function fetchPagina(nPagina = 1) {
-  const payload = {
-    call :'ListarPosEstoque',
-    param:[{
-      nPagina,
-      nRegPorPagina: PAGE_SIZE,
-      dDataPosicao : '30/04/2025',
-      cExibeTodos  : 'S',
-      codigo_local_estoque: 0
-    }],
-    app_key   : OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET
-  };
 
-  const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
-    method :'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body   : JSON.stringify(payload)
+  const payload = {
+    call: 'ListarPosicaoEstoque',
+     app_key:    OMIE_APP_KEY,
+     app_secret: OMIE_APP_SECRET,
+     param: [{
+       nPagina,
+       nRegPorPagina: PAGE_SIZE,
+       dDataPosicao:  hojeDDMMYYYY(),
+       cExibeTodos:   'S',
+       codigo_local_estoque: 0
+     }]
+   };
+
+
+  const res = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type':'application/json' },
+    body:        JSON.stringify(payload)
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+
+   if (!res.ok) throw new Error(await res.text());
+   return res.json();
 }
+
+
+
 
 /* ------------------ MONTA CACHE COMPLETO ----------------------------- */
 async function buildPosEstoqueCache() {
@@ -181,21 +199,26 @@ window.updateCustoReal = updateCustoReal;
 
 
 /* ------------------ INICIALIZAÇÃO GLOBAL ----------------------------- */
-document.addEventListener('DOMContentLoaded', () => {
-  /* dispara pré-load */
-  window.__posEstoqueReady = buildPosEstoqueCache().catch(hideSpinner);
+ document.addEventListener('DOMContentLoaded', () => {
 
-  /* intercepta detalhe do produto */
-  const original = window.loadDadosProduto;
-  if (typeof original === 'function') {
-    setTimeout(window.updateCustoReal, 0);
-    window.loadDadosProduto = async function (codigo) {
-      await original(codigo);
-      await window.__posEstoqueReady;
-      updateCustoReal();
-    };
-  }
-});
+  // não pré-carrega estoque: só faz build quando abrir produto
+
+   /* intercepta detalhe do produto */
+   const original = window.loadDadosProduto;
+   if (typeof original === 'function') {
+     setTimeout(window.updateCustoReal, 0);
+     window.loadDadosProduto = async function (codigo) {
+       await original(codigo);
+      // carrega o cache de estoque só na primeira vez
+      if (!window.__posEstoqueReady) {
+        window.__posEstoqueReady = buildPosEstoqueCache().catch(hideSpinner);
+      }
+       await window.__posEstoqueReady;
+       updateCustoReal();
+     };
+   }
+ });
+
 
 /* =====================================================================
  *  ROTINA ORIGINAL – INCLUIR ESTRUTURA  (sem alterações)
