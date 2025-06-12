@@ -95,10 +95,16 @@ export const TIPO_ITEM_MAP = {
   /**
    * Define o cache completo e limpa filtros
    */
+// logo em cima, onde exporta setCache
 export function setCache(items) {
-  allItems     = Array.isArray(items) ? items : [];
-  lastFiltered = allItems.slice();
+  console.log('[filtro_produto] setCache recebeu:', items);
+
+  // se não for array, usamos array vazio
+  const arr = Array.isArray(items) ? items : [];
+  allItems     = arr;
+  lastFiltered = arr.slice();
 }
+
 
 
 
