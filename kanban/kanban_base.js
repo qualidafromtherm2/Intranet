@@ -85,7 +85,7 @@ export function renderKanbanDesdeJSON(itemsKanban) {
 
 export async function carregarKanbanLocal() {
   try {
-    const resp = await fetch('/api/kanban');
+    const resp = await fetch(`${API_BASE}/api/kanban`);
     if (!resp.ok) {
       console.warn('GET /api/kanban retornou status', resp.status);
       return [];
@@ -100,7 +100,7 @@ export async function carregarKanbanLocal() {
 
 export async function salvarKanbanLocal(itemsKanban) {
   try {
-    const resp = await fetch('/api/kanban', {
+    const resp = await fetch(`${API_BASE}/api/kanban`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(itemsKanban, null, 2)
@@ -256,7 +256,7 @@ ul.addEventListener('drop', async e => {
 
           // 7. Gera etiqueta
           try {
-            await fetch('/api/etiquetas', {
+            await fetch(`${API_BASE}/api/etiquetas`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ numeroOP: cCodIntOP })

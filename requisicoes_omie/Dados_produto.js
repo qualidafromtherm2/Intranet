@@ -670,7 +670,7 @@ if (!caracUl._caracListenerAttached) {
       };
       console.log('▶️ AlterarCaracteristica →', payload);
       try {
-        const resp = await fetch('/api/prodcaract/alterar', {
+        const resp = await fetch(`${API_BASE}/api/prodcaract/alterar`, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify(payload)
@@ -855,7 +855,7 @@ if (!caracUl._deleteListenerAttached) {
 
 /* ----------------- 5) Estrutura de produto (malha) ---------------- */
 try {
-  const r = await fetch('/api/malha', {
+  const r = await fetch(`${API_BASE}/api/malha`, {
     method : 'POST',
     headers: { 'Content-Type':'application/json' },
     body   : JSON.stringify({ intProduto: codigo })
