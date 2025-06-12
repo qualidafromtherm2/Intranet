@@ -48,7 +48,7 @@ export function initKanbanDetalhes(itemsKanban) {
         app_secret: OMIE_APP_SECRET,
         param: [{ numero_pedido: numeroPedido }]
       };
-      const resp = await fetch('/api/omie/pedido', {
+      const resp = await fetch(`${API_BASE}/api/omie/pedido`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

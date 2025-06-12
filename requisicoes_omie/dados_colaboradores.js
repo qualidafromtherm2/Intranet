@@ -209,7 +209,7 @@ detPane.querySelectorAll('#anexoRow1, #anexoRow2, #anexosList, #editDetails')
 
    // 2) envia para o seu proxy /api/omie/contatos-incluir
    try {
-     const resp = await fetch('/api/omie/contatos-incluir', {
+     const resp = await fetch(`${API_BASE}/api/omie/contatos-incluir`, {
        method: 'POST',
        headers: { 'Content-Type': 'application/json' },
        body: JSON.stringify(payload)
@@ -244,7 +244,7 @@ detPane.querySelectorAll('#anexoRow1, #anexoRow2, #anexosList, #editDetails')
       await new Promise(r => setTimeout(r, attempts === 1 ? 10000 : 5000));
 
       // busca a lista de colaboradores
-      const resp2 = await fetch('/api/omie/login/contatos', {
+      const resp2 = await fetch(`${API_BASE}/api/omie/login/contatos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -329,7 +329,7 @@ pane.querySelector('#btnExcluir').addEventListener('click', () => {
     // 3) ao clicar no trash, chama o proxy de exclusão
     trash.addEventListener('click', async () => {
       try {
-        const resp = await fetch('/api/omie/contatos-excluir', {
+        const resp = await fetch(`${API_BASE}/api/omie/contatos-excluir`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ cCodInt: code })
@@ -390,7 +390,7 @@ ul.innerHTML = '<li>Carregando…</li>';
 let registros = [];
 try {
   // faz a chamada e guarda em `resp`
-  const resp = await fetch('/api/omie/login/contatos', {
+  const resp = await fetch(`${API_BASE}/api/omie/login/contatos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -482,7 +482,7 @@ savePosBtn.addEventListener('click', async () => {
   const novoPos = detPane
         .querySelector('#photoPositionValue').textContent.trim();
   try {
-    await fetch('/api/omie/contatos-alterar', {
+    await fetch(`${API_BASE}/api/omie/contatos-alterar`, {
       method:  'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -715,7 +715,7 @@ document.addEventListener('mouseup', () => {
 });
 
     try {
-      const resp = await fetch('/api/omie/contatos-alterar', {
+      const resp = await fetch(`${API_BASE}/api/omie/contatos-alterar`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify(body)
@@ -767,7 +767,7 @@ editBtn.textContent = 'Editar';
       const imageAnexos = listaAnexos.filter(a => ['png','jpg','jpeg'].includes(a.cTipoArquivo.toLowerCase()));
       if (!imageAnexos.length) return;
       const imgMeta = imageAnexos.reduce((p, c) => c.nIdAnexo>p.nIdAnexo?c:p);
-      const resp = await fetch('/api/omie/anexo-obter', {
+      const resp = await fetch(`${API_BASE}/api/omie/anexo-obter`, {
         method:'POST', headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ cTabela:'crm-contatos', nId:Number(col.identificacao.nCod), cCodIntAnexo:imgMeta.cCodIntAnexo })
       });

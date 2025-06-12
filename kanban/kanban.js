@@ -82,7 +82,7 @@ function attachDoubleClick(itemsKanban) {
         app_secret: OMIE_APP_SECRET,
         param: [{ numero_pedido: numeroPedido }]
       };
-      const resp = await fetch('/api/omie/pedido', {
+      const resp = await fetch(`${API_BASE}/api/omie/pedido`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -173,7 +173,7 @@ export async function initKanban() {
       app_key: OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET
     };
-    const respLP = await fetch('/api/omie/pedidos', {
+    const respLP = await fetch(`${API_BASE}/api/omie/pedidos`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payloadLP)
     });

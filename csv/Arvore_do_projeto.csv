@@ -82,8 +82,10 @@ git push
 
 # Para adicionar arquivos específicos ao commit, você pode usar o comando git add seguido dos nomes dos arquivos.
 # Por exemplo, se você fez alterações em config.server.js e requisicoes_omie/filtro_produto.js, você pode fazer o seguinte:
-git add requisicoes_omie/ListarProdutos.js \
-        requisicoes_omie/filtro_produto.js
+git add kanban/kanban.js \
+        requisicoes_omie/editar_produto.js \
+        requisicoes_omie/filtro_produto.js \
+        requisicoes_omie/Dados_produto.js
 
 git commit -m "Ajustado setCache para só chamar slice() quando o parâmetro é um array válido
 

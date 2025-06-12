@@ -85,7 +85,7 @@ console.log('[loadUserInfo] username →', username);
 const payload = { pagina:1, registros_por_pagina:50 };
 console.log('[loadUserInfo] payload  →', payload);
 
-const res = await fetch('/api/omie/login/contatos', {
+const res = await fetch(`${API_BASE}/api/omie/login/contatos`, {
   method : 'POST',
   headers: { 'Content-Type':'application/json' },
   body   : JSON.stringify(payload)
