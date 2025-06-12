@@ -136,7 +136,7 @@ export async function loadDadosProduto(codigo) {
   ].join('/');
   let resumoEstoque = {};
   try {
-    const respResumo = await fetch('${API_BASE}/api/omie/estoque/resumo', {
+    const respResumo = await fetch(`${API_BASE}/api/omie/estoque/resumo`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({
