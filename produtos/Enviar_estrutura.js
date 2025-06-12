@@ -10,6 +10,7 @@
 import config from '../config.client.js';
 
 
+
 /* === DEBUG helper ==================================================== */
 function dbg(...msg) {
   // prefixo comum para facilitar o filtro no DevTools  
@@ -19,6 +20,7 @@ function dbg(...msg) {
 
 
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+
 
 
 // no topo do arquivo, logo após `const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;`

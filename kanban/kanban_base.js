@@ -2,6 +2,10 @@
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
+const API_BASE =
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : window.location.origin;      // Render ou outro domínio
 /**
  * Mapeia nomes de coluna para os IDs das <ul>.
  */

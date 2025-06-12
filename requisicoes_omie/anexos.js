@@ -5,6 +5,10 @@
 
 import config from '../config.client.js';
 
+const API_BASE =
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : window.location.origin;      // Render ou outro domínio
 // ────────────────────────────────────────────────────────────────
 // 1) listaAnexos via proxy /api/omie/anexo-listar
 // ────────────────────────────────────────────────────────────────

@@ -1,6 +1,11 @@
 // login/login.js
 import config from '../config.client.js';
 
+const API_BASE =
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : window.location.origin;      // Render ou outro domínio
+    
 document.addEventListener('DOMContentLoaded', async () => {
   // 1) Pega o container onde injetaremos o HTML do login
   const overlay = document.getElementById('authOverlay');
