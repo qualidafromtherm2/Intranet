@@ -79,21 +79,17 @@ async function fetchPage(pagina = 1) {
     }]
   };
 
-await fetch(`${API_BASE}/api/omie/produtos`, {
-  method:      'POST',
-  credentials: 'include',
-  headers:     { 'Content-Type':'application/json' },
-  body:        JSON.stringify(body)
-});
+  const res = await fetch(`${API_BASE}/api/omie/produtos`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type':'application/json' },
+    body:        JSON.stringify(body)
+  });
 
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Erro ${res.status}: ${text}`);
-  }
-
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
 
 /* --------------------- CACHE GLOBAL ---------------------------------- */
 window.__omieFullCache = null;   // array de produtos (pronto)
