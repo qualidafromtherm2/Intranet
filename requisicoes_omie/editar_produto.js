@@ -248,7 +248,7 @@ export function attachSelectEditor(li, f, currentValue) {
   
       if (isEditing) {
         // === entra em modo edição e carrega lista ===
-        const famRes = await fetch('/api/omie/familias', {
+        const famRes = await fetch(`${API_BASE}/api/omie/familias`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

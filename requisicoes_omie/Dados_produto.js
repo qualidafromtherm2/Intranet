@@ -9,6 +9,13 @@ import {
   ensureSaveAllBtn
 } from './editar_produto.js';
 
+// --- base para as chamadas ao backend --------------------------
+const API_BASE =
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5001'
+    : window.location.origin;         // produção (Render)
+
+    
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
 // — campos da aba PDV —
@@ -111,7 +118,7 @@ export async function loadDadosProduto(codigo) {
   await loadTipoMap();
 
   // 3.2) Consulta dados do produto
-  const resProd = await fetch('/api/omie/produtos', {
+  const resProd = await fetch(`${API_BASE}/api/omie/produtos`, {
     method: 'POST',
     headers:{ 'Content-Type':'application/json' },
     body: JSON.stringify({
@@ -394,7 +401,7 @@ if (!caractTitleEl.querySelector('#caract-toggle')) {
 
 // 1) Garanta que você já tenha carregado a lista completa de características do OMIE:
 if (!window.__allCaracteristicas) {
-  const respCarat = await fetch('/api/omie/caracteristicas', {
+  const respCarat = await fetch(`${API_BASE}/api/omie/caracteristicas`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -574,7 +581,7 @@ if (!caracUl._caracListenerAttached) {
         console.log('▶️ IncluirCaracteristica →', payload1);
         let json1;
         try {
-          const resp1 = await fetch('/api/omie/caracteristicas', {
+          const resp1 = await fetch(`${API_BASE}/api/omie/caracteristicas`, {
             method:  'POST',
             headers: { 'Content-Type':'application/json' },
             body:    JSON.stringify(payload1)
@@ -621,7 +628,7 @@ if (!caracUl._caracListenerAttached) {
              };
              console.log('▶️ IncluirCaractProduto →', payload2);
              try {
-               const resp2 = await fetch('/api/omie/prodcaract', {
+               const resp2 = await fetch(`${API_BASE}/api/omie/prodcaract`, {
                  method:  'POST',
                  headers: { 'Content-Type':'application/json' },
                  body:    JSON.stringify(payload2)
@@ -812,7 +819,7 @@ if (!caracUl._deleteListenerAttached) {
     if (!confirm('Deseja realmente excluir esta característica?')) return;
   
     try {
-      const resp = await fetch('/api/omie/prodcaract', {
+      const resp = await fetch(`${API_BASE}/api/omie/prodcaract`, {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({
@@ -1027,7 +1034,7 @@ ulMalha.addEventListener('click', async ev => {
   
     try {
       /* chama /api/omie/malha (proxy criado no server.js) */
-      const r = await fetch('/api/omie/malha', {
+      const r = await fetch(`${API_BASE}/api/omie/malha`, {
         method : 'POST',
         headers: { 'Content-Type':'application/json' },
         body   : JSON.stringify(payload)
@@ -1106,7 +1113,7 @@ function showLineMsg(li, text, ok = true) {
 
 // 1.1) Helper que chama o seu endpoint de atualização
 async function updateTipoCSV(groupId, newFlag) {
-  await fetch('/api/omie/updateTipo', {
+  await fetch(`${API_BASE}/api/omie/updateTipo`, {
     method: 'POST',
     headers: { 'Content-Type':'application/json' },
     body: JSON.stringify({ groupId, listaPecas: newFlag })  // 'S' ou 'N'
@@ -1206,7 +1213,7 @@ panel.innerHTML = `
 if (tipo.prefixesToExclude.includes(prefix)) return;
 
 // chama o endpoint correto
-await fetch('/api/omie/updateNaoListar', {
+await fetch(`${API_BASE}/api/omie/updateNaoListar`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ groupId: gid, prefix })
@@ -1226,7 +1233,7 @@ await fetch('/api/omie/updateNaoListar', {
     const pref = e.target.dataset.prefix;
 
     // dispara remoção no CSV
-    await fetch('/api/omie/removeNaoListar', {
+    await fetch(`${API_BASE}/api/omie/removeNaoListar`, {
       method: 'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ groupId: gid, prefix: pref })

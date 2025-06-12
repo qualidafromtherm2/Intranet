@@ -236,7 +236,7 @@ ul.addEventListener('drop', async e => {
       };
 
       // 6. Chama API para criar OP
-      const respOP = await fetch('/api/omie/produtos/op', {
+      const respOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify(payloadOP)

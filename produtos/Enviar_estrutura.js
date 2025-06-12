@@ -375,7 +375,7 @@ itens.push({
   dbg('🚚 Payload FINAL →\n' + JSON.stringify(payload, null, 2));
 
   try {
-    const resp = await fetch('/api/omie/malha', {
+    const resp = await fetch(`${API_BASE}/api/omie/malha`, {
       method :'POST',
       headers:{ 'Content-Type':'application/json' },
       body   : JSON.stringify(payload)

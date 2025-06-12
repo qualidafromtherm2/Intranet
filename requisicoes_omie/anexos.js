@@ -9,7 +9,7 @@ import config from '../config.client.js';
 // 1) listaAnexos via proxy /api/omie/anexo-listar
 // ────────────────────────────────────────────────────────────────
 export async function listAnexos(cTabela, nId) {
-  const res = await fetch('/api/omie/anexo-listar', {
+  const res = await fetch(`${API_BASE}/api/omie/anexo-listar`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ cTabela, nId, nPagina: 1, nRegPorPagina: 50 })
@@ -70,7 +70,7 @@ function ensureFileInput() {
     // 2) Se for foto, excluir a antiga
     if (uploadMode === 'foto') {
       try {
-        await fetch('/api/omie/anexo-excluir', {
+        await fetch(`${API_BASE}/api/omie/anexo-excluir`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ cTabela, nId, cCodIntAnexo: cCodInt, nIdAnexo: col.lastAnexoId || 0 })
@@ -89,7 +89,7 @@ function ensureFileInput() {
 
     let uploadMeta;
     try {
-      const res  = await fetch('/api/omie/anexo-file', { method: 'POST', body: form });
+      const res  = await fetch(`${API_BASE}/api/omie/anexo-file`, { method: 'POST', body: form });
       const data = await res.json();
       if (data.faultstring) throw new Error(data.faultstring);
       uploadMeta = data;
@@ -108,7 +108,7 @@ function ensureFileInput() {
       await new Promise(r => setTimeout(r, delays[i]));
       try {
         console.log(`Tentativa ${i+1} de ObterAnexo →`, { cCodIntAnexo: cCodInt, cTabela, nId });
-        const respLink = await fetch('/api/omie/anexo-obter', {
+        const respLink = await fetch(`${API_BASE}/api/omie/anexo-obter`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ cCodIntAnexo: cCodInt, cTabela, nId })
@@ -184,7 +184,7 @@ function attachAnexoHandlers(li) {
     console.log(`🔥 Clique em anexo: "${fileName}", codInt="${btn.dataset.codint}", nIdAnexo=${btn.dataset.nidanexo}`);
 
     try {
-      const resp   = await fetch('/api/omie/anexo-obter', {
+      const resp   = await fetch(`${API_BASE}/api/omie/anexo-obter`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ cNomeArquivo: fileName, cTabela, nId })
@@ -209,7 +209,7 @@ function attachAnexoHandlers(li) {
     const nIdAnexo = Number(btn.dataset.nidanexo);
 
     try {
-      await fetch('/api/omie/anexo-excluir', {
+      await fetch(`${API_BASE}/api/omie/anexo-excluir`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ cTabela, nId, cCodIntAnexo: cCodInt, nIdAnexo })
@@ -318,7 +318,7 @@ async function refreshList() {
   const ul = document.getElementById('anexosList');
   if (!ul) return;
   try {
-    const data = await fetch('/api/omie/anexo-listar', {
+    const data = await fetch(`${API_BASE}/api/omie/anexo-listar`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ cTabela:'crm-contatos', nId: Number(col.nCod), nPagina:1, nRegPorPagina:50 })
