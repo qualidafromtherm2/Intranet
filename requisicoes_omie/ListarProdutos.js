@@ -172,7 +172,8 @@ export async function initListarProdutosUI(
   await window.__listaReady;
 
   /* filtros e render */
-  setCache(window.__omieFullCache);
+  setCache(window.__omieFullCache || []);
+
 
   const produtosFiltrados = getFiltered();
   renderList(ul, produtosFiltrados);
