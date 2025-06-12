@@ -232,12 +232,21 @@ ul.addEventListener('drop', async e => {
       const y2 = tom.getFullYear();
       const dDtPrevisao = `${d}/${m2}/${y2}`;
 
-      const payloadOP = {
-        call: 'IncluirOrdemProducao',
-        param: [{ identificacao: { cCodIntOP, dDtPrevisao, nCodProduto: item._codigoProd, nQtde: 1 }}],
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET
-      };
+const payloadOP = {
+  call      : 'IncluirOrdemProducao',
+  app_key   : OMIE_APP_KEY,
+  app_secret: OMIE_APP_SECRET,
+  param     : [{
+    identificacao : {
+      /* cCodIntOP será IGNORADO pelo backend — pode deixar vazio */
+      cCodIntOP   : '',
+      dDtPrevisao,
+      nCodProduto : item._codigoProd,
+      nQtde       : 1
+    }
+  }]
+};
+
 
       // 6. Chama API para criar OP
       const respOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {

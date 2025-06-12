@@ -184,6 +184,61 @@ const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
     res.json({ ok: true });
   });
 
+// rota para listar ordem de produção para ver qual a ultima op gerada
+app.post('/api/omie/produtos/op', async (req, res) => {
+  try {
+    // 1) BUSCA a última OP
+    const bodyLast = {
+      call: 'ListarOrdemProducao',
+      app_key   : OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param:[{ pagina:1, registros_por_pagina:1, ordem_decrescente:'S' }]
+    };
+    const lastJson = await omieCall('/produtos/op/', bodyLast);   // já existe util
+
+    const today   = new Date();
+    const mm      = String(today.getMonth()+1).padStart(2,'0');
+    const yy      = String(today.getFullYear()).slice(-2);
+    const mmYYNow = `${mm}${yy}`;
+
+    // ------ prefixo do produto (F ou P) ------
+    const prefix  = (req.body?.param?.[0]?.identificacao?.cCodIntOP || 'F').slice(0,1).toUpperCase();
+
+    // ------ analisa última OP ------
+    let nextSeq = 1;
+    const ultimo = lastJson?.cadastros?.[0]?.identificacao?.cCodIntOP || '';
+    if (ultimo.startsWith(prefix) && ultimo.slice(1,5) === mmYYNow) {
+      const seq = parseInt(ultimo.slice(-4),10);
+      if (!Number.isNaN(seq)) nextSeq = seq + 1;
+    }
+
+    const seqStr     = String(nextSeq).padStart(4,'0');
+    const novoCodInt = `${prefix}${mmYYNow}${seqStr}`;
+
+    // ---- monta payload FINAL (usa tudo que veio do front) ----
+    const front = req.body;                         // título, qtde, etc.
+    front.param[0].identificacao.cCodIntOP = novoCodInt;
+
+    // ---- tenta criar OP; se colidir, faz +1 até 5 tentativas ----
+    let tentativa = 0;
+    let resposta;
+    while (tentativa < 5) {
+      resposta = await omieCall('/produtos/op/', front);
+      if (resposta?.faultcode === 'SOAP-ENV:Client-102') {   // duplicado
+        tentativa++;
+        front.param[0].identificacao.cCodIntOP =
+          `${prefix}${mmYYNow}${String(++nextSeq).padStart(4,'0')}`;
+        continue;
+      }
+      break;  // sucesso ou outro erro
+    }
+
+    res.status(resposta?.faultstring ? 500 : 200).json(resposta);
+  } catch (err) {
+    console.error('[produtos/op] erro →', err);
+    res.status(err.status||500).json({ error:String(err) });
+  }
+});
 
   // lista pedidos
 app.post('/api/omie/pedidos', express.json(), async (req, res) => {
