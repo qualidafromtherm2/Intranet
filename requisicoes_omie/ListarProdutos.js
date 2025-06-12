@@ -81,14 +81,20 @@ async function fetchPage(pagina = 1) {
 
   const res = await fetch(`${API_BASE}/api/omie/produtos`, {
     method:      'POST',
-    credentials: 'include',
+    credentials: 'include',                // necessário pra sessão
     headers:     { 'Content-Type':'application/json' },
     body:        JSON.stringify(body)
   });
 
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    // mostra no console o erro bruto pra você debugar
+    console.error('[ListarProdutos] fetchPage erro:', res.status, await res.text());
+    throw new Error(`ListarProdutos HTTP ${res.status}`);
+  }
+
   return res.json();
 }
+
 
 
 /* --------------------- CACHE GLOBAL ---------------------------------- */
