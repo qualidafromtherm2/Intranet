@@ -215,16 +215,11 @@ ul.addEventListener('drop', async e => {
       console.log('[OP] condição satisfeita, incluindo OP');
 
       // Gera código OP
-      const prefix = item.codigo[0];
-      const now = new Date();
-      const mm = String(now.getMonth()+1).padStart(2,'0');
-      const yy = String(now.getFullYear()).slice(-2);
-      const seqKey = 'kanban_op_seq';
-      const last = parseInt(localStorage.getItem(seqKey),10)||0;
-      const seq = last + 1;
-      localStorage.setItem(seqKey, seq);
-      const seqStr = String(seq).padStart(4,'0');
-      const cCodIntOP = `${prefix}${mm}${yy}${seqStr}`;
+      // 2. Pergunta ao backend qual o próximo código OP
+      const prefix  = item.codigo.startsWith('P') ? 'P' : 'F';
+      const respNext  = await fetch(`${API_BASE}/api/op/next-code/${prefix}`,
+                                    { credentials: 'include' });
+      const { nextCode: cCodIntOP } = await respNext.json();
 
       const tom = new Date(now.getTime() + 24*60*60*1000);
       const d = String(tom.getDate()).padStart(2,'0');
@@ -238,8 +233,7 @@ const payloadOP = {
   app_secret: OMIE_APP_SECRET,
   param     : [{
     identificacao : {
-      /* cCodIntOP será IGNORADO pelo backend — pode deixar vazio */
-      cCodIntOP   : '',
+    cCodIntOP   : cCodIntOP,          // usa o código único
       dDtPrevisao,
       nCodProduto : item._codigoProd,
       nQtde       : 1
@@ -265,11 +259,12 @@ const payloadOP = {
 
           // 7. Gera etiqueta
           try {
-            await fetch(`${API_BASE}/api/etiquetas`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ numeroOP: cCodIntOP })
-            });
+await fetch(`${API_BASE}/api/etiquetas`, {
+  method : 'POST',
+  headers: { 'Content-Type':'application/json' },
+  body   : JSON.stringify({ numeroOP: cCodIntOP })
+});
+
           } catch (err) {
             console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
           }

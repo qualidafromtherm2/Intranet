@@ -10,7 +10,7 @@ const pendingLabels = new Map();
 // ——————————————————————————————
 const express       = require('express');
 const session       = require('express-session');
-const fs            = require('fs');
+const fs            = require('fs/promises');
 const path          = require('path');
 const multer        = require('multer');
 // logo após os outros requires:
@@ -130,7 +130,45 @@ const upload = multer({ storage: multer.memoryStorage() });
     }
     res.json(list);
   });
+app.get('/api/op/next-code/:prefix', async (req, res) => {
+  try {
+    const prefix = req.params.prefix.toUpperCase();   // 'F' ou 'P'
+    const dir    = path.join(__dirname, 'etiquetas');
+    const files  = await fs.readdir(dir);
 
+    // procura arquivos tipo etiqueta_FMMYYNNNN.zpl
+    const regex = new RegExp(`^etiqueta_${prefix}(\\d{4})(\\d{4})\\.zpl$`);
+
+    let lastSeq = 0;
+    let lastDateBlock = '';
+
+    files.forEach(f => {
+      const m = f.match(regex);
+      if (!m) return;
+      const [ , dateBlock, seqStr ] = m;      // ex.:  '0625'  '0009'
+      if (dateBlock > lastDateBlock) {
+        lastDateBlock = dateBlock;
+        lastSeq       = parseInt(seqStr, 10);
+      } else if (dateBlock === lastDateBlock) {
+        lastSeq = Math.max(lastSeq, parseInt(seqStr, 10));
+      }
+    });
+
+    const now = new Date();
+    const mm  = String(now.getMonth() + 1).padStart(2, '0');
+    const yy  = String(now.getFullYear()).slice(-2);
+    const dateBlock = `${mm}${yy}`;
+
+    const nextSeq = (dateBlock === lastDateBlock) ? lastSeq + 1 : 1;
+    const nextSeqStr = String(nextSeq).padStart(4, '0');
+
+    const nextCode = `${prefix}${dateBlock}${nextSeqStr}`;  // F06250010
+    return res.json({ nextCode });
+  } catch (err) {
+    console.error('[next-code] erro', err);
+    return res.status(500).json({ error: 'Falha ao calcular próximo código' });
+  }
+});
   // POST  /api/etiquetas/:id/printed → marca como já impressa
   app.post('/api/etiquetas/:id/printed', (req, res) => {
     const id = req.params.id;
