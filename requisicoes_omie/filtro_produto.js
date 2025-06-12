@@ -100,10 +100,10 @@ export function setCache(items) {
     console.warn('[filtro_produto] setCache recebeu valor inválido:', items);
     allItems     = [];
     lastFiltered = [];
-    return;
+  } else {
+    allItems     = items;
+    lastFiltered = items.slice();
   }
-  allItems     = items;
-  lastFiltered = items.slice();
 }
 
 

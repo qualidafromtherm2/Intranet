@@ -165,6 +165,10 @@ export async function initListarProdutosUI(
   pane.style.display = 'block';
 
   /* espera cache */
+    if (!window.__listaReady) {
+    window.__listaReady = buildListaCache().catch(hideProductSpinner);
+  }
+
   await window.__listaReady;
 
   /* filtros e render */
