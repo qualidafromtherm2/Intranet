@@ -176,7 +176,7 @@ export async function initListarProdutosUI(
   }
 
   await window.__listaReady;
-
+console.log('[ListarProdutos] __omieFullCache →', window.__omieFullCache);
   /* filtros e render */
   setCache(window.__omieFullCache || []);
 
