@@ -116,6 +116,7 @@ const upload = multer({ storage: multer.memoryStorage() });
   // POST  /api/etiquetas            → gera o .zpl e marca como pendente
   app.post('/api/etiquetas', (req, res) => {
     const { numeroOP } = req.body;
+    console.log(`[API] Recebido pedido para etiqueta da OP: ${numeroOP}`);
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
     const zpl =
       `^XA
