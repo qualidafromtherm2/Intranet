@@ -10,7 +10,8 @@ const pendingLabels = new Map();
 // ——————————————————————————————
 const express       = require('express');
 const session       = require('express-session');
-const fs            = require('fs/promises');
+const fs  = require('fs');           // todas as funções sync
+const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
 const multer        = require('multer');
 // logo após os outros requires:
