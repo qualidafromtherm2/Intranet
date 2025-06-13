@@ -135,7 +135,8 @@ app.get('/api/op/next-code/:prefix', async (req, res) => {
   try {
     const prefix = req.params.prefix.toUpperCase();   // 'F' ou 'P'
     const dir    = path.join(__dirname, 'etiquetas');
-    const files  = await fs.readdir(dir);
+    const files  = await fsp.readdir(dir);
+
 
     // procura arquivos tipo etiqueta_FMMYYNNNN.zpl
     const regex = new RegExp(`^etiqueta_${prefix}(\\d{4})(\\d{4})\\.zpl$`);
