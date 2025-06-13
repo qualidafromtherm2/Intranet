@@ -66,6 +66,20 @@ app.use(session({
     secure: false              // em produção, true se rodar via HTTPS
   }
 }));
+const LOG_FILE = path.join(__dirname, 'data', 'kanban.log');  // ou outro nome
+
+app.post('/api/logs/arrasto', express.json(), (req, res) => {
+  const log = req.body;
+  const linha = `[${log.timestamp}] ${log.etapa} – Pedido: ${log.pedido}, Código: ${log.codigo}, Qtd: ${log.quantidade}\n`;
+
+  fs.appendFile(LOG_FILE, linha, err => {
+    if (err) {
+      console.error('Erro ao gravar log:', err);
+      return res.status(500).json({ error: 'Falha ao registrar log' });
+    }
+    res.json({ ok: true });
+  });
+});
 
 // Parser JSON para todas as rotas
 app.use(express.json());
@@ -111,6 +125,13 @@ const upload = multer({ storage: multer.memoryStorage() });
     const fileName = `etiqueta_${numeroOP}.zpl`;
     const filePath = path.join(etiquetasDir, fileName);
     fs.writeFileSync(filePath, zpl, 'utf8');
+
+    const linhaLog = `[${new Date().toISOString()}] Impressão de etiqueta – OP: ${numeroOP}, Arquivo: ${fileName}\n`;
+fs.appendFile(LOG_FILE, linhaLog, err => {
+  if (err) console.error('Erro ao gravar log de etiqueta:', err);
+});
+
+
     pendingLabels.set(numeroOP, { fileName, printed: false });
     return res.json({
       id:    numeroOP,
@@ -257,6 +278,11 @@ app.post('/api/omie/produtos/op', async (req, res) => {
 
     const seqStr     = String(nextSeq).padStart(4,'0');
     const novoCodInt = `${prefix}${mmYYNow}${seqStr}`;
+
+    const linha = `[${new Date().toISOString()}] Geração de OP – Pedido: ${req.body.param?.[0]?.identificacao?.nCodPed}, Código OP: ${novoCodInt}\n`;
+fs.appendFile(LOG_FILE, linha, err => {
+  if (err) console.error('Erro ao gravar log de OP:', err);
+});
 
     // ---- monta payload FINAL (usa tudo que veio do front) ----
     const front = req.body;                         // título, qtde, etc.
