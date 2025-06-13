@@ -221,7 +221,9 @@ ul.addEventListener('drop', async e => {
                                     { credentials: 'include' });
       const { nextCode: cCodIntOP } = await respNext.json();
 
-      const tom = new Date(now.getTime() + 24*60*60*1000);
+      const now = new Date();
+const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
       const d = String(tom.getDate()).padStart(2,'0');
       const m2 = String(tom.getMonth()+1).padStart(2,'0');
       const y2 = tom.getFullYear();
