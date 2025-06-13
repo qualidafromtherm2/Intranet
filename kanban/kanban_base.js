@@ -230,7 +230,10 @@ ul.addEventListener('drop', async e => {
 
       const prefix = item.codigo.startsWith('P') ? 'P' : 'F';
       const respNext = await fetch(`${API_BASE}/api/op/next-code/${prefix}`, { credentials: 'include' });
-      const { nextCode: cCodIntOP } = await respNext.json();
+      const { nextCode } = await respNext.json();
+const cCodIntOP = nextCode;
+console.log('[CONFIRMAÇÃO] Número de OP gerado e usado em todos os lugares:', cCodIntOP);
+
 
       const now = new Date();
       const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
