@@ -154,6 +154,22 @@ export function enableDragAndDrop(itemsKanban) {
       });
 
 ul.addEventListener('drop', async e => {
+
+  if (newColumn === 'Separação logística') {
+  // envia log inicial para o servidor
+  fetch('/api/logs/arrasto', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      timestamp: new Date().toISOString(),
+      etapa: 'Arrasto para Separação logística',
+      pedido: item.pedido,
+      codigo: item.codigo,
+      quantidade: item.quantidade
+    })
+  });
+}
+
   console.log('[DROP] evento drop em', e.currentTarget.id,
               'indice=', draggedIndex);
   e.preventDefault();
