@@ -153,25 +153,9 @@ export function enableDragAndDrop(itemsKanban) {
         if (e.target === ul) removePlaceholder();
       });
 
+
+
 ul.addEventListener('drop', async e => {
-
-  if (newColumn === 'Separação logística') {
-  // envia log inicial para o servidor
-  fetch('/api/logs/arrasto', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      timestamp: new Date().toISOString(),
-      etapa: 'Arrasto para Separação logística',
-      pedido: item.pedido,
-      codigo: item.codigo,
-      quantidade: item.quantidade
-    })
-  });
-}
-
-  console.log('[DROP] evento drop em', e.currentTarget.id,
-              'indice=', draggedIndex);
   e.preventDefault();
   removePlaceholder();
 
@@ -190,13 +174,29 @@ ul.addEventListener('drop', async e => {
 
   const originColumn = draggedFromColumn;
   const item = itemsKanban[draggedIndex];
-  
+
+  // Envia log logo após identificar o item e nova coluna
+  if (newColumn === 'Separação logística') {
+    fetch(`${API_BASE}/api/logs/arrasto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        timestamp: new Date().toISOString(),
+        etapa: 'Arrasto para Separação logística',
+        pedido: item.pedido,
+        codigo: item.codigo,
+        quantidade: item.quantidade
+      })
+    });
+  }
+
+  console.log('[DROP] evento drop em', e.currentTarget.id, 'indice=', draggedIndex);
+
   // 1. Encontra todos os cards com este índice (pode haver múltiplos se o mesmo item está em várias colunas)
   const cards = document.querySelectorAll(`.kanban-card[data-index="${draggedIndex}"]`);
-  
+
   // 2. Encontra o card específico que está sendo movido (na coluna de origem)
   const movedCard = Array.from(cards).find(card => card.dataset.column === originColumn);
-  
   if (!movedCard) {
     console.log('[DROP] card não encontrado');
     return;
@@ -204,7 +204,7 @@ ul.addEventListener('drop', async e => {
 
   // 3. Salva o conteúdo original e mostra o spinner imediatamente
   const originalContent = movedCard.innerHTML;
-  if (newColumn === "Separação logística") {
+  if (newColumn === 'Separação logística') {
     movedCard.innerHTML = '<i class="fas fa-spinner fa-spin kanban-spinner"></i>';
     movedCard.style.pointerEvents = 'none'; // Impede interação durante o processamento
   }
@@ -215,14 +215,12 @@ ul.addEventListener('drop', async e => {
 
   try {
     // 5. Processa a criação da OP (se aplicável)
-    const respProd = await fetch(
-      `/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`
-    );
+    const respProd = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
     const prodData = await respProd.json();
     console.log('[OP] detalhes:', prodData);
 
     const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
-    
+
     if (
       originColumn === 'Pedido aprovado' &&
       newColumn === 'Separação logística' &&
@@ -230,40 +228,34 @@ ul.addEventListener('drop', async e => {
     ) {
       console.log('[OP] condição satisfeita, incluindo OP');
 
-      // Gera código OP
-      // 2. Pergunta ao backend qual o próximo código OP
-      const prefix  = item.codigo.startsWith('P') ? 'P' : 'F';
-      const respNext  = await fetch(`${API_BASE}/api/op/next-code/${prefix}`,
-                                    { credentials: 'include' });
+      const prefix = item.codigo.startsWith('P') ? 'P' : 'F';
+      const respNext = await fetch(`${API_BASE}/api/op/next-code/${prefix}`, { credentials: 'include' });
       const { nextCode: cCodIntOP } = await respNext.json();
 
       const now = new Date();
-const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-
-      const d = String(tom.getDate()).padStart(2,'0');
-      const m2 = String(tom.getMonth()+1).padStart(2,'0');
+      const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const d = String(tom.getDate()).padStart(2, '0');
+      const m2 = String(tom.getMonth() + 1).padStart(2, '0');
       const y2 = tom.getFullYear();
       const dDtPrevisao = `${d}/${m2}/${y2}`;
 
-const payloadOP = {
-  call      : 'IncluirOrdemProducao',
-  app_key   : OMIE_APP_KEY,
-  app_secret: OMIE_APP_SECRET,
-  param     : [{
-    identificacao : {
-    cCodIntOP   : cCodIntOP,          // usa o código único
-      dDtPrevisao,
-      nCodProduto : item._codigoProd,
-      nQtde       : 1
-    }
-  }]
-};
+      const payloadOP = {
+        call: 'IncluirOrdemProducao',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          identificacao: {
+            cCodIntOP,
+            dDtPrevisao,
+            nCodProduto: item._codigoProd,
+            nQtde: 1
+          }
+        }]
+      };
 
-
-      // 6. Chama API para criar OP
       const respOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadOP)
       });
       const dataOP = await respOP.json();
@@ -275,14 +267,12 @@ const payloadOP = {
         if (idxMov !== -1) {
           arr[idxMov] = `${colunaLimpa},${cCodIntOP}`;
 
-          // 7. Gera etiqueta
           try {
-await fetch(`${API_BASE}/api/etiquetas`, {
-  method : 'POST',
-  headers: { 'Content-Type':'application/json' },
-  body   : JSON.stringify({ numeroOP: cCodIntOP })
-});
-
+            await fetch(`${API_BASE}/api/etiquetas`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ numeroOP: cCodIntOP })
+            });
           } catch (err) {
             console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
           }
@@ -291,18 +281,13 @@ await fetch(`${API_BASE}/api/etiquetas`, {
     }
   } catch (err) {
     console.error('[OP] erro inclusão OP:', err);
-    
-    // 8. Em caso de erro, restaura o conteúdo original
     movedCard.innerHTML = originalContent;
     movedCard.style.pointerEvents = '';
-    
-    // Atualiza a interface sem salvar as mudanças
     renderKanbanDesdeJSON(itemsKanban);
     enableDragAndDrop(itemsKanban);
     return;
   }
 
-  // 9. Atualiza a interface com os novos dados
   renderKanbanDesdeJSON(itemsKanban);
   enableDragAndDrop(itemsKanban);
   await salvarKanbanLocal(itemsKanban);
@@ -310,6 +295,7 @@ await fetch(`${API_BASE}/api/etiquetas`, {
   draggedIndex = null;
   draggedFromColumn = null;
 });
+
     });
     ulListenersInitialized = true;
   }
