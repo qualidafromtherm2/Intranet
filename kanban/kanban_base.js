@@ -259,6 +259,7 @@ ul.addEventListener('drop', async e => {
         body: JSON.stringify(payloadOP)
       });
       const dataOP = await respOP.json();
+console.log('[OP] resposta Omie:', dataOP);
 
       if (!dataOP.faultstring && !dataOP.error) {
         const arr = item.local;
