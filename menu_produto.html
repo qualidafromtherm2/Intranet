@@ -520,8 +520,21 @@
     <div class="overlay-app" id="authOverlay"></div>
   </div> <!-- /.app -->
 
+
+
+<!-- Modal de etiquetas ----------------------------->
+<div id="etiquetasModal" class="modal">
+  <div class="modal-content">
+    <span class="close-modal">&times;</span>
+    <h3>Etiquetas disponíveis</h3>
+    <ul id="listaEtiquetas" class="etiquetas-list"></ul>
+  </div>
+</div>
+
+
   <!-- Scripts -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script type="module" src="login/login.js"></script>
   <script type="module" src="menu_produto.js"></script>
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
@@ -529,7 +542,7 @@
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
-  <script type="module" src="login/login.js"></script>
+
   <script type="module" src="./kanban/kanban.js" defer></script>
 
 </body>

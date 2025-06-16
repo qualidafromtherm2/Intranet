@@ -362,11 +362,14 @@ headerLinks.forEach(link => {
     
   });
 });
-document.addEventListener('DOMContentLoaded', () => {
-  const bell     = document.getElementById('bell-icon');
-  const printBtn = document.getElementById('print-icon');
-  const cloudBtn = document.getElementById('cloud-icon');   // id correto!
-  const avatar   = document.getElementById('profile-icon');
+
+/* dentro do MESMO callback que já existe */
+const bell       = document.getElementById('bell-icon');
+const printBtn   = document.getElementById('print-icon');
+const cloudBtn   = document.getElementById('cloud-icon');
+const avatar     = document.getElementById('profile-icon');
+const etiquetasModal = document.getElementById('etiquetasModal');
+const listaEtiq       = document.getElementById('listaEtiquetas');
 
   /* –– SINO –– */
   bell?.addEventListener('click', e => {
@@ -376,32 +379,63 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* –– IMPRESSORA –– */
-  printBtn?.addEventListener('click', e => {
-    e.preventDefault();
-    alert('Clicou em imprimir');          // troque por window.print() depois
-  });
+printBtn?.addEventListener('click', async e => {
+  e.preventDefault(); e.stopPropagation();
+
+  listaEtiq.innerHTML = '<li>carregando…</li>';
+  try {
+    const resp = await fetch('/api/etiquetas');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const files = await resp.json();  // ex.: ["etiqueta_F06250019.zpl"]
+
+    if (files.length === 0) {
+      listaEtiq.innerHTML = '<li>Nenhuma etiqueta encontrada</li>';
+    } else {
+      listaEtiq.innerHTML = files.map(f => `
+        <li>
+          <span>${f}</span>
+          <button class="btn-print" data-file="${f}">Imprimir</button>
+        </li>`).join('');
+    }
+  } catch (err) {
+    console.error(err);
+    listaEtiq.innerHTML = '<li>Falha ao buscar etiquetas</li>';
+  }
+
+  etiquetasModal.classList.add('is-active');
+});
+
+document
+  .querySelector('#etiquetasModal .close-modal')
+  .addEventListener('click', () =>
+    etiquetasModal.classList.remove('is-active')
+  );
+
+listaEtiq.addEventListener('click', e => {
+  if (e.target.matches('.btn-print')) {
+    const file = e.target.dataset.file;
+    window.open(`/etiquetas/${encodeURIComponent(file)}`, '_blank');
+  }
+});
 
   /* –– NUVEM –– */
   cloudBtn?.addEventListener('click', e => {
     e.preventDefault();
     alert('Clicou em nuvem');
   });
+/* –– AVATAR –– */
+/*  Só chama o modal se a função já estiver registrada
+    (login.js a registra na janela).  Nada de redirecionar! */
+avatar?.addEventListener('click', e => {
+  e.preventDefault();
+  if (window.openLoginModal) window.openLoginModal();
+});
 
-  /* –– AVATAR –– */
-  avatar?.addEventListener('click', e => {
-    e.preventDefault();
-    // se você já tem o modal de login:
-    if (window.openLoginModal) {
-      openLoginModal();
-    } else {
-      window.location.href = 'login.html';
-    }
-  });
 });
 
 initDadosColaboradoresUI();
 initAnexosUI();
-}); // <── Agora fecha o único DOMContentLoaded, depois de tudo
+
 
 
 // Substitua toda a função resetSubTabs atual por esta:

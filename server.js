@@ -26,6 +26,7 @@ const malhaConsultar= require('./routes/malhaConsultar');
 const estoqueRouter = require('./routes/estoque');
 const estoqueResumoRouter = require('./routes/estoqueResumo');
 const authRouter    = require('./routes/auth');
+const etiquetasRouter = require('./routes/etiquetas');   // ⬅️  NOVO
 const omieCall      = require('./utils/omieCall');
 const bcrypt = require('bcrypt');
 const INACTIVE_HASH = '$2b$10$ltPcvabuKvEU6Uj1FBUmi.ME4YjVq/dhGh4Z3PpEyNlphjjXCDkTG';   // ← seu HASH_INATIVO aqui
@@ -653,6 +654,7 @@ app.post(
   // ——————————————————————————————
   app.use('/api/omie/login', loginOmie);
   app.use('/api/auth',     authRouter);
+  app.use('/api/etiquetas', etiquetasRouter);   // ⬅️  NOVO
   app.use('/api/users', require('./routes/users'));
 
   app.use('/api/omie/estoque',       estoqueRouter);
