@@ -55,6 +55,12 @@ if (!fs.existsSync(etiquetasDir)) {
   console.log('✔️  Pasta etiquetas criada em', etiquetasDir);
 }
 
+const printedDir = path.join(etiquetasDir, 'printed');
+if (!fs.existsSync(printedDir)) {
+  fs.mkdirSync(printedDir, { recursive: true });
+  console.log('✔️  Pasta de impressas criada em', printedDir);
+}
+
 // Sessão (cookies) para manter usuário logado
 app.use(session({
   secret: 'uma_chave_secreta_forte', // troque por algo mais seguro
@@ -194,12 +200,27 @@ app.get('/api/op/next-code/:prefix', async (req, res) => {
   }
 });
   // POST  /api/etiquetas/:id/printed → marca como já impressa
-  app.post('/api/etiquetas/:id/printed', (req, res) => {
-    const id = req.params.id;
-    if (!pendingLabels.has(id)) return res.sendStatus(404);
-    pendingLabels.get(id).printed = true;
-    res.sendStatus(200);
-  });
+app.post('/api/etiquetas/:id/printed', (req, res) => {
+  const id = req.params.id;
+  const label = pendingLabels.get(id);
+  if (!label) return res.sendStatus(404);
+
+  // 1) marca internamente
+  label.printed = true;
+
+  // 2) move o .zpl para a pasta printed
+  const src  = path.join(etiquetasDir, label.fileName);
+  const dst  = path.join(printedDir, label.fileName);
+  try {
+    fs.renameSync(src, dst);
+    console.log(`[API] Etiqueta ${id} movida para printed/`);  
+  } catch (err) {
+    console.error(`[API] Falha ao mover etiqueta ${id}:`, err);
+  }
+
+  return res.sendStatus(200);
+});
+
   // ——————————————————————————————
   // 3.1) Rotas CSV (Tipo.csv)
   // ——————————————————————————————
