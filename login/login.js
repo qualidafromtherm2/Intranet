@@ -251,7 +251,7 @@ function bindAuthModal(
     overlay.classList.add('is-active');
   });
   
-  
+  window.openLoginModal = () => overlay.classList.add('is-active');
 
   // fecha modal
   closeBtn.addEventListener('click', () => {
@@ -447,10 +447,20 @@ async function openNotificacoes() {
   : '<li>Nenhuma notificação.</li>';
 
 
-    (window.showMainTab || function(id){
-      document.querySelectorAll('.tab-pane')
-              .forEach(p => p.style.display = (p.id === id ? 'block' : 'none'));
-    })('notificacoes');
+  const showTab = window.showMainTab || function(id){
+    document.querySelectorAll('.tab-pane')
+            .forEach(p => p.style.display = (p.id === id ? 'block' : 'none'));
+  };
+
+  // destaca o link principal da aba
+  const link = document.getElementById('menu-notificacoes');
+  if (link) {
+    document.querySelectorAll('.header .header-menu > .menu-link')
+            .forEach(a => a.classList.remove('is-active'));
+    link.classList.add('is-active');
+  }
+
+  showTab('notificacoes');
     
   updateMessageCount();
 }
