@@ -3281,3 +3281,51 @@ li.duplicado::after{
     font-size: 0.9rem;
   }
 }
+
+
+/* ===== Estilo unificado para todos os ícones em header-profile ===== */
+/* ===== Header – Ícones do perfil ===== */
+.header-profile{
+  margin-left:auto;          /* cola tudo na direita do header           */
+  display:flex;
+  align-items:center;
+  gap:16px;                  /* distância IGUAL entre todos os filhos   */
+  padding-left:40px;         /* recuo igual ao campo de busca (opcional)*/
+}
+
+/* sinos / impressora / nuvem */
+.header-profile i,
+.header-profile svg{
+  font-size:1.4rem;          /* mesmo “tamanho visual”                   */
+  color:#f9fafb;
+  cursor:pointer;
+  transition:transform .2s,color .2s;
+}
+.header-profile i:hover,
+.header-profile svg:hover{
+  transform:scale(1.1);
+  color:var(--theme-color);
+}
+
+/* badge azul do sino */
+.notification{
+  position:relative;
+}
+.notification-number{
+  position:absolute;
+  top:-6px;right:-6px;
+  width:16px;height:16px;
+  background:#3a6df0;color:#fff;
+  border-radius:50%;font-size:10px;
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* foto do usuário */
+.profile-img{
+  width:32px;height:32px;
+  border-radius:50%;
+  object-fit:cover;
+  border:2px solid var(--theme-color);
+  /* *** REMOVA o “margin-left:22px;” que estava duplicado *** */
+}
+.profile-img { cursor: pointer; }
