@@ -242,13 +242,12 @@ function bindAuthModal(
 
 
 
-  const profileArea = document.querySelector('.header-profile');
+  const profileArea = document.getElementById('profile-icon');
   const closeBtn    = overlay.querySelector('.close-auth');
   const formSignIn  = overlay.querySelector('#formSignIn');
 
   // abre modal ao clicar no perfil
   profileArea.addEventListener('click', e => {
-    if (e.target.closest('.notification')) return;   // ignora clique no sino
     overlay.classList.add('is-active');
   });
   

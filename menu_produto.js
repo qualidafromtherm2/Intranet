@@ -8,6 +8,7 @@ import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
 
+
 function showMainTab(tabId) {
   document.querySelectorAll('.tab-pane').forEach(p => {
     p.style.display = (p.id === tabId) ? 'block' : 'none';
@@ -295,7 +296,9 @@ container.innerHTML = `
 
 }
 
-  
+
+
+
 
 
 // Botão “Novo Usuário” mostra o formulário
@@ -355,9 +358,44 @@ headerLinks.forEach(link => {
     } else if (link.textContent.trim() === 'Inicio') {
 
     }
+
     
-    
-    
+  });
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const bell     = document.getElementById('bell-icon');
+  const printBtn = document.getElementById('print-icon');
+  const cloudBtn = document.getElementById('cloud-icon');   // id correto!
+  const avatar   = document.getElementById('profile-icon');
+
+  /* –– SINO –– */
+  bell?.addEventListener('click', e => {
+    e.preventDefault();
+    // Faz o mesmo que clicar no link do header
+    document.getElementById('menu-notificacoes')?.click();
+  });
+
+  /* –– IMPRESSORA –– */
+  printBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    alert('Clicou em imprimir');          // troque por window.print() depois
+  });
+
+  /* –– NUVEM –– */
+  cloudBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    alert('Clicou em nuvem');
+  });
+
+  /* –– AVATAR –– */
+  avatar?.addEventListener('click', e => {
+    e.preventDefault();
+    // se você já tem o modal de login:
+    if (window.openLoginModal) {
+      openLoginModal();
+    } else {
+      window.location.href = 'login.html';
+    }
   });
 });
 
