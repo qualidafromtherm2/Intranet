@@ -49,18 +49,20 @@ const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 const app = express();
 
 
-// ─── 2.1) Cria pasta de etiquetas se não existir ───
-const etiquetasDir = path.join(__dirname, 'etiquetas');
-if (!fs.existsSync(etiquetasDir)) {
-  fs.mkdirSync(etiquetasDir, { recursive: true });
-  console.log('✔️  Pasta etiquetas criada em', etiquetasDir);
+// ——— Etiquetas ————————————————————
+const etiquetasRoot = path.join(__dirname, 'etiquetas');   // raiz única
+// garante as pastas mínimas usadas hoje
+fs.mkdirSync(path.join(etiquetasRoot, 'Expedicao',  'Printed'), { recursive: true });
+fs.mkdirSync(path.join(etiquetasRoot, 'Recebimento', 'Printed'), { recursive: true });
+
+function getDirs(tipo = 'Expedicao') {
+  const dirTipo   = path.join(etiquetasRoot, tipo);                // p.ex. …/Expedicao
+  const dirPrint  = path.join(dirTipo,    'Printed');              // …/Expedicao/Printed
+  fs.mkdirSync(dirPrint, { recursive: true });
+  return { dirTipo, dirPrint };
 }
 
-const printedDir = path.join(etiquetasDir, 'printed');
-if (!fs.existsSync(printedDir)) {
-  fs.mkdirSync(printedDir, { recursive: true });
-  console.log('✔️  Pasta de impressas criada em', printedDir);
-}
+app.use('/etiquetas', express.static(etiquetasRoot));
 
 // Sessão (cookies) para manter usuário logado
 app.use(session({
@@ -88,10 +90,11 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
   });
 });
 
+const kanbanRouter = require('./routes/kanban');
+app.use('/api/kanban', kanbanRouter);
+
 // Parser JSON para todas as rotas
 app.use(express.json());
-// Serve arquivos em /etiquetas como estáticos
-app.use('/etiquetas', express.static(etiquetasDir));
 // Multer para upload de imagens
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -104,14 +107,19 @@ const upload = multer({ storage: multer.memoryStorage() });
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
     // ─── Bootstrapping de ZPL já existentes ───
-  const existing = fs.readdirSync(etiquetasDir)
-                    .filter(f => f.endsWith('.zpl'));
+// ─── Bootstrapping de ZPL já existentes ───
+const dirExped = path.join(etiquetasRoot, 'Expedicao');
+const existing = fs.existsSync(dirExped)
+  ? fs.readdirSync(dirExped).filter(f => f.endsWith('.zpl'))
+  : [];
+
+
   for (const fileName of existing) {
     const m = fileName.match(/^etiqueta_(.+)\.zpl$/);
     if (m) {
       const id = m[1];
       if (!pendingLabels.has(id)) {
-        pendingLabels.set(id, { fileName, printed: false });
+        pendingLabels.set(id, { fileName: `Expedicao/${fileName}`, printed: false });
         console.log(`[Boot] Etiqueta pendente carregada: ${id}`);
       }
     }
@@ -121,31 +129,23 @@ const upload = multer({ storage: multer.memoryStorage() });
   // 3.0) ROTAS DE ETIQUETAS (geração & polling)
   // ────────────────────────────────────────────
   // POST  /api/etiquetas            → gera o .zpl e marca como pendente
-  app.post('/api/etiquetas', (req, res) => {
-    const { numeroOP } = req.body;
-    console.log(`[API] Recebido pedido para etiqueta da OP: ${numeroOP}`);
-    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
-    const zpl =
-      `^XA
+app.post('/api/etiquetas', (req, res) => {
+  const { numeroOP, tipo = 'Expedicao' } = req.body;       // default = Expedição
+  if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
+
+  const { dirTipo } = getDirs(tipo);                       // cria pastas se faltar
+
+  const zpl = `^XA
 ^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
 ^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
 ^XZ`;
-    const fileName = `etiqueta_${numeroOP}.zpl`;
-    const filePath = path.join(etiquetasDir, fileName);
-    fs.writeFileSync(filePath, zpl, 'utf8');
 
-    const linhaLog = `[${new Date().toISOString()}] Impressão de etiqueta – OP: ${numeroOP}, Arquivo: ${fileName}\n`;
-fs.appendFile(LOG_FILE, linhaLog, err => {
-  if (err) console.error('Erro ao gravar log de etiqueta:', err);
+  const fileName = `etiqueta_${numeroOP}.zpl`;
+  fs.writeFileSync(path.join(dirTipo, fileName), zpl, 'utf8');
+
+  return res.json({ ok: true });
 });
 
-
-    pendingLabels.set(numeroOP, { fileName, printed: false });
-    return res.json({
-      id:    numeroOP,
-      zplUrl:`${req.protocol}://${req.get('host')}/etiquetas/${fileName}`
-    });
-  });
 
   // GET   /api/etiquetas/pending    → lista as etiquetas ainda não imprimidas
   app.get('/api/etiquetas/pending', (req, res) => {
@@ -210,8 +210,13 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   label.printed = true;
 
   // 2) move o .zpl para a pasta printed
-  const src  = path.join(etiquetasDir, label.fileName);
-  const dst  = path.join(printedDir, label.fileName);
+// src = onde o arquivo está hoje
+const src = path.join(etiquetasRoot, label.fileName);
+
+// destino = .../Printed/mesmo-nome
+const { dirPrint } = getDirs('Expedicao');           // ou derive do label
+const dst = path.join(dirPrint, path.basename(label.fileName));
+
   try {
     fs.renameSync(src, dst);
     console.log(`[API] Etiqueta ${id} movida para printed/`);  

@@ -31,6 +31,18 @@ async function fetchRetry(url, opts = {}, tentativas = 3, ms = 1500) {
 function readJSON()  { try { return JSON.parse(fs.readFileSync(DATA)); } catch { return []; } }
 function writeJSON(d){ fs.writeFileSync(DATA, JSON.stringify(d, null, 2)); }
 
+// devolve o cache cru
+router.get('/', (_req, res) => {
+  res.json(readJSON());
+});
+
+// sobrescreve o cache com o que vier do cliente
+router.post('/', express.json(), (req, res) => {
+  writeJSON(req.body);
+  res.json({ ok: true });
+});
+
+
 /* ——— GET /api/kanban/data ———  devolve o cache cru */
 router.get('/data', (_req, res) => res.json(readJSON()));
 
