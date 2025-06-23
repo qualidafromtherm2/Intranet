@@ -133,31 +133,42 @@ export function enableDragAndDrop(itemsKanban) {
     });
   });
 
-  if (!ulListenersInitialized) {
-    Object.values(COLUMN_MAP).forEach(ulId => {
-      const ul = document.getElementById(ulId);
-      if (!ul) return;
+if (!ulListenersInitialized) {
+  Object.values(COLUMN_MAP).forEach(ulId => {
+    const ul = document.getElementById(ulId);
+    if (!ul) return;
 
-      ul.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+    // 1) Quando o cursor entra na UL, expande o espaço
+    ul.addEventListener('dragenter', e => {
+      e.preventDefault();
+      // só expande se for o próprio UL (não filhos)
+      if (e.target === ul) {
+        ul.classList.add('drop-expand');
         if (!ul.contains(placeholder)) ul.appendChild(placeholder);
-      });
+      }
+    });
 
-      ul.addEventListener('dragenter', e => {
-        e.preventDefault();
-        if (!ul.contains(placeholder)) ul.appendChild(placeholder);
-      });
+    // 2) Enquanto estiver sobre, mantém o espaço
+    ul.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    });
 
-      ul.addEventListener('dragleave', e => {
-        if (e.target === ul) removePlaceholder();
-      });
+    // 3) Quando sai de vez da UL (e não apenas de um filho), recolhe
+    ul.addEventListener('dragleave', e => {
+      const to = e.relatedTarget;
+      // se o novo elemento NÃO for filho da UL, então saiu de verdade
+      if (!to || !ul.contains(to)) {
+        ul.classList.remove('drop-expand');
+        removePlaceholder();
+      }
+    });
 
-
-
-ul.addEventListener('drop', async e => {
-  e.preventDefault();
-  removePlaceholder();
+    // 4) No drop, recolhe e continua seu fluxo normal
+    ul.addEventListener('drop', async e => {
+      e.preventDefault();
+      ul.classList.remove('drop-expand');
+      removePlaceholder();
 
   if (draggedIndex === null || !draggedFromColumn) {
     console.log('[DROP] drag não iniciado corretamente');
@@ -275,7 +286,7 @@ console.log('[OP] resposta Omie:', dataOP);
             await fetch(`${API_BASE}/api/etiquetas`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ numeroOP: cCodIntOP })
+              body: JSON.stringify({ numeroOP: cCodIntOP, tipo: 'Expedicao' })
             });
           } catch (err) {
             console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);

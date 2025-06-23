@@ -3368,3 +3368,33 @@ li.duplicado::after{
 
 .auth-popup form input        { color:#333; }
 .auth-popup form input::placeholder { color:#777; }   /* placeholder cinza */
+
+/* 1. Esconde por padrão */
+.kanban-column.empty .placeholder {
+  display: none;
+}
+
+/* 2. Mostra em dragover, sem animação piscante */
+.kanban-column.empty.dragover .placeholder {
+  display: block;
+  animation: none !important;       /* remove qualquer keyframe ligado */
+  opacity: 1 !important;            /* força opacidade total */
+  border: 2px dashed #ccc;          /* estilo estático de guia */
+}
+/* espaço extra e placeholder estático */
+.kanban-column.drop-expand {
+  padding-bottom: 60px;              /* altura reservada */
+  transition: padding-bottom .2s ease;
+}
+.kanban-column.drop-expand .placeholder {
+  display: block;                    /* força exibição */
+  height: 50px;                      /* ajuste à altura do cartão */
+  margin: 5px 0;
+  border: 2px dashed #888;           /* guia visual */
+  opacity: 1 !important;
+  animation: none !important;
+}
+/* escondido por padrão */
+.kanban-column .placeholder {
+  display: none;
+}
