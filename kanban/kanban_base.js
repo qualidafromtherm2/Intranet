@@ -164,17 +164,18 @@ if (!ulListenersInitialized) {
       }
     });
 
-    // 4) No drop, recolhe e continua seu fluxo normal
-    ul.addEventListener('drop', async e => {
-      e.preventDefault();
-      ul.classList.remove('drop-expand');
-      removePlaceholder();
+ul.addEventListener('drop', async e => {
+  e.preventDefault();
+  ul.classList.remove('drop-expand');
+  removePlaceholder();
 
+  // 0) Valida estado de drag
   if (draggedIndex === null || !draggedFromColumn) {
     console.log('[DROP] drag não iniciado corretamente');
     return;
   }
 
+  // 1) Identifica coluna de destino e item
   const destinationUlId = e.currentTarget.id;
   const newColumn = Object.entries(COLUMN_MAP)
     .find(([, id]) => id === destinationUlId)?.[0];
@@ -182,54 +183,43 @@ if (!ulListenersInitialized) {
     console.log('[DROP] coluna destino inválida:', destinationUlId);
     return;
   }
-
   const originColumn = draggedFromColumn;
   const item = itemsKanban[draggedIndex];
+  if (!item) return;
 
-  // Envia log logo após identificar o item e nova coluna
-  if (newColumn === 'Separação logística') {
-    fetch(`${API_BASE}/api/logs/arrasto`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        timestamp: new Date().toISOString(),
-        etapa: 'Arrasto para Separação logística',
-        pedido: item.pedido,
-        codigo: item.codigo,
-        quantidade: item.quantidade
-      })
-    });
-  }
+  // 2) Insere um LI “vazio” com barra de loading
+  const loadingLi = document.createElement('li');
+  loadingLi.classList.add('kanban-card', 'loading');
+  loadingLi.innerHTML = `
+    <div class="loading-bar">
+      <div class="progress"></div>
+    </div>
+  `;
+  ul.appendChild(loadingLi);
 
-  console.log('[DROP] evento drop em', e.currentTarget.id, 'indice=', draggedIndex);
-
-  // 1. Encontra todos os cards com este índice (pode haver múltiplos se o mesmo item está em várias colunas)
-  const cards = document.querySelectorAll(`.kanban-card[data-index="${draggedIndex}"]`);
-
-  // 2. Encontra o card específico que está sendo movido (na coluna de origem)
-  const movedCard = Array.from(cards).find(card => card.dataset.column === originColumn);
-  if (!movedCard) {
-    console.log('[DROP] card não encontrado');
-    return;
-  }
-
-  // 3. Salva o conteúdo original e mostra o spinner imediatamente
-  const originalContent = movedCard.innerHTML;
-  if (newColumn === 'Separação logística') {
-    movedCard.innerHTML = '<i class="fas fa-spinner fa-spin kanban-spinner"></i>';
-    movedCard.style.pointerEvents = 'none'; // Impede interação durante o processamento
-  }
-
-  // 4. Atualiza o modelo de dados
-  const idx = item.local.findIndex(c => c === originColumn);
-  if (idx !== -1) item.local[idx] = newColumn;
+  // 3) Atualiza imediatamente o modelo local
+  const idxLocal = item.local.findIndex(c => c === originColumn);
+  if (idxLocal !== -1) item.local[idxLocal] = newColumn;
 
   try {
-    // 5. Processa a criação da OP (se aplicável)
+    // 4) Envia log de arrasto (se for Separação logística)
+    if (newColumn === 'Separação logística') {
+      await fetch(`${API_BASE}/api/logs/arrasto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timestamp: new Date().toISOString(),
+          etapa: 'Arrasto para Separação logística',
+          pedido: item.pedido,
+          codigo: item.codigo,
+          quantidade: item.quantidade
+        })
+      });
+    }
+
+    // 5) Gera OP se necessário
     const respProd = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
     const prodData = await respProd.json();
-    console.log('[OP] detalhes:', prodData);
-
     const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
 
     if (
@@ -237,14 +227,9 @@ if (!ulListenersInitialized) {
       newColumn === 'Separação logística' &&
       (tipoItem === '04' || parseInt(tipoItem, 10) === 4)
     ) {
-      console.log('[OP] condição satisfeita, incluindo OP');
-
       const prefix = item.codigo.startsWith('P') ? 'P' : 'F';
       const respNext = await fetch(`${API_BASE}/api/op/next-code/${prefix}`, { credentials: 'include' });
-      const { nextCode } = await respNext.json();
-const cCodIntOP = nextCode;
-console.log('[CONFIRMAÇÃO] Número de OP gerado e usado em todos os lugares:', cCodIntOP);
-
+      const { nextCode: cCodIntOP } = await respNext.json();
 
       const now = new Date();
       const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -258,12 +243,7 @@ console.log('[CONFIRMAÇÃO] Número de OP gerado e usado em todos os lugares:',
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param: [{
-          identificacao: {
-            cCodIntOP,
-            dDtPrevisao,
-            nCodProduto: item._codigoProd,
-            nQtde: 1
-          }
+          identificacao: { cCodIntOP, dDtPrevisao, nCodProduto: item._codigoProd, nQtde: 1 }
         }]
       };
 
@@ -273,15 +253,12 @@ console.log('[CONFIRMAÇÃO] Número de OP gerado e usado em todos os lugares:',
         body: JSON.stringify(payloadOP)
       });
       const dataOP = await respOP.json();
-console.log('[OP] resposta Omie:', dataOP);
 
       if (!dataOP.faultstring && !dataOP.error) {
         const arr = item.local;
-        const colunaLimpa = newColumn;
-        const idxMov = arr.findIndex(s => s === colunaLimpa);
+        const idxMov = arr.findIndex(s => s === newColumn);
         if (idxMov !== -1) {
-          arr[idxMov] = `${colunaLimpa},${cCodIntOP}`;
-
+          arr[idxMov] = `${newColumn},${cCodIntOP}`;
           try {
             await fetch(`${API_BASE}/api/etiquetas`, {
               method: 'POST',
@@ -294,22 +271,26 @@ console.log('[OP] resposta Omie:', dataOP);
         }
       }
     }
-  } catch (err) {
-    console.error('[OP] erro inclusão OP:', err);
-    movedCard.innerHTML = originalContent;
-    movedCard.style.pointerEvents = '';
+
+    // 6) Persiste e re-renderiza o Kanban
+    await salvarKanbanLocal(itemsKanban);
     renderKanbanDesdeJSON(itemsKanban);
     enableDragAndDrop(itemsKanban);
-    return;
+
+  } catch (err) {
+    // 7) Em caso de erro, remove o loader, reverte o modelo e alerta
+    loadingLi.remove();
+    if (idxLocal !== -1) item.local[idxLocal] = originColumn;
+    alert(`❌ Erro ao mover o cartão: ${err.message}`);
+    renderKanbanDesdeJSON(itemsKanban);
+    enableDragAndDrop(itemsKanban);
+  } finally {
+    // 8) Limpa estado de drag
+    draggedIndex = null;
+    draggedFromColumn = null;
   }
-
-  renderKanbanDesdeJSON(itemsKanban);
-  enableDragAndDrop(itemsKanban);
-  await salvarKanbanLocal(itemsKanban);
-
-  draggedIndex = null;
-  draggedFromColumn = null;
 });
+
 
     });
     ulListenersInitialized = true;
