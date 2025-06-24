@@ -33,6 +33,146 @@ const hideSpinner = () =>
   (document.querySelector('.kanban-spinner') ?? {}).style && (
     document.querySelector('.kanban-spinner').style.display = 'none');
 
+
+
+function setupAddToggle() {
+  const colElem = document.getElementById('coluna-pcp-aprovado');
+  if (!colElem) return;                    // sai se não achou o UL
+  const col = colElem.closest('.kanban-column');
+  if (!col) return;                        // sai se não achou a coluna
+
+  const btn   = col.querySelector('.add-btn');
+  const input = col.querySelector('.add-search');
+  btn.addEventListener('click', () => {
+    col.classList.toggle('search-expand');
+    if (col.classList.contains('search-expand')) {
+      setTimeout(() => input.focus(), 100);
+    }
+  });
+}
+
+// <<< Cole AQUI, logo abaixo de setupAddToggle()
+
+// ─── busca paginada na OMIE (com logs) ───────────────────────────────────────
+// ─── busca paginada na OMIE (com logs) ───────────────────────────────────────
+async function fetchAllProducts(filter) {
+  const all = [];
+  let page = 1;
+  const perPage = 50;
+
+  while (true) {
+    const payload = {
+      call: 'ListarProdutos',
+      param: [{
+        pagina: page,
+        registros_por_pagina: perPage,
+        apenas_importado_api: 'N',
+        filtrar_apenas_omiepdv: 'N',
+        filtrar_apenas_descricao: `%${filter}%`
+      }],
+      app_key:    OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET
+    };
+
+    console.log(`[OMIE][Page ${page}] Enviando payload:`, payload);
+    const resp = await fetch(`${API_BASE}/api/omie/produtos`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload)
+    });
+    console.log(`[OMIE][Page ${page}] Status HTTP:`, resp.status);
+
+    let data;
+    try {
+      data = await resp.json();
+    } catch (err) {
+      console.error(`[OMIE][Page ${page}] Falha ao parsear JSON:`, err);
+      throw err;
+    }
+    console.log(`[OMIE][Page ${page}] JSON recebido:`, data);
+
+    // busca pelo campo correto retornado pela OMIE:
+    const list = Array.isArray(data.produto_servico_cadastro)
+      ? data.produto_servico_cadastro
+      : Array.isArray(data.produtos_cadastro)
+        ? data.produtos_cadastro
+        : [];
+
+    console.log(`[OMIE][Page ${page}] Itens nesta página:`, list.length);
+    all.push(...list);
+
+    if (list.length < perPage) break;
+    page++;
+  }
+
+  console.log('[OMIE] Total de itens coletados:', all.length);
+  return all;
+}
+
+
+// ─── renderiza o listbox ─────────────────────────────────────────
+function renderSearchResults(products, container) {
+  container.innerHTML = '';
+  products.forEach(p => {
+    const li = document.createElement('li');
+    li.classList.add('result-item');
+    li.textContent = `${p.codigo} — ${p.descricao}`;
+    container.appendChild(li);
+    li.addEventListener('click', () => {
+      const input = container.previousElementSibling;
+      input.value = `${p.codigo} — ${p.descricao}`;
+      container.innerHTML = '';
+    });
+  });
+}
+
+// ─── instala o listener no input ─────────────────────────────────
+// ─── instala o listener no input (com logs) ───────────────────────────────
+function setupProductSearch() {
+  const colElem = document.getElementById('coluna-pcp-aprovado');
+  if (!colElem) return;
+  const col     = colElem.closest('.kanban-column');
+  if (!col) return;
+
+  const input   = col.querySelector('.add-search');
+  const results = col.querySelector('.add-results');
+  let debounce;
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    const term = input.value.trim();
+    console.log('[SEARCH] input mudou para:', term);
+    if (term.length < 4) {
+      results.innerHTML = '';
+      return;
+    }
+    debounce = setTimeout(async () => {
+      console.log('[SEARCH] Disparando busca OMIE para:', term);
+      results.innerHTML = '<li>Buscando…</li>';
+      try {
+const items = await fetchAllProducts(term);
+console.log('[SEARCH] Recebeu itens:', items);
+
+// 1) filtra apenas tipoItem = "04"
+const filtered = items.filter(p => p.tipoItem === '04');
+console.log('[SEARCH] Itens tipoItem="04":', filtered.length, filtered);
+
+// 2) ordena alfabeticamente pelo código
+const sorted = filtered.sort((a, b) => a.codigo.localeCompare(b.codigo));
+console.log('[SEARCH] Itens ordenados (códigos):', sorted.map(p => p.codigo));
+
+// 3) renderiza o resultado ordenado
+renderSearchResults(sorted, results);
+
+
+      } catch (err) {
+        console.error('[SEARCH] Erro na busca:', err);
+        results.innerHTML = `<li class="error">Erro: ${err.message}</li>`;
+      }
+    }, 300);
+  });
+
+}
 /* ───────────────── navegação de abas ───────────────── */
 function setupTabNavigation() {
   const links = document.querySelectorAll('#kanbanTabs .main-header-link');
@@ -198,7 +338,6 @@ export async function initKanban() {
     /* 3) identifica novos itens / consulta estoque */
     const keySet = new Set(existingItems.map(i => `${i.pedido}|${i.codigo}`));
     const novos = [];
-
     for (const p of pedidos) {
       const np = p.cabecalho.numero_pedido;
       for (const det of (Array.isArray(p.det)?p.det:[])) {
@@ -220,14 +359,17 @@ export async function initKanban() {
                    cod_int:obj.codigo, data:hoje }],
           app_key:OMIE_APP_KEY, app_secret:OMIE_APP_SECRET
         };
-        try{
-          const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`,{
-            method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payloadEst)});
+        try {
+          const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payloadEst)
+          });
           const d = r.ok?await r.json():{};
           obj.estoque =
             d.saldo ?? d.posicao?.[0]?.saldo_atual ?? d.posicao?.[0]?.quantidade_estoque ?? 0;
-        }catch{ obj.estoque = 0; }
+        } catch {
+          obj.estoque = 0;
+        }
         novos.push(obj);
         await sleep(300);
       }
@@ -239,17 +381,27 @@ export async function initKanban() {
     enableDragAndDrop(allItems);
     if (novos.length) await salvarKanbanLocal(allItems);
 
-    /* 5) ativa dblclick & abas */
+    /* 5) ativa dblclick, toggle de “+”, busca e navegação de abas */    /* 5) ativa dblclick, toggle de “+”, busca e navegação de abas */
     attachDoubleClick(allItems, pedidosMap);
-    setupTabNavigation();
+    setupAddToggle();        // abre/fecha campo de pesquisa
+    setupProductSearch();    // instala listener de digitação
+    setupTabNavigation();    // mantém navegação de abas
 
     /* exibe aba Comercial como default */
-    const linkCom = document.querySelector('#kanbanTabs .main-header-link[data-kanban-tab="comercial"]');
+    const linkCom = document.querySelector(
+      '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
+    );
     linkCom?.click?.();
 
-  } catch (err) {
+
+  }
+  
+  
+  
+  catch (err) {
     console.error('Erro no initKanban:', err);
   } finally {
     hideSpinner();
   }
 }
+

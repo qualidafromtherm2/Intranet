@@ -479,10 +479,22 @@
 </div>
 
 
-  <div class="kanban-column">
-    <div class="kanban-header">Separação logistica</div>
-    <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
+<div class="kanban-column">
+  <div class="kanban-header">
+    <div class="title-wrapper">
+      <span>Separação logística</span>
+      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
+    </div>
+    <div class="add-container">
+      <input type="text" class="add-search" placeholder="Pesquisar…" />
+      <!-- >>> Lista de resultados da busca <<< -->
+      <ul class="add-results"></ul>
+    </div>
   </div>
+  <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
+</div>
+
+
 
   <div class="kanban-column">
     <div class="kanban-header">Fila de produção</div>
