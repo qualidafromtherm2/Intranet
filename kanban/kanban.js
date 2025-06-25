@@ -118,15 +118,29 @@ function renderSearchResults(products, container) {
     li.classList.add('result-item');
     li.textContent = `${p.codigo} — ${p.descricao}`;
     container.appendChild(li);
-    li.addEventListener('click', () => {
-      const input = container.previousElementSibling;
-      input.value = `${p.codigo} — ${p.descricao}`;
-      container.innerHTML = '';
-    });
+li.addEventListener('click', () => {
+  // 1.1) Log do item clicado
+  console.log('[SEARCH] Você clicou em:', p.codigo, p.descricao);
+
+  // 1.2) Preenche o input
+  const input = container.previousElementSibling;
+  input.value = `${p.codigo} — ${p.descricao}`;
+  console.log('[SEARCH] input.value atualizado para:', input.value);
+
+  // 1.3) Fecha a lista de resultados
+  container.innerHTML = '';
+
+  // 1.4) Dispara clique na aba PCP
+  const tabPCP = document.querySelector(
+    '#kanbanTabs .main-header-link[data-kanban-tab="pcp"]'
+  );
+  console.log('[SEARCH] Disparando aba PCP');
+  tabPCP.click();
+});
+
   });
 }
 
-// ─── instala o listener no input ─────────────────────────────────
 // ─── instala o listener no input (com logs) ───────────────────────────────
 function setupProductSearch() {
   const colElem = document.getElementById('coluna-pcp-aprovado');
@@ -173,25 +187,130 @@ renderSearchResults(sorted, results);
   });
 
 }
+
+
+// ─── 1) Renderiza a Lista de Peças na aba PCP ────────────────────────
+async function renderListaPecasPCP() {
+// renderListaPecasPCP()
+console.log('[PCP] → renderListaPecasPCP() começou');
+
+// 1) encontra a UL
+const ul = document.getElementById('listaPecasPCPList');
+if (!ul) { console.warn('[PCP] UL não encontrada'); return; }
+
+// 2) encontra o input correto navegando pela coluna
+const col = document
+  .getElementById('coluna-pcp-aprovado')
+  .closest('.kanban-column');
+const input = col?.querySelector('.add-search');
+console.log('[PCP] input encontrado:', input);
+if (!input) { console.warn('[PCP] input .add-search não encontrado'); return; }
+
+// 3) extrai o código
+const raw = input.value;
+const codigo = raw.split('—')[0]?.trim();
+console.log('[PCP] Código extraído:', codigo);
+if (!codigo) { console.warn('[PCP] Sem código válido'); return; }
+
+  // 3.2) Chama o seu proxy de “ConsultarEstrutura”
+  console.log('[PCP] Enviando requisição para /api/omie/estrutura', codigo);
+  const resp = await fetch(`${API_BASE}/api/omie/estrutura`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ param:[{ codProduto: codigo }] })
+  });
+  console.log('[PCP] status HTTP:', resp.status);
+
+  // 3.3) Parse do JSON
+  let data;
+  try {
+    data = await resp.json();
+    console.log('[PCP] JSON recebido:', data);
+  } catch (err) {
+    console.error('[PCP] Erro ao ler JSON:', err);
+    return;
+  }
+
+  // 3.4) Pega o array de peças (ajuste o nome se for diferente)
+  const pecas = data.itens || data.pecas || [];
+  console.log('[PCP] Total de peças:', pecas.length);
+
+  // 3.5) Limpa e popula o UL
+  ul.innerHTML = '';
+  pecas.forEach(p => {
+    const li = document.createElement('li');
+    li.classList.add('content-item');
+    li.textContent = `${p.codProdMalha} — ${p.descrProdMalha} (Qtd: ${p.quantProdMalha})`;
+    li.dataset.codigo    = p.codProdMalha.toLowerCase();
+    li.dataset.descricao = p.descrProdMalha.toLowerCase();
+    ul.appendChild(li);
+  });
+
+  console.log('[PCP] UL populada no DOM com as peças');
+}
+
+
+
+// ─── 2) Aplica filtros de código e descrição na lista PCP ───────────
+function applyPecasFilterPCP() {
+  const container = document.querySelector('#listaPecasPCP .title-wrapper');
+  if (!container) return;
+
+  // Evita criar duas vezes os inputs
+  if (container.querySelector('#codeFilterPCP')) return;
+
+  const codeFilter = document.createElement('input');
+  codeFilter.id = 'codeFilterPCP';
+  codeFilter.placeholder = 'Pesquisar código';
+
+  const descFilter = document.createElement('input');
+  descFilter.id = 'descFilterPCP';
+  descFilter.placeholder = 'Pesquisar descrição';
+
+  container.appendChild(codeFilter);
+  container.appendChild(descFilter);
+
+  const filtrar = () => {
+    const c = codeFilter.value.trim().toLowerCase();
+    const d = descFilter.value.trim().toLowerCase();
+    document
+      .querySelectorAll('#listaPecasPCPList li')
+      .forEach(li => {
+        const ok = (!c || li.dataset.codigo.includes(c))
+                && (!d || li.dataset.descricao.includes(d));
+        li.style.display = ok ? '' : 'none';
+      });
+  };
+
+  codeFilter.addEventListener('input', filtrar);
+  descFilter.addEventListener('input', filtrar);
+}
+
 /* ───────────────── navegação de abas ───────────────── */
 function setupTabNavigation() {
   const links = document.querySelectorAll('#kanbanTabs .main-header-link');
-  if (!links.length) return;          // evita erro se abas não existirem
-
   links.forEach(lk =>
     lk.addEventListener('click', e => {
       e.preventDefault();
-      const alvo = lk.dataset.kanbanTab;           // comercial | detalhes…
-
+      const alvo = lk.dataset.kanbanTab; // comercial | pcp | produção…
+      console.log('[TAB] Aba selecionada →', alvo);
       links.forEach(a => a.classList.remove('is-active'));
       lk.classList.add('is-active');
-
-      document.querySelectorAll('.kanban-page').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.kanban-page')
+        .forEach(p => p.style.display = 'none');
       const pg = document.getElementById(`conteudo-${alvo}`);
       if (pg) pg.style.display = 'block';
+
+  if (alvo === 'pcp') {
+    console.log('[TAB] Iniciando renderização da lista de peças PCP');
+    renderListaPecasPCP();
+    applyPecasFilterPCP();
+    console.log('[TAB] Lista de peças PCP finalizada');
+  }
     })
   );
 }
+
 
 /* ───────────────── detalhes via duplo-clique ─────────────────
    Agora SEM cache: sempre chama ConsultarPedido.

@@ -873,6 +873,37 @@ app.post(
     }
   });
 
+
+// dentro do seu IIFE, logo após:
+//   app.post('/api/omie/malha', …)
+// e antes de: app.use('/api/malha/consultar', malhaConsultar);
+app.post(
+  '/api/omie/estrutura',
+  express.json(),
+  async (req, res) => {
+    try {
+      // chama o OMIE /geral/malha/ com call=ConsultarEstrutura
+      const data = await omieCall(
+        'https://app.omie.com.br/api/v1/geral/malha/',
+        {
+          call:       'ConsultarEstrutura',
+          app_key:    OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param:      req.body.param
+        }
+      );
+      return res.json(data);
+    } catch (err) {
+      console.error('[estrutura] erro →', err.faultstring || err.message);
+      return res
+        .status(err.status || 500)
+        .json({ error: err.faultstring || err.message });
+    }
+  }
+);
+
+
+
   app.use('/api/malha/consultar', malhaConsultar);
 
 

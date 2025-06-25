@@ -219,15 +219,15 @@ body.light-mode .video-bg:before {
   }
 }
 
-.search-bar {
+.search-bar {                /* sempre visível */
+  flex: 1 1 260px;          /* cresce até 100%, mas parte de 260  */
+  min-width: 0;             /* permite encolher em telas bem pequenas */
   height: 40px;
   display: flex;
-  width: 100%;
-  max-width: 400px;
   padding-left: 16px;
   border-radius: 4px;
 }
-.search-bar input {
+.search-bar input {          /* continua igual */
   width: 100%;
   height: 100%;
   border: none;
@@ -238,11 +238,20 @@ body.light-mode .video-bg:before {
   font-weight: 500;
   padding: 0 20px 0 40px;
   box-shadow: 0 0 0 2px rgba(134, 140, 160, 0.02);
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
+background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
   background-size: 14px;
   background-repeat: no-repeat;
   background-position: 16px 48%;
   color: var(--theme-color);
+}
+
+.search-bar.active {           /* estado aberto (classe vem do JS) */
+max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
+
+}
+
+.search-bar.active input {     /* o próprio <input> ganha foco */
+  cursor: text;
 }
 .search-bar input::-moz-placeholder {
   font-family: var(--body-font);
@@ -264,12 +273,22 @@ body.light-mode .video-bg:before {
 }
 
 .header-profile {
+  margin-left: auto;         /* empurra p/ borda direita           */
   display: flex;
   align-items: center;
-  padding: 0 16px 0 40px;
-  margin-left: auto;
-  flex-shrink: 0;
+  gap: 16px;                 /* distância igual entre os ícones    */
+  padding-left: 40px;        /* mesmo recuo que o campo de busca   */
+  flex: 0 0 200px;
+  flex-shrink: 0;            /* ❸ NUNCA encolha              */
+
 }
+
+.header-menu{
+  display:flex;
+  flex: 0 1 auto;          /* deixa o menu encolher         */
+  overflow:hidden;         /* esconde links que não cabem   */
+}
+
 .header-profile svg {
   width: 22px;
   color: #f9fafb;
@@ -3535,3 +3554,177 @@ li.duplicado::after{
 .add-results::-webkit-scrollbar-track {
   background-color: #1F1F23;
 }
+/* ──────────────────────────────────────────────────
+   Layout de Lista de Peças idêntico à Estrutura de produto
+   ────────────────────────────────────────────────── */
+#listaPecasPCP .content-section ul#listaPecasPCPList {
+  display: block;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li.header-row {
+  display: grid;
+  grid-template-columns:
+      120px
+      minmax(220px,1fr)
+      60px
+      70px
+      90px
+      80px;
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(16,18,27,0.92);
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: bold;
+  text-align: center;
+}
+#listaPecasPCP .content-section ul#listaPecasPCPList li.header-row div:nth-child(-n+2) {
+  text-align: left;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li:not(.category-header):not(.header-row) {
+  display: grid;
+  grid-template-columns:
+      120px minmax(220px,1fr) 60px 70px 90px 80px;
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li.category-header {
+  display: block;
+  background: rgba(144,119,119,0.41);
+  font-size: 1.1em;
+  padding: 8px 18px;
+  cursor: default;
+}
+
+#listaPecasPCP #listaPecasPCPList .status-circle { display: none; }
+#listaPecasPCP #listaPecasPCPList .status {
+  display: block;
+  margin: 0;
+  padding: 0;
+  white-space: normal;
+}
+
+#listaPecasPCP #listaPecasPCPList .status-text {
+  margin-left: 0;
+  word-break: break-word;
+}
+
+#listaPecasPCP #listaPecasPCPList .qtd,
+#listaPecasPCP #listaPecasPCPList .unidade,
+#listaPecasPCP #listaPecasPCPList .valor {
+  text-align: center;
+}
+
+#listaPecasPCP #listaPecasPCPList .button-wrapper {
+  width: auto;
+  display: flex;
+  justify-content: center;
+}
+
+#listaPecasPCP #listaPecasPCPList .products,
+#listaPecasPCP #listaPecasPCPList .status {
+  width: auto;
+  margin-left: 0;
+}
+
+#listaPecasPCP #listaPecasPCPList .button-wrapper .status-button {
+  padding: 6px 18px;
+}
+
+/* ─── Botão ⋯ ───────────────────────────────────── */
+.more-btn{
+  font-size:24px;
+  color:var(--theme-color);  /* branco/lilás do tema */
+  background:none;
+  border:none;
+  cursor:pointer;
+  display:none;      /*   ←  começa escondido   */
+}
+.more-menu.open{ display:flex; }
+
+.more-btn:hover{
+  color:var(--theme-color);
+}
+/* ─── Dropdown oculto ───────────────────────────── */
+.more-menu{
+  position:absolute;
+  top:58px;                 /* logo abaixo do cabeçalho de 58 px */
+  right:30px;               /* mesmo padding do header */
+  display:none;
+  flex-direction:column;
+  min-width:160px;
+  background:var(--dropdown-bg);
+  border:1px solid var(--border-color);
+  border-radius:4px;
+  z-index:100;
+}
+.more-menu a{
+  padding:10px 16px;
+  color:var(--theme-color);
+  text-decoration:none;
+  white-space:nowrap;
+}
+.more-menu a:hover{
+  background:var(--dropdown-hover);
+}
+.more-menu.open{display:flex;}
+.header{position:relative;}     /* referência para o dropdown */
+
+.header {
+  display: flex;
+  align-items: center;
+  padding: 0 30px;
+  gap: 0;                 /* já tinha boa parte disso no seu CSS */
+}
+
+/* nav que pode “estourar” */
+.header-menu {
+  flex: 1 1 auto;
+  display: flex;
+  overflow: hidden;       /* corta o que não couber */
+}
+
+/* botão ⋯ */
+.more-btn {
+  flex: 0 0 auto;
+  font-size: 24px;
+  padding: 20px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--inactive-color);
+  display: none;          /* aparece só quando houver abas ocultas */
+}
+
+/* dropdown */
+.more-menu {
+  position: absolute;
+  top: 58px;              /* logo abaixo da faixa */
+  right: 30px;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  z-index: 100;
+}
+.more-menu a {
+  padding: 10px 16px;
+  color: var(--theme-color);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.more-menu a:hover { background: var(--dropdown-hover); }
+.more-menu.open   { display: flex; }
