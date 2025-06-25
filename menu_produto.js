@@ -7,6 +7,7 @@ import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
+console.log('[menu_produto] script inicializado');
 
 
 function showMainTab(tabId) {
@@ -94,7 +95,40 @@ function navigateToDetalhes(codigo) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const inputBusca = document.querySelector('.search-bar input');
+  console.log('[menu_produto] DOMContentLoaded disparou');
+
+ const inputBusca = document.querySelector('.search-bar input');
+console.log('[INIT] inputBusca', inputBusca);
+
+ /* ── anima a barra de pesquisa (lupa) ─────────────────────────── */
+const searchBar   = document.querySelector('.search-bar');       // <div …>
+const searchInput = inputBusca;                                  // <input …>
+
+// ► abre a barra e foca no input
+searchBar.addEventListener('click', e => {
+  e.stopPropagation();            // não deixa o clique “vazar”
+  searchBar.classList.add('active');
+  searchInput.focus();            // aparece o cursor
+});
+
+// ► fecha se clicar fora (e o campo estiver vazio)
+document.addEventListener('click', e => {
+  const clicouFora = !searchBar.contains(e.target);
+  const vazio      = !searchInput.value.trim();
+  if (clicouFora && vazio) {
+    searchBar.classList.remove('active');
+  }
+});
+/* ─────────────────────────────────────────────────────────────── */
+
+// garante foco mesmo se clicar no ícone ou no espaço à esquerda
+searchBar.addEventListener('mousedown', e => {
+  if (e.target !== inputBusca) {   // agora inputBusca existe :)
+    e.preventDefault();
+    inputBusca.focus();
+  }
+});
+
   const codeFilter = document.getElementById('codeFilter');
   const descFilter = document.getElementById('descFilter');
     // 0) Esconde a aba “Acessos” se não for admin
@@ -137,13 +171,15 @@ const ulList     = document.getElementById('listaProdutosList');
 
   // PESQUISA PRINCIPAL
   inputBusca.addEventListener('keydown', async e => {
+    console.log('[TESTE] valor agora →', inputBusca.value);
     if (e.key !== 'Enter') return;
+    console.log('[KEY] Enter detectado:', inputBusca.value);
     const termo = inputBusca.value.trim();
     if (!termo) return;
 
     // 1) tenta detalhes
     try {
-      const resDet  = await fetch(`/api/produtos/detalhes/${encodeURIComponent(termo)}`);
+      const resDet  = console.log('[FETCH] enviando ListarProdutosResumido'); await fetch(`/api/produtos/detalhes/${encodeURIComponent(termo)}`);
       const detData = await resDet.json();
       if (!detData.error) {
         navigateToDetalhes(termo);
@@ -414,7 +450,7 @@ document
 listaEtiq.addEventListener('click', e => {
   if (e.target.matches('.btn-print')) {
     const file = e.target.dataset.file;
-    window.open(`/etiquetas/${encodeURIComponent(file)}`, '_blank');
+    window.open(`/etiquetas/printed/${encodeURIComponent(file)}`, '_blank');
   }
 });
 
@@ -462,6 +498,11 @@ function resetSubTabs() {
   if (detalhesContent) detalhesContent.style.display = 'block';
 }
 
+// garante que clicar em QUALQUER ponto da barra de pesquisa dá foco ao input
+document.querySelector('.search-bar').addEventListener('click', () => {
+  const inp = document.querySelector('.search-bar input');
+  if (inp) inp.focus();
+});
 
 // 2) Dentro de loadDadosProduto, após obter `dados`, chame:
 function populateSubTabs(dados) {
@@ -604,3 +645,48 @@ document.getElementById('menu-pedidos').addEventListener('click', e => {
   initKanban();
 });
 
+// ---------- MENU RESPONSIVO ----------
+const header   = document.getElementById('appHeader');   // <div class="header">
+const menu     = document.getElementById('mainMenu');    // <nav …>
+const moreBtn  = document.getElementById('moreBtn');     // botão ⋯
+const moreMenu = document.getElementById('moreMenu');    // dropdown
+const notifLi  = document.getElementById('menu-notificacoes'); // link “Notificações”
+
+function recalculaMenu () {
+  /* 1) devolve tudo ao <nav> antes de medir ----------------------- */
+  while (moreMenu.firstChild) menu.appendChild(moreMenu.firstChild);
+  moreBtn.style.display = 'none';
+
+  /* 2)       ↙ larg. header  − (busca + ícones + paddings + ‘…’) */
+  const busca   = document.getElementById('searchBar');
+  const icones  = document.querySelector('.header-profile');
+  const padding = 60;                             // 2 × 30 px
+
+  const livre = header.clientWidth
+              - busca.offsetWidth
+              - icones.offsetWidth
+              - moreBtn.offsetWidth
+              - padding;
+
+  /* 3) força “Notificações” a ficar SEMPRE no dropdown ------------ */
+  if (notifLi && menu.contains(notifLi)) {
+    moreMenu.prepend(notifLi);
+    moreBtn.style.display = 'block';
+  }
+
+  /* 4) empurra o que mais não couber ------------------------------ */
+  while (menu.scrollWidth > livre && menu.children.length > 1) {
+    moreMenu.prepend(menu.lastElementChild);
+    moreBtn.style.display = 'block';
+  }
+}
+
+/* abre/fecha o dropdown */
+moreBtn.addEventListener('click', () => {
+  moreMenu.classList.toggle('open');
+});
+
+/* recalcula em 3 situações */
+window.addEventListener('resize',           recalculaMenu);
+document.fonts?.ready.then(                  recalculaMenu);
+document.addEventListener('DOMContentLoaded', recalculaMenu);
