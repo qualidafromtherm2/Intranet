@@ -375,7 +375,6 @@ plusBtn.addEventListener('click', () => {
 
   console.log('[PCP] UL populada no DOM com as peças');
   await carregarPosicaoEstoque();
-  filtrarPorEstoque(); 
 }
 
 
@@ -677,6 +676,9 @@ export async function initKanban() {
   }
 }
 
+// 1) chame isto no final de renderListaPecasPCP()
+await carregarPosicaoEstoque();
+filtrarPorEstoque(); 
 /* ------------------------------------------------------------------ */
 /* 2) Nova função assíncrona                                          */
 async function carregarPosicaoEstoque() {

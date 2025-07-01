@@ -60,57 +60,13 @@ grep -R "o valor que vc quer localizar" .  "Aqui é para ver qual arquivo utiliz
 http://localhost:5001/# // Meu site
 
 
-(npm run dev // Para iniciar o servidor altomaticamente)
-
-
 chmod +x ./node_modules/.bin/nodemon
 npm run dev // Para iniciar o servidor altomaticamente
 
+// Para enviar para github
 
-
-
-
-Puxar (pull) as alterações do repositório local para o github:
-
-# Primeiro, abra o terminal integrado do VS Code (Ctrl + `).
-# Navegue até o diretório do seu projeto, se ainda não estiver lá.
-# depois de editar arquivos...
-git add config.server.js 
-
-git commit -m "Descrição do que você mudou"
-git push
-
-# Para adicionar arquivos específicos ao commit, você pode usar o comando git add seguido dos nomes dos arquivos.
-# Por exemplo, se você fez alterações em config.server.js e requisicoes_omie/filtro_produto.js, você pode fazer o seguinte:
-git add kanban/kanban.js \
-        requisicoes_omie/editar_produto.js \
-        requisicoes_omie/filtro_produto.js \
-        requisicoes_omie/Dados_produto.js
-
-git commit -m "Ajustado setCache para só chamar slice() quando o parâmetro é um array válido
-
-Alterado initListarProdutosUI para inicializar o cache quando necessário antes de utilizá-lo"
-git push
-
-
-
-
-Limpe cache (Ctrl+Shift+R).
-
-Para enviar (push) suas alterações para o GitHub, você pode seguir os seguintes passos
-no terminal integrado do VS Code:
-git status
-git add .
-git commit -m "Minhas alterações: atualização do layout do modal, correções e melhorias"
-git push
-
-
-(Para enviar apenas alguns arquivos para o GitHub, você pode adicionar
-os arquivos desejados com o comando git add, criar um commit e depois
-fazer o push. Por exemplo:
-
-git add arquivo1.js arquivo2.css
-git commit -m "Adicionando somente os arquivos selecionados"
+git add menu_produto.html menu_produto.js menu_produto.css kanban/kanban.js server.js
+git commit -m "corrigindo atualizar o kanban"
 git push
 
 Isso fará com que somente as alterações de arquivo1.js e arquivo2.css

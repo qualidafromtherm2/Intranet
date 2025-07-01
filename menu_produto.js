@@ -2,19 +2,33 @@
 import config from './config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 const API_BASE = window.location.origin; // já serve https://intranet-30av.onrender.com
+let ultimoCodigo = null;      // <-- NOVO
 
 import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
-console.log('[menu_produto] script inicializado');
+let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
+
+
 
 
 function showMainTab(tabId) {
-  document.querySelectorAll('.tab-pane').forEach(p => {
-    p.style.display = (p.id === tabId) ? 'block' : 'none';
-  });
+  // esconde TUDO que possa ser página principal:
+  document
+    .querySelectorAll('.tab-pane, .kanban-page')
+    .forEach(p => (p.style.display = 'none'));
+
+  // tenta achar o alvo em 2 formatos:
+  //   • id = tabId  (ex.:  "listaPecas")
+  //   • id = "conteudo-" + tabId  (ex.:  "conteudo-pcp")
+  const alvo =
+    document.getElementById(tabId) ||
+    document.getElementById(`conteudo-${tabId}`);
+
+  if (alvo) alvo.style.display = 'block';
 }
+
 
 window.showMainTab = showMainTab;   // expõe p/ outros módulos
 // referências ao container principal e ao painel de Acessos
@@ -22,6 +36,31 @@ const wrapper      = document.querySelector('.wrapper');
 const acessosPanel = document.getElementById('acessos');
 
 // Spinner de carregamento
+
+/* ======== Helpers – alternar Pedidos (Kanban) ======== */
+function showKanban () {
+  /* esconde QUALQUER painel de produtos que ainda possa estar visível */
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+
+  /* mostra somente a estrutura do Kanban */
+  document.getElementById('produtoTabs').style.display   = 'none';
+  document.getElementById('kanbanTabs').style.display    = 'flex';
+  document.getElementById('kanbanContent').style.display = 'block';
+
+  /* (re)carrega dados e abre a sub-aba que o usuário visitou por último */
+  initKanban();
+  showKanbanTab(lastKanbanTab || 'comercial');
+}
+
+
+function hideKanban () {
+  document.getElementById('kanbanTabs').style.display    = 'none';
+  document.getElementById('kanbanContent').style.display = 'none';
+  document.getElementById('produtoTabs').style.display   = 'block';
+}
+
+
+
 function showSpinner() {
   document.getElementById('productSpinner').style.display = 'inline-flex';
 }
@@ -55,10 +94,55 @@ window.fetch = async function(input, init = {}) {
   }
 };
 
+function loadEstruturaProduto(codigo) {
+  if (!codigo) return;
+  ultimoCodigo = codigo;
+
+  const ul      = document.getElementById('malha');
+  const spinner = document.getElementById('estoqueSpinnerBox');
+  ul.innerHTML  = '';                     // limpa antes de começar
+  spinner.style.display = 'inline-flex';  // mostra spinner
+
+  fetch('/api/malha/consultar', {         // ou /api/omie/estrutura
+    method : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body   : JSON.stringify({ intProduto: codigo })
+  })
+  .then(r => r.json())
+  .then(json => {
+    spinner.style.display = 'none';
+
+    if (json.notFound || !Array.isArray(json.itens)) {
+      ul.innerHTML = '<li class="fault-message">Estrutura não cadastrada</li>';
+      return;
+    }
+
+    json.itens.forEach(it => {
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div>${it.codProdMalha}</div>
+        <div class="status">${it.descrProdMalha}</div>
+        <div class="qtd">${it.quantProdMalha}</div>
+        <div class="unidade">${it.unidProdMalha}</div>
+        <div class="custo-real">${it.custoReal ?? '–'}</div>
+        <div class="button-wrapper">
+          <button class="content-button status-button open"
+                  data-cod="${it.codProdMalha}">Editar</button>
+        </div>`;
+      ul.appendChild(li);
+    });
+  })
+  .catch(err => {
+    spinner.style.display = 'none';
+    ul.innerHTML = `<li class="fault-message">Erro: ${err.message}</li>`;
+  });
+}
+window.loadEstruturaProduto = loadEstruturaProduto;   // ← deixa global
 
 // Abre a aba Dados do produto
 // Abre a aba Dados do produto
 function openDadosProdutoTab() {
+  hideKanban();                
   // 1) Esconde todas as .tab-pane
   document.querySelectorAll('.tab-pane')
     .forEach(p => p.style.display = 'none');
@@ -192,8 +276,9 @@ const ulList     = document.getElementById('listaProdutosList');
 
     // 2) fallback: lista resumida
     inputBusca.value = '';
-    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-    document.getElementById('listaPecas').style.display = 'block';
+   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+   document.getElementById('listaProdutos').style.display = 'block';
+
     document.querySelector('.main-header').style.display = 'none';
     ulList.innerHTML = '';
     countEl.textContent = '0';
@@ -255,10 +340,11 @@ const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
   if (btnCache) {
     btnCache.addEventListener('click', async e => {
       e.preventDefault();
+      hideKanban(); 
       // 1) esconde todas as panes
-      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-      // 2) exibe a aba de Lista de produtos cacheada
-      document.getElementById('listaPecas').style.display = 'block';
+document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+document.getElementById('listaProdutos').style.display = 'block';
+
       // 3) oculta a barra interna (se for o comportamento desejado)
       document.querySelector('.main-header').style.display = 'none';
       // 4) marca o link ativo na lateral
@@ -266,7 +352,11 @@ const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
       btnCache.classList.add('is-active');
       // 5) dispara o init que carrega todo o cache e renderiza a lista
 
-      await initListarProdutosUI();
+      await initListarProdutosUI(
+  'listaPecasTab',       // o ID real do seu pane
+  'listaProdutosList'
+);
+
 
       // 1) reaplica filtro de código/descrição (input)
 applyResumoFilters();
@@ -375,8 +465,13 @@ headerLinks.forEach(link => {
     headerLinks.forEach(a => a.classList.remove('is-active'));
     panes.forEach(p => p.style.display = 'none');
 
+        /* toda vez que sair de Pedidos, esconde o painel Kanban */
+if (link.id !== 'menu-pedidos') hideKanban();
+
     // 2) destaca o clicado
     link.classList.add('is-active');
+
+
 
     if (link.id === 'menu-acessos') {
       acessosPanel.style.display = 'block';
@@ -556,6 +651,7 @@ async function loadDadosProduto(codigo) {
   const res = await fetch(`/api/produtos/detalhes/${encodeURIComponent(codigo)}`);
   // 2) agora você pode usar await res.json()
   const dados = await res.json();
+  ultimoCodigo = codigo;        // grava o código para outras abas
 
   // 3) popula as sub-abas
   populateSubTabs(dados);
@@ -567,6 +663,7 @@ async function loadDadosProduto(codigo) {
   if (trigger) trigger.click();
 }
 
+window.loadDadosProduto = loadDadosProduto;   // <-- expõe globalmente
 
 
 // Função para preencher os menus lateral e superior com um <select> de permissões
@@ -627,22 +724,80 @@ function loadMenus() {
 
 
 // 1) Alterna entre Produto ⇄ Pedidos
-document.getElementById('menu-produto').addEventListener('click', e => {
+/* ======== Links diretos do cabeçalho ======== */
+document.getElementById('menu-produto') .addEventListener('click', e => {
   e.preventDefault();
-  document.getElementById('produtoTabs').style.display   = 'block';
-  document.getElementById('kanbanTabs').style.display    = 'none';
-  document.getElementById('kanbanContent').style.display = 'none';
+  hideKanban();            // <<<<< usa o helper novo
+  openDadosProdutoTab();   // já existia
 });
+
 document.getElementById('menu-pedidos').addEventListener('click', e => {
   e.preventDefault();
+  showKanban();            // <<<<< usa o helper novo
+});
 
-  // 1) esconde Produto, mostra Kanban
-  document.getElementById('produtoTabs').style.display   = 'none';
-  document.getElementById('kanbanTabs').style.display    = 'flex';
-  document.getElementById('kanbanContent').style.display = 'block';
 
-  // 2) dispara o Kanban propriamente dito
-  initKanban();
+/* —————————————————————————————
+   Kanban interno  (Comercial / PCP / …)
+————————————————————————————— */
+function showKanbanTab(nome) {
+  lastKanbanTab = nome;          //  ← NOVO
+  /* 1) fixa o highlight na barra */
+  document.querySelectorAll('#kanbanTabs .main-header-link')
+    .forEach(a => a.classList.toggle('is-active',
+                                     a.dataset.kanbanTab === nome));
+
+  /* 2) mostra só a página pedida */
+  document.querySelectorAll('#kanbanContent .kanban-page')
+    .forEach(p => p.style.display =
+                p.id === `conteudo-${nome}` ? 'block' : 'none');
+}
+
+/*  listeners da barra “Comercial | PCP | …”  */
+document.querySelectorAll('#kanbanTabs .main-header-link')
+  .forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const alvo = link.dataset.kanbanTab;   // comercial / pcp / …
+      showKanbanTab(alvo);
+    });
+  });
+
+
+  /* ===========================================================
+   Abas internas (Dados do produto | Estrutura | Fotos | …)
+   =========================================================== */
+document.querySelectorAll('#produtoTabs .main-header-link').forEach(tab => {
+  tab.addEventListener('click', e => {
+    e.preventDefault();
+
+    // 1) visual ------------------------------------------------
+    document
+      .querySelectorAll('#produtoTabs .main-header-link')
+      .forEach(a => a.classList.remove('is-active'));
+    tab.classList.add('is-active');
+
+    const paneId = tab.dataset.target;
+    document
+      .querySelectorAll('#produtoTabs .tab-pane')
+      .forEach(p => p.style.display = (p.id === paneId ? 'block' : 'none'));
+
+    // 2) lógica ------------------------------------------------
+if (paneId === 'estruturaProduto') {
+      if (!ultimoCodigo) {
+        console.warn('Estrutura → nenhum produto carregado ainda');
+        return;
+      }
+
+      // ====== SUBSTITUA todo o bloco abaixo ======
+      //   if (typeof window.loadDadosProduto === 'function') {
+      //     window.loadDadosProduto(ultimoCodigo);
+      //   }
+      // ===========================================
+
+      loadEstruturaProduto(ultimoCodigo);   // ✔ mostra spinner + carrega malha
+}
+  });
 });
 
 // ---------- MENU RESPONSIVO ----------

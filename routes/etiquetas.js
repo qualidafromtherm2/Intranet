@@ -4,7 +4,7 @@ const fs      = require('fs');
 const path    = require('path');
 
 const router = express.Router();
-const etiquetasDir = path.join(__dirname, '..', 'etiquetas'); // pasta raiz/etiquetas
+const etiquetasDir = path.join(__dirname, '..', 'etiquetas', 'printed');
 
 // GET /api/etiquetas  →  devolve array de .zpl
 router.get('/', (req, res) => {
