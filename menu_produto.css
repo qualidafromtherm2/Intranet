@@ -3728,3 +3728,144 @@ li.duplicado::after{
 }
 .more-menu a:hover { background: var(--dropdown-hover); }
 .more-menu.open   { display: flex; }
+/* valor de estoque em cinza claro para não poluir */
+#listaPecasPCPList .est {
+  color: var(--inactive-color);
+  font-size: 0.9em;
+}
+
+
+
+/* ----- lista de peças PCP ----- */
+#listaPecasPCPList li {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .2rem .4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#listaPecasPCPList .cod   { font-weight: 600; min-width: 8rem; }
+#listaPecasPCPList .desc  { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+#listaPecasPCPList .qtd,
+#listaPecasPCPList .est   { margin-left: .5rem; flex-shrink: 0; }
+
+
+/* estoque crítico */
+#listaPecasPCPList .est.low {
+  color: #e74c3c;          /* vermelho */
+  font-weight: 600;
+}
+#listaPecasPCPList li .unit {
+  color: #9fa3ad;          /* cinza claro */
+  margin-left: 2px;
+}
+
+.code-bar .prod-code{
+  color:#d0d0d0;          /* ajuste para combinar com seu tema dark */
+}
+.code-bar .plus-btn{
+  border:none;
+  background:none;
+  color:#8cf;             /* cor de destaque – mude à vontade          */
+  font-size:1.1rem;
+  cursor:pointer;
+  line-height:1;
+  padding:0 .25rem;
+}
+.code-bar .plus-btn:hover{
+  transform:scale(1.2);
+}
+/* faz o wrapper quebrar linha */
+#listaPecasPCP .title-wrapper{
+  display: flex;
+  flex-wrap: wrap;      /* ← permite nova linha */
+  align-items: center;
+  gap: .5rem;
+}
+
+/* ocupa a linha inteira */
+.code-bar{
+  flex: 0 0 100%;       /* largura 100% */
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 600;
+}
+/* --- destaque do código pesquisado e do botão "+" --- */
+.code-bar{
+  font-size: 2rem;          /* 🔍 2 × do tamanho “normal” (ajuste se quiser) */
+  font-weight: 600;         /* um pouco mais robusto */
+  gap: .75rem;              /* espaço entre código e botão */
+}
+
+.code-bar .plus-btn{
+  font-size: 1.75rem;       /* botão + quase do mesmo tamanho do texto */
+  line-height: 1;           /* remove sobrinha vertical */
+  padding: 0 .4rem;         /* tira volume lateral, deixa alto/estreito */
+  cursor: pointer;          /* feedback visual */
+}
+/* tamanho já aumentado antes — mantemos */
+.code-bar .qty-input{
+  width: 4.5rem;
+  font-size: 1.5rem;
+  margin-left: .5rem;
+}
+
+.code-bar .ok-btn{
+  font-size: 1.25rem;
+  margin-left: .4rem;
+  padding: .1rem .6rem;
+  cursor: pointer;
+}
+#pcp-code-bar .prod-code { font-size: 1.6rem; font-weight: 600; }
+#pcp-code-bar .plus-btn  { font-size: 1.4rem; margin-left: .5rem; }
+#pcp-factor              { margin-left:.5rem;padding:.1rem .3rem; }
+#pcp-ok                  { margin-left:.3rem; }
+
+/* botão de limpar filtros da lista PCP */
+.clear-btn{
+  margin-left: 8px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+  background:#444;
+  color:#fff;
+  border:1px solid #555;
+  border-radius:4px;
+  cursor:pointer;
+}
+.clear-btn:hover{
+  background:#666;
+}
+/* linha dos filtros */
+#listaPecasPCP .title-wrapper,
+#listaPecasPCP .desc-wrapper{
+  display:flex;
+  align-items:center;
+}
+
+/* garante pequena folga entre campos */
+#listaPecasPCP .title-wrapper > *:not(:last-child){
+  margin-right:8px;
+}
+
+/* campo de texto ocupa todo o espaço que sobrar */
+#descFilterPCP{
+  flex:1 1 auto;
+}
+
+/* botão-ícone “Limpar” */
+.clear-icon{
+  flex:0 0 auto;
+  background:transparent;
+  border:none;
+  font-size:1.4rem;     /* maior que o texto dos inputs */
+  line-height:1;
+  color:#bbb;
+  cursor:pointer;
+}
+.clear-icon:hover{
+  color:#fff;
+}
