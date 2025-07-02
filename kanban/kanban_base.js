@@ -395,7 +395,17 @@ removePlaceholder();
   
   // 3) Atualiza imediatamente o modelo local
   const idxLocal = item.local.findIndex(c => c === originColumn);
-  if (idxLocal !== -1) item.local[idxLocal] = newColumn;
+if (
+  originColumn === 'Pedido aprovado' &&
+  newColumn    === 'Separação logística' &&
+  item.estoque >= item.local.length      // saldo era suficiente
+) {
+  item.local.forEach(l => {
+    const ticket = l.split(',')[1];      // “F06250142”
+    ticketsParaImprimir.push(ticket);
+  });
+}
+
 
 
   /* se o movimento foi 100 % do cartão (saldo suficiente),
