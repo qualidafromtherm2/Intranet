@@ -28,6 +28,18 @@ function gerarTicket () {
   return 'F' + Date.now().toString().slice(-8);
 }
 
+// 🔹 NOVO helper – dispara a API
+async function gerarEtiqueta(numeroOP) {
+  try {
+    await fetch(`${API_BASE}/api/etiquetas`, {
+      method : 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body   : JSON.stringify({ numeroOP, tipo:'Expedicao' })
+    });
+  } catch (err) {
+    console.error('[etiqueta] falhou:', err);
+  }
+}
 // No início do arquivo, adicione:
 function showSpinnerOnCard(card) {
   if (!card) return;
@@ -249,7 +261,8 @@ ul.addEventListener('drop', async e => {
 
 /* === REGRA DE ESTOQUE – Pedido aprovado → Separação logística === */
 if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
-
+  // ⚠️ Apenas declare um array; vamos disparar depois que tudo estiver OK
+  const ticketsParaImprimir = [];
   /* ── 1. obtém o tipoItem do produto ──────────────────────────── */
   let tipoItemDrag = null;
   try {
@@ -336,6 +349,9 @@ const destExisting = itemsKanban.find(
   it => it !== item && it.pedido === item.pedido && it.codigo === item.codigo
 );
 
+// ⚠️ dispara uma etiqueta para cada ticket recém-gerado
+localArr.forEach(l => ticketsParaImprimir.push(l.split(',')[1]));
+
 if (destExisting) {
   /* já existe → apenas soma */
   destExisting.local.push(...localArr);
@@ -351,10 +367,13 @@ if (destExisting) {
 }
 
 
-      /* 3) salva + redesenha                              */
-      await salvarKanbanLocal(itemsKanban);
-      renderKanbanDesdeJSON(itemsKanban);
-      enableDragAndDrop(itemsKanban);
+ await salvarKanbanLocal(itemsKanban);
+
+ // ► dispara a API para cada ticket confirmado
+ for (const t of ticketsParaImprimir) await gerarEtiqueta(t);
+
+ renderKanbanDesdeJSON(itemsKanban);
+ enableDragAndDrop(itemsKanban);
 
       /* 4) destaca em verde o cartão recém-criado         */
       setTimeout(() => {
@@ -377,6 +396,21 @@ removePlaceholder();
   // 3) Atualiza imediatamente o modelo local
   const idxLocal = item.local.findIndex(c => c === originColumn);
   if (idxLocal !== -1) item.local[idxLocal] = newColumn;
+
+
+  /* se o movimento foi 100 % do cartão (saldo suficiente),
+   precisamos imprimir 1 etiqueta para CADA ticket que saiu */
+if (
+  originColumn === 'Pedido aprovado' &&
+  newColumn    === 'Separação logística' &&
+  estoqueDisp  >= qtdSolicitada        // ⇢ estamos no caso “saldo suficiente”
+) {
+  item.local.forEach(l => {
+    const ticket = l.split(',')[1];    // pega só “F06250142”
+    ticketsParaImprimir.push(ticket);
+  });
+}
+
 
   try {
     // 4) Envia log de arrasto (se for Separação logística)
