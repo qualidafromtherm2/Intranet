@@ -367,8 +367,10 @@ if (destExisting) {
 
  await salvarKanbanLocal(itemsKanban);
 
- // ► dispara a API para cada ticket confirmado
- for (const t of ticketsParaImprimir) await gerarEtiqueta(t);
+// imprime qualquer ticket que tenha sido criado em QUALQUER fluxo
+for (const t of ticketsParaImprimir) {
+  if (t) await gerarEtiqueta(t);
+}
 
  renderKanbanDesdeJSON(itemsKanban);
  enableDragAndDrop(itemsKanban);
@@ -392,7 +394,18 @@ removePlaceholder();
 
   
   // 3) Atualiza imediatamente o modelo local
-  const idxLocal = item.local.findIndex(c => c === originColumn);
+const idxLocal = item.local.findIndex(
+  c => c.split(',')[0] === originColumn      // ← olha só a coluna
+);
+
+if (idxLocal !== -1) {
+  const ticket = gerarTicket();             // F06250142…
+  ticketsParaImprimir.push(ticket);         // ← para imprimir depois
+  item.local[idxLocal] = `${newColumn},${ticket}`;
+  item.estoque = Math.max(0, item.estoque - 1); // baixa 1 do saldo
+}
+
+
 if (
   originColumn === 'Pedido aprovado' &&
   newColumn    === 'Separação logística' &&
