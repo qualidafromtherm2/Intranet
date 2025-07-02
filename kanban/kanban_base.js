@@ -276,6 +276,7 @@ if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística'
       const dataEstr = await respEstr.json();
       const pecas    = dataEstr.itens || dataEstr.pecas || [];
 
+      
       /* bloqueia se não tem peças */
       if (!Array.isArray(pecas) || pecas.length === 0) {
         alert(
