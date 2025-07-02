@@ -260,7 +260,10 @@ ul.addEventListener('drop', async e => {
   const item = itemsKanban[draggedIndex];
   if (!item) return;
 
-
+// ── DEFINIÇÕES DE ESCOPO AMPLO ─────────────────────────
+const estoqueDisp   = Number(item.estoque) || 0;   // saldo atual
+const qtdSolicitada = item.local.length;           // nº de etiquetas
+// ───────────────────────────────────────────────────────
 if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
   /* ── 1. obtém o tipoItem do produto ──────────────────────────── */
   let tipoItemDrag = null;
@@ -304,11 +307,7 @@ if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística'
       return;                  // ↩ cancela o drop
     }
   }
-  /* ── 3. valida saldo de estoque e quantidade solicitada ──────── */
-/* ─────────────────────────────────────────────────────────────── */
 
-    const estoqueDisp  = Number(item.estoque)   || 0;        // saldo
-    const qtdSolicitada = item.local.length;                 // (Qtd)
 
     /* Caso A – não há saldo */
     if (estoqueDisp <= 0) {
