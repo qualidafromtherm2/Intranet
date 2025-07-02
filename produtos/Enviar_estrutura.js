@@ -63,7 +63,7 @@ window.__posEstoqueReady = null;   // Promise de carregamento
 async function fetchPagina(nPagina = 1) {
 
   const payload = {
-    call: 'ListarPosicaoEstoque',
+    call: 'ListarPosEstoque',
      app_key:    OMIE_APP_KEY,
      app_secret: OMIE_APP_SECRET,
      param: [{

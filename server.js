@@ -409,6 +409,9 @@ app.post('/api/omie/cliente', express.json(), async (req, res) => {
 
 // Rota para IncluirOrdemProducao (produção)
 app.post('/api/omie/produtos/op', express.json(), async (req, res) => {
+    console.log('[produtos/op] payload recebido →',
+              JSON.stringify(req.body, null, 2));
+
   try {
     const data = await omieCall(
       'https://app.omie.com.br/api/v1/produtos/op/',
@@ -419,6 +422,10 @@ app.post('/api/omie/produtos/op', express.json(), async (req, res) => {
         param:      req.body.param
       }
     );
+
+        console.log('[produtos/op] resposta Omie →',
+                JSON.stringify(data, null, 2));
+
     return res.json(data);
   } catch (err) {
     console.error('[produtos/op] erro →', err);
