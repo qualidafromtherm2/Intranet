@@ -108,22 +108,32 @@ const upload = multer({ storage: multer.memoryStorage() });
 
     // ─── Bootstrapping de ZPL já existentes ───
 // ─── Bootstrapping de ZPL já existentes ───
-const dirExped = path.join(etiquetasRoot, 'Expedicao');
+// ─── Bootstrapping de ZPL já existentes ───
+const dirExped   = path.join(etiquetasRoot, 'Expedicao');
+const dirPrinted = path.join(dirExped, 'Printed');
+
 const existing = fs.existsSync(dirExped)
   ? fs.readdirSync(dirExped).filter(f => f.endsWith('.zpl'))
   : [];
 
+const printedFiles = fs.existsSync(dirPrinted)
+  ? new Set(fs.readdirSync(dirPrinted))
+  : new Set();
 
-  for (const fileName of existing) {
-    const m = fileName.match(/^etiqueta_(.+)\.zpl$/);
-    if (m) {
-      const id = m[1];
-      if (!pendingLabels.has(id)) {
-        pendingLabels.set(id, { fileName: `Expedicao/${fileName}`, printed: false });
-        console.log(`[Boot] Etiqueta pendente carregada: ${id}`);
-      }
-    }
+for (const fileName of existing) {
+  const m = fileName.match(/^etiqueta_(.+)\.zpl$/);
+  if (!m) continue;
+
+  // pula se estiver em Printed
+  if (printedFiles.has(fileName)) continue;
+
+  const id = m[1];
+  if (!pendingLabels.has(id)) {
+    pendingLabels.set(id, { fileName: `Expedicao/${fileName}`, printed: false });
+    console.log(`[Boot] Etiqueta pendente carregada: ${id}`);
   }
+}
+
 
     // ────────────────────────────────────────────
   // 3.0) ROTAS DE ETIQUETAS (geração & polling)
