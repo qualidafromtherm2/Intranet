@@ -226,6 +226,8 @@ if (!ulListenersInitialized) {
     });
 
 ul.addEventListener('drop', async e => {
+  const ticketsParaImprimir = [];
+
   e.preventDefault();
   ul.classList.remove('drop-expand');
   removePlaceholder();
@@ -259,10 +261,7 @@ ul.addEventListener('drop', async e => {
   if (!item) return;
 
 
-/* === REGRA DE ESTOQUE – Pedido aprovado → Separação logística === */
 if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
-  // ⚠️ Apenas declare um array; vamos disparar depois que tudo estiver OK
-  const ticketsParaImprimir = [];
   /* ── 1. obtém o tipoItem do produto ──────────────────────────── */
   let tipoItemDrag = null;
   try {
