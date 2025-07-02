@@ -10,6 +10,67 @@ import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
 let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
 
+import { loadDadosProduto as loadDadosProdutoReal }
+  from './requisicoes_omie/Dados_produto.js';
+
+// deixa a versão completa visível globalmente
+window.loadDadosProduto = loadDadosProdutoReal;
+
+
+async function fetchAndRenderProdutos() {
+  console.log('[DEBUG] fetchAndRenderProdutos: iniciando');
+  showSpinner();
+  try {
+    console.log(`[DEBUG] fetchAndRenderProdutos: enviando requisição para ${API_BASE}/api/omie/produtos`);
+    const res = await fetch(`${API_BASE}/api/omie/produtos`, {
+      method:      'POST',
+      credentials: 'include',
+      headers:     { 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        call:       'ListarProdutosResumido',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina: 1,
+          registros_por_pagina: 100,
+          filtrar_apenas_descricao: ''
+        }]
+      })
+    });
+    console.log('[DEBUG] fetchAndRenderProdutos: resposta HTTP recebida, status', res.status);
+
+    const json = await res.json();
+    console.log('[DEBUG] fetchAndRenderProdutos: JSON completo:', json);
+
+    const items = json.produto_servico_resumido || [];
+    console.log('[DEBUG] fetchAndRenderProdutos: items extraídos:', items.length, 'itens');
+
+    // atualiza contador
+    document.getElementById('productCount').textContent = items.length;
+    console.log('[DEBUG] fetchAndRenderProdutos: contador atualizado para', items.length);
+
+    // monta a lista
+    const ul = document.getElementById('listaProdutosList');
+    console.log('[DEBUG] fetchAndRenderProdutos: UL encontrado:', ul);
+
+    ul.innerHTML = items.map(item => `
+      <li data-codigo="${item.codigo}" data-descricao="${item.descricao}">
+        <span class="products">${item.codigo}</span>
+        <span class="status">${item.descricao}</span>
+        <span class="unidade">${item.saldo_disponivel ?? '-'}</span>
+      </li>
+    `).join('');
+    console.log('[DEBUG] fetchAndRenderProdutos: UL.innerHTML atualizado');
+
+  } catch (err) {
+    console.error('[DEBUG] fetchAndRenderProdutos: erro ao buscar produtos →', err);
+    alert('Erro ao buscar produtos: ' + err.message);
+  } finally {
+    hideSpinner();
+    console.log('[DEBUG] fetchAndRenderProdutos: spinner escondido');
+    console.log('[DEBUG] fetchAndRenderProdutos() terminou');
+  }
+}
 
 
 
@@ -103,14 +164,22 @@ function loadEstruturaProduto(codigo) {
   ul.innerHTML  = '';                     // limpa antes de começar
   spinner.style.display = 'inline-flex';  // mostra spinner
 
-  fetch('/api/malha/consultar', {         // ou /api/omie/estrutura
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify({ intProduto: codigo })
-  })
+ fetch(`${API_BASE}/api/malha`, {
+   method:      'POST',
+   credentials: 'include',               // se precisar enviar cookies
+   headers:     { 'Content-Type':'application/json' },
+   body:        JSON.stringify({ intProduto: codigo })
+ })
   .then(r => r.json())
   .then(json => {
     spinner.style.display = 'none';
+
+       // aceita tanto { itens: [...] } como [...] puro
+   const itens = Array.isArray(json.itens)
+     ? json.itens
+     : Array.isArray(json)
+       ? json
+       : [];
 
     if (json.notFound || !Array.isArray(json.itens)) {
       ul.innerHTML = '<li class="fault-message">Estrutura não cadastrada</li>';
@@ -140,32 +209,26 @@ function loadEstruturaProduto(codigo) {
 window.loadEstruturaProduto = loadEstruturaProduto;   // ← deixa global
 
 // Abre a aba Dados do produto
-// Abre a aba Dados do produto
 function openDadosProdutoTab() {
-  hideKanban();                
-  // 1) Esconde todas as .tab-pane
-  document.querySelectorAll('.tab-pane')
-    .forEach(p => p.style.display = 'none');
+  hideKanban();
 
-  // 2) Remove destaque de todas as main-header-link
-  document.querySelectorAll('.main-header-link')
-    .forEach(l => l.classList.remove('is-active'));
-
-  // 3) Destaca o link interno “Dados do produto”
-const dadosLink = document.querySelector(
-  '.main-header-link[data-target="dadosProduto"]'
-);
-
-  if (dadosLink) {
-    dadosLink.classList.add('is-active');
-  }
-
-  // 4) Exibe o painel #dadosProduto e a barra de abas internas
-  const painel = document.getElementById('dadosProduto');
-  const barra  = document.querySelector('.main-header');
-  if (painel) painel.style.display = 'block';
-  if (barra)  barra.style.display  = 'flex';
+  // 1) esconde todas as panes
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  // 2) limpa destaque de todos os links principais
+  document.querySelectorAll('.main-header-link').forEach(l => l.classList.remove('is-active'));
+  // 3) destaca “Dados do produto”
+  const dadosLink = document.querySelector('.main-header-link[data-target="dadosProduto"]');
+  if (dadosLink) dadosLink.classList.add('is-active');
+  // 4) mostra painel e sub-header
+  document.getElementById('dadosProduto').style.display = 'block';
+  document.querySelector('.main-header').style.display = 'flex';
+  // 5) dispara sempre a sub-aba “Detalhes”
+  const detalhesInicial = document.querySelector(
+    '#dadosProduto .sub-tabs .main-header-link[data-subtarget="detalhesTab"]'
+  );
+  if (detalhesInicial) detalhesInicial.click();
 }
+
 
 
 // Navega para a aba de Detalhes
@@ -253,35 +316,53 @@ const ulList     = document.getElementById('listaProdutosList');
   codeFilter.addEventListener('input', applyResumoFilters);
   descFilter.addEventListener('input', applyResumoFilters);
 
+
+  // pega referências ao botão e ao painel de filtros
+const filterBtn   = document.getElementById('filterBtn');
+const filterPanel = document.getElementById('filterPanel');
+
+filterBtn.addEventListener('click', e => {
+  e.preventDefault();
+  // alterna visibilidade
+  if (filterPanel.style.display === 'block') {
+    filterPanel.style.display = 'none';
+  } else {
+    filterPanel.style.display = 'block';
+  }
+});
+
   // PESQUISA PRINCIPAL
-  inputBusca.addEventListener('keydown', async e => {
-    console.log('[TESTE] valor agora →', inputBusca.value);
-    if (e.key !== 'Enter') return;
-    console.log('[KEY] Enter detectado:', inputBusca.value);
-    const termo = inputBusca.value.trim();
-    if (!termo) return;
+inputBusca.addEventListener('keydown', async e => {
+  if (e.key !== 'Enter') return;
+  const termo = inputBusca.value.trim();
+  if (!termo) return;
 
-    // 1) tenta detalhes
-    try {
-      const resDet  = console.log('[FETCH] enviando ListarProdutosResumido'); await fetch(`/api/produtos/detalhes/${encodeURIComponent(termo)}`);
-      const detData = await resDet.json();
-      if (!detData.error) {
-        navigateToDetalhes(termo);
-        inputBusca.value = '';
-        return;
-      }
-    } catch {
-      /* ignora */
+  // 1) tenta abrir detalhes
+  try {
+    console.log('[FETCH] buscando detalhes do produto →', termo);
+    const resDet = await fetch(
+      `${API_BASE}/api/produtos/detalhes/${encodeURIComponent(termo)}`,
+      { credentials: 'include' }
+    );
+    if (!resDet.ok) throw new Error(`HTTP ${resDet.status}`);
+    const detData = await resDet.json();
+    if (!detData.error) {
+      navigateToDetalhes(termo);
+      inputBusca.value = '';
+      return;
     }
+  } catch {
+    // se não existe ou deu erro, cai no fallback
+    console.log('[SEARCH] produto não encontrado em detalhes, lista resumida…');
+  }
 
-    // 2) fallback: lista resumida
-    inputBusca.value = '';
-   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-   document.getElementById('listaProdutos').style.display = 'block';
-
-    document.querySelector('.main-header').style.display = 'none';
-    ulList.innerHTML = '';
-    countEl.textContent = '0';
+  // 2) fallback: lista resumida
+  inputBusca.value = '';
+  document.querySelectorAll('.tab-pane').forEach(p => (p.style.display = 'none'));
+  document.getElementById('listaProdutos').style.display = 'block';
+  document.querySelector('.main-header').style.display = 'none';
+  ulList.innerHTML = '';
+  countEl.textContent = '0';
 
     showSpinner();
     try {
@@ -336,41 +417,29 @@ const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
 
    const btnCache = document.getElementById('btn-omie-list1')
                   || document.getElementById('btn-omie-list');
-  
-  if (btnCache) {
-    btnCache.addEventListener('click', async e => {
-      e.preventDefault();
-      hideKanban(); 
-      // 1) esconde todas as panes
-document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-document.getElementById('listaProdutos').style.display = 'block';
+  console.log('[DEBUG] btnCache encontrado em DOMContentLoaded:', btnCache);
+if (btnCache) {
+btnCache.addEventListener('click', async e => {
+  e.preventDefault();
+  hideKanban();
 
-      // 3) oculta a barra interna (se for o comportamento desejado)
-      document.querySelector('.main-header').style.display = 'none';
-      // 4) marca o link ativo na lateral
-      document.querySelectorAll('.side-menu a').forEach(a => a.classList.remove('is-active'));
-      btnCache.classList.add('is-active');
-      // 5) dispara o init que carrega todo o cache e renderiza a lista
+  // 1) esconde todas as panes e mostra só o painel de produtos
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  document.getElementById('listaProdutos').style.display = 'block';
 
-      await initListarProdutosUI(
-  'listaPecasTab',       // o ID real do seu pane
-  'listaProdutosList'
-);
+  // 2) remove destaque e destaca o menu lateral
+  document.querySelector('.main-header').style.display = 'none';
+  document.querySelectorAll('.side-menu a').forEach(a => a.classList.remove('is-active'));
+  btnCache.classList.add('is-active');
 
+  // 3) carrega toda a lista usando o cache e filtros já testados
+  console.log('[DEBUG] iniciando initListarProdutosUI…');
+  await initListarProdutosUI('listaProdutos', 'listaProdutosList');
+  console.log('[DEBUG] initListarProdutosUI completo');
+});
 
-      // 1) reaplica filtro de código/descrição (input)
-applyResumoFilters();
+}
 
-// 2) reaplica filtro de Família / Tipo de Item / Característica / Conteúdo
-document.getElementById('familySelect').dispatchEvent(new Event('change'));
-document.getElementById('tipoItemSelect').dispatchEvent(new Event('change'));
-document.getElementById('caracteristicaSelect').dispatchEvent(new Event('change'));
-document.getElementById('conteudoSelect').dispatchEvent(new Event('change'));
-
-      requestAnimationFrame(applyResumoFilters);
-      
-    });
-  }
 
   document.getElementById('menu-produto')
   .addEventListener('click', e => {
@@ -562,108 +631,51 @@ avatar?.addEventListener('click', e => {
   if (window.openLoginModal) window.openLoginModal();
 });
 
+
+// ─── Sub-abas unificadas em Dados do produto ───
+const subTabLinks = document.querySelectorAll(
+  '#dadosProduto .sub-tabs .main-header-link'
+);
+subTabLinks.forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    // 1) destaco só este link
+    subTabLinks.forEach(l => l.classList.remove('is-active'));
+    link.classList.add('is-active');
+    // 2) escondo todos os sub-conteúdos
+    document
+      .querySelectorAll('#dadosProduto .sub-content')
+      .forEach(sec => (sec.style.display = 'none'));
+    // 3) mostro só o target correto
+    const alvoId = link.dataset.subtarget;            // ex: "detalhesTab"
+    const alvoEl = document.getElementById(alvoId);
+    if (!alvoEl) return console.error(`Sub-aba "${alvoId}" não existe`);
+    alvoEl.style.display = 'block';
+    console.log(`[Sub-aba] exibindo "${alvoId}"`);
+  });
 });
 
-initDadosColaboradoresUI();
-initAnexosUI();
+// forço, ao abrir Dados do produto, a sub-aba “Detalhes”
+const detalhesInicial = document.querySelector(
+  '#dadosProduto .sub-tabs .main-header-link[data-subtarget="detalhesTab"]'
+);
+if (detalhesInicial) detalhesInicial.click();
 
 
 
-// Substitua toda a função resetSubTabs atual por esta:
-// --- substitua a função inteira por isto ---
-function resetSubTabs() {
-  // 1) desmarca todas as sub-abas
-  document
-    .querySelectorAll('#dadosProduto .sub-tabs .main-header-link')
-    .forEach(link => link.classList.remove('is-active'));
 
-  // 2) oculta todos os conteúdos secundários
-  document
-    .querySelectorAll('#dadosProduto .sub-content')
-    .forEach(sec => (sec.style.display = 'none'));
+  // … quaisquer outras inicializações finais …
+  initDadosColaboradoresUI();
+  initAnexosUI();
+});  // <--- aqui fecha o DOMContentLoaded
 
-  // 3) destaca a sub-aba “Detalhes”
-  const detalhesLink = document.querySelector(
-    '#dadosProduto .sub-tabs .main-header-link[data-subtarget="detalhesTab"]'
-  );
-  if (detalhesLink) detalhesLink.classList.add('is-active');
 
-  // 4) exibe o container <div id="detalhesTab">
-  const detalhesContent = document.getElementById('detalhesTab');
-  if (detalhesContent) detalhesContent.style.display = 'block';
-}
 
 // garante que clicar em QUALQUER ponto da barra de pesquisa dá foco ao input
 document.querySelector('.search-bar').addEventListener('click', () => {
   const inp = document.querySelector('.search-bar input');
   if (inp) inp.focus();
 });
-
-// 2) Dentro de loadDadosProduto, após obter `dados`, chame:
-function populateSubTabs(dados) {
-  // DETALHES DO PRODUTO
-  const dl = document.getElementById('detalhesList');
-  dl.innerHTML = `
-    <li><div>Descrição família</div><div>${dados.familia || ''}</div></li>
-    <li><div>Valor unitário</div><div>${dados.valor_unitario || ''}</div></li>
-    <li><div>Tipo item</div><div>${dados.tipo_item || ''}</div></li>
-    <li><div>Marca</div><div>${dados.marca || ''}</div></li>
-    <li><div>Modelo</div><div>${dados.modelo || ''}</div></li>
-    <li><div>Descrição detalhada</div><div>${dados.descricao_detalhada || ''}</div></li>
-    <li><div>Obs internas</div><div>${dados.obs_internas || ''}</div></li>
-  `;
-
-  // DADOS DE CADASTRO
-  const cad = document.getElementById('cadastroList');
-  cad.innerHTML = `
-    <li><div>Código OMIE</div><div>${dados.codigo_omie || ''}</div></li>
-    <li><div>Código família</div><div>${dados.codigo_familia || ''}</div></li>
-    <li><div>Usuário alteração</div><div>${dados.usuario_alteracao || ''}</div></li>
-    <li><div>Data alteração</div><div>${dados.data_alteracao || ''}</div></li>
-    <li><div>Hora alteração</div><div>${dados.hora_alteracao || ''}</div></li>
-    <li><div>Usuário inclusão</div><div>${dados.usuario_inclusao || ''}</div></li>
-    <li><div>Data inclusão</div><div>${dados.data_inclusao || ''}</div></li>
-    <li><div>Hora inclusão</div><div>${dados.hora_inclusao || ''}</div></li>
-    <li><div>Bloqueado</div><div>${dados.bloqueado || ''}</div></li>
-    <li><div>Bloquear exclusão</div><div>${dados.bloquear_exclusao || ''}</div></li>
-    <li><div>Inativo</div><div>${dados.inativo || ''}</div></li>
-  `;
-
-  // FINANCEIRO
-  const fin = document.getElementById('financeiroList');
-  fin.innerHTML = `
-    <li><div>NCM</div><div>${dados.ncm || ''}</div></li>
-  `;
-
-  // LOGÍSTICA: o que sobrar
-  const log = document.getElementById('logisticaList');
-  log.innerHTML = Object.entries(dados.logistica || {})
-    .map(([chave, valor]) =>
-      `<li><div>${chave.replace(/_/g,' ')}</div><div>${valor}</div></li>`
-    )
-    .join('');
-}
-
-// 3) Dentro da sua função assíncrona que carrega o produto:
-// corrigido: marque como async
-async function loadDadosProduto(codigo) {
-  // 1) faça o fetch com await também (caso ainda não esteja):
-  const res = await fetch(`/api/produtos/detalhes/${encodeURIComponent(codigo)}`);
-  // 2) agora você pode usar await res.json()
-  const dados = await res.json();
-  ultimoCodigo = codigo;        // grava o código para outras abas
-
-  // 3) popula as sub-abas
-  populateSubTabs(dados);
-
-  // 4) garante que abra a aba “Detalhes”
-  const trigger = document.querySelector(
-    '#dadosProduto .sub-tabs .main-header-link[data-subtarget="detalhesTab"]'
-  );
-  if (trigger) trigger.click();
-}
-
-window.loadDadosProduto = loadDadosProduto;   // <-- expõe globalmente
 
 
 // Função para preencher os menus lateral e superior com um <select> de permissões
@@ -763,42 +775,6 @@ document.querySelectorAll('#kanbanTabs .main-header-link')
     });
   });
 
-
-  /* ===========================================================
-   Abas internas (Dados do produto | Estrutura | Fotos | …)
-   =========================================================== */
-document.querySelectorAll('#produtoTabs .main-header-link').forEach(tab => {
-  tab.addEventListener('click', e => {
-    e.preventDefault();
-
-    // 1) visual ------------------------------------------------
-    document
-      .querySelectorAll('#produtoTabs .main-header-link')
-      .forEach(a => a.classList.remove('is-active'));
-    tab.classList.add('is-active');
-
-    const paneId = tab.dataset.target;
-    document
-      .querySelectorAll('#produtoTabs .tab-pane')
-      .forEach(p => p.style.display = (p.id === paneId ? 'block' : 'none'));
-
-    // 2) lógica ------------------------------------------------
-if (paneId === 'estruturaProduto') {
-      if (!ultimoCodigo) {
-        console.warn('Estrutura → nenhum produto carregado ainda');
-        return;
-      }
-
-      // ====== SUBSTITUA todo o bloco abaixo ======
-      //   if (typeof window.loadDadosProduto === 'function') {
-      //     window.loadDadosProduto(ultimoCodigo);
-      //   }
-      // ===========================================
-
-      loadEstruturaProduto(ultimoCodigo);   // ✔ mostra spinner + carrega malha
-}
-  });
-});
 
 // ---------- MENU RESPONSIVO ----------
 const header   = document.getElementById('appHeader');   // <div class="header">

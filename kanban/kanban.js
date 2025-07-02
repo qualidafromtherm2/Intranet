@@ -11,6 +11,7 @@ import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 /* ——— Filtro de estoque (true = mostra tudo, false = só baixos) ——— */
 let pcpShowAll = false;           // começa mostrando **apenas** itens em vermelho
+let kanbanCache = [];      // mantém os itens atuais em memória
 
 /* ------------------------------------------------------------------ */
 /*  kanban.js  –  garantir BASE das chamadas backend                   */
@@ -28,6 +29,14 @@ function formatDateBR(date) {
   return `${d}/${m}/${y}`;
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+
+/* ——— gera etiqueta tipo F06234567 ——— */
+function gerarTicket() {
+  const n = Date.now().toString();          // 13 dígitos
+  return 'F' + n.slice(-8);                 // pega só os 8 finais
+}
+
 const showSpinner = () =>
   (document.querySelector('.kanban-spinner') ?? {}).style && (
     document.querySelector('.kanban-spinner').style.display = 'inline-block');
@@ -260,20 +269,22 @@ if (!codigo) { console.warn('[PCP] Sem código válido'); return; }
       barra = document.createElement('div');
       barra.id        = 'pcp-code-bar';
       barra.className = 'code-bar';
-      barra.innerHTML = `
-        <span class="prod-code"></span>
-        <button class="plus-btn" title="(em construção)">+</button>
+barra.innerHTML = `
+  <span class="prod-code"></span>
+  <i id="pcpSpinner" class="fas fa-spinner fa-spin kanban-spinner"
+     style="display:none;margin-left:6px"></i>
+  <button class="plus-btn" title="(em construção)">+</button>
 
-         <input  id="pcp-factor" type="number" min="1" max="999"
-         placeholder="×"  style="display:none;width:60px">
- <button id="pcp-ok" style="display:none">OK</button>
+  <input  id="pcp-factor" type="number" min="1" max="999"
+          placeholder="×" style="display:none;width:60px">
+  <button id="pcp-ok" style="display:none">OK</button>
+`;
 
-
-      `;
       alvo.parentNode.insertBefore(barra, alvo);   // vira irmão ANTES do wrapper
     }
     // sempre atualiza o texto
     barra.querySelector('.prod-code').textContent = codigo;
+barra.querySelector('#pcpSpinner').style.display = 'inline-block';
 
      /* ── clique no “+” abre input numérico ───────────────────────── */
 /* ── clique no “+” abre input numérico ───────────────────────── */
@@ -301,10 +312,94 @@ plusBtn.addEventListener('click', () => {
     okBtn              = document.createElement('button');
     okBtn.textContent  = 'OK';
     okBtn.className    = 'ok-btn';
-    okBtn.addEventListener('click', () => {
-      // por enquanto não faz nada além de manter-se pronto p/ a próxima feature
-      inp.focus();
+okBtn.addEventListener('click', async () => {
+  /* --- 0) valida quantidade --- */
+  const fator = Number(barra.querySelector('.qty-input')?.value || 0);
+  if (!Number.isInteger(fator) || fator < 1) return;
+
+  /* --- 1) consulta estoque atual --- */
+  let saldoAtual = 0;
+  try {
+    const payload = {
+      call : 'PosicaoEstoque',
+      param: [{
+        codigo_local_estoque: 0,
+        id_prod            : 0,
+        cod_int            : codigo,
+        data               : formatDateBR(new Date())
+      }],
+      app_key   : OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET
+    };
+    const r  = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
+      method :'POST',
+      headers:{'Content-Type':'application/json'},
+      body   : JSON.stringify(payload)
     });
+    const d  = await r.json();
+    saldoAtual = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0;
+  } catch {/* mantém 0 */ }
+
+  /* --- 2) monta o novo objeto --- */
+
+  // gera um array com <fator> etiquetas — uma para cada unidade
+  const localArr = Array.from({ length: fator }, () =>
+    `Separação logística,${gerarTicket()}`
+  );
+
+  const novoItem = {
+    pedido      : 'Estoque',
+    codigo      : codigo,
+    quantidade  : fator,
+    local       : localArr,          // ← agora tem N entradas
+    estoque     : saldoAtual,
+    _codigoProd : 0
+  };
+
+/* —— consolida se já existir um cartão “Estoque” deste código —— */
+const existente = kanbanCache.find(
+  it => it.pedido === 'Estoque' && it.codigo === codigo
+);
+
+if (existente) {
+  existente.quantidade += fator;          // soma a nova qtd
+  existente.local.push(...localArr);      // acrescenta etiquetas
+  existente.estoque = saldoAtual;         // opcional: refresca estoque
+} else {
+  kanbanCache.push(novoItem);             // primeiro do código
+}
+
+/* grava e redesenha Kanban */
+await salvarKanbanLocal(kanbanCache);
+renderKanbanDesdeJSON(kanbanCache);
+enableDragAndDrop(kanbanCache);
+
+
+  /* ——— leva o usuário para a aba Comercial ——— */
+document
+  .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="comercial"]')
+  ?.click();
+
+  /* —— pinta de verde o cartão recém-criado ———————————————— */
+setTimeout(() => {
+  const col  = document.getElementById('coluna-pcp-aprovado');
+  if (!col) return;
+
+  /* última <li> da coluna é o item acabado de inserir */
+  const novoCard = col.lastElementChild;
+  if (!novoCard) return;
+
+  novoCard.classList.add('flash-new');
+
+  /* remove o destaque após 3 segundos */
+  setTimeout(() => novoCard.classList.remove('flash-new'), 3000);
+}, 80);   // pequeno atraso para garantir que o DOM já foi atualizado
+
+  /* --- 4) limpeza visual --- */
+  barra.querySelector('.qty-input').value = 1;
+  barra.querySelector('.qty-input').blur();
+});
+
     barra.appendChild(okBtn);
   }
 
@@ -343,10 +438,14 @@ plusBtn.addEventListener('click', () => {
   try {
     data = await resp.json();
     console.log('[PCP] JSON recebido:', data);
-  } catch (err) {
-    console.error('[PCP] Erro ao ler JSON:', err);
-    return;
-  }
+} catch (err) {
+  console.error('[PCP] Erro ao ler JSON:', err);
+  const sp = document.getElementById('pcpSpinner');
+  if (sp) sp.style.display = 'none';
+  return;
+}
+
+
 
   // 3.4) Pega o array de peças (ajuste o nome se for diferente)
   const pecas = data.itens || data.pecas || [];
@@ -373,9 +472,16 @@ plusBtn.addEventListener('click', () => {
     ul.appendChild(li);
   });
 
-  console.log('[PCP] UL populada no DOM com as peças');
+console.log('[PCP] UL populada no DOM com as peças');
+try {
   await carregarPosicaoEstoque();
-  filtrarPorEstoque(); 
+  filtrarPorEstoque();
+} finally {
+  const sp = document.getElementById('pcpSpinner');
+  if (sp) sp.style.display = 'none';
+}
+
+
 }
 
 
@@ -648,8 +754,10 @@ export async function initKanban() {
     }
 
     /* 4) mescla + renderiza */
-    const allItems = existingItems.concat(novos);
-    renderKanbanDesdeJSON(allItems);
+const allItems = existingItems.concat(novos);   // mantém igual
+kanbanCache = allItems;                         // ← NOVO
+renderKanbanDesdeJSON(allItems);
+
     enableDragAndDrop(allItems);
     if (novos.length) await salvarKanbanLocal(allItems);
 

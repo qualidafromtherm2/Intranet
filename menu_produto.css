@@ -3869,3 +3869,13 @@ li.duplicado::after{
 .clear-icon:hover{
   color:#fff;
 }
+/* ——— Código no topo da guia “Dados do produto” ——— */
+#productTitle {
+  text-transform: uppercase;
+}
+/* cartão que acabou de ser criado na coluna Separação logística */
+.flash-new {
+  background: #235c23 !important;   /* verde escuro */
+  color: #fff;                      /* texto branco p/ contraste */
+  transition: background 0.8s ease;
+}

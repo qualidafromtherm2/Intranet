@@ -1109,6 +1109,12 @@ function showLineMsg(li, text, ok = true) {
      span._timer = setTimeout(() => span.remove(), 6000);
    }
 
+
+   // atualiza a aba Fotos, se o script de fotos já tiver sido carregado
+if (typeof window.loadFotos === 'function') {
+  window.loadFotos(codigo);
+}
+
 }
 
 // 1.1) Helper que chama o seu endpoint de atualização

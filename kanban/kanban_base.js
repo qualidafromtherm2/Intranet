@@ -19,6 +19,14 @@ let placeholder = null;
 let ulListenersInitialized = false;
 let draggedIndex = null;
 let draggedFromColumn = null;
+/* controla a diferença entre click e dblclick */
+let clickTimerId = null;        // null = nenhum clique pendente
+
+
+/* —— etiqueta única tipo F06250142 —— */
+function gerarTicket () {
+  return 'F' + Date.now().toString().slice(-8);
+}
 
 // No início do arquivo, adicione:
 function showSpinnerOnCard(card) {
@@ -131,6 +139,47 @@ export function enableDragAndDrop(itemsKanban) {
       draggedIndex = null;
       draggedFromColumn = null;
     });
+
+
+/* ───────── clique simples vs. duplo ───────── */
+li.addEventListener('click', ev => {
+  /* se não é da coluna Pedido aprovado, ignore */
+  if (li.dataset.column !== 'Pedido aprovado') return;
+
+  /* 2 cliques? cancela o pending do single e sai */
+  if (ev.detail > 1) {
+    if (clickTimerId) {
+      clearTimeout(clickTimerId);
+      clickTimerId = null;
+    }
+    return;                       // deixa o dblclick agir
+  }
+
+  /* clique simples → agenda abrir PCP */
+  clickTimerId = setTimeout(() => {
+    clickTimerId = null;          // libera para o próximo
+
+    const idx = +li.dataset.index;
+    const it  = itemsKanban[idx];
+    if (!it) return;
+
+    /* 1) preenche o campo do “+” */
+    const col = document.getElementById('coluna-pcp-aprovado')
+                 ?.closest('.kanban-column');
+    const inp = col?.querySelector('.add-search');
+    if (!inp) return;
+    inp.value = `${it.codigo} — ${it.codigo}`;
+
+    /* 2) ativa a aba PCP */
+    document
+      .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
+      ?.click();
+
+  }, 350);   // um pouco acima do tempo típico de dbl-click
+});
+/* ───────────────────────────────────────────── */
+
+
   });
 
 if (!ulListenersInitialized) {
@@ -169,9 +218,17 @@ ul.addEventListener('drop', async e => {
   ul.classList.remove('drop-expand');
   removePlaceholder();
 
+    /* ➊ — cria o loader ANTES de qualquer validação */
+  const loadingLi = document.createElement('li');
+  loadingLi.classList.add('kanban-card', 'loading');
+  loadingLi.innerHTML = `
+    <div class="loading-bar"><div class="progress"></div></div>`;
+  ul.appendChild(loadingLi);
+
   // 0) Valida estado de drag
   if (draggedIndex === null || !draggedFromColumn) {
     console.log('[DROP] drag não iniciado corretamente');
+    loadingLi.remove();
     return;
   }
 
@@ -181,22 +238,141 @@ ul.addEventListener('drop', async e => {
     .find(([, id]) => id === destinationUlId)?.[0];
   if (!newColumn) {
     console.log('[DROP] coluna destino inválida:', destinationUlId);
+    loadingLi.remove();
     return;
   }
+  
   const originColumn = draggedFromColumn;
   const item = itemsKanban[draggedIndex];
   if (!item) return;
 
-  // 2) Insere um LI “vazio” com barra de loading
-  const loadingLi = document.createElement('li');
-  loadingLi.classList.add('kanban-card', 'loading');
-  loadingLi.innerHTML = `
-    <div class="loading-bar">
-      <div class="progress"></div>
-    </div>
-  `;
-  ul.appendChild(loadingLi);
 
+/* === REGRA DE ESTOQUE – Pedido aprovado → Separação logística === */
+if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
+
+  /* ── 1. obtém o tipoItem do produto ──────────────────────────── */
+  let tipoItemDrag = null;
+  try {
+    const respProdDrag = await fetch(
+      `/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`
+    );
+    const dProd = await respProdDrag.json();
+    tipoItemDrag = dProd.tipoItem ?? dProd.tipo_item ?? null;
+  } catch {
+    /* se falhar, mantém null → tratará como “precisa estrutura” */
+  }
+
+  /* Se for revenda (tipo 00), NÃO precisa de estrutura            */
+  const precisaEstrutura = !(tipoItemDrag === '00' || +tipoItemDrag === 0);
+
+  /* ── 2. (opcional) valida Estrutura na Omie ──────────────────── */
+  if (precisaEstrutura) {
+    try {
+      const respEstr = await fetch(`${API_BASE}/api/omie/estrutura`, {
+        method : 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body   : JSON.stringify({ param:[{ codProduto: item.codigo }] })
+      });
+      const dataEstr = await respEstr.json();
+      const pecas    = dataEstr.itens || dataEstr.pecas || [];
+
+      /* bloqueia se não tem peças */
+      if (!Array.isArray(pecas) || pecas.length === 0) {
+        alert(
+          '❌ Este produto não possui Estrutura de Produto; não é possível separar.'
+        );
+        loadingLi.remove();
+        return;                // ↩ cancela o drop
+      }
+    } catch (err) {
+      console.error('[DROP] erro ao consultar estrutura:', err);
+      alert('Erro ao consultar estrutura do produto. Tente novamente.');
+      loadingLi.remove();
+      return;                  // ↩ cancela o drop
+    }
+  }
+  /* ── 3. valida saldo de estoque e quantidade solicitada ──────── */
+/* ─────────────────────────────────────────────────────────────── */
+
+    const estoqueDisp  = Number(item.estoque)   || 0;        // saldo
+    const qtdSolicitada = item.local.length;                 // (Qtd)
+
+    /* Caso A – não há saldo */
+    if (estoqueDisp <= 0) {
+      alert('Não possui saldo no estoque.');
+      loadingLi.remove();
+      return;                     // cancela o drop
+    }
+
+    /* Caso B – saldo parcial */
+    if (estoqueDisp < qtdSolicitada) {
+      const maxMov = estoqueDisp;
+      const txt = prompt(
+        `Só há ${maxMov} em estoque. Quantos deseja mover? (1-${maxMov})`,
+        maxMov
+      );
+      const mover = Number(txt);
+      if (!Number.isInteger(mover) || mover < 1 || mover > maxMov) return;
+
+      /* 1) reduz o cartão original                         */
+      item.local.splice(0, mover);          // corta N etiquetas
+      item.quantidade = item.local.length;
+
+      /* 1.1) ajusta o saldo de estoque desse pedido/código */
+item.estoque = Math.max(0, estoqueDisp - mover);
+
+      /* remove cartão se zerou */
+      if (item.quantidade === 0) {
+        itemsKanban.splice(draggedIndex, 1);
+      }
+
+      /* gera as novas etiquetas */
+const localArr = Array.from({ length: mover }, () =>
+  `Separação logística,${gerarTicket()}`
+);
+/* 2)  procura cartão existente mesmo pedido+código */
+const destExisting = itemsKanban.find(
+  it => it !== item && it.pedido === item.pedido && it.codigo === item.codigo
+);
+
+if (destExisting) {
+  /* já existe → apenas soma */
+  destExisting.local.push(...localArr);
+  destExisting.quantidade = destExisting.local.length;
+} else {
+  /* não existe → cria o cartão parcial */
+  const novoCard = {
+    ...item,
+    quantidade : mover,
+    local      : localArr
+  };
+  itemsKanban.push(novoCard);
+}
+
+
+      /* 3) salva + redesenha                              */
+      await salvarKanbanLocal(itemsKanban);
+      renderKanbanDesdeJSON(itemsKanban);
+      enableDragAndDrop(itemsKanban);
+
+      /* 4) destaca em verde o cartão recém-criado         */
+      setTimeout(() => {
+        const col = document.getElementById('coluna-pcp-aprovado');
+        const flash = col?.lastElementChild;
+        flash?.classList.add('flash-new');
+        setTimeout(() => flash?.classList.remove('flash-new'), 3000);
+      }, 50);
+
+      return;                   // não deixa seguir o drop “normal”
+    }
+
+    /* Caso C – saldo suficiente → cai no fluxo original (continua) */
+  } // fim da regra de estoque
+
+ul.classList.remove('drop-expand');
+removePlaceholder();
+
+  
   // 3) Atualiza imediatamente o modelo local
   const idxLocal = item.local.findIndex(c => c === originColumn);
   if (idxLocal !== -1) item.local[idxLocal] = newColumn;
