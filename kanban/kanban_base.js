@@ -29,17 +29,22 @@ function gerarTicket () {
 }
 
 // 🔹 NOVO helper – dispara a API
+// kanban_base.js  (deixe gerarEtiqueta num único lugar)
+
 async function gerarEtiqueta(numeroOP) {
-  try {
-    await fetch(`${API_BASE}/api/etiquetas`, {
-      method : 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body   : JSON.stringify({ numeroOP, tipo:'Expedicao' })
-    });
-  } catch (err) {
-    console.error('[etiqueta] falhou:', err);
-  }
+  const payload = JSON.stringify({ numeroOP, tipo:'Expedicao' });
+  const headers = { 'Content-Type':'application/json' };
+
+  // 1) servidor da própria página  (Render ou localhost)
+  try { await fetch('/api/etiquetas', { method:'POST', headers, body: payload }); }
+  catch (e) { console.warn('[etiqueta] remoto falhou', e); }
+
+  // 2) sempre tenta no localhost, onde o poll-print está rodando
+  try { await fetch('http://localhost:5001/api/etiquetas',
+                    { method:'POST', headers, body: payload, mode:'no-cors' }); }
+  catch (e) { /* ignora se não houver servidor local */ }
 }
+
 // No início do arquivo, adicione:
 function showSpinnerOnCard(card) {
   if (!card) return;
