@@ -16,9 +16,6 @@ const multer        = require('multer');
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
-// --- Zebra templates -------------------------------------------
-const { chooseZPL } = require('./src/zpl/chooseTemplate');
-
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
 const { stringify: csvStringify } = require('csv-stringify/sync');
@@ -120,6 +117,22 @@ const upload = multer({ storage: multer.memoryStorage() });
   const { Octokit } = await import('@octokit/rest');
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
+/* ============================================================================
+   1) Gera etiqueta (.zpl)
+   ============================================================================ */
+app.post('/api/etiquetas', (req, res) => {
+  const { numeroOP, tipo = 'Expedicao' } = req.body;
+  if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
+
+  const { dirTipo } = getDirs(tipo);
+  const zpl = `^XA
+^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
+^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
+^XZ`;
+
+  fs.writeFileSync(path.join(dirTipo, `etiqueta_${numeroOP}.zpl`), zpl, 'utf8');
+  res.json({ ok: true });
+});
 
 /* ============================================================================
    2) Lista pendentes (lê direto a pasta)
@@ -154,32 +167,26 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
     res.status(500).json({ error: 'Falha ao mover etiqueta' });
   }
 });
-// -----------------------------------------------------------------------------
-// POST /api/etiquetas  → gera o .zpl correto (FTeFH ou FTiBR) e marca pendente
-// -----------------------------------------------------------------------------
+
+  // 3.0) ROTAS DE ETIQUETAS (geração & polling)
+  // ────────────────────────────────────────────
+  // POST  /api/etiquetas            → gera o .zpl e marca como pendente
 app.post('/api/etiquetas', (req, res) => {
-  const { modelo, numeroSerie, tipo = 'Expedicao' } = req.body;
-  if (!modelo || !numeroSerie) {
-    return res.status(400).json({ error: 'Faltam modelo ou numeroSerie' });
-  }
+  const { numeroOP, tipo = 'Expedicao' } = req.body;       // default = Expedição
+  if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-  // ► Escolhe qual layout usar (FT/FH  vs  FTI/FHI)
-  let zpl;
-  try {
-    zpl = chooseZPL(modelo, numeroSerie);     // ← função criada em src/zpl/chooseTemplate.js
-  } catch (err) {
-    console.error('[etiquetas] erro chooseZPL →', err);
-    return res.status(400).json({ error: err.message });
-  }
+  const { dirTipo } = getDirs(tipo);                       // cria pastas se faltar
 
-  // ► Grava arquivo na pasta certa
-  const { dirTipo } = getDirs(tipo);          // já existe na sua infra
-  const fileName    = `etiqueta_${numeroSerie}.zpl`;
+  const zpl = `^XA
+^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
+^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
+^XZ`;
+
+  const fileName = `etiqueta_${numeroOP}.zpl`;
   fs.writeFileSync(path.join(dirTipo, fileName), zpl, 'utf8');
 
   return res.json({ ok: true });
 });
-
 
 app.get('/api/op/next-code/:prefix', async (req, res) => {
   try {
