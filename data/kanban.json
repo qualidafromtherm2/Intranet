@@ -4,9 +4,9 @@
     "codigo": "FTI35D40PT",
     "quantidade": 1,
     "local": [
-      "Pedido aprovado"
+      "Separação logística,F45491071"
     ],
-    "estoque": 91,
+    "estoque": 90,
     "_codigoProd": 10408354006
   },
   {
@@ -161,9 +161,9 @@
     "codigo": "FTI125L40PT",
     "quantidade": 1,
     "local": [
-      "Separação logística"
+      "Pedido aprovado,F49382110"
     ],
-    "estoque": 19,
+    "estoque": 18,
     "_codigoProd": 10408354002
   },
   {
@@ -171,9 +171,9 @@
     "codigo": "FTI35D40PT",
     "quantidade": 1,
     "local": [
-      "Pedido aprovado"
+      "Separação logística,F49388163"
     ],
-    "estoque": 91,
+    "estoque": 90,
     "_codigoProd": 10408354006
   },
   {
