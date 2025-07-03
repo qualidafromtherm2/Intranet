@@ -36,26 +36,15 @@ async function gerarEtiqueta(numeroOP) {
   const payload = JSON.stringify({ numeroOP, tipo: 'Expedicao' });
   const headers = { 'Content-Type': 'application/json' };
 
-  /* 1) – Render (ou o servidor onde está rodando a página) */
-  try {
-    await fetch(
-      `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-      { method: 'POST', headers, body: payload }
-    );
-  } catch (e) {
-    console.warn('[etiqueta] remoto falhou', e);
-  }
+  // 1) Chamada segura (HTTPS → Render)
+  await fetch(
+    `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+    { method: 'POST', headers, body: payload }
+  );
 
-  /* 2) – Tenta no PC que possui a impressora                        */
-  try {
-    await fetch(
-      `${PRINTER_URL}/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-        { method: 'POST', headers, body: payload, mode: 'no-cors' }
-    );
-  } catch (e) {
-    /* ignora se não houver servidor local */
-  }
+  // ---- Removido o fetch direto ao PC ----
 }
+
 
 // No início do arquivo, adicione:
 function showSpinnerOnCard(card) {
