@@ -1,7 +1,7 @@
 // kanban_base.js
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-
+const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
@@ -32,17 +32,28 @@ function gerarTicket () {
 // kanban_base.js  (deixe gerarEtiqueta num único lugar)
 
 async function gerarEtiqueta(numeroOP) {
-  const payload = JSON.stringify({ numeroOP, tipo:'Expedicao' });
-  const headers = { 'Content-Type':'application/json' };
+  const payload = JSON.stringify({ numeroOP, tipo: 'Expedicao' });
+  const headers = { 'Content-Type': 'application/json' };
 
-  // 1) servidor da própria página  (Render ou localhost)
-  try { await fetch('/api/etiquetas', { method:'POST', headers, body: payload }); }
-  catch (e) { console.warn('[etiqueta] remoto falhou', e); }
+  /* 1) – Render (ou o servidor onde está rodando a página) */
+  try {
+    await fetch(
+      `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+      { method: 'POST', headers, body: payload }
+    );
+  } catch (e) {
+    console.warn('[etiqueta] remoto falhou', e);
+  }
 
-  // 2) sempre tenta no localhost, onde o poll-print está rodando
-  try { await fetch('http://localhost:5001/api/etiquetas',
-                    { method:'POST', headers, body: payload, mode:'no-cors' }); }
-  catch (e) { /* ignora se não houver servidor local */ }
+  /* 2) – Sempre tenta também no localhost (Windows-printer)         */
+  try {
+    await fetch(
+      `http://localhost:5001/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+      { method: 'POST', headers, body: payload, mode: 'no-cors' }
+    );
+  } catch (e) {
+    /* ignora se não houver servidor local */
+  }
 }
 
 // No início do arquivo, adicione:
@@ -511,6 +522,12 @@ if (
 
     // 6) Persiste e re-renderiza o Kanban
     await salvarKanbanLocal(itemsKanban);
+
+    // 6.1) Dispara a impressão de tudo que foi acumulado
+for (const t of ticketsParaImprimir) {
+  if (t) await gerarEtiqueta(t);
+}
+
     renderKanbanDesdeJSON(itemsKanban);
     enableDragAndDrop(itemsKanban);
 

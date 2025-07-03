@@ -61,7 +61,19 @@ function getDirs(tipo = 'Expedicao') {
   return { dirTipo, dirPrint };
 }
 
+
+
 app.use('/etiquetas', express.static(etiquetasRoot));
+
+// ——————————————————————————————
+// proteger rotas de etiquetas com token
+// ——————————————————————————————
+function chkToken(req, res, next) {
+  if (req.query.token !== process.env.MY_ZPL_SECRET) {
+    return res.sendStatus(401);          // Unauthorized
+  }
+  next();
+}
 
 // Sessão (cookies) para manter usuário logado
 app.use(session({
