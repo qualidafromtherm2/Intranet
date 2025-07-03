@@ -2,6 +2,7 @@
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
+const PRINTER_URL = 'http://DESKTOP-0RJO5A6:5001';
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
@@ -45,11 +46,11 @@ async function gerarEtiqueta(numeroOP) {
     console.warn('[etiqueta] remoto falhou', e);
   }
 
-  /* 2) – Sempre tenta também no localhost (Windows-printer)         */
+  /* 2) – Tenta no PC que possui a impressora                        */
   try {
     await fetch(
-      `http://localhost:5001/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-      { method: 'POST', headers, body: payload, mode: 'no-cors' }
+      `${PRINTER_URL}/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+        { method: 'POST', headers, body: payload, mode: 'no-cors' }
     );
   } catch (e) {
     /* ignora se não houver servidor local */
@@ -382,11 +383,6 @@ if (destExisting) {
 
 
  await salvarKanbanLocal(itemsKanban);
-
-// imprime qualquer ticket que tenha sido criado em QUALQUER fluxo
-for (const t of ticketsParaImprimir) {
-  if (t) await gerarEtiqueta(t);
-}
 
  renderKanbanDesdeJSON(itemsKanban);
  enableDragAndDrop(itemsKanban);
