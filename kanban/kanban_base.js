@@ -35,28 +35,16 @@ function gerarTicket () {
 // ---------------------------------------------------------------------
 // Envia { numeroSerie, modelo } para o back-end gerar a etiqueta
 // ---------------------------------------------------------------------
-async function gerarEtiqueta (numeroSerie, modelo) {
-  const payload = JSON.stringify({ numeroSerie, modelo, tipo: 'Expedicao' });
-  await fetch(
-    `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-    {
-      method : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body   : payload
-    }
-  );
+ async function gerarEtiqueta(numeroSerie, modelo) {
+   const payload = JSON.stringify({ numeroSerie, modelo, tipo: 'Expedicao' });
 
-  // ► dispara a impressão no PC da Logística ------------------------
-try {
-  await fetch(
-    `${PRINTER_URL}/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-    { method:'POST', headers:{'Content-Type':'application/json'}, body: payload }
-  );
-} catch (err) {
-  console.warn('[PRINT] não foi possível alcançar o PC da Logística', err);
-}
+   // chama só o Render / back-end
+   await fetch(
+     `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+     { method:'POST', headers:{'Content-Type':'application/json'}, body: payload }
+   );
+ }
 
-}
 
 
 // No início do arquivo, adicione:
