@@ -512,7 +512,7 @@ if (
 
     // 6.1) Dispara a impressão de tudo que foi acumulado
 for (const t of ticketsParaImprimir) {
-  if (t) await gerarEtiqueta(ticket, item.codigo);   // novo
+  if (t) await gerarEtiqueta(ticket, item.codigo);
 }
 
     renderKanbanDesdeJSON(itemsKanban);
