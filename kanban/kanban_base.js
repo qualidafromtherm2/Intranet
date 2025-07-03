@@ -45,6 +45,17 @@ async function gerarEtiqueta (numeroSerie, modelo) {
       body   : payload
     }
   );
+
+  // ► dispara a impressão no PC da Logística ------------------------
+try {
+  await fetch(
+    `${PRINTER_URL}/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+    { method:'POST', headers:{'Content-Type':'application/json'}, body: payload }
+  );
+} catch (err) {
+  console.warn('[PRINT] não foi possível alcançar o PC da Logística', err);
+}
+
 }
 
 
