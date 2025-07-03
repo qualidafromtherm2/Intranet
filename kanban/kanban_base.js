@@ -32,17 +32,19 @@ function gerarTicket () {
 // 🔹 NOVO helper – dispara a API
 // kanban_base.js  (deixe gerarEtiqueta num único lugar)
 
-async function gerarEtiqueta(numeroOP) {
-  const payload = JSON.stringify({ numeroOP, tipo: 'Expedicao' });
-  const headers = { 'Content-Type': 'application/json' };
-
-  // 1) Chamada segura (HTTPS → Render)
+// ---------------------------------------------------------------------
+// Envia { numeroSerie, modelo } para o back-end gerar a etiqueta
+// ---------------------------------------------------------------------
+async function gerarEtiqueta (numeroSerie, modelo) {
+  const payload = JSON.stringify({ numeroSerie, modelo, tipo: 'Expedicao' });
   await fetch(
     `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-    { method: 'POST', headers, body: payload }
+    {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : payload
+    }
   );
-
-  // ---- Removido o fetch direto ao PC ----
 }
 
 
@@ -510,7 +512,7 @@ if (
 
     // 6.1) Dispara a impressão de tudo que foi acumulado
 for (const t of ticketsParaImprimir) {
-  if (t) await gerarEtiqueta(t);
+  if (t) await gerarEtiqueta(ticket, item.codigo);   // novo
 }
 
     renderKanbanDesdeJSON(itemsKanban);

@@ -1,13 +1,32 @@
-// src/zpl/chooseTemplate.js
-import { gerarZPL_FTeFH, gerarZPL_FTiBR } from './templates.js';
+/*  src/zpl/templates.js  */
+const layoutFTeFH = `^XA
+^CF0,30
+^FO50,40 ^FB600,1,0,C ^FD${'' /* SERIE */}^FS
+^CF0,60
+^FO50,100 ^FD${'' /* MODELO */}^FS
+^FO50,200 ^FD${'' /* DATA */}^FS
+^XZ`;
 
-export function chooseZPL(modelo, numeroSerie) {
-  const prefixo = modelo.toUpperCase().slice(0, 3);     // FT1, FTI, FH2…
+const layoutFTiBR = `^XA
+^CF0,30
+^FO50,40 ^FB600,1,0,C ^FD${'' /* SERIE */}^FS
+^CF0,60
+^FO50,100 ^FD${'' /* MODELO */}^FS
+^FO50,240 ^FD${'' /* DATA */}^FS
+^XZ`;
 
-  const isFT_FH  = /^(FT|FH)/.test(prefixo) && prefixo[2] !== 'I';
-  const isFTI    = prefixo[2] === 'I';                  // FTI, FHI …
-
-  if (isFT_FH) return gerarZPL_FTeFH(modelo, numeroSerie, {});   // dados vazios
-  if (isFTI)   return gerarZPL_FTiBR(modelo, numeroSerie, {});
-  throw new Error(`Modelo "${modelo}" não mapeado`);
+function gerarZPL_FTeFH (modelo, numeroSerie) {
+  return layoutFTeFH
+    .replace('${"" /* SERIE */}',  numeroSerie)
+    .replace('${"" /* MODELO */}', modelo)
+    .replace('${"" /* DATA */}',   '');
 }
+
+function gerarZPL_FTiBR (modelo, numeroSerie) {
+  return layoutFTiBR
+    .replace('${"" /* SERIE */}',  numeroSerie)
+    .replace('${"" /* MODELO */}', modelo)
+    .replace('${"" /* DATA */}',   '');
+}
+
+module.exports = { gerarZPL_FTeFH, gerarZPL_FTiBR };
