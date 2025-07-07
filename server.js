@@ -117,22 +117,6 @@ const upload = multer({ storage: multer.memoryStorage() });
   const { Octokit } = await import('@octokit/rest');
   const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-/* ============================================================================
-   1) Gera etiqueta (.zpl)
-   ============================================================================ */
-app.post('/api/etiquetas', (req, res) => {
-  const { numeroOP, tipo = 'Expedicao' } = req.body;
-  if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
-
-  const { dirTipo } = getDirs(tipo);
-  const zpl = `^XA
-^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
-^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
-^XZ`;
-
-  fs.writeFileSync(path.join(dirTipo, `etiqueta_${numeroOP}.zpl`), zpl, 'utf8');
-  res.json({ ok: true });
-});
 
 /* ============================================================================
    2) Lista pendentes (lê direto a pasta)
@@ -168,25 +152,49 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   }
 });
 
-  // 3.0) ROTAS DE ETIQUETAS (geração & polling)
-  // ────────────────────────────────────────────
-  // POST  /api/etiquetas            → gera o .zpl e marca como pendente
 app.post('/api/etiquetas', (req, res) => {
-  const { numeroOP, tipo = 'Expedicao' } = req.body;       // default = Expedição
+  const { numeroOP, tipo = 'Expedicao' } = req.body;
   if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-  const { dirTipo } = getDirs(tipo);                       // cria pastas se faltar
+  const { dirTipo } = getDirs(tipo);
+  const hoje = new Date();
+  const hojeFormatado = `${(hoje.getMonth() + 1).toString().padStart(2, '0')}/${hoje.getFullYear()}`;
+  const z = () => ''; // todos os outros campos vazios
 
-  const zpl = `^XA
-^FO30,20^A0N,30,30^FDOP: ${numeroOP}^FS
-^FO30,60^BY2^BCN,60,Y,N,N^FD${numeroOP}^FS
+  const zpl = `
+^XA
+^CI28
+^PW1150
+^LL700
+^A0R,42,40
+^FO640,15^FDBOMBA DE CALOR FROMTHERM^FS
+^A0R,20,20
+^FO650,690^FD FABRICAÇÃO:^FS
+^A0R,20,20
+^FO650,820^FD${hojeFormatado}^FS
+^FO580,20^GB60,375,2^FS
+^A0R,22,22
+^FO593,35^FDMODELO^FS
+^A0R,40,40
+^FO585,120^FD${z()}^FS
+^FO580,400^GB60,220,2^FS
+^A0R,30,30
+^FO590,415^FDNCM: 84186100^FS
+^FO580,630^GB60,200,60^FS  
+^A0R,22,22
+^FO593,645^FR^FDN SÉRIE^FS
+^A0R,40,40
+^FO585,725^FR^FD${numeroOP}^FS
+^FO580,825^BQN,2,3^FDLA,${numeroOP}^FS
+^FO30,450^GB545,2,2^FS
+; (campos restantes omitidos para manter limpo)
 ^XZ`;
 
   const fileName = `etiqueta_${numeroOP}.zpl`;
-  fs.writeFileSync(path.join(dirTipo, fileName), zpl, 'utf8');
-
-  return res.json({ ok: true });
+  fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
+  res.json({ ok: true });
 });
+
 
 app.get('/api/op/next-code/:prefix', async (req, res) => {
   try {
