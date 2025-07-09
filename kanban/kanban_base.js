@@ -286,7 +286,7 @@ if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística'
   }
 
   /* Se for revenda (tipo 00), NÃO precisa de estrutura            */
-  const precisaEstrutura = !(tipoItemDrag === '00' || +tipoItemDrag === 0);
+  const precisaEstrutura = false;
 
   /* ── 2. (opcional) valida Estrutura na Omie ──────────────────── */
   if (precisaEstrutura) {
