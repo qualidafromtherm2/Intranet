@@ -153,38 +153,48 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
 });
 
 app.post('/api/etiquetas', async (req, res) => {
+  try {
+    const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
+    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-
-  const { numeroOP, tipo = 'Expedicao' } = req.body;
-
-  // 1) busca dados do produto pelo código enviado
-const { codigo } = req.body;
-let produtoDet = {};
-if (codigo) {
-  produtoDet = await omieCall(
-    'https://app.omie.com.br/api/v1/geral/produtos/',
-    {
-      call:       'ConsultarProduto',
-      app_key:    OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param:      [{ codigo }]
+    // 🔹 Busca dados do produto
+    let produtoDet = {};
+    if (codigo) {
+      produtoDet = await omieCall(
+        'https://app.omie.com.br/api/v1/geral/produtos/',
+        {
+          call:       'ConsultarProduto',
+          app_key:    OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param:      [{ codigo }]
+        }
+      );
     }
-  );
-}
 
-  if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
+    // 🔹 Garante diretórios
+    const { dirTipo } = getDirs(tipo);
 
-  const { dirTipo } = getDirs(tipo);
-  const hoje = new Date();
-  const hojeFormatado = `${(hoje.getMonth() + 1).toString().padStart(2, '0')}/${hoje.getFullYear()}`;
-  function z(val) {
-  return val || '';
-}
+    // 🔹 Data de fabricação
+    const hoje = new Date();
+    const hojeFormatado = `${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
 
-// pega o primeiro (e único) cadastro de produto
-const prod = produtoDet.produto_servico_cadastro[0];
+    // 🔹 Mapeia características em um objeto d
+    const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
+    const d = {};
+    (cad.caracteristicas || []).forEach(c => {
+      d[c.cCodIntCaract] = (c.cConteudo || '').replace(/_7E$/, '~');
+    });
+    // campos adicionais exigidos pela etiqueta
+    d.modelo          = cad.modelo || '';
+    d.ncm             = cad.ncm || '';
+    d.pesoLiquido     = cad.peso_liq || '';
+    d.dimensaoProduto = `${cad.largura||''}x${cad.profundidade||''}x${cad.altura||''}`;
 
-const zpl = `
+    // 🔹 Helper de render vazio
+    const z = val => val || '';
+
+    // 🔹 Montagem do ZPL completo
+    const zpl = `
 ^XA
 ^CI28
 ^PW1150
@@ -203,11 +213,11 @@ const zpl = `
 ^A0R,22,22
 ^FO593,35^FDMODELO^FS
 ^A0R,40,40
-^FO585,120^FD${z(prod.modelo)}^FS
+^FO585,120^FD${z(d.modelo)}^FS
 
 ^FO580,400^GB60,220,2^FS
 ^A0R,30,30
-^FO590,415^FDNCM: ${z(prod.ncm)}^FS
+^FO590,415^FDNCM: ${z(d.ncm)}^FS
 
 ; -------------------- CAIXA NS ENXUTA --------------------
 ^FO580,630^GB60,200,60^FS  
@@ -224,162 +234,99 @@ const zpl = `
 
 ; -------------------- BLOCO ESQUERDO --------------------
 ^A0R,25,25
-^FO540,25^FDCapacidade de^FS
-^A0R,25,25
-^FO515,25^FDaquecimento (kW)^FS
-^A0R,25,25
-^FO540,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='capacidadekW')?.cConteudo
-)}^FS
+^FO540,25^FDCapacidade de aquecimento (kW)^FS
+^FO540,240^FB200,1,0,R^FD${z(d.capacidadekW)}^FS
 
 ^A0R,25,25
-^FO475,25^FDPotência nominal(kW)^FS
-^A0R,25,25
-^FO475,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='potenciakW')?.cConteudo
-)}^FS
+^FO475,25^FDPotência nominal (kW)^FS
+^FO475,240^FB200,1,0,R^FD${z(d.potenciakW)}^FS
 
 ^A0R,25,25
 ^FO435,25^FDCOP^FS
-^A0R,25,25
-^FO435,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='cop')?.cConteudo
-)}^FS
+^FO435,240^FB200,1,0,R^FD${z(d.cop)}^FS
 
 ^A0R,25,25
 ^FO395,25^FDTensão nominal^FS
-^A0R,25,25
-^FO395,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='tensaoNominal')?.cConteudo
-)}^FS
+^FO395,240^FB200,1,0,R^FD${z(d.tensaoNominal)}^FS
 
 ^A0R,25,25
 ^FO355,25^FDFaixa tensão nominal^FS
-^A0R,25,25
-^FO355,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='faixaTensaoNominal')?.cConteudo
-)}^FS
+^FO355,240^FB200,1,0,R^FD${z(d.faixaTensaoNominal)}^FS
 
 ^A0R,25,25
 ^FO315,25^FDPotência Máxima (kW)^FS
-^A0R,25,25
-^FO315,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='potenciaMaxima')?.cConteudo
-)}^FS
+^FO315,240^FB200,1,0,R^FD${z(d.potenciaMaxima)}^FS
 
 ^A0R,25,25
 ^FO275,25^FDCorrente Máxima (A)^FS
-^A0R,25,25
-^FO275,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='correnteMaxima')?.cConteudo
-)}^FS
+^FO275,240^FB200,1,0,R^FD${z(d.correnteMaxima)}^FS
 
 ^A0R,25,25
 ^FO235,25^FDFluído refrigerante^FS
-^A0R,25,25
-^FO235,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='fluidoRefrigerante')?.cConteudo
-)}^FS
+^FO235,240^FB200,1,0,R^FD${z(d.fluidoRefrigerante)}^FS
 
 ^A0R,25,25
-^FO195,25^FDFaixa de temp. de aquec. (°C)^FS
-^A0R,25,25
-^FO195,240^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='faixaTemperaturaTrabalho')?.cConteudo
-)}^FS
-
-; -------------------- BLOCO DIREITO --------------------
-^A0R,25,25
-^FO540,470^FDPressão máx. descarga^FS
-^A0R,25,25
-^FO540,688^FB216,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoDescarga')?.cConteudo
-)}^FS
+^FO195,25^FDPressão máx. descarga^FS
+^FO540,688^FB216,1,0,R^FD${z(d.pressaoDescarga)}^FS
 
 ^A0R,25,25
 ^FO515,470^FDPressão máx. sucção^FS
-^A0R,25,25
-^FO515,688^FB216,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoSuccao')?.cConteudo
-)}^FS
+^FO515,688^FB216,1,0,R^FD${z(d.pressaoSuccao)}^FS
 
 ^A0R,25,25
-^FO475,470^FDPressão d'água^FS
-^A0R,25,25
-^FO475,655^FDMín.^FS
-^A0R,25,25
-^FO475,675^FB230,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoAguaMin')?.cConteudo
-)}^FS
-^A0R,25,25
-^FO450,655^FDMáx.^FS
-^A0R,25,25
-^FO450,675^FB230,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoAguaMax')?.cConteudo
-)}^FS
+^FO475,470^FDPressão d'água (mín)^FS
+^FO475,675^FB230,1,0,R^FD${z(d.pressaoAguaMin)}^FS
 
 ^A0R,25,25
-^FO410,470^FDVazão d'água^FS
+^FO450,470^FDPressão d'água (máx)^FS
+^FO450,675^FB230,1,0,R^FD${z(d.pressaoAguaMax)}^FS
+
 ^A0R,25,25
-^FO410,655^FDMínima^FS
-^A0R,25,25
-^FO410,675^FB230,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaMin')?.cConteudo
-)}^FS
+^FO410,470^FDVazão d'água (mín)^FS
+^FO410,675^FB230,1,0,R^FD${z(d.vazaoAguaMin)}^FS
+
 ^A0R,25,25
 ^FO385,655^FDIdeal^FS
-^A0R,25,25
-^FO385,675^FB230,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaIdeal')?.cConteudo
-)}^FS
+^FO385,675^FB230,1,0,R^FD${z(d.vazaoAguaIdeal)}^FS
+
 ^A0R,25,25
 ^FO360,655^FDMáxima^FS
-^A0R,25,25
-^FO360,675^FB230,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaMax')?.cConteudo
-)}^FS
+^FO360,675^FB230,1,0,R^FD${z(d.vazaoAguaMax)}^FS
 
 ^A0R,25,25
 ^FO320,470^FDClasse de isolação^FS
-^A0R,25,25
-^FO320,700^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='classeIsolacao')?.cConteudo
-)}^FS
+^FO320,700^FB200,1,0,R^FD${z(d.classeIsolacao)}^FS
 
 ^A0R,25,25
 ^FO290,470^FDGrau de proteção^FS
-^A0R,25,25
-^FO290,700^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='grauProtecao')?.cConteudo
-)}^FS
+^FO290,700^FB200,1,0,R^FD${z(d.grauProtecao)}^FS
 
 ^A0R,25,25
 ^FO260,470^FDRuído dB(A)^FS
-^A0R,25,25
-^FO260,700^FB200,1,0,R^FD${z(
-  prod.caracteristicas.find(c=>c.cCodIntCaract==='ruido')?.cConteudo
-)}^FS
+^FO260,700^FB200,1,0,R^FD${z(d.ruido)}^FS
 
 ^A0R,25,25
 ^FO220,470^FDPeso líquido (kg)^FS
-^A0R,25,25
-^FO220,700^FB200,1,0,R^FD${z(prod.peso_liq)}^FS
+^FO220,700^FB200,1,0,R^FD${z(d.pesoLiquido)}^FS
 
 ^A0R,25,25
-^FO180,470^FDDimensões do produto^FS
-^A0R,25,25
-^FO155,470^FDLxPxA (mm)^FS
-^A0R,25,25
-^FO180,700^FB200,1,0,R^FH\\^FD${z(
-  `${prod.largura}x${prod.profundidade}x${prod.altura}`
-)}^FS
+^FO180,470^FDDimensões do produto (LxPxA mm)^FS
+^FO180,700^FB200,1,0,R^FD${z(d.dimensaoProduto)}^FS
 
 ^XZ
 `;
-  const fileName = `etiqueta_${numeroOP}.zpl`;
-  fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
-  res.json({ ok: true });
+
+    // 🔹 Grava arquivo .zpl
+    const fileName = `etiqueta_${numeroOP}.zpl`;
+    fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[etiquetas] erro →', err);
+    return res.status(500).json({ error: 'Erro ao gerar etiqueta' });
+  }
 });
+
 
 
 app.get('/api/op/next-code/:prefix', async (req, res) => {
