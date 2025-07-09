@@ -12,6 +12,8 @@ let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
 
 import { loadDadosProduto as loadDadosProdutoReal }
   from './requisicoes_omie/Dados_produto.js';
+import { inicializarImportacaoCaracteristicas } from './produtos/caracteristica_importar.js';
+
 
 // deixa a versão completa visível globalmente
 window.loadDadosProduto = loadDadosProdutoReal;
@@ -821,3 +823,6 @@ moreBtn.addEventListener('click', () => {
 window.addEventListener('resize',           recalculaMenu);
 document.fonts?.ready.then(                  recalculaMenu);
 document.addEventListener('DOMContentLoaded', recalculaMenu);
+document.addEventListener('DOMContentLoaded', () => {
+  inicializarImportacaoCaracteristicas();
+});

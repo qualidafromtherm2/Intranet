@@ -32,8 +32,10 @@ function gerarTicket () {
 // 🔹 NOVO helper – dispara a API
 // kanban_base.js  (deixe gerarEtiqueta num único lugar)
 
-async function gerarEtiqueta(numeroOP) {
-  const payload = JSON.stringify({ numeroOP, tipo: 'Expedicao' });
+async function gerarEtiqueta(numeroOP, codigo) {
+
+  const payload = JSON.stringify({ numeroOP, codigo, tipo: 'Expedicao' });
+
   const headers = { 'Content-Type': 'application/json' };
 
   // 1) Chamada segura (HTTPS → Render)
@@ -401,7 +403,8 @@ const idxLocal = item.local.findIndex(
 
 if (idxLocal !== -1) {
   const ticket = gerarTicket();             // F06250142…
-  ticketsParaImprimir.push(ticket);         // ← para imprimir depois
+  ticketsParaImprimir.push({ ticket, codigo: item.codigo });
+      // ← para imprimir depois
   item.local[idxLocal] = `${newColumn},${ticket}`;
   item.estoque = Math.max(0, item.estoque - 1); // baixa 1 do saldo
 }
@@ -414,7 +417,8 @@ if (
 ) {
   item.local.forEach(l => {
     const ticket = l.split(',')[1];      // “F06250142”
-    ticketsParaImprimir.push(ticket);
+    ticketsParaImprimir.push({ ticket, codigo: item.codigo });
+
   });
 }
 
@@ -429,7 +433,8 @@ if (
 ) {
   item.local.forEach(l => {
     const ticket = l.split(',')[1];    // pega só “F06250142”
-    ticketsParaImprimir.push(ticket);
+    ticketsParaImprimir.push({ ticket, codigo: item.codigo });
+
   });
 }
 
@@ -509,9 +514,11 @@ if (
     await salvarKanbanLocal(itemsKanban);
 
     // 6.1) Dispara a impressão de tudo que foi acumulado
-for (const t of ticketsParaImprimir) {
-  if (t) await gerarEtiqueta(t);
+for (const tObj of ticketsParaImprimir) {
+  // cada tObj agora é { ticket, codigo }
+  if (tObj.ticket) await gerarEtiqueta(tObj.ticket, tObj.codigo);
 }
+
 
     renderKanbanDesdeJSON(itemsKanban);
     enableDragAndDrop(itemsKanban);

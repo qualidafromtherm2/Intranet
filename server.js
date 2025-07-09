@@ -13,6 +13,7 @@ const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
 const multer        = require('multer');
+const fetch = require('node-fetch');
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
@@ -30,7 +31,6 @@ const omieCall      = require('./utils/omieCall');
 const bcrypt = require('bcrypt');
 const INACTIVE_HASH = '$2b$10$ltPcvabuKvEU6Uj1FBUmi.ME4YjVq/dhGh4Z3PpEyNlphjjXCDkTG';   // ← seu HASH_INATIVO aqui
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-
 const {
   OMIE_APP_KEY,
   OMIE_APP_SECRET,
@@ -152,8 +152,26 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   }
 });
 
-app.post('/api/etiquetas', (req, res) => {
+app.post('/api/etiquetas', async (req, res) => {
+
+
   const { numeroOP, tipo = 'Expedicao' } = req.body;
+
+  // 1) busca dados do produto pelo código enviado
+const { codigo } = req.body;
+let produtoDet = {};
+if (codigo) {
+  produtoDet = await omieCall(
+    'https://app.omie.com.br/api/v1/geral/produtos/',
+    {
+      call:       'ConsultarProduto',
+      app_key:    OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param:      [{ codigo }]
+    }
+  );
+}
+
   if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
   const { dirTipo } = getDirs(tipo);
@@ -176,7 +194,8 @@ app.post('/api/etiquetas', (req, res) => {
 ^A0R,22,22
 ^FO593,35^FDMODELO^FS
 ^A0R,40,40
-^FO585,120^FD${z()}^FS
+^FO585,120^FD${produtoDet.modelo || ''}^FS
+
 ^FO580,400^GB60,220,2^FS
 ^A0R,30,30
 ^FO590,415^FDNCM: 84186100^FS
@@ -1244,6 +1263,75 @@ app.use(express.static(path.join(__dirname)));
 app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
   res.sendFile(path.join(__dirname, 'menu_produto.html'));
 });
+
+app.post('/api/produtos/caracteristicas-aplicar-teste', express.json(), async (req, res) => {
+  try {
+    const csvPath = path.join(__dirname, 'produtos', 'dadosEtiquetasMaquinas - dadosFT.csv');
+    const csvContent = fs.readFileSync(csvPath, 'utf8');
+    const linhas = csvParse(csvContent, { delimiter: ',', from_line: 1 });
+
+    const headers = linhas[0]; // Cabeçalho
+    const resultados = [];
+
+    const app_key = process.env.OMIE_APP_KEY;
+    const app_secret = process.env.OMIE_APP_SECRET;
+
+    // Percorre da linha 2 em diante
+    for (let linhaIndex = 1; linhaIndex < linhas.length; linhaIndex++) {
+      const valores = linhas[linhaIndex];
+      const codigoProduto = valores[0]; // Coluna A
+
+      if (!codigoProduto?.trim()) break; // parou ao encontrar linha vazia
+
+      for (let i = 2; i <= 24; i++) { // Colunas C a Y
+        const caract = headers[i];
+        let conteudo = valores[i];
+if (conteudo?.endsWith('_7E')) {
+  conteudo = conteudo.replace('_7E', '~');
+}
+
+        if (!caract?.trim() || !conteudo?.trim()) continue;
+
+        const body = {
+          call: 'IncluirCaractProduto',
+          app_key,
+          app_secret,
+          param: [{
+            cCodIntProd:        codigoProduto,
+            cCodIntCaract:      caract,
+            cConteudo:          conteudo,
+            cExibirItemNF:      'N',
+            cExibirItemPedido:  'N',
+            cExibirOrdemProd:   'N'
+          }]
+        };
+
+        const resp = await fetch('https://app.omie.com.br/api/v1/geral/prodcaract/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        const json = await resp.json();
+        resultados.push({
+          produto: codigoProduto,
+          caract,
+          conteudo,
+          resposta: json
+        });
+
+        await new Promise(r => setTimeout(r, 350)); // respeita limite
+      }
+    }
+
+    res.json({ total: resultados.length, resultados });
+  } catch (err) {
+    console.error('[caracteristicas-aplicar-teste] erro:', err);
+    res.status(500).json({ error: 'Erro ao aplicar características em múltiplos produtos' });
+  }
+});
+
+
 
 
 

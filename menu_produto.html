@@ -375,6 +375,14 @@
   <div class="content-wrapper">
     <div class="content-section">
       <div class="content-section-title">Características</div>
+
+      <!-- botão provisorio-->
+        <button class="content-button" data-action="incluir-conteudo" style="margin-left: 10px;">
+    🛠️ Incluir conteúdo
+        </button>
+       <!-- botão provisorio-->
+
+       
       <ul id="listacaracteristica" class="content-list product-details"></ul>
     </div>
   </div>
@@ -570,10 +578,19 @@
 </div>
 
 
-  <!-- Scripts -->
+
+ <!-- PapaParse 5.3.2 com hash corrigido -->
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"
+  integrity="sha512-SGWgwwRA8xZgEoKiex3UubkSkV1zSE1BS6O4pXcaxcNtUlQsOmOmhVnDwIvqGRfEmuz83tIGL13cXMZn6upPyg=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer">
+</script>
+
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script type="module" src="login/login.js"></script>
   <script type="module" src="menu_produto.js"></script>
+  
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js" defer></script>
