@@ -28,10 +28,10 @@
     "codigo": "FTI145LPTBR",
     "quantidade": 2,
     "local": [
-      "Pedido aprovado",
+      "Pedido aprovado,F91701040",
       "Pedido aprovado"
     ],
-    "estoque": 2,
+    "estoque": 0,
     "_codigoProd": 10520726398
   },
   {
