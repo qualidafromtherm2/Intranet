@@ -177,38 +177,205 @@ if (codigo) {
   const { dirTipo } = getDirs(tipo);
   const hoje = new Date();
   const hojeFormatado = `${(hoje.getMonth() + 1).toString().padStart(2, '0')}/${hoje.getFullYear()}`;
-  const z = () => ''; // todos os outros campos vazios
+  function z(val) {
+  return val || '';
+}
 
-  const zpl = `
+// pega o primeiro (e único) cadastro de produto
+const prod = produtoDet.produto_servico_cadastro[0];
+
+const zpl = `
 ^XA
 ^CI28
 ^PW1150
 ^LL700
+
+; -------------------- CABEÇALHO ROTACIONADO --------------------
 ^A0R,42,40
 ^FO640,15^FDBOMBA DE CALOR FROMTHERM^FS
+
 ^A0R,20,20
 ^FO650,690^FD FABRICAÇÃO:^FS
 ^A0R,20,20
 ^FO650,820^FD${hojeFormatado}^FS
+
 ^FO580,20^GB60,375,2^FS
 ^A0R,22,22
 ^FO593,35^FDMODELO^FS
 ^A0R,40,40
-^FO585,120^FD${produtoDet.modelo || ''}^FS
+^FO585,120^FD${z(prod.modelo)}^FS
 
 ^FO580,400^GB60,220,2^FS
 ^A0R,30,30
-^FO590,415^FDNCM: 84186100^FS
+^FO590,415^FDNCM: ${z(prod.ncm)}^FS
+
+; -------------------- CAIXA NS ENXUTA --------------------
 ^FO580,630^GB60,200,60^FS  
 ^A0R,22,22
 ^FO593,645^FR^FDN SÉRIE^FS
 ^A0R,40,40
 ^FO585,725^FR^FD${numeroOP}^FS
-^FO580,825^BQN,2,3^FDLA,${numeroOP}^FS
-^FO30,450^GB545,2,2^FS
-; (campos restantes omitidos para manter limpo)
-^XZ`;
 
+; -------------------- QR CODE COM Nº DE SÉRIE --------------------
+^FO580,825^BQN,2,3^FDLA,${numeroOP}^FS
+
+; -------------------- LINHA DE CENTRO --------------------
+^FO30,450^GB545,2,2^FS
+
+; -------------------- BLOCO ESQUERDO --------------------
+^A0R,25,25
+^FO540,25^FDCapacidade de^FS
+^A0R,25,25
+^FO515,25^FDaquecimento (kW)^FS
+^A0R,25,25
+^FO540,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='capacidadekW')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO475,25^FDPotência nominal(kW)^FS
+^A0R,25,25
+^FO475,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='potenciakW')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO435,25^FDCOP^FS
+^A0R,25,25
+^FO435,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='cop')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO395,25^FDTensão nominal^FS
+^A0R,25,25
+^FO395,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='tensaoNominal')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO355,25^FDFaixa tensão nominal^FS
+^A0R,25,25
+^FO355,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='faixaTensaoNominal')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO315,25^FDPotência Máxima (kW)^FS
+^A0R,25,25
+^FO315,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='potenciaMaxima')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO275,25^FDCorrente Máxima (A)^FS
+^A0R,25,25
+^FO275,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='correnteMaxima')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO235,25^FDFluído refrigerante^FS
+^A0R,25,25
+^FO235,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='fluidoRefrigerante')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO195,25^FDFaixa de temp. de aquec. (°C)^FS
+^A0R,25,25
+^FO195,240^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='faixaTemperaturaTrabalho')?.cConteudo
+)}^FS
+
+; -------------------- BLOCO DIREITO --------------------
+^A0R,25,25
+^FO540,470^FDPressão máx. descarga^FS
+^A0R,25,25
+^FO540,688^FB216,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoDescarga')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO515,470^FDPressão máx. sucção^FS
+^A0R,25,25
+^FO515,688^FB216,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoSuccao')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO475,470^FDPressão d'água^FS
+^A0R,25,25
+^FO475,655^FDMín.^FS
+^A0R,25,25
+^FO475,675^FB230,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoAguaMin')?.cConteudo
+)}^FS
+^A0R,25,25
+^FO450,655^FDMáx.^FS
+^A0R,25,25
+^FO450,675^FB230,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='pressaoAguaMax')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO410,470^FDVazão d'água^FS
+^A0R,25,25
+^FO410,655^FDMínima^FS
+^A0R,25,25
+^FO410,675^FB230,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaMin')?.cConteudo
+)}^FS
+^A0R,25,25
+^FO385,655^FDIdeal^FS
+^A0R,25,25
+^FO385,675^FB230,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaIdeal')?.cConteudo
+)}^FS
+^A0R,25,25
+^FO360,655^FDMáxima^FS
+^A0R,25,25
+^FO360,675^FB230,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='vazaoAguaMax')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO320,470^FDClasse de isolação^FS
+^A0R,25,25
+^FO320,700^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='classeIsolacao')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO290,470^FDGrau de proteção^FS
+^A0R,25,25
+^FO290,700^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='grauProtecao')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO260,470^FDRuído dB(A)^FS
+^A0R,25,25
+^FO260,700^FB200,1,0,R^FD${z(
+  prod.caracteristicas.find(c=>c.cCodIntCaract==='ruido')?.cConteudo
+)}^FS
+
+^A0R,25,25
+^FO220,470^FDPeso líquido (kg)^FS
+^A0R,25,25
+^FO220,700^FB200,1,0,R^FD${z(prod.peso_liq)}^FS
+
+^A0R,25,25
+^FO180,470^FDDimensões do produto^FS
+^A0R,25,25
+^FO155,470^FDLxPxA (mm)^FS
+^A0R,25,25
+^FO180,700^FB200,1,0,R^FH\\^FD${z(
+  `${prod.largura}x${prod.profundidade}x${prod.altura}`
+)}^FS
+
+^XZ
+`;
   const fileName = `etiqueta_${numeroOP}.zpl`;
   fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
   res.json({ ok: true });
