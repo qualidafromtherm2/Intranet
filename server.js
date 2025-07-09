@@ -235,7 +235,7 @@ const zpl = `
 ; -------------------- BLOCO ESQUERDO --------------------
 ^A0R,25,25
 ^FO540,25^FDCapacidade de aquecimento (kW)^FS
-^A0N,25,25
+^A0R,25,25
 ^FO540,240^FB200,1,0,R^FD${z(d.capacidadekW)}^FS
 
 ^A0R,25,25
