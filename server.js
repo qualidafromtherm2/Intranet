@@ -236,105 +236,106 @@ const zpl = `
 ^A0R,25,25
 ^FO540,25^FDCapacidade de aquecimento (kW)^FS
 ^A0N,25,25
-^FO540,240^FB200,1,0,N^FD${z(d.capacidadekW)}^FS
+^FO540,240^FB200,1,0,R^FD${z(d.capacidadekW)}^FS
 
 ^A0R,25,25
 ^FO475,25^FDPotência nominal (kW)^FS
 ^A0N,25,25
-^FO475,240^FB200,1,0,N^FD${z(d.potenciakW)}^FS
+^FO475,240^FB200,1,0,R^FD${z(d.potenciakW)}^FS
 
 ^A0R,25,25
 ^FO435,25^FDCOP^FS
 ^A0N,25,25
-^FO435,240^FB200,1,0,N^FD${z(d.cop)}^FS
+^FO435,240^FB200,1,0,R^FD${z(d.cop)}^FS
 
 ^A0R,25,25
 ^FO395,25^FDTensão nominal^FS
 ^A0N,25,25
-^FO395,240^FB200,1,0,N^FD${z(d.tensaoNominal)}^FS
+^FO395,240^FB200,1,0,R^FD${z(d.tensaoNominal)}^FS
 
 ^A0R,25,25
 ^FO355,25^FDFaixa tensão nominal^FS
 ^A0N,25,25
-^FO355,240^FB200,1,0,N^FD${z(d.faixaTensaoNominal)}^FS
+^FO355,240^FB200,1,0,R^FD${z(d.faixaTensaoNominal)}^FS
 
 ^A0R,25,25
 ^FO315,25^FDPotência Máxima (kW)^FS
 ^A0N,25,25
-^FO315,240^FB200,1,0,N^FD${z(d.potenciaMaxima)}^FS
+^FO315,240^FB200,1,0,R^FD${z(d.potenciaMaxima)}^FS
 
 ^A0R,25,25
 ^FO275,25^FDCorrente Máxima (A)^FS
 ^A0N,25,25
-^FO275,240^FB200,1,0,N^FD${z(d.correnteMaxima)}^FS
+^FO275,240^FB200,1,0,R^FD${z(d.correnteMaxima)}^FS
 
 ^A0R,25,25
 ^FO235,25^FDFluído refrigerante^FS
 ^A0N,25,25
-^FO235,240^FB200,1,0,N^FD${z(d.fluidoRefrigerante)}^FS
+^FO235,240^FB200,1,0,R^FD${z(d.fluidoRefrigerante)}^FS
 
 ^A0R,25,25
 ^FO195,25^FDPressão máx. descarga^FS
 ^A0N,25,25
-^FO540,688^FB216,1,0,N^FD${z(d.pressaoDescarga)}^FS
+^FO540,688^FB216,1,0,R^FD${z(d.pressaoDescarga)}^FS
 
 ^A0R,25,25
 ^FO515,470^FDPressão máx. sucção^FS
 ^A0N,25,25
-^FO515,688^FB216,1,0,N^FD${z(d.pressaoSuccao)}^FS
+^FO515,688^FB216,1,0,R^FD${z(d.pressaoSuccao)}^FS
 
 ^A0R,25,25
 ^FO475,470^FDPressão d'água (mín)^FS
 ^A0N,25,25
-^FO475,675^FB230,1,0,N^FD${z(d.pressaoAguaMin)}^FS
+^FO475,675^FB230,1,0,R^FD${z(d.pressaoAguaMin)}^FS
 
 ^A0R,25,25
 ^FO450,470^FDPressão d'água (máx)^FS
 ^A0N,25,25
-^FO450,675^FB230,1,0,N^FD${z(d.pressaoAguaMax)}^FS
+^FO450,675^FB230,1,0,R^FD${z(d.pressaoAguaMax)}^FS
 
 ^A0R,25,25
 ^FO410,470^FDVazão d'água (mín)^FS
 ^A0N,25,25
-^FO410,675^FB230,1,0,N^FD${z(d.vazaoAguaMin)}^FS
+^FO410,675^FB230,1,0,R^FD${z(d.vazaoAguaMin)}^FS
 
 ^A0R,25,25
 ^FO385,655^FDIdeal^FS
 ^A0N,25,25
-^FO385,675^FB230,1,0,N^FD${z(d.vazaoAguaIdeal)}^FS
+^FO385,675^FB230,1,0,R^FD${z(d.vazaoAguaIdeal)}^FS
 
 ^A0R,25,25
 ^FO360,655^FDMáxima^FS
 ^A0N,25,25
-^FO360,675^FB230,1,0,N^FD${z(d.vazaoAguaMax)}^FS
+^FO360,675^FB230,1,0,R^FD${z(d.vazaoAguaMax)}^FS
 
 ^A0R,25,25
 ^FO320,470^FDClasse de isolação^FS
 ^A0N,25,25
-^FO320,700^FB200,1,0,N^FD${z(d.classeIsolacao)}^FS
+^FO320,700^FB200,1,0,R^FD${z(d.classeIsolacao)}^FS
 
 ^A0R,25,25
 ^FO290,470^FDGrau de proteção^FS
 ^A0N,25,25
-^FO290,700^FB200,1,0,N^FD${z(d.grauProtecao)}^FS
+^FO290,700^FB200,1,0,R^FD${z(d.grauProtecao)}^FS
 
 ^A0R,25,25
 ^FO260,470^FDRuído dB(A)^FS
 ^A0N,25,25
-^FO260,700^FB200,1,0,N^FD${z(d.ruido)}^FS
+^FO260,700^FB200,1,0,R^FD${z(d.ruido)}^FS
 
 ^A0R,25,25
 ^FO220,470^FDPeso líquido (kg)^FS
 ^A0N,25,25
-^FO220,700^FB200,1,0,N^FD${z(d.pesoLiquido)}^FS
+^FO220,700^FB200,1,0,R^FD${z(d.pesoLiquido)}^FS
 
 ^A0R,25,25
 ^FO180,470^FDDimensões do produto (LxPxA mm)^FS
 ^A0N,25,25
-^FO180,700^FB200,1,0,N^FD${z(d.dimensaoProduto)}^FS
+^FO180,700^FB200,1,0,R^FD${z(d.dimensaoProduto)}^FS
 
 ^XZ
 `;
+
 
 
     // 🔹 Grava arquivo .zpl
