@@ -152,13 +152,12 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   }
 });
 
-// Em server.js, dentro do seu IIFE, substitua a rota /api/etiquetas inteira por esta:
-
 app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
+    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-    // 1) Busca dados do produto na OMIE
+    // 🔹 Busca dados do produto
     let produtoDet = {};
     if (codigo) {
       produtoDet = await omieCall(
@@ -171,18 +170,31 @@ app.post('/api/etiquetas', async (req, res) => {
         }
       );
     }
-    const d = produtoDet;
 
-    // 2) Prepara diretórios e data
+    // 🔹 Garante diretórios
     const { dirTipo } = getDirs(tipo);
+
+    // 🔹 Data de fabricação
     const hoje = new Date();
-    const hojeFormatado = `${(hoje.getMonth() + 1).toString().padStart(2, '0')}/${hoje.getFullYear()}`;
+    const hojeFormatado = `${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
 
-    // 3) Função auxiliar para evitar null/undefined
-    const z = v => v == null ? '' : v;
+    // 🔹 Mapeia características em um objeto d
+    const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
+    const d = {};
+    (cad.caracteristicas || []).forEach(c => {
+      d[c.cCodIntCaract] = (c.cConteudo || '').replace(/_7E$/, '~');
+    });
+    // campos adicionais exigidos pela etiqueta
+    d.modelo          = cad.modelo || '';
+    d.ncm             = cad.ncm || '';
+    d.pesoLiquido     = cad.peso_liq || '';
+    d.dimensaoProduto = `${cad.largura||''}x${cad.profundidade||''}x${cad.altura||''}`;
 
-    // 4) Monta o ZPL, escapando '~' como '\7E' e ajustando legendas/valores
-    const zpl = `
+    // 🔹 Helper de render vazio
+    const z = val => val || '';
+
+    // 🔹 Montagem do ZPL completo
+const zpl = `
 ^XA
 ^CI28
 ^PW1150
@@ -226,120 +238,121 @@ app.post('/api/etiquetas', async (req, res) => {
 ^FO540,10^FDCapacidade de^FS
 ^A0R,25,25
 ^FO540,35^FDEaquecimento (kW)^FS
-; valor (escapando '~')
+; valor (com ~ escapado)
 ^A0R,20,20
-^FO540,240^FB200,1,0,R^FH^FD${String(z(d.capacidadekW)).replace(/~/g,'\\7E')}^FS
+^FO540,240^FH^FD${z(d.capacidadekW).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO475,25^FDPotência nominal (kW)^FS
 ^A0R,20,20
-^FO475,240^FB200,1,0,R^FH^FD${String(z(d.potenciakW)).replace(/~/g,'\\7E')}^FS
+^FO475,240^FH^FD${z(d.potenciakW).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO435,25^FDCOP^FS
 ^A0R,20,20
-^FO435,240^FB200,1,0,R^FH^FD${String(z(d.cop)).replace(/~/g,'\\7E')}^FS
+^FO435,240^FH^FD${z(d.cop).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO395,25^FDTensão nominal^FS
 ^A0R,20,20
-^FO395,240^FB200,1,0,R^FH^FD${String(z(d.tensaoNominal)).replace(/~/g,'\\7E')}^FS
+^FO395,240^FH^FD${z(d.tensaoNominal).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO355,25^FDFaixa tensão nominal^FS
 ^A0R,20,20
-^FO355,240^FB200,1,0,R^FH^FD${String(z(d.faixaTensaoNominal)).replace(/~/g,'\\7E')}^FS
+^FO355,240^FH^FD${z(d.faixaTensaoNominal).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO315,25^FDPotência Máxima (kW)^FS
 ^A0R,20,20
-^FO315,240^FB200,1,0,R^FH^FD${String(z(d.potenciaMaxima)).replace(/~/g,'\\7E')}^FS
+^FO315,240^FH^FD${z(d.potenciaMaxima).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO275,25^FDCorrente Máxima (A)^FS
 ^A0R,20,20
-^FO275,240^FB200,1,0,R^FH^FD${String(z(d.correnteMaxima)).replace(/~/g,'\\7E')}^FS
+^FO275,240^FH^FD${z(d.correnteMaxima).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO235,25^FDFluído refrigerante^FS
 ^A0R,20,20
-^FO235,240^FB200,1,0,R^FH^FD${String(z(d.fluidoRefrigerante)).replace(/~/g,'\\7E')}^FS
+^FO235,240^FH^FD${z(d.fluidoRefrigerante).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO195,25^FDPressão máx. descarga^FS
 ^A0R,20,20
-^FO540,688^FB216,1,0,R^FH^FD${String(z(d.pressaoDescarga)).replace(/~/g,'\\7E')}^FS
+^FO540,688^FH^FD${z(d.pressaoDescarga).replace(/~/g,'\\7E')}^FS
 
 ; legenda movida para cima
 ^A0R,25,25
 ^FO515,445^FDPressão máx. sucção^FS
 ^A0R,20,20
-^FO515,688^FB216,1,0,R^FH^FD${String(z(d.pressaoSuccao)).replace(/~/g,'\\7E')}^FS
+^FO515,688^FH^FD${z(d.pressaoSuccao).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO475,470^FDPressão d'água (mín)^FS
 ^A0R,20,20
-^FO475,675^FB230,1,0,R^FH^FD${String(z(d.pressaoAguaMin)).replace(/~/g,'\\7E')}^FS
+^FO475,675^FH^FD${z(d.pressaoAguaMin).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO450,470^FDPressão d'água (máx)^FS
 ^A0R,20,20
-^FO450,675^FB230,1,0,R^FH^FD${String(z(d.pressaoAguaMax)).replace(/~/g,'\\7E')}^FS
+^FO450,675^FH^FD${z(d.pressaoAguaMax).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO410,470^FDVazão d'água (mín)^FS
 ^A0R,20,20
-^FO410,675^FB230,1,0,R^FH^FD${String(z(d.vazaoAguaMin)).replace(/~/g,'\\7E')}^FS
+^FO410,675^FH^FD${z(d.vazaoAguaMin).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO385,655^FDIdeal^FS
 ^A0R,20,20
-^FO385,675^FB230,1,0,R^FH^FD${String(z(d.vazaoAguaIdeal)).replace(/~/g,'\\7E')}^FS
+^FO385,675^FH^FD${z(d.vazaoAguaIdeal).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO360,655^FDMáxima^FS
 ^A0R,20,20
-^FO360,675^FB230,1,0,R^FH^FD${String(z(d.vazaoAguaMax)).replace(/~/g,'\\7E')}^FS
+^FO360,675^FH^FD${z(d.vazaoAguaMax).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO320,470^FDClasse de isolação^FS
 ^A0R,20,20
-^FO320,700^FB200,1,0,R^FH^FD${String(z(d.classeIsolacao)).replace(/~/g,'\\7E')}^FS
+^FO320,700^FH^FD${z(d.classeIsolacao).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO290,470^FDGrau de proteção^FS
 ^A0R,20,20
-^FO290,700^FB200,1,0,R^FH^FD${String(z(d.grauProtecao)).replace(/~/g,'\\7E')}^FS
+^FO290,700^FH^FD${z(d.grauProtecao).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO260,470^FDRuído dB(A)^FS
 ^A0R,20,20
-^FO260,700^FB200,1,0,R^FH^FD${String(z(d.ruido)).replace(/~/g,'\\7E')}^FS
+^FO260,700^FH^FD${z(d.ruido).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO220,470^FDPeso líquido (kg)^FS
 ^A0R,20,20
-^FO220,700^FB200,1,0,R^FH^FD${String(z(d.pesoLiquido)).replace(/~/g,'\\7E')}^FS
+^FO220,700^FH^FD${z(d.pesoLiquido).replace(/~/g,'\\7E')}^FS
 
 ^A0R,25,25
 ^FO180,470^FDDimensões do produto (LxPxA mm)^FS
 ^A0R,20,20
-^FO180,700^FB200,1,0,R^FH^FD${String(z(d.dimensaoProduto)).replace(/~/g,'\\7E')}^FS
+^FO180,700^FH^FD${z(d.dimensaoProduto).replace(/~/g,'\\7E')}^FS
 
 ^XZ
 `;
 
-    // 5) Grava o ZPL e retorna
+
+
+    // 🔹 Grava arquivo .zpl
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
-    res.json({ ok: true });
 
+    return res.json({ ok: true });
   } catch (err) {
     console.error('[etiquetas] erro →', err);
-    res.status(500).json({ error: err.faultstring || err.message });
+    return res.status(500).json({ error: 'Erro ao gerar etiqueta' });
   }
 });
-
 
 
 
