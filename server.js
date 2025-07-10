@@ -152,12 +152,17 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   }
 });
 
+/* ============================================================================
+   /api/etiquetas – gera o .zpl da etiqueta
+   ============================================================================ */
 app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-    // 🔹 Busca dados do produto
+    /* ───────────────────────────────────────────────
+       1) Consulta o produto no Omie (se veio o código)
+    ─────────────────────────────────────────────── */
     let produtoDet = {};
     if (codigo) {
       produtoDet = await omieCall(
@@ -171,32 +176,47 @@ app.post('/api/etiquetas', async (req, res) => {
       );
     }
 
-    // 🔹 Garante diretórios
+    /* ───────────────────────────────────────────────
+       2) Garante diretórios
+    ─────────────────────────────────────────────── */
     const { dirTipo } = getDirs(tipo);
 
-    // 🔹 Data de fabricação
+    /* ───────────────────────────────────────────────
+       3) Data de fabricação
+    ─────────────────────────────────────────────── */
     const hoje = new Date();
-    const hojeFormatado = `${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
+    const hojeFormatado =
+      `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
 
-    // 🔹 Mapeia características em um objeto d
+    /* ───────────────────────────────────────────────
+       4) Constrói objeto d com TODAS as características
+          – toda “~” vira _7E  (ZPL exibe depois)
+    ─────────────────────────────────────────────── */
     const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
-    const d = {};
-    (cad.caracteristicas || []).forEach(c => {
-      d[c.cCodIntCaract] = (c.cConteudo || '').replace(/_7E$/, '~');
-    });
-    // campos adicionais exigidos pela etiqueta
-    d.modelo          = cad.modelo || '';
-    d.ncm             = cad.ncm || '';
-    d.pesoLiquido     = cad.peso_liq || '';
-    d.dimensaoProduto = `${cad.largura||''}x${cad.profundidade||''}x${cad.altura||''}`;
+    const d   = {};
 
-    // 🔹 Helper de render vazio
+    const encodeTilde = s => (s || '').replace(/~/g, '_7E');
+
+    (cad.caracteristicas || []).forEach(c => {
+      d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
+    });
+
+    /* extras usados no layout */
+    d.modelo          = cad.modelo      || '';
+    d.ncm             = cad.ncm         || '';
+    d.pesoLiquido     = cad.peso_liq    || '';
+    d.dimensaoProduto = `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
+
+    /* helper que evita “undefined” */
     const z = val => val || '';
 
-    // 🔹 Montagem do ZPL completo
-const zpl = `
+    /* ───────────────────────────────────────────────
+       5) **Z P L**  (agora com ^FH\ habilitado)
+    ─────────────────────────────────────────────── */
+    const zpl = `
 ^XA
 ^CI28
+^FH\\
 ^PW1150
 ^LL700
 
@@ -220,7 +240,7 @@ const zpl = `
 ^FO590,415^FDNCM: ${z(d.ncm)}^FS
 
 ; -------------------- CAIXA NS ENXUTA --------------------
-^FO580,630^GB60,200,60^FS  
+^FO580,630^GB60,200,60^FS
 ^A0R,22,22
 ^FO593,645^FR^FDN SÉRIE^FS
 ^A0R,40,40
@@ -336,10 +356,9 @@ const zpl = `
 ^XZ
 `;
 
-
-
-
-    // 🔹 Grava arquivo .zpl
+    /* ───────────────────────────────────────────────
+       6) Salva o arquivo e responde
+    ─────────────────────────────────────────────── */
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
 
@@ -349,6 +368,7 @@ const zpl = `
     return res.status(500).json({ error: 'Erro ao gerar etiqueta' });
   }
 });
+
 
 
 
