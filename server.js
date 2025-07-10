@@ -156,14 +156,16 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
    /api/etiquetas – gera o .zpl da etiqueta
    ============================================================================ */
 /* ============================================================================
-   /api/etiquetas – gera o .zpl da etiqueta
+   /api/etiquetas – gera o .zpl da etiqueta no layout “compacto” aprovado
    ============================================================================ */
 app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-    /* 1) Consulta Omie (se veio o código) ---------------------------------- */
+    /* ---------------------------------------------------------------------
+       1) Consulta Omie (se veio código)
+    --------------------------------------------------------------------- */
     let produtoDet = {};
     if (codigo) {
       produtoDet = await omieCall(
@@ -177,15 +179,21 @@ app.post('/api/etiquetas', async (req, res) => {
       );
     }
 
-    /* 2) Diretório de saída -------------------------------------------------- */
+    /* ---------------------------------------------------------------------
+       2) Diretório de saída
+    --------------------------------------------------------------------- */
     const { dirTipo } = getDirs(tipo);
 
-    /* 3) Data de fabricação (MM/AAAA) --------------------------------------- */
+    /* ---------------------------------------------------------------------
+       3) Data de fabricação (MM/AAAA)
+    --------------------------------------------------------------------- */
     const hoje          = new Date();
     const hojeFormatado =
       `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
 
-    /* 4) Mapeia características (troca ~ → _7E) ----------------------------- */
+    /* ---------------------------------------------------------------------
+       4) Características → objeto d   (troca ~ → _7E)
+    --------------------------------------------------------------------- */
     const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
     const d   = {};
     const encodeTilde = s => (s || '').replace(/~/g, '_7E');
@@ -194,25 +202,26 @@ app.post('/api/etiquetas', async (req, res) => {
       d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
     });
 
-    /* extras usados no layout */
     d.modelo          = cad.modelo      || '';
     d.ncm             = cad.ncm         || '';
     d.pesoLiquido     = cad.peso_liq    || '';
-    d.dimensaoProduto = `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
+    d.dimensaoProduto =
+      `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
 
-    const z = v => v || '';   // evita undefined no ^FD
+    const z = v => v || '';            // evita undefined em ^FD
 
-    /* 5) Z P L  – ^FH_ antes de cada campo variável ------------------------- */
+    /* ---------------------------------------------------------------------
+       5) ZPL – exatamente o layout aprovado (coordenadas / fontes intactas)
+    --------------------------------------------------------------------- */
     const zpl = `
 ^XA
 ^CI28
 ^PW1150
 ^LL700
 
-; -------- CABEÇALHO ROTACIONADO --------
+; ── Cabeçalho ───────────────────────────────────────────────────────────
 ^A0R,42,40
 ^FO640,15^FDBOMBA DE CALOR FROMTHERM^FS
-
 ^A0R,20,20
 ^FO650,690^FD FABRICAÇÃO:^FS
 ^A0R,20,20
@@ -223,129 +232,133 @@ app.post('/api/etiquetas', async (req, res) => {
 ^FO593,35^FDMODELO^FS
 ^A0R,40,40
 ^FO585,120^FH_^FD${z(d.modelo)}^FS
-
 ^FO580,400^GB60,220,2^FS
 ^A0R,30,30
 ^FO590,415^FH_^FDNCM: ${z(d.ncm)}^FS
 
-; -------- CAIXA NÚMERO DE SÉRIE --------
 ^FO580,630^GB60,200,60^FS
 ^A0R,22,22
 ^FO593,645^FR^FDN SÉRIE^FS
 ^A0R,40,40
 ^FO585,725^FR^FH_^FD${numeroOP}^FS
-
-; -------- QR CODE --------
 ^FO580,825^BQN,2,3^FH_^FDLA,${numeroOP}^FS
-
-; -------- LINHA DE CENTRO --------
 ^FO30,450^GB545,2,2^FS
 
-; -------- BLOCO ESQUERDO --------
+; ── BLOCO ESQUERDO ──────────────────────────────────────────────────────
 ^A0R,25,25
-^FO540,25^FDCapacidade de aquecimento (kW)^FS
+^FO540,25^FB180,1,0,L^FDCapacidade de^FS
+^FO515,25^FDaquecimento (kW)^FS
 ^A0R,20,20
-^FO540,240^FB200,1,0,R^FH_^FD${z(d.capacidadekW)}^FS
+^FO515,240^FB200,1,0,R^FH_^FD${z(d.capacidadekW)}^FS
 
 ^A0R,25,25
-^FO475,25^FDPotência nominal (kW)^FS
+^FO480,25^FDPotência nominal (kW)^FS
 ^A0R,20,20
-^FO475,240^FB200,1,0,R^FH_^FD${z(d.potenciakW)}^FS
+^FO480,240^FB200,1,0,R^FH_^FD${z(d.potenciakW)}^FS
 
 ^A0R,25,25
-^FO435,25^FDCOP^FS
+^FO440,25^FDCOP^FS
 ^A0R,20,20
-^FO435,240^FB200,1,0,R^FH_^FD${z(d.cop)}^FS
+^FO440,240^FB200,1,0,R^FH_^FD${z(d.cop)}^FS
 
 ^A0R,25,25
-^FO395,25^FDTensão nominal^FS
+^FO400,25^FDTensão nominal^FS
 ^A0R,20,20
-^FO395,240^FB200,1,0,R^FH_^FD${z(d.tensaoNominal)}^FS
+^FO400,240^FB200,1,0,R^FH_^FD${z(d.tensaoNominal)}^FS
 
 ^A0R,25,25
-^FO355,25^FDFaixa tensão nominal^FS
+^FO360,25^FDFaixa tensão nominal^FS
 ^A0R,20,20
-^FO355,240^FB200,1,0,R^FH_^FD${z(d.faixaTensaoNominal)}^FS
+^FO360,240^FB200,1,0,R^FH_^FD${z(d.faixaTensaoNominal)}^FS
 
 ^A0R,25,25
-^FO315,25^FDPotência Máxima (kW)^FS
+^FO320,25^FDPotência Máxima (kW)^FS
 ^A0R,20,20
-^FO315,240^FB200,1,0,R^FH_^FD${z(d.potenciaMaxima)}^FS
+^FO320,240^FB200,1,0,R^FH_^FD${z(d.potenciaMaxima)}^FS
 
 ^A0R,25,25
-^FO275,25^FDCorrente Máxima (A)^FS
+^FO280,25^FDCorrente Máxima (A)^FS
 ^A0R,20,20
-^FO275,240^FB200,1,0,R^FH_^FD${z(d.correnteMaxima)}^FS
+^FO280,240^FB200,1,0,R^FH_^FD${z(d.correnteMaxima)}^FS
 
 ^A0R,25,25
-^FO235,25^FDFluído refrigerante^FS
+^FO240,25^FDFluído refrigerante^FS
 ^A0R,20,20
-^FO235,240^FB200,1,0,R^FH_^FD${z(d.fluidoRefrigerante)}^FS
+^FO240,240^FB200,1,0,R^FH_^FD${z(d.fluidoRefrigerante)}^FS
 
 ^A0R,25,25
-^FO195,25^FDPressão máx. descarga^FS
+^FO200,25^FDPressão máx. descarga^FS
 ^A0R,20,20
-^FO540,688^FB216,1,0,R^FH_^FD${z(d.pressaoDescarga)}^FS
+^FO200,240^FB200,1,0,R^FH_^FD${z(d.pressaoDescarga)}^FS
+
+; ── BLOCO DIREITO ───────────────────────────────────────────────────────
+^A0R,25,25
+^FO540,470^FDPressão máx. sucção^FS
+^A0R,20,20
+^FO540,688^FB216,1,0,R^FH_^FD${z(d.pressaoSuccao)}^FS
 
 ^A0R,25,25
-^FO515,470^FDPressão máx. sucção^FS
+^FO500,470^FDPressão d'água^FS
+^A0R,25,25
+^FO500,655^FD(mín)^FS
 ^A0R,20,20
-^FO515,688^FB216,1,0,R^FH_^FD${z(d.pressaoSuccao)}^FS
+^FO500,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMin)}^FS
 
 ^A0R,25,25
-^FO475,470^FDPressão d'água (mín)^FS
+^FO470,655^FD(máx)^FS
 ^A0R,20,20
-^FO475,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMin)}^FS
+^FO470,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMax)}^FS
 
 ^A0R,25,25
-^FO450,470^FDPressão d'água (máx)^FS
+^FO440,470^FDVazão d'água^FS
+^A0R,25,25
+^FO440,655^FD(mín)^FS
 ^A0R,20,20
-^FO450,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMax)}^FS
+^FO440,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMin)}^FS
 
 ^A0R,25,25
-^FO410,470^FDVazão d'água (mín)^FS
+^FO410,655^FDIdeal^FS
 ^A0R,20,20
-^FO410,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMin)}^FS
+^FO410,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaIdeal)}^FS
 
 ^A0R,25,25
-^FO385,655^FDIdeal^FS
+^FO380,655^FDMáxima^FS
 ^A0R,20,20
-^FO385,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaIdeal)}^FS
+^FO380,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMax)}^FS
 
 ^A0R,25,25
-^FO360,655^FDMáxima^FS
+^FO350,470^FDClasse de isolação^FS
 ^A0R,20,20
-^FO360,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMax)}^FS
+^FO350,700^FB200,1,0,R^FH_^FD${z(d.classeIsolacao)}^FS
 
 ^A0R,25,25
-^FO320,470^FDClasse de isolação^FS
+^FO310,470^FDGrau de proteção^FS
 ^A0R,20,20
-^FO320,700^FB200,1,0,R^FH_^FD${z(d.classeIsolacao)}^FS
+^FO310,700^FB200,1,0,R^FH_^FD${z(d.grauProtecao)}^FS
 
 ^A0R,25,25
-^FO290,470^FDGrau de proteção^FS
+^FO270,470^FDRuído dB(A)^FS
 ^A0R,20,20
-^FO290,700^FB200,1,0,R^FH_^FD${z(d.grauProtecao)}^FS
+^FO270,700^FB200,1,0,R^FH_^FD${z(d.ruido)}^FS
 
 ^A0R,25,25
-^FO260,470^FDRuído dB(A)^FS
+^FO230,470^FDPeso líquido (kg)^FS
 ^A0R,20,20
-^FO260,700^FB200,1,0,R^FH_^FD${z(d.ruido)}^FS
+^FO230,700^FB200,1,0,R^FH_^FD${z(d.pesoLiquido)}^FS
 
+; Dimensões do produto  (2 linhas)
 ^A0R,25,25
-^FO220,470^FDPeso líquido (kg)^FS
+^FO170,470^FB250,1,0,L^FDDimensões do produto^FS
+^FO145,470^FD(LxPxA mm)^FS
 ^A0R,20,20
-^FO220,700^FB200,1,0,R^FH_^FD${z(d.pesoLiquido)}^FS
-
-^A0R,25,25
-^FO180,470^FDDimensões do produto (LxPxA mm)^FS
-^A0R,20,20
-^FO180,700^FB200,1,0,R^FH_^FD${z(d.dimensaoProduto)}^FS
+^FO145,700^FB200,1,0,R^FH_^FD${z(d.dimensaoProduto)}^FS
 
 ^XZ
 `;
 
-    /* 6) Salva o arquivo ---------------------------------------------------- */
+    /* ---------------------------------------------------------------------
+       6) Salva o arquivo .zpl
+    --------------------------------------------------------------------- */
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
 
@@ -355,6 +368,7 @@ app.post('/api/etiquetas', async (req, res) => {
     return res.status(500).json({ error: 'Erro ao gerar etiqueta' });
   }
 });
+
 
 
 
