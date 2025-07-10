@@ -181,14 +181,14 @@ app.post('/api/etiquetas', async (req, res) => {
     const { dirTipo } = getDirs(tipo);
 
     /* 3) Data de fabricação (MM/AAAA) */
-    const hoje           = new Date();
-    const hojeFormatado  =
+    const hoje          = new Date();
+    const hojeFormatado =
       `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
 
-    /* 4) Constrói objeto d com as características */
+    /* 4) Mapeia características (converte ~ → _7E) */
     const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
     const d   = {};
-    const encodeTilde = s => (s || '').replace(/~/g, '_7E');   // ~ → _7E
+    const encodeTilde = s => (s || '').replace(/~/g, '_7E');
 
     (cad.caracteristicas || []).forEach(c => {
       d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
@@ -199,13 +199,13 @@ app.post('/api/etiquetas', async (req, res) => {
     d.pesoLiquido     = cad.peso_liq    || '';
     d.dimensaoProduto = `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
 
-    const z = v => v || '';   // evita undefined
+    const z = v => v || '';     // evita undefined no ^FD
 
-    /* 5) ZPL – ^FH SEM parâmetro mantém “_” como indicador */
+    /* 5) ZPL — ^FH_ mantém “_” como indicador-hex */
     const zpl = `
 ^XA
 ^CI28
-^FH
+^FH_
 ^PW1150
 ^LL700
 
@@ -345,7 +345,7 @@ app.post('/api/etiquetas', async (req, res) => {
 ^XZ
 `;
 
-    /* 6) Salva o arquivo .zpl */
+    /* 6) Salva o .zpl */
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
 
