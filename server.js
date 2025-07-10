@@ -155,14 +155,15 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
 /* ============================================================================
    /api/etiquetas – gera o .zpl da etiqueta
    ============================================================================ */
+/* ============================================================================
+   /api/etiquetas – gera o .zpl da etiqueta
+   ============================================================================ */
 app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-    /* ───────────────────────────────────────────────
-       1) Consulta o produto no Omie (se veio o código)
-    ─────────────────────────────────────────────── */
+    /* 1) Consulta Omie (se veio o código) */
     let produtoDet = {};
     if (codigo) {
       produtoDet = await omieCall(
@@ -176,47 +177,35 @@ app.post('/api/etiquetas', async (req, res) => {
       );
     }
 
-    /* ───────────────────────────────────────────────
-       2) Garante diretórios
-    ─────────────────────────────────────────────── */
+    /* 2) Diretório de saída conforme o tipo */
     const { dirTipo } = getDirs(tipo);
 
-    /* ───────────────────────────────────────────────
-       3) Data de fabricação
-    ─────────────────────────────────────────────── */
-    const hoje = new Date();
-    const hojeFormatado =
+    /* 3) Data de fabricação (MM/AAAA) */
+    const hoje           = new Date();
+    const hojeFormatado  =
       `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
 
-    /* ───────────────────────────────────────────────
-       4) Constrói objeto d com TODAS as características
-          – toda “~” vira _7E  (ZPL exibe depois)
-    ─────────────────────────────────────────────── */
+    /* 4) Constrói objeto d com as características */
     const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
     const d   = {};
-
-    const encodeTilde = s => (s || '').replace(/~/g, '_7E');
+    const encodeTilde = s => (s || '').replace(/~/g, '_7E');   // ~ → _7E
 
     (cad.caracteristicas || []).forEach(c => {
       d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
     });
 
-    /* extras usados no layout */
     d.modelo          = cad.modelo      || '';
     d.ncm             = cad.ncm         || '';
     d.pesoLiquido     = cad.peso_liq    || '';
     d.dimensaoProduto = `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
 
-    /* helper que evita “undefined” */
-    const z = val => val || '';
+    const z = v => v || '';   // evita undefined
 
-    /* ───────────────────────────────────────────────
-       5) **Z P L**  (agora com ^FH\ habilitado)
-    ─────────────────────────────────────────────── */
+    /* 5) ZPL – ^FH SEM parâmetro mantém “_” como indicador */
     const zpl = `
 ^XA
 ^CI28
-^FH\\
+^FH
 ^PW1150
 ^LL700
 
@@ -239,7 +228,7 @@ app.post('/api/etiquetas', async (req, res) => {
 ^A0R,30,30
 ^FO590,415^FDNCM: ${z(d.ncm)}^FS
 
-; -------------------- CAIXA NS ENXUTA --------------------
+; -------------------- CAIXA NÚMERO DE SÉRIE --------------------
 ^FO580,630^GB60,200,60^FS
 ^A0R,22,22
 ^FO593,645^FR^FDN SÉRIE^FS
@@ -356,9 +345,7 @@ app.post('/api/etiquetas', async (req, res) => {
 ^XZ
 `;
 
-    /* ───────────────────────────────────────────────
-       6) Salva o arquivo e responde
-    ─────────────────────────────────────────────── */
+    /* 6) Salva o arquivo .zpl */
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
 
