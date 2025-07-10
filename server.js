@@ -219,7 +219,7 @@ app.post('/api/etiquetas', async (req, res) => {
 ^PW1150
 ^LL700
 
-; ── Cabeçalho ───────────────────────────────────────────────────────────
+; ── Cabeçalho ───────────────────────────────────────────────────────────────
 ^A0R,42,40
 ^FO640,15^FDBOMBA DE CALOR FROMTHERM^FS
 ^A0R,20,20
@@ -244,54 +244,55 @@ app.post('/api/etiquetas', async (req, res) => {
 ^FO580,825^BQN,2,3^FH_^FDLA,${numeroOP}^FS
 ^FO30,450^GB545,2,2^FS
 
-; ── BLOCO ESQUERDO ──────────────────────────────────────────────────────
+; ── BLOCO ESQUERDO ─────────────────────────────────────────────────────────
 ^A0R,25,25
 ^FO540,25^FB180,1,0,L^FDCapacidade de^FS
-^FO515,25^FDaquecimento (kW)^FS
+^A0R,25,25
+^FO515,25^FDa aquecimento (kW)^FS
 ^A0R,20,20
 ^FO515,240^FB200,1,0,R^FH_^FD${z(d.capacidadekW)}^FS
 
 ^A0R,25,25
-^FO480,25^FDPotência nominal (kW)^FS
+^FO475,25^FDPotência nominal (kW)^FS
 ^A0R,20,20
-^FO480,240^FB200,1,0,R^FH_^FD${z(d.potenciakW)}^FS
+^FO475,240^FB200,1,0,R^FH_^FD${z(d.potenciakW)}^FS
 
 ^A0R,25,25
-^FO440,25^FDCOP^FS
+^FO435,25^FDCOP^FS
 ^A0R,20,20
-^FO440,240^FB200,1,0,R^FH_^FD${z(d.cop)}^FS
+^FO435,240^FB200,1,0,R^FH_^FD${z(d.cop)}^FS
 
 ^A0R,25,25
-^FO400,25^FDTensão nominal^FS
+^FO395,25^FDTensão nominal^FS
 ^A0R,20,20
-^FO400,240^FB200,1,0,R^FH_^FD${z(d.tensaoNominal)}^FS
+^FO395,240^FB200,1,0,R^FH_^FD${z(d.tensaoNominal)}^FS
 
 ^A0R,25,25
-^FO360,25^FDFaixa tensão nominal^FS
+^FO355,25^FDFaixa tensão nominal^FS
 ^A0R,20,20
-^FO360,240^FB200,1,0,R^FH_^FD${z(d.faixaTensaoNominal)}^FS
+^FO355,240^FB200,1,0,R^FH_^FD${z(d.faixaTensaoNominal)}^FS
 
 ^A0R,25,25
-^FO320,25^FDPotência Máxima (kW)^FS
+^FO315,25^FDPotência Máxima (kW)^FS
 ^A0R,20,20
-^FO320,240^FB200,1,0,R^FH_^FD${z(d.potenciaMaxima)}^FS
+^FO315,240^FB200,1,0,R^FH_^FD${z(d.potenciaMaxima)}^FS
 
 ^A0R,25,25
-^FO280,25^FDCorrente Máxima (A)^FS
+^FO275,25^FDCorrente Máxima (A)^FS
 ^A0R,20,20
-^FO280,240^FB200,1,0,R^FH_^FD${z(d.correnteMaxima)}^FS
+^FO275,240^FB200,1,0,R^FH_^FD${z(d.correnteMaxima)}^FS
 
 ^A0R,25,25
-^FO240,25^FDFluído refrigerante^FS
+^FO235,25^FDFluído refrigerante^FS
 ^A0R,20,20
-^FO240,240^FB200,1,0,R^FH_^FD${z(d.fluidoRefrigerante)}^FS
+^FO235,240^FB200,1,0,R^FH_^FD${z(d.fluidoRefrigerante)}^FS
 
 ^A0R,25,25
-^FO200,25^FDPressão máx. descarga^FS
+^FO195,25^FDPressão máx. descarga^FS
 ^A0R,20,20
-^FO200,240^FB200,1,0,R^FH_^FD${z(d.pressaoDescarga)}^FS
+^FO195,240^FB200,1,0,R^FH_^FD${z(d.pressaoDescarga)}^FS
 
-; ── BLOCO DIREITO ───────────────────────────────────────────────────────
+; ── BLOCO DIREITO ──────────────────────────────────────────────────────────
 ^A0R,25,25
 ^FO540,470^FDPressão máx. sucção^FS
 ^A0R,20,20
@@ -346,12 +347,13 @@ app.post('/api/etiquetas', async (req, res) => {
 ^A0R,20,20
 ^FO230,700^FB200,1,0,R^FH_^FD${z(d.pesoLiquido)}^FS
 
-; Dimensões do produto  (2 linhas)
+; Dimensões do produto (2 linhas)
 ^A0R,25,25
-^FO170,470^FB250,1,0,L^FDDimensões do produto^FS
-^FO145,470^FD(LxPxA mm)^FS
+^FO190,470^FB250,1,0,L^FDDimensões do produto^FS
+^A0R,25,25
+^FO160,470^FD(LxPxA mm)^FS
 ^A0R,20,20
-^FO145,700^FB200,1,0,R^FH_^FD${z(d.dimensaoProduto)}^FS
+^FO160,700^FB200,1,0,R^FH_^FD${z(d.dimensaoProduto)}^FS
 
 ^XZ
 `;
