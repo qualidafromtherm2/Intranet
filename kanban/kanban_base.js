@@ -1,12 +1,16 @@
 // kanban_base.js
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+
+// Define a URL-base das chamadas à API: usa window.location.origin
+const API_BASE = window.location.origin;
 const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
-const PRINTER_URL = 'http://DESKTOP-0RJO5A6:5001';
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;      // Render ou outro domínio
+ // Mantenha o token original
+ const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+ // Em local, imprime na própria máquina; em prod, aponta para o Windows da logística
+ const PRINTER_URL = isLocal
+   ? window.location.origin
+   : 'http://DESKTOP-0RJO5A6:5001';
 /**
  * Mapeia nomes de coluna para os IDs das <ul>.
  */
@@ -24,25 +28,37 @@ let draggedFromColumn = null;
 let clickTimerId = null;        // null = nenhum clique pendente
 
 
-/* —— etiqueta única tipo F06250142 —— */
-function gerarTicket () {
-  return 'F' + Date.now().toString().slice(-8);
+/* ——— devolve o próximo código sequencial gravado no backend ——— */
+export async function gerarTicket () {
+  const resp = await fetch('/api/op/next-code/0', { credentials: 'include' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const { nextCode } = await resp.json();   // ← vem do server
+  return nextCode;                          // ex.: 21007
 }
 
-// 🔹 NOVO helper – dispara a API
-// kanban_base.js  (deixe gerarEtiqueta num único lugar)
-
-async function gerarEtiqueta(numeroOP, codigo) {
-
-  const payload = JSON.stringify({ numeroOP, codigo, tipo: 'Expedicao' });
+ // 🔹 NOVO helper – dispara a API
+ export async function gerarEtiqueta(numeroOP, codigo) {
+   // 1) Se for local, sempre TESTE
+   // 2) Se for produção (não local), decide pela prefixo 'FT':
+   //      FT → Linha de producao
+   //      outro → Quadro eletrico
+   let tipo;
+   if (isLocal) {
+     tipo = 'Teste';
+   } else if (codigo.startsWith('FT')) {
+     tipo = 'Linha de producao';
+   } else {
+     tipo = 'Quadro eletrico';
+   }
+   const payload = JSON.stringify({ numeroOP, codigo, tipo });
 
   const headers = { 'Content-Type': 'application/json' };
 
-  // 1) Chamada segura (HTTPS → Render)
-  await fetch(
-    `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
-    { method: 'POST', headers, body: payload }
-  );
+   // 1) Gera o .zpl na pasta determinada acima
+   await fetch(
+     `/api/etiquetas?token=${encodeURIComponent(ZPL_TOKEN)}`,
+     { method: 'POST', headers, body: payload }
+   );
 
   // ---- Removido o fetch direto ao PC ----
 }
@@ -347,9 +363,10 @@ item.estoque = Math.max(0, estoqueDisp - mover);
       }
 
       /* gera as novas etiquetas */
-const localArr = Array.from({ length: mover }, () =>
-  `Separação logística,${gerarTicket()}`
-);
+const localArr = [];
+for (let i = 0; i < mover; i++) {
+  localArr.push(`Separação logística,${await gerarTicket()}`);
+}
 /* 2)  procura cartão existente mesmo pedido+código */
 const destExisting = itemsKanban.find(
   it => it !== item && it.pedido === item.pedido && it.codigo === item.codigo
@@ -402,7 +419,7 @@ const idxLocal = item.local.findIndex(
 );
 
 if (idxLocal !== -1) {
-  const ticket = gerarTicket();             // F06250142…
+  const ticket = await gerarTicket();
   ticketsParaImprimir.push({ ticket, codigo: item.codigo });
       // ← para imprimir depois
   item.local[idxLocal] = `${newColumn},${ticket}`;
@@ -465,10 +482,7 @@ if (
       newColumn === 'Separação logística' &&
       (tipoItem === '04' || parseInt(tipoItem, 10) === 4)
     ) {
-      const prefix = item.codigo.startsWith('P') ? 'P' : 'F';
-      const respNext = await fetch(`${API_BASE}/api/op/next-code/${prefix}`, { credentials: 'include' });
-      const { nextCode: cCodIntOP } = await respNext.json();
-
+const cCodIntOP = await gerarTicket();   // já vem sequencial do backend
       const now = new Date();
       const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
       const d = String(tom.getDate()).padStart(2, '0');

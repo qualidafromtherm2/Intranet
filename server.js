@@ -19,6 +19,55 @@ const archiver = require('archiver');
 const crypto   = require('crypto');
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
+
+// ─── Config. dinâmica de etiqueta ─────────────────────────
+const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
+
+let etqConfig = [];
+function loadEtqConfig() {
+  if (etqConfig.length) return;              // já carregado
+  const raw = fs.readFileSync(etqConfigPath, 'utf8');
+  etqConfig = csvParse(raw, { columns: true, skip_empty_lines: true })
+               .sort((a, b) => Number(a.Ordem) - Number(b.Ordem)); // mantém ordem
+}
+loadEtqConfig();
+// DEBUG ────────────────────────────────────────────────
+console.log('\n⇢ Cabeçalhos que o csv-parse leu:');
+console.table(etqConfig.slice(0, 5));
+// Fim DEBUG ─────────────────────────────────────────────
+
+/**
+ * Separa as linhas para a coluna E (esquerda) e D (direita)
+ * @param {object} cad – produto vindo do Omie
+ * @returns {{E:Array, D:Array}}
+ */
+function separarLinhas(cad) {
+// letras até encontrar o 1º dígito ou hífen
+const prefixoModelo =
+  ((cad.codigo || cad.modelo || '').match(/^[A-Za-z]+/) || [''])[0]
+    .toUpperCase();
+
+
+  return etqConfig.reduce((acc, row) => {
+    const modo   = (row.modo     || '').trim().toUpperCase();   // C / E
+    const coluna = (row.coluna   || '').trim().toUpperCase();   // E / D
+const lista = (row.Prefixos || '')
+                .toUpperCase()
+                .split(';')
+                .filter(Boolean);        // ['FT','FH','FTI', …]
+
+const ehComum    = modo === 'C';
+const ehDoModelo = modo === 'E' && lista.includes(prefixoModelo);
+
+
+    if (ehComum || ehDoModelo) acc[coluna].push(row);
+    return acc;
+  }, { E: [], D: [] });
+}
+
+
+
+
 const { stringify: csvStringify } = require('csv-stringify/sync');
 const loginOmie     = require('./routes/login_omie');
 const malhaRouter   = require('./routes/malha');
@@ -41,6 +90,28 @@ const {
   GITHUB_PATH
 } = require('./config.server');
 const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
+
+
+/* lê o MAIOR nº que existir em QUALQUER cartão.local-[]  */
+function nextOpFromKanban () {
+  try {
+    const items = JSON.parse(fs.readFileSync(KANBAN_FILE,'utf8'));   // ← é um array
+    const nums  = items
+      .flatMap(it => Array.isArray(it.local) ? it.local : [])
+      .map(s => {
+        const m = String(s).match(/,\s*(\d+)\s*$/);   // “…,21007”
+        return m ? Number(m[1]) : NaN;
+      })
+      .filter(n => !Number.isNaN(n));
+
+    const maior = nums.length ? Math.max(...nums) : 21000;
+    return String(maior + 1);           // 21001, 21002, …
+  } catch (err) {
+    console.error('[nextOpFromKanban]', err);
+    return '21001';
+  }
+}
+
 
 // ——————————————————————————————
 // 2) Cria a app e configura middlewares globais
@@ -152,15 +223,39 @@ app.post('/api/etiquetas/:id/printed', (req, res) => {
   }
 });
 
-/* ============================================================================
-   /api/etiquetas – gera o .zpl da etiqueta
-   ============================================================================ */
+/**
+ * Quebra um texto em linhas de até maxChars caracteres, 
+ * sempre respeitando os espaços.
+ */
+function wrapText(text, maxChars) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let current = '';
+  for (const w of words) {
+    if ((current + ' ' + w).trim().length <= maxChars) {
+      current = (current + ' ' + w).trim();
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
 /* ============================================================================
    /api/etiquetas – gera o .zpl da etiqueta no layout “compacto” aprovado
    ============================================================================ */
 app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
+
+      // Garante existência da pasta dinâmica (Teste ou Expedicao)
+  const folder = path.join(__dirname, 'etiquetas', tipo);
+  if (!fs.existsSync(folder)) {
+    fs.mkdirSync(folder, { recursive: true });
+  }
+
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
     /* ---------------------------------------------------------------------
@@ -195,6 +290,17 @@ app.post('/api/etiquetas', async (req, res) => {
        4) Características → objeto d   (troca ~ → _7E)
     --------------------------------------------------------------------- */
     const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
+    // -------------------------------------------------------------
+// código interno do produto (vem do Omie)
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+// MODELO na etiqueta = código com hífen antes do 1º dígito
+// Ex.: ft160 → ft-160   |   FH200 → FH-200   |   fti25b → fti-25b
+// -------------------------------------------------------------
+const modeloParaEtiqueta = (cad.codigo || '')
+  .replace(/^([A-Za-z]+)(\d)/, '$1-$2');
+
+
     const d   = {};
     const encodeTilde = s => (s || '').replace(/~/g, '_7E');
 
@@ -210,16 +316,98 @@ app.post('/api/etiquetas', async (req, res) => {
 
     const z = v => v || '';            // evita undefined em ^FD
 
-    /* ---------------------------------------------------------------------
-       5) ZPL – exatamente o layout aprovado (coordenadas / fontes intactas)
-    --------------------------------------------------------------------- */
-    const zpl = `
+/* ---------------------------------------------------------------------
+   5) ZPL – mesmo layout, mas linhas dinâmicas a partir do CSV
+--------------------------------------------------------------------- */
+const linhas = separarLinhas(cad);     // usa função criada no topo
+
+// parâmetros de espaçamento (ajuste só se mudar fonte ou margens)
+const startY_E = 540;  // Y inicial da coluna esquerda
+const startY_D = 540;  // Y inicial da coluna direita
+
+const CHAR_W        = 11;  // acertado na calibragem
+const STEP_ITEM     = 40;  // distância até o próximo item “normal”
+const STEP_SUFIXO   = 30;  // distância quando é só o sufixo “(…)”
+const STEP_WRAP     = 20;  // distância entre linhas quebradas do MESMO rótulo
+
+
+function montarColuna(col, startY, xLabel, xValue) {
+  const blocos = [];
+  let   y      = startY;
+
+  const xParenByBase = {};        // base → X do '('
+  let   baseAnterior = '';
+
+  for (const row of col) {
+    const cod   = (row.Caracteristica || '').trim();
+    const valor = z(d[cod]);
+
+    /* separa base + sufixo */
+    const full = (row.Label || '').trim();
+    const m    = full.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+    const base   = m ? m[1].trim() : full;
+    const sufixo = m ? `(${m[2]})`  : '';
+
+    const sufixoOnly = base === baseAnterior && sufixo;
+
+    /* decide texto + X */
+    let labelPrint, xLabelNow = xLabel;
+    if (sufixoOnly) {
+      labelPrint = sufixo;
+      xLabelNow  = xParenByBase[base];
+    } else {
+      labelPrint   = full;
+      baseAnterior = base;
+      const p = full.indexOf('(');
+      if (p >= 0) xParenByBase[base] = xLabel + p * CHAR_W;
+    }
+
+    /* quebra >25 chars --------------- */
+    const LIM = 25;
+    const partes = [];
+    let txt = labelPrint;
+    while (txt.length > LIM) {
+      const pos = txt.lastIndexOf(' ', LIM);
+      if (pos > 0) { partes.push(txt.slice(0,pos)); txt = txt.slice(pos+1); }
+      else break;
+    }
+    partes.push(txt);
+
+    /* imprime LABEL(es) --------------- */
+    partes.forEach((ln, idx) => {
+      const stepIntra = idx === 0 ? 0 : STEP_WRAP; // 1ª linha = 0
+      blocos.push(
+        `^A0R,25,25`,
+        `^FO${y - stepIntra},${xLabelNow}^FD${ln}^FS`
+      );
+      y -= stepIntra;          // só para linhas quebradas
+    });
+
+    /* imprime VALOR ------------------- */
+    blocos.push(
+      `^A0R,20,20`,
+      `^FO${y},${xValue}^FB200,1,0,R^FH_^FD${valor}^FS`
+    );
+
+    /* avança para o PRÓXIMO item ------ */
+    y -= sufixoOnly ? STEP_SUFIXO : STEP_ITEM;
+  }
+
+  return blocos.join('\n');
+}
+
+const blocoE = montarColuna(linhas.E, startY_E,  25, 240); // esquerda
+const blocoD = montarColuna(linhas.D, startY_D, 470, 688); // direita
+
+
+
+const zpl = `
 ^XA
 ^CI28
 ^PW1150
 ^LL700
 
-; ── Cabeçalho ───────────────────────────────────────────────────────────────
+; ── Cabeçalho fixo ───────────────────────────────────────────────────────
 ^A0R,42,40
 ^FO640,15^FDBOMBA DE CALOR FROMTHERM^FS
 ^A0R,20,20
@@ -231,132 +419,28 @@ app.post('/api/etiquetas', async (req, res) => {
 ^A0R,22,22
 ^FO593,35^FDMODELO^FS
 ^A0R,40,40
-^FO585,120^FH_^FD${z(d.modelo)}^FS
-^FO580,400^GB60,220,2^FS
-^A0R,30,30
-^FO590,415^FH_^FDNCM: ${z(d.ncm)}^FS
+^FO585,120^FH_^FD${z(modeloParaEtiqueta)}^FS
+^FO580,400^GB60,190,2^FS
+^A0R,25,25
+^FO585,405^FH_^FDNCM: ${z(d.ncm)}^FS
 
-^FO580,630^GB60,200,60^FS
-^A0R,22,22
-^FO593,645^FR^FDN SÉRIE^FS
+^FO580,595^GB60,235,60^FS
+^A0R,25,25                 ; tamanho da letra do NS numero de serie
+^FO585,600^FR^FDNS:^FS
 ^A0R,40,40
-^FO585,725^FR^FH_^FD${numeroOP}^FS
+^FO585,640^FR^FH_^FD${numeroOP}^FS   ; X aproximado
 ^FO580,825^BQN,2,3^FH_^FDLA,${numeroOP}^FS
 ^FO30,450^GB545,2,2^FS
 
-; ── BLOCO ESQUERDO ─────────────────────────────────────────────────────────
-^A0R,25,25
-^FO540,25^FB180,1,0,L^FDCapacidade de^FS
-^A0R,25,25
-^FO515,25^FDa aquecimento (kW)^FS
-^A0R,20,20
-^FO515,240^FB200,1,0,R^FH_^FD${z(d.capacidadekW)}^FS
+; ── BLOCO ESQUERDO (CSV) ────────────────────────────────────────────────
+${blocoE}
 
-^A0R,25,25
-^FO475,25^FDPotência nominal (kW)^FS
-^A0R,20,20
-^FO475,240^FB200,1,0,R^FH_^FD${z(d.potenciakW)}^FS
-
-^A0R,25,25
-^FO435,25^FDCOP^FS
-^A0R,20,20
-^FO435,240^FB200,1,0,R^FH_^FD${z(d.cop)}^FS
-
-^A0R,25,25
-^FO395,25^FDTensão nominal^FS
-^A0R,20,20
-^FO395,240^FB200,1,0,R^FH_^FD${z(d.tensaoNominal)}^FS
-
-^A0R,25,25
-^FO355,25^FDFaixa tensão nominal^FS
-^A0R,20,20
-^FO355,240^FB200,1,0,R^FH_^FD${z(d.faixaTensaoNominal)}^FS
-
-^A0R,25,25
-^FO315,25^FDPotência Máxima (kW)^FS
-^A0R,20,20
-^FO315,240^FB200,1,0,R^FH_^FD${z(d.potenciaMaxima)}^FS
-
-^A0R,25,25
-^FO275,25^FDCorrente Máxima (A)^FS
-^A0R,20,20
-^FO275,240^FB200,1,0,R^FH_^FD${z(d.correnteMaxima)}^FS
-
-^A0R,25,25
-^FO235,25^FDFluído refrigerante^FS
-^A0R,20,20
-^FO235,240^FB200,1,0,R^FH_^FD${z(d.fluidoRefrigerante)}^FS
-
-^A0R,25,25
-^FO195,25^FDPressão máx. descarga^FS
-^A0R,20,20
-^FO195,240^FB200,1,0,R^FH_^FD${z(d.pressaoDescarga)}^FS
-
-; ── BLOCO DIREITO ──────────────────────────────────────────────────────────
-^A0R,25,25
-^FO540,470^FDPressão máx. sucção^FS
-^A0R,20,20
-^FO540,688^FB216,1,0,R^FH_^FD${z(d.pressaoSuccao)}^FS
-
-^A0R,25,25
-^FO500,470^FDPressão d'água^FS
-^A0R,25,25
-^FO500,655^FD(mín)^FS
-^A0R,20,20
-^FO500,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMin)}^FS
-
-^A0R,25,25
-^FO470,655^FD(máx)^FS
-^A0R,20,20
-^FO470,675^FB230,1,0,R^FH_^FD${z(d.pressaoAguaMax)}^FS
-
-^A0R,25,25
-^FO440,470^FDVazão d'água^FS
-^A0R,25,25
-^FO440,655^FD(mín)^FS
-^A0R,20,20
-^FO440,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMin)}^FS
-
-^A0R,25,25
-^FO410,655^FDIdeal^FS
-^A0R,20,20
-^FO410,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaIdeal)}^FS
-
-^A0R,25,25
-^FO380,655^FDMáxima^FS
-^A0R,20,20
-^FO380,675^FB230,1,0,R^FH_^FD${z(d.vazaoAguaMax)}^FS
-
-^A0R,25,25
-^FO350,470^FDClasse de isolação^FS
-^A0R,20,20
-^FO350,700^FB200,1,0,R^FH_^FD${z(d.classeIsolacao)}^FS
-
-^A0R,25,25
-^FO310,470^FDGrau de proteção^FS
-^A0R,20,20
-^FO310,700^FB200,1,0,R^FH_^FD${z(d.grauProtecao)}^FS
-
-^A0R,25,25
-^FO270,470^FDRuído dB(A)^FS
-^A0R,20,20
-^FO270,700^FB200,1,0,R^FH_^FD${z(d.ruido)}^FS
-
-^A0R,25,25
-^FO230,470^FDPeso líquido (kg)^FS
-^A0R,20,20
-^FO230,700^FB200,1,0,R^FH_^FD${z(d.pesoLiquido)}^FS
-
-; Dimensões do produto (2 linhas)
-^A0R,25,25
-^FO190,470^FB250,1,0,L^FDDimensões do produto^FS
-^A0R,25,25
-^FO160,470^FD(LxPxA mm)^FS
-^A0R,20,20
-^FO160,700^FB200,1,0,R^FH_^FD${z(d.dimensaoProduto)}^FS
+; ── BLOCO DIREITO (CSV) ─────────────────────────────────────────────────
+${blocoD}
 
 ^XZ
 `;
+
 
     /* ---------------------------------------------------------------------
        6) Salva o arquivo .zpl
@@ -371,60 +455,20 @@ app.post('/api/etiquetas', async (req, res) => {
   }
 });
 
-
-
-
-
-
-app.get('/api/op/next-code/:prefix', async (req, res) => {
-  try {
-    const prefix = req.params.prefix.toUpperCase();   // 'F' ou 'P'
-    const dir    = path.join(__dirname, 'etiquetas');
-    const files  = await fsp.readdir(dir);
-
-
-    // procura arquivos tipo etiqueta_FMMYYNNNN.zpl
-    const regex = new RegExp(`^etiqueta_${prefix}(\\d{4})(\\d{4})\\.zpl$`);
-
-    let lastSeq = 0;
-    let lastDateBlock = '';
-
-    files.forEach(f => {
-      const m = f.match(regex);
-      if (!m) return;
-      const [ , dateBlock, seqStr ] = m;      // ex.:  '0625'  '0009'
-      if (dateBlock > lastDateBlock) {
-        lastDateBlock = dateBlock;
-        lastSeq       = parseInt(seqStr, 10);
-      } else if (dateBlock === lastDateBlock) {
-        lastSeq = Math.max(lastSeq, parseInt(seqStr, 10));
-      }
-    });
-
-    const now = new Date();
-    const mm  = String(now.getMonth() + 1).padStart(2, '0');
-    const yy  = String(now.getFullYear()).slice(-2);
-    const dateBlock = `${mm}${yy}`;
-
-    const nextSeq = (dateBlock === lastDateBlock) ? lastSeq + 1 : 1;
-    const nextSeqStr = String(nextSeq).padStart(4, '0');
-
-    const nextCode = `${prefix}${dateBlock}${nextSeqStr}`;  // F06250010
-    return res.json({ nextCode });
-  } catch (err) {
-    console.error('[next-code] erro', err);
-    return res.status(500).json({ error: 'Falha ao calcular próximo código' });
-  }
-});
-
+app.get('/api/op/next-code/:dummy', (req,res)=>{ return res.json({ nextCode: nextOpFromKanban() }); });
   // ——————————————————————————————
   // 3.1) Rotas CSV (Tipo.csv)
   // ——————————————————————————————
   app.post('/api/omie/updateTipo', (req, res) => {
     const { groupId, listaPecas } = req.body;
-    const csvPath = path.join(__dirname, 'csv', 'Tipo.csv');
-    const text    = fs.readFileSync(csvPath, 'utf8');
-    const rows    = csvParse(text, { columns: true, skip_empty_lines: true });
+const csvPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
+const csvText = fs.readFileSync(csvPath, 'utf8');
+// OBS.: o arquivo usa “;” – indicamos o delimitador explicitamente
+const rows = csvParse(csvText, {
+  columns:           true,
+  skip_empty_lines:  true,
+  delimiter:         ','          // <<< a parte que estava faltando
+});
 
     const updated = rows.map(row => {
       if (+row.Grupo === groupId) row['lista_peças'] = listaPecas;
@@ -466,36 +510,9 @@ const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
 // rota para listar ordem de produção para ver qual a ultima op gerada
 app.post('/api/omie/produtos/op', async (req, res) => {
   try {
-    // 1) BUSCA a última OP
-    const bodyLast = {
-      call: 'ListarOrdemProducao',
-      app_key   : OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param:[{ pagina:1, registros_por_pagina:1, ordem_decrescente:'S' }]
-    };
- const lastJson = await omieCall(
-   'https://app.omie.com.br/api/v1/produtos/op/',
-   bodyLast
- );
 
-    const today   = new Date();
-    const mm      = String(today.getMonth()+1).padStart(2,'0');
-    const yy      = String(today.getFullYear()).slice(-2);
-    const mmYYNow = `${mm}${yy}`;
 
-    // ------ prefixo do produto (F ou P) ------
-    const prefix  = (req.body?.param?.[0]?.identificacao?.cCodIntOP || 'F').slice(0,1).toUpperCase();
-
-    // ------ analisa última OP ------
-    let nextSeq = 1;
-    const ultimo = lastJson?.cadastros?.[0]?.identificacao?.cCodIntOP || '';
-    if (ultimo.startsWith(prefix) && ultimo.slice(1,5) === mmYYNow) {
-      const seq = parseInt(ultimo.slice(-4),10);
-      if (!Number.isNaN(seq)) nextSeq = seq + 1;
-    }
-
-    const seqStr     = String(nextSeq).padStart(4,'0');
-    const novoCodInt = `${prefix}${mmYYNow}${seqStr}`;
+const novoCodInt = nextOpFromKanban();      // ex.: "21001"
 
     const linha = `[${new Date().toISOString()}] Geração de OP – Pedido: ${req.body.param?.[0]?.identificacao?.nCodPed}, Código OP: ${novoCodInt}\n`;
 fs.appendFile(LOG_FILE, linha, err => {
@@ -516,8 +533,6 @@ fs.appendFile(LOG_FILE, linha, err => {
  );
       if (resposta?.faultcode === 'SOAP-ENV:Client-102') {   // duplicado
         tentativa++;
-        front.param[0].identificacao.cCodIntOP =
-          `${prefix}${mmYYNow}${String(++nextSeq).padStart(4,'0')}`;
         continue;
       }
       break;  // sucesso ou outro erro
@@ -596,34 +611,6 @@ app.post('/api/omie/cliente', express.json(), async (req, res) => {
   }
 });
 
-
-// Rota para IncluirOrdemProducao (produção)
-app.post('/api/omie/produtos/op', express.json(), async (req, res) => {
-    console.log('[produtos/op] payload recebido →',
-              JSON.stringify(req.body, null, 2));
-
-  try {
-    const data = await omieCall(
-      'https://app.omie.com.br/api/v1/produtos/op/',
-      {
-        call:       req.body.call,      // “IncluirOrdemProducao”
-        app_key:    OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param:      req.body.param
-      }
-    );
-
-        console.log('[produtos/op] resposta Omie →',
-                JSON.stringify(data, null, 2));
-
-    return res.json(data);
-  } catch (err) {
-    console.error('[produtos/op] erro →', err);
-    return res
-      .status(err.status || 500)
-      .json({ error: err.faultstring || err.message });
-  }
-});
 
 // ─── Rota para ConsultarPedido ───
 // ─── Rota para ConsultarPedido (com debug) ───
