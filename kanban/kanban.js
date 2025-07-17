@@ -4,8 +4,17 @@ import {
   carregarKanbanLocal,
   renderKanbanDesdeJSON,
   salvarKanbanLocal,
-  enableDragAndDrop
+  enableDragAndDrop,
+  gerarEtiqueta,
+ gerarTicket          // ← NOVO
 } from './kanban_base.js';
+// kanban.js  – depois dos imports
+let pcpOpBusy = false;      // evita cliques repetidos enquanto processa
+
+/* ——————————————————————————————————— */
+/*  🔹  Cache com TODOS os produtos tipo 04  */
+let productsCache = null;           // null = ainda não carregou
+/* ——————————————————————————————————— */
 
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
@@ -30,13 +39,6 @@ function formatDateBR(date) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-
-/* ——— gera etiqueta tipo F06234567 ——— */
-function gerarTicket() {
-  const n = Date.now().toString();          // 13 dígitos
-  return 'F' + n.slice(-8);                 // pega só os 8 finais
-}
-
 const showSpinner = () =>
   (document.querySelector('.kanban-spinner') ?? {}).style && (
     document.querySelector('.kanban-spinner').style.display = 'inline-block');
@@ -46,21 +48,86 @@ const hideSpinner = () =>
 
 
 
+const PAGE_SIZE   = 100;
+async function loadProductsCache () {
+  if (productsCache) return productsCache;          // já carregado
+
+  const todos = [];
+  let   page  = 1;
+  let   totPg = 1;                                  // 1ª suposição
+
+  do {
+    const body = {
+      call : 'ListarProdutosResumido',
+      param: [{
+        pagina: page,
+        registros_por_pagina: PAGE_SIZE,
+        apenas_importado_api : 'N',
+        filtrar_apenas_omiepdv: 'N',
+        filtrar_apenas_tipo   : '04'                // 💡 só produtos finais
+      }]
+    };
+
+    const res  = await fetch(`${API_BASE}/api/omie/produtos`, {
+      method      : 'POST',
+      credentials : 'include',
+      headers     : { 'Content-Type':'application/json' },
+      body        : JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      console.error('[loadProductsCache] HTTP', res.status, await res.text());
+      throw new Error('Falha ao consultar OMIE');
+    }
+
+    const json = await res.json();
+    const arr  = json.produto_servico_resumido || [];
+    todos.push(...arr);
+
+    // OMIE devolve o nº total de páginas
+    totPg = json.total_de_paginas ?? 1;
+    page++;
+
+    if (page <= totPg) await sleep(650);            // 0,65 s ≈ 2 req/s
+  } while (page <= totPg);
+
+  todos.sort((a,b) => a.codigo.localeCompare(b.codigo));
+  productsCache = todos;
+  return todos;
+}
+
+
 function setupAddToggle() {
   const colElem = document.getElementById('coluna-pcp-aprovado');
-  if (!colElem) return;                    // sai se não achou o UL
-  const col = colElem.closest('.kanban-column');
-  if (!col) return;                        // sai se não achou a coluna
+  if (!colElem) return;
 
-  const btn   = col.querySelector('.add-btn');
-  const input = col.querySelector('.add-search');
-  btn.addEventListener('click', () => {
+  const col     = colElem.closest('.kanban-column');
+  if (!col) return;
+
+  const btn     = col.querySelector('.add-btn');
+  const input   = col.querySelector('.add-search');
+  const results = col.querySelector('.add-results');   // 🔹  ADICIONE ESTA LINHA
+
+  btn.addEventListener('click', async () => {
     col.classList.toggle('search-expand');
-    if (col.classList.contains('search-expand')) {
-      setTimeout(() => input.focus(), 100);
+    if (!col.classList.contains('search-expand')) return;
+
+    setTimeout(() => input.focus(), 100);
+
+    /* —— novo bloco: carrega cache na 1ª vez —— */
+    if (!productsCache) {
+      results.innerHTML = '<li>Carregando produtos…</li>';
+      try {
+        await loadProductsCache();          // função de cache
+        results.innerHTML = '';             // limpa lista temporária
+      } catch (err) {
+        results.innerHTML =
+          `<li class="error">Falha ao carregar: ${err.message}</li>`;
+      }
     }
   });
 }
+
 /* Fecha o painel de busca: remove a classe, limpa UL e zera o input */
 function collapseSearchPanel() {
   const col = document
@@ -163,67 +230,34 @@ li.addEventListener('click', ev => {
   });
 }
 
-// ─── instala o listener no input (com logs) ───────────────────────────────
 function setupProductSearch() {
-  const colElem = document.getElementById('coluna-pcp-aprovado');
-  if (!colElem) return;
-  const col     = colElem.closest('.kanban-column');
+  const col     = document
+    .getElementById('coluna-pcp-aprovado')
+    ?.closest('.kanban-column');
   if (!col) return;
 
   const input   = col.querySelector('.add-search');
   const results = col.querySelector('.add-results');
 
-let debounce;
-let cacheResults = [];     // guarda o último lote vindo da OMIE
-  input.addEventListener('input', () => {
-    clearTimeout(debounce);
-    const term = input.value.trim();
-    console.log('[SEARCH] input mudou para:', term);
-    if (term.length < 4) {
+  /* debounced filtering */
+  let debounce;
+input.addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => {
+    const term = input.value.trim().toLowerCase();
+    if (!productsCache || term.length < 2) {
       results.innerHTML = '';
       return;
     }
-    debounce = setTimeout(async () => {
-      console.log('[SEARCH] Disparando busca OMIE para:', term);
-
-            // 0) procura no cache local primeiro
-      const local = cacheResults.filter(p =>
-        p.codigo.toLowerCase().includes(term.toLowerCase())
-      );
-      if (local.length) {
-        console.log('[SEARCH] Cache hit →', local.length);
-        renderSearchResults(local, results);
-        return;                    // pula a chamada remota
-      }
-
-      // nada no cache? segue para OMIE
-      results.innerHTML = '<li>Buscando…</li>';
-      try {
-const items = await fetchAllProducts(term);
-console.log('[SEARCH] Recebeu itens:', items);
-
-// 1) filtra apenas tipoItem = "04"
-const filtered = items.filter(p => p.tipoItem === '04');
-console.log('[SEARCH] Itens tipoItem="04":', filtered.length, filtered);
-
-// 2) ordena alfabeticamente pelo código
-const sorted = filtered.sort((a, b) => a.codigo.localeCompare(b.codigo));
-console.log('[SEARCH] Itens ordenados (códigos):', sorted.map(p => p.codigo));
-
-// 3) renderiza o resultado ordenado
-renderSearchResults(sorted, results);
-cacheResults = sorted;     // atualiza o cache para a próxima digitação
-
-
-
-      } catch (err) {
-        console.error('[SEARCH] Erro na busca:', err);
-        results.innerHTML = `<li class="error">Erro: ${err.message}</li>`;
-      }
-    }, 300);
-  });
+    const found = productsCache
+      .filter(p => p.codigo.toLowerCase().includes(term))
+      .slice(0, 40);                // mostra no máx. 40 itens
+    renderSearchResults(found, results);
+  }, 150);
+});
 
 }
+
 
 function filtrarPorEstoque() {
   document.querySelectorAll('#listaPecasPCPList li').forEach(li => {
@@ -313,92 +347,127 @@ plusBtn.addEventListener('click', () => {
     okBtn.textContent  = 'OK';
     okBtn.className    = 'ok-btn';
 okBtn.addEventListener('click', async () => {
-  /* --- 0) valida quantidade --- */
-  const fator = Number(barra.querySelector('.qty-input')?.value || 0);
-  if (!Number.isInteger(fator) || fator < 1) return;
+  if (pcpOpBusy) return;        // já em execução
+  pcpOpBusy = true;
 
-  /* --- 1) consulta estoque atual --- */
-  let saldoAtual = 0;
+  okBtn.disabled   = true;
+  plusBtn.disabled = true;
+  inp.disabled     = true;
+
   try {
-    const payload = {
-      call : 'PosicaoEstoque',
-      param: [{
-        codigo_local_estoque: 0,
-        id_prod            : 0,
-        cod_int            : codigo,
-        data               : formatDateBR(new Date())
-      }],
-      app_key   : OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET
-    };
-    const r  = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
-      method :'POST',
-      headers:{'Content-Type':'application/json'},
-      body   : JSON.stringify(payload)
-    });
-    const d  = await r.json();
-    saldoAtual = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0;
-  } catch {/* mantém 0 */ }
+    /* ----------------------------------------------------------
+       0) valida quantidade
+    ---------------------------------------------------------- */
+    const fator = Number(barra.querySelector('.qty-input')?.value || 0);
+    if (!Number.isInteger(fator) || fator < 1) return;
 
-  /* --- 2) monta o novo objeto --- */
+    /* ----------------------------------------------------------
+       1) busca nCodProduto
+    ---------------------------------------------------------- */
+    let nCodProduto = 0;
+    try {
+      const r = await fetch(
+        `/api/produtos/detalhes/${encodeURIComponent(codigo)}`
+      );
+      const d = await r.json();
+      nCodProduto = d.codigo_produto ?? d.codigo_produto_integracao ?? 0;
+    } catch {/* continua 0 */ }
 
-  // gera um array com <fator> etiquetas — uma para cada unidade
-  const localArr = Array.from({ length: fator }, () =>
-    `Separação logística,${gerarTicket()}`
-  );
+    /* ----------------------------------------------------------
+       2) data +2 dias
+    ---------------------------------------------------------- */
+    const hoje   = new Date();
+    const prev   = new Date(hoje.getTime() + 2*24*60*60*1e3);
+    const dPrev  = prev.toLocaleDateString('pt-BR');       // dd/mm/aaaa
 
-  const novoItem = {
-    pedido      : 'Estoque',
-    codigo      : codigo,
-    quantidade  : fator,
-    local       : localArr,          // ← agora tem N entradas
-    estoque     : saldoAtual,
-    _codigoProd : 0
-  };
+    /* ----------------------------------------------------------
+       3) gera N OPs sequenciais
+    ---------------------------------------------------------- */
+    const localArr   = [];
+    const primeiroOP = parseInt(await gerarTicket(), 10);  // 21004…
 
-/* —— consolida se já existir um cartão “Estoque” deste código —— */
-const existente = kanbanCache.find(
-  it => it.pedido === 'Estoque' && it.codigo === codigo
-);
+    for (let i = 0; i < fator; i++) {
+      const cCodIntOP = String(primeiroOP + i);
 
-if (existente) {
-  existente.quantidade += fator;          // soma a nova qtd
-  existente.local.push(...localArr);      // acrescenta etiquetas
-  existente.estoque = saldoAtual;         // opcional: refresca estoque
-} else {
-  kanbanCache.push(novoItem);             // primeiro do código
-}
+      /* 3.1) cria OP */
+      const payloadOP = {
+        call      : 'IncluirOrdemProducao',
+        app_key   : OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:[{ identificacao:{
+          cCodIntOP, dDtPrevisao:dPrev, nCodProduto, nQtde:1
+        }}]
+      };
+      const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
+        method :'POST',
+        headers:{'Content-Type':'application/json'},
+        body   : JSON.stringify(payloadOP)
+      });
+      const jOP = await rOP.json();
+      if (jOP.faultstring || jOP.error) {
+        console.warn('Falha OP', cCodIntOP, jOP);
+        continue;
+      }
 
-/* grava e redesenha Kanban */
-await salvarKanbanLocal(kanbanCache);
-renderKanbanDesdeJSON(kanbanCache);
-enableDragAndDrop(kanbanCache);
+      /* 3.2) guarda + etiqueta */
+      localArr.push(`Separação logística,${cCodIntOP}`);
+      await gerarEtiqueta(cCodIntOP, codigo);
 
+      /* 3.3) 2 req/s = pausa 600 ms */
+      if (i < fator-1) await sleep(600);
+    }
 
-  /* ——— leva o usuário para a aba Comercial ——— */
-document
-  .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="comercial"]')
-  ?.click();
+    /* ----------------------------------------------------------
+       4) atualiza Kanban / salva
+    ---------------------------------------------------------- */
+    if (localArr.length) {
+      const existente = kanbanCache
+        .find(it => it.pedido==='Estoque' && it.codigo===codigo);
 
-  /* —— pinta de verde o cartão recém-criado ———————————————— */
-setTimeout(() => {
-  const col  = document.getElementById('coluna-pcp-aprovado');
-  if (!col) return;
+      if (existente) {
+        existente.quantidade += localArr.length;
+        existente.local.push(...localArr);
+      } else {
+        kanbanCache.push({
+          pedido:'Estoque', codigo,
+          quantidade: localArr.length,
+          local: localArr, estoque:0, _codigoProd:nCodProduto
+        });
+      }
 
-  /* última <li> da coluna é o item acabado de inserir */
-  const novoCard = col.lastElementChild;
-  if (!novoCard) return;
+      await salvarKanbanLocal(kanbanCache);
+      renderKanbanDesdeJSON(kanbanCache);
+      enableDragAndDrop(kanbanCache);
+    }
 
-  novoCard.classList.add('flash-new');
+    /* UX extra – volta à aba Comercial, destaca cartão */
+    document.querySelector(
+      '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
+    )?.click();
+    setTimeout(() => {
+      const col   = document.getElementById('coluna-pcp-aprovado');
+      col?.lastElementChild?.classList.add('flash-new');
+      setTimeout(() =>
+        col?.lastElementChild?.classList.remove('flash-new'), 3000);
+    }, 80);
 
-  /* remove o destaque após 3 segundos */
-  setTimeout(() => novoCard.classList.remove('flash-new'), 3000);
-}, 80);   // pequeno atraso para garantir que o DOM já foi atualizado
+  } catch (err) {
+    console.error('[PCP-OK] erro:', err);
+    alert('Erro ao gerar OP/etiquetas:\n' + err.message);
+  } finally {
+    /* -------- SEMPRE reabilita controles -------- */
+    okBtn.disabled   = false;
+    plusBtn.disabled = false;
+    inp.disabled     = false;
+    pcpOpBusy        = false;
 
-  /* --- 4) limpeza visual --- */
-  barra.querySelector('.qty-input').value = 1;
-  barra.querySelector('.qty-input').blur();
+    /* limpa input */
+    barra.querySelector('.qty-input').value = 1;
+    barra.querySelector('.qty-input').blur();
+  }
 });
+
+
 
     barra.appendChild(okBtn);
   }

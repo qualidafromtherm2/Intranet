@@ -1,0 +1,35 @@
+@startuml
+entity Produto {
+  * id : UUID
+  * codigo_interno : VARCHAR
+  * nome           : VARCHAR
+  * descricao      : TEXT
+}
+
+entity OrdemProducao {
+  * id            : UUID
+  * numero_op     : VARCHAR
+  * data_criacao  : DATETIME
+  * quantidade    : INT
+  -- FK --
+  * produto_id    : UUID
+}
+
+entity Etiqueta {
+  * Tipo de etiqueta               : Valores padrão
+}
+
+entity EstoqueIntermediario {
+  * id                 : UUID
+  * quantidade_atual   : INT
+  * data_atualizacao   : DATETIME
+  -- FKs --
+  * produto_id         : UUID
+  * op_id              : UUID
+}
+
+Produto          ||--o{ OrdemProducao         : gera
+OrdemProducao    ||--|| Etiqueta              : imprime
+OrdemProducao    ||--o{ EstoqueIntermediario : atualiza
+Produto          ||--o{ EstoqueIntermediario : registra
+@enduml
