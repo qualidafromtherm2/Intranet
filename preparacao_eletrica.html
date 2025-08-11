@@ -415,41 +415,23 @@ paginaPrep.style.display = 'block';
   }
 
 async function abrirLeitorQR() {
-  if (typeof window.Html5Qrcode !== 'function') {
+  if (!window.Html5Qrcode) {
     alert('Leitor indisponível. Recarregue a página.');
     return;
   }
 
-  // 0) pré-pedido de permissão (isso dispara o prompt no mobile)
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-    s.getTracks().forEach(t => t.stop());
-  } catch (err) {
-    console.error('Permissão negada/indisponível:', err);
-    alert('Não foi possível abrir a câmera.\nVerifique a permissão da câmera nas configurações do site (cadeado > Permissões).');
-    return;
-  }
-
-  // 1) abre o modal
+  // abre o modal
   qrModal.style.display = 'block';
 
-  // 2) escolhe a traseira se der
-  async function pickRearCamera() {
-    try {
-      const devices = await window.Html5Qrcode.getCameras();
-      if (!devices || !devices.length) return null;
-      const prefer = devices.find(d => /back|trás|rear|environment/i.test(d.label));
-      return (prefer?.id) || devices[0].id;
-    } catch {
-      return null;
-    }
-  }
-  const cameraId = await pickRearCamera();
-
-  // 3) instancia o leitor
   const html5QrCode = new window.Html5Qrcode('qrReader');
 
-  // handler comum quando um QR é lido
+  // fecha/limpa
+  const stop = async () => {
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+    qrModal.style.display = 'none';
+  };
+
+  // quando ler um QR
   const onScan = (decodedText /*, decodedResult*/) => {
     const op = (decodedText.split(',')[1] || decodedText).trim();
     const agora   = new Date();
@@ -471,14 +453,15 @@ async function abrirLeitorQR() {
         // move para Em produção com timestamp
         alvo.local[idx] = `Em produção,${op},${carimbo}`;
 
-        // mostra na guia Produto
-        window.ativarAbaProduto?.();
+        // mostra na guia Produto (usa tua função já definida acima)
+        ativarAbaProduto();
         document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
 
         const ulMiniFila   = document.getElementById('prod-col-fila');
         const ulMiniEmProd = document.getElementById('prod-col-emprod');
         ulMiniFila.innerHTML = '';
         ulMiniEmProd.innerHTML = '';
+
         (alvo.local || []).forEach(linha => {
           const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
           const li = document.createElement('li');
@@ -487,87 +470,76 @@ async function abrirLeitorQR() {
           if (status === 'Fila de produção') ulMiniFila.appendChild(li);
           else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
         });
+
         if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
         if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
       })
       .catch(err => { console.error(err); alert('Falha ao ler/atualizar a fila local.'); })
-      .finally(finalize);
+      .finally(stop);
   };
 
-  // função para fechar e limpar
-  const finalize = async () => {
-    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-    qrModal.style.display = 'none';
-  };
-
-  // 4) primeira tentativa (qualidade melhor)
-  const qrboxSide = Math.min(360, Math.floor(window.innerWidth * 0.9));
-  const configGood = {
-    fps: 15,
-    qrbox: { width: qrboxSide, height: qrboxSide },
-    aspectRatio: 1.777,
-    videoConstraints: {
-      facingMode: 'environment',
-      focusMode: 'continuous',
-      width:  { ideal: 1280 },
-      height: { ideal: 720 }
+  // helper para tentar iniciar e logar erro sem travar
+  const tryStart = async (constraints, config) => {
+    try {
+      await html5QrCode.start(constraints, config, onScan);
+      return true;
+    } catch (e) {
+      console.warn('start falhou:', e?.name, e?.message);
+      return false;
     }
   };
 
+  // escolher a câmera: tenta a traseira real
+  let camConstraints;
   try {
-    await html5QrCode.start(
-      cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
-      configGood,
-      onScan
-    );
+    const cams = await window.Html5Qrcode.getCameras();
+    if (cams && cams.length) {
+      const rear = cams.find(c => /back|rear|environment|trás/i.test(c.label)) || cams[0];
+      camConstraints = { deviceId: { exact: rear.id } };
+    } else {
+      camConstraints = { facingMode: 'environment' };
+    }
+  } catch {
+    camConstraints = { facingMode: 'environment' };
+  }
 
-    // pós-start: tenta melhorar foco/zoom/torch se suportado
-    if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
-        typeof html5QrCode.applyVideoConstraints === 'function') {
+  // TENTATIVA 1 — configuração simples (compatível)
+  let ok = await tryStart(camConstraints, { fps: 10, qrbox: 260 });
+
+  // fallback — ainda mais leve
+  if (!ok) ok = await tryStart({ facingMode: 'environment' }, { fps: 10, qrbox: 240 });
+
+  if (!ok) {
+    alert('Não foi possível abrir a câmera. Verifique as permissões e tente novamente.');
+    await stop();
+    return;
+  }
+
+  // pós-start: melhora foco/zoom/torch se suportado (não quebra se não tiver)
+  if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
+      typeof html5QrCode.applyVideoConstraints === 'function') {
+    try {
       const caps = await html5QrCode.getRunningTrackCapabilities();
       const adv = [];
+      const focusList = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
+      if (focusList?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
+      if (caps?.zoom)  adv.push({ zoom: Math.min(caps.zoom.max || 2, 2) });
       if (caps?.torch) adv.push({ torch: true });
-      const focusModes = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
-      if (focusModes?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
-      if (caps?.zoom) {
-        const target = Math.min(caps.zoom.max ?? 1, Math.max(caps.zoom.min ?? 1, 2));
-        adv.push({ zoom: target });
-      }
-      if (adv.length) { try { await html5QrCode.applyVideoConstraints({ advanced: adv }); } catch {} }
-    }
-  } catch (err) {
-    console.warn('Tentativa 1 falhou:', err?.name, err?.message);
-
-    // 5) fallback “leve” (mais compatível)
-    try {
-      await html5QrCode.start(
-        cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
-        { fps: 10, qrbox: 250 },   // sem aspectRatio, sem width/height ideais
-        onScan
-      );
-    } catch (err2) {
-      console.error('Fallback também falhou:', err2?.name, err2?.message);
-      let dica = 'Verifique se a permissão da câmera está liberada nas configurações do site.';
-      if (err2?.name === 'NotAllowedError')  dica = 'Permissão negada. Toque no cadeado > Câmera > Permitir e recarregue.';
-      if (err2?.name === 'NotFoundError')    dica = 'Nenhuma câmera foi encontrada neste dispositivo.';
-      if (err2?.name === 'NotReadableError') dica = 'Câmera em uso por outro app. Feche outros apps de câmera e tente de novo.';
-      if (err2?.name === 'SecurityError')    dica = 'Precisa de HTTPS (ou localhost).';
-      alert('Não foi possível abrir a câmera.\n' + dica);
-      finalize();
-      return;
-    }
+      if (adv.length) await html5QrCode.applyVideoConstraints({ advanced: adv });
+    } catch {}
   }
 
   // fechar no X / fora / ESC
-  qrClose.onclick = finalize;
-  qrModal.onclick = (e) => { if (e.target === qrModal) finalize(); };
+  qrClose.onclick = stop;
+  qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
   document.addEventListener('keydown', function onEsc(ev){
     if (ev.key === 'Escape' && qrModal.style.display === 'block') {
       document.removeEventListener('keydown', onEsc);
-      finalize();
+      stop();
     }
   });
 }
+
 
 
   // botão “Iniciar produção”
