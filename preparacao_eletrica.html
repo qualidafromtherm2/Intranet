@@ -531,10 +531,18 @@ try {
   }
 
 } catch (err) {
-  console.error(err);
-  alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost e libere a permissão.');
+  console.error('start() falhou:', err, 'name=', err?.name, 'message=', err?.message);
+  let dica = 'Verifique se a permissão da câmera está liberada nas configurações do site.';
+  if (err?.name === 'NotAllowedError')  dica = 'Permissão negada. Toque no cadeado > Câmera > Permitir e recarregue.';
+  if (err?.name === 'NotFoundError')    dica = 'Nenhuma câmera foi encontrada neste dispositivo.';
+  if (err?.name === 'NotReadableError') dica = 'Câmera em uso por outro app. Feche outros apps de câmera e tente de novo.';
+  if (err?.name === 'SecurityError')    dica = 'Precisa de HTTPS (ou localhost).';
+  if (err?.name === 'OverconstrainedError') dica = 'As configurações de vídeo não são suportadas. Vou tentar relaxar as constraints.';
+
+  alert('Não foi possível abrir a câmera.\n' + dica);
   finalize();
 }
+
 
 
     // fechar no X
