@@ -1,33 +1,25 @@
-// watch_print.js
-const chokidar    = require('chokidar');
-const { exec }    = require('child_process');
-const path        = require('path');
-const fs          = require('fs');
+// watch_print.js (versão enxuta e funcional)
+const chokidar   = require('chokidar');
+const { execFile } = require('child_process');
+const path       = require('path');
+const fs         = require('fs');
 
-// Pasta onde o kanban_base.js grava as ZPL em local
 const watchFolder = path.resolve(__dirname, 'etiquetas', 'Teste');
+//  ↓ se PRINTER não estiver definido, o script usa a fila default do sistema
+const printerName = process.env.PRINTER || '';
 
-// Nome da fila da impressora no CUPS (confira em `lpstat -p`)
-const printerName = 'Zebra_Raw';
+if (!fs.existsSync(watchFolder)) fs.mkdirSync(watchFolder, { recursive: true });
 
-// Garante que a pasta existe
-if (!fs.existsSync(watchFolder)) {
-  fs.mkdirSync(watchFolder, { recursive: true });
-  console.log(`Criada pasta de monitoramento: ${watchFolder}`);
-}
-
-console.log(`Monitorando ${watchFolder} para novas etiquetas...`);
+console.log(`Monitorando ${watchFolder} para novas etiquetas…`);
+// watch_print.js
 chokidar.watch(watchFolder, { ignoreInitial: true })
-  .on('add', filePath => {
-    console.log(`→ Nova etiqueta detectada: ${filePath}`);
-    // envia para a impressora via lpr em modo RAW
-    exec(`lpr -P "${printerName}" -o raw "${filePath}"`, (err, stdout, stderr) => {
-      if (err) {
-        console.error('❌ Erro ao imprimir:', stderr || err);
-      } else {
-        console.log(`✔ Impressão enviada (stdout: ${stdout.trim()})`);
-        // opcional: mover ou apagar o arquivo após imprimir
-        // fs.unlinkSync(filePath);
-      }
-    });
+  .on('add',    filePath => imprimir(filePath))
+  .on('change', filePath => imprimir(filePath));   // 👈 NOVO
+
+  function imprimir(filePath) {
+  console.log(`→ Etiqueta detectada: ${filePath}`);
+  execFile('lpr', ['-o','raw', filePath], (err) => {
+    if (err) console.error('❌ Erro ao imprimir:', err.message);
+    else     console.log('✔ Impressão enviada');
   });
+}

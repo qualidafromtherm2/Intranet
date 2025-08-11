@@ -2,6 +2,10 @@
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
+ // Decide em qual endpoint salvar
+ const getKanbanEndpoint = destino =>
+   destino === 'preparacao' ? '/api/kanban_preparacao' : '/api/kanban';
+
 // Define a URL-base das chamadas à API: usa window.location.origin
 const API_BASE = window.location.origin;
 const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
@@ -62,6 +66,237 @@ export async function gerarTicket () {
 
   // ---- Removido o fetch direto ao PC ----
 }
+
+
+// ───── Etiqueta PP (Matéria-Prima / Preparação) ───────────────
+// kanban_base.js  – substitua APENAS o corpo da gerarEtiquetaPP
+export function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
+  /* ajuste aqui até ficar no local ideal -------------------------- */
+  const DX = 220;      // deslocamento horizontal
+  const DY = 0;      // deslocamento vertical
+  /* --------------------------------------------------------------- */
+
+  const agora = new Date();
+  const dataHora =
+    agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  /* helper p/ somar offset às coordenadas ------------------------- */
+  const fo = (x, y) => `^FO${x + DX},${y + DY}`;
+
+  return `
+^XA
+^FWB
+${fo(7, 10)}
+^BQN,2,4
+^FDQA,${codMP}-${op}^FS
+
+${fo(135, 10)}
+^A0B,40,35
+^FD ${codMP} ^FS
+
+${fo(170, 50)}
+^A0B,20,20
+^FD ${dataHora} ^FS
+
+${fo(180, 0)}
+^A0B,23,23
+^FB320,1,0,L,0
+^FD --------------- ^FS
+
+${fo(20, 0)}
+^A0B,20,20
+^FB230,2,0,L,0
+^FD OP: ${op} ^FS
+
+${fo(196, 0)}
+^A0B,23,23
+^FB320,1,0,L,0
+^FD --------------- ^FS
+
+${fo(210, 10)}
+^A0B,23,23
+^FB220,8,0,L,0
+^FD ${descricao || 'SEM DESCRIÇÃO'} ^FS
+
+${fo(110, 10)}
+^A0B,20,20
+^FB225,1,0,L,0
+^FD FT-M00-ETQP - REV01 ^FS
+^XZ`.trim();
+}
+
+
+
+/**
+ * Gera etiqueta curta “Pedido em separação”.
+ * Cria o arquivo em etiquetas/Teste/sep_<pedido>.zpl
+ */
+// …kanban_base.js
+export async function gerarEtiquetaSeparacao (codigo, pedido, ns = '') {
+
+
+
+
+  /* ── Consulta OMIE p/ descrição + obs_venda ───────────────────── */
+  let descProd = '';
+  let obsVenda = '';
+let itemsStr = '';          // <- aqui
+
+  try {
+    const numPed = pedido;           // evita colidir com o parâmetro
+    const resp = await fetch('/api/omie/pedido', {
+      method : 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body   : JSON.stringify({ param:[{ numero_pedido: numPed }] })
+    });
+    const json = await resp.json();
+
+    // pega o objeto do pedido
+    const pedOmie = Array.isArray(json.pedido_venda_produto)
+                  ? json.pedido_venda_produto[0]
+                  : json.pedido_venda_produto;
+
+    // acha a linha do produto
+    const det = (pedOmie.det || []).find(
+      d => d?.produto?.codigo === codigo
+    );
+
+    descProd = det?.produto?.descricao || '';
+    obsVenda = pedOmie?.observacoes?.obs_venda || '';
+
+    // ——— monta texto “Código – quantidade” (1 linha por item) ———
+const detArray = Array.isArray(pedOmie.det) ? pedOmie.det : [];
+            // ← “\&” quebra de linha
+ const pad = 12;                // largura máxima do código
+ itemsStr = detArray
+   .map(d => {
+     const qtd = String(d.produto.quantidade).padStart(4, ' '); // alinhar à dir.
+     const cod = String(d.produto.codigo).padEnd(pad, ' ');
+     return `${qtd}  ${cod}`;
+   })
+   .join('\\&');                // \& = nova linha em ^FH_ modo
+        //  “\&” = quebra de linha (^FH_ ativo)
+
+
+  } catch (err) {
+    console.error('[gerarEtiquetaSeparacao] falhou →', err);
+    alert('❌ Falha ao gerar etiqueta:\n' + err.message);
+  }
+
+
+
+
+  const nomeArq = `etiqueta_${ns || pedido}.zpl`;   // prefixo que o watcher reconhece
+
+
+
+const zpl = `
+^XA
+^CI28
+^PW600
+^LH0,0
+
+; ---------- Título ----------
+^CF0,60
+^FO40,60^FDSeparar produto:^FS
+^FO40,120^FH_^FDPedido: ${pedido}^FS
+
+; ---------- Código ----------
+^CF0,30
+^FO250,200^FH_^FDCod.: ${codigo}^FS
+
+; ---------- QR-Code (esquerda) ----------
+^FO40,200
+^BQN,4,8
+^FH_^FDLA,${ns || pedido}^FS
+
+; ---------- Descrição (à direita do QR) ----------
+^FO250,240
+^A0N,30,30
+^FB300,6,0,L
+^FH_^FD${descProd}^FS
+
+; ---------- Número-de-Série ----------
+^CF0,40
+^FO40,400^FDNS: ${ns || 'SN'}^FS
+
+; ---------- Observação (quebra em 40) ----------
+^CF0,28
+^FO40,440^FH_^FDObs.: ${obsVenda.slice(0,40)}^FS
+^FO40,480^FH_^FD${obsVenda.slice(40,80)}^FS
+
+; ---------- Itens do pedido ----------
+^CF0,30
+^FO40,520^FDItens do pedido ${pedido}:^FS
+^A0N,26,26
+^FO40,560
+^FB520,10,0,L
+^FH_^FD${itemsStr}^FS        ; linhas “qtd – cod”
+
+^XZ
+`.trim();
+;
+
+
+// decide a pasta onde o .zpl será salvo
+const pastaTipo = isLocal ? 'Teste' : 'Expedicao';
+
+await fetch('/api/etiquetas/gravar', {
+  method : 'POST',
+  headers: { 'Content-Type':'application/json' },
+  body   : JSON.stringify({
+    file: nomeArq,
+    zpl,
+    ns,
+    tipo: pastaTipo          // ← aqui a mágica
+  })
+});
+
+}
+
+/* ───────────────── Etiqueta de OBSERVAÇÃO ───────────────────── */
+/**
+ * Gera uma etiqueta só com o texto do campo Observações
+ * e grava em etiquetas/Teste  (local)  ou  etiquetas/Expedicao (prod).
+ * Quebra o texto a cada 48 colunas automaticamente.
+ */
+export function gerarEtiquetaObs (texto) {
+  /* 1) remove quebras manuais e deixa o ^FB quebrar sozinho */
+  const txtLimpo = texto.replace(/\r?\n+/g, ' ').trim();   // limpa CR/LF extras
+
+  /* 2) data + hora no formato  dd/mm/aaaa HH:MM  */
+  const dataHora = new Date().toLocaleString('pt-BR', { hour12:false });
+
+  /* 3) monta ZPL  */
+  const zpl = `
+^XA
+^CI28
+^PW600
+^LL640                   ; cobre até 20 linhas de 26 pt
+^CF0,30
+^FO40,30^FD↑ destacar aqui ↑ ${dataHora}^FS
+^FO40,70^FDDados adicionais:^FS
+
+^A0N,26,26
+^FO40,130
+^FB520,20,0,L            ; larg. 520 px, máx. 20 linhas
+^FH_^FD${txtLimpo}^FS
+
+^XZ`.trim();
+
+  /* 4) envia ao backend */
+  const nomeArq = `obs_${Date.now()}.zpl`;
+  const pasta   = isLocal ? 'Teste' : 'Expedicao';
+
+  return fetch('/api/etiquetas/gravar', {
+    method : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body   : JSON.stringify({ file:nomeArq, zpl, tipo:pasta })
+  });
+}
+
+
 
 
 // No início do arquivo, adicione:
@@ -142,22 +377,53 @@ export async function carregarKanbanLocal() {
   }
 }
 
-export async function salvarKanbanLocal(itemsKanban) {
+
+/**
+ * Salva o array em:
+ *   • /api/kanban              → Comercial
+ *   • /api/kanban_preparacao  → Preparação
+ */
+export async function salvarKanbanLocal(items, board = 'comercial') {
+  const rota = board === 'preparacao'
+             ? '/api/kanban_preparacao'
+             : '/api/kanban';
+
+  /* 1) Lê o arquivo atual p/ não perder histórico -------------------- */
+  let antigos = [];
   try {
-    const resp = await fetch(`${API_BASE}/api/kanban`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(itemsKanban, null, 2)
-    });
-    if (!resp.ok) {
-      console.error('Falha ao salvar kanban.json:', await resp.text());
+    const r = await fetch(`${API_BASE}${rota}`);
+    if (r.ok) antigos = await r.json();
+  } catch { /* se falhar, continua com [] */ }
+
+  /* 2) Mescla quantidade e local onde pedido+codigo coincidem -------- */
+  items.forEach(novo => {
+    const old = antigos.find(a =>
+      a.pedido === novo.pedido && a.codigo === novo.codigo);
+    if (old) {
+      old.quantidade = novo.quantidade;           // já somada antes
+      old.local = Array.from(new Set([...old.local, ...novo.local]));
+
     } else {
-      console.log('kanban.json atualizado com sucesso (rota /api/kanban).');
+      antigos.push(novo);
     }
-  } catch (err) {
-    console.error('Erro ao chamar POST /api/kanban:', err);
+  });
+
+  /* 3) Grava a versão mesclada --------------------------------------- */
+  const resp = await fetch(`${API_BASE}${rota}`, {
+    method : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body   : JSON.stringify(antigos, null, 2)
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`[salvarKanbanLocal] HTTP ${resp.status}: ${txt}`);
   }
 }
+
+
+
+
 
 export function enableDragAndDrop(itemsKanban) {
   document.querySelectorAll('.kanban-card').forEach(li => {
@@ -192,7 +458,7 @@ li.addEventListener('click', ev => {
   }
 
   /* clique simples → agenda abrir PCP */
-  clickTimerId = setTimeout(() => {
+ clickTimerId = setTimeout(async () => {   //  ⬅️ torna o callback assíncrono
     clickTimerId = null;          // libera para o próximo
 
     const idx = +li.dataset.index;
@@ -210,6 +476,47 @@ li.addEventListener('click', ev => {
     document
       .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
       ?.click();
+
+    /* 3) busca obs_venda do pedido e preenche o campo Observações  */
+    try {
+      const payload = {
+        call      : 'ConsultarPedido',
+        app_key   : OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param     : [{ numero_pedido: it.pedido }]
+      };
+
+      const resp = await fetch(`${API_BASE}/api/omie/pedido`, {
+        method : 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body   : JSON.stringify(payload)
+      });
+      const json = await resp.json();
+
+      /* garante sempre um objeto único */
+      const ped = Array.isArray(json.pedido_venda_produto)
+                ? json.pedido_venda_produto[0]
+                : json.pedido_venda_produto || {};
+
+      /* ➊ pega obs_venda — default = '' */
+      let obs = ped.observacoes?.obs_venda ?? '';
+
+      /* ➋ decodifica &quot; → " e extrai só o interior das aspas   */
+      obs = obs.replace(/&quot;/g, '"');
+      const m = obs.match(/"([^"]+)"/);
+      if (m) obs = m[1];                   // só o texto dentro das aspas
+
+      /* ➌ espera o textarea existir e grava o valor                */
+      const setObs = txt => {
+        const el = document.getElementById('pcp-obs');
+        if (el) { el.value = txt; }
+        else    { setTimeout(() => setObs(txt), 100); }
+      };
+      setObs(obs);
+
+    } catch (err) {
+      console.error('[PCP-obs] falha ao obter obs_venda:', err);
+    }
 
   }, 350);   // um pouco acima do tempo típico de dbl-click
 });
@@ -289,125 +596,134 @@ const estoqueDisp   = Number(item.estoque) || 0;   // saldo atual
 const qtdSolicitada = item.local.length;           // nº de etiquetas
 // ───────────────────────────────────────────────────────
 if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
-  /* ── 1. obtém o tipoItem do produto ──────────────────────────── */
-  let tipoItemDrag = null;
-  try {
-    const respProdDrag = await fetch(
-      `/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`
+
+    /* ------------------------------------------------------------------
+     BLOCO NOVO – move só a quantidade solicitada e controla NS
+  ------------------------------------------------------------------ */
+
+const estoqueDisp = Number(item.estoque) || 0;     // saldo atual no 105…
+const pendentes   = item.local
+                      .filter(l => l.startsWith('Pedido aprovado'))
+                      .length;                     // só o que falta mover
+const movMax      = Math.min(pendentes, estoqueDisp);
+
+
+  if (movMax < 1) {
+    alert('❌ Sem estoque disponível para mover.');
+    loadingLi.remove();
+    return;
+  }
+
+  /* 1) pergunta ao usuário */
+  let qtdMover = movMax;                          // declara ANTES de usar
+  if (movMax > 1) {
+    const entrada = prompt(
+      `Quantas unidades deseja mover? (1 – ${movMax})`,
+      String(movMax)
     );
-    const dProd = await respProdDrag.json();
-    tipoItemDrag = dProd.tipoItem ?? dProd.tipo_item ?? null;
-  } catch {
-    /* se falhar, mantém null → tratará como “precisa estrutura” */
-  }
-
-  /* Se for revenda (tipo 00), NÃO precisa de estrutura            */
-  const precisaEstrutura = false;
-
-  /* ── 2. (opcional) valida Estrutura na Omie ──────────────────── */
-  if (precisaEstrutura) {
-    try {
-      const respEstr = await fetch(`${API_BASE}/api/omie/estrutura`, {
-        method : 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body   : JSON.stringify({ param:[{ codProduto: item.codigo }] })
-      });
-      const dataEstr = await respEstr.json();
-      const pecas    = dataEstr.itens || dataEstr.pecas || [];
-
-      
-      /* bloqueia se não tem peças */
-      if (!Array.isArray(pecas) || pecas.length === 0) {
-        alert(
-          '❌ Este produto não possui Estrutura de Produto; não é possível separar.'
-        );
-        loadingLi.remove();
-        return;                // ↩ cancela o drop
-      }
-    } catch (err) {
-      console.error('[DROP] erro ao consultar estrutura:', err);
-      alert('Erro ao consultar estrutura do produto. Tente novamente.');
+    if (entrada === null) {                      // Cancelar
       loadingLi.remove();
-      return;                  // ↩ cancela o drop
+      return;
     }
-  }
-
-
-    /* Caso A – não há saldo */
-    if (estoqueDisp <= 0) {
-      alert('Não possui saldo no estoque.');
+    qtdMover = parseInt(entrada, 10);
+    if (!qtdMover || qtdMover < 1 || qtdMover > movMax) {
+      alert('Valor inválido.');
       loadingLi.remove();
-      return;                     // cancela o drop
+      return;
     }
 
-    /* Caso B – saldo parcial */
-    if (estoqueDisp < qtdSolicitada) {
-      const maxMov = estoqueDisp;
-      const txt = prompt(
-        `Só há ${maxMov} em estoque. Quantos deseja mover? (1-${maxMov})`,
-        maxMov
-      );
-      const mover = Number(txt);
-      if (!Number.isInteger(mover) || mover < 1 || mover > maxMov) return;
 
-      /* 1) reduz o cartão original                         */
-      item.local.splice(0, mover);          // corta N etiquetas
-      item.quantidade = item.local.length;
-
-      /* 1.1) ajusta o saldo de estoque desse pedido/código */
-item.estoque = Math.max(0, estoqueDisp - mover);
-
-      /* remove cartão se zerou */
-      if (item.quantidade === 0) {
-        itemsKanban.splice(draggedIndex, 1);
-      }
-
-      /* gera as novas etiquetas */
-const localArr = [];
-for (let i = 0; i < mover; i++) {
-  localArr.push(`Separação logística,${await gerarTicket()}`);
-}
-/* 2)  procura cartão existente mesmo pedido+código */
-const destExisting = itemsKanban.find(
-  it => it !== item && it.pedido === item.pedido && it.codigo === item.codigo
-);
-
-// ⚠️ dispara uma etiqueta para cada ticket recém-gerado
-localArr.forEach(l => ticketsParaImprimir.push(l.split(',')[1]));
-
-if (destExisting) {
-  /* já existe → apenas soma */
-  destExisting.local.push(...localArr);
-  destExisting.quantidade = destExisting.local.length;
-} else {
-  /* não existe → cria o cartão parcial */
-  const novoCard = {
-    ...item,
-    quantidade : mover,
-    local      : localArr
+    /* ------------------------------------------------------------------
+   1) registra a movimentação de estoque no OMIE
+   ------------------------------------------------------------------ */
+try {
+  const payloadAjuste = {
+    call: 'IncluirAjusteEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      codigo_local_estoque        : 10520299822,
+      codigo_local_estoque_destino: 10564345392,
+      id_prod : item._codigoProd,                          // ← do Kanban
+      data    : new Date().toLocaleDateString('pt-BR'),    // dd/mm/aaaa
+      quan    : String(qtdMover),                          // quantidade movida
+      obs     : `Movimentação de pedido de venda ${item.pedido}`,
+      origem  : 'AJU',
+      tipo    : 'TRF',
+      motivo  : 'TRF',
+      valor   : 10
+    }]
   };
-  itemsKanban.push(novoCard);
+console.log('[PP→SL] payloadAjuste →',
+            JSON.stringify(payloadAjuste, null, 2));   //  ⬅️  ADICIONE
+  await fetch('/api/omie/estoque/ajuste', {
+    method : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body   : JSON.stringify(payloadAjuste)
+  });
+} catch (e) {
+  console.warn('[PP→SL] falha ao registrar ajuste de estoque:', e);
+  // não bloqueia o fluxo principal – apenas loga
+}
+
+  }
+
+  /* 2) coleta números-de-série no back-end */
+  const nsMovidos = [];
+  for (let i = 0; i < qtdMover; i++) {
+    const resp = await fetch(
+      `/api/serie/next/${encodeURIComponent(item.codigo)}`
+    );
+    const { ns } = await resp.json();             // p.ex. 101002
+    nsMovidos.push(ns);
+  }
+
+
+  /* ─── NOVO: imprime 2ª etiqueta se houver observação ─── */
+const campoObs = document.getElementById('pcp-obs');
+if (campoObs && campoObs.value.trim()) {
+  await gerarEtiquetaObs(campoObs.value.trim());
 }
 
 
- await salvarKanbanLocal(itemsKanban);
+  /* 3) imprime uma etiqueta (Pedido em separação) para cada NS */
+  for (const serie of nsMovidos) {
+    // dentro do for (const serie of nsMovidos) { … }
+await gerarEtiquetaSeparacao(item.codigo, item.pedido, serie);
 
- renderKanbanDesdeJSON(itemsKanban);
- enableDragAndDrop(itemsKanban);
 
-      /* 4) destaca em verde o cartão recém-criado         */
-      setTimeout(() => {
-        const col = document.getElementById('coluna-pcp-aprovado');
-        const flash = col?.lastElementChild;
-        flash?.classList.add('flash-new');
-        setTimeout(() => flash?.classList.remove('flash-new'), 3000);
-      }, 50);
 
-      return;                   // não deixa seguir o drop “normal”
+
+
+  }
+
+  /* 4) grava o NS no array local, só nas posições movidas */
+  let movidos = 0;
+  item.local = item.local.map(coluna => {
+    if (
+      movidos < qtdMover &&
+      coluna.startsWith('Pedido aprovado')
+    ) {
+      const serie = nsMovidos[movidos++];
+      return `${newColumn},${serie}`;             // “Separação logística,101002”
     }
+    return coluna;                                // mantém as demais
+  });
 
-    /* Caso C – saldo suficiente → cai no fluxo original (continua) */
-  } // fim da regra de estoque
+  /* 5) baixa o estoque do cartão */
+  item.estoque = Math.max(0, estoqueDisp - qtdMover);
+
+  /* 6) persiste e re-renderiza */
+  await salvarKanbanLocal(itemsKanban);
+  renderKanbanDesdeJSON(itemsKanban);
+  enableDragAndDrop(itemsKanban);
+
+  loadingLi.remove();
+  draggedIndex = null;
+  draggedFromColumn = null;
+  return;                                         // impede código antigo
+}
+
 
 ul.classList.remove('drop-expand');
 removePlaceholder();
@@ -477,11 +793,11 @@ if (
     const prodData = await respProd.json();
     const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
 
-    if (
-      originColumn === 'Pedido aprovado' &&
-      newColumn === 'Separação logística' &&
-      (tipoItem === '04' || parseInt(tipoItem, 10) === 4)
-    ) {
+ const isPPtoSL = originColumn === 'Pedido aprovado' &&
+                  newColumn    === 'Separação logística';
+
+ if ( !isPPtoSL &&                                           // ← pula PP→SL
+      (tipoItem === '04' || parseInt(tipoItem, 10) === 4) ) {
 const cCodIntOP = await gerarTicket();   // já vem sequencial do backend
       const now = new Date();
       const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);

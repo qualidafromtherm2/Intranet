@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Preparação elétrica</title>
+  <!-- Font Awesome para os ícones das fotos -->
+  <link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+  integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+/>
+  <!-- Seu CSS principal -->
+  <link rel="stylesheet" href="menu_produto.css"/>
+<style>
+  /* Modal do leitor de QR */
+  #qrModal{
+    position: fixed; inset: 0; display:none;
+    background: rgba(0,0,0,.5);
+    z-index: 2000;
+    align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  #qrModal.open{ display:flex; }
+
+  .qr-box{
+    width: min(640px, 100%);
+    background: var(--header-bg, #111);
+    color: var(--text, #fff);
+    border-radius: 16px;
+    box-shadow: 0 12px 24px rgba(0,0,0,.35);
+    padding: 16px;
+  }
+  .qr-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom: 12px;
+  }
+  .qr-close{
+    appearance:none; border:0; background:transparent;
+    font-size: 26px; line-height: 1; cursor: pointer; color: inherit;
+  }
+  /* o container que o html5-qrcode usa ajusta sozinho */
+  #qr-reader{ width:100%; }
+</style>
+
+
+  <style>
+  /* layout: kanban à esquerda e botão à direita */
+  #produtoTab .produto-layout{
+    display:flex;
+    gap:16px;
+    align-items:flex-start;
+  }
+  #produtoTab .mini-board{ flex:1; min-width:0; }
+  #produtoTab .side-actions{
+    width:220px;              /* largura fixa da coluna do botão */
+    flex:0 0 220px;
+    display:flex;
+    align-items:flex-start;
+  }
+
+  /* botão moderno */
+  #produtoTab .btn-modern{
+    appearance:none;
+    border:0;
+    width:100%;
+    padding:14px 18px;
+    border-radius:16px;
+    font-weight:600;
+    letter-spacing:.2px;
+    cursor:pointer;
+    color:#fff;
+    background: linear-gradient(135deg,#4f46e5,#22d3ee);
+    box-shadow: 0 12px 22px rgba(79,70,229,.22),
+                0 6px 10px rgba(34,211,238,.18);
+    transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+  }
+  #produtoTab .btn-modern:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 16px 26px rgba(79,70,229,.28),
+                0 10px 14px rgba(34,211,238,.22);
+  }
+  #produtoTab .btn-modern:active{
+    transform: translateY(0);
+    filter: brightness(.96);
+  }
+
+  /* responsivo: botão vai para baixo em telas estreitas */
+  @media (max-width: 1100px){
+    #produtoTab .produto-layout{ flex-direction:column; }
+    #produtoTab .side-actions{ width:100%; flex:0 0 auto; }
+  }
+</style>
+
+</head>
+<body>
+
+
+  <div class="dark-light">
+    <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+    </svg>
+  </div>
+
+  <div class="app">
+    <!-- Cabeçalho principal -->
+<!-- ===== CABEÇALHO PRINCIPAL ===== -->
+<div class="header" id="appHeader">
+  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
+
+  <!-- Links que podem “sobrar” -->
+  <nav id="mainMenu" class="header-menu">
+    
+
+ <a id="menu-inicio"
+    class="menu-link is-active"
+    data-target="paginaInicio">Início</a>
+    <a id="menu-produto" class="menu-link" href="#" data-target="produtoTab">Produto</a>
+    <a id="menu-qualidade"     class="menu-link" href="#">Qualidade</a>
+    <a id="menu-acessos"       class="menu-link" href="#">Acessos</a>
+    <a id="menu-notificacoes"  class="menu-link" href="#">Notificações</a>
+  </nav>
+
+  <!-- Botão …  (fica invisível até o JS precisar dele) -->
+<button id="moreBtn" class="more-btn" aria-label="Mais opções">
+  <!-- era: <i class="fa-solid fa-ellipsis-h"></i> -->
+  <i class="fa-solid fa-ellipsis"></i>
+</button>
+
+  <!-- Campo de busca -->
+  <div class="search-bar" id="searchBar">
+    <input type="text" placeholder="Pesquisar produto" />
+  </div>
+
+  <!-- Ícones da direita -->
+  <div class="header-profile">
+    <div class="notification">
+      <span class="notification-number">5</span>
+      <i class="fa-solid fa-bell"></i>
+    </div>
+    <i class="fa-solid fa-print"></i>
+    <i class="fa-solid fa-cloud"></i>
+    <img id="profile-icon" class="profile-img"
+         src="https://images.unsplash.com/photo-1600353068440-6361ef3a86e8?auto=format&fit=crop&w=1000&q=80"
+         alt="Perfil">
+  </div>
+
+  <!-- Dropdown criado dinamicamente -->
+  <div id="moreMenu" class="more-menu"></div>
+</div>
+
+
+
+    <div class="wrapper">
+
+      <!-- ===== MENU LATERAL ===== -->
+<div class="left-side">
+  <div class="side-wrapper">
+    <div class="side-title">Preparação elétrica</div>
+
+    <div class="side-menu">
+      <!-- coloque links ou deixe vazio por enquanto -->
+      <a href="#" class="menu-link">Em construção 1</a>
+      <a href="#" class="menu-link">Em construção 2</a>
+    </div>
+  </div>
+</div>
+
+
+      <!-- Conteúdo principal -->
+
+      <!-- Painel Início — aparece primeiro -->
+<!-- Painel Preparação elétrica -->
+<div id="paginaPrepEletrica" class="tab-pane" style="display:block;">
+
+
+  
+  <!-- === bloco PREPARAÇÃO (Kanban) ============================ -->
+<div id="conteudo-preparacao" class="kanban-page" >
+  <div class="kanban-board">
+
+    <!-- 🟦 Coluna 1: Fila de produção -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <div class="title-wrapper">
+          <span>Fila de produção</span>
+        </div>
+      </div>
+      <ul id="coluna-prep-fila" class="kanban-list"></ul>
+    </div>
+
+    <!-- 🟦 Coluna 2: Em produção -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <span>Em produção</span>
+      </div>
+      <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
+    </div>
+
+    <!-- 🟦 Coluna 3: No estoque -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <span>No estoque</span>
+      </div>
+      <ul id="coluna-prep-estoque" class="kanban-list"></ul>
+    </div>
+
+  </div><!-- /.kanban-board -->
+</div>
+<!-- ========================================================= -->
+</div>
+
+
+
+<!-- Guia Produto -->
+<div id="produtoTab" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="title-wrapper">
+      <div class="content-section-title">
+        Produto  <span id="produtoSelecionado"></span>
+      </div>
+    </div>
+
+<!-- layout lado-a-lado: kanban (esq) + botão (dir) -->
+<div class="produto-layout">
+  <div class="kanban-board mini-board">
+    <div class="kanban-column">
+      <div class="kanban-header"><span>Fila de produção</span></div>
+      <ul id="prod-col-fila" class="kanban-list"></ul>
+    </div>
+
+    <div class="kanban-column">
+      <div class="kanban-header"><span>Em produção</span></div>
+      <ul id="prod-col-emprod" class="kanban-list"></ul>
+    </div>
+  </div>
+
+  <div class="side-actions">
+    <button id="btn-iniciar" class="btn-modern" type="button">
+      Iniciar produção
+    </button>
+  </div>
+</div>
+
+  </div>
+</div>
+
+
+
+
+    </div> <!-- /.wrapper -->
+
+    <div class="overlay-app" id="authOverlay"></div>
+  </div> <!-- /.app -->
+
+
+
+<!-- Modal de etiquetas ----------------------------->
+<div id="etiquetasModal" class="modal">
+  <div class="modal-content">
+    <span class="close-modal">&times;</span>
+    <h3>Etiquetas disponíveis</h3>
+    <ul id="listaEtiquetas" class="etiquetas-list"></ul>
+  </div>
+</div>
+
+
+
+ <!-- PapaParse 5.3.2 com hash corrigido -->
+
+
+  <script type="module" src="login/login.js"></script>
+
+
+  <!-- coloca logo antes do fechamento do body -->
+<script type="module">
+  import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // monta as colunas do Kanban principal desta página
+    initPreparacaoKanban();
+
+const menuInicio    = document.getElementById('menu-inicio');
+const menuProduto   = document.getElementById('menu-produto');
+const paginaPrep    = document.getElementById('paginaPrepEletrica');
+const produtoTab    = document.getElementById('produtoTab');           // <div id="produtoTab">
+const miniCodigoEl  = document.getElementById('produtoSelecionado');   // <span id="produtoSelecionado">
+const ulMiniFila    = document.getElementById('prod-col-fila');        // <ul id="prod-col-fila">
+const ulMiniEmProd  = document.getElementById('prod-col-emprod');      // <ul id="prod-col-emprod">
+
+
+    let codigoSelecionado = null;
+
+function ativarAbaProduto() {
+  document.querySelectorAll('#mainMenu .menu-link')
+          .forEach(a => a.classList.remove('is-active'));
+  menuProduto.classList.add('is-active');
+
+  paginaPrep.style.display = 'none';
+  produtoTab.style.display = 'block';
+}
+
+
+    async function renderMiniKanban(codigo) {
+      miniCodigoEl.textContent = codigo ? `— ${codigo}` : '';
+      ulMiniFila.innerHTML   = '';
+      ulMiniEmProd.innerHTML = '';
+
+      try {
+        const resp  = await fetch('data/kanban_preparacao.json', { cache: 'no-store' });
+        const lista = await resp.json();
+
+        const item = lista.find(x => String(x.codigo).trim() === String(codigo).trim());
+        if (!item) {
+          ulMiniFila.innerHTML = '<li class="empty">Nada encontrado</li>';
+          return;
+        }
+
+        (item.local || []).forEach(linha => {
+          const [status, op] = String(linha).split(',').map(s => s.trim());
+const li = document.createElement('li');
+li.textContent = op || linha;   // exibe só o código da OP
+li.classList.add('kanban-card');
+
+
+          if (status === 'Fila de produção') {
+            ulMiniFila.appendChild(li);
+          } else if (status === 'Em produção') {
+            ulMiniEmProd.appendChild(li);
+          }
+        });
+
+        // se não tiver nenhum item em algum lado, mostra vazio bonito
+        if (!ulMiniFila.children.length)    ulMiniFila.innerHTML    = '<li class="empty">—</li>';
+        if (!ulMiniEmProd.children.length)  ulMiniEmProd.innerHTML  = '<li class="empty">—</li>';
+
+      } catch (err) {
+        ulMiniFila.innerHTML   = '<li class="empty">Erro carregando JSON</li>';
+        ulMiniEmProd.innerHTML = '';
+        console.error(err);
+      }
+    }
+
+    // — Clique SOMENTE na "Fila de produção" do kanban desta página —
+    document.getElementById('coluna-prep-fila')
+      .addEventListener('click', (e) => {
+        const card = e.target.closest('li');
+        if (!card) return;
+
+        // tenta achar o código do produto
+        let code =
+          card.dataset?.codigo
+          || card.querySelector('[data-codigo]')?.dataset?.codigo
+          || card.querySelector('.codigo')?.textContent?.trim()
+          || (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]); // ex.: 04.PP.N.51004
+
+        if (!code) return; // sem código, não tem o que filtrar
+
+        codigoSelecionado = code;
+        ativarAbaProduto();
+        renderMiniKanban(codigoSelecionado);
+      });
+
+    // — Clicar em "Produto" na barra apenas mostra a aba (sem seleção) —
+    menuProduto.addEventListener('click', (e) => {
+      e.preventDefault();
+      ativarAbaProduto();
+      if (codigoSelecionado) {
+        renderMiniKanban(codigoSelecionado);
+      } else {
+        miniCodigoEl.textContent = '';
+        ulMiniFila.innerHTML     = '<li class="empty">Selecione um item na Fila de produção</li>';
+        ulMiniEmProd.innerHTML   = '<li class="empty">—</li>';
+      }
+    });
+
+    // — Voltar para a preparação ao clicar em Início —
+    menuInicio.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.querySelectorAll('#mainMenu .menu-link')
+              .forEach(a => a.classList.remove('is-active'));
+      menuInicio.classList.add('is-active');
+produtoTab.style.display = 'none';
+paginaPrep.style.display = 'block';
+
+    });
+  });
+
+
+  // ====== QR Code ======
+let qr;  // instância do leitor
+const qrModal = document.getElementById('qrModal');
+const qrClose = document.getElementById('qrClose');
+const btnIniciar = document.getElementById('btn-iniciar');
+
+async function abrirLeitorQR(){
+  // abre modal
+  qrModal.classList.add('open');
+
+  // cria instância se necessário
+  if (!qr) qr = new Html5Qrcode('qr-reader');
+
+  // escolhe câmera (traseira, se existir)
+  const cameras = await Html5Qrcode.getCameras();
+  const backCam = cameras.find(c => /back|traseira|rear/i.test(c.label)) || cameras[0];
+  if (!backCam) {
+    alert('Nenhuma câmera encontrada.');
+    fecharLeitorQR();
+    return;
+  }
+
+  // inicia captura
+  await qr.start(
+    backCam.id,
+    { fps: 10, qrbox: 300 },
+    (decodedText) => {
+      // ✅ SUCESSO: por enquanto só mostra e para
+      alert('QR lido: ' + decodedText);
+      fecharLeitorQR();
+    },
+    (errMsg) => {
+      // erros de leitura são normais durante o scanning (silencioso)
+    }
+  );
+}
+
+function fecharLeitorQR(){
+  // para a câmera e limpa
+  if (qr && qr.isScanning) {
+    qr.stop().then(() => qr.clear());
+  }
+  qrModal.classList.remove('open');
+}
+
+// Ações
+btnIniciar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  abrirLeitorQR().catch(err => {
+    console.error(err);
+    alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost.');
+    fecharLeitorQR();
+  });
+});
+qrClose?.addEventListener('click', fecharLeitorQR);
+// fecha clicando fora da caixa
+qrModal.addEventListener('click', (e) => {
+  if (e.target === qrModal) fecharLeitorQR();
+});
+// fecha com ESC
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && qrModal.classList.contains('open')) fecharLeitorQR();
+});
+
+</script>
+
+<!-- Modal do QR Code -->
+<div id="qrModal">
+  <div class="qr-box">
+    <div class="qr-header">
+      <h3>Ler QR Code</h3>
+      <button id="qrClose" class="qr-close" aria-label="Fechar">&times;</button>
+    </div>
+    <div id="qr-reader"></div>
+  </div>
+</div>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+
+</body>
+</html>
+

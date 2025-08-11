@@ -243,14 +243,47 @@ window.updateCustoReal = updateCustoReal;
  * @returns {Promise<void>} Resolve quando o processo é concluído.
  */
 async function handlePedidoCompra() {
-  dbg('Início do fluxo');
+dbg('Início do fluxo');
 
-  const erros = [];
-  const intProduto = $('productTitle').textContent.trim();
-  dbg('🔍 Código a pesquisar no CSV:', intProduto);
+/* -----------------------------------------------------------------
+   0) Códigos de referência
+   ----------------------------------------------------------------- */
+const idProduto  = [...document.querySelectorAll('#cadastroList li')]
+  .find(li => li.querySelector('.products')?.textContent.trim() === 'Código OMIE')
+  ?.querySelector('.status-text')?.textContent.trim() ?? '';
+
+if (!idProduto) {
+  alert('Código OMIE não encontrado. Abra a aba “Dados de cadastro” e tente de novo.');
+  return;
+}
+
+const intProduto = '(todos)';   // ← não usamos mais para filtrar, mas evita erro
+
+dbg('🔍 CSV → enviar TODAS as linhas | Código OMIE:', idProduto);
+
+  
 
   /* ---------- 1. Lê o CSV ----------------------------------------- */
-  const texto  = await fetch('/csv/Estrutura_produto.csv').then(r => r.text());
+  const file = await new Promise(resolve => {
+  const input = Object.assign(document.createElement('input'), {
+    type: 'file', accept: '.csv'
+  });
+  input.onchange = () => resolve(input.files[0] || null);
+  input.click();
+});
+
+if (!file) { dbg('🚫 Upload cancelado'); return; }
+
+// 1) envia para /api/upload/bom
+const fd = new FormData();
+fd.append('bom', file, 'BOM.csv');
+const up = await fetch('/api/upload/bom', { method:'POST', body: fd });
+if (!up.ok) { alert('Falha ao salvar CSV'); return; }
+
+// 2) lê o arquivo salvo
+const texto = await fetch('/csv/BOM.csv?'+Date.now()).then(r => r.text());
+
+
   const linhas = texto.trim().split(/\r?\n/);
   dbg(`📄 CSV carregado – ${linhas.length - 1} linhas (+ cabeçalho)`);
 
@@ -269,38 +302,17 @@ const campos = header
 
   dbg('🔑 Cabeçalho CSV:', campos.join(' | '));
 
-  const idxP = campos.indexOf('Identificação do Produto');
 
-  // procura de forma robusta por “Identificação do Produto Consumido”
-  const idxC = campos.findIndex(h =>
-    h.toLowerCase().includes('identificação do produto consumido')
-  );
-  
-  // procura por “Quantidade Prevista de Consumo”
-   // procura robusta por “Quantidade Prevista de Consumo”
-   const idxQ = campos.findIndex(h =>
-     /Quantidade\s+Prevista\s+de\s+Consumo/i.test(h)
-   );
-  
-  dbg('🗺️ Índices → Produto:', idxP,
-      'Consumido:', idxC,
-      'QtdeConsumo:', idxQ);
-  
-  if ([idxP, idxC, idxQ].some(i => i < 0)) {
-    dbg('❌ Colunas obrigatórias não encontradas → abortando');
-    return;
-  }
+const idxC = campos.findIndex(h => /descrição do produto/i.test(h));
+const idxQ = campos.findIndex(h => /qtde\s*prevista/i.test(h));
+if ([idxC, idxQ].some(i => i < 0)) {
+  dbg('❌ Colunas obrigatórias não encontradas → abortando');
+  return;
+}
 
-
-   /* ---------- 3. Conta linhas do produto -------------------------- */
-   const totalMatches = linhas.reduce((a, l) => {
-     const col = l
-       .split(splitPattern)
-       .map(s => s.replace(/^"|"$/g, '').trim());
-     return col[idxP] === intProduto ? a + 1 : a;
-   }, 0);
-  dbg(`📄 Encontradas ${totalMatches} linhas do produto`);
-  if (totalMatches === 0) return;
+/* ---------- 3. Total de linhas ---------------------------------- */
+const totalMatches = linhas.length;                // todas as linhas do CSV
+dbg(`📄 Encontradas ${totalMatches} linhas no CSV`);
 
   /* ---------- 4. Monta itens -------------------------------------- */
   const itens = [];
@@ -311,7 +323,7 @@ const campos = header
     const col = linhas[i]
       .split(splitPattern)
       .map(s => s.replace(/^"|"$/g, '').trim());
-    if (col[idxP] !== intProduto) continue;
+
   
     // ── debug dos valores brutos vindos do CSV
     const rawCod = col[idxC];
@@ -334,7 +346,8 @@ const campos = header
     }
   
     seq++;
-    dbg(`➡️  [${seq}/${totalMatches}] cod=${cod}, qtd=${qt}`);
+    dbg(`➡️  [${seq + 1}] cod=${cod}, qtd=${qt}`);
+
 
 /* --- consulta detalhes p/ pegar intProdMalha --- */
 const det = await fetch(
@@ -368,12 +381,12 @@ itens.push({
   /* ---------- 5. Envia único POST --------------------------------- */
   if (!itens.length) { dbg('⚠️ Nenhum item válido – nada a enviar'); return; }
 
-  const payload = {
-    call : 'IncluirEstrutura',
-    app_key : OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
-    param:[{ intProduto, itemMalhaIncluir: itens }]
-  };
+const payload = {
+  call       : 'IncluirEstrutura',
+  app_key    : OMIE_APP_KEY,
+  app_secret : OMIE_APP_SECRET,
+  param      : [{ idProduto, itemMalhaIncluir: itens }]
+};
   dbg('🚚 Payload FINAL →\n' + JSON.stringify(payload, null, 2));
 
   try {

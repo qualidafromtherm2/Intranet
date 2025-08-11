@@ -1,0 +1,26 @@
+[
+  {
+    "pedido": "Estoque",
+    "codigo": "04.PP.N.51004",
+    "quantidade": 1,
+    "local": [
+      "Fila de produção,P101059",
+      "Em produção,P101080",
+      "Fila de produção,P101083",
+      "Fila de produção,P101084",
+      "Fila de produção,P101085"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10569202060
+  },
+  {
+    "pedido": "Estoque",
+    "codigo": "04.PP.N.51005",
+    "quantidade": 1,
+    "local": [
+      "Fila de produção,P101082"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10569205330
+  }
+]
