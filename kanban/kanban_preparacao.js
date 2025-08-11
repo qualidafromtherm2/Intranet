@@ -174,15 +174,20 @@ function renderSearchResults(items, container) {
 
 
 function setupProductSearchByUl(ulId) {
-  const ul    = document.getElementById(ulId);
-  if (!ul) return;
+  const ul = document.getElementById(ulId);
+  if (!ul) return;                             // coluna nem existe
+
   const col   = ul.closest('.kanban-column');
+  if (!col) return;
+
   const input = col.querySelector('.add-search');
   const list  = col.querySelector('.add-results');
 
+  // ⚠️ Página sem UI de busca? Não faz nada.
+  if (!input || !list) return;
+
   let debounceId;
 
-  // 🔸 pesquisa enquanto digita
   input.addEventListener('input', () => {
     clearTimeout(debounceId);
     const q = input.value.trim().toLowerCase();
@@ -192,10 +197,12 @@ function setupProductSearchByUl(ulId) {
       list.innerHTML = '<li>Carregando catálogo…</li>';
       try {
         await buildTipo03Cache();
-        const resultados = tipo03Cache.filter(p =>
-          p.codigo.toLowerCase().includes(q) ||
-          (p.descricao || '').toLowerCase().includes(q)
-        ).sort((a, b) => a.codigo.localeCompare(b.codigo));
+        const resultados = tipo03Cache
+          .filter(p =>
+            p.codigo.toLowerCase().includes(q) ||
+            (p.descricao || '').toLowerCase().includes(q)
+          )
+          .sort((a, b) => a.codigo.localeCompare(b.codigo));
 
         renderSearchResults(resultados, list);
       } catch (err) {
@@ -204,34 +211,24 @@ function setupProductSearchByUl(ulId) {
     }, 300);
   });
 
-// 🔹 clique em um item da lista
-list.addEventListener('click', e => {
-  const li = e.target.closest('.result-item');
-  if (!li) return;
+  list.addEventListener('click', e => {
+    const li = e.target.closest('.result-item');
+    if (!li) return;
 
-  /* 0) guarda o código para a aba PCP */
-  window.prepCodigoSelecionado = li.dataset.codigo;   // ex.: "FTI55DPTBR"
+    window.prepCodigoSelecionado = li.dataset.codigo;
+    document
+      .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
+      ?.click();
 
-  /* 1) troca para a aba PCP (isso dispara renderListaPecasPCP internamente) */
-  document
-    .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
-    ?.click();
+    setTimeout(() => {
+      if (typeof renderListaPecasPCP === 'function') renderListaPecasPCP();
+    }, 80);
 
-  /* 2) relança renderListaPecasPCP após ~80 ms – garante atualização
-        mesmo que a função já tenha rodado antes com outro código        */
-  setTimeout(() => {
-    if (typeof renderListaPecasPCP === 'function') {
-      renderListaPecasPCP();
-    }
-  }, 80);   // ajuste se sua máquina precisar de um tempo diferente
-
-  /* 3) mantém o campo local preenchido e recolhe a lista */
-  input.value   = `${li.dataset.codigo} — ${li.dataset.desc}`;
-  list.innerHTML = '';
-});
-
-
+    input.value   = `${li.dataset.codigo} — ${li.dataset.desc}`;
+    list.innerHTML = '';
+  });
 }
+
 
 
 
@@ -239,25 +236,20 @@ list.addEventListener('click', e => {
 
 // Apenas estrutura inicial – lógica virá depois
 export async function initPreparacaoKanban() {
-   // 0) limpa colunas
-['coluna-prep-fila',
- 'coluna-prep-em-producao',
- 'coluna-prep-estoque']
+  ['coluna-prep-fila','coluna-prep-em-producao','coluna-prep-estoque']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
 
-     .forEach(id => document.getElementById(id).innerHTML = '');
-
-  // 1) carrega cache salvo em disco
   const cached = await carregarKanbanPreparacao();
   if (cached.length) {
     renderKanbanPreparacao(cached);
-    enableDragAndDrop(cached);
+    enableDragAndDrop?.(cached);
   }
 
-    setupAddToggleSolicitar();   // habilita o “+”
-    setupProductSearchByUl('coluna-prep-fila');
-
-
+  // Estes dois só fazem algo se a UI existir na página.
+  setupAddToggleSolicitar();
+  setupProductSearchByUl('coluna-prep-fila');
 }
+
 
 /* ——— listeners locais do “+” (Solicitar produção) ——— */
 document.addEventListener('click', e => {
@@ -266,23 +258,30 @@ document.addEventListener('click', e => {
   const container = coluna.querySelector('.add-container');
   container.classList.toggle('open');
 });
+
+
 function setupAddToggleSolicitar() {
   const colElem = document.getElementById('coluna-prep-fila');
   if (!colElem) return;
-  const col = colElem.closest('.kanban-column');
+
+  const col   = colElem.closest('.kanban-column');
   if (!col) return;
 
   const btn   = col.querySelector('.add-btn');
   const input = col.querySelector('.add-search');
+
+  // ⚠️ Se a página não tem botão/campo, não arma o toggle.
+  if (!btn || !input) return;
+
   btn.addEventListener('click', () => {
-   collapseSearchPanel();                // fecha outros painéis primeiro
-   col.classList.toggle('search-expand');
+    collapseSearchPanel?.();               // ok se não existir
+    col.classList.toggle('search-expand');
     if (col.classList.contains('search-expand')) {
       setTimeout(() => input.focus(), 100);
       buildTipo03Cache().catch(err =>
-  console.error('[Tipo03] falha ao construir cache:', err)
-);
-
+        console.error('[Tipo03] falha ao construir cache:', err)
+      );
     }
   });
 }
+

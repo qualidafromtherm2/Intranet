@@ -41,7 +41,7 @@
     font-size: 26px; line-height: 1; cursor: pointer; color: inherit;
   }
   /* o container que o html5-qrcode usa ajusta sozinho */
-  #qr-reader{ width:100%; }
+  #qrReader{ width:100%; }
 </style>
 
 
@@ -183,11 +183,12 @@
 
     <!-- 🟦 Coluna 1: Fila de produção -->
     <div class="kanban-column">
-      <div class="kanban-header">
-        <div class="title-wrapper">
-          <span>Fila de produção</span>
-        </div>
-      </div>
+<div class="kanban-header">
+  <div class="title-wrapper"><span>Fila de produção</span></div>
+  <i class="fas fa-plus add-btn" style="display:none"></i>
+  <div class="add-container" style="display:none"></div>
+</div>
+
       <ul id="coluna-prep-fila" class="kanban-list"></ul>
     </div>
 
@@ -268,18 +269,21 @@
 
 
 
- <!-- PapaParse 5.3.2 com hash corrigido -->
-
-
-  <script type="module" src="login/login.js"></script>
 
 
   <!-- coloca logo antes do fechamento do body -->
+<!-- coloque ANTES do seu script de inicialização -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script type="module" src="./kanban/kanban.js" defer></script>
+
+<!-- coloca logo antes do fechamento do body -->
 <script type="module">
   import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
 
+  // use SEMPRE window.Html5Qrcode para garantir o escopo global
+  const Html5Qrcode = window.Html5Qrcode;
+
   document.addEventListener('DOMContentLoaded', () => {
-    // monta as colunas do Kanban principal desta página
     initPreparacaoKanban();
 
 const menuInicio    = document.getElementById('menu-inicio');
@@ -293,7 +297,8 @@ const ulMiniEmProd  = document.getElementById('prod-col-emprod');      // <ul id
 
     let codigoSelecionado = null;
 
-function ativarAbaProduto() {
+window.ativarAbaProduto = function ativarAbaProduto() {
+
   document.querySelectorAll('#mainMenu .menu-link')
           .forEach(a => a.classList.remove('is-active'));
   menuProduto.classList.add('is-active');
@@ -386,45 +391,130 @@ produtoTab.style.display = 'none';
 paginaPrep.style.display = 'block';
 
     });
+
   });
 
 
-  // ====== QR Code ======
-let qr;  // instância do leitor
-const qrModal = document.getElementById('qrModal');
-const qrClose = document.getElementById('qrClose');
-const btnIniciar = document.getElementById('btn-iniciar');
 
-async function abrirLeitorQR(){
-  // abre modal
-  qrModal.classList.add('open');
+  // ===== Leitor QR (somente nesta página) =====
+  const btnIniciar = document.getElementById('btn-iniciar');
+  const qrModal    = document.getElementById('qrModal');
+  const qrClose    = document.getElementById('qrClose');
 
-  // cria instância se necessário
-  if (!qr) qr = new Html5Qrcode('qr-reader');
+  async function abrirLeitorQR() {
+    if (typeof window.Html5Qrcode !== 'function') {
+      alert('Leitor indisponível. Recarregue a página.');
+      return;
+    }
 
-  // escolhe câmera (traseira, se existir)
-  const cameras = await Html5Qrcode.getCameras();
-  const backCam = cameras.find(c => /back|traseira|rear/i.test(c.label)) || cameras[0];
-  if (!backCam) {
-    alert('Nenhuma câmera encontrada.');
-    fecharLeitorQR();
-    return;
+    qrModal.style.display = 'block';
+
+    const html5QrCode = new window.Html5Qrcode('qrReader');
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+    const finalize = async () => {
+      try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+      qrModal.style.display = 'none';
+    };
+
+    try {
+      await html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText /*, decodedResult*/) => {
+  // 1) pega o valor após a 1ª vírgula (ex.: "... , P101086")
+  const op = (decodedText.split(',')[1] || decodedText).trim();
+
+  // 2) carimba data/hora
+  const agora   = new Date();
+  const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
+                  agora.toLocaleTimeString('pt-BR', { hour12:false });
+
+  // 3) busca o JSON atual
+  fetch('data/kanban_preparacao.json', { cache:'no-store' })
+    .then(r => r.json())
+    .then(lista => {
+      // 4) acha o item cujo "local" tem "Fila de produção,OP"
+      let alvo = null, idx = -1;
+      for (const it of lista) {
+        idx = (it.local || []).findIndex(l =>
+          l.startsWith('Fila de produção,') && l.includes(op)
+        );
+        if (idx !== -1) { alvo = it; break; }
+      }
+
+      if (!alvo) {
+        alert(`OP ${op} não encontrada na Fila de produção.`);
+        return;
+      }
+
+      // 5) troca para "Em produção,OP,DATA - HORA"
+      alvo.local[idx] = `Em produção,${op},${carimbo}`;
+
+      // 6) abre a guia Produto e renderiza SOMENTE com este item "alvo"
+      ativarAbaProduto();
+
+      // escreve o código no título da guia
+      document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
+
+      // zera as colunas da mini-board
+      const ulMiniFila   = document.getElementById('prod-col-fila');
+      const ulMiniEmProd = document.getElementById('prod-col-emprod');
+      ulMiniFila.innerHTML = '';
+      ulMiniEmProd.innerHTML = '';
+
+      // 7) redesenha a mini-board usando o "alvo" já atualizado (sem re-buscar o JSON)
+      (alvo.local || []).forEach(linha => {
+        const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
+        const li = document.createElement('li');
+        li.classList.add('kanban-card');
+        // no mini kanban mostramos OP + (se houver) timestamp
+        li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
+
+        if (status === 'Fila de produção') ulMiniFila.appendChild(li);
+        else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
+      });
+
+      if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
+      if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Falha ao ler/atualizar a fila local.');
+    })
+    .finally(() => {
+      // 8) fecha o leitor
+      finalize();
+    });
+}
+
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost e libere a permissão.');
+      finalize();
+    }
+
+    // fechar no X
+    qrClose.onclick = finalize;
+    // fechar clicando fora
+    qrModal.onclick = (e) => { if (e.target === qrModal) finalize(); };
+    // fechar com ESC
+    document.addEventListener('keydown', function onEsc(ev){
+      if (ev.key === 'Escape' && qrModal.style.display === 'block') {
+        document.removeEventListener('keydown', onEsc);
+        finalize();
+      }
+    });
   }
 
-  // inicia captura
-  await qr.start(
-    backCam.id,
-    { fps: 10, qrbox: 300 },
-    (decodedText) => {
-      // ✅ SUCESSO: por enquanto só mostra e para
-      alert('QR lido: ' + decodedText);
-      fecharLeitorQR();
-    },
-    (errMsg) => {
-      // erros de leitura são normais durante o scanning (silencioso)
-    }
-  );
-}
+  // botão “Iniciar produção”
+  btnIniciar?.addEventListener('click', (e) => {
+    e.preventDefault();
+    abrirLeitorQR();
+  });
+
+
 
 function fecharLeitorQR(){
   // para a câmera e limpa
@@ -455,17 +545,14 @@ document.addEventListener('keydown', (e) => {
 
 </script>
 
-<!-- Modal do QR Code -->
-<div id="qrModal">
-  <div class="qr-box">
-    <div class="qr-header">
-      <h3>Ler QR Code</h3>
-      <button id="qrClose" class="qr-close" aria-label="Fechar">&times;</button>
-    </div>
-    <div id="qr-reader"></div>
+<!-- Modal simples do QR -->
+<div id="qrModal" class="modal" style="display:none;">
+  <div class="modal-content" style="max-width:520px;">
+    <span class="close-modal" id="qrClose">&times;</span>
+    <h3>Ler QR-Code</h3>
+    <div id="qrReader" style="width:480px; height:320px; margin-top:10px;"></div>
   </div>
 </div>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
 
 </body>
 </html>
