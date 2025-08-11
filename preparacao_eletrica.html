@@ -454,7 +454,10 @@ async function abrirLeitorQR() {
 
   // quando ler um QR
   const onScan = (decodedText /*, decodedResult*/) => {
-    const op = (decodedText.split(',')[1] || decodedText).trim();
+// pega só o trecho que começa com P seguido de dígitos (ex.: ...-P101091)
+const m  = decodedText.match(/P\d{3,}/i);
+const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText)).trim().toUpperCase();
+
     const agora   = new Date();
     const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
                     agora.toLocaleTimeString('pt-BR', { hour12:false });
