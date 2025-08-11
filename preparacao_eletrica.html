@@ -414,149 +414,161 @@ paginaPrep.style.display = 'block';
     }
   }
 
-  async function abrirLeitorQR() {
-    if (typeof window.Html5Qrcode !== 'function') {
-      alert('Leitor indisponível. Recarregue a página.');
+async function abrirLeitorQR() {
+  if (typeof window.Html5Qrcode !== 'function') {
+    alert('Leitor indisponível. Recarregue a página.');
+    return;
+  }
+
+  // 0) pré-pedido de permissão (isso dispara o prompt no mobile)
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    s.getTracks().forEach(t => t.stop());
+  } catch (err) {
+    console.error('Permissão negada/indisponível:', err);
+    alert('Não foi possível abrir a câmera.\nVerifique a permissão da câmera nas configurações do site (cadeado > Permissões).');
+    return;
+  }
+
+  // 1) abre o modal
+  qrModal.style.display = 'block';
+
+  // 2) escolhe a traseira se der
+  async function pickRearCamera() {
+    try {
+      const devices = await window.Html5Qrcode.getCameras();
+      if (!devices || !devices.length) return null;
+      const prefer = devices.find(d => /back|trás|rear|environment/i.test(d.label));
+      return (prefer?.id) || devices[0].id;
+    } catch {
+      return null;
+    }
+  }
+  const cameraId = await pickRearCamera();
+
+  // 3) instancia o leitor
+  const html5QrCode = new window.Html5Qrcode('qrReader');
+
+  // handler comum quando um QR é lido
+  const onScan = (decodedText /*, decodedResult*/) => {
+    const op = (decodedText.split(',')[1] || decodedText).trim();
+    const agora   = new Date();
+    const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
+                    agora.toLocaleTimeString('pt-BR', { hour12:false });
+
+    fetch('data/kanban_preparacao.json', { cache:'no-store' })
+      .then(r => r.json())
+      .then(lista => {
+        let alvo = null, idx = -1;
+        for (const it of lista) {
+          idx = (it.local || []).findIndex(l =>
+            l.startsWith('Fila de produção,') && l.includes(op)
+          );
+          if (idx !== -1) { alvo = it; break; }
+        }
+        if (!alvo) { alert(`OP ${op} não encontrada na Fila de produção.`); return; }
+
+        // move para Em produção com timestamp
+        alvo.local[idx] = `Em produção,${op},${carimbo}`;
+
+        // mostra na guia Produto
+        window.ativarAbaProduto?.();
+        document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
+
+        const ulMiniFila   = document.getElementById('prod-col-fila');
+        const ulMiniEmProd = document.getElementById('prod-col-emprod');
+        ulMiniFila.innerHTML = '';
+        ulMiniEmProd.innerHTML = '';
+        (alvo.local || []).forEach(linha => {
+          const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
+          const li = document.createElement('li');
+          li.classList.add('kanban-card');
+          li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
+          if (status === 'Fila de produção') ulMiniFila.appendChild(li);
+          else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
+        });
+        if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
+        if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+      })
+      .catch(err => { console.error(err); alert('Falha ao ler/atualizar a fila local.'); })
+      .finally(finalize);
+  };
+
+  // função para fechar e limpar
+  const finalize = async () => {
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+    qrModal.style.display = 'none';
+  };
+
+  // 4) primeira tentativa (qualidade melhor)
+  const qrboxSide = Math.min(360, Math.floor(window.innerWidth * 0.9));
+  const configGood = {
+    fps: 15,
+    qrbox: { width: qrboxSide, height: qrboxSide },
+    aspectRatio: 1.777,
+    videoConstraints: {
+      facingMode: 'environment',
+      focusMode: 'continuous',
+      width:  { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+
+  try {
+    await html5QrCode.start(
+      cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
+      configGood,
+      onScan
+    );
+
+    // pós-start: tenta melhorar foco/zoom/torch se suportado
+    if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
+        typeof html5QrCode.applyVideoConstraints === 'function') {
+      const caps = await html5QrCode.getRunningTrackCapabilities();
+      const adv = [];
+      if (caps?.torch) adv.push({ torch: true });
+      const focusModes = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
+      if (focusModes?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
+      if (caps?.zoom) {
+        const target = Math.min(caps.zoom.max ?? 1, Math.max(caps.zoom.min ?? 1, 2));
+        adv.push({ zoom: target });
+      }
+      if (adv.length) { try { await html5QrCode.applyVideoConstraints({ advanced: adv }); } catch {} }
+    }
+  } catch (err) {
+    console.warn('Tentativa 1 falhou:', err?.name, err?.message);
+
+    // 5) fallback “leve” (mais compatível)
+    try {
+      await html5QrCode.start(
+        cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
+        { fps: 10, qrbox: 250 },   // sem aspectRatio, sem width/height ideais
+        onScan
+      );
+    } catch (err2) {
+      console.error('Fallback também falhou:', err2?.name, err2?.message);
+      let dica = 'Verifique se a permissão da câmera está liberada nas configurações do site.';
+      if (err2?.name === 'NotAllowedError')  dica = 'Permissão negada. Toque no cadeado > Câmera > Permitir e recarregue.';
+      if (err2?.name === 'NotFoundError')    dica = 'Nenhuma câmera foi encontrada neste dispositivo.';
+      if (err2?.name === 'NotReadableError') dica = 'Câmera em uso por outro app. Feche outros apps de câmera e tente de novo.';
+      if (err2?.name === 'SecurityError')    dica = 'Precisa de HTTPS (ou localhost).';
+      alert('Não foi possível abrir a câmera.\n' + dica);
+      finalize();
       return;
     }
-
-    qrModal.style.display = 'block';
-
-const html5QrCode = new window.Html5Qrcode('qrReader');
-
-// tamanho do quadrado de leitura — maior no desktop, menor no mobile
-const qrboxSide = Math.min(360, Math.floor(window.innerWidth * 0.8));
-
-// tenta pegar a câmera traseira real; se não achar, usa facingMode
-const cameraId = await pickRearCamera();
-
-// config mais “robusta” para celular
-const config = {
-  fps: 15,                         // taxa boa p/ foco e leitura
-  qrbox: { width: qrboxSide, height: qrboxSide },
-  aspectRatio: 1.777,              // 16:9 costuma funcionar melhor no mobile
-  videoConstraints: {
-    // se cameraId existir, ele será usado no start (abaixo)
-    facingMode: 'environment',
-    focusMode: 'continuous',       // alguns navegadores ignoram, outros respeitam
-    width:  { ideal: 1280 },
-    height: { ideal: 720 }
-  }
-};
-
-const finalize = async () => {
-  try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-  qrModal.style.display = 'none';
-};
-
-try {
-  await html5QrCode.start(
-    cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
-    config,
-    (decodedText /*, decodedResult*/) => {
-      // ======= seu handler de QR (permanece igual) =======
-      const op = (decodedText.split(',')[1] || decodedText).trim();
-      const agora   = new Date();
-      const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
-                      agora.toLocaleTimeString('pt-BR', { hour12:false });
-
-      fetch('data/kanban_preparacao.json', { cache:'no-store' })
-        .then(r => r.json())
-        .then(lista => {
-          let alvo = null, idx = -1;
-          for (const it of lista) {
-            idx = (it.local || []).findIndex(l =>
-              l.startsWith('Fila de produção,') && l.includes(op)
-            );
-            if (idx !== -1) { alvo = it; break; }
-          }
-
-          if (!alvo) {
-            alert(`OP ${op} não encontrada na Fila de produção.`);
-            return;
-          }
-
-          alvo.local[idx] = `Em produção,${op},${carimbo}`;
-          window.ativarAbaProduto?.();
-          document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
-
-          const ulMiniFila   = document.getElementById('prod-col-fila');
-          const ulMiniEmProd = document.getElementById('prod-col-emprod');
-          ulMiniFila.innerHTML = '';
-          ulMiniEmProd.innerHTML = '';
-
-          (alvo.local || []).forEach(linha => {
-            const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
-            const li = document.createElement('li');
-            li.classList.add('kanban-card');
-            li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
-            if (status === 'Fila de produção') ulMiniFila.appendChild(li);
-            else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
-          });
-
-          if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
-          if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-        })
-        .catch(err => {
-          console.error(err);
-          alert('Falha ao ler/atualizar a fila local.');
-        })
-        .finally(() => finalize());
-      // ======= /handler =======
-    }
-  );
-
-  // Pós-start: tenta melhorar foco, zoom e ligar torch se suportado
-  if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
-      typeof html5QrCode.applyVideoConstraints === 'function') {
-    const caps = await html5QrCode.getRunningTrackCapabilities();
-    const adv = [];
-
-    // liga o flash/torch se existir
-    if (caps?.torch) adv.push({ torch: true });
-
-    // solicita foco contínuo, quando suportado (string ou array)
-    const focusModes = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
-    if (focusModes?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
-
-    // um pouco de zoom ajuda MUITO a focar QR pequeno
-    if (caps?.zoom) {
-      const target = Math.min(caps.zoom.max ?? 1, Math.max(caps.zoom.min ?? 1, 2));
-      adv.push({ zoom: target });
-    }
-
-    if (adv.length) {
-      try { await html5QrCode.applyVideoConstraints({ advanced: adv }); } catch {}
-    }
   }
 
-} catch (err) {
-  console.error('start() falhou:', err, 'name=', err?.name, 'message=', err?.message);
-  let dica = 'Verifique se a permissão da câmera está liberada nas configurações do site.';
-  if (err?.name === 'NotAllowedError')  dica = 'Permissão negada. Toque no cadeado > Câmera > Permitir e recarregue.';
-  if (err?.name === 'NotFoundError')    dica = 'Nenhuma câmera foi encontrada neste dispositivo.';
-  if (err?.name === 'NotReadableError') dica = 'Câmera em uso por outro app. Feche outros apps de câmera e tente de novo.';
-  if (err?.name === 'SecurityError')    dica = 'Precisa de HTTPS (ou localhost).';
-  if (err?.name === 'OverconstrainedError') dica = 'As configurações de vídeo não são suportadas. Vou tentar relaxar as constraints.';
-
-  alert('Não foi possível abrir a câmera.\n' + dica);
-  finalize();
+  // fechar no X / fora / ESC
+  qrClose.onclick = finalize;
+  qrModal.onclick = (e) => { if (e.target === qrModal) finalize(); };
+  document.addEventListener('keydown', function onEsc(ev){
+    if (ev.key === 'Escape' && qrModal.style.display === 'block') {
+      document.removeEventListener('keydown', onEsc);
+      finalize();
+    }
+  });
 }
 
-
-
-    // fechar no X
-    qrClose.onclick = finalize;
-    // fechar clicando fora
-    qrModal.onclick = (e) => { if (e.target === qrModal) finalize(); };
-    // fechar com ESC
-    document.addEventListener('keydown', function onEsc(ev){
-      if (ev.key === 'Escape' && qrModal.style.display === 'block') {
-        document.removeEventListener('keydown', onEsc);
-        finalize();
-      }
-    });
-  }
 
   // botão “Iniciar produção”
   btnIniciar?.addEventListener('click', (e) => {
