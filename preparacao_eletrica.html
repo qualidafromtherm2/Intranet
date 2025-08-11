@@ -401,6 +401,19 @@ paginaPrep.style.display = 'block';
   const qrModal    = document.getElementById('qrModal');
   const qrClose    = document.getElementById('qrClose');
 
+
+    // Escolhe a câmera traseira (quando houver)
+  async function pickRearCamera() {
+    try {
+      const devices = await window.Html5Qrcode.getCameras();
+      if (!devices || !devices.length) return null;
+      const prefer = devices.find(d => /back|trás|rear|environment/i.test(d.label));
+      return (prefer?.id) || devices[0].id; // fallback para a 1ª
+    } catch {
+      return null;
+    }
+  }
+
   async function abrirLeitorQR() {
     if (typeof window.Html5Qrcode !== 'function') {
       alert('Leitor indisponível. Recarregue a página.');
@@ -409,91 +422,120 @@ paginaPrep.style.display = 'block';
 
     qrModal.style.display = 'block';
 
-    const html5QrCode = new window.Html5Qrcode('qrReader');
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+const html5QrCode = new window.Html5Qrcode('qrReader');
 
-    const finalize = async () => {
-      try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-      qrModal.style.display = 'none';
-    };
+// tamanho do quadrado de leitura — maior no desktop, menor no mobile
+const qrboxSide = Math.min(360, Math.floor(window.innerWidth * 0.8));
 
-    try {
-      await html5QrCode.start(
-        { facingMode: 'environment' },
-        config,
-        (decodedText /*, decodedResult*/) => {
-  // 1) pega o valor após a 1ª vírgula (ex.: "... , P101086")
-  const op = (decodedText.split(',')[1] || decodedText).trim();
+// tenta pegar a câmera traseira real; se não achar, usa facingMode
+const cameraId = await pickRearCamera();
 
-  // 2) carimba data/hora
-  const agora   = new Date();
-  const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
-                  agora.toLocaleTimeString('pt-BR', { hour12:false });
+// config mais “robusta” para celular
+const config = {
+  fps: 15,                         // taxa boa p/ foco e leitura
+  qrbox: { width: qrboxSide, height: qrboxSide },
+  aspectRatio: 1.777,              // 16:9 costuma funcionar melhor no mobile
+  videoConstraints: {
+    // se cameraId existir, ele será usado no start (abaixo)
+    facingMode: 'environment',
+    focusMode: 'continuous',       // alguns navegadores ignoram, outros respeitam
+    width:  { ideal: 1280 },
+    height: { ideal: 720 }
+  }
+};
 
-  // 3) busca o JSON atual
-  fetch('data/kanban_preparacao.json', { cache:'no-store' })
-    .then(r => r.json())
-    .then(lista => {
-      // 4) acha o item cujo "local" tem "Fila de produção,OP"
-      let alvo = null, idx = -1;
-      for (const it of lista) {
-        idx = (it.local || []).findIndex(l =>
-          l.startsWith('Fila de produção,') && l.includes(op)
-        );
-        if (idx !== -1) { alvo = it; break; }
-      }
+const finalize = async () => {
+  try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+  qrModal.style.display = 'none';
+};
 
-      if (!alvo) {
-        alert(`OP ${op} não encontrada na Fila de produção.`);
-        return;
-      }
+try {
+  await html5QrCode.start(
+    cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
+    config,
+    (decodedText /*, decodedResult*/) => {
+      // ======= seu handler de QR (permanece igual) =======
+      const op = (decodedText.split(',')[1] || decodedText).trim();
+      const agora   = new Date();
+      const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
+                      agora.toLocaleTimeString('pt-BR', { hour12:false });
 
-      // 5) troca para "Em produção,OP,DATA - HORA"
-      alvo.local[idx] = `Em produção,${op},${carimbo}`;
+      fetch('data/kanban_preparacao.json', { cache:'no-store' })
+        .then(r => r.json())
+        .then(lista => {
+          let alvo = null, idx = -1;
+          for (const it of lista) {
+            idx = (it.local || []).findIndex(l =>
+              l.startsWith('Fila de produção,') && l.includes(op)
+            );
+            if (idx !== -1) { alvo = it; break; }
+          }
 
-      // 6) abre a guia Produto e renderiza SOMENTE com este item "alvo"
-      ativarAbaProduto();
+          if (!alvo) {
+            alert(`OP ${op} não encontrada na Fila de produção.`);
+            return;
+          }
 
-      // escreve o código no título da guia
-      document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
+          alvo.local[idx] = `Em produção,${op},${carimbo}`;
+          window.ativarAbaProduto?.();
+          document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
 
-      // zera as colunas da mini-board
-      const ulMiniFila   = document.getElementById('prod-col-fila');
-      const ulMiniEmProd = document.getElementById('prod-col-emprod');
-      ulMiniFila.innerHTML = '';
-      ulMiniEmProd.innerHTML = '';
+          const ulMiniFila   = document.getElementById('prod-col-fila');
+          const ulMiniEmProd = document.getElementById('prod-col-emprod');
+          ulMiniFila.innerHTML = '';
+          ulMiniEmProd.innerHTML = '';
 
-      // 7) redesenha a mini-board usando o "alvo" já atualizado (sem re-buscar o JSON)
-      (alvo.local || []).forEach(linha => {
-        const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
-        const li = document.createElement('li');
-        li.classList.add('kanban-card');
-        // no mini kanban mostramos OP + (se houver) timestamp
-        li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
+          (alvo.local || []).forEach(linha => {
+            const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
+            const li = document.createElement('li');
+            li.classList.add('kanban-card');
+            li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
+            if (status === 'Fila de produção') ulMiniFila.appendChild(li);
+            else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
+          });
 
-        if (status === 'Fila de produção') ulMiniFila.appendChild(li);
-        else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
-      });
+          if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
+          if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+        })
+        .catch(err => {
+          console.error(err);
+          alert('Falha ao ler/atualizar a fila local.');
+        })
+        .finally(() => finalize());
+      // ======= /handler =======
+    }
+  );
 
-      if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
-      if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-    })
-    .catch(err => {
-      console.error(err);
-      alert('Falha ao ler/atualizar a fila local.');
-    })
-    .finally(() => {
-      // 8) fecha o leitor
-      finalize();
-    });
+  // Pós-start: tenta melhorar foco, zoom e ligar torch se suportado
+  if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
+      typeof html5QrCode.applyVideoConstraints === 'function') {
+    const caps = await html5QrCode.getRunningTrackCapabilities();
+    const adv = [];
+
+    // liga o flash/torch se existir
+    if (caps?.torch) adv.push({ torch: true });
+
+    // solicita foco contínuo, quando suportado (string ou array)
+    const focusModes = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
+    if (focusModes?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
+
+    // um pouco de zoom ajuda MUITO a focar QR pequeno
+    if (caps?.zoom) {
+      const target = Math.min(caps.zoom.max ?? 1, Math.max(caps.zoom.min ?? 1, 2));
+      adv.push({ zoom: target });
+    }
+
+    if (adv.length) {
+      try { await html5QrCode.applyVideoConstraints({ advanced: adv }); } catch {}
+    }
+  }
+
+} catch (err) {
+  console.error(err);
+  alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost e libere a permissão.');
+  finalize();
 }
 
-      );
-    } catch (err) {
-      console.error(err);
-      alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost e libere a permissão.');
-      finalize();
-    }
 
     // fechar no X
     qrClose.onclick = finalize;
