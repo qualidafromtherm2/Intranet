@@ -19,6 +19,8 @@ const archiver = require('archiver');
 const crypto   = require('crypto');
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
+const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
+const app = express();
 
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
@@ -112,11 +114,34 @@ function nextOpFromKanban () {
   }
 }
 
+function lerEstoque() {
+  return JSON.parse(fs.readFileSync(estoquePath, 'utf8'));
+}
+function gravarEstoque(obj) {
+  fs.writeFileSync(estoquePath, JSON.stringify(obj, null, 2), 'utf8');
+}
+
+/* GET /api/serie/next/:codigo → { ns:"101002" } */
+app.get('/api/serie/next/:codigo', (req, res) => {
+  const codReq = req.params.codigo.toLowerCase();
+  const db = lerEstoque();
+
+  const item = db.find(p => (p.codigo || '').toLowerCase() === codReq);
+  if (!item || !Array.isArray(item.NS) || !item.NS.length)
+    return res.status(404).json({ error: 'Sem NS disponível' });
+
+  const ns = item.NS.sort()[0];            // menor disponível
+  item.NS = item.NS.filter(n => n !== ns); // remove
+  item.quantidade = item.NS.length;        // atualiza qtd
+
+  gravarEstoque(db);
+  res.json({ ns });
+});
 
 // ——————————————————————————————
 // 2) Cria a app e configura middlewares globais
 // ——————————————————————————————
-const app = express();
+
 
 
 // ——— Etiquetas ————————————————————
@@ -174,6 +199,10 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
 
 const kanbanRouter = require('./routes/kanban');
 app.use('/api/kanban', kanbanRouter);
+const kanbanPrepRouter = require('./routes/kanban_preparacao');
+app.use('/api/kanban_preparacao', kanbanPrepRouter);
+
+
 
 // Parser JSON para todas as rotas
 app.use(express.json());
@@ -202,6 +231,37 @@ app.get('/api/etiquetas/pending', (req, res) => {
   }));
 
   res.json(list);
+});
+
+// NOVO – salva o buffer em csv/BOM.csv
+app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
+  try {
+    const destDir  = path.join(__dirname, 'csv');
+    const destFile = path.join(destDir, 'BOM.csv');
+
+    // cria a pasta csv/ se não existir
+ const fsp = require('fs').promises;           // coloque no topo se ainda não existir
+ await fsp.mkdir(destDir, { recursive: true });
+ await fsp.writeFile(destFile, req.file.buffer);
+if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[upload/bom]', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Grava um ZPL pronto vindo do front
+app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
+  const { file, zpl, tipo = 'Teste' } = req.body || {};
+  if (!file || !zpl) return res.status(400).json({ error: 'faltam campos' });
+
+  const pasta = path.join(__dirname, 'etiquetas', tipo);
+  if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
+
+  fs.writeFileSync(path.join(pasta, file), zpl.trim(), 'utf8');
+  res.json({ ok: true });
 });
 
 /* ============================================================================
@@ -248,7 +308,8 @@ function wrapText(text, maxChars) {
    ============================================================================ */
 app.post('/api/etiquetas', async (req, res) => {
   try {
-    const { numeroOP, tipo = 'Expedicao', codigo } = req.body;
+    const { numeroOP, tipo = 'Expedicao', codigo, ns } = req.body;
+
 
       // Garante existência da pasta dinâmica (Teste ou Expedicao)
   const folder = path.join(__dirname, 'etiquetas', tipo);
@@ -428,8 +489,8 @@ const zpl = `
 ^A0R,25,25                 ; tamanho da letra do NS numero de serie
 ^FO585,600^FR^FDNS:^FS
 ^A0R,40,40
-^FO585,640^FR^FH_^FD${numeroOP}^FS   ; X aproximado
-^FO580,825^BQN,2,3^FH_^FDLA,${numeroOP}^FS
+^FO585,640^FR^FH_^FD${ns || numeroOP}^FS
+^FO580,825^BQN,2,3^FH_^FDLA,${ns || numeroOP}^FS
 ^FO30,450^GB545,2,2^FS
 
 ; ── BLOCO ESQUERDO (CSV) ────────────────────────────────────────────────
@@ -510,38 +571,50 @@ const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
 // rota para listar ordem de produção para ver qual a ultima op gerada
 app.post('/api/omie/produtos/op', async (req, res) => {
   try {
+    /* 1. Payload recebido */
+    const front = req.body;
 
-
-const novoCodInt = nextOpFromKanban();      // ex.: "21001"
-
-    const linha = `[${new Date().toISOString()}] Geração de OP – Pedido: ${req.body.param?.[0]?.identificacao?.nCodPed}, Código OP: ${novoCodInt}\n`;
-fs.appendFile(LOG_FILE, linha, err => {
-  if (err) console.error('Erro ao gravar log de OP:', err);
-});
-
-    // ---- monta payload FINAL (usa tudo que veio do front) ----
-    const front = req.body;                         // título, qtde, etc.
+    /* 2. Define (ou reaproveita) o código da OP */
+    let novoCodInt = front.param?.[0]?.identificacao?.cCodIntOP
+                  || nextOpFromKanban();
     front.param[0].identificacao.cCodIntOP = novoCodInt;
 
-    // ---- tenta criar OP; se colidir, faz +1 até 5 tentativas ----
+    /* 3. Agora SIM é seguro registrar no log */
+    const linha = `[${new Date().toISOString()}] Geração de OP – Pedido: ${front.param?.[0]?.identificacao?.nCodPed}, Código OP: ${novoCodInt}\n`;
+    fs.appendFile(LOG_FILE, linha, err => {
+      if (err) console.error('Erro ao gravar log de OP:', err);
+    });
+
+    /* 4. Logs de depuração */
+    console.log('[produtos/op] nCodProduto enviado →',
+                front.param?.[0]?.identificacao?.nCodProduto);
+    console.log('[produtos/op] payload completo →\n',
+                JSON.stringify(front, null, 2));
+
+    /* 5. Tenta incluir OP (até 5 tentativas em caso de duplicidade) */
     let tentativa = 0;
     let resposta;
+
     while (tentativa < 5) {
- resposta = await omieCall(
-   'https://app.omie.com.br/api/v1/produtos/op/',
-   front
- );
-      if (resposta?.faultcode === 'SOAP-ENV:Client-102') {   // duplicado
+      resposta = await omieCall(
+        'https://app.omie.com.br/api/v1/produtos/op/',
+        front
+      );
+
+      if (resposta?.faultcode === 'SOAP-ENV:Client-102') { // já existe
+        novoCodInt = nextOpFromKanban();                   // pega próximo
+        front.param[0].identificacao.cCodIntOP = novoCodInt;
         tentativa++;
         continue;
       }
-      break;  // sucesso ou outro erro
+      break; // sucesso ou erro diferente
     }
 
     res.status(resposta?.faultstring ? 500 : 200).json(resposta);
+
   } catch (err) {
     console.error('[produtos/op] erro →', err);
-    res.status(err.status||500).json({ error:String(err) });
+    res.status(err.status || 500).json({ error: String(err) });
   }
 });
 
@@ -566,6 +639,170 @@ app.post('/api/omie/pedidos', express.json(), async (req, res) => {
   }
 });
 
+// ─── Ajuste / Transferência de estoque ───────────────────────────
+app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
+  // 1) loga o que veio do browser
+  console.log('\n[ajuste] payload recebido →\n',
+              JSON.stringify(req.body, null, 2));
+
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/estoque/ajuste/',
+      req.body
+    );
+
+    // 2) loga a resposta OK do OMIE
+    console.log('[ajuste] OMIE respondeu OK →\n',
+                JSON.stringify(data, null, 2));
+
+    return res.json(data);
+
+  } catch (err) {
+    // 3) loga a falha (faultstring, faultcode, etc.)
+    console.error('[ajuste] ERRO OMIE →',
+                  err.faultstring || err.message,
+                  '\nDetalhes:', err);
+
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message, details: err });
+  }
+});
+
+//------------------------------------------------------------------
+// Armazéns → Almoxarifado (POSIÇÃO DE ESTOQUE)
+//------------------------------------------------------------------
+app.post(
+  '/api/armazem/almoxarifado',
+  express.json(),                     // garante req.body parseado
+async (req, res) => {
+  try {
+    // 1) CHAMADA RÁPIDA: pega só o total ---------------------------
+    const payload1 = {
+      call : 'ListarPosEstoque',
+      app_key   : OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param : [{
+        nPagina: 1,
+        nRegPorPagina: 1,                    // ← apenas 1 registro
+        dDataPosicao: new Date().toLocaleDateString('pt-BR'),
+        cExibeTodos : 'N',
+        codigo_local_estoque : 10408201806
+      }]
+    };
+    const r1 = await omieCall(
+      'https://app.omie.com.br/api/v1/estoque/consulta/',
+      payload1
+    );
+    const total = r1.nTotRegistros || 50;   // 872 no seu caso
+
+    // 2) CHAMADA COMPLETA: traz *todos* os itens de uma vez ---------
+    const payload2 = {
+      ...payload1,
+      param : [{
+        ...payload1.param[0],
+        nPagina: 1,
+        nRegPorPagina: total                // ← agora 872
+      }]
+    };
+    const r2 = await omieCall(
+      'https://app.omie.com.br/api/v1/estoque/consulta/',
+      payload2
+    );
+
+    // 3) Filtra campos p/ front ------------------------------------
+    const dados = (r2.produtos || []).map(p => ({
+      codigo    : p.cCodigo,
+      descricao : p.cDescricao,
+      min       : p.estoque_minimo,
+      fisico    : p.fisico,
+      reservado : p.reservado,
+      saldo     : p.nSaldo,
+      cmc       : p.nCMC
+    }));
+
+    res.json({
+      ok: true,
+      pagina: 1,
+      totalPaginas: 1,      // sempre 1 agora
+      dados
+    });
+
+  } catch (err) {
+    console.error('[armazem/almoxarifado]', err);
+    res.status(500).json({ ok:false, error:'Falha ao consultar Omie' });
+  }
+}
+
+);
+
+//------------------------------------------------------------------
+// Armazéns → Produção (POSIÇÃO DE ESTOQUE)
+//------------------------------------------------------------------
+app.post(
+  '/api/armazem/producao',
+  express.json(),
+  async (req, res) => {
+    try {
+      const HOJE = new Date().toLocaleDateString('pt-BR');
+
+      // 1ª chamada — pegar total de páginas
+      const first = await omieCall(
+        'https://app.omie.com.br/api/v1/estoque/consulta/',
+        {
+          call : 'ListarPosEstoque',
+          app_key   : OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param : [{
+            nPagina: 1,
+            nRegPorPagina: 50,
+            dDataPosicao: HOJE,
+            cExibeTodos : 'N',
+            codigo_local_estoque: 10564345392   // <<< Produção
+          }]
+        }
+      );
+
+      const totalPag = first.nTotPaginas || 1;
+      let produtos = first.produtos || [];
+
+      for (let p = 2; p <= totalPag; p++) {
+        const lote = await omieCall(
+          'https://app.omie.com.br/api/v1/estoque/consulta/',
+          {
+            call : 'ListarPosEstoque',
+            app_key   : OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param : [{
+              nPagina: p,
+              nRegPorPagina: 50,
+              dDataPosicao: HOJE,
+              cExibeTodos : 'N',
+              codigo_local_estoque: 10564345392
+            }]
+          }
+        );
+        produtos = produtos.concat(lote.produtos || []);
+      }
+
+      const dados = produtos.map(p => ({
+        codigo    : p.cCodigo,
+        descricao : p.cDescricao,
+        min       : p.estoque_minimo,
+        fisico    : p.fisico,
+        reservado : p.reservado,
+        saldo     : p.nSaldo,
+        cmc       : p.nCMC
+      }));
+
+      res.json({ ok:true, pagina:1, totalPaginas:1, dados });
+
+    } catch (err) {
+      console.error('[armazem/producao]', err);
+      res.status(500).json({ ok:false, error:'Falha ao consultar Omie' });
+    }
+  }
+);
 
 // ------------------------------------------------------------------
 // Alias: /api/omie/produto  →  mesma lógica de /api/omie/produtos
@@ -1390,13 +1627,15 @@ app.get('/api/kanban', (req, res) => {
 });
 
 app.post('/api/kanban', express.json(), (req, res) => {
-  try {
-    fs.writeFileSync(KANBAN_FILE, JSON.stringify(req.body, null, 2), 'utf8');
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  /* ❌ Remova ou comente o bloco que fazia “clean = …map(({estoque,…})” */
+  fs.writeFileSync(
+    KANBAN_FILE,
+    JSON.stringify(req.body, null, 2),   //  ← grava exatamente o que veio
+    'utf8'
+  );
+  res.json({ ok:true });
 });
+
 
 
 // ────────────────────────────────────────────

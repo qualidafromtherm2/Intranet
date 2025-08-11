@@ -5,8 +5,10 @@ import {
   renderKanbanDesdeJSON,
   salvarKanbanLocal,
   enableDragAndDrop,
-  gerarEtiqueta,
- gerarTicket          // ← NOVO
+   gerarEtiqueta,
+   gerarEtiquetaPP,
+  gerarTicket,
+  gerarEtiquetaObs         // ← NOVO
 } from './kanban_base.js';
 // kanban.js  – depois dos imports
 let pcpOpBusy = false;      // evita cliques repetidos enquanto processa
@@ -15,6 +17,12 @@ let pcpOpBusy = false;      // evita cliques repetidos enquanto processa
 /*  🔹  Cache com TODOS os produtos tipo 04  */
 let productsCache = null;           // null = ainda não carregou
 /* ——————————————————————————————————— */
+
+function obterDescricao(codMP) {
+  if (!productsCache) return '';
+  const prod = productsCache.find(p => p.codigo === codMP);
+  return prod ? prod.descricao : '';
+}
 
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
@@ -25,12 +33,81 @@ let kanbanCache = [];      // mantém os itens atuais em memória
 /* ------------------------------------------------------------------ */
 /*  kanban.js  –  garantir BASE das chamadas backend                   */
 /* ------------------------------------------------------------------ */
+// ——— depósito fixo para Atualizar Kanban ———
+const COD_LOCAL_ESTOQUE = 10520299822;
+const COD_LOCAL_PCP = 10564345392;   // depósito onde ficam as peças separadas
+
 const API_BASE =
   (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5001'
     : window.location.origin;           // Render ou outro domínio
 
 /* ───────────────── helpers ───────────────── */
+
+/* ────────────────────────────────
+   Atualiza saldo só dos cartões
+   "Pedido aprovado" (coluna comercial)
+   ──────────────────────────────── */
+async function atualizarEstoqueKanban () {
+  const HOJE       = new Date().toLocaleDateString('pt-BR'); // dd/mm/aaaa
+  const OMIE_URL   = `${API_BASE}/api/omie/estoque/consulta`;
+
+  /* 1) monta o payload – só 1 página, 50 itens */
+  const payload = {
+    call      : 'ListarPosEstoque',
+    app_key   : OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param     : [{
+      nPagina: 1,
+      nRegPorPagina: 50,
+      dDataPosicao: HOJE,
+      cExibeTodos: 'N',
+      codigo_local_estoque: COD_LOCAL_ESTOQUE,
+      cTipoItem: '04'           // produtos acabados
+    }]
+  };
+
+  /* 2) chama o backend (proxy) */
+  const resp = await fetch(OMIE_URL, {
+    method : 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body   : JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    console.warn('[Kanban] estoque 105… status', resp.status);
+    return;
+  }
+  const dados = await resp.json();
+
+  /* 3) monta mapa código → saldo */
+  const mapa = {};
+  (dados.produtos || []).forEach(p => {
+    mapa[p.cCodigo.toLowerCase()] = p.nSaldo ?? p.fisico ?? 0;
+  });
+
+  /* 4) aplica só nos cartões Pedido aprovado */
+  let mudou = false;
+  kanbanCache.forEach(it => {
+    if (!it.local.some(l => l.startsWith('Pedido aprovado'))) return;
+
+    const key  = it.codigo.toLowerCase();
+    const novo = key in mapa ? mapa[key] : 0;   // ← default 0
+
+    if (it.estoque !== novo) {                  // grava sempre que mudou
+      it.estoque = novo;
+      mudou = true;
+    }
+  });
+
+  /* 5) se algo mudou, salva e re-renderiza */
+  if (mudou) {
+    await salvarKanbanLocal(kanbanCache, 'comercial');
+    renderKanbanDesdeJSON(kanbanCache);
+    enableDragAndDrop(kanbanCache);
+  }
+}
+
+
 function formatDateBR(date) {
   const d = String(date.getDate()).padStart(2, '0');
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -129,15 +206,15 @@ function setupAddToggle() {
 }
 
 /* Fecha o painel de busca: remove a classe, limpa UL e zera o input */
-function collapseSearchPanel() {
-  const col = document
-    .getElementById('coluna-pcp-aprovado')
-    ?.closest('.kanban-column');
-  if (!col) return;
+ function collapseSearchPanel() {
+   /* fecha QUALQUER coluna que esteja com o search aberto */
+   document.querySelectorAll('.kanban-column.search-expand').forEach(col => {
+     col.classList.remove('search-expand');
+     col.querySelector('.add-results')?.replaceChildren(); // limpa lista
+   });
+ }
 
-  col.classList.remove('search-expand');          // esconde <add-container>
-  col.querySelector('.add-results')?.replaceChildren();
-}
+window.collapseSearchPanel = collapseSearchPanel;   // torna-a global
 
 // <<< Cole AQUI, logo abaixo de setupAddToggle()
 
@@ -205,6 +282,7 @@ function renderSearchResults(products, container) {
     const li = document.createElement('li');
     li.classList.add('result-item');
     li.textContent = `${p.codigo} — ${p.descricao}`;
+    li.dataset.desc = p.descricao;              // << NOVO
     container.appendChild(li);
 li.addEventListener('click', ev => {
   /* 0) Impede que o clique “vaze” para outros handlers */
@@ -272,7 +350,8 @@ function filtrarPorEstoque() {
 // ─── 1) Renderiza a Lista de Peças na aba PCP ────────────────────────
 async function renderListaPecasPCP() {
 // renderListaPecasPCP()
-console.log('[PCP] → renderListaPecasPCP() começou');
+console.debug('[PCP] renderListaPecasPCP() começou');
+
 
 // 1) encontra a UL
 const ul = document.getElementById('listaPecasPCPList');
@@ -283,214 +362,262 @@ const col = document
   .getElementById('coluna-pcp-aprovado')
   .closest('.kanban-column');
 const input = col?.querySelector('.add-search');
+
+  // ——— patch: código vindo da aba “Solicitar produção” ———
+  if (window.prepCodigoSelecionado) {     // ← SEM checar se está vazio
+    input.value = window.prepCodigoSelecionado;   // cola o código
+    window.prepCodigoSelecionado = null;          // zera a variável
+  }
+
 console.log('[PCP] input encontrado:', input);
 if (!input) { console.warn('[PCP] input .add-search não encontrado'); return; }
 
 // 3) extrai o código
 const raw = input.value;
 const codigo = raw.split('—')[0]?.trim();
-console.log('[PCP] Código extraído:', codigo);
+console.debug('[PCP] Código lido =', codigo);
 if (!codigo) { console.warn('[PCP] Sem código válido'); return; }
 
-  (function renderCodigoHeader() {
-    const alvo = document.querySelector('#listaPecasPCP .title-wrapper')
-               || document.getElementById('listaPecasPCP');
-    if (!alvo) return;
+/* ───────────────────── Cabeçalho da aba PCP ───────────────────── */
+function renderCodigoHeader () {
+  const alvo = document.querySelector('#listaPecasPCP .title-wrapper')
+             || document.getElementById('listaPecasPCP');
+  if (!alvo) return;
 
-    // cria só 1 vez
-    let barra = document.getElementById('pcp-code-bar');
-    if (!barra) {
-      barra = document.createElement('div');
-      barra.id        = 'pcp-code-bar';
-      barra.className = 'code-bar';
-barra.innerHTML = `
-  <span class="prod-code"></span>
-  <i id="pcpSpinner" class="fas fa-spinner fa-spin kanban-spinner"
-     style="display:none;margin-left:6px"></i>
-  <button class="plus-btn" title="(em construção)">+</button>
+  /* cria só 1 vez -------------------------------------------------------- */
+  let barra = document.getElementById('pcp-code-bar');
+  if (!barra) {
+    barra = document.createElement('div');
+    barra.id        = 'pcp-code-bar';
+    barra.className = 'code-bar';
+    barra.innerHTML = `
+      <span class="prod-code"></span>
+      <i id="pcpSpinner" class="fas fa-spinner fa-spin kanban-spinner"
+         style="display:none;margin-left:6px"></i>
 
-  <input  id="pcp-factor" type="number" min="1" max="999"
-          placeholder="×" style="display:none;width:60px">
-  <button id="pcp-ok" style="display:none">OK</button>
-`;
+      <input id="pcp-factor" class="qty-input" type="number"
+             min="1" max="999" value="1" title="Quantidade" style="width:60px">
 
-      alvo.parentNode.insertBefore(barra, alvo);   // vira irmão ANTES do wrapper
-    }
-    // sempre atualiza o texto
-    barra.querySelector('.prod-code').textContent = codigo;
-barra.querySelector('#pcpSpinner').style.display = 'inline-block';
+      <button id="pcp-ok"  class="ok-btn">OK</button>
 
-     /* ── clique no “+” abre input numérico ───────────────────────── */
-/* ── clique no “+” abre input numérico ───────────────────────── */
-const plusBtn = barra.querySelector('.plus-btn');
-if (!plusBtn.dataset.init) {
-  plusBtn.dataset.init = '1';
-
-plusBtn.addEventListener('click', () => {
-  /* evita abrir 2× */
-  let inp = barra.querySelector('.qty-input');
-  if (!inp) {
-    inp            = document.createElement('input');
-    inp.type       = 'number';
-    inp.min        = 1;
-    inp.max        = 999;
-    inp.value      = 1;
-    inp.className  = 'qty-input';
-    barra.appendChild(inp);
+      <textarea id="pcp-obs" rows="2" placeholder="Observações…"
+                style="margin-left:10px;width:300px;resize:vertical"></textarea>
+    `;
+    alvo.parentNode.insertBefore(barra, alvo);   /* irmão ANTES do wrapper */
   }
-  inp.focus();
 
-  /* 🔹 1)  GARANTE QUE O BOTÃO OK EXISTA E JÁ FIQUE VISÍVEL */
-  let okBtn = barra.querySelector('.ok-btn');
-  if (!okBtn) {
-    okBtn              = document.createElement('button');
-    okBtn.textContent  = 'OK';
-    okBtn.className    = 'ok-btn';
-okBtn.addEventListener('click', async () => {
-  if (pcpOpBusy) return;        // já em execução
-  pcpOpBusy = true;
+  /* sempre actualiza o código e mostra o spinner ------------------------ */
+  barra.querySelector('.prod-code').textContent = codigo;
+  barra.querySelector('#pcpSpinner').style.display = 'inline-block';
 
-  okBtn.disabled   = true;
-  plusBtn.disabled = true;
-  inp.disabled     = true;
+  /* ───────────── 1)  EVENTO DO BOTÃO OK  (uma única vez) ────────────── */
+  const okBtn = barra.querySelector('#pcp-ok');
+  if (!okBtn.dataset.init) {          /* evita duplicar o listener */
+    okBtn.dataset.init = '1';
 
-  try {
-    /* ----------------------------------------------------------
-       0) valida quantidade
-    ---------------------------------------------------------- */
-    const fator = Number(barra.querySelector('.qty-input')?.value || 0);
-    if (!Number.isInteger(fator) || fator < 1) return;
+    okBtn.addEventListener('click', async () => {
+      if (pcpOpBusy) return;
+      pcpOpBusy = true;
 
-    /* ----------------------------------------------------------
-       1) busca nCodProduto
-    ---------------------------------------------------------- */
-    let nCodProduto = 0;
+      /* desabilita controles enquanto roda ----------------------------- */
+      okBtn.disabled  = true;
+      barra.querySelector('#pcp-factor').disabled = true;
+
+      try {
+        /* 0) valida quantidade ---------------------------------------- */
+        const fator = Number(barra.querySelector('#pcp-factor').value || 0);
+
+                /* lê o código visível no header e decide o destino do Kanban */
+        const codigoOK = barra.querySelector('.prod-code').textContent.trim();
+        const destino = /PP/i.test(codigoOK) ? 'preparacao' : 'comercial';
+
+
+
+
+
+
+        if (!Number.isInteger(fator) || fator < 1) return;
+
+        /* 1) busca nCodProduto --------------------------------------- */
+let nCodProduto = 0;
+let descOK      = '';               // ← já declara aqui
+try {
+  const r = await fetch(`/api/produtos/detalhes/${encodeURIComponent(codigoOK)}`);
+  const d = await r.json();
+
+  nCodProduto = d.codigo_produto ?? d.codigo_produto_integracao ?? 0;
+  descOK      = (d.descricao || '').trim();   // 👈 captura descrição
+} catch {/* se falhar, descOK fica vazio */}
+
+
+        /* 2) data +2 dias -------------------------------------------- */
+        const hoje  = new Date();
+        const prev  = new Date(hoje.getTime() + 2*24*60*60*1e3);
+        const dPrev = prev.toLocaleDateString('pt-BR');   // dd/mm/aaaa
+
+        /* 3) gera N OPs + etiquetas ---------------------------------- */
+        const localArr   = [];
+        const txtObs = barra.querySelector('#pcp-obs').value.trim();
+
+                /* ——— descobre o maior nº de OP já usado ——— */
+/* ——— descobre o maior nº de OP já usado ——— */
+const getNextOP = async destino => {
+  let max = 100000;                           // ponto de partida seguro
+
+  /* 1) percorre o cache já carregado (tela atual) */
+  kanbanCache.forEach(reg => {
+    reg.local.forEach(tag => {
+      const id  = tag.split(',')[1];          // "P101050"
+      const num = parseInt(id?.replace(/^P/, ''), 10);
+      if (!isNaN(num) && num > max) max = num;
+    });
+  });
+
+  /* 2) se for preparação, consulta também o arquivo em disco */
+  if (destino === 'preparacao') {
     try {
-      const r = await fetch(
-        `/api/produtos/detalhes/${encodeURIComponent(codigo)}`
-      );
-      const d = await r.json();
-      nCodProduto = d.codigo_produto ?? d.codigo_produto_integracao ?? 0;
-    } catch {/* continua 0 */ }
-
-    /* ----------------------------------------------------------
-       2) data +2 dias
-    ---------------------------------------------------------- */
-    const hoje   = new Date();
-    const prev   = new Date(hoje.getTime() + 2*24*60*60*1e3);
-    const dPrev  = prev.toLocaleDateString('pt-BR');       // dd/mm/aaaa
-
-    /* ----------------------------------------------------------
-       3) gera N OPs sequenciais
-    ---------------------------------------------------------- */
-    const localArr   = [];
-    const primeiroOP = parseInt(await gerarTicket(), 10);  // 21004…
-
-    for (let i = 0; i < fator; i++) {
-      const cCodIntOP = String(primeiroOP + i);
-
-      /* 3.1) cria OP */
-      const payloadOP = {
-        call      : 'IncluirOrdemProducao',
-        app_key   : OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param:[{ identificacao:{
-          cCodIntOP, dDtPrevisao:dPrev, nCodProduto, nQtde:1
-        }}]
-      };
-      const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
-        method :'POST',
-        headers:{'Content-Type':'application/json'},
-        body   : JSON.stringify(payloadOP)
-      });
-      const jOP = await rOP.json();
-      if (jOP.faultstring || jOP.error) {
-        console.warn('Falha OP', cCodIntOP, jOP);
-        continue;
-      }
-
-      /* 3.2) guarda + etiqueta */
-      localArr.push(`Separação logística,${cCodIntOP}`);
-      await gerarEtiqueta(cCodIntOP, codigo);
-
-      /* 3.3) 2 req/s = pausa 600 ms */
-      if (i < fator-1) await sleep(600);
-    }
-
-    /* ----------------------------------------------------------
-       4) atualiza Kanban / salva
-    ---------------------------------------------------------- */
-    if (localArr.length) {
-      const existente = kanbanCache
-        .find(it => it.pedido==='Estoque' && it.codigo===codigo);
-
-      if (existente) {
-        existente.quantidade += localArr.length;
-        existente.local.push(...localArr);
-      } else {
-        kanbanCache.push({
-          pedido:'Estoque', codigo,
-          quantidade: localArr.length,
-          local: localArr, estoque:0, _codigoProd:nCodProduto
+      const resp = await fetch('/api/kanban_preparacao');
+      if (resp.ok) {
+        const prep = await resp.json();
+        prep.forEach(reg => {
+          reg.local.forEach(tag => {
+            const id  = tag.split(',')[1];
+            const num = parseInt(id?.replace(/^P/, ''), 10);
+            if (!isNaN(num) && num > max) max = num;
+          });
         });
       }
-
-      await salvarKanbanLocal(kanbanCache);
-      renderKanbanDesdeJSON(kanbanCache);
-      enableDragAndDrop(kanbanCache);
+    } catch (e) {
+      console.warn('[getNextOP] Falha lendo kanban_preparacao:', e);
     }
-
-    /* UX extra – volta à aba Comercial, destaca cartão */
-    document.querySelector(
-      '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
-    )?.click();
-    setTimeout(() => {
-      const col   = document.getElementById('coluna-pcp-aprovado');
-      col?.lastElementChild?.classList.add('flash-new');
-      setTimeout(() =>
-        col?.lastElementChild?.classList.remove('flash-new'), 3000);
-    }, 80);
-
-  } catch (err) {
-    console.error('[PCP-OK] erro:', err);
-    alert('Erro ao gerar OP/etiquetas:\n' + err.message);
-  } finally {
-    /* -------- SEMPRE reabilita controles -------- */
-    okBtn.disabled   = false;
-    plusBtn.disabled = false;
-    inp.disabled     = false;
-    pcpOpBusy        = false;
-
-    /* limpa input */
-    barra.querySelector('.qty-input').value = 1;
-    barra.querySelector('.qty-input').blur();
-  }
-});
-
-
-
-    barra.appendChild(okBtn);
   }
 
-  /* 🔹 2)  callback em tempo real (já existente) */
-  const onType = () => {
-    const fator = Number(inp.value);
-    if (Number.isInteger(fator) && fator >= 1 && fator <= 999) {
-      aplicarMultiplicador(fator);
-    }
+  return max + 1;                              // próximo livre
+};
+
+
+        const primeiroOP = await getNextOP(destino);
+
+
+
+for (let i = 0; i < fator; i++) {
+
+  const numero    = primeiroOP + i;
+  const cCodIntOP = destino === 'preparacao'
+    ? `P${numero}`
+    : String(numero);
+
+  /* 3.1) cria OP --------------------------------------------------- */
+  const payloadOP = {
+    call      : 'IncluirOrdemProducao',
+    app_key   : OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param:[{identificacao:{ cCodIntOP, dDtPrevisao:dPrev,
+                             nCodProduto, nQtde:1 }}]
   };
-
-  if (!inp.dataset.init) {
-    inp.dataset.init = '1';
-    inp.addEventListener('input',  onType);
-    inp.addEventListener('change', onType);
+  const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
+    method :'POST',
+    headers:{'Content-Type':'application/json'},
+    body   : JSON.stringify(payloadOP)
+  });
+  const jOP = await rOP.json();
+  if (jOP.faultstring || jOP.error) {
+    console.warn('Falha OP', cCodIntOP, jOP);
+    continue;
   }
-});
+
+  /* 3.2) etiqueta + observação ------------------------------------ */
+  localArr.push(`Fila de produção,${cCodIntOP}`);
 
 
+if (/PP/i.test(codigoOK)) {
+  const zplPP = gerarEtiquetaPP({
+    codMP     : codigoOK,
+    op        : cCodIntOP,
+    descricao : descOK            // ← já vem da Omie
+  });
+
+    await fetch('/api/etiquetas/gravar', {
+      method : 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body   : JSON.stringify({
+        file: `mp_${cCodIntOP}.zpl`,
+        zpl : zplPP,
+        ns  : '',
+        tipo: 'Teste'
+      })
+    });
+  } else {
+    await gerarEtiqueta(cCodIntOP, codigoOK);        // modelo antigo
+  }
+
+  if (txtObs) await gerarEtiquetaObs(txtObs);        // observação
+
+  /* 3.3) respeita 2 req/s ----------------------------------------- */
+  if (i < fator - 1) await sleep(600);
 }
 
-  })();
+
+        /* 4) actualiza Kanban / salva -------------------------------- */
+        if (localArr.length) {
+
+ const existente = kanbanCache.find(it =>
+   it.pedido==='Estoque' && it.codigo===codigoOK);
+
+
+          if (existente) {
+            existente.quantidade += localArr.length;
+            existente.local.push(...localArr);
+          } else {
+            kanbanCache.push({
+              pedido:'Estoque', codigo: codigoOK,
+              quantidade: localArr.length,
+              local: localArr, estoque:0, _codigoProd:nCodProduto
+            });
+          }
+
+
+           /* — separa os arrays e salva no arquivo certo — */
+           const arrPrep = kanbanCache.filter(it => /PP/i.test(it.codigo));
+           const arrCom  = kanbanCache.filter(it => !/PP/i.test(it.codigo));
+
+if (arrCom.length)  await salvarKanbanLocal(arrCom , 'comercial');
+if (arrPrep.length) await salvarKanbanLocal(arrPrep, 'preparacao');
+
+
+
+          renderKanbanDesdeJSON(kanbanCache);
+          enableDragAndDrop(kanbanCache);
+        }
+
+  /* 5) escolhe a aba correta */
+  const tabSelector = destino === 'preparacao'
+    ? '[data-kanban-tab="preparacao"]'
+    : '[data-kanban-tab="comercial"]';
+  document.querySelector(`#kanbanTabs .main-header-link${tabSelector}`)?.click();
+        setTimeout(() => {
+          const col = document.getElementById('coluna-pcp-aprovado');
+          col?.lastElementChild?.classList.add('flash-new');
+          setTimeout(() => col?.lastElementChild?.classList.remove('flash-new'),
+                     3000);
+        }, 80);
+
+      } catch (err) {
+        console.error('[PCP-OK] erro:', err);
+        alert('Erro ao gerar OP/etiquetas:\n' + err.message);
+      } finally {
+        okBtn.disabled  = false;
+        barra.querySelector('#pcp-factor').disabled = false;
+        pcpOpBusy = false;
+        barra.querySelector('#pcp-factor').value = 1;   /* limpa */
+      }
+    });
+  }
+}
+renderCodigoHeader();   //  <-- executa agora
+/* ———————————————————————————————————————————————————————————————— */
+
+
 
 
   // 3.2) Chama o seu proxy de “ConsultarEstrutura”
@@ -756,6 +883,7 @@ export async function initKanban() {
   try {
     /* 1) carrega kanban.json existente */
     const existingItems = await carregarKanbanLocal();
+
     if (existingItems.length) {
       renderKanbanDesdeJSON(existingItems);
       enableDragAndDrop(existingItems);
@@ -802,18 +930,20 @@ export async function initKanban() {
         /* consulta estoque */
         const payloadEst = {
           call:'PosicaoEstoque',
-          param:[{ codigo_local_estoque:0, id_prod:obj._codigoProd,
+          param:[{ codigo_local_estoque:COD_LOCAL_ESTOQUE, id_prod:obj._codigoProd,
                    cod_int:obj.codigo, data:hoje }],
           app_key:OMIE_APP_KEY, app_secret:OMIE_APP_SECRET
         };
+        
+
+
         try {
           const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payloadEst)
           });
           const d = r.ok?await r.json():{};
-          obj.estoque =
-            d.saldo ?? d.posicao?.[0]?.saldo_atual ?? d.posicao?.[0]?.quantidade_estoque ?? 0;
+            obj.estoque = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0;   // default 0
         } catch {
           obj.estoque = 0;
         }
@@ -828,6 +958,10 @@ kanbanCache = allItems;                         // ← NOVO
 renderKanbanDesdeJSON(allItems);
 
     enableDragAndDrop(allItems);
+/* Atualiza o saldo dos cartões "Pedido aprovado" (depósito 105…) */
+await atualizarEstoqueKanban();
+
+
     if (novos.length) await salvarKanbanLocal(allItems);
 
     /* 5) ativa dblclick, toggle de “+”, busca e navegação de abas */    /* 5) ativa dblclick, toggle de “+”, busca e navegação de abas */
@@ -857,7 +991,7 @@ renderKanbanDesdeJSON(allItems);
 /* ------------------------------------------------------------------ */
 /* 2) Nova função assíncrona                                          */
 async function carregarPosicaoEstoque() {
-  const OMIE_URL   = `${API_BASE}/api/omie/estoque/pagina`;
+  const OMIE_URL   = `${API_BASE}/api/omie/estoque/consulta`;
   const HOJE       = new Date().toLocaleDateString('pt-BR'); // 26/06/2025 → dd/mm/yyyy
   const POR_PAGINA = 50;
 
@@ -873,7 +1007,7 @@ async function carregarPosicaoEstoque() {
       nRegPorPagina    : POR_PAGINA,
       dDataPosicao     : HOJE,
       cExibeTodos      : 'N',
-      codigo_local_estoque : 0,
+      codigo_local_estoque : COD_LOCAL_PCP,
       cTipoItem        : '01'
     }]
  };
@@ -932,7 +1066,12 @@ if (valor < 1 || valor < qtd) {          // critério de “baixo estoque”
 }
 
       qtdEl.appendChild(spanEst);
-    }
+} else {                                     // ← NOVO: item não existe no depósito
+  const spanEst = document.createElement('span');
+  spanEst.className   = 'est low';           // já entra com .low
+  spanEst.textContent = ' (Est:–)';          // hífen indica inexistente
+  qtdEl.appendChild(spanEst);
+}
   });
 filtrarPorEstoque();
 }

@@ -31,7 +31,10 @@
 
   <!-- Links que podem “sobrar” -->
   <nav id="mainMenu" class="header-menu">
-    <a id="menu-inicio"        class="menu-link" href="#">Início</a>
+
+ <a id="menu-inicio"
+    class="menu-link is-active"
+    data-target="paginaInicio">Início</a>
     <a id="menu-produto"       class="menu-link" href="#">Produto</a>
     <a id="menu-qualidade"     class="menu-link" href="#">Qualidade</a>
     <a id="menu-acessos"       class="menu-link" href="#">Acessos</a>
@@ -115,20 +118,56 @@
 <div class="side-wrapper">
   <div class="side-title">Logística</div>
   <div class="side-menu">
+    <!-- Botão existente -->
     <a href="#" id="menu-pedidos" class="menu-link">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
         <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
       </svg>
       Pedidos
     </a>
+
+    <!-- ✅ Botão armazen -->
+    <a href="#" id="menu-armazens" class="menu-link">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <!-- Ícone de armazém (FA6: fa-warehouse) -->
+        <path d="M3 9.5V21h3v-7h12v7h3V9.5L12 3 3 9.5zM9 19H6v-5h3v5zm9 0h-3v-5h3v5z"/>
+      </svg>
+      Armazéns
+    </a>
   </div>
 </div>
+
 
 
         </div>
       </div>
 
       <!-- Conteúdo principal -->
+
+      <!-- Painel Início — aparece primeiro -->
+<div id="paginaInicio" class="tab-pane" style="display:block;">
+  <div class="content-wrapper">
+    <div class="content-section">
+
+<div class="inicio-grid">
+  <button class="inicio-btn">Linha de produção</button>
+
+  <!-- único botão Preparação elétrica -->
+  <button id="btn-prep-eletrica" class="inicio-btn">
+    Preparação elétrica
+  </button>
+
+  <button class="inicio-btn">Preparação da base</button>
+  <button class="inicio-btn">Preparação da tampa</button>
+  <button class="inicio-btn">Preparação da evaporadora</button>
+  <button class="inicio-btn">Kit cobre</button>
+</div>
+
+
+    </div>
+  </div>
+</div>
+
       <div class="main-container">
 
         <!-- Painel de Lista de Produtos -->
@@ -473,10 +512,134 @@
   <div class="header-menu">
     <a href="#" data-kanban-tab="comercial" class="main-header-link is-active">Comercial</a>
     <a href="#" data-kanban-tab="pcp"       class="main-header-link">PCP</a>
+<a href="#" data-kanban-tab="preparacao" class="main-header-link">
+  Preparação
+</a>
+
     <a href="#" data-kanban-tab="producao"  class="main-header-link">Produção</a>
     <a href="#" data-kanban-tab="detalhes"  class="main-header-link">Detalhes</a>
   </div>
 </div>
+
+<!-- Abas de Armazéns (inicialmente ocultas) -->
+<div id="armazemTabs" class="main-header" style="display:none; margin-top:1rem;">
+  <div class="header-menu">
+    <a href="#" data-arm-tab="almoxarifado" class="main-header-link is-active">Almoxarifado</a>
+    <a href="#" data-arm-tab="producao"      class="main-header-link">Produção</a>
+    <a href="#" data-arm-tab="expedicao"     class="main-header-link">Expedição</a>
+    <a href="#" data-arm-tab="produto"       class="main-header-link">Produto acabado</a>
+    <a href="#" data-arm-tab="terceiros"     class="main-header-link">Terceiros</a>
+    <a href="#" data-arm-tab="Geral"     class="main-header-link">geral</a>
+  </div>
+</div>
+
+<div id="armazemContent" style="display:none;">
+<!-- Painel de Almoxarifado (Armazéns) -->
+<div id="conteudo-almoxarifado" class="armazem-page tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="title-wrapper">
+        <div class="content-section-title">
+          Almoxarifado (<span id="almoxCount">0</span>)
+        </div>
+
+        <input id="almoxSearch"
+       type="text"
+       placeholder="Pesquisar na descrição…"
+       class="search-box" />
+
+       <span id="almoxCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
+      
+<button id="almoxFilterBtn" class="filter-icon" title="Filtrar por tipo">
+  <i class="fa-solid fa-filter"></i>
+</button>
+
+<!-- Painel que aparece/ some -->
+<div id="almoxFilterPanel" class="filter-panel" style="display:none;"></div>
+
+
+        <!-- spinner opcional (mesmo padrão que você usa em Pedidos) -->
+        <div id="almoxSpinner" data-pct="0" style="display:none;">
+          <!-- copie seu SVG de spinner aqui se quiser -->
+        </div>
+      </div>
+
+      <!-- aqui a tabela é montada em runtime -->
+<!-- —— wrapper fixo + scroll —— -->
+<div class="almox-wrapper">
+  <table id="tbl-almoxarifado" class="tabela padrao">
+    <thead>
+      <tr>
+        <th>Código</th><th>Descrição</th><th>Est. mín.</th>
+        <th>Físico</th><th>Reservado</th><th>Saldo</th><th>CMC</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- —— paginação —— -->
+<div class="almox-pager">
+  <button id="almoxPrev"  class="btn tiny">◀</button>
+  <span   id="almoxPageInfo">1 / 1</span>
+  <button id="almoxNext"  class="btn tiny">▶</button>
+</div>
+
+
+    </div>
+  </div>
+</div>
+
+<!-- Painel de Produção -->
+<div id="conteudo-producao" class="armazem-page tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="title-wrapper">
+        <div class="content-section-title">
+          Produção (<span id="prodCount">0</span>)
+        </div>
+
+        <input id="prodSearch"
+               type="text"
+               placeholder="Pesquisar na descrição…"
+               class="search-box" />
+
+        <span id="prodCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
+        <button id="prodFilterBtn" class="filter-icon" title="Filtrar por grupo">
+  <i class="fa-solid fa-filter"></i>
+</button>
+
+<div id="prodFilterPanel" class="filter-panel" style="display:none;"></div>
+
+      </div>
+
+      <div class="producao-wrapper">
+        <table id="tbl-producao" class="tabela padrao">
+          <thead>
+            <tr>
+              <th>Código</th><th>Descrição</th><th>Est. mín.</th>
+              <th>Físico</th><th>Reservado</th><th>Saldo</th><th>CMC</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="almox-pager"><!-- reaproveita classe -->
+        <button id="prodPrev" class="btn tiny">◀</button>
+        <span   id="prodPageInfo">1 / 1</span>
+        <button id="prodNext" class="btn tiny">▶</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+  <div id="conteudo-expedicao"    class="armazem-page" style="display:none;"></div>
+  <div id="conteudo-produto"      class="armazem-page" style="display:none;"></div>
+  <div id="conteudo-terceiros"    class="armazem-page" style="display:none;"></div>
+  <div id="conteudo-geral"    class="armazem-page" style="display:none;"></div>
+</div>
+
 
 
   <!-- Comercial -->
@@ -536,6 +699,46 @@
   </div>
 </div>
 <!-- ============================================================ -->
+
+<!-- === bloco PREPARAÇÃO (Kanban) ============================ -->
+<div id="conteudo-preparacao" class="kanban-page" style="display:none;">
+  <div class="kanban-board">
+
+    <!-- 🟦 Coluna 1: Fila de produção -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <div class="title-wrapper">
+          <span>Fila de produção</span>
+          <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
+        </div>
+        <div class="add-container">
+          <input type="text" class="add-search" placeholder="Pesquisar…" />
+          <ul class="add-results"></ul>
+        </div>
+      </div>
+      <ul id="coluna-prep-fila" class="kanban-list"></ul>
+    </div>
+
+    <!-- 🟦 Coluna 2: Em produção -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <span>Em produção</span>
+      </div>
+      <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
+    </div>
+
+    <!-- 🟦 Coluna 3: No estoque -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <span>No estoque</span>
+      </div>
+      <ul id="coluna-prep-estoque" class="kanban-list"></ul>
+    </div>
+
+  </div><!-- /.kanban-board -->
+</div>
+<!-- ========================================================= -->
+
 
 
 
@@ -597,6 +800,7 @@
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
+  <script type="module" src="kanban/kanban_preparacao.js"></script>
 
   <script type="module" src="./kanban/kanban.js" defer></script>
 

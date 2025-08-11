@@ -12,7 +12,116 @@ let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
 
 import { loadDadosProduto as loadDadosProdutoReal }
   from './requisicoes_omie/Dados_produto.js';
-import { inicializarImportacaoCaracteristicas } from './produtos/caracteristica_importar.js';
+/* ——— IMPORT único do módulo Kanban ——— */
+import * as KanbanViews from './kanban/kanban.js';
+
+import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
+
+let almoxCurrentPage = 1;
+// —— Produção —— //
+let prodAllDados   = [];
+let prodCurrentPage = 1;
+let prodTotalPages  = 1;
+// —— Filtro Produção —— //
+let prodTipoMap        = new Map();   // desc -> prefixo
+let prodActivePrefixes = new Set();   // prefixos ativos
+let prodCsvLoaded      = false;
+
+
+let almoxAllDados = [];   // mantém o array completo para filtro
+/* — Filtro por Tipo (Almoxarifado) — */
+let almoxTipoMap        = new Map();   // desc  -> prefixo (Tipo do produto)
+let almoxActivePrefixes = new Set();   // prefixos atualmente exibidos
+let almoxCsvLoaded      = false;
+
+// ——— formatação numérica (xx.xxx,yy) ———
+const fmtBR = new Intl.NumberFormat('pt-BR', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+/* —— desenha <tbody> a partir de um array —— */
+function renderAlmoxTable(arr) {
+  const tbody = document.querySelector('#tbl-almoxarifado tbody');
+  tbody.innerHTML = '';
+
+  let somaCMC = 0;
+  arr.forEach(p => {
+    somaCMC += parseFloat(p.cmc);  // acumula total
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.codigo}</td>
+      <td>${p.descricao}</td>
+      <td class="num">${fmtBR.format(p.min)}</td>
+      <td class="num">${fmtBR.format(p.fisico)}</td>
+      <td class="num">${fmtBR.format(p.reservado)}</td>
+      <td class="num">${fmtBR.format(p.saldo)}</td>
+      <td class="num">R$ ${fmtBR.format(p.cmc)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  /* contador de itens */
+  document.getElementById('almoxCount').textContent = arr.length;
+
+  /* total CMC */
+  document.getElementById('almoxCmcTotal').textContent =
+    `Total CMC: R$ ${fmtBR.format(somaCMC)}`;
+}
+
+
+function aplicarFiltroAlmox() {
+  const termo = document.getElementById('almoxSearch').value
+                 .trim().toLowerCase();
+
+  const filtrados = almoxAllDados.filter(p => {
+    const prefixOk = [...almoxActivePrefixes]
+                   .some(pre => p.codigo.startsWith(pre));
+
+    const buscaOk  = p.descricao.toLowerCase().includes(termo);
+    return prefixOk && buscaOk;
+  });
+  renderAlmoxTable(filtrados);
+}
+
+function renderProdTable(arr) {
+  const tbody = document.querySelector('#tbl-producao tbody');
+  tbody.innerHTML = '';
+  let soma = 0;
+
+  arr.forEach(p => {
+    soma += parseFloat(p.cmc);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.codigo}</td>
+      <td>${p.descricao}</td>
+      <td class="num">${fmtBR.format(p.min)}</td>
+      <td class="num">${fmtBR.format(p.fisico)}</td>
+      <td class="num">${fmtBR.format(p.reservado)}</td>
+      <td class="num">${fmtBR.format(p.saldo)}</td>
+      <td class="num">R$ ${fmtBR.format(p.cmc)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('prodCount').textContent = arr.length;
+  document.getElementById('prodCmcTotal').textContent =
+    `Total CMC: R$ ${fmtBR.format(soma)}`;
+}
+
+function aplicarFiltroProd() {
+  const termo = document.getElementById('prodSearch').value.trim().toLowerCase();
+
+  const filtrados = prodAllDados.filter(p => {
+    const prefixOk = [...prodActivePrefixes]
+                      .some(pre => p.codigo.startsWith(pre));
+    const buscaOk  = p.descricao.toLowerCase().includes(termo);
+    return prefixOk && buscaOk;
+  });
+  renderProdTable(filtrados);
+}
+
+
+let almoxTotalPages  = 1;
 
 
 // deixa a versão completa visível globalmente
@@ -102,6 +211,7 @@ const acessosPanel = document.getElementById('acessos');
 
 /* ======== Helpers – alternar Pedidos (Kanban) ======== */
 function showKanban () {
+    hideArmazem();                 // ← NOVA LINHA
   /* esconde QUALQUER painel de produtos que ainda possa estar visível */
   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
 
@@ -232,6 +342,275 @@ function openDadosProdutoTab() {
 }
 
 
+/* ======== Helpers – alternar Armazéns ======== */
+function showArmazem () {
+  // esconde qualquer pane de Produto
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  // esconde Kanban e Produto
+  hideKanban();
+  document.getElementById('produtoTabs').style.display = 'none';
+
+  // mostra Armazéns
+  document.getElementById('armazemTabs').style.display    = 'flex';
+  document.getElementById('armazemContent').style.display = 'block';
+  showArmazemTab('almoxarifado');          // primeira aba
+}
+
+function hideArmazem () {
+  document.getElementById('armazemTabs').style.display    = 'none';
+  document.getElementById('armazemContent').style.display = 'none';
+  // se preferir, pode voltar a mostrar produtoTabs aqui
+}
+
+/* ——— sub-abas internas ——— */
+async function showArmazemTab(nome) {
+
+  document.querySelectorAll('#armazemTabs .main-header-link')
+    .forEach(a => a.classList.toggle('is-active', a.dataset.armTab === nome));
+
+  document.querySelectorAll('#armazemContent .armazem-page')
+    .forEach(p => p.style.display = (p.id === `conteudo-${nome}` ? 'block' : 'none'));
+
+// —— Almoxarifado: sempre recarrega a página corrente ——
+if (nome === 'almoxarifado') {
+  // 1) busca dados caso ainda não exista nada carregado
+  if (!almoxAllDados.length) {
+    await carregarAlmoxarifado();      // primeira vez
+  } else {
+    aplicarFiltroAlmox();              // reaplica prefixos + texto
+  }
+
+  // 2) carrega o CSV e monta checkboxes só na primeira abertura
+  if (!almoxCsvLoaded) {
+    await loadAlmoxTipoCSV();
+  }
+}
+else if (nome === 'producao') {
+  if (!prodAllDados.length) {
+    await carregarProducao();          // busca dados 1ª vez
+  } else {
+    aplicarFiltroProd();
+  }
+
+  if (!prodCsvLoaded) await loadProdTipoCSV();
+}
+
+
+
+}
+
+
+/* ====================================================== */
+/*  Almoxarifado – carregar dados                         */
+/* ====================================================== */
+let almoxDataLoaded = false;
+
+/* ====================================================== */
+/*  Almoxarifado – carregar todos os itens                */
+/* ====================================================== */
+async function carregarAlmoxarifado() {
+  const tbody = document.querySelector('#tbl-almoxarifado tbody');
+  tbody.innerHTML = '<tr><td colspan="7">⏳ Carregando…</td></tr>';
+
+  try {
+    const resp = await fetch('/api/armazem/almoxarifado', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ pagina: 1 })        // backend devolve tudo
+    });
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'Falha na API');
+
+    /* —— guarda e desenha —— */
+    almoxAllDados   = json.dados;      // mantém a lista completa
+    almoxTotalPages = 1;               // sempre 1 agora
+    almoxCurrentPage = 1;
+
+    renderAlmoxTable(almoxAllDados);   // cria as <tr>
+
+    /* —— contador e pager —— */
+    document.querySelector('.almox-pager').style.display = 'none';  // esconde ◀▶
+    document.getElementById('almoxPageInfo').textContent = '1 / 1';
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = '<tr><td colspan="7">⚠️ Erro ao carregar dados</td></tr>';
+  }
+}
+
+async function loadAlmoxTipoCSV() {
+  if (almoxCsvLoaded) return;     // só carrega uma vez
+
+  const panel = document.getElementById('almoxFilterPanel');
+  // carrega CSV (servido como arquivo estático)
+  const textoCsv = await (await fetch('csv/Tipo.csv')).text();
+
+  Papa.parse(textoCsv, {
+    header: true,
+    skipEmptyLines: true,
+    complete: ({ data }) => {
+      data.forEach(row => {
+        const desc   = row['Descrição'].trim();
+        const raw    = row['Grupo'].trim();
+const prefix = raw.padStart(2, '0');   // “1” → “01”, “9” → “09”
+ 
+        const padrao = row['almoxarifado']?.trim().toUpperCase() === 'S';
+
+        almoxTipoMap.set(desc, prefix);
+        if (padrao) almoxActivePrefixes.add(prefix);
+
+        // monta checkbox
+        const id = `chk_${prefix}`;
+        const label = document.createElement('label');
+        label.innerHTML = `
+          <input type="checkbox" id="${id}" ${padrao ? 'checked' : ''}>
+          <span>${desc}</span>`;
+        panel.appendChild(label);
+
+        // listener deste checkbox
+        label.querySelector('input').addEventListener('change', e => {
+          if (e.target.checked)  almoxActivePrefixes.add(prefix);
+          else                   almoxActivePrefixes.delete(prefix);
+          aplicarFiltroAlmox();           // refaz a tabela
+        });
+      });
+      // se os dados já estão na memória, reaplica filtro imediatamente
+      if (almoxAllDados.length) aplicarFiltroAlmox();
+
+      almoxCsvLoaded = true;
+    }
+  });
+}
+
+async function loadProdTipoCSV() {
+  if (prodCsvLoaded) return;
+
+  const panel = document.getElementById('prodFilterPanel');
+  const textoCsv = await (await fetch('csv/Tipo.csv')).text();
+
+  Papa.parse(textoCsv, {
+    header: true,
+    skipEmptyLines: true,
+    complete: ({ data }) => {
+      data.forEach(row => {
+        const desc   = row['Descrição'].trim();
+        const raw    = row['Grupo'].trim();
+        const prefix = raw.padStart(2, '0');         // “1” → “01”
+        // Na aba Produção vamos iniciar **todos** ativos
+prodTipoMap.set(desc, prefix);
+const padrao = (row['produção'] ?? '').trim().toUpperCase() !== 'N';
+if (padrao) prodActivePrefixes.add(prefix);
+
+
+        const id = `chkProd_${prefix}`;
+        const label = document.createElement('label');
+label.innerHTML = `
+  <input type="checkbox" id="${id}" ${padrao ? 'checked' : ''}>
+  <span>${desc}</span>`;
+
+        panel.appendChild(label);
+
+        label.querySelector('input').addEventListener('change', e => {
+          if (e.target.checked)  prodActivePrefixes.add(prefix);
+          else                   prodActivePrefixes.delete(prefix);
+          aplicarFiltroProd();          // refaz tabela produção
+        });
+      });
+
+      prodCsvLoaded = true;
+      if (prodAllDados.length) aplicarFiltroProd();   // reaplica filtro inicial
+    }
+  });
+}
+
+
+async function carregarProducao() {
+  const tbody = document.querySelector('#tbl-producao tbody');
+  tbody.innerHTML = '<tr><td colspan="7">⏳ Carregando…</td></tr>';
+
+  try {
+    const resp = await fetch('/api/armazem/producao', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pagina:1 })
+    });
+    const json = await resp.json();
+    if (!json.ok) throw new Error(json.error || 'Falha na API');
+
+    prodAllDados   = json.dados;
+    prodCurrentPage = 1;
+    prodTotalPages  = 1;
+
+    renderProdTable(prodAllDados);
+    document.querySelector('#conteudo-producao .almox-pager').style.display = 'none';
+    document.getElementById('prodPageInfo').textContent = '1 / 1';
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = '<tr><td colspan="7">⚠️ Erro ao carregar dados</td></tr>';
+  }
+}
+
+
+document.getElementById('menu-armazens').addEventListener('click', e => {
+  e.preventDefault();
+  showArmazem();
+});
+
+document.querySelectorAll('#armazemTabs .main-header-link')
+  .forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      showArmazemTab(link.dataset.armTab);   // almoxarifado / producao / …
+    });
+  });
+
+  /* ——— paginação ——— */
+document.getElementById('almoxPrev').addEventListener('click', () => {
+  if (almoxCurrentPage > 1) {
+    carregarAlmoxarifado(almoxCurrentPage - 1);
+  }
+});
+document.getElementById('almoxNext').addEventListener('click', () => {
+  if (almoxCurrentPage < almoxTotalPages) {
+    carregarAlmoxarifado(almoxCurrentPage + 1);
+  }
+});
+
+/* —— pesquisa em tempo-real —— */
+const inpSearch = document.getElementById('almoxSearch');
+inpSearch.addEventListener('input', aplicarFiltroAlmox);
+
+/* —— Botão de filtro (toggle) —— */
+const btnFiltro = document.getElementById('almoxFilterBtn');
+btnFiltro.addEventListener('click', () => {
+  const panel = document.getElementById('almoxFilterPanel');
+  const vis = panel.style.display === 'block';
+  panel.style.display = vis ? 'none' : 'block';
+
+  if (!vis) {
+    // posiciona logo abaixo do botão
+    const r = btnFiltro.getBoundingClientRect();
+    panel.style.left = r.left + 'px';
+    panel.style.top  = (r.bottom + 6) + 'px';
+  }
+});
+
+/* —— busca Produção —— */
+const prodInput = document.getElementById('prodSearch');
+prodInput.addEventListener('input', aplicarFiltroProd);
+
+const prodBtnFiltro = document.getElementById('prodFilterBtn');
+prodBtnFiltro.addEventListener('click', () => {
+  const panel = document.getElementById('prodFilterPanel');
+  const vis = panel.style.display === 'block';
+  panel.style.display = vis ? 'none' : 'block';
+
+  if (!vis) {
+    const r = prodBtnFiltro.getBoundingClientRect();
+    panel.style.left = r.left + 'px';
+    panel.style.top  = (r.bottom + 6) + 'px';
+  }
+});
+
 
 // Navega para a aba de Detalhes
 function navigateToDetalhes(codigo) {
@@ -245,6 +624,8 @@ function navigateToDetalhes(codigo) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('[menu_produto] DOMContentLoaded disparou');
+// abre o painel Início como padrão
+showMainTab('paginaInicio');
 
  const inputBusca = document.querySelector('.search-bar input');
 console.log('[INIT] inputBusca', inputBusca);
@@ -415,6 +796,13 @@ const resResumo = await fetch(`${API_BASE}/api/omie/produtos`, {
     }
   });
 
+  // === HOME – Preparação elétrica =========================
+document.getElementById('btn-prep-eletrica')?.addEventListener('click', e => {
+  e.preventDefault();                 // não siga o href
+  window.location.href = 'preparacao_eletrica.html';  // carrega a nova página
+});
+
+
   // ATALHO ÚNICO: abre aba cacheada + carrega cache EM UM SÓ CLIQUE
 
    const btnCache = document.getElementById('btn-omie-list1')
@@ -538,6 +926,7 @@ headerLinks.forEach(link => {
 
         /* toda vez que sair de Pedidos, esconde o painel Kanban */
 if (link.id !== 'menu-pedidos') hideKanban();
+if (link.id !== 'menu-armazens') hideArmazem();
 
     // 2) destaca o clicado
     link.classList.add('is-active');
@@ -557,9 +946,36 @@ if (link.id !== 'menu-pedidos') hideKanban();
       acessosPanel.style.display = 'none';
       if (window.openNotificacoes) window.openNotificacoes();
       
-    } else if (link.textContent.trim() === 'Inicio') {
+} else if (link.id === 'menu-inicio') {
 
-    }
+  /* 1) fecha Kanban e Armazéns, se abertos */
+  hideKanban();
+  hideArmazem();
+
+  /* 2) esconde todas as outras seções */
+  document.querySelectorAll('.tab-pane, .kanban-page')
+          .forEach(p => p.style.display = 'none');
+  document.getElementById('produtoTabs').style.display  = 'none';
+  document.getElementById('kanbanTabs').style.display   = 'none';
+  document.getElementById('armazemTabs').style.display  = 'none';
+const mh = document.querySelector('.main-header');
+if (mh) mh.style.display = 'none';
+
+
+  /* 3) mostra a Home com os 6 botões */
+  showMainTab('paginaInicio');
+
+  /* 4) mantém o link Início destacado */
+  headerLinks.forEach(a => a.classList.remove('is-active'));
+  link.classList.add('is-active');
+
+  /* 5) garante que a sidebar esteja visível */
+  document.querySelector('.left-side')?.classList.remove('is-hidden');
+}
+
+
+
+
 
     
   });
@@ -663,6 +1079,10 @@ const detalhesInicial = document.querySelector(
 );
 if (detalhesInicial) detalhesInicial.click();
 
+// Ao carregar, parte da Home → oculta abas internas de Produto
+const prodHeader = document.querySelector('#produtoTabs .main-header');
+if (prodHeader) prodHeader.style.display = 'none';
+document.getElementById('produtoTabs').style.display = 'none';
 
 
 
@@ -751,31 +1171,49 @@ document.getElementById('menu-pedidos').addEventListener('click', e => {
 });
 
 
-/* —————————————————————————————
-   Kanban interno  (Comercial / PCP / …)
-————————————————————————————— */
+/* ------------------------------------------------------------ *
+ *  Mostra uma sub-aba do Kanban                                *
+ *  nome = comercial | pcp | preparacao | producao | detalhes   *
+ * ------------------------------------------------------------ */
 function showKanbanTab(nome) {
-  lastKanbanTab = nome;          //  ← NOVO
-  /* 1) fixa o highlight na barra */
+
+  /* 1) destaca o link ativo na barra -------------------------- */
   document.querySelectorAll('#kanbanTabs .main-header-link')
     .forEach(a => a.classList.toggle('is-active',
                                      a.dataset.kanbanTab === nome));
 
-  /* 2) mostra só a página pedida */
+  /* 2) exibe só o painel correspondente ----------------------- */
   document.querySelectorAll('#kanbanContent .kanban-page')
-    .forEach(p => p.style.display =
-                p.id === `conteudo-${nome}` ? 'block' : 'none');
+    .forEach(p =>
+      p.style.display = (p.id === `conteudo-${nome}` ? 'block' : 'none')
+    );
+
+  /* 3) carrega / atualiza as colunas da aba escolhida ---------- */
+if (nome === 'comercial')       KanbanViews.renderKanbanComercial?.();
+else if (nome === 'pcp')        KanbanViews.renderKanbanPCP?.();
+else if (nome === 'preparacao') initPreparacaoKanban();
+else if (nome === 'producao')   KanbanViews.renderKanbanProducao?.();
+else if (nome === 'detalhes')   KanbanViews.renderKanbanDetalhes?.();
+
+
+
+  /* 4) guarda a última aba visitada --------------------------- */
+  lastKanbanTab = nome;
 }
 
-/*  listeners da barra “Comercial | PCP | …”  */
+/* ------------------------------------------------------------ *
+ *  Listeners da barra “Comercial | PCP | …”                    *
+ * ------------------------------------------------------------ */
 document.querySelectorAll('#kanbanTabs .main-header-link')
   .forEach(link => {
     link.addEventListener('click', e => {
-      e.preventDefault();
+      e.preventDefault();                    // cancela o href
+      hideArmazem();                         // oculta abas de estoque
       const alvo = link.dataset.kanbanTab;   // comercial / pcp / …
-      showKanbanTab(alvo);
+      showKanbanTab(alvo);                   // exibe sub-kanban
     });
   });
+
 
 
 // ---------- MENU RESPONSIVO ----------
@@ -824,5 +1262,7 @@ window.addEventListener('resize',           recalculaMenu);
 document.fonts?.ready.then(                  recalculaMenu);
 document.addEventListener('DOMContentLoaded', recalculaMenu);
 document.addEventListener('DOMContentLoaded', () => {
-  inicializarImportacaoCaracteristicas();
+  if (window.inicializarImportacaoCaracteristicas)
+       window.inicializarImportacaoCaracteristicas();
 });
+

@@ -30,9 +30,6 @@
     "node-fetch": "^2.7.0",
     "papaparse": "^5.5.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.9"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/qualidafromtherm2/Intranet.git"
@@ -40,5 +37,8 @@
   "bugs": {
     "url": "https://github.com/qualidafromtherm2/Intranet/issues"
   },
-  "homepage": "https://github.com/qualidafromtherm2/Intranet#readme"
+  "homepage": "https://github.com/qualidafromtherm2/Intranet#readme",
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
 }

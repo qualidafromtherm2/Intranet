@@ -3879,3 +3879,198 @@ li.duplicado::after{
   color: #fff;                      /* texto branco p/ contraste */
   transition: background 0.8s ease;
 }
+
+
+/* ——— Tabelas do módulo Armazéns ——— */
+table.tabela {
+  width: 100%;
+  border-collapse: collapse;      /* cola linhas -> some o “pulo” */
+  border-spacing: 0;
+  color: #eee;
+  font-size: 0.9rem;
+}
+
+table.tabela thead {
+  background: #222;
+  text-transform: uppercase;
+}
+
+table.tabela th,
+table.tabela td {
+  padding: 6px 8px;
+  border: 1px solid #444;         /* linhas discretas */
+}
+
+table.tabela tbody tr:nth-child(even) { background: #2a2a2a; }
+table.tabela tbody tr:hover       { background: #333; }
+
+table.tabela td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;  /* algarismos alinhados */
+}
+
+/* ——— Paginação ——— */
+.almox-pager {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;    /* centraliza */
+  font-size: 0.9rem;
+}
+
+.almox-pager .btn.tiny {
+  padding: 2px 6px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #eee;
+  cursor: pointer;
+}
+.almox-pager .btn[disabled] { opacity: .4; cursor: default; }
+
+/* ——— Área rolável em ambas as direções ——— */
+.almox-wrapper {
+  max-height: 60vh;          /* rolagem vertical               */
+  overflow-y: auto;
+  overflow-x: auto;          /* rolagem horizontal se precisar */
+  margin-bottom: 8px;
+}
+
+/* ——— Larguras fixas e reticências ——— */
+.almox-wrapper table {
+  table-layout: fixed;   /* força as larguras abaixo */
+  width: 100%;
+}
+
+/* 1ª coluna – Código */
+.almox-wrapper td:nth-child(1),
+.almox-wrapper th:nth-child(1) {
+  width: 120px;          /* ~⅔ da largura anterior */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 2ª coluna – Descrição (reticências) */
+.almox-wrapper td:nth-child(2),
+.almox-wrapper th:nth-child(2) {
+  width: 360px;          /* ajuste conforme seu layout */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Demais colunas numéricas — largura enxuta */
+.almox-wrapper td:nth-child(n+3),
+.almox-wrapper th:nth-child(n+3) {
+  width: 100px;   /* estava 80px */
+}
+
+/* Ajuste fino de larguras ----------------------------------- */
+.almox-wrapper th:nth-child(1),
+.almox-wrapper td:nth-child(1) { width: 120px; }  /* CÓDIGO      */
+.almox-wrapper th:nth-child(2),
+.almox-wrapper td:nth-child(2) { width: 320px; }  /* DESCRIÇÃO   */
+.almox-wrapper th:nth-child(n+3),
+.almox-wrapper td:nth-child(n+3) { width: 100px; } /* numéricas   */
+
+/* ——— campo de busca ——— */
+.search-box {
+  margin-left: 12px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #eee;
+  border-radius: 4px;
+  width: 220px;
+}
+.search-box::placeholder { color:#777; }
+
+/* ——— total CMC (à direita do campo de busca) ——— */
+.cmc-total {
+  margin-left: 16px;
+  font-size: 0.85rem;
+  color: #bbb;
+  white-space: nowrap;
+}
+
+
+.producao-wrapper {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+/* usa as mesmas larguras */
+.producao-wrapper table         { table-layout: fixed; width:100%; }
+.producao-wrapper td:nth-child(1),
+.producao-wrapper th:nth-child(1){ width:110px; white-space:nowrap; overflow:hidden;text-overflow:ellipsis; }
+.producao-wrapper td:nth-child(2),
+.producao-wrapper th:nth-child(2){ width:320px; white-space:nowrap; overflow:hidden;text-overflow:ellipsis; }
+.producao-wrapper td:nth-child(n+3),
+.producao-wrapper th:nth-child(n+3){ width:95px; }
+
+
+
+/* — filtro por tipo — */
+.filter-icon {
+  margin-left: 10px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+}
+.filter-icon:hover { color: #fff; }
+
+.filter-panel {
+  position: absolute;
+  z-index: 10;
+  background: #1b1b1b;
+  border: 1px solid #444;
+  padding: 8px 10px;
+  border-radius: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.6);
+}
+
+.filter-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .85rem;
+  margin: 4px 0;
+  color: #eee;
+}
+.filter-panel input[type="checkbox"] {
+  accent-color: #3fa7ff;   /* azul */
+}
+
+/* --- Painel Início --- */
+.inicio-grid{
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
+  padding:20px 0;
+}
+
+.inicio-btn{
+  min-width:220px;
+  flex:1 1 220px;
+  padding:18px 24px;
+  border-radius:10px;
+  font-size:16px;
+  background:var(--theme-bg-color);
+  color:var(--theme-color);
+  border:1px solid var(--border-color);
+  cursor:pointer;
+  transition:.25s;
+}
+.inicio-btn:hover{background:var(--hover-menu-bg);}
+/* mantém o comportamento original */
+.header .header-menu > .menu-link:hover {
+  cursor: pointer;          /* 👈 força a mãozinha */
+}
+
+.iniciar-prod-btn{ margin-bottom:1rem; }
