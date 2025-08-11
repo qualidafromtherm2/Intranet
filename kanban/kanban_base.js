@@ -72,7 +72,7 @@ export async function gerarTicket () {
 // kanban_base.js  – substitua APENAS o corpo da gerarEtiquetaPP
 export function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
   /* ajuste aqui até ficar no local ideal -------------------------- */
-  const DX = 220;      // deslocamento horizontal
+  const DX = 100;      // deslocamento horizontal
   const DY = 0;      // deslocamento vertical
   /* --------------------------------------------------------------- */
 

@@ -106,7 +106,7 @@
   {
     "pedido": "Estoque",
     "codigo": "FTI55DPTBR",
-    "quantidade": 31,
+    "quantidade": 33,
     "local": [
       "Separação logística,101046",
       "Separação logística,101025",
@@ -138,7 +138,9 @@
       "Separação logística,101078",
       "Separação logística,101081",
       "Fila de produção,101082",
-      "Fila de produção,101083"
+      "Fila de produção,101083",
+      "Fila de produção,101087",
+      "Fila de produção,101090"
     ],
     "estoque": 0,
     "_codigoProd": 10434228657
@@ -172,5 +174,55 @@
     ],
     "estoque": 0,
     "_codigoProd": 10408353781
+  },
+  {
+    "pedido": "18130",
+    "codigo": "FT180J35T",
+    "quantidade": 2,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353819
+  },
+  {
+    "pedido": "18130",
+    "codigo": "FT40B35W",
+    "quantidade": 3,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10621791877
+  },
+  {
+    "pedido": "18130",
+    "codigo": "FT80J35T",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353981
+  },
+  {
+    "pedido": "18134",
+    "codigo": "FTI75DPTBR",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10476605682
+  },
+  {
+    "pedido": "18138",
+    "codigo": "FT50D35W",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10621791899
   }
 ]

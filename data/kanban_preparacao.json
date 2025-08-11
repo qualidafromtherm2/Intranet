@@ -2,13 +2,17 @@
   {
     "pedido": "Estoque",
     "codigo": "04.PP.N.51004",
-    "quantidade": 1,
+    "quantidade": 2,
     "local": [
       "Fila de produção,P101059",
       "Em produção,P101080",
       "Fila de produção,P101083",
       "Fila de produção,P101084",
-      "Fila de produção,P101085"
+      "Fila de produção,P101085",
+      "Fila de produção,P101086",
+      "Fila de produção,P101088",
+      "Fila de produção,P101089",
+      "Fila de produção,P101091"
     ],
     "estoque": 0,
     "_codigoProd": 10569202060
