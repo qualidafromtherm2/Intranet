@@ -172,6 +172,41 @@
     background: rgba(255,255,255,.08);
   }
 
+/* Gestão usa o mesmo layout/botões da aba Produto */
+#gestaoTab .produto-layout{ display:flex; gap:16px; align-items:flex-start; }
+#gestaoTab .side-actions{ width:220px; flex:0 0 220px; display:flex; align-items:flex-start; }
+#gestaoTab .btn-stack{ display:flex; flex-direction:column; gap:10px; width:100%; }
+#gestaoTab .btn-modern{ /* reaproveita seu estilo padrão */ }
+@media (max-width:1100px){
+  #gestaoTab .produto-layout{ flex-direction:column; }
+  #gestaoTab .side-actions{ width:100%; flex:0 0 auto; }
+}
+
+/* o menu SQL precisa de position:relative no contêiner */
+#gestaoTab .side-actions { position: relative; }
+
+/* reutiliza o mesmo estilo do menu flutuante na Gestão */
+#gestaoTab .sql-menu{ 
+  position: absolute;
+  right: 0; top: calc(100% + 8px);
+  background: var(--header-bg, #111);
+  color: var(--text, #fff);
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(0,0,0,.25);
+  padding: 8px;
+  min-width: 220px;
+  display: none;
+  z-index: 3000;
+}
+#gestaoTab .sql-menu.open{ display: block; }
+#gestaoTab .sql-menu button{
+  width: 100%;
+  appearance: none; border: 0; background: transparent;
+  text-align: left; padding: 10px 12px; cursor: pointer; border-radius: 10px;
+  color: inherit;
+}
+#gestaoTab .sql-menu button:hover{ background: rgba(255,255,255,.08); }
+
 </style>
 
 </head>
@@ -200,7 +235,7 @@
     data-target="paginaInicio">Início</a>
     <a id="menu-produto" class="menu-link" href="#" data-target="produtoTab">Produto</a>
     <a id="menu-qualidade"     class="menu-link" href="#">Qualidade</a>
-    <a id="menu-acessos"       class="menu-link" href="#">Acessos</a>
+    <a id="menu-gestao" class="menu-link" href="#">Gestão</a>
     <a id="menu-notificacoes"  class="menu-link" href="#">Notificações</a>
   </nav>
 
@@ -330,14 +365,6 @@
 </button>
 
 
-    <button id="btn-baixar-csv" class="btn-modern" type="button">
-      Baixar CSV
-    </button>
-
-
-<button id="btn-sql" class="btn-modern" type="button">
-  SQL
-</button>
 
   </div>
 </div>
@@ -347,6 +374,27 @@
   </div>
 </div>
 
+<!-- Aba Gestão (fora do #produtoTab) -->
+<div id="gestaoTab" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="title-wrapper">
+      <div class="content-section-title">Gestão</div>
+    </div>
+
+    <div class="produto-layout">
+      <div class="side-actions">
+        <div class="btn-stack">
+          <button id="btn-baixar-csv-gestao" class="btn-modern" type="button">
+            Baixar CSV
+          </button>
+          <button id="btn-sql-gestao" class="btn-modern" type="button">
+            SQL
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 
 
@@ -367,9 +415,6 @@
 </div>
 
 
-
-
-
   <!-- coloca logo antes do fechamento do body -->
 <!-- coloque ANTES do seu script de inicialização -->
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -379,180 +424,45 @@
 <script type="module">
   import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
 
-  // use SEMPRE window.Html5Qrcode para garantir o escopo global
-  const Html5Qrcode = window.Html5Qrcode;
-
   document.addEventListener('DOMContentLoaded', () => {
     initPreparacaoKanban();
 
-const menuInicio    = document.getElementById('menu-inicio');
-const menuProduto   = document.getElementById('menu-produto');
-const paginaPrep    = document.getElementById('paginaPrepEletrica');
-const produtoTab    = document.getElementById('produtoTab');           // <div id="produtoTab">
-const miniCodigoEl  = document.getElementById('produtoSelecionado');   // <span id="produtoSelecionado">
-const ulMiniFila    = document.getElementById('prod-col-fila');        // <ul id="prod-col-fila">
-const ulMiniEmProd  = document.getElementById('prod-col-emprod');      // <ul id="prod-col-emprod">
+    // ===== refs da UI
+    const menuInicio   = document.getElementById('menu-inicio');
+    const menuProduto  = document.getElementById('menu-produto');
+    const menuGestao   = document.getElementById('menu-gestao');
 
-  const btnSql   = document.getElementById('btn-sql');
-  const sideBox  = document.querySelector('#produtoTab .side-actions');
+    const paginaPrep   = document.getElementById('paginaPrepEletrica');
+    const produtoTab   = document.getElementById('produtoTab');
+    const gestaoTab    = document.getElementById('gestaoTab');
 
-  // cria o menu
-  const sqlMenu = document.createElement('div');
-  sqlMenu.id = 'sqlMenu';
-  sqlMenu.className = 'sql-menu';
-  sqlMenu.innerHTML = `
-    <button data-act="last100">Últimos 100</button>
-    <button data-act="byop">Digite a OP…</button>
-    <button data-act="today">Hoje</button>
-    <button data-act="range">Entre datas…</button>
-  `;
-  sideBox.appendChild(sqlMenu);
+    const miniCodigoEl = document.getElementById('produtoSelecionado');
+    const ulMiniFila   = document.getElementById('prod-col-fila');
+    const ulMiniEmProd = document.getElementById('prod-col-emprod');
 
-  // abre/fecha
-  btnSql?.addEventListener('click', (e) => {
-    e.preventDefault();
-    sqlMenu.classList.toggle('open');
-  });
-  document.addEventListener('click', (e) => {
-    if (!sqlMenu.contains(e.target) && e.target !== btnSql) {
-      sqlMenu.classList.remove('open');
-    }
-  });
+    window.codigoSelecionado = null;
 
-  // helper: abre JSON em nova aba, ou baixa CSV (OK=CSV, Cancel=JSON)
-  function openEventosQuery(q) {
-    const csv = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
-    const base = csv ? '/api/preparacao/eventos.csv' : '/api/preparacao/eventos';
-    const qs = new URLSearchParams(q);
-    const url = `${base}?${qs.toString()}`;
+    // ===== navegação das abas
+    const setActive = (el) => {
+      document.querySelectorAll('#mainMenu .menu-link').forEach(a => a.classList.remove('is-active'));
+      el.classList.add('is-active');
+    };
 
-    if (csv) {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'op_eventos.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } else {
-      window.open(url, '_blank');
-    }
-  }
+    menuInicio.addEventListener('click', (e) => {
+      e.preventDefault();
+      setActive(menuInicio);
+      produtoTab.style.display = 'none';
+      gestaoTab.style.display  = 'none';
+      paginaPrep.style.display = 'block';
+    });
 
-  // cliques do menu
-  sqlMenu.addEventListener('click', (e) => {
-    const act = e.target?.dataset?.act;
-    if (!act) return;
-    sqlMenu.classList.remove('open');
-
-    if (act === 'last100') {
-      openEventosQuery({ limit: '100', order: 'desc' });
-    } else if (act === 'byop') {
-      const op = prompt('Digite a OP (ex.: P101086):');
-      if (op) openEventosQuery({ op: op.trim().toUpperCase() });
-    } else if (act === 'today') {
-      const d = new Date();
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      openEventosQuery({ from: `${y}-${m}-${day}`, to: `${y}-${m}-${day}` });
-    } else if (act === 'range') {
-      const de  = prompt('Data inicial (AAAA-MM-DD):');
-      if (!de) return;
-      const ate = prompt('Data final (AAAA-MM-DD):');
-      if (!ate) return;
-      openEventosQuery({ from: de.trim(), to: ate.trim() });
-    }
-  });
-  
-window.codigoSelecionado = null;
-  
-
-window.ativarAbaProduto = function ativarAbaProduto() {
-
-  document.querySelectorAll('#mainMenu .menu-link')
-          .forEach(a => a.classList.remove('is-active'));
-  menuProduto.classList.add('is-active');
-
-  paginaPrep.style.display = 'none';
-  produtoTab.style.display = 'block';
-}
-
-
-async function renderMiniKanban(codigo) {
-  miniCodigoEl.textContent = codigo ? `— ${codigo}` : '';
-  ulMiniFila.innerHTML   = '';
-  ulMiniEmProd.innerHTML = '';
-
-  try {
-    const resp = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-    const { mode, data } = await resp.json();
-    console.log('[mini-board] mode =', mode);
-
-    // junta as duas colunas que exibimos na mini-board
-    const todos = [
-      ...(data['Fila de produção'] || []),
-      ...(data['Em produção']      || [])
-    ];
-
-    const itensDoProduto = todos.filter(c =>
-      String(c.produto).trim() === String(codigo).trim()
-    );
-
-    if (!itensDoProduto.length) {
-      ulMiniFila.innerHTML   = '<li class="empty">Nada encontrado</li>';
-      ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-      return;
-    }
-
-    for (const c of itensDoProduto) {
-      const li = document.createElement('li');
-      li.classList.add('kanban-card');
-      li.textContent = c.op;
-
-      if (c.status === 'Fila de produção') {
-        ulMiniFila.appendChild(li);
-      } else if (c.status === 'Em produção') {
-        ulMiniEmProd.appendChild(li);
-      }
-    }
-
-    if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
-    if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-
-  } catch (err) {
-    console.error(err);
-    ulMiniFila.innerHTML   = '<li class="empty">Erro carregando dados</li>';
-    ulMiniEmProd.innerHTML = '';
-  }
-}
-window.renderMiniKanban = renderMiniKanban;
-
-
-
-    // — Clique SOMENTE na "Fila de produção" do kanban desta página —
-    document.getElementById('coluna-prep-fila')
-      .addEventListener('click', (e) => {
-        const card = e.target.closest('li');
-        if (!card) return;
-
-        // tenta achar o código do produto
-        let code =
-          card.dataset?.codigo
-          || card.querySelector('[data-codigo]')?.dataset?.codigo
-          || card.querySelector('.codigo')?.textContent?.trim()
-          || (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]); // ex.: 04.PP.N.51004
-
-        if (!code) return; // sem código, não tem o que filtrar
-
-        window.codigoSelecionado = code;
-        ativarAbaProduto();
-        renderMiniKanban(window.codigoSelecionado);
-      });
-
-    // — Clicar em "Produto" na barra apenas mostra a aba (sem seleção) —
     menuProduto.addEventListener('click', (e) => {
       e.preventDefault();
-      ativarAbaProduto();
+      setActive(menuProduto);
+      paginaPrep.style.display = 'none';
+      gestaoTab.style.display  = 'none';
+      produtoTab.style.display = 'block';
+
       if (window.codigoSelecionado) {
         renderMiniKanban(window.codigoSelecionado);
       } else {
@@ -562,157 +472,232 @@ window.renderMiniKanban = renderMiniKanban;
       }
     });
 
-    // — Voltar para a preparação ao clicar em Início —
-    menuInicio.addEventListener('click', (e) => {
+    menuGestao.addEventListener('click', (e) => {
       e.preventDefault();
-      document.querySelectorAll('#mainMenu .menu-link')
-              .forEach(a => a.classList.remove('is-active'));
-      menuInicio.classList.add('is-active');
-produtoTab.style.display = 'none';
-paginaPrep.style.display = 'block';
-
+      setActive(menuGestao);
+      paginaPrep.style.display = 'none';
+      produtoTab.style.display = 'none';
+      gestaoTab.style.display  = 'block';
     });
 
-  });
+    // ===== botões da aba Gestão (CSV + SQL)
+    const btnBaixarCsvGestao = document.getElementById('btn-baixar-csv-gestao');
+    const btnSqlGestao       = document.getElementById('btn-sql-gestao');
+    const sideBoxGestao      = document.querySelector('#gestaoTab .side-actions');
 
+    const sqlMenu = document.createElement('div');
+    sqlMenu.className = 'sql-menu';
+    sqlMenu.innerHTML = `
+      <button data-act="last100">Últimos 100</button>
+      <button data-act="byop">Digite a OP…</button>
+      <button data-act="today">Hoje</button>
+      <button data-act="range">Entre datas…</button>
+    `;
+    sideBoxGestao?.appendChild(sqlMenu);
 
-
-  // ===== Leitor QR (somente nesta página) =====
-// ===== Leitor QR (somente nesta página) =====
-const btnIniciar    = document.getElementById('btn-iniciar');
-const btnFinalizar  = document.getElementById('btn-finalizar');
-const btnBaixarCsv  = document.getElementById('btn-baixar-csv');
-
-btnIniciar?.addEventListener('click', (e) => {
-  e.preventDefault();
-  abrirLeitorQRComAcao('iniciar');
-});
-
-btnFinalizar?.addEventListener('click', (e) => {
-  e.preventDefault();
-  abrirLeitorQRComAcao('concluir'); // muda para "No estoque"
-});
-
-// btnBaixarCsv já deve estar com o fetch do CSV
-
-
-
-
-// Lê QR e executa a ação: 'iniciar' → Em produção | 'concluir' → No estoque
-async function abrirLeitorQRComAcao(acao) {
-  if (!window.Html5Qrcode) {
-    alert('Leitor indisponível. Recarregue a página.');
-    return;
-  }
-
-  const qrModal   = document.getElementById('qrModal');
-  const qrClose   = document.getElementById('qrClose');
-  const html5QrCode = new window.Html5Qrcode('qrReader');
-
-  let handled = false; // ← trava múltiplas leituras
-
-  const stop = async () => {
-    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-    qrModal.style.display = 'none';
-  };
-
-  const onScan = async (decodedText) => {
-    if (handled) return;
-    handled = true;
-
-    // para a câmera IMEDIATAMENTE para não disparar de novo
-    await stop();
-
-    // extrai a OP (Pxxxxx)
-    const m  = decodedText.match(/P\d{3,}/i);
-    const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText))
-                .trim().toUpperCase();
-
-    try {
-      if (acao === 'iniciar') {
-        await Preparacao.iniciarProducao(op);
-        alert(`OP ${op} movida para "Em produção".`);
-      } else if (acao === 'concluir') {
-        await Preparacao.finalizarProducao(op);
-        alert(`OP ${op} movida para "No estoque".`);
+    btnSqlGestao?.addEventListener('click', (e) => {
+      e.preventDefault();
+      sqlMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', (e) => {
+      if (!sqlMenu.contains(e.target) && e.target !== btnSqlGestao) {
+        sqlMenu.classList.remove('open');
       }
+    });
 
-      if (window.renderMiniKanban && window.codigoSelecionado) {
-        await window.renderMiniKanban(window.codigoSelecionado);
+    function openEventosQuery(q) {
+      const csv  = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
+      const base = csv ? '/api/preparacao/eventos.csv' : '/api/preparacao/eventos';
+      const qs   = new URLSearchParams(q);
+      const url  = `${base}?${qs.toString()}`;
+      if (csv) {
+        const a = document.createElement('a');
+        a.href = url; a.download = 'op_eventos.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+      } else {
+        window.open(url, '_blank');
       }
-    } catch (err) {
-      const txt = acao === 'iniciar' ? 'iniciar' : 'finalizar';
-      alert(`Falha ao ${txt} produção: ${err.message || err}`);
     }
-  };
 
-  // abre modal e inicia câmera
-  qrModal.style.display = 'block';
-  const camConstraints = { facingMode: 'environment' };
-  try {
-    await html5QrCode.start(
-      camConstraints,
-      {
-        fps: 15,
-        aspectRatio: 16/9,
-        qrbox: (vw, vh) => {
-          const size = Math.floor(Math.min(vw, vh) * 0.72);
-          return { width: size, height: size };
+    sqlMenu.addEventListener('click', (e) => {
+      const act = e.target?.dataset?.act;
+      if (!act) return;
+      sqlMenu.classList.remove('open');
+
+      if (act === 'last100') {
+        openEventosQuery({ limit: '100', order: 'desc' });
+      } else if (act === 'byop') {
+        const op = prompt('Digite a OP (ex.: P101086):');
+        if (op) openEventosQuery({ op: op.trim().toUpperCase() });
+      } else if (act === 'today') {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        openEventosQuery({ from: `${y}-${m}-${day}`, to: `${y}-${m}-${day}` });
+      } else if (act === 'range') {
+        const de  = prompt('Data inicial (AAAA-MM-DD):'); if (!de) return;
+        const ate = prompt('Data final (AAAA-MM-DD):');   if (!ate) return;
+        openEventosQuery({ from: de.trim(), to: ate.trim() });
+      }
+    });
+
+    btnBaixarCsvGestao?.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = '/api/preparacao/csv';
+      a.download = 'preparacao.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+
+    // ===== mini-board (aba Produto)
+    window.ativarAbaProduto = function ativarAbaProduto() {
+      setActive(menuProduto);
+      paginaPrep.style.display = 'none';
+      gestaoTab.style.display  = 'none';
+      produtoTab.style.display = 'block';
+    };
+
+    async function renderMiniKanban(codigo) {
+      miniCodigoEl.textContent = codigo ? `— ${codigo}` : '';
+      ulMiniFila.innerHTML   = '';
+      ulMiniEmProd.innerHTML = '';
+      try {
+        const resp = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+        const { mode, data } = await resp.json();
+        console.log('[mini-board] mode =', mode);
+
+        const todos = [
+          ...(data['Fila de produção'] || []),
+          ...(data['Em produção']      || [])
+        ];
+        const itensDoProduto = todos.filter(c =>
+          String(c.produto).trim() === String(codigo).trim()
+        );
+
+        if (!itensDoProduto.length) {
+          ulMiniFila.innerHTML   = '<li class="empty">Nada encontrado</li>';
+          ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+          return;
         }
-      },
-      onScan
-    );
-  } catch (e) {
-    alert('Não foi possível abrir a câmera: ' + (e.message || e));
-    await stop();
-    return;
-  }
 
-  // fechar X / fora / ESC
-  qrClose.onclick = stop;
-  qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
-  const onEsc = (ev) => {
-    if (ev.key === 'Escape' && qrModal.style.display === 'block') {
-      document.removeEventListener('keydown', onEsc);
-      stop();
+        for (const c of itensDoProduto) {
+          const li = document.createElement('li');
+          li.classList.add('kanban-card');
+          li.textContent = c.op;
+          if (c.status === 'Fila de produção') ulMiniFila.appendChild(li);
+          else if (c.status === 'Em produção') ulMiniEmProd.appendChild(li);
+        }
+
+        if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
+        if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+      } catch (err) {
+        console.error(err);
+        ulMiniFila.innerHTML   = '<li class="empty">Erro carregando dados</li>';
+        ulMiniEmProd.innerHTML = '';
+      }
     }
-  };
-  document.addEventListener('keydown', onEsc);
-}
+    window.renderMiniKanban = renderMiniKanban;
 
+    document.getElementById('coluna-prep-fila')
+      .addEventListener('click', (e) => {
+        const card = e.target.closest('li');
+        if (!card) return;
+        let code =
+          card.dataset?.codigo
+          || card.querySelector('[data-codigo]')?.dataset?.codigo
+          || card.querySelector('.codigo')?.textContent?.trim()
+          || (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]);
+        if (!code) return;
+        window.codigoSelecionado = code;
+        window.ativarAbaProduto();
+        renderMiniKanban(window.codigoSelecionado);
+      });
 
-// download do CSV (funciona tanto local quanto via Render/Cloudflare)
-btnBaixarCsv?.addEventListener('click', () => {
-  // forma compatível: cria um <a> invisível e clica
-  const a = document.createElement('a');
-  a.href = '/api/preparacao/csv';
-  a.download = 'preparacao.csv'; // hint pro navegador
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-});
+    // ===== QR: iniciar/finalizar produção
+    const btnIniciar   = document.getElementById('btn-iniciar');
+    const btnFinalizar = document.getElementById('btn-finalizar');
 
-  const qrModal    = document.getElementById('qrModal');
-  const qrClose    = document.getElementById('qrClose');
+    btnIniciar?.addEventListener('click', (e) => {
+      e.preventDefault();
+      abrirLeitorQRComAcao('iniciar');
+    });
+    btnFinalizar?.addEventListener('click', (e) => {
+      e.preventDefault();
+      abrirLeitorQRComAcao('concluir');
+    });
 
+    async function abrirLeitorQRComAcao(acao) {
+      if (!window.Html5Qrcode) {
+        alert('Leitor indisponível. Recarregue a página.');
+        return;
+      }
+      const qrModal     = document.getElementById('qrModal');
+      const qrClose     = document.getElementById('qrClose');
+      const html5QrCode = new window.Html5Qrcode('qrReader');
+      let handled = false;
 
+      const stop = async () => {
+        try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+        qrModal.style.display = 'none';
+      };
 
+      const onScan = async (decodedText) => {
+        if (handled) return;
+        handled = true;
+        await stop();
 
+        const m  = decodedText.match(/P\d{3,}/i);
+        const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText))
+                    .trim().toUpperCase();
+        try {
+          if (acao === 'iniciar') {
+            await Preparacao.iniciarProducao(op);
+            alert(`OP ${op} movida para "Em produção".`);
+          } else if (acao === 'concluir') {
+            await Preparacao.finalizarProducao(op);
+            alert(`OP ${op} movida para "No estoque".`);
+          }
+          if (window.renderMiniKanban && window.codigoSelecionado) {
+            await window.renderMiniKanban(window.codigoSelecionado);
+          }
+        } catch (err) {
+          alert(`Falha ao ${acao === 'iniciar' ? 'iniciar' : 'finalizar'} produção: ${err.message || err}`);
+        }
+      };
 
-    // Escolhe a câmera traseira (quando houver)
-  async function pickRearCamera() {
-    try {
-      const devices = await window.Html5Qrcode.getCameras();
-      if (!devices || !devices.length) return null;
-      const prefer = devices.find(d => /back|trás|rear|environment/i.test(d.label));
-      return (prefer?.id) || devices[0].id; // fallback para a 1ª
-    } catch {
-      return null;
+      qrModal.style.display = 'block';
+      try {
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          {
+            fps: 15,
+            aspectRatio: 16/9,
+            qrbox: (vw, vh) => {
+              const size = Math.floor(Math.min(vw, vh) * 0.72);
+              return { width: size, height: size };
+            }
+          },
+          onScan
+        );
+      } catch (e) {
+        alert('Não foi possível abrir a câmera: ' + (e.message || e));
+        await stop();
+        return;
+      }
+
+      qrClose.onclick = stop;
+      qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
+      const onEsc = (ev) => {
+        if (ev.key === 'Escape' && qrModal.style.display === 'block') {
+          document.removeEventListener('keydown', onEsc);
+          stop();
+        }
+      };
+      document.addEventListener('keydown', onEsc);
     }
-  }
-
-
+  });
 </script>
+
 
 <!-- Modal simples do QR -->
 <div id="qrModal" class="modal" style="display:none;">
