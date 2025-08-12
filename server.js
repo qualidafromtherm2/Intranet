@@ -24,7 +24,9 @@ const app = express();
 
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
-
+const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
+// Caminho do JSON local
+const KANBAN_PREP_PATH = path.join(__dirname, 'data', 'kanban_preparacao.json');
 let etqConfig = [];
 function loadEtqConfig() {
   if (etqConfig.length) return;              // já carregado
@@ -37,6 +39,15 @@ loadEtqConfig();
 console.log('\n⇢ Cabeçalhos que o csv-parse leu:');
 console.table(etqConfig.slice(0, 5));
 // Fim DEBUG ─────────────────────────────────────────────
+
+// Detecta se a requisição é local (localhost/127.0.0.1)
+function isLocalRequest(req) {
+  const hostHeader = (req.headers['x-forwarded-host'] || req.headers.host || '').toString();
+  const host = hostHeader.split(':')[0].toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+
 
 /**
  * Separa as linhas para a coluna E (esquerda) e D (direita)
@@ -93,6 +104,97 @@ const {
 } = require('./config.server');
 const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 
+
+// ==== NOVO: utilitários p/ formato ARRAY do seu kanban_preparacao.json ====
+// usa fsp (fs.promises) que você já declarou lá em cima como `const fsp = fs.promises;`
+
+function splitLocalEntry(s) {
+  const [statusRaw, opRaw] = String(s).split(',');
+  return {
+    status: String(statusRaw || '').trim(),
+    op:     String(opRaw    || '').trim()
+  };
+}
+
+async function loadPrepArray() {
+  try {
+    const txt = await fsp.readFile(KANBAN_PREP_PATH, 'utf8');
+    const arr = JSON.parse(txt);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+async function savePrepArray(arr) {
+  await fsp.mkdir(path.dirname(KANBAN_PREP_PATH), { recursive: true });
+  await fsp.writeFile(KANBAN_PREP_PATH, JSON.stringify(arr, null, 2), 'utf8');
+}
+
+/**
+ * Move uma OP dentro do ARRAY local: procura em todos os itens/local[]
+ * e troca "StatusAntigo,OP" por "novoStatus,OP".
+ */
+async function moverOpLocalArray(op, novoStatus) {
+  const valid = ['Fila de produção', 'Em produção', 'No estoque'];
+  if (!valid.includes(novoStatus)) throw new Error(`Status inválido: ${novoStatus}`);
+
+  const arr = await loadPrepArray();
+  let found = false;
+
+  for (const item of arr) {
+    if (!Array.isArray(item.local)) continue;
+    for (let i = 0; i < item.local.length; i++) {
+      const { status, op: opId } = splitLocalEntry(item.local[i]);
+      if (opId === op) {
+        item.local[i] = `${novoStatus},${op}`;
+        found = true;
+        break;
+      }
+    }
+    if (found) break;
+  }
+
+  if (!found) {
+    // não achou? cria um “balde” mínimo e registra a OP no novo status
+    arr.push({
+      pedido: 'Estoque',
+      codigo: 'DESCONHECIDO',
+      quantidade: 1,
+      local: [`${novoStatus},${op}`],
+      estoque: 0,
+      _codigoProd: null
+    });
+  }
+
+  await savePrepArray(arr);
+  return { ok: true, updated: found, to: novoStatus };
+}
+
+/** Converte o ARRAY em colunas { 'Fila de produção':[], 'Em produção':[], ... } */
+function arrToColumns(arr) {
+  const cols = {
+    'Fila de produção': [],
+    'Em produção': [],
+    'No estoque': []
+  };
+  for (const item of arr) {
+    const base = {
+      pedido: item.pedido,
+      produto: item.codigo,
+      quantidade: item.quantidade,
+      _codigoProd: item._codigoProd
+    };
+    if (Array.isArray(item.local)) {
+      for (const s of item.local) {
+        const { status, op } = splitLocalEntry(s);
+        if (!cols[status]) cols[status] = [];
+        cols[status].push({ op, status, ...base });
+      }
+    }
+  }
+  return cols;
+}
 
 /* lê o MAIOR nº que existir em QUALQUER cartão.local-[]  */
 function nextOpFromKanban () {
@@ -1719,6 +1821,80 @@ if (conteudo?.endsWith('_7E')) {
 });
 
 
+
+// Iniciar produção (muda status da OP para "Em produção")
+app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
+  const { op } = req.params;
+  const novoStatus = 'Em produção';
+
+  try {
+    if (isLocalRequest(req) || !isDbEnabled) {
+      // Modo LOCAL → mexe no JSON
+      const result = await moverOpLocalArray(op, novoStatus);
+      return res.json({ mode: 'local-json', op, ...result });
+    }
+
+    // Modo REMOTO (Render) → Postgres
+    await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
+    return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
+  } catch (err) {
+    console.error('[preparacao/op/iniciar] erro:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao iniciar produção' });
+  }
+});
+
+// Concluir produção (muda status da OP para "No estoque")
+app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
+  const { op } = req.params;
+  const novoStatus = 'No estoque';
+
+  try {
+    if (isLocalRequest(req) || !isDbEnabled) {
+      // Modo LOCAL → JSON (usando o array do seu kanban_preparacao.json)
+      const result = await moverOpLocalArray(op, novoStatus);
+      return res.json({ mode: 'local-json', op, ...result });
+    }
+
+    // Modo REMOTO → Postgres
+    await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
+    return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
+  } catch (err) {
+    console.error('[preparacao/op/concluir] erro:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao concluir produção' });
+  }
+});
+
+// Lista o Kanban de preparação (local: JSON | remoto: Postgres)
+app.get('/api/preparacao/listar', async (req, res) => {
+  try {
+    if (isLocalRequest(req) || !isDbEnabled) {
+      const arr  = await loadPrepArray();     // << aqui
+      const data = arrToColumns(arr);         // << e aqui
+      return res.json({ mode: 'local-json', data });
+    }
+
+    // (remoto) mantém como está:
+    const { rows } = await dbQuery(
+      `SELECT produto_codigo, op, status
+         FROM op_status
+        ORDER BY status, op`
+    );
+    const data = {
+      'Fila de produção': [],
+      'Em produção': [],
+      'No estoque': []
+    };
+    for (const r of rows) {
+      const card = { op: r.op, produto: r.produto_codigo, status: r.status };
+      if (!data[r.status]) data[r.status] = [];
+      data[r.status].push(card);
+    }
+    return res.json({ mode: 'postgres', data });
+  } catch (err) {
+    console.error('[preparacao/listar] erro:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao listar preparação' });
+  }
+});
 
 
 

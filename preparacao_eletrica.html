@@ -316,7 +316,8 @@ const ulMiniFila    = document.getElementById('prod-col-fila');        // <ul id
 const ulMiniEmProd  = document.getElementById('prod-col-emprod');      // <ul id="prod-col-emprod">
 
 
-    let codigoSelecionado = null;
+window.codigoSelecionado = null;
+  
 
 window.ativarAbaProduto = function ativarAbaProduto() {
 
@@ -329,45 +330,56 @@ window.ativarAbaProduto = function ativarAbaProduto() {
 }
 
 
-    async function renderMiniKanban(codigo) {
-      miniCodigoEl.textContent = codigo ? `— ${codigo}` : '';
-      ulMiniFila.innerHTML   = '';
-      ulMiniEmProd.innerHTML = '';
+async function renderMiniKanban(codigo) {
+  miniCodigoEl.textContent = codigo ? `— ${codigo}` : '';
+  ulMiniFila.innerHTML   = '';
+  ulMiniEmProd.innerHTML = '';
 
-      try {
-        const resp  = await fetch('data/kanban_preparacao.json', { cache: 'no-store' });
-        const lista = await resp.json();
+  try {
+    const resp = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+    const { mode, data } = await resp.json();
+    console.log('[mini-board] mode =', mode);
 
-        const item = lista.find(x => String(x.codigo).trim() === String(codigo).trim());
-        if (!item) {
-          ulMiniFila.innerHTML = '<li class="empty">Nada encontrado</li>';
-          return;
-        }
+    // junta as duas colunas que exibimos na mini-board
+    const todos = [
+      ...(data['Fila de produção'] || []),
+      ...(data['Em produção']      || [])
+    ];
 
-        (item.local || []).forEach(linha => {
-          const [status, op] = String(linha).split(',').map(s => s.trim());
-const li = document.createElement('li');
-li.textContent = op || linha;   // exibe só o código da OP
-li.classList.add('kanban-card');
+    const itensDoProduto = todos.filter(c =>
+      String(c.produto).trim() === String(codigo).trim()
+    );
 
+    if (!itensDoProduto.length) {
+      ulMiniFila.innerHTML   = '<li class="empty">Nada encontrado</li>';
+      ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+      return;
+    }
 
-          if (status === 'Fila de produção') {
-            ulMiniFila.appendChild(li);
-          } else if (status === 'Em produção') {
-            ulMiniEmProd.appendChild(li);
-          }
-        });
+    for (const c of itensDoProduto) {
+      const li = document.createElement('li');
+      li.classList.add('kanban-card');
+      li.textContent = c.op;
 
-        // se não tiver nenhum item em algum lado, mostra vazio bonito
-        if (!ulMiniFila.children.length)    ulMiniFila.innerHTML    = '<li class="empty">—</li>';
-        if (!ulMiniEmProd.children.length)  ulMiniEmProd.innerHTML  = '<li class="empty">—</li>';
-
-      } catch (err) {
-        ulMiniFila.innerHTML   = '<li class="empty">Erro carregando JSON</li>';
-        ulMiniEmProd.innerHTML = '';
-        console.error(err);
+      if (c.status === 'Fila de produção') {
+        ulMiniFila.appendChild(li);
+      } else if (c.status === 'Em produção') {
+        ulMiniEmProd.appendChild(li);
       }
     }
+
+    if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
+    if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+
+  } catch (err) {
+    console.error(err);
+    ulMiniFila.innerHTML   = '<li class="empty">Erro carregando dados</li>';
+    ulMiniEmProd.innerHTML = '';
+  }
+}
+window.renderMiniKanban = renderMiniKanban;
+
+
 
     // — Clique SOMENTE na "Fila de produção" do kanban desta página —
     document.getElementById('coluna-prep-fila')
@@ -384,17 +396,17 @@ li.classList.add('kanban-card');
 
         if (!code) return; // sem código, não tem o que filtrar
 
-        codigoSelecionado = code;
+        window.codigoSelecionado = code;
         ativarAbaProduto();
-        renderMiniKanban(codigoSelecionado);
+        renderMiniKanban(window.codigoSelecionado);
       });
 
     // — Clicar em "Produto" na barra apenas mostra a aba (sem seleção) —
     menuProduto.addEventListener('click', (e) => {
       e.preventDefault();
       ativarAbaProduto();
-      if (codigoSelecionado) {
-        renderMiniKanban(codigoSelecionado);
+      if (window.codigoSelecionado) {
+        renderMiniKanban(window.codigoSelecionado);
       } else {
         miniCodigoEl.textContent = '';
         ulMiniFila.innerHTML     = '<li class="empty">Selecione um item na Fila de produção</li>';
@@ -452,55 +464,43 @@ async function abrirLeitorQR() {
     qrModal.style.display = 'none';
   };
 
-  // quando ler um QR
-  const onScan = (decodedText /*, decodedResult*/) => {
-// pega só o trecho que começa com P seguido de dígitos (ex.: ...-P101091)
-const m  = decodedText.match(/P\d{3,}/i);
-const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText)).trim().toUpperCase();
+// quando ler um QR
+const onScan = async (decodedText) => {
+  // pega OP (Pxxxxx)
+  const m  = decodedText.match(/P\d{3,}/i);
+  const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText)).trim().toUpperCase();
 
-    const agora   = new Date();
-    const carimbo = agora.toLocaleDateString('pt-BR') + ' - ' +
-                    agora.toLocaleTimeString('pt-BR', { hour12:false });
+  try {
+    // 1) Manda iniciar no servidor (vai para “Em produção”)
+    const data = await window.Preparacao.iniciarProducao(op);
+    // data = { 'Fila de produção': [...], 'Em produção': [...], 'No estoque': [...] }
 
-    fetch('data/kanban_preparacao.json', { cache:'no-store' })
-      .then(r => r.json())
-      .then(lista => {
-        let alvo = null, idx = -1;
-        for (const it of lista) {
-          idx = (it.local || []).findIndex(l =>
-            l.startsWith('Fila de produção,') && l.includes(op)
-          );
-          if (idx !== -1) { alvo = it; break; }
-        }
-        if (!alvo) { alert(`OP ${op} não encontrada na Fila de produção.`); return; }
+    // 2) descobre o código do produto pela OP nos dados retornados
+    const produtoDoOp =
+      Object.values(data).flat().find(c => c.op === op)?.produto;
 
-        // move para Em produção com timestamp
-        alvo.local[idx] = `Em produção,${op},${carimbo}`;
+    // 3) mostra a aba Produto e atualiza o mini-kanban daquele código
+    window.ativarAbaProduto();
+    if (produtoDoOp) {
+      codigoSelecionado = produtoDoOp;
+      await renderMiniKanban(codigoSelecionado);
+    }
 
-        // mostra na guia Produto (usa tua função já definida acima)
-        ativarAbaProduto();
-        document.getElementById('produtoSelecionado').textContent = `— ${alvo.codigo}`;
+    // (opcional) se você quiser, pode também recarregar o quadro grande:
+    // window.KanbanPrep?.reload?.();
 
-        const ulMiniFila   = document.getElementById('prod-col-fila');
-        const ulMiniEmProd = document.getElementById('prod-col-emprod');
-        ulMiniFila.innerHTML = '';
-        ulMiniEmProd.innerHTML = '';
+  } catch (err) {
+    console.error(err);
+    alert('Falha ao iniciar produção: ' + (err.message || err));
+  } finally {
+    // fecha o leitor
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+    qrModal.style.display = 'none';
+  }
+};
 
-        (alvo.local || []).forEach(linha => {
-          const [status, opCode, stamp] = String(linha).split(',').map(s => s.trim());
-          const li = document.createElement('li');
-          li.classList.add('kanban-card');
-          li.textContent = stamp ? `${opCode} — ${stamp}` : opCode;
-          if (status === 'Fila de produção') ulMiniFila.appendChild(li);
-          else if (status === 'Em produção') ulMiniEmProd.appendChild(li);
-        });
 
-        if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
-        if (!ulMiniEmProd.children.length) ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-      })
-      .catch(err => { console.error(err); alert('Falha ao ler/atualizar a fila local.'); })
-      .finally(stop);
-  };
+
 
   // helper para tentar iniciar e logar erro sem travar
   const tryStart = async (constraints, config) => {
@@ -586,6 +586,7 @@ if (!ok) ok = await tryStart(
   });
 }
 
+window.abrirLeitorQR = abrirLeitorQR;
 
 
   // botão “Iniciar produção”
@@ -604,15 +605,6 @@ function fecharLeitorQR(){
   qrModal.classList.remove('open');
 }
 
-// Ações
-btnIniciar?.addEventListener('click', (e) => {
-  e.preventDefault();
-  abrirLeitorQR().catch(err => {
-    console.error(err);
-    alert('Não foi possível abrir a câmera.\nDica: use HTTPS ou localhost.');
-    fecharLeitorQR();
-  });
-});
 qrClose?.addEventListener('click', fecharLeitorQR);
 // fecha clicando fora da caixa
 qrModal.addEventListener('click', (e) => {
@@ -634,6 +626,10 @@ document.addEventListener('keydown', (e) => {
 
   </div>
 </div>
+
+
+
+<script src="/preparacao_api.js"></script>
 
 </body>
 </html>
