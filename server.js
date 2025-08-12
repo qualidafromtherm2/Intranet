@@ -135,7 +135,7 @@ async function savePrepArray(arr) {
  * Move uma OP dentro do ARRAY local: procura em todos os itens/local[]
  * e troca "StatusAntigo,OP" por "novoStatus,OP".
  */
-async function moverOpLocalArray(op, novoStatus) {
+async function moverOpLocalArray(op, novoStatus, novoCarimbo /* string ou null */) {
   const valid = ['Fila de produção', 'Em produção', 'No estoque'];
   if (!valid.includes(novoStatus)) throw new Error(`Status inválido: ${novoStatus}`);
 
@@ -145,9 +145,22 @@ async function moverOpLocalArray(op, novoStatus) {
   for (const item of arr) {
     if (!Array.isArray(item.local)) continue;
     for (let i = 0; i < item.local.length; i++) {
-      const { status, op: opId } = splitLocalEntry(item.local[i]);
+      const linha = String(item.local[i]);
+      // captura: status,OP,(resto opcional)
+      const m = linha.match(/^([^,]+)\s*,\s*([^,]+)(?:,(.*))?$/);
+      if (!m) continue;
+      const [, _statusAnt, opId, resto] = m;
+
       if (opId === op) {
-        item.local[i] = `${novoStatus},${op}`;
+        const partes = [];
+        partes.push(novoStatus, op);     // substitui o status
+        if (resto && resto.trim()) {
+          partes.push(resto.trim());     // preserva carimbos antigos
+        }
+        if (novoCarimbo) {
+          partes.push(novoCarimbo);      // adiciona o novo carimbo
+        }
+        item.local[i] = partes.join(',');
         found = true;
         break;
       }
@@ -156,12 +169,14 @@ async function moverOpLocalArray(op, novoStatus) {
   }
 
   if (!found) {
-    // não achou? cria um “balde” mínimo e registra a OP no novo status
+    // não achou? registra num cartão “Estoque”
+    const partes = [novoStatus, op];
+    if (novoCarimbo) partes.push(novoCarimbo);
     arr.push({
       pedido: 'Estoque',
       codigo: 'DESCONHECIDO',
       quantidade: 1,
-      local: [`${novoStatus},${op}`],
+      local: [partes.join(',')],
       estoque: 0,
       _codigoProd: null
     });
@@ -170,6 +185,7 @@ async function moverOpLocalArray(op, novoStatus) {
   await savePrepArray(arr);
   return { ok: true, updated: found, to: novoStatus };
 }
+
 
 /** Converte o ARRAY em colunas { 'Fila de produção':[], 'Em produção':[], ... } */
 function arrToColumns(arr) {
@@ -338,21 +354,18 @@ app.get('/api/etiquetas/pending', (req, res) => {
 // NOVO – salva o buffer em csv/BOM.csv
 app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
     const destDir  = path.join(__dirname, 'csv');
     const destFile = path.join(destDir, 'BOM.csv');
-
-    // cria a pasta csv/ se não existir
- const fsp = require('fs').promises;           // coloque no topo se ainda não existir
- await fsp.mkdir(destDir, { recursive: true });
- await fsp.writeFile(destFile, req.file.buffer);
-if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
-
+    await fsp.mkdir(destDir, { recursive: true });
+    await fsp.writeFile(destFile, req.file.buffer);
     res.json({ ok: true });
   } catch (err) {
     console.error('[upload/bom]', err);
     res.status(500).json({ error: String(err) });
   }
 });
+
 
 // Grava um ZPL pronto vindo do front
 app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
@@ -1026,30 +1039,6 @@ app.post('/api/omie/estoque/consulta', express.json(), async (req, res) => {
       error: err.faultstring || err.message,
       stack: err.stack
     });
-  }
-});
-
-
-
-// server.js
-
-// Rota para listar pedidos (já existente? senão adicione-a)
-app.post('/api/omie/pedidos', async (req, res) => {
-  try {
-    const payload = req.body;
-    const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/pedido/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!omieResponse.ok) {
-      return res.status(omieResponse.status).json({ error: `OMIE retornou ${omieResponse.status}` });
-    }
-    const json = await omieResponse.json();
-    return res.json(json);
-  } catch (err) {
-    console.error('Erro no servidor ao chamar OMIE/ListarPedidos:', err);
-    return res.status(500).json({ error: 'Erro interno ao listar pedidos' });
   }
 });
 
@@ -1739,6 +1728,21 @@ app.post('/api/kanban', express.json(), (req, res) => {
 });
 
 
+// ——— Helpers de carimbo de usuário/data ————————————————
+function userFromReq(req) {
+  // tente extrair do seu objeto de sessão; ajuste se o seu auth usar outro nome/campo
+  return (req.session?.user?.fullName)
+      || (req.session?.user?.username)
+      || 'Not-user';
+}
+function stampNowBR() {
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} - ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function buildStamp(prefix, req) {
+  return `${prefix} - ${userFromReq(req)} - ${stampNowBR()}`;
+}
 
 // ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
@@ -1822,20 +1826,24 @@ if (conteudo?.endsWith('_7E')) {
 
 
 
-// Iniciar produção (muda status da OP para "Em produção")
+// Iniciar produção (vai para "Em produção")
 app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
   const { op } = req.params;
   const novoStatus = 'Em produção';
+  const carimbo = buildStamp('I', req);        // I = início
 
   try {
     if (isLocalRequest(req) || !isDbEnabled) {
-      // Modo LOCAL → mexe no JSON
-      const result = await moverOpLocalArray(op, novoStatus);
+      const result = await moverOpLocalArray(op, novoStatus, carimbo);
       return res.json({ mode: 'local-json', op, ...result });
     }
 
-    // Modo REMOTO (Render) → Postgres
+    // REMOTO (Postgres)
     await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
+    // registra o evento (tabela criada no passo 4)
+    await dbQuery('INSERT INTO op_event (op, tipo, usuario) VALUES ($1,$2,$3)',
+                  [op, 'I', userFromReq(req)]);
+
     return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
   } catch (err) {
     console.error('[preparacao/op/iniciar] erro:', err);
@@ -1847,22 +1855,26 @@ app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
 app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
   const { op } = req.params;
   const novoStatus = 'No estoque';
+  const carimbo = buildStamp('F', req);        // F = fim
 
   try {
     if (isLocalRequest(req) || !isDbEnabled) {
-      // Modo LOCAL → JSON (usando o array do seu kanban_preparacao.json)
-      const result = await moverOpLocalArray(op, novoStatus);
+      const result = await moverOpLocalArray(op, novoStatus, carimbo);
       return res.json({ mode: 'local-json', op, ...result });
     }
 
-    // Modo REMOTO → Postgres
+    // REMOTO (Postgres)
     await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
+    await dbQuery('INSERT INTO op_event (op, tipo, usuario) VALUES ($1,$2,$3)',
+                  [op, 'F', userFromReq(req)]);
+
     return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
   } catch (err) {
     console.error('[preparacao/op/concluir] erro:', err);
     return res.status(500).json({ error: err.message || 'Erro ao concluir produção' });
   }
 });
+
 
 // Lista o Kanban de preparação (local: JSON | remoto: Postgres)
 app.get('/api/preparacao/listar', async (req, res) => {
