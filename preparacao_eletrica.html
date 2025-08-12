@@ -502,9 +502,11 @@ async function abrirLeitorQRComAcao(acao) {
     return;
   }
 
-  const qrModal = document.getElementById('qrModal');
-  const qrClose = document.getElementById('qrClose');
+  const qrModal   = document.getElementById('qrModal');
+  const qrClose   = document.getElementById('qrClose');
   const html5QrCode = new window.Html5Qrcode('qrReader');
+
+  let handled = false; // ← trava múltiplas leituras
 
   const stop = async () => {
     try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
@@ -512,7 +514,13 @@ async function abrirLeitorQRComAcao(acao) {
   };
 
   const onScan = async (decodedText) => {
-    // extrai algo tipo P101086 do QR
+    if (handled) return;
+    handled = true;
+
+    // para a câmera IMEDIATAMENTE para não disparar de novo
+    await stop();
+
+    // extrai a OP (Pxxxxx)
     const m  = decodedText.match(/P\d{3,}/i);
     const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText))
                 .trim().toUpperCase();
@@ -522,24 +530,20 @@ async function abrirLeitorQRComAcao(acao) {
         await Preparacao.iniciarProducao(op);
         alert(`OP ${op} movida para "Em produção".`);
       } else if (acao === 'concluir') {
-        // precisa existir em preparacao_api.js
         await Preparacao.finalizarProducao(op);
         alert(`OP ${op} movida para "No estoque".`);
       }
 
-      // atualiza mini-board se você tiver um produto selecionado
       if (window.renderMiniKanban && window.codigoSelecionado) {
         await window.renderMiniKanban(window.codigoSelecionado);
       }
     } catch (err) {
-      const txt = (acao === 'iniciar') ? 'iniciar' : 'finalizar';
+      const txt = acao === 'iniciar' ? 'iniciar' : 'finalizar';
       alert(`Falha ao ${txt} produção: ${err.message || err}`);
-    } finally {
-      await stop();
     }
   };
 
-  // abre modal e inicia câmera (traseira quando possível)
+  // abre modal e inicia câmera
   qrModal.style.display = 'block';
   const camConstraints = { facingMode: 'environment' };
   try {
@@ -558,16 +562,21 @@ async function abrirLeitorQRComAcao(acao) {
   } catch (e) {
     alert('Não foi possível abrir a câmera: ' + (e.message || e));
     await stop();
+    return;
   }
 
-  // fechar
+  // fechar X / fora / ESC
   qrClose.onclick = stop;
   qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
-  const onEsc = (ev) => { if (ev.key === 'Escape' && qrModal.style.display === 'block') { 
-    document.removeEventListener('keydown', onEsc); stop(); 
-  }};
+  const onEsc = (ev) => {
+    if (ev.key === 'Escape' && qrModal.style.display === 'block') {
+      document.removeEventListener('keydown', onEsc);
+      stop();
+    }
+  };
   document.addEventListener('keydown', onEsc);
 }
+
 
 // download do CSV (funciona tanto local quanto via Render/Cloudflare)
 btnBaixarCsv?.addEventListener('click', () => {
@@ -599,165 +608,6 @@ btnBaixarCsv?.addEventListener('click', () => {
     }
   }
 
-async function abrirLeitorQR() {
-  if (!window.Html5Qrcode) {
-    alert('Leitor indisponível. Recarregue a página.');
-    return;
-  }
-
-  // abre o modal
-  qrModal.style.display = 'block';
-
-  const html5QrCode = new window.Html5Qrcode('qrReader');
-
-  // fecha/limpa
-  const stop = async () => {
-    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-    qrModal.style.display = 'none';
-  };
-
-// quando ler um QR
-const onScan = async (decodedText) => {
-  // pega OP (Pxxxxx)
-  const m  = decodedText.match(/P\d{3,}/i);
-  const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText)).trim().toUpperCase();
-
-  try {
-    // 1) Manda iniciar no servidor (vai para “Em produção”)
-    const data = await window.Preparacao.iniciarProducao(op);
-    // data = { 'Fila de produção': [...], 'Em produção': [...], 'No estoque': [...] }
-
-    // 2) descobre o código do produto pela OP nos dados retornados
-    const produtoDoOp =
-      Object.values(data).flat().find(c => c.op === op)?.produto;
-
-    // 3) mostra a aba Produto e atualiza o mini-kanban daquele código
-    window.ativarAbaProduto();
-    if (produtoDoOp) {
-      codigoSelecionado = produtoDoOp;
-      await renderMiniKanban(codigoSelecionado);
-    }
-
-    // (opcional) se você quiser, pode também recarregar o quadro grande:
-    // window.KanbanPrep?.reload?.();
-
-  } catch (err) {
-    console.error(err);
-    alert('Falha ao iniciar produção: ' + (err.message || err));
-  } finally {
-    // fecha o leitor
-    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
-    qrModal.style.display = 'none';
-  }
-};
-
-
-
-
-  // helper para tentar iniciar e logar erro sem travar
-  const tryStart = async (constraints, config) => {
-    try {
-      await html5QrCode.start(constraints, config, onScan);
-      return true;
-    } catch (e) {
-      console.warn('start falhou:', e?.name, e?.message);
-      return false;
-    }
-  };
-
-  // escolher a câmera: tenta a traseira real
-  let camConstraints;
-  try {
-    const cams = await window.Html5Qrcode.getCameras();
-    if (cams && cams.length) {
-      const rear = cams.find(c => /back|rear|environment|trás/i.test(c.label)) || cams[0];
-      camConstraints = { deviceId: { exact: rear.id } };
-    } else {
-      camConstraints = { facingMode: 'environment' };
-    }
-  } catch {
-    camConstraints = { facingMode: 'environment' };
-  }
-
-  // TENTATIVA 1 — configuração simples (compatível)
-let ok = await tryStart(
-  camConstraints,
-  {
-    fps: 15,
-    aspectRatio: 16 / 9,
-    qrbox: (vw, vh) => {
-      const size = Math.floor(Math.min(vw, vh) * 0.72);
-      return { width: size, height: size };
-    }
-  }
-);
-
-
-  // fallback — ainda mais leve
-if (!ok) ok = await tryStart(
-  { facingMode: 'environment' },
-  {
-    fps: 12,
-    aspectRatio: 16 / 9,
-    qrbox: (vw, vh) => {
-      const size = Math.floor(Math.min(vw, vh) * 0.70);
-      return { width: size, height: size };
-    }
-  }
-);
-
-
-  if (!ok) {
-    alert('Não foi possível abrir a câmera. Verifique as permissões e tente novamente.');
-    await stop();
-    return;
-  }
-
-  // pós-start: melhora foco/zoom/torch se suportado (não quebra se não tiver)
-  if (typeof html5QrCode.getRunningTrackCapabilities === 'function' &&
-      typeof html5QrCode.applyVideoConstraints === 'function') {
-    try {
-      const caps = await html5QrCode.getRunningTrackCapabilities();
-      const adv = [];
-      const focusList = Array.isArray(caps?.focusMode) ? caps.focusMode : [caps?.focusMode];
-      if (focusList?.includes?.('continuous')) adv.push({ focusMode: 'continuous' });
-      if (caps?.zoom)  adv.push({ zoom: Math.min(caps.zoom.max || 2, 2) });
-      if (caps?.torch) adv.push({ torch: true });
-      if (adv.length) await html5QrCode.applyVideoConstraints({ advanced: adv });
-    } catch {}
-  }
-
-  // fechar no X / fora / ESC
-  qrClose.onclick = stop;
-  qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
-  document.addEventListener('keydown', function onEsc(ev){
-    if (ev.key === 'Escape' && qrModal.style.display === 'block') {
-      document.removeEventListener('keydown', onEsc);
-      stop();
-    }
-  });
-}
-
-
-
-
-function fecharLeitorQR(){
-  // para a câmera e limpa
-  if (qr && qr.isScanning) {
-    qr.stop().then(() => qr.clear());
-  }
-  qrModal.classList.remove('open');
-}
-
-qrClose?.addEventListener('click', fecharLeitorQR);
-// fecha clicando fora da caixa
-qrModal.addEventListener('click', (e) => {
-  if (e.target === qrModal) fecharLeitorQR();
-});
-// fecha com ESC
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && qrModal.classList.contains('open')) fecharLeitorQR();
-});
 
 </script>
 
