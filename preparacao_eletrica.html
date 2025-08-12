@@ -144,6 +144,33 @@
   box-shadow: 0 16px 26px rgba(22,163,74,.28),
               0 10px 14px rgba(34,197,94,.22);
 }
+  /* âncora para posicionar o menu */
+  #produtoTab .side-actions { position: relative; }
+
+  /* menu flutuante */
+  #produtoTab .sql-menu{
+    position: absolute;
+    right: 0; top: calc(100% + 8px);
+    background: var(--header-bg, #111);
+    color: var(--text, #fff);
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(0,0,0,.25);
+    padding: 8px;
+    min-width: 220px;
+    display: none;
+    z-index: 3000;
+  }
+  #produtoTab .sql-menu.open{ display: block; }
+
+  #produtoTab .sql-menu button{
+    width: 100%;
+    appearance: none; border: 0; background: transparent;
+    text-align: left; padding: 10px 12px; cursor: pointer; border-radius: 10px;
+    color: inherit;
+  }
+  #produtoTab .sql-menu button:hover{
+    background: rgba(255,255,255,.08);
+  }
 
 </style>
 
@@ -306,6 +333,12 @@
     <button id="btn-baixar-csv" class="btn-modern" type="button">
       Baixar CSV
     </button>
+
+
+<button id="btn-sql" class="btn-modern" type="button">
+  SQL
+</button>
+
   </div>
 </div>
 
@@ -360,7 +393,77 @@ const miniCodigoEl  = document.getElementById('produtoSelecionado');   // <span 
 const ulMiniFila    = document.getElementById('prod-col-fila');        // <ul id="prod-col-fila">
 const ulMiniEmProd  = document.getElementById('prod-col-emprod');      // <ul id="prod-col-emprod">
 
+  const btnSql   = document.getElementById('btn-sql');
+  const sideBox  = document.querySelector('#produtoTab .side-actions');
 
+  // cria o menu
+  const sqlMenu = document.createElement('div');
+  sqlMenu.id = 'sqlMenu';
+  sqlMenu.className = 'sql-menu';
+  sqlMenu.innerHTML = `
+    <button data-act="last100">Últimos 100</button>
+    <button data-act="byop">Digite a OP…</button>
+    <button data-act="today">Hoje</button>
+    <button data-act="range">Entre datas…</button>
+  `;
+  sideBox.appendChild(sqlMenu);
+
+  // abre/fecha
+  btnSql?.addEventListener('click', (e) => {
+    e.preventDefault();
+    sqlMenu.classList.toggle('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!sqlMenu.contains(e.target) && e.target !== btnSql) {
+      sqlMenu.classList.remove('open');
+    }
+  });
+
+  // helper: abre JSON em nova aba, ou baixa CSV (OK=CSV, Cancel=JSON)
+  function openEventosQuery(q) {
+    const csv = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
+    const base = csv ? '/api/preparacao/eventos.csv' : '/api/preparacao/eventos';
+    const qs = new URLSearchParams(q);
+    const url = `${base}?${qs.toString()}`;
+
+    if (csv) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'op_eventos.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+
+  // cliques do menu
+  sqlMenu.addEventListener('click', (e) => {
+    const act = e.target?.dataset?.act;
+    if (!act) return;
+    sqlMenu.classList.remove('open');
+
+    if (act === 'last100') {
+      openEventosQuery({ limit: '100', order: 'desc' });
+    } else if (act === 'byop') {
+      const op = prompt('Digite a OP (ex.: P101086):');
+      if (op) openEventosQuery({ op: op.trim().toUpperCase() });
+    } else if (act === 'today') {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      openEventosQuery({ from: `${y}-${m}-${day}`, to: `${y}-${m}-${day}` });
+    } else if (act === 'range') {
+      const de  = prompt('Data inicial (AAAA-MM-DD):');
+      if (!de) return;
+      const ate = prompt('Data final (AAAA-MM-DD):');
+      if (!ate) return;
+      openEventosQuery({ from: de.trim(), to: ate.trim() });
+    }
+  });
+  
 window.codigoSelecionado = null;
   
 

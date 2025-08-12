@@ -367,6 +367,142 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
 });
 
 
+// === Consulta de eventos de OP (JSON & CSV) ===============================
+// Parâmetros (query):
+//   op=P101086           → filtra por uma OP
+//   limit=100            → máximo de registros (padrão 100, máx 1000)
+//   order=asc|desc       → ordenação por data (padrão desc)
+//   tz=America/Sao_Paulo → fuso para formatar no Postgres
+
+// === Consulta de eventos (com filtros por data) ===========================
+app.get('/api/preparacao/eventos', async (req, res) => {
+  const {
+    op,
+    limit = '100',
+    order = 'desc',
+    tz = 'America/Sao_Paulo',
+    from,   // AAAA-MM-DD
+    to      // AAAA-MM-DD
+  } = req.query;
+
+  const lim = Math.min(parseInt(limit, 10) || 100, 1000);
+  const ord = String(order).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+  // boundaries (strings) → Date (local) para comparar no modo local
+  const hasRange = !!(from || to);
+  let startDate = null, endDate = null;
+  if (hasRange) {
+    const norm = (s) => String(s || '').trim();
+    const f = norm(from);
+    const t = norm(to);
+    if (f) startDate = new Date(`${f}T00:00:00`);
+    if (t) endDate   = new Date(`${t}T23:59:59`);
+  }
+
+  try {
+    // LOCAL (JSON)
+    if (isLocalRequest(req) || !isDbEnabled) {
+      const arr = await loadPrepArray();
+      const eventos = [];
+
+      for (const item of arr) {
+        for (const s of (item.local || [])) {
+          const m = String(s).match(/^([^,]+)\s*,\s*([^,]+)\s*(?:,(.*))?$/);
+          if (!m) continue;
+          const [, , opId, rest] = m;
+          if (op && opId !== op) continue;
+          if (!rest) continue;
+
+          const stamps = rest.split(',').map(x => x.trim()).filter(Boolean);
+          for (const stamp of stamps) {
+            const sm = stamp.match(/^([IF])\s*-\s*(.+?)\s*-\s*(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}:\d{2}:\d{2})$/);
+            if (!sm) continue;
+            const tipo    = sm[1];
+            const usuario = sm[2];
+            const dataBR  = sm[3];
+            const hora    = sm[4];
+
+            // cria Date local a partir de “dd/mm/aaaa HH:MM:SS”
+            const [dd, mm, yyyy] = dataBR.split('/');
+            const isoLocal = `${yyyy}-${mm}-${dd}T${hora}`;
+            const dt = new Date(isoLocal);
+
+            // aplica filtro de datas, se houver
+            if (startDate && dt < startDate) continue;
+            if (endDate   && dt > endDate)   continue;
+
+            eventos.push({
+              op: opId,
+              tipo,
+              usuario,
+              quando: `${dataBR} ${hora}`,
+              _ts: dt.getTime()
+            });
+          }
+        }
+      }
+
+      eventos.sort((a, b) => (ord === 'ASC' ? a._ts - b._ts : b._ts - a._ts));
+      const out = eventos.slice(0, lim).map(({ _ts, ...rest }) => rest);
+
+      return res.json({ mode: 'local-json', op: op || null, eventos: out });
+    }
+
+    // REMOTO (Postgres)
+    // monta WHERE dinâmico
+    const where = [];
+    const params = [tz]; // $1 = tz
+    if (op) { where.push(`op = $${params.length + 1}`); params.push(op); }
+    if (from) {
+      where.push(`(momento AT TIME ZONE $1) >= $${params.length + 1}::timestamp`);
+      params.push(`${from} 00:00:00`);
+    }
+    if (to) {
+      where.push(`(momento AT TIME ZONE $1) <= $${params.length + 1}::timestamp`);
+      params.push(`${to} 23:59:59`);
+    }
+
+    let sql = `
+      SELECT op, tipo, usuario,
+             to_char(momento AT TIME ZONE $1, 'DD/MM/YYYY HH24:MI:SS') AS quando
+        FROM op_event
+    `;
+    if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
+    sql += ` ORDER BY momento ${ord}`;
+    sql += ` LIMIT $${params.length + 1}`;
+    params.push(lim);
+
+    const { rows } = await dbQuery(sql, params);
+    return res.json({ mode: 'postgres', op: op || null, eventos: rows });
+  } catch (err) {
+    console.error('[preparacao/eventos] erro:', err);
+    res.status(500).json({ error: err.message || 'Erro ao consultar eventos' });
+  }
+});
+
+
+app.get('/api/preparacao/eventos.csv', async (req, res) => {
+  try {
+    // Reaproveita a rota JSON acima chamando o próprio servidor
+    // (ou poderia duplicar a lógica; aqui mantemos simples)
+    const url = new URL(req.protocol + '://' + req.get('host') + req.originalUrl.replace(/\.csv(\?.*)?$/, '$1'));
+    url.pathname = '/api/preparacao/eventos';
+
+    const r = await fetch(url.toString());
+    if (!r.ok) return res.status(r.status).send(await r.text());
+    const { eventos } = await r.json();
+
+    const csv = csvStringify(eventos, { header: true, columns: ['op','tipo','usuario','quando'] });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="op_eventos.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('[preparacao/eventos.csv] erro:', err);
+    res.status(500).json({ error: err.message || 'Erro ao gerar CSV de eventos' });
+  }
+});
+
+
 // Grava um ZPL pronto vindo do front
 app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
   const { file, zpl, tipo = 'Teste' } = req.body || {};
