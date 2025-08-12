@@ -1897,6 +1897,40 @@ app.get('/api/preparacao/listar', async (req, res) => {
 });
 
 
+// CSV da preparação (local JSON ou Postgres)
+app.get('/api/preparacao/csv', async (req, res) => {
+  try {
+    let rows = [];
+
+    if (isLocalRequest(req) || !isDbEnabled) {
+      // modo LOCAL: lê o array e achata
+      const arr = await loadPrepArray(); // já existe no arquivo
+      for (const item of arr) {
+        const produto = String(item.codigo || '');
+        for (const s of (item.local || [])) {
+          const { status, op } = splitLocalEntry(s); // já existe no arquivo
+          rows.push({ op, produto, status });
+        }
+      }
+    } else {
+      // modo REMOTO: consulta o Postgres
+      const r = await dbQuery(
+        `SELECT op, produto_codigo AS produto, status
+           FROM op_status
+          ORDER BY status, op`
+      );
+      rows = r.rows;
+    }
+
+    const csv = csvStringify(rows, { header: true, columns: ['op','produto','status'] });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="preparacao.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('[preparacao/csv]', err);
+    res.status(500).json({ error: err.message || 'Erro ao gerar CSV' });
+  }
+});
 
   // ——————————————————————————————
   // 5) Inicia o servidor

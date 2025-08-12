@@ -18,6 +18,20 @@
     // depois do POST, devolvemos o kanban atualizado
     return await carregarKanban();
   }
+  
+  async function finalizarProducao(op) {
+  const res = await fetch(`/api/preparacao/op/${encodeURIComponent(op)}/concluir`, {
+    method: 'POST'
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || 'Falha ao finalizar produção');
+  }
+  return await carregarKanban();
+}
+
+window.Preparacao = { carregarKanban, iniciarProducao, finalizarProducao };
+
 
   // expõe no escopo global pra usar no HTML ou no console
   window.Preparacao = { carregarKanban, iniciarProducao };
