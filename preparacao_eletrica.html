@@ -111,6 +111,39 @@
   object-fit: cover;      /* preenche a área mantendo corte elegante */
   filter: brightness(1.15) contrast(1.08);
 }
+/* empilha os botões */
+#produtoTab .btn-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+/* variante "fantasma" para o Finalizar (ainda não ativo) */
+#produtoTab .btn-modern.btn-ghost{
+  background: transparent;
+  color: #4f46e5;
+  box-shadow: inset 0 0 0 2px rgba(79,70,229,.45);
+}
+#produtoTab .btn-modern.btn-ghost:hover{
+  transform: none;
+  filter: none;
+  box-shadow:
+    inset 0 0 0 2px rgba(79,70,229,.65),
+    0 2px 6px rgba(0,0,0,.06);
+}
+
+/* variante verde “sucesso” */
+#produtoTab .btn-modern.btn-success{
+  background: linear-gradient(135deg,#16a34a,#22c55e);
+  box-shadow: 0 12px 22px rgba(22,163,74,.22),
+              0 6px 10px rgba(34,197,94,.18);
+}
+#produtoTab .btn-modern.btn-success:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 16px 26px rgba(22,163,74,.28),
+              0 10px 14px rgba(34,197,94,.22);
+}
 
 </style>
 
@@ -259,11 +292,23 @@
     </div>
   </div>
 
-  <div class="side-actions">
+<div class="side-actions">
+  <div class="btn-stack">
     <button id="btn-iniciar" class="btn-modern" type="button">
       Iniciar produção
     </button>
+
+<button id="btn-finalizar" class="btn-modern btn-success" type="button">
+  Finalizar produção
+</button>
+
+
+    <button id="btn-baixar-csv" class="btn-modern" type="button">
+      Baixar CSV
+    </button>
   </div>
+</div>
+
 </div>
 
   </div>
@@ -430,9 +475,122 @@ paginaPrep.style.display = 'block';
 
 
   // ===== Leitor QR (somente nesta página) =====
-  const btnIniciar = document.getElementById('btn-iniciar');
+// ===== Leitor QR (somente nesta página) =====
+const btnIniciar    = document.getElementById('btn-iniciar');
+const btnFinalizar  = document.getElementById('btn-finalizar');
+const btnBaixarCsv  = document.getElementById('btn-baixar-csv');
+
+btnIniciar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  abrirLeitorQRComAcao('iniciar');
+});
+
+btnFinalizar?.addEventListener('click', (e) => {
+  e.preventDefault();
+  abrirLeitorQRComAcao('concluir'); // muda para "No estoque"
+});
+
+// btnBaixarCsv já deve estar com o fetch do CSV
+
+
+
+
+// Lê QR e executa a ação: 'iniciar' → Em produção | 'concluir' → No estoque
+async function abrirLeitorQRComAcao(acao) {
+  if (!window.Html5Qrcode) {
+    alert('Leitor indisponível. Recarregue a página.');
+    return;
+  }
+
+  const qrModal = document.getElementById('qrModal');
+  const qrClose = document.getElementById('qrClose');
+  const html5QrCode = new window.Html5Qrcode('qrReader');
+
+  const stop = async () => {
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch {}
+    qrModal.style.display = 'none';
+  };
+
+  const onScan = async (decodedText) => {
+    // extrai algo tipo P101086 do QR
+    const m  = decodedText.match(/P\d{3,}/i);
+    const op = (m ? m[0] : (decodedText.split(',')[1] || decodedText))
+                .trim().toUpperCase();
+
+    try {
+      if (acao === 'iniciar') {
+        await Preparacao.iniciarProducao(op);
+        alert(`OP ${op} movida para "Em produção".`);
+      } else if (acao === 'concluir') {
+        // precisa existir em preparacao_api.js
+        await Preparacao.finalizarProducao(op);
+        alert(`OP ${op} movida para "No estoque".`);
+      }
+
+      // atualiza mini-board se você tiver um produto selecionado
+      if (window.renderMiniKanban && window.codigoSelecionado) {
+        await window.renderMiniKanban(window.codigoSelecionado);
+      }
+    } catch (err) {
+      const txt = (acao === 'iniciar') ? 'iniciar' : 'finalizar';
+      alert(`Falha ao ${txt} produção: ${err.message || err}`);
+    } finally {
+      await stop();
+    }
+  };
+
+  // abre modal e inicia câmera (traseira quando possível)
+  qrModal.style.display = 'block';
+  const camConstraints = { facingMode: 'environment' };
+  try {
+    await html5QrCode.start(
+      camConstraints,
+      {
+        fps: 15,
+        aspectRatio: 16/9,
+        qrbox: (vw, vh) => {
+          const size = Math.floor(Math.min(vw, vh) * 0.72);
+          return { width: size, height: size };
+        }
+      },
+      onScan
+    );
+  } catch (e) {
+    alert('Não foi possível abrir a câmera: ' + (e.message || e));
+    await stop();
+  }
+
+  // fechar
+  qrClose.onclick = stop;
+  qrModal.onclick = (e) => { if (e.target === qrModal) stop(); };
+  const onEsc = (ev) => { if (ev.key === 'Escape' && qrModal.style.display === 'block') { 
+    document.removeEventListener('keydown', onEsc); stop(); 
+  }};
+  document.addEventListener('keydown', onEsc);
+}
+
+
+// placeholder — vamos implementar depois
+btnFinalizar?.addEventListener('click', () => {
+  alert('Finalizar produção: em breve 🤝');
+});
+
+// download do CSV (funciona tanto local quanto via Render/Cloudflare)
+btnBaixarCsv?.addEventListener('click', () => {
+  // forma compatível: cria um <a> invisível e clica
+  const a = document.createElement('a');
+  a.href = '/api/preparacao/csv';
+  a.download = 'preparacao.csv'; // hint pro navegador
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
   const qrModal    = document.getElementById('qrModal');
   const qrClose    = document.getElementById('qrClose');
+
+
+
 
 
     // Escolhe a câmera traseira (quando houver)
@@ -586,14 +744,6 @@ if (!ok) ok = await tryStart(
   });
 }
 
-window.abrirLeitorQR = abrirLeitorQR;
-
-
-  // botão “Iniciar produção”
-  btnIniciar?.addEventListener('click', (e) => {
-    e.preventDefault();
-    abrirLeitorQR();
-  });
 
 
 
