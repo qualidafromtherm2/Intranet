@@ -30,6 +30,12 @@
   return await carregarKanban();
 }
 
-window.Preparacao = { carregarKanban, iniciarProducao, finalizarProducao };
+// mantenha as três funções como estão declaradas acima…
+window.Preparacao = {
+  carregarKanban,
+  iniciarProducao,
+  finalizarProducao,  // <-- não deixe de exportar!
+};
+
 
 })();
