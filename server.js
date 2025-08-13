@@ -25,6 +25,11 @@ const app = express();
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
 const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
+
+// helper central: só usa DB se houver pool E a requisição não for local
+function shouldUseDb(req) {
+  return isDbEnabled && !isLocalRequest(req);
+}
 // Caminho do JSON local
 const KANBAN_PREP_PATH = path.join(__dirname, 'data', 'kanban_preparacao.json');
 let etqConfig = [];
@@ -401,7 +406,7 @@ app.get('/api/preparacao/eventos', async (req, res) => {
 
   try {
     // LOCAL (JSON)
-    if (isLocalRequest(req) || !isDbEnabled) {
+    if (!shouldUseDb(req)) {
       const arr = await loadPrepArray();
       const eventos = [];
 
@@ -1969,7 +1974,7 @@ app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
   const carimbo = buildStamp('I', req);        // I = início
 
   try {
-    if (isLocalRequest(req) || !isDbEnabled) {
+    if (!shouldUseDb(req)) {
       const result = await moverOpLocalArray(op, novoStatus, carimbo);
       return res.json({ mode: 'local-json', op, ...result });
     }
@@ -1994,7 +1999,7 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
   const carimbo = buildStamp('F', req);        // F = fim
 
   try {
-    if (isLocalRequest(req) || !isDbEnabled) {
+    if (!shouldUseDb(req)) {
       const result = await moverOpLocalArray(op, novoStatus, carimbo);
       return res.json({ mode: 'local-json', op, ...result });
     }
@@ -2015,7 +2020,7 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
 // Lista o Kanban de preparação (local: JSON | remoto: Postgres)
 app.get('/api/preparacao/listar', async (req, res) => {
   try {
-    if (isLocalRequest(req) || !isDbEnabled) {
+    if (!shouldUseDb(req)) {
       const arr  = await loadPrepArray();     // << aqui
       const data = arrToColumns(arr);         // << e aqui
       return res.json({ mode: 'local-json', data });
@@ -2044,13 +2049,161 @@ app.get('/api/preparacao/listar', async (req, res) => {
   }
 });
 
+// ====== CONSULTA DE EVENTOS (JSON + CSV) ======
+app.get('/api/preparacao/eventos', async (req, res) => {
+  try {
+    const { op, from, to, limit, order } = req.query;
+    const lim = Math.min(parseInt(limit || '100', 10), 500);
+    const ord = (String(order || 'desc').toLowerCase() === 'asc') ? 'ASC' : 'DESC';
+
+    // MODO DB (Render) → lê da tabela op_event
+    if (!isLocalRequest(req) && isDbEnabled) {
+      const where = [];
+      const params = [];
+      let p = 1;
+
+      if (op) { where.push(`op = $${p++}`); params.push(op.trim().toUpperCase()); }
+      if (from) { where.push(`momento >= $${p++}`); params.push(new Date(from)); }
+      if (to)   { where.push(`momento < ($${p++}::date + interval '1 day')`); params.push(to); }
+
+      const sql = `
+        SELECT id, op, tipo, usuario, momento, payload
+        FROM public.op_event
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY momento ${ord}
+        LIMIT ${lim}
+      `;
+      const { rows } = await dbQuery(sql, params);
+      return res.json({ mode: 'postgres', count: rows.length, data: rows });
+    }
+
+    // MODO LOCAL → tenta ler um arquivo de log (se existir)
+    const fs = require('fs');
+    const path = require('path');
+
+    // tente em alguns caminhos comuns; ajuste se o seu for diferente
+    const candidates = [
+      path.join(__dirname, 'kanban_logs', 'eventos.log'),
+      path.join(__dirname, 'data', 'eventos.log'),
+    ];
+    const file = candidates.find(f => fs.existsSync(f));
+    if (!file) {
+      return res.status(404).json({ mode: 'local', error: 'Nenhum log local encontrado.' });
+    }
+
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+    // cada linha deve ser um JSON; adapte o mapeamento conforme seu formato real
+    const all = lines.map(l => {
+      try {
+        const obj = JSON.parse(l);
+        return {
+          id: obj.id || null,
+          op: (obj.op || null),
+          tipo: obj.tipo || 'arrasto',
+          usuario: obj.usuario || (obj.user || 'desconhecido'),
+          momento: obj.momento ? new Date(obj.momento) : new Date(),
+          payload: obj.payload || obj.data || obj,
+        };
+      } catch { return null; }
+    }).filter(Boolean);
+
+    // filtros locais
+    let filtered = all;
+    if (op)   filtered = filtered.filter(r => (r.op || '').toUpperCase() === op.trim().toUpperCase());
+    if (from) filtered = filtered.filter(r => r.momento >= new Date(from));
+    if (to)   filtered = filtered.filter(r => r.momento < new Date(new Date(to).toDateString()).getTime() + 24*3600*1000);
+
+    filtered.sort((a, b) => (order && order.toLowerCase()==='asc') ? (a.momento - b.momento) : (b.momento - a.momento));
+    filtered = filtered.slice(0, lim);
+
+    return res.json({ mode: 'local-log', count: filtered.length, data: filtered });
+  } catch (err) {
+    console.error('[GET /api/preparacao/eventos] erro:', err);
+    return res.status(500).json({ error: err.message || 'Falha ao consultar eventos' });
+  }
+});
+
+app.get('/api/preparacao/eventos.csv', async (req, res) => {
+  // Reutiliza a rota JSON acima e forma o CSV
+  try {
+    // chama a mesma lógica via fetch interno seria overkill; refaz rápido:
+    const { op, from, to, limit, order } = req.query;
+
+    if (!isLocalRequest(req) && isDbEnabled) {
+      const where = [];
+      const params = [];
+      let p = 1;
+      const lim = Math.min(parseInt(limit || '100', 10), 500);
+      const ord = (String(order || 'desc').toLowerCase() === 'asc') ? 'ASC' : 'DESC';
+
+      if (op) { where.push(`op = $${p++}`); params.push(op.trim().toUpperCase()); }
+      if (from) { where.push(`momento >= $${p++}`); params.push(new Date(from)); }
+      if (to)   { where.push(`momento < ($${p++}::date + interval '1 day')`); params.push(to); }
+
+      const sql = `
+        SELECT id, op, tipo, usuario, momento, payload
+        FROM public.op_event
+        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+        ORDER BY momento ${ord}
+        LIMIT ${lim}
+      `;
+      const { rows } = await dbQuery(sql, params);
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="op_eventos.csv"');
+      const header = 'momento,tipo,op,usuario,etapa,pedido,codigo,quantidade\n';
+      const body = rows.map(r => {
+        const p = r.payload || {};
+        const etapa = (p.etapa ?? p.status ?? '');
+        const pedido = (p.pedido ?? '');
+        const codigo = (p.codigo ?? p.produto_codigo ?? '');
+        const quantidade = (p.quantidade ?? p.qtd ?? '');
+        return [
+          new Date(r.momento).toISOString(),
+          r.tipo || '',
+          r.op || '',
+          r.usuario || '',
+          etapa, pedido, codigo, quantidade
+        ].map(v => String(v).replace(/"/g,'""')).map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(',');
+      }).join('\n');
+      return res.send(header + body);
+    }
+
+    // MODO LOCAL → Aproveita a rota JSON local de cima com um mini-fetch interno
+    const axios = require('axios');
+    const url = req.protocol + '://' + req.get('host') + req.path.replace(/\.csv$/, '');
+    const { data } = await axios.get(url, { params: { op, from, to, limit, order } });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="op_eventos.csv"');
+    const header = 'momento,tipo,op,usuario,etapa,pedido,codigo,quantidade\n';
+    const body = (data.data || []).map(r => {
+      const p = r.payload || {};
+      const etapa = (p.etapa ?? p.status ?? '');
+      const pedido = (p.pedido ?? '');
+      const codigo = (p.codigo ?? p.produto_codigo ?? '');
+      const quantidade = (p.quantidade ?? p.qtd ?? '');
+      return [
+        new Date(r.momento).toISOString(),
+        r.tipo || '',
+        r.op || '',
+        r.usuario || '',
+        etapa, pedido, codigo, quantidade
+      ].map(v => String(v).replace(/"/g,'""')).map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(',');
+    }).join('\n');
+    return res.send(header + body);
+  } catch (err) {
+    console.error('[GET /api/preparacao/eventos.csv] erro:', err);
+    return res.status(500).send('Falha ao gerar CSV');
+  }
+});
 
 // CSV da preparação (local JSON ou Postgres)
 app.get('/api/preparacao/csv', async (req, res) => {
   try {
     let rows = [];
 
-    if (isLocalRequest(req) || !isDbEnabled) {
+    if (!shouldUseDb(req)) {
       // modo LOCAL: lê o array e achata
       const arr = await loadPrepArray(); // já existe no arquivo
       for (const item of arr) {

@@ -80,18 +80,8 @@ Isso fará com que somente as alterações de arquivo1.js e arquivo2.css
 sejam incluídas no commit e enviados para o repositório remoto.)
 
 https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
-https://codepen.io/cjl750/pen/mXbMyo // exemplo de linha do tempo
-https://codepen.io/jkantner/pen/vEBQZYe // exemplo para a pagina do SAC
-https://codepen.io/leonam-silva-de-souza/pen/vYoazQq // exemplo para login
-https://codepen.io/cbolson/pen/YzmENGy // Para deixar a foto dos aniversariantes do mês
-https://codepen.io/dilums/pen/ZEBowxX // dashboard para report
-https://codepen.io/fainder/pen/qBwBeO // menu do modal
 https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script
-https://codepen.io/peanav/pen/DmZEEp // calendario para auditoria escalonada
-https://codepen.io/karan12990/pen/pQzPdR // grafico para gerenciar andamentos de projetos
-https://codepen.io/Clonerrs/pen/qBEQmGQ // Chat para conversas internas da empresa
-https://codepen.io/mr_alien/pen/pNRQxK // Tipo kambam
-https://codepen.io/heff/pen/DyoMvJ // Para incluir videos
+
 
 "Abaixo nomeclaturas de programação"
 span - campo amarelo para digitação, ou seja, inserção de dados.
@@ -111,3 +101,14 @@ ul - campo de lista não ordenada.
 ol - campo de lista ordenada.
 li - campo de item de lista.
 h1 - campo de titulo.
+
+
+
+Element,Description
+CAMINHOS E METODOS PARA SQL,"Define os caminhos e métodos utilizados para operações SQL, facilitando a integração e manipulação de dados em bancos relacionais."
+
+"Para iniciar o comando no terminal" : PGPASSWORD=amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho psql -h dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com -U intranet_db_yd0w_user intranet_db_yd0w
+
+"Veja o que existe hoje (dentro do sql)":
+\df+ mover_op
+SELECT pg_get_functiondef('mover_op(text,text)'::regprocedure);    
