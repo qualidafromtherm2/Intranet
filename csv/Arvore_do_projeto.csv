@@ -1,84 +1,37 @@
-INTRANET_FROMTHERM/
-├── .vs/
-├── csv/
-│   ├── Estrutura_do_projeto.csv
-│   ├── Estrutura_do_produto.csv
-│   ├── ListarNCM.csv
-│   ├── Login.csv
-│   ├── Origem.csv
-│   ├── plano_op.csv
-│   ├── Posto_trabalho.csv
-│   ├── Resultado_teste.csv
-│   ├── resumo_erro_estrutura.csv
-│   ├── Testes01.csv
-│   └── Tipo.csv
-│   └── Paradas.csv
-│   └── Motvio_parada.csv
-├── img/
-│   ├── Produto/
-│   │   └── ... (imagens de produtos)
-│   ├── fundo.png
-│   └── logo.png
-├── login/
-│   ├── login.html
-│   ├── login.js
-├── produtos/
-│   ├── Enviar_estrutura.js
-│   ├── lista_Pecas.js
-│   ├── produto_foto.js
-├── requisicoes_omie/
-│   ├── Dados_produto.js
-│   ├── editar_produto.js
-│   ├── filtro_produto.js
-│   ├── ListarProdutos.js
-│   ├── Pesquisar_produto.js
-├── routes/
-│   ├── estoque.js
-│   ├── estoqueResumo.js
-├── node_modules/
-│   └── ... (dependências NPM)
-├── utils/
-│   ├── axiosRetry.js
-│   └── csvUtils.js
-├── .gitmodules
-├── config.client.js
-├── config.server.js
-├── menu_produto.css
-├── menu_produto.html
-├── package.json
-├── package-lock.json
-├── server.js
 
 
-/* fechar porta 5001*/
-netstat -ano | findstr :5001 
-Stop-Process -Id 27084 -Force
 
-grep -R "o valor que vc quer localizar" .  "Aqui é para ver qual arquivo utiliza uma palavra"
+ html,css e http://localhost:5001/#
 
+"utilize o seguinte comando para mexer com inicialização do hostlocal:"
+"Se quer ficar no modo JSON (sem banco) para testar local o banco de dados localmente, utilize o seguinte comando:"
+pm2 restart intranet_api --env json
+pm2 save
 
-http://localhost:5001/# // Meu site
+"Se quer usar o Postgres do Render, ou seja o banco de dados remoto, utilize o seguinte comando:"
+DATABASE_URL='postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require' \
+pm2 restart intranet_api --env pg
+pm2 save
 
-
-chmod +x ./node_modules/.bin/nodemon
-npm run dev // Para iniciar o servidor altomaticamente
-ou
+"Para reiniciar depois de alguma mudança no código, ou seja para aplicar as alterações do dia a dia, utilize o seguinte comando:"
 pm2 restart intranet_api
+"ele mantém o último modo que você escolheu"
 
-para acompanhar o servidor em tempo real
-pm2 list                     # confirme o nome do processo
-pm2 logs intranet_api        # streaming em tempo-real
+"Para ver se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
+pm2 list
+pm2 logs intranet_api
 
+"quando quiser trocar de modo"
+"JSON → Postgres:"
+DATABASE_URL='postgresql://...'?sslmode=require \
+pm2 restart intranet_api --env pg
+pm2 save
+"Postgres → JSON:"
+pm2 restart intranet_api --env json
+pm2 save
 
-// Para enviar para github
-
-git add menu_produto.html menu_produto.js menu_produto.css kanban/kanban.js server.js
-git commit -m "corrigindo atualizar o kanban"
-git push
-
-Isso fará com que somente as alterações de arquivo1.js e arquivo2.css
-sejam incluídas no commit e enviados para o repositório remoto.)
-
+Sites uteis:
+https://www.w3schools.com/ // site de referência para HTML, CSS e JavaScript
 https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
 https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script
 
