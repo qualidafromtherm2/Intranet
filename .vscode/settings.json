@@ -12,22 +12,24 @@
     "editor.hover.enabled": false
   },
 
-  "highlight.include": ["**/csv/Arvore_do_projeto.csv"],
   "highlight.regexes": {
     "\"(?:[^\"]|\"\")*\"": {
       "decorations": [
         { "color": "#1f2937", "backgroundColor": "#fde68a", "fontWeight": "bold" }
-      ]
+      ],
+      "filterFileRegex": ".*Arvore_do_projeto\\.csv$"
     },
     "\\([^()]*\\)": {
       "decorations": [
         { "color": "#064e3b", "backgroundColor": "#a7f3d0", "fontWeight": "bold" }
-      ]
+      ],
+      "filterFileRegex": ".*Arvore_do_projeto\\.csv$"
     },
     "\\[[^\\[\\]]*\\]": {
       "decorations": [
         { "color": "#1e3a8a", "backgroundColor": "#bfdbfe", "fontWeight": "bold" }
-      ]
+      ],
+      "filterFileRegex": ".*Arvore_do_projeto\\.csv$"
     }
   }
 }
