@@ -224,5 +224,15 @@
     ],
     "estoque": 0,
     "_codigoProd": 10621791899
+  },
+  {
+    "pedido": "18148",
+    "codigo": "FT20B35W",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10621791868
   }
 ]
