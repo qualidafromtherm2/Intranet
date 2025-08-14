@@ -27,12 +27,42 @@ let   _debugReqId   = 0;      // já existia
 
 
 async function carregarKanbanPreparacao () {
+  // 1) Tenta ler do Postgres (/api/preparacao/listar)
+  try {
+    const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.mode === 'pg' && j.data) {
+        // j.data tem arrays por status (Ex.: 'Fila de produção', 'Em produção', 'No estoque')
+        const perProd = new Map();
+        ['Fila de produção','Em produção','No estoque'].forEach(st => {
+          (j.data[st] || []).forEach(it => {
+            const codigo = it.produto || it.produto_codigo || it.codigo;
+            if (!codigo) return;
+            const arr = perProd.get(codigo) || [];
+            // mantemos o formato antigo: "Status,OP" (o renderer só usa a parte antes da vírgula)
+            arr.push(`${st},${it.op || ''}`);
+            perProd.set(codigo, arr);
+          });
+        });
+
+        // converte para o formato que seu renderer atual espera
+        const lista = Array.from(perProd.entries()).map(([codigo, local]) => ({
+          pedido: 'Estoque',
+          codigo,
+          local
+        }));
+        return lista;
+      }
+    }
+  } catch (err) {
+    console.warn('PG indisponível, caindo para JSON local:', err);
+  }
+
+  // 2) Fallback: JSON local (funciona no seu modo “json”)
   try {
     const resp = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
-    if (!resp.ok) {
-      console.warn('GET /api/kanban_preparacao →', resp.status);
-      return [];
-    }
+    if (!resp.ok) return [];
     const json = await resp.json();
     return Array.isArray(json) ? json : [];
   } catch (err) {
@@ -40,6 +70,7 @@ async function carregarKanbanPreparacao () {
     return [];
   }
 }
+
 
 
 function renderKanbanPreparacao (items) {
