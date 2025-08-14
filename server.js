@@ -40,10 +40,10 @@ function loadEtqConfig() {
                .sort((a, b) => Number(a.Ordem) - Number(b.Ordem)); // mantém ordem
 }
 loadEtqConfig();
-// DEBUG ────────────────────────────────────────────────
+// *DEBUG ────────────────────────────────────────────────
 console.log('\n⇢ Cabeçalhos que o csv-parse leu:');
 console.table(etqConfig.slice(0, 5));
-// Fim DEBUG ─────────────────────────────────────────────
+// Fim *DEBUG ─────────────────────────────────────────────
 
 // Detecta se a requisição é local (localhost/127.0.0.1)
 function isLocalRequest(req) {
@@ -2017,109 +2017,50 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
 });
 
 
-// Lista o Kanban de preparação (local: JSON | remoto: Postgres)
+// Lista preparação (preferindo Postgres). Fallback: JSON local.
+// --- Listagem do Kanban Preparação (Home) ---
 app.get('/api/preparacao/listar', async (req, res) => {
-  try {
-    if (!shouldUseDb(req)) {
-      const arr  = await loadPrepArray();     // << aqui
-      const data = arrToColumns(arr);         // << e aqui
-      return res.json({ mode: 'local-json', data });
-    }
+  res.set('Cache-Control', 'no-store');
 
-    // (remoto) mantém como está:
-    const { rows } = await dbQuery(
-      `SELECT produto_codigo, op, status
-         FROM op_status
-        ORDER BY status, op`
-    );
-    const data = {
-      'Fila de produção': [],
-      'Em produção': [],
-      'No estoque': []
-    };
-    for (const r of rows) {
-      const card = { op: r.op, produto: r.produto_codigo, status: r.status };
-      if (!data[r.status]) data[r.status] = [];
-      data[r.status].push(card);
+  if (isDbEnabled) {
+    try {
+      const { rows } = await dbQuery(`
+        SELECT op,
+               produto_codigo AS produto,
+               status
+        FROM public.op_status
+        ORDER BY status, op
+      `);
+
+      // mesmo shape esperado pelo front:
+      const data = {
+        'Fila de produção': [],
+        'Em produção': [],
+        'No estoque': []
+      };
+
+      for (const r of rows) {
+        data[r.status]?.push({
+          op: r.op,
+          produto: r.produto,
+          status: r.status
+        });
+      }
+
+      return res.json({ mode: 'pg', data });
+    } catch (err) {
+      console.error('[listar:pg] falhou:', err);
+      // fallback seguro
     }
-    return res.json({ mode: 'postgres', data });
-  } catch (err) {
-    console.error('[preparacao/listar] erro:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao listar preparação' });
   }
-});
 
-// ====== CONSULTA DE EVENTOS (JSON + CSV) ======
-app.get('/api/preparacao/eventos', async (req, res) => {
+  // Fallback local (modo dev)
   try {
-    const { op, from, to, limit, order } = req.query;
-    const lim = Math.min(parseInt(limit || '100', 10), 500);
-    const ord = (String(order || 'desc').toLowerCase() === 'asc') ? 'ASC' : 'DESC';
-
-    // MODO DB (Render) → lê da tabela op_event
-    if (!isLocalRequest(req) && isDbEnabled) {
-      const where = [];
-      const params = [];
-      let p = 1;
-
-      if (op) { where.push(`op = $${p++}`); params.push(op.trim().toUpperCase()); }
-      if (from) { where.push(`momento >= $${p++}`); params.push(new Date(from)); }
-      if (to)   { where.push(`momento < ($${p++}::date + interval '1 day')`); params.push(to); }
-
-      const sql = `
-        SELECT id, op, tipo, usuario, momento, payload
-        FROM public.op_event
-        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-        ORDER BY momento ${ord}
-        LIMIT ${lim}
-      `;
-      const { rows } = await dbQuery(sql, params);
-      return res.json({ mode: 'postgres', count: rows.length, data: rows });
-    }
-
-    // MODO LOCAL → tenta ler um arquivo de log (se existir)
-    const fs = require('fs');
-    const path = require('path');
-
-    // tente em alguns caminhos comuns; ajuste se o seu for diferente
-    const candidates = [
-      path.join(__dirname, 'kanban_logs', 'eventos.log'),
-      path.join(__dirname, 'data', 'eventos.log'),
-    ];
-    const file = candidates.find(f => fs.existsSync(f));
-    if (!file) {
-      return res.status(404).json({ mode: 'local', error: 'Nenhum log local encontrado.' });
-    }
-
-    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
-    // cada linha deve ser um JSON; adapte o mapeamento conforme seu formato real
-    const all = lines.map(l => {
-      try {
-        const obj = JSON.parse(l);
-        return {
-          id: obj.id || null,
-          op: (obj.op || null),
-          tipo: obj.tipo || 'arrasto',
-          usuario: obj.usuario || (obj.user || 'desconhecido'),
-          momento: obj.momento ? new Date(obj.momento) : new Date(),
-          payload: obj.payload || obj.data || obj,
-        };
-      } catch { return null; }
-    }).filter(Boolean);
-
-    // filtros locais
-    let filtered = all;
-    if (op)   filtered = filtered.filter(r => (r.op || '').toUpperCase() === op.trim().toUpperCase());
-    if (from) filtered = filtered.filter(r => r.momento >= new Date(from));
-    if (to)   filtered = filtered.filter(r => r.momento < new Date(new Date(to).toDateString()).getTime() + 24*3600*1000);
-
-    filtered.sort((a, b) => (order && order.toLowerCase()==='asc') ? (a.momento - b.momento) : (b.momento - a.momento));
-    filtered = filtered.slice(0, lim);
-
-    return res.json({ mode: 'local-log', count: filtered.length, data: filtered });
-  } catch (err) {
-    console.error('[GET /api/preparacao/eventos] erro:', err);
-    return res.status(500).json({ error: err.message || 'Falha ao consultar eventos' });
+    const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
+    const json = JSON.parse(raw);
+    return res.json({ mode: 'local-json', data: json });
+  } catch (e) {
+    return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
   }
 });
 

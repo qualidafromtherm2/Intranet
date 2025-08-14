@@ -28,7 +28,7 @@ let   _debugReqId   = 0;      // já existia
 
 async function carregarKanbanPreparacao () {
   try {
-    const resp = await fetch(`${API_BASE}/api/kanban_preparacao`);
+    const resp = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
     if (!resp.ok) {
       console.warn('GET /api/kanban_preparacao →', resp.status);
       return [];
