@@ -879,171 +879,156 @@ function attachDoubleClick(itemsKanban) {
 
 
 export async function initKanban() {
-  // Loading ON (se existir helper)
+  // Loading ON
   if (typeof showSpinner === 'function') showSpinner();
 
-  const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
   const hoje = formatDateBR(new Date());
-  let rendered = false;
 
   try {
-    /* =======================  PRODUÇÃO / RENDER  ======================= */
+    // ===================== PRODUÇÃO / RENDER =====================
     if (!IS_LOCALHOST) {
       try {
-        // Backend já sincroniza com OMIE/SQL e devolve no mesmo formato do JSON local
+        // Backend monta e devolve no MESMO formato do JSON local
         const resp = await fetch(`${API_BASE}/api/kanban/sync`, { cache: 'no-store' });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
         const items = await resp.json();
         const arr   = Array.isArray(items) ? items : [];
 
-        // cache em memória (mantém compatibilidade com o restante do código)
         if (typeof kanbanCache !== 'undefined') kanbanCache = arr;
-
         renderKanbanDesdeJSON(arr);
         enableDragAndDrop(arr);
 
-        // Se sua UI atualiza saldos no DOM, mantém chamada (idempotente)
         if (typeof atualizarEstoqueKanban === 'function') {
           await atualizarEstoqueKanban();
         }
-
-        // Hooks/UX já usados no seu fluxo
-        if (typeof attachDoubleClick === 'function') attachDoubleClick(arr, {}); // sem pedidosMap em prod
+        if (typeof attachDoubleClick === 'function') attachDoubleClick(arr, {});
         if (typeof setupAddToggle === 'function') setupAddToggle();
         if (typeof setupProductSearch === 'function') setupProductSearch();
         if (typeof setupTabNavigation === 'function') setupTabNavigation();
 
-        // Abre aba Comercial por padrão
         const linkCom = document.querySelector(
           '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
         );
         linkCom?.click?.();
 
-        rendered = true;
+        // Em produção NUNCA cai para JSON
+        return;
       } catch (err) {
-        console.error('[KANBAN][prod] Falha no /api/kanban/sync — caindo para fluxo local:', err);
-        // continua para o bloco "localhost/fallback" abaixo
+        console.error('[KANBAN][prod] Falha em /api/kanban/sync:', err);
+        alert('Falha ao carregar Kanban (produção). Verifique o backend /api/kanban/sync.');
+        return;
+      } finally {
+        if (typeof hideSpinner === 'function') hideSpinner();
       }
     }
 
-    /* ==============  LOCALHOST (ou fallback se prod falhar)  ============== */
-    if (!rendered) {
-      /* 1) carrega kanban.json existente */
-      const existingItems = await carregarKanbanLocal();
+    // ======================= LOCALHOST =======================
+    // 1) carrega kanban.json existente
+    const existingItems = await carregarKanbanLocal();
 
-      if (existingItems.length) {
-        renderKanbanDesdeJSON(existingItems);
-        enableDragAndDrop(existingItems);
-      }
+    if (existingItems.length) {
+      renderKanbanDesdeJSON(existingItems);
+      enableDragAndDrop(existingItems);
+    }
 
-      /* 2) busca ListarPedidos (OMIE) */
-      const payloadLP = {
-        call: 'ListarPedidos',
-        param: [{ pagina: 1, registros_por_pagina: 100, etapa: '80', apenas_importado_api: 'N' }],
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET
-      };
-      const respLP = await fetch(`${API_BASE}/api/omie/pedidos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadLP)
-      });
-      const dataLP = respLP.ok ? await respLP.json() : {};
-      const pedidos = Array.isArray(dataLP.pedido_venda_produto)
-        ? dataLP.pedido_venda_produto
-        : [];
+    // 2) busca ListarPedidos (OMIE)
+    const payloadLP = {
+      call: 'ListarPedidos',
+      param: [{ pagina:1, registros_por_pagina:100, etapa:'80', apenas_importado_api:'N' }],
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET
+    };
+    const respLP = await fetch(`${API_BASE}/api/omie/pedidos`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payloadLP)
+    });
+    const dataLP = respLP.ok ? await respLP.json() : {};
+    const pedidos = Array.isArray(dataLP.pedido_venda_produto)
+      ? dataLP.pedido_venda_produto : [];
 
-      /* cria mapa para cache de pedidos */
-      const pedidosMap = {};
-      pedidos.forEach(p => {
-        pedidosMap[String(p.cabecalho.numero_pedido)] = p;
-      });
+    // cria mapa para cache de pedidos
+    const pedidosMap = {};
+    pedidos.forEach(p => {
+      pedidosMap[String(p.cabecalho.numero_pedido)] = p;
+    });
 
-      /* 3) identifica novos itens / consulta estoque */
-      const keySet = new Set(existingItems.map(i => `${i.pedido}|${i.codigo}`));
-      const novos = [];
-      for (const p of pedidos) {
-        const np = p.cabecalho.numero_pedido;
-        for (const det of (Array.isArray(p.det) ? p.det : [])) {
-          const k = `${np}|${det.produto.codigo}`;
-          if (keySet.has(k)) continue;
+    // 3) identifica novos itens / consulta estoque
+    const keySet = new Set(existingItems.map(i => `${i.pedido}|${i.codigo}`));
+    const novos = [];
+    for (const p of pedidos) {
+      const np = p.cabecalho.numero_pedido;
+      for (const det of (Array.isArray(p.det)?p.det:[])) {
+        const k = `${np}|${det.produto.codigo}`;
+        if (keySet.has(k)) continue;
 
-          const obj = {
-            pedido: np,
-            codigo: det.produto.codigo,
-            quantidade: det.produto.quantidade,
-            local: Array(det.produto.quantidade).fill('Pedido aprovado'),
-            estoque: null,
-            _codigoProd: det.produto.codigo_produto
-          };
+        const obj = {
+          pedido: np,
+          codigo: det.produto.codigo,
+          quantidade: det.produto.quantidade,
+          local: Array(det.produto.quantidade).fill('Pedido aprovado'),
+          estoque: null,
+          _codigoProd: det.produto.codigo_produto
+        };
 
-          /* consulta estoque */
-          const payloadEst = {
-            call: 'PosicaoEstoque',
-            param: [{
-              codigo_local_estoque: COD_LOCAL_ESTOQUE,
-              id_prod: obj._codigoProd,
-              cod_int: obj.codigo,
-              data: hoje
-            }],
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET
-          };
-
-          try {
-            const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payloadEst)
-            });
-            const d = r.ok ? await r.json() : {};
-            obj.estoque = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0; // default 0
-          } catch {
-            obj.estoque = 0;
-          }
-
-          novos.push(obj);
-          if (typeof sleep === 'function') await sleep(300);
+        // consulta estoque
+        const payloadEst = {
+          call:'PosicaoEstoque',
+          param:[{ codigo_local_estoque:COD_LOCAL_ESTOQUE, id_prod:obj._codigoProd,
+                   cod_int:obj.codigo, data:hoje }],
+          app_key:OMIE_APP_KEY, app_secret:OMIE_APP_SECRET
+        };
+        try {
+          const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payloadEst)
+          });
+          const d = r.ok?await r.json():{};
+          obj.estoque = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0;
+        } catch {
+          obj.estoque = 0;
         }
+
+        novos.push(obj);
+        if (typeof sleep === 'function') await sleep(300);
       }
-
-      /* 4) mescla + renderiza */
-      const allItems = existingItems.concat(novos); // mantém igual ao seu fluxo
-      if (typeof kanbanCache !== 'undefined') kanbanCache = allItems;
-
-      renderKanbanDesdeJSON(allItems);
-      enableDragAndDrop(allItems);
-
-      // Atualiza o saldo dos cartões "Pedido aprovado" (depósito 105…)
-      if (typeof atualizarEstoqueKanban === 'function') {
-        await atualizarEstoqueKanban();
-      }
-
-      if (novos.length && typeof salvarKanbanLocal === 'function') {
-        await salvarKanbanLocal(allItems);
-      }
-
-      /* 5) ativa dblclick, toggle de “+”, busca e navegação de abas */
-      if (typeof attachDoubleClick === 'function') attachDoubleClick(allItems, pedidosMap);
-      if (typeof setupAddToggle === 'function') setupAddToggle();
-      if (typeof setupProductSearch === 'function') setupProductSearch();
-      if (typeof setupTabNavigation === 'function') setupTabNavigation();
-
-      /* exibe aba Comercial como default */
-      const linkCom = document.querySelector(
-        '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
-      );
-      linkCom?.click?.();
     }
+
+    // 4) mescla + renderiza
+    const allItems = existingItems.concat(novos);
+    if (typeof kanbanCache !== 'undefined') kanbanCache = allItems;
+
+    renderKanbanDesdeJSON(allItems);
+    enableDragAndDrop(allItems);
+
+    // Atualiza saldos “Pedido aprovado”
+    if (typeof atualizarEstoqueKanban === 'function') {
+      await atualizarEstoqueKanban();
+    }
+
+    if (novos.length && typeof salvarKanbanLocal === 'function') {
+      await salvarKanbanLocal(allItems);
+    }
+
+    // 5) UX / Navegação
+    if (typeof attachDoubleClick === 'function') attachDoubleClick(allItems, pedidosMap);
+    if (typeof setupAddToggle === 'function') setupAddToggle();
+    if (typeof setupProductSearch === 'function') setupProductSearch();
+    if (typeof setupTabNavigation === 'function') setupTabNavigation();
+
+    const linkCom = document.querySelector(
+      '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
+    );
+    linkCom?.click?.();
+
   } catch (err) {
     console.error('Erro no initKanban:', err);
     alert('Falha ao inicializar o Kanban.');
   } finally {
-    // Loading OFF (se existir helper)
     if (typeof hideSpinner === 'function') hideSpinner();
   }
 }
+
 
 
 /* ------------------------------------------------------------------ */
