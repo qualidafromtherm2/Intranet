@@ -8,7 +8,8 @@ const router  = express.Router();
 const DATA    = path.join(__dirname, '..', 'data', 'kanban.json');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server.js');
 // === BASE URL DA OMIE ===
-const OMIE_API = 'https://api.omie.com.br/api/v1';
+const OMIE_API = 'https://app.omie.com.br/api/v1';
+
 
 
 // --- utilitário: tenta até N vezes com back-off simples -----------------
@@ -49,8 +50,15 @@ router.get('/data', (_req, res) => res.json(readJSON()));
 /* ——— GET /api/kanban/sync ———  (re)sincroniza e devolve o novo JSON */
 router.get('/sync', async (_req, res) => {
   try {
+        if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({
+        error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no servidor.'
+      });
+    }
+
     /* 1) baixa pedidos (mesmo filtro que usa no front) */
-    const resp = await fetchRetry(`${OMIE_API}/geral/pedidovenda/`, {
+    const resp = await fetchRetry(`${OMIE_API}/produtos/pedido/`, {
+
 
 
         
@@ -66,9 +74,12 @@ router.get('/sync', async (_req, res) => {
 
     // ─── valida se veio JSON ─────────────────────────────
 if (!resp.ok || !resp.headers.get('content-type')?.includes('json')) {
-  const text = await resp.text();                 // Omie devolveu HTML
-  console.error('Omie respondeu:', text.slice(0, 200));
-  throw new Error('Resposta não-JSON da Omie');
+  const ct   = resp.headers.get('content-type');
+  const body = await resp.text();
+  console.error('[KANBAN /sync] Omie NÃO-JSON',
+                'status=', resp.status, 'ct=', ct,
+                'trecho=', body.slice(0, 200));
+  return res.status(502).json({ error: 'omie_non_json', status: resp.status, ct });
 }
 // ─── fim do guard ───────────────────────────────────
 

@@ -234,5 +234,15 @@
     ],
     "estoque": 0,
     "_codigoProd": 10621791868
+  },
+  {
+    "pedido": "18160",
+    "codigo": "FTI25D40PT",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10413817508
   }
 ]
