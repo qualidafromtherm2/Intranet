@@ -2185,8 +2185,15 @@ app.get('/api/kanban/sync', async (req, res) => {
       const msg = await rp.text().catch(() => '');
       return res.status(502).json({ error: 'OMIE ListarPedidos falhou', status: rp.status, body: msg });
     }
-    const dataLP = await rp.json();
-    const pedidos = Array.isArray(dataLP.pedido_venda_produto) ? dataLP.pedido_venda_produto : [];
+const dataLP = await rp.json();
+
+const todos = Array.isArray(dataLP.pedido_venda_produto)
+  ? dataLP.pedido_venda_produto
+  : [];
+
+// 🔒 Garantia: só etapa 80 (Aprovado). Itens em 70 (Em aprovação) ficam fora.
+const pedidos = todos.filter(p => String(p?.cabecalho?.etapa) === '80');
+
 
     // 2) Monta itens no MESMO formato do kanban.json
     const items = [];
