@@ -2145,6 +2145,107 @@ app.get('/api/preparacao/eventos.csv', async (req, res) => {
   }
 });
 
+
+// === KANBAN COMERCIAL (Render) — monta via OMIE e retorna no formato do JSON local ===
+app.get('/api/kanban/sync', async (req, res) => {
+  try {
+    // Ajuste estas 3 linhas conforme seu projeto:
+    const OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || (global.config && global.config.OMIE_APP_KEY);
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || (global.config && global.config.OMIE_APP_SECRET);
+    const COD_LOCAL_ESTOQUE = Number(process.env.COD_LOCAL_ESTOQUE) || 10564345392; // ← ajuste se necessário
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ error: 'OMIE_APP_KEY/SECRET ausentes no servidor.' });
+    }
+
+    const hojeBR = (() => {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yy = d.getFullYear();
+      return `${dd}/${mm}/${yy}`;
+    })();
+
+    const sleep = ms => new Promise(s => setTimeout(s, ms));
+
+    // 1) ListarPedidos (etapa 80 = aprovado)
+    const payloadLP = {
+      call: 'ListarPedidos',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{ pagina: 1, registros_por_pagina: 100, etapa: '80', apenas_importado_api: 'N' }]
+    };
+
+    const rp = await fetch('https://app.omie.com.br/api/v1/produtos/pedido/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payloadLP)
+    });
+    if (!rp.ok) {
+      const msg = await rp.text().catch(() => '');
+      return res.status(502).json({ error: 'OMIE ListarPedidos falhou', status: rp.status, body: msg });
+    }
+    const dataLP = await rp.json();
+    const pedidos = Array.isArray(dataLP.pedido_venda_produto) ? dataLP.pedido_venda_produto : [];
+
+    // 2) Monta itens no MESMO formato do kanban.json
+    const items = [];
+    for (const p of pedidos) {
+      const np = p?.cabecalho?.numero_pedido;
+      const dets = Array.isArray(p?.det) ? p.det : [];
+      for (const det of dets) {
+        const codigo  = det?.produto?.codigo;
+        const id_prod = det?.produto?.codigo_produto;
+        const qtd     = Number(det?.produto?.quantidade) || 0;
+        if (!np || !codigo || !id_prod || !qtd) continue;
+
+        // 2.1) Consulta estoque (PosicaoEstoque)
+        let estoque = 0;
+        try {
+          const payloadEst = {
+            call: 'PosicaoEstoque',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{
+              codigo_local_estoque: COD_LOCAL_ESTOQUE,
+              id_prod,
+              cod_int: codigo,
+              data: hojeBR
+            }]
+          };
+          const re = await fetch('https://app.omie.com.br/api/v1/estoque/consulta/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadEst)
+          });
+          const je = re.ok ? await re.json() : {};
+          estoque = je.saldo ?? je.posicao?.[0]?.saldo_atual ?? 0;
+        } catch {
+          estoque = 0;
+        }
+
+        items.push({
+          pedido: np,
+          codigo,
+          quantidade: qtd,
+          local: Array(qtd).fill('Pedido aprovado'),
+          estoque
+        });
+
+        // Respeita limite de chamadas da OMIE
+        await sleep(250);
+      }
+    }
+
+    // 3) Retorna no mesmo formato do JSON local (array de itens)
+    return res.json(items);
+  } catch (err) {
+    console.error('[api/kanban/sync] erro:', err);
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+
 // CSV da preparação (local JSON ou Postgres)
 app.get('/api/preparacao/csv', async (req, res) => {
   try {
