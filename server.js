@@ -2054,14 +2054,20 @@ app.get('/api/preparacao/listar', async (req, res) => {
     }
   }
 
-  // Fallback local (modo dev)
-  try {
-    const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
-    const json = JSON.parse(raw);
-    return res.json({ mode: 'local-json', data: json });
-  } catch (e) {
-    return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
+// Fallback local (modo dev) — **somente** se a requisição for local
+try {
+  if (!isLocalRequest(req)) {
+    // Em produção/Render NÃO usa JSON nunca:
+    return res.status(500).json({ error: 'DB indisponível em produção; sem fallback JSON.' });
   }
+
+  const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
+  const json = JSON.parse(raw);
+  return res.json({ mode: 'local-json', data: json });
+} catch (e) {
+  return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
+}
+
 });
 
 app.get('/api/preparacao/eventos.csv', async (req, res) => {

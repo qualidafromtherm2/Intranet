@@ -3,7 +3,7 @@
 // kanban/kanban_preparacao.js
 import config from '../config.client.js';
 import { enableDragAndDrop } from './kanban_base.js';
-const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+
 
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
@@ -25,40 +25,46 @@ const API_BASE = window.location.origin;   // mesmo host do front-end
 let   tipo03Cache   = null;   // ← guarda o array completo
 let   tipo03Ready   = null;   // ← Promise que resolve quando o cache estiver pronto
 let   _debugReqId   = 0;      // já existia
-
+const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
 async function carregarKanbanPreparacao () {
+  // localhost => usa JSON local; Render => usa SQL (sem fallback para JSON)
   if (IS_LOCALHOST) {
-    // localhost → JSON servido pelo próprio Node (lendo data/kanban_preparacao.json)
-    const resp = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
-    if (!resp.ok) return [];
-    const json = await resp.json();
-    return Array.isArray(json) ? json : [];
+    // JSON local servido pelo backend (lê data/kanban_preparacao.json)
+    const r = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
+    if (!r.ok) return [];
+    const arr = await r.json();
+    return Array.isArray(arr) ? arr : [];
   }
 
-  // Render/produção → SQL
+  // PRODUÇÃO/Render => SQL
   const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-  if (!r.ok) return [];
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const j = await r.json();
 
-  // normaliza o formato do PG para o renderer atual (lista por produto)
+  // Resposta do server (modo SQL) vem como { mode:'pg', data:{ 'Fila de produção':[], 'Em produção':[], 'No estoque':[] } }
   if (j && j.mode === 'pg' && j.data) {
     const perProd = new Map();
-    ['Fila de produção', 'Em produção', 'No estoque'].forEach(st => {
+    ['Fila de produção','Em produção','No estoque'].forEach(st => {
       (j.data[st] || []).forEach(it => {
         const codigo = it.produto || it.produto_codigo || it.codigo;
         if (!codigo) return;
         const arr = perProd.get(codigo) || [];
-        arr.push(`${st},${it.op || ''}`); // mantém "Status,OP"
+        // Mantém o formato esperado pelo renderer ("Status,OP")
+        arr.push(`${st},${it.op || ''}`);
         perProd.set(codigo, arr);
       });
     });
     return [...perProd.entries()].map(([codigo, local]) => ({
-      pedido: 'Estoque', codigo, local
+      pedido: 'Estoque',
+      codigo,
+      local
     }));
   }
+
   return [];
 }
+
 
 
 
