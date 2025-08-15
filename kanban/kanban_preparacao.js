@@ -3,6 +3,7 @@
 // kanban/kanban_preparacao.js
 import config from '../config.client.js';
 import { enableDragAndDrop } from './kanban_base.js';
+const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
@@ -27,49 +28,38 @@ let   _debugReqId   = 0;      // já existia
 
 
 async function carregarKanbanPreparacao () {
-  // 1) Tenta ler do Postgres (/api/preparacao/listar)
-  try {
-    const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.mode === 'pg' && j.data) {
-        // j.data tem arrays por status (Ex.: 'Fila de produção', 'Em produção', 'No estoque')
-        const perProd = new Map();
-        ['Fila de produção','Em produção','No estoque'].forEach(st => {
-          (j.data[st] || []).forEach(it => {
-            const codigo = it.produto || it.produto_codigo || it.codigo;
-            if (!codigo) return;
-            const arr = perProd.get(codigo) || [];
-            // mantemos o formato antigo: "Status,OP" (o renderer só usa a parte antes da vírgula)
-            arr.push(`${st},${it.op || ''}`);
-            perProd.set(codigo, arr);
-          });
-        });
-
-        // converte para o formato que seu renderer atual espera
-        const lista = Array.from(perProd.entries()).map(([codigo, local]) => ({
-          pedido: 'Estoque',
-          codigo,
-          local
-        }));
-        return lista;
-      }
-    }
-  } catch (err) {
-    console.warn('PG indisponível, caindo para JSON local:', err);
-  }
-
-  // 2) Fallback: JSON local (funciona no seu modo “json”)
-  try {
+  if (IS_LOCALHOST) {
+    // localhost → JSON servido pelo próprio Node (lendo data/kanban_preparacao.json)
     const resp = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
     if (!resp.ok) return [];
     const json = await resp.json();
     return Array.isArray(json) ? json : [];
-  } catch (err) {
-    console.error('Falha ao carregar kanban_preparacao:', err);
-    return [];
   }
+
+  // Render/produção → SQL
+  const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+  if (!r.ok) return [];
+  const j = await r.json();
+
+  // normaliza o formato do PG para o renderer atual (lista por produto)
+  if (j && j.mode === 'pg' && j.data) {
+    const perProd = new Map();
+    ['Fila de produção', 'Em produção', 'No estoque'].forEach(st => {
+      (j.data[st] || []).forEach(it => {
+        const codigo = it.produto || it.produto_codigo || it.codigo;
+        if (!codigo) return;
+        const arr = perProd.get(codigo) || [];
+        arr.push(`${st},${it.op || ''}`); // mantém "Status,OP"
+        perProd.set(codigo, arr);
+      });
+    });
+    return [...perProd.entries()].map(([codigo, local]) => ({
+      pedido: 'Estoque', codigo, local
+    }));
+  }
+  return [];
 }
+
 
 
 
@@ -99,6 +89,7 @@ function renderKanbanPreparacao (items) {
       li.setAttribute('draggable', 'true');
       li.dataset.index    = index;
       li.dataset.column   = columnName;
+      li.dataset.codigo   = item.codigo;   // <-- facilita o clique nas duas colunas
       ul.appendChild(li);
     });
   });
