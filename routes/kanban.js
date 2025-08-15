@@ -83,70 +83,65 @@ if (!resp.ok || !resp.headers.get('content-type')?.includes('json')) {
 }
 // ─── fim do guard ───────────────────────────────────
 
-    const apiJson  = await resp.json();
-    const pedidos  = apiJson.pedido_venda_produto || [];
+const apiJson = await resp.json();
 
-    /* 2) carrega cache atual em memória */
-    const cache = readJSON();
+const todos = Array.isArray(apiJson.pedido_venda_produto)
+  ? apiJson.pedido_venda_produto
+  : [];
 
-    /* 3) índice p/ achar rápido (pedido+codigo) */
-    const idx = {};
-    cache.forEach(rec => idx[`${rec.pedido}-${rec.codigo}`] = rec);
+// 🔒 garante só etapa 80 (Aprovado)
+const pedidos = todos.filter(p => String(p?.cabecalho?.etapa) === '80');
 
-    /* 4) percorre todos os itens de todos os pedidos */
-    for (const p of pedidos) {
-      for (const item of p.det) {
-        const key  = `${p.cabecalho.numero_pedido}-${item.produto.codigo}`;
-        const qtd  = item.produto.quantidade || 1;
-        const hojeBR = new Date().toLocaleDateString('pt-BR'); // 29/05/2025
-        const rec  = idx[key] || {
-          pedido     : p.cabecalho.numero_pedido,
-          codigo     : item.produto.codigo,
-          quantidade : qtd,
-          local_Estoque: [],
-          Obs        : [],
-          Estoque    : 0
-        };
-        /* ajusta quantidade se aumentou na Omie */
-        if (qtd > rec.quantidade) rec.quantidade = qtd;
 
-        /* se é novo, joga no cache & índice */
-        if (!idx[key]) {
-          cache.push(rec);
-          idx[key] = rec;
-        }
+/* 2) RECONSTRÓI do zero (sem cache antigo) */
+const idx     = {};
+const result  = [];
 
-        /* 5) (opcional) traz estoque físico — somente se ainda = 0 */
-        if (rec.Estoque === 0) {
-          const estResp = await fetchRetry(`${OMIE_API}/estoque/consulta/`, {
+/* 3) percorre todos os itens de todos os pedidos */
+for (const p of pedidos) {
+  for (const item of (Array.isArray(p.det) ? p.det : [])) {
+    const key    = `${p.cabecalho.numero_pedido}-${item.produto.codigo}`;
+    const qtd    = item.produto.quantidade || 1;
+    const hojeBR = new Date().toLocaleDateString('pt-BR'); // 29/05/2025
 
-            method : 'POST',
-            headers: { 'Content-Type':'application/json' },
-            body   : JSON.stringify({
-              call : 'ObterEstoqueProduto',
-              param: [{ nIdProduto: item.produto.codigo_produto, dDia: hojeBR }],
-              app_key   : OMIE_APP_KEY,
-              app_secret: OMIE_APP_SECRET
-            })
-        });
+    const rec = idx[key] || {
+      pedido       : p.cabecalho.numero_pedido,
+      codigo       : item.produto.codigo,
+      quantidade   : qtd,
+      local_Estoque: [],
+      Obs          : [],
+      Estoque      : 0
+    };
+    if (qtd > rec.quantidade) rec.quantidade = qtd;
 
- // ----------- valida se veio JSON -----------
- if (!estResp.ok || !estResp.headers.get('content-type')?.includes('json')) {
-   const txt = await estResp.text();
-   console.error('Estoque respondeu:', txt.slice(0, 200));
-   throw new Error('Resposta não-JSON (estoque)');
- }
-
- const estJson = await estResp.json();
- const fisico  = estJson.listaEstoque?.[0]?.fisico ?? 0;
- rec.Estoque   = fisico;
-        }
-      }
+    if (!idx[key]) {
+      result.push(rec);
+      idx[key] = rec;
     }
 
-    /* 6) persiste */
-    writeJSON(cache);
-    res.json(cache);
+    // (opcional) estoque físico — mantém sua lógica existente
+    if (rec.Estoque === 0) {
+      const estResp = await fetchRetry(`${OMIE_API}/estoque/consulta/`, {
+        method : 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body   : JSON.stringify({
+          call : 'ObterEstoqueProduto',
+          param: [{ nIdProduto: item.produto.codigo_produto, dDia: hojeBR }],
+          app_key   : OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET
+        })
+      });
+      if (estResp.ok && estResp.headers.get('content-type')?.includes('json')) {
+        const estJson = await estResp.json();
+        rec.Estoque   = estJson.listaEstoque?.[0]?.fisico ?? 0;
+      }
+    }
+  }
+}
+
+/* 4) devolve apenas o snapshot atual (sem gravar cache) */
+return res.json(result);
+
   } catch (err) {
     if (process.env.NODE_ENV !== 'production') {
   console.error('KANBAN SYNC ERROR', err.message);
