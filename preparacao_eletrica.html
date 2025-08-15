@@ -612,6 +612,25 @@
         renderMiniKanban(window.codigoSelecionado);
       });
 
+      document.getElementById('coluna-prep-em-producao')
+  .addEventListener('click', (e) => {
+    const card = e.target.closest('li');
+    if (!card) return;
+
+    let code =
+      card.dataset?.codigo
+      || card.querySelector('[data-codigo]')?.dataset?.codigo
+      || card.querySelector('.codigo')?.textContent?.trim()
+      || (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]);
+
+    if (!code) return;
+
+    window.codigoSelecionado = code;
+    window.ativarAbaProduto();                 // já existe e abre a aba Produto
+    renderMiniKanban(window.codigoSelecionado); // já renderiza o mini-kanban
+  });
+
+
     // ===== QR: iniciar/finalizar produção
     const btnIniciar   = document.getElementById('btn-iniciar');
     const btnFinalizar = document.getElementById('btn-finalizar');
@@ -651,10 +670,8 @@
         try {
           if (acao === 'iniciar') {
             await Preparacao.iniciarProducao(op);
-            alert(`OP ${op} movida para "Em produção".`);
           } else if (acao === 'concluir') {
             await Preparacao.finalizarProducao(op);
-            alert(`OP ${op} movida para "No estoque".`);
           }
           if (window.renderMiniKanban && window.codigoSelecionado) {
             await window.renderMiniKanban(window.codigoSelecionado);
