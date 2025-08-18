@@ -13,13 +13,10 @@ DATABASE_URL='postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0h
 pm2 restart intranet_api --env pg
 pm2 save
 
-"Para reiniciar depois de alguma mudança no código, ou seja para aplicar as alterações do dia a dia, utilize o seguinte comando:"
-pm2 restart intranet_api
-"ele mantém o último modo que você escolheu"
-
-"Para ver se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
-pm2 list
+"Reinicia, verifica se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
+pm2 restart intranet_api --update-env
 pm2 logs intranet_api
+
 
 "quando quiser trocar de modo"
 "JSON → Postgres:"

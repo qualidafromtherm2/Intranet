@@ -244,5 +244,25 @@
     ],
     "estoque": 0,
     "_codigoProd": 10413817508
+  },
+  {
+    "pedido": "17266",
+    "codigo": "FT160F35T",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353795
+  },
+  {
+    "pedido": "18168",
+    "codigo": "FH100H60T",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353575
   }
 ]
