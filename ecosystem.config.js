@@ -10,29 +10,16 @@ module.exports = {
       }
     },
 
-    {
-      name: 'intranet_api',
-      script: './server.js',
-      watch: true,
-      ignore_watch: ['etiquetas', 'logs', 'node_modules'],
-      watch_delay: 500,
 
-      // padrão (sem indicar env) → usa 5001
-      env: {
-        PORT: 5001
-      },
+{
+  name: 'intranet_api',
+  script: './server.js',
+  watch: true,
+  ignore_watch: ['etiquetas', 'logs', 'node_modules'],
+  watch_delay: 500,
+  env: { PORT: 5001 },
+  env_pg: { PORT: 5001 }   // se você usa o profile "pg"
+}
 
-      // === MODO JSON (sem banco) ===
-      env_json: {
-        PORT: 5001
-        // intencionalmente sem DATABASE_URL
-      },
-
-      // === MODO POSTGRES (com banco) ===
-      env_pg: {
-        PORT: 5001
-        // A DATABASE_URL será injetada pelo comando (não colocamos aqui)
-      }
-    }
   ]
 };

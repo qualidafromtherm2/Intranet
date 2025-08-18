@@ -10,9 +10,9 @@
  *    à Omie. Spinner some assim que chega a 100 %.
  * ======================================================================= */
 
-import config from '../config.client.js';
+/*import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
-const API_BASE = window.location.origin;  // 'https://intranet-30av.onrender.com'
+const API_BASE = window.location.origin;  // 'https://intranet-30av.onrender.com'*/
 
 import { loadDadosProduto } from './Dados_produto.js';
 import {
@@ -29,6 +29,36 @@ const PAGE_SIZE = 500;
 let spinnerVisible   = false;
 let spinnerLocked    = false;
 let spinnerFinished  = false;    // ← NOVO
+
+// --- Live updates via SSE ---
+function setupLiveUpdates() {
+  if (!('EventSource' in window)) return;
+
+  const es = new EventSource('/api/produtos/stream');
+  let debounce = null;
+
+  es.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (!msg) return;
+
+      // Quando o back avisar, recarrega a lista (com debounce)
+      if (msg.type === 'refresh_all' || msg.type === 'product_updated') {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          // mostra o spinner (se você já tiver esses helpers)
+          try { showProductSpinner?.(); } catch {}
+          // refaz todo o preload e a UI espera por __listaReady
+          window.__listaReady = preloadFromDB();
+        }, 800);
+      }
+    } catch (_) {}
+  };
+
+  es.onerror = () => {
+    // silencioso: EventSource já tenta reconectar sozinho
+  };
+}
 
 function showProductSpinner() {
   if (spinnerFinished || spinnerVisible) return;   // ← NOVO
@@ -62,73 +92,13 @@ function updateSpinnerPct(val) {
     hideProductSpinner();
   }
 }
-/* --------------------- Omie → uma página ----------------------------- */
-async function fetchPage(pagina = 1) {
-  const body = {
-    call:       'ListarProdutos',
-    app_key:    OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
-    param: [{
-      pagina,
-      registros_por_pagina: PAGE_SIZE,
-      apenas_importado_api: 'N',
-      filtrar_apenas_omiepdv: 'N',
-      exibir_caracteristicas: 'S',
-      exibir_obs: 'S',
-      exibir_kit: 'S'
-    }]
-  };
 
-  const res = await fetch(`${API_BASE}/api/omie/produtos`, {
-    method:      'POST',
-    credentials: 'include',                // necessário pra sessão
-    headers:     { 'Content-Type':'application/json' },
-    body:        JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    // mostra no console o erro bruto pra você debugar
-    console.error('[ListarProdutos] fetchPage erro:', res.status, await res.text());
-    throw new Error(`ListarProdutos HTTP ${res.status}`);
-  }
-
-  return res.json();
-}
 
 
 
 /* --------------------- CACHE GLOBAL ---------------------------------- */
 window.__omieFullCache = null;   // array de produtos (pronto)
 window.__listaReady    = null;   // Promise de preload
-
-/* --------------------- MONTA CACHE COMPLETO -------------------------- */
-async function buildListaCache() {
-  try {
-    showProductSpinner();
-
-    const first    = await fetchPage(1);
-    const totalReg = first.total_de_registros;
-    const totalPag = first.total_de_paginas;
-    const items    = [...first.produto_servico_cadastro];
-
-    updateSpinnerPct((items.length / totalReg) * 100);
-
-    for (let p = 2; p <= totalPag; p++) {
-      const page = await fetchPage(p);
-      items.push(...page.produto_servico_cadastro);
-      updateSpinnerPct((items.length / totalReg) * 100);
-    }
-
-    window.__omieFullCache = items;        // ✅ sempre array
-    updateSpinnerPct(100);
-  } catch (err) {
-    console.error('[ListarProdutos] preload falhou:', err);
-    window.__omieFullCache = [];           // ✅ fallback
-    throw err;                             // para quem quiser tratar
-  } finally {
-    hideProductSpinner();
-  }
-}
 
 
 /* --------------------- RENDER & EVENTOS ------------------------------ */
@@ -177,13 +147,7 @@ export async function initListarProdutosUI(
   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
   pane.style.display = 'block';
 
-  /* espera cache */
-    if (!window.__listaReady) {
-    window.__listaReady = buildListaCache().catch(hideProductSpinner);
-  }
-
   await window.__listaReady;
-console.log('[ListarProdutos] __omieFullCache →', window.__omieFullCache);
   /* filtros e render */
   setCache(window.__omieFullCache || []);
 
@@ -214,7 +178,57 @@ console.log('[ListarProdutos] __omieFullCache →', window.__omieFullCache);
   populateFilters();
 }
 
-/* --------------------- DISPARA PRELOAD NO LOAD ----------------------- */
+
+// === NOVO: pré-carregar do Postgres em vez da Omie =========================
+async function preloadFromDB() {
+  try {
+    showProductSpinner?.();
+
+    window.__omieFullCache = [];
+    let page   = 1;
+    const askLimit = 500;  // pode pedir 500 (o back devolve até o teto dele)
+    let total  = null;
+    let loaded = 0;
+
+    while (true) {
+      const params = new URLSearchParams({
+        page : String(page),
+        limit: String(askLimit),
+        inativo: 'N',        // remova se quiser incluir inativos
+        // tipoitem: '04',   // opcional
+        // q: 'termo',       // opcional
+      });
+
+      const resp = await fetch(`/api/produtos/lista?${params.toString()}`);
+      if (!resp.ok) throw new Error('Falha ao carregar produtos do banco.');
+      const data  = await resp.json();
+      const itens = Array.isArray(data.itens) ? data.itens : [];
+
+      if (total === null) {
+        total = Number(data.total || 0);
+        // se você quiser que o título já mostre o total logo no início:
+        typeof setListaTitulo === 'function' && setListaTitulo(total);
+      }
+
+      if (!itens.length) break;
+
+      window.__omieFullCache.push(...itens);
+      loaded += itens.length;
+
+      updateSpinnerPct?.(total ? (loaded / total) * 100 : 0);
+
+      if (total && loaded >= total) break;  // ✅ chave: para quando terminar tudo
+      page++;
+    }
+  } finally {
+    hideProductSpinner?.();
+  }
+  return true;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  window.__listaReady = buildListaCache().catch(hideProductSpinner);
+  window.__listaReady = preloadFromDB();
 });
+
+await window.__listaReady;
+

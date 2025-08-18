@@ -1,6 +1,8 @@
 // server.js
 // Carrega as variáveis de ambiente definidas em .env
+// no topo do intranet/server.js
 require('dotenv').config();
+
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
 
@@ -25,7 +27,7 @@ const app = express();
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
 const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
-
+const produtosRouter = require('./routes/produtos');
 // helper central: só usa DB se houver pool E a requisição não for local
 function shouldUseDb(req) {
   return isDbEnabled && !isLocalRequest(req);
@@ -244,6 +246,10 @@ function gravarEstoque(obj) {
   fs.writeFileSync(estoquePath, JSON.stringify(obj, null, 2), 'utf8');
 }
 
+app.use(require('express').json({ limit: '5mb' }));
+
+app.use('/api/produtos', produtosRouter);
+
 /* GET /api/serie/next/:codigo → { ns:"101002" } */
 app.get('/api/serie/next/:codigo', (req, res) => {
   const codReq = req.params.codigo.toLowerCase();
@@ -325,10 +331,6 @@ app.use('/api/kanban', kanbanRouter);
 const kanbanPrepRouter = require('./routes/kanban_preparacao');
 app.use('/api/kanban_preparacao', kanbanPrepRouter);
 
-
-
-// Parser JSON para todas as rotas
-app.use(express.json());
 // Multer para upload de imagens
 const upload = multer({ storage: multer.memoryStorage() });
 
