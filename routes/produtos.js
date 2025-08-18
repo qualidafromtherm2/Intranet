@@ -7,6 +7,16 @@ const router = express.Router();
 // --- SSE (Server-Sent Events) ---
 const sseClients = new Set();
 
+
+// ===== Helpers para o webhook =====
+const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN;
+const OMIE_APP_KEY       = process.env.OMIE_APP_KEY;
+const OMIE_APP_SECRET    = process.env.OMIE_APP_SECRET;
+const OMIE_URL           = 'https://app.omie.com.br/api/v1/geral/produtos/';
+
+
+const mask = s => (s ? s.slice(0,4) + '…' : s);
+
 function sseBroadcast(payload) {
   const msg = `data: ${JSON.stringify(payload)}\n\n`;
   for (const res of sseClients) {
@@ -97,43 +107,112 @@ router.get('/stream', (req, res) => {
   req.on('close', () => sseClients.delete(res));
 });
 
-
-// POST /api/produtos/webhook  → recebe eventos da Omie
-router.post('/webhook', async (req, res) => {
-    console.log('[webhook] expected=', process.env.OMIE_WEBHOOK_TOKEN, ' header=', req.get('X-Omie-Token'), ' query=', req.query.token);
-
-  try {
-    const tokenHeader = req.get('X-Omie-Token');
-    const tokenQuery  = req.query.token;
-    const expected    = process.env.OMIE_WEBHOOK_TOKEN || '';
-
-    if (!expected || (tokenHeader !== expected && tokenQuery !== expected)) {
-      return res.status(401).json({ error: 'unauthorized' });
-    }
-
-    const body = req.body || {};
-    let processed = 0;
-
-    // aceita um item único ou um array na chave produto_servico_cadastro
-    const items = Array.isArray(body.produto_servico_cadastro)
-      ? body.produto_servico_cadastro
-      : (body.produto_servico_cadastro ? [body.produto_servico_cadastro] : []);
-
-    for (const item of items) {
-      await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [item]);
-      processed++;
-    }
-
-    // Notifica os clientes conectados para recarregar a lista
-if (processed > 0) {
-  sseBroadcast({ type: 'refresh_all' });
+// define se o payload está “magro” (precisa buscar na Omie)
+function precisaFetch(it) {
+  if (!it) return false;
+  // se não veio descrição (ou outros campos básicos), vamos buscar
+  if (!it.descricao) return true;
+  // alguns tópicos mandam só "tipoItem" e mais nada — cubra esses casos também
+  if (!it.unidade || !it.tipoItem || !it.ncm) return true;
+  return false;
 }
 
-    return res.json({ ok: true, processed });
-  } catch (err) {
-    console.error('[webhook/omie] erro →', err);
-    return res.status(500).json({ error: 'failed' });
+async function consultarProdutoOmie({ codigo_produto, codigo }) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) return null;
+
+  const param = codigo_produto ? { codigo_produto } :
+                codigo         ? { codigo } :
+                                 null;
+  if (!param) return null;
+
+  const payload = {
+    call: 'ConsultarProduto',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [param]
+  };
+
+  const resp = await fetch(OMIE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const json = await resp.json().catch(() => null);
+  // a Omie retorna { produto_servico_cadastro: { ... } }
+  return json && (json.produto_servico_cadastro || null);
+}
+
+// (opcional) se você já tem uma lista global de clientes SSE, use-a
+function broadcastSSE(msg) {
+  try {
+    const clients = global.__produtosSSEClients || [];
+    const data = `data: ${JSON.stringify(msg)}\n\n`;
+    for (const res of clients) res.write(data);
+  } catch {}
+}
+
+// ===== WEBHOOK OMIE =====
+router.post('/webhook', async (req, res) => {
+  // aceita token no header OU na querystring
+  const token = req.get('X-Omie-Token') || req.query.token;
+  if (!token || token !== OMIE_WEBHOOK_TOKEN) {
+    return res.status(401).json({ error: 'unauthorized' });
   }
+
+  const body = req.body || {};
+  // tente várias chaves possíveis
+  const raw =
+    body.produto_servico_cadastro ??
+    body.produto_cadastro ??
+    body.itens ??
+    body.item ??
+    [];
+
+  const items = Array.isArray(raw) ? raw : [raw];
+
+  let processed = 0;
+  let fetched   = 0;
+
+  for (const it of items) {
+    let data = it;
+
+    // se vier "magro", consulta a Omie para obter o registro completo
+    if (precisaFetch(it)) {
+      try {
+        const full = await consultarProdutoOmie({
+          codigo_produto: it.codigo_produto,
+          codigo: it.codigo
+        });
+        if (full) {
+          data = full;
+          fetched++;
+        }
+      } catch (e) {
+        console.warn('[webhook] falha no ConsultarProduto:', e?.message || e);
+      }
+    }
+
+    // upsert no Postgres
+    try {
+      await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
+      processed++;
+    } catch (e) {
+      console.error('[webhook] erro ao gravar no banco:', e?.message || e);
+    }
+  }
+
+  // avisa o front (se você habilitou o /stream)
+  broadcastSSE({ type: 'refresh_all', at: Date.now() });
+
+  console.log(
+    '[webhook] ok:',
+    'itens=', items.length,
+    'gravados=', processed,
+    'viaConsultarProduto=', fetched
+  );
+
+  return res.json({ ok: true, processed, fetched_from_omie: fetched });
 });
 
 module.exports = router;
