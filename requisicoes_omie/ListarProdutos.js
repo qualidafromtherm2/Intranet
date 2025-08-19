@@ -256,31 +256,66 @@ async function preloadFromDB() {
 
 document.addEventListener('DOMContentLoaded', () => {
   window.__listaReady = preloadFromDB();
-
-  // === AUTO-REFRESH: escuta o webhook e recarrega a lista ===
+// === AUTO-REFRESH: escuta o webhook e recarrega a lista ===
 (function connectSSE() {
   try {
     const es = new EventSource('/api/produtos/stream');
+
     es.onmessage = async (ev) => {
       let msg = {};
       try { msg = JSON.parse(ev.data || '{}'); } catch {}
-      if (msg.type === 'refresh_all') {
-        // limpa e recarrega a lista
+
+      if (msg.type === 'refresh_all' || msg.type === 'product_updated') {
+        // 1) refaz o cache a partir do back (sem cache do browser)
         await preloadFromDB();
-        // chame aqui a MESMA função que você já usa
-        // para desenhar a tabela após o preload inicial:
-        if (typeof renderListaProdutos === 'function') {
-          renderListaProdutos(window.__omieFullCache);
-        } else if (typeof montarTabelaProdutos === 'function') {
-          montarTabelaProdutos(window.__omieFullCache);
-        } else if (typeof popularTabela === 'function') {
-          popularTabela(window.__omieFullCache);
+
+        // 2) se a aba de lista estiver visível, re-renderiza agora
+        const pane  = document.getElementById('listaPecas');
+        const ul    = document.getElementById('listaProdutosList');
+        if (pane && ul && pane.style.display !== 'none') {
+          // atualiza a fonte dos filtros e re-renderiza a lista
+          setCache(window.__omieFullCache || []);
+          const itens = getFiltered();
+          (function renderListNow() {
+            ul.innerHTML = itens.map(p => `
+              <li>
+                <span class="products">${p.codigo}</span>
+                <span class="status">${p.descricao}</span>
+                <div class="button-wrapper">
+                  <button class="content-button status-button open abrir-button"
+                          data-codigo="${p.codigo}">Abrir</button>
+                </div>
+              </li>`).join('');
+            // reatacha os handlers dos botões "Abrir"
+            ul.querySelectorAll('.abrir-button').forEach(btn => {
+              btn.onclick = () => {
+                const codigo = btn.dataset.codigo;
+                document.querySelector('.main-header').style.display = 'flex';
+                document.querySelectorAll('.main-header-link')
+                        .forEach(l => l.classList.remove('is-active'));
+                document.querySelector('[data-target="dadosProduto"]')
+                        .classList.add('is-active');
+                document.querySelectorAll('.tab-pane')
+                        .forEach(p => p.style.display = 'none');
+                document.getElementById('dadosProduto').style.display = 'block';
+                loadDadosProduto(codigo);
+              };
+            });
+          })();
+
+          const title = pane.querySelector('.content-section-title');
+          if (title) title.textContent = `Lista de produtos (${itens.length})`;
+          try { populateFilters(); } catch {}
         }
       }
     };
-    es.onerror = () => { /* opcional: reconectar com backoff */ };
-  } catch (_) {}
+
+    es.onerror = () => { /* silencioso: o EventSource tenta reconectar */ };
+  } catch (e) {
+    console.warn('SSE erro', e);
+  }
 })();
+
 
 });
 
