@@ -193,13 +193,15 @@ router.post('/webhook', async (req, res) => {
   const hasEnv = { key: !!OMIE_APP_KEY, secret: !!OMIE_APP_SECRET };
   const body = req.body || {};
 
-  // tenta várias chaves possíveis vindas da Omie
-  const raw =
-    body.produto_servico_cadastro ??
-    body.produto_cadastro ??
-    body.itens ??
-    body.item ??
-    [];
+// tenta várias chaves possíveis vindas da Omie (inclui Connect 2.0: { topic, event })
+const raw =
+  body.produto_servico_cadastro ??
+  body.produto_cadastro ??
+  body.event ??                  // ← ADICIONADO: payload de webhooks "Produto.Alterado"
+  body.itens ??
+  body.item ??
+  [];
+
 
   const items = Array.isArray(raw) ? raw : [raw];
 
