@@ -84,6 +84,12 @@ router.get('/lista', async (req, res) => {
     const { rows } = await dbQuery(sql, [q, tipoitem, inativo, limit, offset]);
     const total = Number(rows?.[0]?.total || 0);
     const itens = rows?.[0]?.itens || [];
+    // dentro do handler GET /lista, antes de responder:
+res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+res.set('Pragma', 'no-cache');
+res.set('Expires', '0');
+res.set('Surrogate-Control', 'no-store');
+
     res.json({ total, page, limit, itens });
   } catch (err) {
     console.error('[produtos/lista] erro →', err);
