@@ -180,6 +180,7 @@ function hasEssentials(obj) {
 }
 
 // ===== WEBHOOK OMIE =====
+// ===== WEBHOOK OMIE =====
 router.post('/webhook', async (req, res) => {
   const debugMode = String(req.query.debug || '') === '1';
 
@@ -192,7 +193,7 @@ router.post('/webhook', async (req, res) => {
   const hasEnv = { key: !!OMIE_APP_KEY, secret: !!OMIE_APP_SECRET };
   const body = req.body || {};
 
-  // tente várias chaves possíveis
+  // tenta várias chaves possíveis vindas da Omie
   const raw =
     body.produto_servico_cadastro ??
     body.produto_cadastro ??
@@ -207,89 +208,69 @@ router.post('/webhook', async (req, res) => {
   const failures = [];
 
   for (const it of items) {
-    let data = it;
+    let data = (it && typeof it === 'object') ? { ...it } : null;
 
-    // precisa fetch na Omie?
-    const needs = !it || !it.descricao || !it.codigo || !it.codigo_produto_integracao;
-    if (needs && hasEnv.key && hasEnv.secret) {
+    // precisa ter pelo menos codigo_produto OU codigo para poder consultar
+    if (!data || (!data.codigo_produto && !data.codigo)) {
+      failures.push({
+        step: 'skip',
+        id: data?.codigo_produto || data?.codigo || null,
+        reason: 'sem codigo_produto/codigo'
+      });
+      continue;
+    }
+
+    // payload "magro"? então buscamos o produto completo na Omie
+    const needFetch =
+      !data.descricao ||
+      !data.unidade ||
+      !data.tipoItem ||
+      !data.ncm ||
+      !data.codigo ||
+      !data.codigo_produto_integracao;
+
+    if (needFetch && hasEnv.key && hasEnv.secret) {
       try {
         const full = await consultarProdutoOmie({
-          codigo_produto: it.codigo_produto,
-          codigo: it.codigo
+          codigo_produto: data.codigo_produto,
+          codigo: data.codigo
         });
         if (full) {
           data = full;
           fetched++;
+        } else {
+          failures.push({
+            step: 'consultarProdutoOmie',
+            id: data.codigo_produto || data.codigo,
+            error: 'resposta vazia/inesperada'
+          });
         }
       } catch (e) {
         failures.push({
           step: 'consultarProdutoOmie',
-          id: it?.codigo_produto || it?.codigo,
+          id: data.codigo_produto || data.codigo,
           error: e?.message || String(e)
         });
       }
     }
 
-    // upsert no Postgres
-    try {
-for (const it of items) {
-  let data = it;
-
-  const needs = precisaFetch(it);
-  if (needs && hasEnv.key && hasEnv.secret) {
-    try {
-      const full = await consultarProdutoOmie({
-        codigo_produto: it.codigo_produto,
-        codigo: it.codigo
-      });
-      if (full) {
-        data = full;
-        fetched++;
-      } else {
-        failures.push({
-          step: 'consultarProdutoOmie',
-          id: it?.codigo_produto || it?.codigo,
-          error: 'Omie retornou vazio/inesperado'
-        });
-      }
-    } catch (e) {
+    // validações essenciais para o upsert
+    if (!data || !data.codigo_produto || !(data.codigo || data.codigo_produto_integracao)) {
       failures.push({
-        step: 'consultarProdutoOmie',
-        id: it?.codigo_produto || it?.codigo,
-        error: e?.message || String(e)
+        step: 'skip_upsert',
+        id: data?.codigo_produto || data?.codigo,
+        reason: 'payload sem campos essenciais (codigo/codigo_produto_integracao)'
       });
+      continue;
     }
-  }
 
-  // Se ainda está magro e o produto não existe, não tente inserir
-  if (!hasEssentials(data)) {
-    failures.push({
-      step: 'skip_upsert',
-      id: data?.codigo_produto || data?.codigo,
-      reason: 'payload sem campos essenciais (codigo/codigo_produto_integracao)'
-    });
-    continue;
-  }
-
-  try {
-    await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
-    processed++;
-  } catch (e) {
-    failures.push({
-      step: 'db_upsert',
-      id: data?.codigo_produto || data?.codigo,
-      error: e?.message || String(e),
-      code: e?.code || null,
-      detail: e?.detail || null
-    });
-  }
-}
-
+    try {
+      await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
       processed++;
     } catch (e) {
       failures.push({
         step: 'db_upsert',
-        id: data?.codigo_produto || data?.codigo,
+        id: data.codigo_produto || data.codigo,
         error: e?.message || String(e),
         code: e?.code || null,
         detail: e?.detail || null
@@ -297,20 +278,16 @@ for (const it of items) {
     }
   }
 
-  // avisa o front (SSE)
-  broadcastSSE({ type: 'refresh_all', at: Date.now() });
+  // avisa o front por SSE (se estiver aberto)
+  try { sseBroadcast({ type: 'refresh_all', at: Date.now() }); } catch (_) {}
+  try { broadcastSSE({ type: 'refresh_all', at: Date.now() }); } catch (_) {}
 
   const payload = { ok: true, processed, fetched_from_omie: fetched };
-  if (debugMode) {
-    payload.debug = {
-      items_len: items.length,
-      hasEnv,
-      failures
-    };
-  }
+  if (debugMode) payload.debug = { items_len: items.length, hasEnv, failures };
 
   return res.json(payload);
 });
+
 
 
 module.exports = router;
