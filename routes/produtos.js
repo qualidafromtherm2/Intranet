@@ -179,116 +179,93 @@ function hasEssentials(obj) {
   return !!(obj && obj.codigo_produto && (obj.codigo || obj.codigo_produto_integracao));
 }
 
-// ===== WEBHOOK OMIE =====
-// ===== WEBHOOK OMIE =====
-router.post('/webhook', async (req, res) => {
-  const debugMode = String(req.query.debug || '') === '1';
 
-  // aceita token no header OU na querystring
-  const token = req.get('X-Omie-Token') || req.query.token;
-  if (!token || token !== OMIE_WEBHOOK_TOKEN) {
+// ===== WEBHOOK OMIE =====
+
+router.post('/webhook', async (req, res) => {
+  const expected = process.env.OMIE_WEBHOOK_TOKEN;
+  const headerTok = req.get('X-Omie-Token');
+  const queryTok  = req.query.token;
+  if (expected && headerTok !== expected && queryTok !== expected) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const hasEnv = { key: !!OMIE_APP_KEY, secret: !!OMIE_APP_SECRET };
   const body = req.body || {};
 
-// tenta várias chaves possíveis vindas da Omie (inclui Connect 2.0: { topic, event })
-const raw =
-  body.produto_servico_cadastro ??
-  body.produto_cadastro ??
-  body.event ??                  // ← ADICIONADO: payload de webhooks "Produto.Alterado"
-  body.itens ??
-  body.item ??
-  [];
+  // Normaliza os diferentes formatos de payload de webhook (inclui Connect 2.0: { topic, event })
+  let raw =
+    body.produto_servico_cadastro ??
+    body.produto_cadastro ??
+    body.itens ??
+    body.item ??
+    (body.topic && body.event ? body.event : []);
 
+  // Garante array para o loop
+  const itens = Array.isArray(raw) ? raw : [raw];
 
-  const items = Array.isArray(raw) ? raw : [raw];
+  // Se o payload veio vazio, responde ok e sai
+  if (!itens.length || (itens.length === 1 && Object.keys(itens[0] || {}).length === 0)) {
+    return res.json({ ok: true, processed: 0, fetched_from_omie: 0 });
+  }
 
   let processed = 0;
-  let fetched   = 0;
+  let fetched_from_omie = 0;
   const failures = [];
 
-  for (const it of items) {
-    let data = (it && typeof it === 'object') ? { ...it } : null;
-
-    // precisa ter pelo menos codigo_produto OU codigo para poder consultar
-    if (!data || (!data.codigo_produto && !data.codigo)) {
-      failures.push({
-        step: 'skip',
-        id: data?.codigo_produto || data?.codigo || null,
-        reason: 'sem codigo_produto/codigo'
-      });
-      continue;
-    }
-
-    // payload "magro"? então buscamos o produto completo na Omie
-    const needFetch =
-      !data.descricao ||
-      !data.unidade ||
-      !data.tipoItem ||
-      !data.ncm ||
-      !data.codigo ||
-      !data.codigo_produto_integracao;
-
-    if (needFetch && hasEnv.key && hasEnv.secret) {
-      try {
-        const full = await consultarProdutoOmie({
-          codigo_produto: data.codigo_produto,
-          codigo: data.codigo
-        });
-        if (full) {
-          data = full;
-          fetched++;
-        } else {
-          failures.push({
-            step: 'consultarProdutoOmie',
-            id: data.codigo_produto || data.codigo,
-            error: 'resposta vazia/inesperada'
-          });
-        }
-      } catch (e) {
-        failures.push({
-          step: 'consultarProdutoOmie',
-          id: data.codigo_produto || data.codigo,
-          error: e?.message || String(e)
-        });
-      }
-    }
-
-    // validações essenciais para o upsert
-    if (!data || !data.codigo_produto || !(data.codigo || data.codigo_produto_integracao)) {
-      failures.push({
-        step: 'skip_upsert',
-        id: data?.codigo_produto || data?.codigo,
-        reason: 'payload sem campos essenciais (codigo/codigo_produto_integracao)'
-      });
-      continue;
-    }
-
+  for (const it of itens) {
     try {
-      await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
+      // Aceita tanto id (codigo_produto) quanto código "humano"
+      const id     = it.codigo_produto ?? it.codigoProduto ?? null;
+      const codigo = it.codigo ?? it.codigo_produto_integracao ?? it.codigoProdutoIntegracao ?? null;
+
+      let full = it;
+
+      // Se ainda não temos campos mínimos (ex.: só veio id), fazemos fallback para ConsultarProduto
+      const hasMin = !!(full.descricao && (id || codigo));
+      if (!hasMin) {
+        if (!id && !codigo) {
+          failures.push({ step: 'skip', msg: 'sem id/codigo no item', itResumo: { id, codigo } });
+          continue;
+        }
+        const payload = id ? { codigo_produto: id } : { codigo };
+        try {
+          full = await callOmie('ConsultarProduto', payload);
+          fetched_from_omie++;
+        } catch (e) {
+          failures.push({ step: 'omie_consulta', id, codigo, error: String(e) });
+          continue;
+        }
+      }
+
+      // Upsert no Postgres (função já criada no seu banco)
+      await pool.query('SELECT omie_upsert_produto($1)', [full]);
       processed++;
     } catch (e) {
-      failures.push({
-        step: 'db_upsert',
-        id: data.codigo_produto || data.codigo,
-        error: e?.message || String(e),
-        code: e?.code || null,
-        detail: e?.detail || null
-      });
+      failures.push({ step: 'db_upsert', error: String(e) });
     }
   }
 
-  // avisa o front por SSE (se estiver aberto)
-  try { sseBroadcast({ type: 'refresh_all', at: Date.now() }); } catch (_) {}
-  try { broadcastSSE({ type: 'refresh_all', at: Date.now() }); } catch (_) {}
+  // Notifica clientes via SSE (se configurado no app)
+  try {
+    const notify =
+      (req.app && req.app.locals && req.app.locals.broadcastSSE) ||
+      (req.app && typeof req.app.get === 'function' && req.app.get('broadcastSSE'));
+    if (typeof notify === 'function') {
+      notify('produtos:update', { count: processed, at: new Date().toISOString() });
+    }
+  } catch {}
 
-  const payload = { ok: true, processed, fetched_from_omie: fetched };
-  if (debugMode) payload.debug = { items_len: items.length, hasEnv, failures };
-
-  return res.json(payload);
+  const resp = { ok: true, processed, fetched_from_omie };
+  if (req.query.debug) {
+    resp.debug = {
+      items_len: itens.length,
+      hasEnv: { key: !!process.env.OMIE_APP_KEY, secret: !!process.env.OMIE_APP_SECRET },
+      failures
+    };
+  }
+  return res.json(resp);
 });
+
 
 
 
