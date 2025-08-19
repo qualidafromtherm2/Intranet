@@ -160,13 +160,17 @@ function broadcastSSE(msg) {
 
 // ===== WEBHOOK OMIE =====
 router.post('/webhook', async (req, res) => {
+  const debugMode = String(req.query.debug || '') === '1';
+
   // aceita token no header OU na querystring
   const token = req.get('X-Omie-Token') || req.query.token;
   if (!token || token !== OMIE_WEBHOOK_TOKEN) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
+  const hasEnv = { key: !!OMIE_APP_KEY, secret: !!OMIE_APP_SECRET };
   const body = req.body || {};
+
   // tente várias chaves possíveis
   const raw =
     body.produto_servico_cadastro ??
@@ -179,12 +183,14 @@ router.post('/webhook', async (req, res) => {
 
   let processed = 0;
   let fetched   = 0;
+  const failures = [];
 
   for (const it of items) {
     let data = it;
 
-    // se vier "magro", consulta a Omie para obter o registro completo
-    if (precisaFetch(it)) {
+    // precisa fetch na Omie?
+    const needs = precisaFetch(it);
+    if (needs && hasEnv.key && hasEnv.secret) {
       try {
         const full = await consultarProdutoOmie({
           codigo_produto: it.codigo_produto,
@@ -195,7 +201,11 @@ router.post('/webhook', async (req, res) => {
           fetched++;
         }
       } catch (e) {
-        console.warn('[webhook] falha no ConsultarProduto:', e?.message || e);
+        failures.push({
+          step: 'consultarProdutoOmie',
+          id: it?.codigo_produto || it?.codigo,
+          error: e?.message || String(e)
+        });
       }
     }
 
@@ -204,21 +214,30 @@ router.post('/webhook', async (req, res) => {
       await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
       processed++;
     } catch (e) {
-      console.error('[webhook] erro ao gravar no banco:', e?.message || e);
+      failures.push({
+        step: 'db_upsert',
+        id: data?.codigo_produto || data?.codigo,
+        error: e?.message || String(e),
+        code: e?.code || null,
+        detail: e?.detail || null
+      });
     }
   }
 
-  // avisa o front (se você habilitou o /stream)
+  // avisa o front (SSE)
   broadcastSSE({ type: 'refresh_all', at: Date.now() });
 
-  console.log(
-    '[webhook] ok:',
-    'itens=', items.length,
-    'gravados=', processed,
-    'viaConsultarProduto=', fetched
-  );
+  const payload = { ok: true, processed, fetched_from_omie: fetched };
+  if (debugMode) {
+    payload.debug = {
+      items_len: items.length,
+      hasEnv,
+      failures
+    };
+  }
 
-  return res.json({ ok: true, processed, fetched_from_omie: fetched });
+  return res.json(payload);
 });
+
 
 module.exports = router;
