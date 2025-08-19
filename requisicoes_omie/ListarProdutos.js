@@ -201,81 +201,87 @@ export async function initListarProdutosUI(
 }
 
 
-// === NOVO: pré-carregar do Postgres em vez da Omie =========================
-// === NOVO: pré-carregar do Postgres em vez da Omie =========================
+// === NOVO: pré-carregar do Postgres (com cache-busting) ===
 async function preloadFromDB() {
   try {
-    // spinner opcional (se você já tem essas funções no arquivo)
-    if (typeof showProductSpinner === 'function') showProductSpinner();
-    if (typeof updateSpinnerPct === 'function') updateSpinnerPct(0);
+    showProductSpinner?.();
 
-    // zera o cache global usado pela tela
+    // zera o cache local antes de recarregar tudo
     window.__omieFullCache = [];
-
     let page   = 1;
-    const askLimit = 500;   // peça 500 por página; o servidor limita se precisar
+    const askLimit = 500;
     let total  = null;
     let loaded = 0;
 
     while (true) {
-      // monta a URL com cache-buster (?t=timestamp)
       const params = new URLSearchParams({
-        page:  String(page),
-        limit: String(askLimit),
-        inativo: 'N',       // remova se quiser incluir inativos
-        // tipoitem: '04',  // opcional
-        // q: 'termo',      // opcional
+        page   : String(page),
+        limit  : String(askLimit),
+        inativo: 'N',      // ajuste se quiser ver inativos
+        // tipoitem: '04', // opcional
+        // q: 'termo',     // opcional
+        t: String(Date.now()) // <- cache-busting
       });
-      params.set('t', Date.now()); // cache-busting
 
-      const url = `/api/produtos/lista?${params.toString()}`;
-
-      // força o navegador a NÃO usar cache
-      const resp = await fetch(url, { cache: 'no-store' });
-      if (!resp.ok) throw new Error(`Falha ao carregar produtos do banco: HTTP ${resp.status}`);
-
+      const resp = await fetch(`/api/produtos/lista?${params.toString()}`, {
+        cache: 'no-store' // <-
+      });
+      if (!resp.ok) throw new Error('Falha ao carregar produtos do banco.');
       const data  = await resp.json();
       const itens = Array.isArray(data.itens) ? data.itens : [];
 
       if (total === null) {
         total = Number(data.total || 0);
-        // se você tem uma função que atualiza o título com o total, use:
-        if (typeof setListaTitulo === 'function') setListaTitulo(total);
+        // atualiza o título com o total
+        typeof setListaTitulo === 'function' && setListaTitulo(total);
       }
 
-      // nada veio? terminou
       if (!itens.length) break;
 
-      // acumula no cache global
       window.__omieFullCache.push(...itens);
       loaded += itens.length;
 
-      // atualiza o spinner (se existir)
-      if (typeof updateSpinnerPct === 'function') {
-        const pct = total ? Math.min(100, Math.floor((loaded / total) * 100))
-                          : Math.min(100, Math.floor((page * askLimit) / askLimit * 100));
-        updateSpinnerPct(pct);
-      }
+      updateSpinnerPct?.(total ? (loaded / total) * 100 : 0);
 
-      // chegou no total? para
-      if (total && loaded >= total) break;
-
-      // próxima página
+      if (total && loaded >= total) break; // terminou
       page++;
     }
-  } catch (err) {
-    console.error('[preloadFromDB] erro:', err);
   } finally {
-    if (typeof hideProductSpinner === 'function') hideProductSpinner();
-    // mantém a Promise pública usada pelo resto do front
-    window.__listaReady = Promise.resolve(true);
+    hideProductSpinner?.();
   }
   return true;
 }
 
 
+
 document.addEventListener('DOMContentLoaded', () => {
   window.__listaReady = preloadFromDB();
+
+  // === AUTO-REFRESH: escuta o webhook e recarrega a lista ===
+(function connectSSE() {
+  try {
+    const es = new EventSource('/api/produtos/stream');
+    es.onmessage = async (ev) => {
+      let msg = {};
+      try { msg = JSON.parse(ev.data || '{}'); } catch {}
+      if (msg.type === 'refresh_all') {
+        // limpa e recarrega a lista
+        await preloadFromDB();
+        // chame aqui a MESMA função que você já usa
+        // para desenhar a tabela após o preload inicial:
+        if (typeof renderListaProdutos === 'function') {
+          renderListaProdutos(window.__omieFullCache);
+        } else if (typeof montarTabelaProdutos === 'function') {
+          montarTabelaProdutos(window.__omieFullCache);
+        } else if (typeof popularTabela === 'function') {
+          popularTabela(window.__omieFullCache);
+        }
+      }
+    };
+    es.onerror = () => { /* opcional: reconectar com backoff */ };
+  } catch (_) {}
+})();
+
 });
 
 await window.__listaReady;
