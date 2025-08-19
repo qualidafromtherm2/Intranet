@@ -144,10 +144,27 @@ async function consultarProdutoOmie({ codigo_produto, codigo }) {
     body: JSON.stringify(payload),
   });
 
-  const json = await resp.json().catch(() => null);
-  // a Omie retorna { produto_servico_cadastro: { ... } }
-  return json && (json.produto_servico_cadastro || null);
+  let json = null;
+  try {
+    json = await resp.json();
+  } catch {
+    return null;
+  }
+
+  // formatos possíveis:
+  // A) { produto_servico_cadastro: {...} }
+  // B) { ...camposDoProduto... }
+  // C) { faultstring: "...", ... }
+  if (json && json.produto_servico_cadastro) return json.produto_servico_cadastro;
+
+  if (json && (json.codigo_produto || json.codigo || json.descricao)) {
+    return json;
+  }
+
+  // se vier erro, retorne null (o caller loga)
+  return null;
 }
+
 
 // (opcional) se você já tem uma lista global de clientes SSE, use-a
 function broadcastSSE(msg) {
@@ -156,6 +173,10 @@ function broadcastSSE(msg) {
     const data = `data: ${JSON.stringify(msg)}\n\n`;
     for (const res of clients) res.write(data);
   } catch {}
+}
+
+function hasEssentials(obj) {
+  return !!(obj && obj.codigo_produto && (obj.codigo || obj.codigo_produto_integracao));
 }
 
 // ===== WEBHOOK OMIE =====
@@ -189,7 +210,7 @@ router.post('/webhook', async (req, res) => {
     let data = it;
 
     // precisa fetch na Omie?
-    const needs = precisaFetch(it);
+    const needs = !it || !it.descricao || !it.codigo || !it.codigo_produto_integracao;
     if (needs && hasEnv.key && hasEnv.secret) {
       try {
         const full = await consultarProdutoOmie({
@@ -211,7 +232,59 @@ router.post('/webhook', async (req, res) => {
 
     // upsert no Postgres
     try {
-      await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
+for (const it of items) {
+  let data = it;
+
+  const needs = precisaFetch(it);
+  if (needs && hasEnv.key && hasEnv.secret) {
+    try {
+      const full = await consultarProdutoOmie({
+        codigo_produto: it.codigo_produto,
+        codigo: it.codigo
+      });
+      if (full) {
+        data = full;
+        fetched++;
+      } else {
+        failures.push({
+          step: 'consultarProdutoOmie',
+          id: it?.codigo_produto || it?.codigo,
+          error: 'Omie retornou vazio/inesperado'
+        });
+      }
+    } catch (e) {
+      failures.push({
+        step: 'consultarProdutoOmie',
+        id: it?.codigo_produto || it?.codigo,
+        error: e?.message || String(e)
+      });
+    }
+  }
+
+  // Se ainda está magro e o produto não existe, não tente inserir
+  if (!hasEssentials(data)) {
+    failures.push({
+      step: 'skip_upsert',
+      id: data?.codigo_produto || data?.codigo,
+      reason: 'payload sem campos essenciais (codigo/codigo_produto_integracao)'
+    });
+    continue;
+  }
+
+  try {
+    await dbQuery('SELECT omie_upsert_produto($1::jsonb);', [data]);
+    processed++;
+  } catch (e) {
+    failures.push({
+      step: 'db_upsert',
+      id: data?.codigo_produto || data?.codigo,
+      error: e?.message || String(e),
+      code: e?.code || null,
+      detail: e?.detail || null
+    });
+  }
+}
+
       processed++;
     } catch (e) {
       failures.push({
