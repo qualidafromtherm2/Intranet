@@ -30,6 +30,28 @@ let spinnerVisible   = false;
 let spinnerLocked    = false;
 let spinnerFinished  = false;    // ← NOVO
 
+
+// === evita cache do /api/produtos/lista ===
+function buildListaUrl({ limit=50, offset=0, q='', tipoitem='', inativo='' } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    q,
+    tipoitem,
+    inativo
+  });
+  // cache-buster
+  params.set('t', Date.now());
+  return `/api/produtos/lista?` + params.toString();
+}
+
+async function fetchLista(params) {
+  const url = buildListaUrl(params);
+  const resp = await fetch(url, { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
 // --- Live updates via SSE ---
 function setupLiveUpdates() {
   if (!('EventSource' in window)) return;
@@ -180,51 +202,77 @@ export async function initListarProdutosUI(
 
 
 // === NOVO: pré-carregar do Postgres em vez da Omie =========================
+// === NOVO: pré-carregar do Postgres em vez da Omie =========================
 async function preloadFromDB() {
   try {
-    showProductSpinner?.();
+    // spinner opcional (se você já tem essas funções no arquivo)
+    if (typeof showProductSpinner === 'function') showProductSpinner();
+    if (typeof updateSpinnerPct === 'function') updateSpinnerPct(0);
 
+    // zera o cache global usado pela tela
     window.__omieFullCache = [];
+
     let page   = 1;
-    const askLimit = 500;  // pode pedir 500 (o back devolve até o teto dele)
+    const askLimit = 500;   // peça 500 por página; o servidor limita se precisar
     let total  = null;
     let loaded = 0;
 
     while (true) {
+      // monta a URL com cache-buster (?t=timestamp)
       const params = new URLSearchParams({
-        page : String(page),
+        page:  String(page),
         limit: String(askLimit),
-        inativo: 'N',        // remova se quiser incluir inativos
-        // tipoitem: '04',   // opcional
-        // q: 'termo',       // opcional
+        inativo: 'N',       // remova se quiser incluir inativos
+        // tipoitem: '04',  // opcional
+        // q: 'termo',      // opcional
       });
+      params.set('t', Date.now()); // cache-busting
 
-      const resp = await fetch(`/api/produtos/lista?${params.toString()}`);
-      if (!resp.ok) throw new Error('Falha ao carregar produtos do banco.');
+      const url = `/api/produtos/lista?${params.toString()}`;
+
+      // força o navegador a NÃO usar cache
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`Falha ao carregar produtos do banco: HTTP ${resp.status}`);
+
       const data  = await resp.json();
       const itens = Array.isArray(data.itens) ? data.itens : [];
 
       if (total === null) {
         total = Number(data.total || 0);
-        // se você quiser que o título já mostre o total logo no início:
-        typeof setListaTitulo === 'function' && setListaTitulo(total);
+        // se você tem uma função que atualiza o título com o total, use:
+        if (typeof setListaTitulo === 'function') setListaTitulo(total);
       }
 
+      // nada veio? terminou
       if (!itens.length) break;
 
+      // acumula no cache global
       window.__omieFullCache.push(...itens);
       loaded += itens.length;
 
-      updateSpinnerPct?.(total ? (loaded / total) * 100 : 0);
+      // atualiza o spinner (se existir)
+      if (typeof updateSpinnerPct === 'function') {
+        const pct = total ? Math.min(100, Math.floor((loaded / total) * 100))
+                          : Math.min(100, Math.floor((page * askLimit) / askLimit * 100));
+        updateSpinnerPct(pct);
+      }
 
-      if (total && loaded >= total) break;  // ✅ chave: para quando terminar tudo
+      // chegou no total? para
+      if (total && loaded >= total) break;
+
+      // próxima página
       page++;
     }
+  } catch (err) {
+    console.error('[preloadFromDB] erro:', err);
   } finally {
-    hideProductSpinner?.();
+    if (typeof hideProductSpinner === 'function') hideProductSpinner();
+    // mantém a Promise pública usada pelo resto do front
+    window.__listaReady = Promise.resolve(true);
   }
   return true;
 }
+
 
 document.addEventListener('DOMContentLoaded', () => {
   window.__listaReady = preloadFromDB();
