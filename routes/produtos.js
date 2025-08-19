@@ -182,88 +182,105 @@ function hasEssentials(obj) {
 
 // ===== WEBHOOK OMIE =====
 
+// === WEBHOOK OMIE ============================================================
 router.post('/webhook', async (req, res) => {
-  const expected = process.env.OMIE_WEBHOOK_TOKEN;
-  const headerTok = req.get('X-Omie-Token');
-  const queryTok  = req.query.token;
-  if (expected && headerTok !== expected && queryTok !== expected) {
+  const expected = process.env.OMIE_WEBHOOK_TOKEN || '';
+  const token    = req.query.token || req.get('X-Omie-Token') || '';
+
+  if (!expected || token !== expected) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  const body = req.body || {};
-
-  // Normaliza os diferentes formatos de payload de webhook (inclui Connect 2.0: { topic, event })
-  let raw =
-    body.produto_servico_cadastro ??
-    body.produto_cadastro ??
-    body.itens ??
-    body.item ??
-    (body.topic && body.event ? body.event : []);
-
-  // Garante array para o loop
-  const itens = Array.isArray(raw) ? raw : [raw];
-
-  // Se o payload veio vazio, responde ok e sai
-  if (!itens.length || (itens.length === 1 && Object.keys(itens[0] || {}).length === 0)) {
-    return res.json({ ok: true, processed: 0, fetched_from_omie: 0 });
+  // fetch seguro (usa global, senão carrega node-fetch)
+  async function httpFetch(url, opts) {
+    const f = globalThis.fetch || (await import('node-fetch')).default;
+    return f(url, opts);
   }
 
+  // Fallback: ConsultarProduto direto na Omie
+  async function consultarProdutoOmie({ codigo, codigo_produto }) {
+    const app_key    = process.env.OMIE_APP_KEY;
+    const app_secret = process.env.OMIE_APP_SECRET;
+    if (!app_key || !app_secret) throw new Error('OMIE_APP_KEY/SECRET ausentes');
+
+    const payload = {
+      call: 'ConsultarProduto',
+      param: [{ codigo, codigo_produto }],
+      app_key,
+      app_secret,
+    };
+
+    const r = await httpFetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) throw new Error(`Omie HTTP ${r.status}`);
+    return r.json();
+  }
+
+  // Upsert no Postgres usando a sua função PL/pgSQL
+  async function upsertNoBanco(item) {
+    if (!item) return;
+    if (!item.codigo_produto_integracao) {
+      item.codigo_produto_integracao = item.codigo || String(item.codigo_produto || '');
+    }
+    await pool.query('SELECT omie_upsert_produto($1::jsonb)', [item]);
+  }
+
+  const body = req.body || {};
   let processed = 0;
-  let fetched_from_omie = 0;
+  let fetched   = 0;
   const failures = [];
 
-  for (const it of itens) {
-    try {
-      // Aceita tanto id (codigo_produto) quanto código "humano"
-      const id     = it.codigo_produto ?? it.codigoProduto ?? null;
-      const codigo = it.codigo ?? it.codigo_produto_integracao ?? it.codigoProdutoIntegracao ?? null;
-
-      let full = it;
-
-      // Se ainda não temos campos mínimos (ex.: só veio id), fazemos fallback para ConsultarProduto
-      const hasMin = !!(full.descricao && (id || codigo));
-      if (!hasMin) {
-        if (!id && !codigo) {
-          failures.push({ step: 'skip', msg: 'sem id/codigo no item', itResumo: { id, codigo } });
-          continue;
-        }
-        const payload = id ? { codigo_produto: id } : { codigo };
+  try {
+    // 1) Formato clássico (lista completa)
+    if (Array.isArray(body.produto_servico_cadastro) && body.produto_servico_cadastro.length) {
+      for (const raw of body.produto_servico_cadastro) {
         try {
-          full = await callOmie('ConsultarProduto', payload);
-          fetched_from_omie++;
+          await upsertNoBanco(raw);
+          processed++;
         } catch (e) {
-          failures.push({ step: 'omie_consulta', id, codigo, error: String(e) });
-          continue;
+          failures.push({ step: 'db_upsert', id: raw?.codigo_produto || raw?.codigo, error: String(e) });
         }
       }
-
-      // Upsert no Postgres (função já criada no seu banco)
-      await pool.query('SELECT omie_upsert_produto($1)', [full]);
-      processed++;
-    } catch (e) {
-      failures.push({ step: 'db_upsert', error: String(e) });
     }
-  }
 
-  // Notifica clientes via SSE (se configurado no app)
-  try {
-    const notify =
-      (req.app && req.app.locals && req.app.locals.broadcastSSE) ||
-      (req.app && typeof req.app.get === 'function' && req.app.get('broadcastSSE'));
-    if (typeof notify === 'function') {
-      notify('produtos:update', { count: processed, at: new Date().toISOString() });
+    // 2) Formato Omie Connect: { topic:"Produto.Alterado", event:{...} }
+    if (body.topic === 'Produto.Alterado' && body.event) {
+      const ev = body.event;
+      const codigo_produto = ev.codigo_produto || null;
+      const codigo         = ev.codigo || null;
+
+      try {
+        // buscamos SEMPRE a versão completa na Omie
+        const produto = await consultarProdutoOmie({ codigo, codigo_produto });
+        if (!produto.codigo_produto_integracao) {
+          produto.codigo_produto_integracao = produto.codigo || String(produto.codigo_produto || '');
+        }
+        await upsertNoBanco(produto);
+        processed++;
+        fetched++;
+      } catch (e) {
+        failures.push({ step: 'omie_consulta', id: codigo_produto || codigo, error: String(e) });
+      }
     }
-  } catch {}
 
-  const resp = { ok: true, processed, fetched_from_omie };
-  if (req.query.debug) {
-    resp.debug = {
-      items_len: itens.length,
-      hasEnv: { key: !!process.env.OMIE_APP_KEY, secret: !!process.env.OMIE_APP_SECRET },
-      failures
-    };
+    // (opcional) notificar SSE/clientes
+    try { req.app?.get('notifyProducts')?.(); } catch {}
+
+    const resp = { ok: true, processed, fetched_from_omie: fetched };
+    if (String(req.query.debug) === '1') {
+      resp.debug = {
+        items_len: Array.isArray(body.produto_servico_cadastro) ? body.produto_servico_cadastro.length : 0,
+        hasEnv: { key: !!process.env.OMIE_APP_KEY, secret: !!process.env.OMIE_APP_SECRET },
+        failures,
+      };
+    }
+    return res.json(resp);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err), processed, fetched_from_omie: fetched, failures });
   }
-  return res.json(resp);
 });
 
 
