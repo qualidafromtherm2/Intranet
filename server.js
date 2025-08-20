@@ -24,6 +24,39 @@ const { parse: csvParse }         = require('csv-parse/sync');
 const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
 const app = express();
 
+
+// ==== SSE (Server-Sent Events) para avisar o front ao vivo ==================
+const sseClients = new Set();
+
+app.get('/api/produtos/stream', (req, res) => {
+  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection',    'keep-alive');
+  if (res.flushHeaders) res.flushHeaders();
+
+  // manda um "hello" para o cliente saber que conectou
+  res.write(`data: ${JSON.stringify({ type: 'hello' })}\n\n`);
+
+  const client = { res };
+  sseClients.add(client);
+
+  req.on('close', () => {
+    sseClients.delete(client);
+  });
+});
+
+// função para notificar todos os clientes conectados
+function sseBroadcast(payload) {
+  const line = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const { res } of sseClients) {
+    try { res.write(line); } catch {}
+  }
+}
+// deixa acessível para os routers via req.app.get('sseBroadcast')
+app.set('sseBroadcast', sseBroadcast);
+// ============================================================================
+
+
 // ─── Config. dinâmica de etiqueta ─────────────────────────
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
 const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
@@ -249,6 +282,15 @@ function gravarEstoque(obj) {
 app.use(require('express').json({ limit: '5mb' }));
 
 app.use('/api/produtos', produtosRouter);
+
+// (opcional) compat: algumas partes do código usam "notifyProducts"
+app.set('notifyProducts', () => {
+  try {
+    if (typeof produtosRouter.__sseBroadcast === 'function') {
+      produtosRouter.__sseBroadcast({ type: 'produtos_changed', at: Date.now() });
+    }
+  } catch {}
+});
 
 /* GET /api/serie/next/:codigo → { ns:"101002" } */
 app.get('/api/serie/next/:codigo', (req, res) => {
