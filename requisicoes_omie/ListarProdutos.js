@@ -1,14 +1,12 @@
 /* =======================================================================
  *  requisicoes_omie/ListarProdutos.js
  *  ----------------------------------------------------------------------
- *  • Pré-carrega a lista do seu BACKEND (/api/produtos/lista), página a página,
- *    sem cache do navegador, e guarda em:
- *        window.__omieFullCache   (array de produtos)
- *        window.__listaReady      (Promise do preload)
- *  • Escuta atualizações ao vivo via SSE em /api/produtos/stream:
- *      - quando receber { type: 'produtos_updated' }, refaz o preload e
- *        re-renderiza a lista se a aba “Lista de produtos” estiver visível.
- *  • Integra com os filtros (filtro_produto.js).
+ *  • Carrega a lista do seu BACKEND (/api/produtos/lista) sem cache,
+ *    guarda em window.__omieFullCache e re-renderiza a tabela.
+ *  • Ao clicar no item do menu "Lista de produtos", força um refresh do
+ *    banco e depois desenha a lista — sem precisar dar F5.
+ *  • Mantém SSE opcional: se o backend emitir {type:'produtos_updated'},
+ *    também refaz o preload automaticamente.
  * ======================================================================= */
 
 import { loadDadosProduto } from './Dados_produto.js';
@@ -20,8 +18,8 @@ import {
 } from './filtro_produto.js';
 
 /* --------------------- SPINNER helpers -------------------------------- */
-let spinnerVisible   = false;
-let spinnerFinished  = false;
+let spinnerVisible  = false;
+let spinnerFinished = false;
 
 function showProductSpinner() {
   if (spinnerFinished || spinnerVisible) return;
@@ -45,7 +43,7 @@ function updateSpinnerPct(val) {
   if (!cont || !spinnerVisible) return;
   cont.setAttribute('data-pct', pct);
   const circle = cont.querySelector('#bar');
-  const len = Math.PI * 2 * +circle.getAttribute('r');
+  const len    = Math.PI * 2 * +circle.getAttribute('r');
   circle.style.strokeDashoffset = ((100 - pct) / 100) * len;
 
   if (pct >= 100) {
@@ -84,18 +82,17 @@ async function preloadFromDB() {
     showProductSpinner();
 
     window.__omieFullCache = [];
-    let page   = 1;
-    const askLimit = 500; // o back devolve até o teto dele
-    let total  = null;
-    let loaded = 0;
+    let page     = 1;
+    const limit  = 500; // o back limita ao teto dele
+    let total    = null;
+    let loaded   = 0;
 
     while (true) {
-      const data = await fetchLista({ page, limit: askLimit, inativo: 'N' });
+      const data  = await fetchLista({ page, limit, inativo: 'N' });
       const itens = Array.isArray(data.itens) ? data.itens : [];
 
       if (total === null) {
         total = Number(data.total || 0);
-        // se existir setListaTitulo em algum lugar, atualiza com o total inicial
         if (typeof window.setListaTitulo === 'function') {
           window.setListaTitulo(total);
         }
@@ -108,7 +105,7 @@ async function preloadFromDB() {
 
       updateSpinnerPct(total ? (loaded / total) * 100 : 0);
 
-      if (total && loaded >= total) break; // terminou
+      if (total && loaded >= total) break; // terminou tudo
       page++;
     }
   } finally {
@@ -133,7 +130,7 @@ function attachOpenHandlers(ul) {
         .forEach(p => p.style.display = 'none');
       document.getElementById('dadosProduto').style.display = 'block';
 
-      // carrega o detalhe (consulta direta na Omie)
+      // detalhe busca direto na Omie
       loadDadosProduto(codigo);
     };
   });
@@ -152,49 +149,60 @@ function renderList(ul, produtos) {
   attachOpenHandlers(ul);
 }
 
-/* --------------------- SSE (atualizações ao vivo) --------------------- */
-function setupLiveUpdates() {
-  if (!('EventSource' in window)) return;
+/* --------------------- “Hard refresh” da lista ----------------------- */
+let __refreshing = false;
+
+async function hardRefreshLista() {
+  if (__refreshing) return;
+  __refreshing = true;
+  try {
+    showProductSpinner();
+    await preloadFromDB();
+
+    // Atualiza filtros e re-renderiza (se a aba estiver visível ou não)
+    setCache(window.__omieFullCache || []);
+    const itens = getFiltered();
+
+    const pane = document.getElementById('listaPecas');
+    const ul   = document.getElementById('listaProdutosList');
+    if (ul) renderList(ul, itens);
+
+    const title = pane?.querySelector('.content-section-title');
+    if (title) title.textContent = `Lista de produtos (${itens.length})`;
+
+    try { populateFilters(); } catch {}
+  } finally {
+    __refreshing = false;
+    hideProductSpinner();
+  }
+}
+
+// deixa disponível global (se quiser chamar manualmente)
+window.__forceListaRefresh = hardRefreshLista;
+
+/* --------------------- SSE (opcional) --------------------------------- */
+let __esInstance = null;  // garante uma única conexão
+
+function connectSSE() {
+  if (!('EventSource' in window)) return null;
+  if (__esInstance) return __esInstance;
 
   const es = new EventSource('/api/produtos/stream');
   let debounce = null;
 
   es.onmessage = async (ev) => {
     let msg = null;
-    try { msg = JSON.parse(ev.data || '{}'); } catch { /* ignore */ }
-
-    // Mensagens aceitas do back:
-    //  - { type: 'produtos_updated', ids:[...] }
-    //  - { type: 'refresh_all' } (compatibilidade)
-    //  - { type: 'product_updated' } (compatibilidade)
+    try { msg = JSON.parse(ev.data || '{}'); } catch {}
     if (!msg || !msg.type) return;
-    if (!['produtos_updated','refresh_all','product_updated'].includes(msg.type)) return;
 
-    clearTimeout(debounce);
-    debounce = setTimeout(async () => {
-      try { showProductSpinner(); } catch {}
-      await preloadFromDB();
-
-      // Se a aba "Lista" está visível, re-renderiza agora
-      const pane = document.getElementById('listaPecas');
-      const ul   = document.getElementById('listaProdutosList');
-      if (pane && ul && pane.style.display !== 'none') {
-        setCache(window.__omieFullCache || []);
-        const itens = getFiltered();
-
-        renderList(ul, itens);
-
-        const title = pane.querySelector('.content-section-title');
-        if (title) title.textContent = `Lista de produtos (${itens.length})`;
-        try { populateFilters(); } catch {}
-      }
-    }, 400);
+    if (['produtos_updated','refresh_all','product_updated'].includes(msg.type)) {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => hardRefreshLista(), 400);
+    }
   };
 
-  es.onerror = () => {
-    // silencioso; EventSource tenta reconectar sozinho
-  };
-
+  es.onerror = () => { /* EventSource reconecta sozinho */ };
+  __esInstance = es;
   return es;
 }
 
@@ -213,10 +221,10 @@ export async function initListarProdutosUI(
   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
   pane.style.display = 'block';
 
-  // 1) Precarrega do banco
+  // primeira carga
   if (!window.__listaReady) window.__listaReady = preloadFromDB();
+  await window.__listaReady;
 
-  // 2) Inicializa filtros + render inicial
   setCache(window.__omieFullCache || []);
   const produtosFiltrados = getFiltered();
   renderList(ul, produtosFiltrados);
@@ -243,32 +251,25 @@ export async function initListarProdutosUI(
 
   populateFilters();
 
-  // 3) Liga SSE para auto-refresh quando o webhook gravar no banco
-  setupLiveUpdates();
+  // liga SSE (se estiver funcionando no back)
+  connectSSE();
 }
 
-/* --------------------- Bootstrap no DOMContentLoaded ------------------ */
-document.addEventListener('DOMContentLoaded', () => {
-  // dispara o preload imediatamente (a UI vai aguardar em initListarProdutosUI)
-  window.__listaReady = preloadFromDB();
-  // também já deixamos o SSE conectado
-  setupLiveUpdates();
-});
-
-// === DEBUG (console) ==================================================
-// deixa acessível no DevTools:
-window.__preloadFromDB = preloadFromDB;
-// recarrega do banco e re-renderiza a lista se a aba estiver visível
-window.__refreshLista = async () => {
-  await preloadFromDB();
+// === FORÇAR ATUALIZAÇÃO AO CLICAR NO MENU ===============================
+// Função global que refaz o cache e redesenha a lista
+window.__forceListaRefresh = async function () {
   try {
-    // re-renderiza usando os helpers que você já tem
+    // 1) baixa tudo do /api/produtos/lista (sem cache do browser)
+    await preloadFromDB();
+
+    // 2) coloca no filtro/cache e pega os itens já filtrados
     setCache(window.__omieFullCache || []);
     const itens = getFiltered();
 
-    const ul   = document.getElementById('listaProdutosList');
+    // 3) redesenha a UL
     const pane = document.getElementById('listaPecas');
-    if (ul && pane && pane.style.display !== 'none') {
+    const ul   = document.getElementById('listaProdutosList');
+    if (ul) {
       ul.innerHTML = itens.map(p => `
         <li>
           <span class="products">${p.codigo}</span>
@@ -279,28 +280,72 @@ window.__refreshLista = async () => {
           </div>
         </li>`).join('');
 
-      // reatacha os handlers “Abrir”
+      // reatacha os handlers dos botões "Abrir"
       ul.querySelectorAll('.abrir-button').forEach(btn => {
         btn.onclick = () => {
           const codigo = btn.dataset.codigo;
-          document.querySelector('.main-header').style.display = 'flex';
+          document.querySelector('.main-header')?.style && (document.querySelector('.main-header').style.display = 'flex');
           document.querySelectorAll('.main-header-link')
                   .forEach(l => l.classList.remove('is-active'));
           document.querySelector('[data-target="dadosProduto"]')
-                  .classList.add('is-active');
+                  ?.classList.add('is-active');
           document.querySelectorAll('.tab-pane')
                   .forEach(p => p.style.display = 'none');
           document.getElementById('dadosProduto').style.display = 'block';
-          // função já existente
+          // se você já tem loadDadosProduto importado:
           try { loadDadosProduto(codigo); } catch {}
         };
       });
-
-      const title = pane.querySelector('.content-section-title');
-      if (title) title.textContent = `Lista de produtos (${itens.length})`;
-      try { populateFilters(); } catch {}
     }
+
+    // 4) atualiza o título com a contagem
+    const title = pane?.querySelector('.content-section-title');
+    if (title) title.textContent = `Lista de produtos (${itens.length})`;
   } catch (e) {
-    console.warn('refreshLista falhou:', e);
+    console.warn('forceListaRefresh falhou:', e);
   }
 };
+
+// Handler do menu: mostra a aba e força refresh SEM F5
+(function wireMenuClick() {
+  const btn = document.getElementById('menuListaProdutos')
+          || document.getElementById('btn-omie-list1'); // fallback ao seu id atual
+  if (!btn) return;
+
+  btn.addEventListener('click', async (ev) => {
+    try { ev.preventDefault(); } catch {}
+    // mostra a aba da lista
+    const pane = document.getElementById('listaPecas');
+    const hdr  = document.querySelector('.main-header');
+    if (hdr) hdr.style.display = 'none';
+    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+    if (pane) pane.style.display = 'block';
+
+    // força recarregar e redesenhar
+    await window.__forceListaRefresh();
+  });
+})();
+
+/* --------------------- Bootstrap no DOMContentLoaded ------------------ */
+document.addEventListener('DOMContentLoaded', () => {
+  // pré-carrega assim que a SPA nasce
+  window.__listaReady = preloadFromDB();
+
+  // **AQUI ESTÁ O PULO DO GATO**
+  // toda vez que clicar no menu "Lista de produtos", força refresh antes de mostrar
+  const btn = document.getElementById('menuListaProdutos');
+  btn?.addEventListener('click', async (ev) => {
+    try { ev.preventDefault(); } catch {}
+    await hardRefreshLista();
+
+    // se você também alterna as abas manualmente em outro script, ótimo.
+    // se não, garante que a aba fique visível:
+    const pane = document.getElementById('listaPecas');
+    const hdr  = document.querySelector('.main-header');
+    if (hdr) hdr.style.display = 'none';
+    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+    if (pane) pane.style.display = 'block';
+  });
+
+  connectSSE();
+});

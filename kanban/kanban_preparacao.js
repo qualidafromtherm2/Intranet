@@ -7,11 +7,15 @@ import { enableDragAndDrop } from './kanban_base.js';
 
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
+// Mapa de rótulo → id da <ul> correspondente
 const PREP_COLUMN_MAP = {
-  'Fila de produção': 'coluna-prep-fila',
-  'Em produção'     : 'coluna-prep-em-producao',
-  'No estoque'      : 'coluna-prep-estoque',
+  'A Produzir' : 'coluna-prep-fila',         // era "Fila de produção"
+  'Produzindo' : 'coluna-prep-em-producao',  // já existia
+  'teste 1'    : 'coluna-prep-estoque',      // substitui "No estoque"
+  'teste final': 'coluna-prep-teste-final',  // NOVA
+  'concluido'  : 'coluna-prep-concluido'     // NOVA
 };
+
 
 
 
@@ -38,30 +42,33 @@ async function carregarKanbanPreparacao () {
   }
 
   // PRODUÇÃO/Render => SQL
-  const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const j = await r.json();
+// PRODUÇÃO/Render => SQL
+const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+if (!r.ok) throw new Error(`HTTP ${r.status}`);
+const j = await r.json();
 
-  // Resposta do server (modo SQL) vem como { mode:'pg', data:{ 'Fila de produção':[], 'Em produção':[], 'No estoque':[] } }
-  if (j && j.mode === 'pg' && j.data) {
-    const perProd = new Map();
-    ['Fila de produção','Em produção','No estoque'].forEach(st => {
-      (j.data[st] || []).forEach(it => {
-        const codigo = it.produto || it.produto_codigo || it.codigo;
-        if (!codigo) return;
-        const arr = perProd.get(codigo) || [];
-        // Mantém o formato esperado pelo renderer ("Status,OP")
-        arr.push(`${st},${it.op || ''}`);
-        perProd.set(codigo, arr);
-      });
+/* Esperado (novo): { mode:'pg', data:{ 'A Produzir':[], 'Produzindo':[], 'teste 1':[], 'teste final':[], 'concluido':[] } }
+   Ainda assim, tornamos robusto a nomes/chaves. */
+if (j && j.mode === 'pg' && j.data) {
+  const perProd = new Map();
+  const colunas = Object.keys(j.data); // usa o que o servidor mandar
+
+  colunas.forEach(st => {
+    (j.data[st] || []).forEach(it => {
+      const codigo = it.produto || it.produto_codigo || it.codigo;
+      if (!codigo) return;
+      const arr = perProd.get(codigo) || [];
+      arr.push(`${st},${it.op || ''}`); // "Status,OP"
+      perProd.set(codigo, arr);
     });
-    return [...perProd.entries()].map(([codigo, local]) => ({
-      pedido: 'Estoque',
-      codigo,
-      local
-    }));
-  }
+  });
 
+  return [...perProd.entries()].map(([codigo, local]) => ({
+    pedido: 'Estoque',
+    codigo,
+    local
+  }));
+}
   return [];
 }
 
@@ -264,7 +271,8 @@ function setupProductSearchByUl(ulId) {
 
 // Apenas estrutura inicial – lógica virá depois
 export async function initPreparacaoKanban() {
-  ['coluna-prep-fila','coluna-prep-em-producao','coluna-prep-estoque']
+  // limpar TODAS as colunas declaradas no mapa
+  Object.values(PREP_COLUMN_MAP)
     .forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
 
   const cached = await carregarKanbanPreparacao();
@@ -273,10 +281,10 @@ export async function initPreparacaoKanban() {
     enableDragAndDrop?.(cached);
   }
 
-  // Estes dois só fazem algo se a UI existir na página.
   setupAddToggleSolicitar();
   setupProductSearchByUl('coluna-prep-fila');
 }
+
 
 
 /* ——— listeners locais do “+” (Solicitar produção) ——— */
