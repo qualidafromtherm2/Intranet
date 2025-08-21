@@ -264,5 +264,45 @@
     ],
     "estoque": 0,
     "_codigoProd": 10408353575
+  },
+  {
+    "pedido": "18202",
+    "codigo": "FT25B35W",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10621791873
+  },
+  {
+    "pedido": "18203",
+    "codigo": "FT160F35T",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10408353795
+  },
+  {
+    "pedido": "18204",
+    "codigo": "FTI115DPTBR",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10538072919
+  },
+  {
+    "pedido": "18206",
+    "codigo": "FTI145DPTBR",
+    "quantidade": 1,
+    "local": [
+      "Pedido aprovado"
+    ],
+    "estoque": 0,
+    "_codigoProd": 10536379431
   }
 ]

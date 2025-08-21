@@ -82,6 +82,7 @@
                    style="margin-right:8px;flex-shrink:0;">
                 <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
               </svg>
+              
               Lista de produtos
             </a>
             <a href="#" id="btn-omie-list">
@@ -704,11 +705,11 @@
 <div id="conteudo-preparacao" class="kanban-page" style="display:none;">
   <div class="kanban-board">
 
-    <!-- 🟦 Coluna 1: Fila de produção -->
+    <!-- Coluna 1: A Produzir -->
     <div class="kanban-column">
       <div class="kanban-header">
         <div class="title-wrapper">
-          <span>Fila de produção</span>
+          <span>A Produzir</span>
           <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
         </div>
         <div class="add-container">
@@ -719,25 +720,34 @@
       <ul id="coluna-prep-fila" class="kanban-list"></ul>
     </div>
 
-    <!-- 🟦 Coluna 2: Em produção -->
+    <!-- Coluna 2: Produzindo -->
     <div class="kanban-column">
-      <div class="kanban-header">
-        <span>Em produção</span>
-      </div>
+      <div class="kanban-header"><span>Produzindo</span></div>
       <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
     </div>
 
-    <!-- 🟦 Coluna 3: No estoque -->
+    <!-- Coluna 3: teste 1 -->
     <div class="kanban-column">
-      <div class="kanban-header">
-        <span>No estoque</span>
-      </div>
+      <div class="kanban-header"><span>teste 1</span></div>
       <ul id="coluna-prep-estoque" class="kanban-list"></ul>
     </div>
 
-  </div><!-- /.kanban-board -->
+    <!-- Coluna 4: teste final -->
+    <div class="kanban-column">
+      <div class="kanban-header"><span>teste final</span></div>
+      <ul id="coluna-prep-teste-final" class="kanban-list"></ul>
+    </div>
+
+    <!-- Coluna 5: concluido -->
+    <div class="kanban-column">
+      <div class="kanban-header"><span>concluido</span></div>
+      <ul id="coluna-prep-concluido" class="kanban-list"></ul>
+    </div>
+
+  </div>
 </div>
 <!-- ========================================================= -->
+
 
 
 

@@ -23,7 +23,8 @@ const crypto   = require('crypto');
 const { parse: csvParse }         = require('csv-parse/sync');
 const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
 const app = express();
-
+// ===== Ingestão inicial de OPs (Omie → Postgres) ============================
+const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
 // ==== SSE (Server-Sent Events) para avisar o front ao vivo ==================
 const sseClients = new Set();
@@ -62,9 +63,11 @@ const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteris
 const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
 const produtosRouter = require('./routes/produtos');
 // helper central: só usa DB se houver pool E a requisição não for local
-function shouldUseDb(req) {
-  return isDbEnabled && !isLocalRequest(req);
-}
+ function shouldUseDb(req) {
+   if (process.env.FORCE_DB === '1') return true; // força Postgres mesmo em localhost
+   return isDbEnabled && !isLocalRequest(req);
+ }
+
 // Caminho do JSON local
 const KANBAN_PREP_PATH = path.join(__dirname, 'data', 'kanban_preparacao.json');
 let etqConfig = [];
@@ -144,6 +147,42 @@ const {
 } = require('./config.server');
 const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 
+const ETAPA_TO_STATUS = {
+  '10': 'A Produzir',
+  '20': 'Produzindo',
+  '30': 'teste 1',
+  '40': 'teste final',
+  '60': 'concluido'
+};
+const STATUS_TO_ETAPA = Object.fromEntries(
+  Object.entries(ETAPA_TO_STATUS).map(([k,v]) => [v, k])
+);
+
+
+function toOmieDate(d) {
+  if (!d) return undefined;
+  if (typeof d === 'string' && d.includes('/')) return d; // já dd/mm/aaaa
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return undefined;
+  const dd = String(dt.getDate()).padStart(2,'0');
+  const mm = String(dt.getMonth()+1).padStart(2,'0');
+  const yyyy = dt.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+// retry simples para 500 BG
+async function withRetry(fn, tries = 3) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); } catch (e) {
+      lastErr = e;
+      if (!String(e.message).includes('Broken response')) break; // só retry p/ BG intermitente
+      await new Promise(r => setTimeout(r, [300, 800, 1500][i] || 1500));
+    }
+  }
+  throw lastErr;
+}
+
 
 // ==== NOVO: utilitários p/ formato ARRAY do seu kanban_preparacao.json ====
 // usa fsp (fs.promises) que você já declarou lá em cima como `const fsp = fs.promises;`
@@ -171,13 +210,145 @@ async function savePrepArray(arr) {
   await fsp.writeFile(KANBAN_PREP_PATH, JSON.stringify(arr, null, 2), 'utf8');
 }
 
+
+// Timeout p/ chamadas OMIE (evita pendurar quando o BG “trava”)
+async function omiePost(url, payload, timeoutMs = 20000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ac.signal
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`Omie HTTP ${r.status}${text ? ` – ${text}` : ''}`);
+    return JSON.parse(text || '{}');
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`Omie timeout (${timeoutMs}ms)`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+
+async function listarOPPagina(pagina, filtros = {}) {
+  const payload = {
+    call: 'ListarOrdemProducao',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      pagina,
+      registros_por_pagina: OP_REGS_PER_PAGE,
+      // ✅ datas a Omie aceita — se quiser usar
+      ...(filtros.data_de  ? { dDtPrevisaoDe:  toOmieDate(filtros.data_de) }  : {}),
+      ...(filtros.data_ate ? { dDtPrevisaoAte: toOmieDate(filtros.data_ate) } : {})
+      // 🔴 NÃO enviar codigo_local_estoque — a API não suporta!
+    }]
+  };
+
+  return withRetry(() =>
+    omiePost('https://app.omie.com.br/api/v1/produtos/op/', payload)
+  );
+}
+
+// IMPORTAÇÃO INICIAL DE OPs (Omie → Postgres ou JSON local)
+app.post('/api/preparacao/importar', express.json(), async (req, res) => {
+  const { codigo_local_estoque, data_de, data_ate, max_paginas = 999 } = req.body || {};
+  const filtros = { codigo_local_estoque, data_de, data_ate };
+
+  // usa DB se habilitado (ou se FORCE_DB=1), senão cai no JSON local
+  const usarDb = shouldUseDb(req);
+
+  try {
+    let pagina = 1;
+    let totalPaginas = 1;
+    let totalRegistros = 0;
+    let importados = 0;
+
+    while (pagina <= totalPaginas && pagina <= Number(max_paginas)) {
+      // 🔎 busca 1 página na Omie (usa dDtPrevisaoDe/Ate quando enviados)
+      const lote = await listarOPPagina(pagina, filtros);
+      totalPaginas   = Number(lote.total_de_paginas    || 1);
+      totalRegistros = Number(lote.total_de_registros  || 0);
+      const cadastros = Array.isArray(lote.cadastros) ? lote.cadastros : [];
+
+      if (usarDb) {
+        // ▶ grava direto no Postgres (1 row por OP)
+        for (const op of cadastros) {
+          // filtro por depósito é aplicado do nosso lado (a Omie não filtra isso nessa call)
+          if (filtros.codigo_local_estoque) {
+            const cod = op?.identificacao?.codigo_local_estoque;
+            if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
+          }
+          await dbQuery('select public.op_upsert_from_payload($1::jsonb)', [op]);
+          importados++;
+        }
+      } else {
+        // ▶ modo LOCAL-JSON (não toca no Postgres)
+        const arr = await loadPrepArray();
+        const mapByCodigo = new Map(arr.map(x => [x.codigo, x]));
+
+        for (const op of cadastros) {
+          if (filtros.codigo_local_estoque) {
+            const cod = op?.identificacao?.codigo_local_estoque;
+            if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
+          }
+
+          const ident  = op.identificacao   || {};
+          const inf    = op.infAdicionais   || {};
+          const etapa  = String(inf.cEtapa || '').trim();
+          const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
+
+          const codigoProd = String(ident.cCodIntProd || ident.nCodProduto || '').trim();
+          const opNum      = String(ident.cNumOP      || ident.nCodOP      || '').trim();
+          if (!codigoProd || !opNum) continue;
+
+          const item = mapByCodigo.get(codigoProd) || {
+            pedido: 'Estoque',
+            codigo: codigoProd,
+            quantidade: Number(ident.nQtde || 1),
+            local: [],
+            estoque: 0,
+            _codigoProd: codigoProd
+          };
+
+          const linha = `${status},${opNum}`;
+          if (!item.local.some(s => s.split(',').slice(0,2).join(',') === `${status},${opNum}`)) {
+            item.local.push(linha);
+          }
+          if (!mapByCodigo.has(codigoProd)) mapByCodigo.set(codigoProd, item);
+          importados++;
+        }
+
+        await savePrepArray([...mapByCodigo.values()]);
+      }
+
+      pagina++;
+    }
+
+    return res.json({
+      ok: true,
+      mode: usarDb ? 'postgres' : 'local-json',
+      total_registros: totalRegistros,
+      importados
+    });
+  } catch (err) {
+    console.error('[importar OPs] erro:', err);
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 /**
  * Move uma OP dentro do ARRAY local: procura em todos os itens/local[]
  * e troca "StatusAntigo,OP" por "novoStatus,OP".
  */
-async function moverOpLocalArray(op, novoStatus, novoCarimbo /* string ou null */) {
-  const valid = ['Fila de produção', 'Em produção', 'No estoque'];
-  if (!valid.includes(novoStatus)) throw new Error(`Status inválido: ${novoStatus}`);
+async function moverOpLocalArrayPorEtapa(op, etapa, novoCarimbo /* string ou null */) {
+  const novoStatus = ETAPA_TO_STATUS[String(etapa)];
+  if (!novoStatus) throw new Error(`Etapa inválida: ${etapa}`);
 
   const arr = await loadPrepArray();
   let found = false;
@@ -186,20 +357,14 @@ async function moverOpLocalArray(op, novoStatus, novoCarimbo /* string ou null *
     if (!Array.isArray(item.local)) continue;
     for (let i = 0; i < item.local.length; i++) {
       const linha = String(item.local[i]);
-      // captura: status,OP,(resto opcional)
-      const m = linha.match(/^([^,]+)\s*,\s*([^,]+)(?:,(.*))?$/);
+      const m = linha.match(/^([^,]+)\s*,\s*([^,]+)(?:,(.*))?$/); // status,op,(carimbos…)
       if (!m) continue;
-      const [, _statusAnt, opId, resto] = m;
+      const [, , opId, resto] = m;
 
       if (opId === op) {
-        const partes = [];
-        partes.push(novoStatus, op);     // substitui o status
-        if (resto && resto.trim()) {
-          partes.push(resto.trim());     // preserva carimbos antigos
-        }
-        if (novoCarimbo) {
-          partes.push(novoCarimbo);      // adiciona o novo carimbo
-        }
+        const partes = [novoStatus, op];
+        if (resto && resto.trim()) partes.push(resto.trim());
+        if (novoCarimbo) partes.push(novoCarimbo);
         item.local[i] = partes.join(',');
         found = true;
         break;
@@ -209,7 +374,6 @@ async function moverOpLocalArray(op, novoStatus, novoCarimbo /* string ou null *
   }
 
   if (!found) {
-    // não achou? registra num cartão “Estoque”
     const partes = [novoStatus, op];
     if (novoCarimbo) partes.push(novoCarimbo);
     arr.push({
@@ -223,8 +387,9 @@ async function moverOpLocalArray(op, novoStatus, novoCarimbo /* string ou null *
   }
 
   await savePrepArray(arr);
-  return { ok: true, updated: found, to: novoStatus };
+  return { ok: true, updated: found, to: novoStatus, etapa: String(etapa) };
 }
+
 
 
 /** Converte o ARRAY em colunas { 'Fila de produção':[], 'Em produção':[], ... } */
@@ -279,6 +444,122 @@ function gravarEstoque(obj) {
   fs.writeFileSync(estoquePath, JSON.stringify(obj, null, 2), 'utf8');
 }
 
+
+// 🔁 Genérico: define etapa explicitamente
+// ========= ROTA ÚNICA: mover por etapa (10/20/30/40/60) =========
+app.post('/api/preparacao/op/:op/etapa/:etapa', express.json(), async (req, res) => {
+  const { op, etapa } = req.params;
+  const etapaStr = String(etapa);
+  const status = ETAPA_TO_STATUS[etapaStr];
+  const usarDb = shouldUseDb(req);
+
+  console.log('[MOVE] op=%s etapa=%s status=%s usarDb=%s', op, etapaStr, status, usarDb);
+
+  if (!status) {
+    return res.status(400).json({ error: 'Etapa inválida', etapa: etapaStr });
+  }
+
+  try {
+    if (!usarDb) {
+      // ------- MODO LOCAL (JSON) -------
+      const carimbo = buildStamp('M', req); // Move
+      const result = await moverOpLocalArrayPorEtapa(op, etapaStr, carimbo);
+      console.log('[MOVE][local] ->', result);
+      return res.json({ mode: 'local-json', op, status, etapa: etapaStr, ok: true });
+    }
+
+    // ------- MODO POSTGRES -------
+    // 1) atualiza a etapa da OP
+    const r = await dbQuery('select public.mover_op($1,$2) as ok', [op, status]);
+    const ok = r?.rows?.[0]?.ok === true;
+    console.log('[MOVE][pg] mover_op -> ok=%s', ok);
+
+    // 2) registra evento apenas quando a sua constraint permite (I/F)
+    const usuario = (req.session?.user?.fullName)
+                 || (req.session?.user?.username)
+                 || 'Not-user';
+
+    const tipoEvento =
+      etapaStr === '20' ? 'I' :   // Produzindo -> Início
+      etapaStr === '60' ? 'F' :   // concluido  -> Fim
+      null;
+
+    if (tipoEvento) {
+      await dbQuery(
+        'insert into public.op_event(op,tipo,usuario) values ($1,$2,$3)',
+        [op, tipoEvento, usuario]
+      );
+    } else {
+      console.log('[MOVE][pg] etapa %s não gera evento (constraint aceita só I/F).', etapaStr);
+    }
+
+    return res.json({ mode: 'postgres', op, status, etapa: etapaStr, ok });
+  } catch (err) {
+    console.error('[MOVE] erro:', err);
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+
+// valida o token do OMIE presente na query ?token=...
+function chkOmieToken(req, res, next) {
+  const token = req.query.token || req.headers['x-omie-token'];
+  if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
+    return res.status(401).json({ ok:false, error:'unauthorized' });
+  }
+  next();
+}
+
+// recebe 1 ou N OPs e grava via função SQL
+async function handleOpWebhook(req, res) {
+  try {
+    const body = req.body || {};
+    const cadastros = Array.isArray(body.cadastros)
+      ? body.cadastros
+      : (body.identificacao ? [body] : []);
+
+    let recebidos = 0;
+    for (const cad of cadastros) {
+      await dbQuery('select public.op_upsert_from_payload($1::jsonb)', [cad]); // <<< usa sua função no DB
+      recebidos++;
+    }
+    return res.json({ ok:true, recebidos });
+  } catch (e) {
+    console.error('[webhooks/omie/op] erro:', e);
+    return res.status(500).json({ ok:false, error: e.message || String(e) });
+  }
+}
+
+
+app.post('/webhooks/omie/op', chkOmieToken, express.json(), handleOpWebhook);
+// alias com /api para ficar consistente com suas outras rotas
+app.post('/api/omie/op',      chkOmieToken, express.json(), handleOpWebhook);
+
+
+// ▶ iniciar → etapa 20 (Produzindo)
+app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
+  req.params.etapa = '20';
+  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/20`);
+});
+
+// ▷ parcial → etapa 30 (teste 1)
+app.post('/api/preparacao/op/:op/parcial', async (req, res) => {
+  req.params.etapa = '30';
+  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/30`);
+});
+
+// ▷ final → etapa 40 (teste final)
+app.post('/api/preparacao/op/:op/final', async (req, res) => {
+  req.params.etapa = '40';
+  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/40`);
+});
+
+// ✔ concluir → etapa 60 (concluido)
+app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
+  req.params.etapa = '60';
+  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/60`);
+});
+
 app.use(require('express').json({ limit: '5mb' }));
 
 app.use('/api/produtos', produtosRouter);
@@ -291,6 +572,8 @@ app.set('notifyProducts', () => {
     }
   } catch {}
 });
+
+
 
 /* GET /api/serie/next/:codigo → { ns:"101002" } */
 app.get('/api/serie/next/:codigo', (req, res) => {
@@ -2010,109 +2293,61 @@ if (conteudo?.endsWith('_7E')) {
 });
 
 
-
-// Iniciar produção (vai para "Em produção")
-app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
-  const { op } = req.params;
-  const novoStatus = 'Em produção';
-  const carimbo = buildStamp('I', req);        // I = início
-
-  try {
-    if (!shouldUseDb(req)) {
-      const result = await moverOpLocalArray(op, novoStatus, carimbo);
-      return res.json({ mode: 'local-json', op, ...result });
-    }
-
-    // REMOTO (Postgres)
-    await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
-    // registra o evento (tabela criada no passo 4)
-    await dbQuery('INSERT INTO op_event (op, tipo, usuario) VALUES ($1,$2,$3)',
-                  [op, 'I', userFromReq(req)]);
-
-    return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
-  } catch (err) {
-    console.error('[preparacao/op/iniciar] erro:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao iniciar produção' });
-  }
-});
-
-// Concluir produção (muda status da OP para "No estoque")
-app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
-  const { op } = req.params;
-  const novoStatus = 'No estoque';
-  const carimbo = buildStamp('F', req);        // F = fim
-
-  try {
-    if (!shouldUseDb(req)) {
-      const result = await moverOpLocalArray(op, novoStatus, carimbo);
-      return res.json({ mode: 'local-json', op, ...result });
-    }
-
-    // REMOTO (Postgres)
-    await dbQuery('SELECT mover_op($1, $2) AS ok', [op, novoStatus]);
-    await dbQuery('INSERT INTO op_event (op, tipo, usuario) VALUES ($1,$2,$3)',
-                  [op, 'F', userFromReq(req)]);
-
-    return res.json({ mode: 'postgres', op, status: novoStatus, ok: true });
-  } catch (err) {
-    console.error('[preparacao/op/concluir] erro:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao concluir produção' });
-  }
-});
-
-
 // Lista preparação (preferindo Postgres). Fallback: JSON local.
-// --- Listagem do Kanban Preparação (Home) ---
 app.get('/api/preparacao/listar', async (req, res) => {
   res.set('Cache-Control', 'no-store');
 
   if (isDbEnabled) {
     try {
       const { rows } = await dbQuery(`
-        SELECT op,
-               produto_codigo AS produto,
-               status
-        FROM public.op_status
-        ORDER BY status, op
+        SELECT
+          n_cod_op                   AS op,
+          c_cod_int_prod             AS produto_codigo,  -- ajuste se quiser usar outro campo
+          kanban_coluna              AS status
+        FROM kanban_preparacao_view
+        ORDER BY kanban_coluna, n_cod_op
       `);
 
-      // mesmo shape esperado pelo front:
-      const data = {
-        'Fila de produção': [],
-        'Em produção': [],
-        'No estoque': []
-      };
+const data = {
+  'A Produzir': [],
+  'Produzindo': [],
+  'teste 1': [],
+  'teste final': [],
+  'concluido': []
+};
 
-      for (const r of rows) {
-        data[r.status]?.push({
-          op: r.op,
-          produto: r.produto,
-          status: r.status
-        });
-      }
+for (const r of rows) {
+  if (!data[r.status]) data[r.status] = []; // robusto a futuras etapas
+data[r.status].push({
+  op: r.op,
+  produto: r.produto_codigo, // <- importante
+  status: r.status
+});
+
+
+}
+
 
       return res.json({ mode: 'pg', data });
     } catch (err) {
       console.error('[listar:pg] falhou:', err);
-      // fallback seguro
+      // sem fallback em produção (como já estava), segue o mesmo comportamento
     }
   }
 
-// Fallback local (modo dev) — **somente** se a requisição for local
-try {
-  if (!isLocalRequest(req)) {
-    // Em produção/Render NÃO usa JSON nunca:
-    return res.status(500).json({ error: 'DB indisponível em produção; sem fallback JSON.' });
+  // … mantém o bloco local-dev, se quiser, mas ATUALIZE os nomes:
+  try {
+    if (!isLocalRequest(req)) {
+      return res.status(500).json({ error: 'DB indisponível em produção; sem fallback JSON.' });
+    }
+    const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
+    const json = JSON.parse(raw);
+    return res.json({ mode: 'local-json', data: json });
+  } catch (e) {
+    return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
   }
-
-  const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
-  const json = JSON.parse(raw);
-  return res.json({ mode: 'local-json', data: json });
-} catch (e) {
-  return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
-}
-
 });
+
 
 app.get('/api/preparacao/eventos.csv', async (req, res) => {
   // Reutiliza a rota JSON acima e forma o CSV
@@ -2337,9 +2572,10 @@ app.get('/api/preparacao/csv', async (req, res) => {
   // ——————————————————————————————
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
-app.listen(PORT, HOST, () =>
-  console.log(`Servidor rodando em http://${HOST}:${PORT}`)
-);
+app.listen(PORT, HOST, () => {
+  console.log(`Servidor rodando em http://${HOST}:${PORT}`);
+  console.log(`🚀 API rodando em http://localhost:${PORT}`);
+});
 
 
 })();
