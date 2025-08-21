@@ -256,12 +256,12 @@ async function listarOPPagina(pagina, filtros = {}) {
 }
 
 // IMPORTAÇÃO INICIAL DE OPs (Omie → Postgres ou JSON local)
+// === IMPORTAR OPs (Omie → Postgres ou JSON local) ==========================
 app.post('/api/preparacao/importar', express.json(), async (req, res) => {
   const { codigo_local_estoque, data_de, data_ate, max_paginas = 999 } = req.body || {};
   const filtros = { codigo_local_estoque, data_de, data_ate };
 
-  // usa DB se habilitado (ou se FORCE_DB=1), senão cai no JSON local
-  const usarDb = shouldUseDb(req);
+  const usarDb = shouldUseDb(req); // usa DB se não for localhost e pool ativo
 
   try {
     let pagina = 1;
@@ -270,16 +270,16 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
     let importados = 0;
 
     while (pagina <= totalPaginas && pagina <= Number(max_paginas)) {
-      // 🔎 busca 1 página na Omie (usa dDtPrevisaoDe/Ate quando enviados)
       const lote = await listarOPPagina(pagina, filtros);
-      totalPaginas   = Number(lote.total_de_paginas    || 1);
-      totalRegistros = Number(lote.total_de_registros  || 0);
+      pagina++; // → AVANÇA PÁGINA
+
+      totalPaginas   = Number(lote.total_de_paginas || 1);
+      totalRegistros = Number(lote.total_de_registros || 0);
       const cadastros = Array.isArray(lote.cadastros) ? lote.cadastros : [];
 
       if (usarDb) {
-        // ▶ grava direto no Postgres (1 row por OP)
+        // ——— MODO POSTGRES ————————————————————————————————
         for (const op of cadastros) {
-          // filtro por depósito é aplicado do nosso lado (a Omie não filtra isso nessa call)
           if (filtros.codigo_local_estoque) {
             const cod = op?.identificacao?.codigo_local_estoque;
             if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
@@ -288,7 +288,7 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
           importados++;
         }
       } else {
-        // ▶ modo LOCAL-JSON (não toca no Postgres)
+        // ——— MODO LOCAL (JSON) ———————————————————————————————
         const arr = await loadPrepArray();
         const mapByCodigo = new Map(arr.map(x => [x.codigo, x]));
 
@@ -298,13 +298,13 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
             if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
           }
 
-          const ident  = op.identificacao   || {};
-          const inf    = op.infAdicionais   || {};
-          const etapa  = String(inf.cEtapa || '').trim();
+          const ident = op.identificacao || {};
+          const inf   = op.infAdicionais || {};
+          const etapa = String(inf.cEtapa || '').trim();
           const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
 
           const codigoProd = String(ident.cCodIntProd || ident.nCodProduto || '').trim();
-          const opNum      = String(ident.cNumOP      || ident.nCodOP      || '').trim();
+          const opNum      = String(ident.cNumOP || ident.nCodOP || '').trim();
           if (!codigoProd || !opNum) continue;
 
           const item = mapByCodigo.get(codigoProd) || {
@@ -326,21 +326,36 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
 
         await savePrepArray([...mapByCodigo.values()]);
       }
+    }
 
-      pagina++;
+    // ——— Dispara BACKFILL automaticamente (só no Postgres) ————————
+    let backfill = null;
+    if (usarDb) {
+      try {
+        const r = await fetch(`http://localhost:${process.env.PORT || 5001}/api/preparacao/backfill-codigos`, {
+          method: 'POST'
+        });
+        backfill = await r.json().catch(() => null);
+        console.log('[importar] backfill-codigos →', backfill);
+      } catch (e) {
+        console.error('[importar] backfill-codigos falhou:', e);
+      }
     }
 
     return res.json({
       ok: true,
       mode: usarDb ? 'postgres' : 'local-json',
       total_registros: totalRegistros,
-      importados
+      importados,
+      ...(backfill ? { backfill } : {})
     });
+
   } catch (err) {
     console.error('[importar OPs] erro:', err);
-    return res.status(500).json({ ok: false, error: String(err) });
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
+
 
 /**
  * Move uma OP dentro do ARRAY local: procura em todos os itens/local[]
@@ -530,8 +545,80 @@ async function handleOpWebhook(req, res) {
   }
 }
 
+// === WEBHOOK: OP da Omie ====================================================
+app.post('/webhooks/omie/op', chkOmieToken, express.json(), async (req, res) => {
+  const usarDb = shouldUseDb(req);
 
-app.post('/webhooks/omie/op', chkOmieToken, express.json(), handleOpWebhook);
+  try {
+    const body = req.body || {};
+    let cadastros = [];
+
+    // 1) Se vier no formato "cadastros: [ ... ]"
+    if (Array.isArray(body.cadastros)) {
+      cadastros = body.cadastros;
+    } else {
+      // 2) Compat: formato Omie Connect 2.0 (topic/event) ou payload simples
+      const ev = body.event || body;
+
+      const ident = ev.identificacao || {
+        cCodIntOP: ev.cCodIntOP,
+        cNumOP: ev.cNumOP,
+        nCodOP: ev.nCodOP,
+        nCodProduto: ev.nCodProd ?? ev.nCodProduto,
+        codigo_local_estoque: ev.codigo_local_estoque,
+        nQtde: ev.nQtde,
+        dDtPrevisao: ev.dDtPrevisao
+      };
+
+      const inf = ev.infAdicionais || {
+        cEtapa: ev.cEtapa,
+        dDtInicio: ev.dDtInicio,
+        dDtConclusao: ev.dDtConclusao,
+        nCodProjeto: ev.nCodProjeto
+      };
+
+      const out = ev.outrasInf || {
+        cConcluida: ev.cConcluida,
+        dAlteracao: ev.dAlteracao,
+        dInclusao: ev.dInclusao,
+        uAlt: ev.uAlt,
+        uInc: ev.uInc
+      };
+
+      cadastros = [{ identificacao: ident, infAdicionais: inf, outrasInf: out }];
+    }
+
+    let recebidos = 0;
+
+    if (usarDb) {
+      for (const op of cadastros) {
+        await dbQuery('select public.op_upsert_from_payload($1::jsonb)', [op]);
+        recebidos++;
+      }
+
+      // dispara o backfill pra garantir "produto" como Código
+      let backfill = null;
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5001}/api/preparacao/backfill-codigos`, {
+          method: 'POST'
+        });
+        backfill = await resp.json().catch(() => null);
+      } catch (e) {
+        console.error('[webhooks/omie/op] backfill-codigos falhou:', e);
+      }
+
+      return res.json({ ok: true, recebidos, backfill });
+    } else {
+      // modo local-json (raro pra webhook): só confirma recebimento
+      recebidos = cadastros.length;
+      return res.json({ ok: true, recebidos, mode: 'local-json' });
+    }
+  } catch (e) {
+    console.error('[webhooks/omie/op] erro:', e);
+    return res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
 // alias com /api para ficar consistente com suas outras rotas
 app.post('/api/omie/op',      chkOmieToken, express.json(), handleOpWebhook);
 
@@ -2345,6 +2432,82 @@ data[r.status].push({
     return res.json({ mode: 'local-json', data: json });
   } catch (e) {
     return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
+  }
+});
+
+
+// ==== Backfill dos códigos de produto (preenche produto_codigo a partir do op_raw) ====
+app.all('/api/preparacao/backfill-codigos', async (req, res) => {
+  try {
+    const sql = `
+      WITH upd AS (
+        UPDATE public.op_info i
+           SET produto_codigo = r.payload->'identificacao'->>'cCodIntProd',
+               updated_at     = now()
+          FROM public.op_raw r
+         WHERE r.n_cod_op = i.n_cod_op
+           AND (i.produto_codigo IS NULL OR i.produto_codigo ~ '^[0-9]+$')
+           AND (r.payload->'identificacao'->>'cCodIntProd') IS NOT NULL
+        RETURNING 1
+      )
+      SELECT count(*)::int AS atualizados FROM upd;
+    `;
+    const { rows } = await dbQuery(sql);
+    const atualizados = Number(rows?.[0]?.atualizados || 0);
+    return res.json({ ok: true, atualizados });
+  } catch (e) {
+    console.error('[backfill-codigos] erro:', e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+
+// ——— Kanban Preparação – backfill de códigos (1 só rota, rápida, usando produtos já no DB) ———
+async function runBackfillCodigos() {
+  if (!isDbEnabled) {
+    return { ok:false, error:'DB desativado neste modo' };
+  }
+  const sql = `
+    WITH m AS (
+      SELECT
+        i.n_cod_op,
+        i.n_cod_prod,
+        COALESCE(p.codigo, p.codigo_familia, p.codigo_produto::text) AS novo_codigo
+      FROM public.op_info i
+      JOIN public.produtos p
+            ON p.codigo_produto::text = i.n_cod_prod::text
+      WHERE (i.produto_codigo IS NULL OR i.produto_codigo ~ '^[0-9]+$')
+        AND i.n_cod_prod IS NOT NULL
+    )
+    UPDATE public.op_info i
+       SET produto_codigo = m.novo_codigo,
+           updated_at     = now()
+      FROM m
+     WHERE i.n_cod_op = m.n_cod_op
+    RETURNING i.n_cod_op, i.n_cod_prod, i.produto_codigo;
+  `;
+  const { rows } = await dbQuery(sql);
+  return { ok:true, total: rows.length, atualizados: rows.length, exemplos: rows.slice(0,5) };
+}
+
+// Disponibiliza tanto POST quanto GET (facilita testar no Render)
+app.post('/api/preparacao/backfill-codigos', async (req, res) => {
+  try {
+    const out = await runBackfillCodigos();
+    res.json(out);
+  } catch (e) {
+    console.error('[backfill-codigos]', e);
+    res.status(500).json({ ok:false, error:String(e.message||e) });
+  }
+});
+
+app.get('/api/preparacao/backfill-codigos', async (req, res) => {
+  try {
+    const out = await runBackfillCodigos();
+    res.json(out);
+  } catch (e) {
+    console.error('[backfill-codigos][GET]', e);
+    res.status(500).json({ ok:false, error:String(e.message||e) });
   }
 });
 
