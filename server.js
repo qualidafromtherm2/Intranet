@@ -2435,6 +2435,45 @@ data[r.status].push({
   }
 });
 
+// === Backfill de códigos de produto (Preparação) ===
+// Atualiza op_info.produto_codigo com o "código" (ex.: QDS-..., 04.PP....)
+// a partir das tabelas produtos e, como fallback, op_ordens.
+const backfillCodigos = async (req, res) => {
+  try {
+    // 1) usa a tabela produtos (codigo_prod -> codigo)
+    const r1 = await dbQuery(`
+      update public.op_info oi
+         set produto_codigo = p.codigo,
+             updated_at     = now()
+        from public.produtos p
+       where (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
+         and (
+              p.codigo_prod::text = oi.produto_codigo
+           or p.codigo_prod       = oi.n_cod_prod
+         );
+    `);
+
+    // 2) fallback: usa op_ordens (quando já temos o código salvo nas ordens)
+    const r2 = await dbQuery(`
+      update public.op_info oi
+         set produto_codigo = o.codigo,
+             updated_at     = now()
+        from public.op_ordens o
+       where (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
+         and o.n_cod_prod = oi.n_cod_prod;
+    `);
+
+    const atualizados = (r1.rowCount || 0) + (r2.rowCount || 0);
+    res.json({ ok: true, atualizados });
+  } catch (e) {
+    console.error('[backfill-codigos] erro:', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+};
+
+// Disponibiliza POST (local) e GET (Render) para facilitar chamar via curl/navegador
+app.post('/api/preparacao/backfill-codigos', backfillCodigos);
+app.get('/api/preparacao/backfill-codigos', backfillCodigos);
 
 // ==== Backfill dos códigos de produto (preenche produto_codigo a partir do op_raw) ====
 app.all('/api/preparacao/backfill-codigos', async (req, res) => {
