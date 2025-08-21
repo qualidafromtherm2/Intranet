@@ -2476,29 +2476,37 @@ app.post('/api/preparacao/backfill-codigos', backfillCodigos);
 app.get('/api/preparacao/backfill-codigos', backfillCodigos);
 
 // ==== Backfill dos códigos de produto (preenche produto_codigo a partir do op_raw) ====
+// ✅ Backfill/propaga códigos legíveis para as OPs (Render e local)
 app.all('/api/preparacao/backfill-codigos', async (req, res) => {
   try {
     const sql = `
-      WITH upd AS (
-        UPDATE public.op_info i
-           SET produto_codigo = r.payload->'identificacao'->>'cCodIntProd',
+      -- Dedup dos produtos (mantém 1 por codigo_prod)
+      with dedup as (
+        select codigo_prod::text as codigo_prod,
+               max(codigo) as codigo
+        from public.produtos
+        group by codigo_prod::text
+      ),
+      upd as (
+        update public.op_info oi
+           set produto_codigo = p.codigo,
                updated_at     = now()
-          FROM public.op_raw r
-         WHERE r.n_cod_op = i.n_cod_op
-           AND (i.produto_codigo IS NULL OR i.produto_codigo ~ '^[0-9]+$')
-           AND (r.payload->'identificacao'->>'cCodIntProd') IS NOT NULL
-        RETURNING 1
+        from dedup p
+        where (p.codigo_prod = oi.n_cod_prod::text
+               or p.codigo_prod = oi.produto_codigo)
+          and (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
+        returning 1
       )
-      SELECT count(*)::int AS atualizados FROM upd;
+      select count(*)::int as atualizados from upd;
     `;
     const { rows } = await dbQuery(sql);
-    const atualizados = Number(rows?.[0]?.atualizados || 0);
-    return res.json({ ok: true, atualizados });
+    return res.json({ ok: true, atualizados: rows?.[0]?.atualizados ?? 0 });
   } catch (e) {
     console.error('[backfill-codigos] erro:', e);
-    return res.status(500).json({ ok: false, error: String(e) });
+    return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
+
 
 
 // ——— Kanban Preparação – backfill de códigos (1 só rota, rápida, usando produtos já no DB) ———
