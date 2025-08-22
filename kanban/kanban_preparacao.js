@@ -29,48 +29,38 @@ const API_BASE = window.location.origin;   // mesmo host do front-end
 let   tipo03Cache   = null;   // ← guarda o array completo
 let   tipo03Ready   = null;   // ← Promise que resolve quando o cache estiver pronto
 let   _debugReqId   = 0;      // já existia
-const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
-async function carregarKanbanPreparacao () {
-  // localhost => usa JSON local; Render => usa SQL (sem fallback para JSON)
-  if (IS_LOCALHOST) {
-    // JSON local servido pelo backend (lê data/kanban_preparacao.json)
-    const r = await fetch(`${API_BASE}/api/kanban_preparacao`, { cache: 'no-store' });
-    if (!r.ok) return [];
-    const arr = await r.json();
-    return Array.isArray(arr) ? arr : [];
-  }
 
-  // PRODUÇÃO/Render => SQL
-// PRODUÇÃO/Render => SQL
-const r = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-if (!r.ok) throw new Error(`HTTP ${r.status}`);
-const j = await r.json();
+ async function carregarKanbanPreparacao () {
+   // Sempre usa o SQL (Render ou local apontando para o mesmo banco)
+   const r = await fetch('/api/preparacao/listar', {
+     cache: 'no-store',
+     credentials: 'include'
+   });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
 
-/* Esperado (novo): { mode:'pg', data:{ 'A Produzir':[], 'Produzindo':[], 'teste 1':[], 'teste final':[], 'concluido':[] } }
-   Ainda assim, tornamos robusto a nomes/chaves. */
-if (j && j.mode === 'pg' && j.data) {
-  const perProd = new Map();
-  const colunas = Object.keys(j.data); // usa o que o servidor mandar
+    if (j && j.mode === 'pg' && j.data) {
+      const perProd = new Map();
+      const colunas = Object.keys(j.data);
+      colunas.forEach(st => {
+        (j.data[st] || []).forEach(it => {
+          const codigo = it.produto || it.produto_codigo || it.codigo;
+          if (!codigo) return;
+          const arr = perProd.get(codigo) || [];
+          arr.push(`${st},${it.op || ''}`);
+          perProd.set(codigo, arr);
+        });
+      });
+ return [...perProd.entries()].map(([codigo, local]) => ({
+   pedido: '',     // sem prefixo
+   codigo,
+   local
+ }));
+    }
+    return [];
+ }
 
-  colunas.forEach(st => {
-    (j.data[st] || []).forEach(it => {
-      const codigo = it.produto || it.produto_codigo || it.codigo;
-      if (!codigo) return;
-      const arr = perProd.get(codigo) || [];
-      arr.push(`${st},${it.op || ''}`); // "Status,OP"
-      perProd.set(codigo, arr);
-    });
-  });
-
-  return [...perProd.entries()].map(([codigo, local]) => ({
-    pedido: 'Estoque',
-    codigo,
-    local
-  }));
-}
-  return [];
-}
 
 
 
@@ -97,7 +87,7 @@ function renderKanbanPreparacao (items) {
       if (!ul) return;
 
       const li = document.createElement('li');
-      li.textContent      = `${item.pedido} – ${item.codigo} (${qt})`;
+      li.textContent = `${item.codigo} (${qt})`;
       li.classList.add('kanban-card');
       li.setAttribute('draggable', 'true');
       li.dataset.index    = index;

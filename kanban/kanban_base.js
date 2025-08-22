@@ -362,69 +362,6 @@ export function renderKanbanDesdeJSON(itemsKanban) {
   });
 }
 
-export async function carregarKanbanLocal() {
-  try {
-    const resp = await fetch(`${API_BASE}/api/kanban`);
-    if (!resp.ok) {
-      console.warn('GET /api/kanban retornou status', resp.status);
-      return [];
-    }
-    const json = await resp.json();
-    return Array.isArray(json) ? json : [];
-  } catch (err) {
-    console.error('Erro ao carregar kanban.json local:', err);
-    return [];
-  }
-}
-
-
-/**
- * Salva o array em:
- *   • /api/kanban              → Comercial
- *   • /api/kanban_preparacao  → Preparação
- */
-export async function salvarKanbanLocal(items, board = 'comercial') {
-  const rota = board === 'preparacao'
-             ? '/api/kanban_preparacao'
-             : '/api/kanban';
-
-  /* 1) Lê o arquivo atual p/ não perder histórico -------------------- */
-  let antigos = [];
-  try {
-    const r = await fetch(`${API_BASE}${rota}`);
-    if (r.ok) antigos = await r.json();
-  } catch { /* se falhar, continua com [] */ }
-
-  /* 2) Mescla quantidade e local onde pedido+codigo coincidem -------- */
-  items.forEach(novo => {
-    const old = antigos.find(a =>
-      a.pedido === novo.pedido && a.codigo === novo.codigo);
-    if (old) {
-      old.quantidade = novo.quantidade;           // já somada antes
-      old.local = Array.from(new Set([...old.local, ...novo.local]));
-
-    } else {
-      antigos.push(novo);
-    }
-  });
-
-  /* 3) Grava a versão mesclada --------------------------------------- */
-  const resp = await fetch(`${API_BASE}${rota}`, {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify(antigos, null, 2)
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`[salvarKanbanLocal] HTTP ${resp.status}: ${txt}`);
-  }
-}
-
-
-
-
-
 export function enableDragAndDrop(itemsKanban) {
   document.querySelectorAll('.kanban-card').forEach(li => {
     li.addEventListener('dragstart', e => {

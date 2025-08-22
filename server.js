@@ -68,8 +68,6 @@ const produtosRouter = require('./routes/produtos');
    return isDbEnabled && !isLocalRequest(req);
  }
 
-// Caminho do JSON local
-const KANBAN_PREP_PATH = path.join(__dirname, 'data', 'kanban_preparacao.json');
 let etqConfig = [];
 function loadEtqConfig() {
   if (etqConfig.length) return;              // já carregado
@@ -737,11 +735,6 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
     res.json({ ok: true });
   });
 });
-
-const kanbanRouter = require('./routes/kanban');
-app.use('/api/kanban', kanbanRouter);
-const kanbanPrepRouter = require('./routes/kanban_preparacao');
-app.use('/api/kanban_preparacao', kanbanPrepRouter);
 
 // Multer para upload de imagens
 const upload = multer({ storage: multer.memoryStorage() });
@@ -2260,27 +2253,6 @@ app.get('/api/viacep/:cep', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-// ────────────────────────────────────────────
-// Kanban local (GET lê, POST grava)
-// ────────────────────────────────────────────
-app.get('/api/kanban', (req, res) => {
-  try {
-    const data = JSON.parse(fs.readFileSync(KANBAN_FILE, 'utf8'));
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/kanban', express.json(), (req, res) => {
-  /* ❌ Remova ou comente o bloco que fazia “clean = …map(({estoque,…})” */
-  fs.writeFileSync(
-    KANBAN_FILE,
-    JSON.stringify(req.body, null, 2),   //  ← grava exatamente o que veio
-    'utf8'
-  );
-  res.json({ ok:true });
-});
 
 
 // ——— Helpers de carimbo de usuário/data ————————————————
@@ -2379,59 +2351,133 @@ if (conteudo?.endsWith('_7E')) {
   }
 });
 
-
-// Lista preparação (preferindo Postgres). Fallback: JSON local.
 app.get('/api/preparacao/listar', async (req, res) => {
   res.set('Cache-Control', 'no-store');
+  if (!isDbEnabled) return res.status(503).json({ error: 'Banco de dados não configurado.' });
 
-  if (isDbEnabled) {
+  try {
+    const { rows } = await dbQuery(`
+      SELECT
+        op,                                -- <- usa a coluna "op" da view (cCodIntOP/cNumOP fallback)
+        c_cod_int_prod AS produto_codigo,
+        kanban_coluna  AS status
+      FROM public.kanban_preparacao_view
+      ORDER BY status, op
+    `);
+
+    const data = {
+      'A Produzir': [],
+      'Produzindo': [],
+      'teste 1': [],
+      'teste final': [],
+      'concluido': []
+    };
+    const ALLOWED = new Set(Object.keys(data));
+
+    for (const r of rows) {
+      if (!ALLOWED.has(r.status)) continue;  // qualquer coisa fora das 5 some (ex.: 80)
+      data[r.status].push({
+        op: r.op,
+        produto: r.produto_codigo,
+        status: r.status
+      });
+    }
+
+    return res.json({ mode: 'pg', data });
+  } catch (err) {
+    console.error('[preparacao/listar] erro:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao consultar preparação' });
+  }
+});
+
+// === Mudar etapa da OP na Omie e refletir no Postgres ===
+app.post('/api/preparacao/op/:op/etapa/:etapa', async (req, res) => {
+  const { op, etapa } = req.params;            // etapa: '10' | '20' | '30' | '40' | '60'
+  const isCodInt = /^P\d+/i.test(op);          // P101102 → cCodIntOP; 10713583228 → nCodOP
+
+  // payload Omie
+  const hojeISO = new Date().toISOString().slice(0,10); // 'AAAA-MM-DD'
+  const identificacao = isCodInt ? { cCodIntOP: op } : { nCodOP: Number(op) };
+  const infAdicionais = { cEtapa: etapa };
+  if (etapa === '20') infAdicionais.dDtInicio    = hojeISO; // marcou início
+  if (etapa === '60') infAdicionais.dDtConclusao = hojeISO; // marcou conclusão
+
+  const payload = {
+    call: 'AlterarOrdemProducao',
+    app_key: process.env.OMIE_APP_KEY,
+    app_secret: process.env.OMIE_APP_SECRET,
+    param: [{ identificacao, infAdicionais }]
+  };
+
+  try {
+    // 1) manda pra Omie
+    const r = await fetch('https://app.omie.com.br/api/v1/industria/op/', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+
+    if (!r.ok || j?.faultstring || j?.error) {
+      return res.status(400).json({ ok:false, stage: etapa, omie: j });
+    }
+
+    // 2) reflete no Postgres pra UI não ficar esperando webhook
+    //    (mapeia etapa → status humano do kanban)
+    const ETAPA_TO_STATUS = { '10':'A Produzir', '20':'Produzindo', '30':'teste 1', '40':'teste final', '60':'concluido' };
+    const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
     try {
-      const { rows } = await dbQuery(`
-        SELECT
-          n_cod_op                   AS op,
-          c_cod_int_prod             AS produto_codigo,  -- ajuste se quiser usar outro campo
-          kanban_coluna              AS status
-        FROM kanban_preparacao_view
-        ORDER BY kanban_coluna, n_cod_op
-      `);
+      await dbQuery('select public.mover_op($1,$2)', [op, status]); // função já usada no server
+    } catch (e) {
+      console.warn('[mover_op] falhou (segue sem travar):', e.message);
+    }
 
-const data = {
-  'A Produzir': [],
-  'Produzindo': [],
-  'teste 1': [],
-  'teste final': [],
-  'concluido': []
-};
+    // 3) avisa o SSE pra atualizar telas abertas
+    req.app.get('notifyProducts')?.(); // seu helper compat, já presente no server. :contentReference[oaicite:2]{index=2}
 
-for (const r of rows) {
-  if (!data[r.status]) data[r.status] = []; // robusto a futuras etapas
-data[r.status].push({
-  op: r.op,
-  produto: r.produto_codigo, // <- importante
-  status: r.status
+    return res.json({ ok:true, stage: etapa, mode:'pg', omie:j });
+  } catch (err) {
+    return res.status(500).json({ ok:false, error: err.message || String(err) });
+  }
 });
 
 
-}
-
-
-      return res.json({ mode: 'pg', data });
-    } catch (err) {
-      console.error('[listar:pg] falhou:', err);
-      // sem fallback em produção (como já estava), segue o mesmo comportamento
-    }
+// Comercial: lista itens por coluna a partir do Postgres
+app.get('/api/kanban/comercial/listar', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!isDbEnabled) {
+    return res.status(503).json({ error: 'Banco de dados não configurado.' });
   }
-
-  // … mantém o bloco local-dev, se quiser, mas ATUALIZE os nomes:
   try {
-    if (!isLocalRequest(req)) {
-      return res.status(500).json({ error: 'DB indisponível em produção; sem fallback JSON.' });
+    const { rows } = await dbQuery(`
+      SELECT
+        numero_pedido   AS pedido,
+        produto_codigo  AS codigo,
+        quantidade,
+        kanban_coluna   AS status
+      FROM kanban_comercial_view
+      ORDER BY kanban_coluna, numero_pedido, produto_codigo
+    `);
+
+    const data = {
+      'Pedido aprovado'     : [],
+      'Separação logística' : [],
+      'Fila de produção'    : []
+    };
+
+    for (const r of rows) {
+      if (!data[r.status]) continue; // ignora status não mapeado
+      data[r.status].push({
+        pedido: r.pedido,
+        codigo: r.codigo,
+        quantidade: r.quantidade,
+        status: r.status
+      });
     }
-    const raw = fs.readFileSync(path.join(__dirname, 'data/kanban_preparacao.json'), 'utf8');
-    const json = JSON.parse(raw);
-    return res.json({ mode: 'local-json', data: json });
-  } catch (e) {
-    return res.status(500).json({ mode: 'local-json', error: 'Falha ao ler JSON local.' });
+    return res.json({ mode: 'pg', data });
+  } catch (err) {
+    console.error('[comercial/listar] erro:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao consultar comercial no banco' });
   }
 });
 
@@ -2476,11 +2522,11 @@ app.post('/api/preparacao/backfill-codigos', backfillCodigos);
 app.get('/api/preparacao/backfill-codigos', backfillCodigos);
 
 // ==== Backfill dos códigos de produto (preenche produto_codigo a partir do op_raw) ====
-// ✅ Backfill/propaga códigos legíveis para as OPs (Render e local)
+// ✅ Backfill/propaga códigos legíveis para as OPs (funciona com GET/POST)
 app.all('/api/preparacao/backfill-codigos', async (req, res) => {
   try {
     const sql = `
-      -- Dedup dos produtos (mantém 1 por codigo_prod)
+      -- Dedup de produtos por codigo_prod (evita múltiplas linhas no join)
       with dedup as (
         select codigo_prod::text as codigo_prod,
                max(codigo) as codigo
@@ -2506,6 +2552,7 @@ app.all('/api/preparacao/backfill-codigos', async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
+
 
 
 
@@ -2745,27 +2792,12 @@ const pedidos = todos.filter(p => String(p?.cabecalho?.etapa) === '80');
 // CSV da preparação (local JSON ou Postgres)
 app.get('/api/preparacao/csv', async (req, res) => {
   try {
-    let rows = [];
-
-    if (!shouldUseDb(req)) {
-      // modo LOCAL: lê o array e achata
-      const arr = await loadPrepArray(); // já existe no arquivo
-      for (const item of arr) {
-        const produto = String(item.codigo || '');
-        for (const s of (item.local || [])) {
-          const { status, op } = splitLocalEntry(s); // já existe no arquivo
-          rows.push({ op, produto, status });
-        }
-      }
-    } else {
-      // modo REMOTO: consulta o Postgres
-      const r = await dbQuery(
-        `SELECT op, produto_codigo AS produto, status
-           FROM op_status
-          ORDER BY status, op`
-      );
-      rows = r.rows;
-    }
+    const r = await dbQuery(
+      `SELECT op, produto_codigo AS produto, status
+         FROM op_status
+        ORDER BY status, op`
+    );
+    const rows = r.rows;
 
     const csv = csvStringify(rows, { header: true, columns: ['op','produto','status'] });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
