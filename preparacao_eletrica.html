@@ -14,199 +14,51 @@
   <!-- Seu CSS principal -->
   <link rel="stylesheet" href="menu_produto.css"/>
 <style>
-  /* Modal do leitor de QR */
-  #qrModal{
-    position: fixed; inset: 0; display:none;
-    background: rgba(0,0,0,.5);
-    z-index: 2000;
-    align-items: center; justify-content: center;
-    padding: 24px;
-  }
-  #qrModal.open{ display:flex; }
+/* ——— QR modal ——— */
+#qrModal{position:fixed;inset:0;display:none;background:rgba(0,0,0,.5);z-index:2000;align-items:center;justify-content:center;padding:24px}
+#qrModal.open{display:flex}
+.qr-box{width:min(640px,100%);background:var(--header-bg,#111);color:var(--text,#fff);border-radius:16px;box-shadow:0 12px 24px rgba(0,0,0,.35);padding:16px}
+.qr-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.qr-close{appearance:none;border:0;background:transparent;font-size:26px;line-height:1;cursor:pointer;color:inherit}
+#qrModal .modal-content{width:min(580px,92vw);max-height:90vh}
+#qrReader{width:100%;height:60vh;max-height:75vh;background:#000}
+#qrReader video{width:100%!important;height:100%!important;object-fit:cover;filter:brightness(1.15) contrast(1.08)}
 
-  .qr-box{
-    width: min(640px, 100%);
-    background: var(--header-bg, #111);
-    color: var(--text, #fff);
-    border-radius: 16px;
-    box-shadow: 0 12px 24px rgba(0,0,0,.35);
-    padding: 16px;
-  }
-  .qr-header{
-    display:flex; align-items:center; justify-content:space-between;
-    margin-bottom: 12px;
-  }
-  .qr-close{
-    appearance:none; border:0; background:transparent;
-    font-size: 26px; line-height: 1; cursor: pointer; color: inherit;
-  }
-  /* o container que o html5-qrcode usa ajusta sozinho */
-  #qrReader{ width:100%; }
-</style>
+/* ——— Layout compartilhado (Produto & Gestão) ——— */
+#produtoTab .produto-layout,#gestaoTab .produto-layout{display:flex;gap:16px;align-items:flex-start}
+#produtoTab .mini-board{flex:1;min-width:0}
+#produtoTab .side-actions,#gestaoTab .side-actions{position:relative;width:220px;flex:0 0 220px;display:flex;align-items:flex-start}
 
+/* ——— Botões ——— */
+.btn-stack{display:flex;flex-direction:column;gap:10px;width:100%}
+.btn-modern{appearance:none;border:0;width:100%;padding:14px 18px;border-radius:16px;font-weight:600;letter-spacing:.2px;cursor:pointer;color:#fff;background:linear-gradient(135deg,#4f46e5,#22d3ee);box-shadow:0 12px 22px rgba(79,70,229,.22),0 6px 10px rgba(34,211,238,.18);transition:transform .12s ease,box-shadow .2s ease,filter .2s ease}
+.btn-modern:hover{transform:translateY(-1px);box-shadow:0 16px 26px rgba(79,70,229,.28),0 10px 14px rgba(34,211,238,.22)}
+.btn-modern:active{transform:translateY(0);filter:brightness(.96)}
+.btn-modern.btn-ghost{background:transparent;color:#4f46e5;box-shadow:inset 0 0 0 2px rgba(79,70,229,.45)}
+.btn-modern.btn-ghost:hover{transform:none;filter:none;box-shadow:inset 0 0 0 2px rgba(79,70,229,.65),0 2px 6px rgba(0,0,0,.06)}
+.btn-modern.btn-success{background:linear-gradient(135deg,#16a34a,#22c55e);box-shadow:0 12px 22px rgba(22,163,74,.22),0 6px 10px rgba(34,197,94,.18)}
+.btn-modern.btn-success:hover{transform:translateY(-1px);box-shadow:0 16px 26px rgba(22,163,74,.28),0 10px 14px rgba(34,197,94,.22)}
 
-  <style>
-  /* layout: kanban à esquerda e botão à direita */
-  #produtoTab .produto-layout{
-    display:flex;
-    gap:16px;
-    align-items:flex-start;
-  }
-  #produtoTab .mini-board{ flex:1; min-width:0; }
-  #produtoTab .side-actions{
-    width:220px;              /* largura fixa da coluna do botão */
-    flex:0 0 220px;
-    display:flex;
-    align-items:flex-start;
-  }
+/* ——— SQL menu (Produto & Gestão) ——— */
+#produtoTab .sql-menu,#gestaoTab .sql-menu{position:absolute;right:0;top:calc(100% + 8px);background:var(--header-bg,#111);color:var(--text,#fff);border-radius:12px;box-shadow:0 12px 24px rgba(0,0,0,.25);padding:8px;min-width:220px;display:none;z-index:3000}
+#produtoTab .sql-menu.open,#gestaoTab .sql-menu.open{display:block}
+#produtoTab .sql-menu button,#gestaoTab .sql-menu button{width:100%;appearance:none;border:0;background:transparent;text-align:left;padding:10px 12px;cursor:pointer;border-radius:10px;color:inherit}
+#produtoTab .sql-menu button:hover,#gestaoTab .sql-menu button:hover{background:rgba(255,255,255,.08)}
 
-  /* botão moderno */
-  #produtoTab .btn-modern{
-    appearance:none;
-    border:0;
-    width:100%;
-    padding:14px 18px;
-    border-radius:16px;
-    font-weight:600;
-    letter-spacing:.2px;
-    cursor:pointer;
-    color:#fff;
-    background: linear-gradient(135deg,#4f46e5,#22d3ee);
-    box-shadow: 0 12px 22px rgba(79,70,229,.22),
-                0 6px 10px rgba(34,211,238,.18);
-    transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
-  }
-  #produtoTab .btn-modern:hover{
-    transform: translateY(-1px);
-    box-shadow: 0 16px 26px rgba(79,70,229,.28),
-                0 10px 14px rgba(34,211,238,.22);
-  }
-  #produtoTab .btn-modern:active{
-    transform: translateY(0);
-    filter: brightness(.96);
-  }
-
-  /* responsivo: botão vai para baixo em telas estreitas */
-  @media (max-width: 1100px){
-    #produtoTab .produto-layout{ flex-direction:column; }
-    #produtoTab .side-actions{ width:100%; flex:0 0 auto; }
-  }
-  /* — QR em tela cheia "segura" no mobile — */
-#qrModal .modal-content{
-  width: min(580px, 92vw);
-  max-height: 90vh;
-}
-
-#qrReader{
-  width: 100%;
-  height: 60vh;           /* ocupa bem a tela */
-  max-height: 75vh;
-  background: #000;       /* fundo neutro, ajuda o contraste */
-}
-
-/* força o <video> interno a preencher bem e ficar mais claro */
-#qrReader video{
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover;      /* preenche a área mantendo corte elegante */
-  filter: brightness(1.15) contrast(1.08);
-}
-/* empilha os botões */
-#produtoTab .btn-stack{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-}
-
-/* variante "fantasma" para o Finalizar (ainda não ativo) */
-#produtoTab .btn-modern.btn-ghost{
-  background: transparent;
-  color: #4f46e5;
-  box-shadow: inset 0 0 0 2px rgba(79,70,229,.45);
-}
-#produtoTab .btn-modern.btn-ghost:hover{
-  transform: none;
-  filter: none;
-  box-shadow:
-    inset 0 0 0 2px rgba(79,70,229,.65),
-    0 2px 6px rgba(0,0,0,.06);
-}
-
-/* variante verde “sucesso” */
-#produtoTab .btn-modern.btn-success{
-  background: linear-gradient(135deg,#16a34a,#22c55e);
-  box-shadow: 0 12px 22px rgba(22,163,74,.22),
-              0 6px 10px rgba(34,197,94,.18);
-}
-#produtoTab .btn-modern.btn-success:hover{
-  transform: translateY(-1px);
-  box-shadow: 0 16px 26px rgba(22,163,74,.28),
-              0 10px 14px rgba(34,197,94,.22);
-}
-  /* âncora para posicionar o menu */
-  #produtoTab .side-actions { position: relative; }
-
-  /* menu flutuante */
-  #produtoTab .sql-menu{
-    position: absolute;
-    right: 0; top: calc(100% + 8px);
-    background: var(--header-bg, #111);
-    color: var(--text, #fff);
-    border-radius: 12px;
-    box-shadow: 0 12px 24px rgba(0,0,0,.25);
-    padding: 8px;
-    min-width: 220px;
-    display: none;
-    z-index: 3000;
-  }
-  #produtoTab .sql-menu.open{ display: block; }
-
-  #produtoTab .sql-menu button{
-    width: 100%;
-    appearance: none; border: 0; background: transparent;
-    text-align: left; padding: 10px 12px; cursor: pointer; border-radius: 10px;
-    color: inherit;
-  }
-  #produtoTab .sql-menu button:hover{
-    background: rgba(255,255,255,.08);
-  }
-
-/* Gestão usa o mesmo layout/botões da aba Produto */
-#gestaoTab .produto-layout{ display:flex; gap:16px; align-items:flex-start; }
-#gestaoTab .side-actions{ width:220px; flex:0 0 220px; display:flex; align-items:flex-start; }
-#gestaoTab .btn-stack{ display:flex; flex-direction:column; gap:10px; width:100%; }
+/* ——— Responsivo ——— */
 @media (max-width:1100px){
-  #gestaoTab .produto-layout{ flex-direction:column; }
-  #gestaoTab .side-actions{ width:100%; flex:0 0 auto; }
+  #produtoTab .produto-layout,#gestaoTab .produto-layout{flex-direction:column}
+  #produtoTab .side-actions,#gestaoTab .side-actions{width:100%;flex:0 0 auto}
 }
 
-/* o menu SQL precisa de position:relative no contêiner */
-#gestaoTab .side-actions { position: relative; }
+/* ——— Largura exclusiva desta página (3 colunas) ——— */
+#paginaPrepEletrica .kanban-board:not(.mini-board){display:grid!important;grid-template-columns:repeat(3,minmax(300px,1fr));gap:20px;max-width:none!important}
+#paginaPrepEletrica .kanban-board:not(.mini-board) .kanban-column{width:auto!important;max-width:none!important;flex:0 0 auto!important}
 
-/* reutiliza o mesmo estilo do menu flutuante na Gestão */
-#gestaoTab .sql-menu{ 
-  position: absolute;
-  right: 0; top: calc(100% + 8px);
-  background: var(--header-bg, #111);
-  color: var(--text, #fff);
-  border-radius: 12px;
-  box-shadow: 0 12px 24px rgba(0,0,0,.25);
-  padding: 8px;
-  min-width: 220px;
-  display: none;
-  z-index: 3000;
-}
-#gestaoTab .sql-menu.open{ display: block; }
-#gestaoTab .sql-menu button{
-  width: 100%;
-  appearance: none; border: 0; background: transparent;
-  text-align: left; padding: 10px 12px; cursor: pointer; border-radius: 10px;
-  color: inherit;
-}
-#gestaoTab .sql-menu button:hover{ background: rgba(255,255,255,.08); }
-
+/* Mini-board (aba Produto) 2 colunas confortáveis */
+#paginaPrepEletrica .kanban-board.mini-board{display:grid!important;grid-template-columns:repeat(2,minmax(320px,1fr));gap:16px}
 </style>
+
 
 </head>
 <body>
@@ -273,12 +125,12 @@
       <!-- ===== MENU LATERAL ===== -->
 <div class="left-side">
   <div class="side-wrapper">
-    <div class="side-title">Preparação elétrica</div>
+    <div class="side-title">Aqui será a NIQ</div>
 
     <div class="side-menu">
       <!-- coloque links ou deixe vazio por enquanto -->
-      <a href="#" class="menu-link">Em construção 1</a>
-      <a href="#" class="menu-link">Em construção 2</a>
+      <a href="#" class="menu-link">Item a ser verificado 01</a>
+      <a href="#" class="menu-link">Item a ser verificado 02</a>
     </div>
   </div>
 </div>
@@ -299,7 +151,7 @@
     <!-- 🟦 Coluna 1: Fila de produção -->
     <div class="kanban-column">
 <div class="kanban-header">
-  <div class="title-wrapper"><span>Fila de produção</span></div>
+  <div class="title-wrapper"><span>A Produzir</span></div>
   <i class="fas fa-plus add-btn" style="display:none"></i>
   <div class="add-container" style="display:none"></div>
 </div>
@@ -315,12 +167,12 @@
       <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
     </div>
 
-    <!-- 🟦 Coluna 3: No estoque -->
+    <!-- 🟦 Coluna 3: Concluído -->
     <div class="kanban-column">
       <div class="kanban-header">
-        <span>No estoque</span>
+        <span>Concluído</span>
       </div>
-      <ul id="coluna-prep-estoque" class="kanban-list"></ul>
+      <ul id="coluna-prep-concluido" class="kanban-list"></ul>
     </div>
 
   </div><!-- /.kanban-board -->
@@ -565,10 +417,10 @@
         const { mode, data } = await resp.json();
         console.log('[mini-board] mode =', mode);
 
-        const todos = [
-          ...(data['Fila de produção'] || []),
-          ...(data['Em produção']      || [])
-        ];
+const todos = [
+  ...(data['A Produzir'] || []),
+  ...(data['Produzindo'] || [])
+];
         const itensDoProduto = todos.filter(c =>
           String(c.produto).trim() === String(codigo).trim()
         );
@@ -583,8 +435,8 @@
           const li = document.createElement('li');
           li.classList.add('kanban-card');
           li.textContent = c.op;
-          if (c.status === 'Fila de produção') ulMiniFila.appendChild(li);
-          else if (c.status === 'Em produção') ulMiniEmProd.appendChild(li);
+if (c.status === 'A Produzir') ulMiniFila.appendChild(li);
+else if (c.status === 'Produzindo') ulMiniEmProd.appendChild(li);
         }
 
         if (!ulMiniFila.children.length)   ulMiniFila.innerHTML   = '<li class="empty">—</li>';
@@ -711,6 +563,46 @@
       };
       document.addEventListener('keydown', onEsc);
     }
+
+
+      /* === Atualização ao vivo via SSE (webhook) — cole ANTES da linha que fecha o DOMContentLoaded === */
+    (function setupLiveUpdates() {
+      let debounceId;
+
+      const refresh = async () => {
+        clearTimeout(debounceId);
+        debounceId = setTimeout(async () => {
+          try {
+            await initPreparacaoKanban();
+            if (window.codigoSelecionado && typeof window.renderMiniKanban === 'function') {
+              await window.renderMiniKanban(window.codigoSelecionado);
+            }
+          } catch (e) {
+            console.warn('[prep-eletrica] refresh falhou:', e);
+          }
+        }, 300);
+      };
+
+      try {
+        // SSE do servidor (rota já existente no seu server)
+        const es = new EventSource('/api/produtos/stream');
+
+        // ignora o "hello" inicial; qualquer outra msg → refresh
+        es.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg && msg.type === 'hello') return;
+          } catch {}
+          refresh();
+        };
+
+        // fecha conexão ao sair da página
+        window.addEventListener('beforeunload', () => es.close?.());
+      } catch {
+        // fallback se EventSource não existir
+        setInterval(refresh, 20000);
+      }
+    })();
   });
 </script>
 

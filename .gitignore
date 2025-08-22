@@ -29,3 +29,7 @@ etiquetas/*.zpl
 etiquetas/*.zpl
 etiquetas/*.zpl
 etiquetas/*.zpl
+
+# nunca versionar o antigo cache
+data/kanban_preparacao.json
+

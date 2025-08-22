@@ -1,41 +1,67 @@
 // preparacao_api.js
 (function () {
+  // --- Helpers -----------------------------------------------------------
+  function normOp(op) {
+    // aceita "P101102" (cCodIntOP) ou "10713583228" (nCodOP)
+    return String(op || '').trim().toUpperCase();
+  }
+
+  function pickError(json, resp) {
+    return (
+      json?.omie?.faultstring ||
+      json?.error ||
+      json?.message ||
+      (resp ? `HTTP ${resp.status}` : 'Erro desconhecido')
+    );
+  }
+
+  async function postEtapa(url) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    let json = null;
+    try { json = await resp.json(); } catch { json = {}; }
+
+    if (!resp.ok || json?.ok === false) {
+      throw new Error(pickError(json, resp));
+    }
+    return json;
+  }
+
+  // --- API pública -------------------------------------------------------
   async function carregarKanban() {
-    const res = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-    if (!res.ok) throw new Error('Falha ao listar preparação');
-    const { data } = await res.json(); // { 'Fila de produção':[], 'Em produção':[], 'No estoque':[] }
-    return data;
+    const res = await fetch('/api/preparacao/listar', {
+      cache: 'no-store',
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error(`Falha ao listar preparação (HTTP ${res.status})`);
+    const json = await res.json();
+    // Esperado: { mode:'pg', data:{ 'A Produzir':[], 'Produzindo':[], 'teste 1':[], 'teste final':[], 'concluido':[] } }
+    return json?.data || {};
   }
 
   async function iniciarProducao(op) {
-    const res = await fetch(`/api/preparacao/op/${encodeURIComponent(op)}/iniciar`, {
-      method: 'POST'
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || json.error) {
-      throw new Error(json.error || 'Falha ao iniciar produção');
-    }
-    // depois do POST, devolvemos o kanban atualizado
-    return await carregarKanban();
+    op = normOp(op);
+    if (!op) throw new Error('OP inválida.');
+    await postEtapa(`/api/preparacao/op/${encodeURIComponent(op)}/iniciar`); // etapa 20
+    // devolve o kanban atualizado (útil para atualizar a UI imediatamente)
+    return carregarKanban();
   }
 
   async function finalizarProducao(op) {
-  const res = await fetch(`/api/preparacao/op/${encodeURIComponent(op)}/concluir`, {
-    method: 'POST'
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.error) {
-    throw new Error(json.error || 'Falha ao finalizar produção');
+    op = normOp(op);
+    if (!op) throw new Error('OP inválida.');
+    await postEtapa(`/api/preparacao/op/${encodeURIComponent(op)}/concluir`); // etapa 60
+    return carregarKanban();
   }
-  return await carregarKanban();
-}
 
-// mantenha as três funções como estão declaradas acima…
-window.Preparacao = {
-  carregarKanban,
-  iniciarProducao,
-  finalizarProducao,  // <-- não deixe de exportar!
-};
-
-
+  // --- Exposição global --------------------------------------------------
+  window.Preparacao = {
+    carregarKanban,
+    iniciarProducao,
+    finalizarProducao,
+  };
 })();

@@ -1,15 +1,6 @@
 // kanban.js  (substitua todo o arquivo)
 
-import {
-  carregarKanbanLocal,
-  renderKanbanDesdeJSON,
-  salvarKanbanLocal,
-  enableDragAndDrop,
-   gerarEtiqueta,
-   gerarEtiquetaPP,
-  gerarTicket,
-  gerarEtiquetaObs         // ← NOVO
-} from './kanban_base.js';
+import { renderKanbanDesdeJSON, enableDragAndDrop } from './kanban_base.js';
 // kanban.js  – depois dos imports
 let pcpOpBusy = false;      // evita cliques repetidos enquanto processa
 
@@ -42,7 +33,6 @@ const API_BASE =
     ? 'http://localhost:5001'
     : window.location.origin;
 
-const IS_LOCALHOST = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
 
 /* ───────────────── helpers ───────────────── */
@@ -220,6 +210,39 @@ function setupAddToggle() {
 window.collapseSearchPanel = collapseSearchPanel;   // torna-a global
 
 // <<< Cole AQUI, logo abaixo de setupAddToggle()
+
+
+// === SSE p/ auto-atualização do Kanban Comercial ===
+let __comercialSseStarted = false;
+
+export function startComercialSSE() {
+  if (__comercialSseStarted) return;
+  __comercialSseStarted = true;
+
+  try {
+    const src = new EventSource('/api/produtos/stream');
+
+    // Qualquer evento (exceto o "hello" inicial) dispara um refresh do quadro
+    src.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg && msg.type === 'hello') return;
+      } catch (_) {
+        // não era JSON? Sem crise, atualiza do mesmo jeito
+      }
+      Promise.resolve(initKanban()).catch(err =>
+        console.error('[SSE][Comercial] falha ao recarregar:', err)
+      );
+    };
+
+    window.addEventListener('beforeunload', () => src.close?.());
+  } catch (e) {
+    console.warn('[SSE] EventSource indisponível, ativando polling como fallback');
+    setInterval(() => {
+      Promise.resolve(initKanban()).catch(() => {});
+    }, 5000);
+  }
+}
 
 // ─── busca paginada na OMIE (com logs) ───────────────────────────────────────
 // ─── busca paginada na OMIE (com logs) ───────────────────────────────────────
@@ -877,158 +900,42 @@ function attachDoubleClick(itemsKanban) {
   });
 }
 
-
 export async function initKanban() {
-  // Loading ON
+  startComercialSSE?.();           // liga o webhook (com trava anti-duplicado)
+  // Mostra spinner se existir
   if (typeof showSpinner === 'function') showSpinner();
 
-  const hoje = formatDateBR(new Date());
-
   try {
-    // ===================== PRODUÇÃO / RENDER =====================
-    if (!IS_LOCALHOST) {
-      try {
-        // Backend monta e devolve no MESMO formato do JSON local
-        const resp = await fetch(`${API_BASE}/api/kanban/sync`, { cache: 'no-store' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    // carrega SEMPRE do servidor (SQL), tanto local quanto no Render
+    const resp = await fetch(`${API_BASE}/api/kanban/sync`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-        const items = await resp.json();
-        const arr   = Array.isArray(items) ? items : [];
+    const items = await resp.json();
+    const arr   = Array.isArray(items) ? items : [];
 
-        if (typeof kanbanCache !== 'undefined') kanbanCache = arr;
-        renderKanbanDesdeJSON(arr);
-        enableDragAndDrop(arr);
+    // cache e render
+    if (typeof kanbanCache !== 'undefined') kanbanCache = arr;
+    renderKanbanDesdeJSON(arr);
+    enableDragAndDrop(arr);
 
-        if (typeof atualizarEstoqueKanban === 'function') {
-          await atualizarEstoqueKanban();
-        }
-        if (typeof attachDoubleClick === 'function') attachDoubleClick(arr, {});
-        if (typeof setupAddToggle === 'function') setupAddToggle();
-        if (typeof setupProductSearch === 'function') setupProductSearch();
-        if (typeof setupTabNavigation === 'function') setupTabNavigation();
-
-        const linkCom = document.querySelector(
-          '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
-        );
-        linkCom?.click?.();
-
-        // Em produção NUNCA cai para JSON
-        return;
-      } catch (err) {
-        console.error('[KANBAN][prod] Falha em /api/kanban/sync:', err);
-        alert('Falha ao carregar Kanban (produção). Verifique o backend /api/kanban/sync.');
-        return;
-      } finally {
-        if (typeof hideSpinner === 'function') hideSpinner();
-      }
-    }
-
-    // ======================= LOCALHOST =======================
-    // 1) carrega kanban.json existente
-    const existingItems = await carregarKanbanLocal();
-
-    if (existingItems.length) {
-      renderKanbanDesdeJSON(existingItems);
-      enableDragAndDrop(existingItems);
-    }
-
-    // 2) busca ListarPedidos (OMIE)
-    const payloadLP = {
-      call: 'ListarPedidos',
-      param: [{ pagina:1, registros_por_pagina:100, etapa:'80', apenas_importado_api:'N' }],
-      app_key: OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET
-    };
-    const respLP = await fetch(`${API_BASE}/api/omie/pedidos`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payloadLP)
-    });
-    const dataLP = respLP.ok ? await respLP.json() : {};
-    const pedidos = Array.isArray(dataLP.pedido_venda_produto)
-      ? dataLP.pedido_venda_produto : [];
-
-    // cria mapa para cache de pedidos
-    const pedidosMap = {};
-    pedidos.forEach(p => {
-      pedidosMap[String(p.cabecalho.numero_pedido)] = p;
-    });
-
-    // 3) identifica novos itens / consulta estoque
-    const keySet = new Set(existingItems.map(i => `${i.pedido}|${i.codigo}`));
-    const novos = [];
-    for (const p of pedidos) {
-      const np = p.cabecalho.numero_pedido;
-      for (const det of (Array.isArray(p.det)?p.det:[])) {
-        const k = `${np}|${det.produto.codigo}`;
-        if (keySet.has(k)) continue;
-
-        const obj = {
-          pedido: np,
-          codigo: det.produto.codigo,
-          quantidade: det.produto.quantidade,
-          local: Array(det.produto.quantidade).fill('Pedido aprovado'),
-          estoque: null,
-          _codigoProd: det.produto.codigo_produto
-        };
-
-        // consulta estoque
-        const payloadEst = {
-          call:'PosicaoEstoque',
-          param:[{ codigo_local_estoque:COD_LOCAL_ESTOQUE, id_prod:obj._codigoProd,
-                   cod_int:obj.codigo, data:hoje }],
-          app_key:OMIE_APP_KEY, app_secret:OMIE_APP_SECRET
-        };
-        try {
-          const r = await fetch(`${API_BASE}/api/omie/estoque/consulta`, {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payloadEst)
-          });
-          const d = r.ok?await r.json():{};
-          obj.estoque = d.saldo ?? d.posicao?.[0]?.saldo_atual ?? 0;
-        } catch {
-          obj.estoque = 0;
-        }
-
-        novos.push(obj);
-        if (typeof sleep === 'function') await sleep(300);
-      }
-    }
-
-    // 4) mescla + renderiza
-    const allItems = existingItems.concat(novos);
-    if (typeof kanbanCache !== 'undefined') kanbanCache = allItems;
-
-    renderKanbanDesdeJSON(allItems);
-    enableDragAndDrop(allItems);
-
-    // Atualiza saldos “Pedido aprovado”
+    // atualiza saldos para “Pedido aprovado” se essa função existir
     if (typeof atualizarEstoqueKanban === 'function') {
       await atualizarEstoqueKanban();
     }
 
-    if (novos.length && typeof salvarKanbanLocal === 'function') {
-      await salvarKanbanLocal(allItems);
-    }
-
-    // 5) UX / Navegação
-    if (typeof attachDoubleClick === 'function') attachDoubleClick(allItems, pedidosMap);
+    // ganchos auxiliares já existentes
+    if (typeof attachDoubleClick === 'function') attachDoubleClick(arr, {});
     if (typeof setupAddToggle === 'function') setupAddToggle();
     if (typeof setupProductSearch === 'function') setupProductSearch();
     if (typeof setupTabNavigation === 'function') setupTabNavigation();
 
-    const linkCom = document.querySelector(
-      '#kanbanTabs .main-header-link[data-kanban-tab="comercial"]'
-    );
-    linkCom?.click?.();
-
   } catch (err) {
-    console.error('Erro no initKanban:', err);
-    alert('Falha ao inicializar o Kanban.');
+    console.error('[KANBAN] Falha ao carregar do servidor:', err);
+    alert('Falha ao carregar o Kanban via /api/kanban/sync. Veja o console.');
   } finally {
     if (typeof hideSpinner === 'function') hideSpinner();
   }
 }
-
 
 
 /* ------------------------------------------------------------------ */
