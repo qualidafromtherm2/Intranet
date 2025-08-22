@@ -196,32 +196,6 @@ async function withRetry(fn, tries = 3) {
 }
 
 
-// ==== NOVO: utilitários p/ formato ARRAY do seu kanban_preparacao.json ====
-// usa fsp (fs.promises) que você já declarou lá em cima como `const fsp = fs.promises;`
-
-function splitLocalEntry(s) {
-  const [statusRaw, opRaw] = String(s).split(',');
-  return {
-    status: String(statusRaw || '').trim(),
-    op:     String(opRaw    || '').trim()
-  };
-}
-
-async function loadPrepArray() {
-  try {
-    const txt = await fsp.readFile(KANBAN_PREP_PATH, 'utf8');
-    const arr = JSON.parse(txt);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
-async function savePrepArray(arr) {
-  await fsp.mkdir(path.dirname(KANBAN_PREP_PATH), { recursive: true });
-  await fsp.writeFile(KANBAN_PREP_PATH, JSON.stringify(arr, null, 2), 'utf8');
-}
-
 
 // Timeout p/ chamadas OMIE (evita pendurar quando o BG “trava”)
 async function omiePost(url, payload, timeoutMs = 20000) {
@@ -267,13 +241,13 @@ async function listarOPPagina(pagina, filtros = {}) {
   );
 }
 
-// IMPORTAÇÃO INICIAL DE OPs (Omie → Postgres ou JSON local)
-// === IMPORTAR OPs (Omie → Postgres ou JSON local) ==========================
 app.post('/api/preparacao/importar', express.json(), async (req, res) => {
   const { codigo_local_estoque, data_de, data_ate, max_paginas = 999 } = req.body || {};
   const filtros = { codigo_local_estoque, data_de, data_ate };
 
-  const usarDb = shouldUseDb(req); // usa DB se não for localhost e pool ativo
+  if (!isDbEnabled) {
+    return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
+  }
 
   try {
     let pagina = 1;
@@ -283,80 +257,34 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
 
     while (pagina <= totalPaginas && pagina <= Number(max_paginas)) {
       const lote = await listarOPPagina(pagina, filtros);
-      pagina++; // → AVANÇA PÁGINA
+      pagina++;
 
       totalPaginas   = Number(lote.total_de_paginas || 1);
       totalRegistros = Number(lote.total_de_registros || 0);
       const cadastros = Array.isArray(lote.cadastros) ? lote.cadastros : [];
 
-      if (usarDb) {
-        // ——— MODO POSTGRES ————————————————————————————————
-        for (const op of cadastros) {
-          if (filtros.codigo_local_estoque) {
-            const cod = op?.identificacao?.codigo_local_estoque;
-            if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
-          }
-          await dbQuery('select public.op_upsert_from_payload($1::jsonb)', [op]);
-          importados++;
+      for (const op of cadastros) {
+        if (filtros.codigo_local_estoque) {
+          const cod = op?.identificacao?.codigo_local_estoque;
+          if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
         }
-      } else {
-        // ——— MODO LOCAL (JSON) ———————————————————————————————
-        const arr = await loadPrepArray();
-        const mapByCodigo = new Map(arr.map(x => [x.codigo, x]));
-
-        for (const op of cadastros) {
-          if (filtros.codigo_local_estoque) {
-            const cod = op?.identificacao?.codigo_local_estoque;
-            if (Number(cod) !== Number(filtros.codigo_local_estoque)) continue;
-          }
-
-          const ident = op.identificacao || {};
-          const inf   = op.infAdicionais || {};
-          const etapa = String(inf.cEtapa || '').trim();
-          const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
-
-          const codigoProd = String(ident.cCodIntProd || ident.nCodProduto || '').trim();
-          const opNum      = String(ident.cNumOP || ident.nCodOP || '').trim();
-          if (!codigoProd || !opNum) continue;
-
-          const item = mapByCodigo.get(codigoProd) || {
-            pedido: 'Estoque',
-            codigo: codigoProd,
-            quantidade: Number(ident.nQtde || 1),
-            local: [],
-            estoque: 0,
-            _codigoProd: codigoProd
-          };
-
-          const linha = `${status},${opNum}`;
-          if (!item.local.some(s => s.split(',').slice(0,2).join(',') === `${status},${opNum}`)) {
-            item.local.push(linha);
-          }
-          if (!mapByCodigo.has(codigoProd)) mapByCodigo.set(codigoProd, item);
-          importados++;
-        }
-
-        await savePrepArray([...mapByCodigo.values()]);
+        await dbQuery('select public.op_upsert_from_payload($1::jsonb)', [op]);
+        importados++;
       }
     }
 
-    // ——— Dispara BACKFILL automaticamente (só no Postgres) ————————
+    // backfill de códigos após importar
     let backfill = null;
-    if (usarDb) {
-      try {
-        const r = await fetch(`http://localhost:${process.env.PORT || 5001}/api/preparacao/backfill-codigos`, {
-          method: 'POST'
-        });
-        backfill = await r.json().catch(() => null);
-        console.log('[importar] backfill-codigos →', backfill);
-      } catch (e) {
-        console.error('[importar] backfill-codigos falhou:', e);
-      }
+    try {
+      const r = await fetch(`http://localhost:${process.env.PORT || 5001}/api/preparacao/backfill-codigos`, { method: 'POST' });
+      backfill = await r.json().catch(() => null);
+    } catch (e) {
+      console.error('[importar] backfill-codigos falhou:', e);
     }
 
     return res.json({
       ok: true,
-      mode: usarDb ? 'postgres' : 'local-json',
+      mode: 'postgres',
       total_registros: totalRegistros,
       importados,
       ...(backfill ? { backfill } : {})
@@ -368,81 +296,6 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
   }
 });
 
-
-/**
- * Move uma OP dentro do ARRAY local: procura em todos os itens/local[]
- * e troca "StatusAntigo,OP" por "novoStatus,OP".
- */
-async function moverOpLocalArrayPorEtapa(op, etapa, novoCarimbo /* string ou null */) {
-  const novoStatus = ETAPA_TO_STATUS[String(etapa)];
-  if (!novoStatus) throw new Error(`Etapa inválida: ${etapa}`);
-
-  const arr = await loadPrepArray();
-  let found = false;
-
-  for (const item of arr) {
-    if (!Array.isArray(item.local)) continue;
-    for (let i = 0; i < item.local.length; i++) {
-      const linha = String(item.local[i]);
-      const m = linha.match(/^([^,]+)\s*,\s*([^,]+)(?:,(.*))?$/); // status,op,(carimbos…)
-      if (!m) continue;
-      const [, , opId, resto] = m;
-
-      if (opId === op) {
-        const partes = [novoStatus, op];
-        if (resto && resto.trim()) partes.push(resto.trim());
-        if (novoCarimbo) partes.push(novoCarimbo);
-        item.local[i] = partes.join(',');
-        found = true;
-        break;
-      }
-    }
-    if (found) break;
-  }
-
-  if (!found) {
-    const partes = [novoStatus, op];
-    if (novoCarimbo) partes.push(novoCarimbo);
-    arr.push({
-      pedido: 'Estoque',
-      codigo: 'DESCONHECIDO',
-      quantidade: 1,
-      local: [partes.join(',')],
-      estoque: 0,
-      _codigoProd: null
-    });
-  }
-
-  await savePrepArray(arr);
-  return { ok: true, updated: found, to: novoStatus, etapa: String(etapa) };
-}
-
-
-
-/** Converte o ARRAY em colunas { 'Fila de produção':[], 'Em produção':[], ... } */
-function arrToColumns(arr) {
-  const cols = {
-    'Fila de produção': [],
-    'Em produção': [],
-    'No estoque': []
-  };
-  for (const item of arr) {
-    const base = {
-      pedido: item.pedido,
-      produto: item.codigo,
-      quantidade: item.quantidade,
-      _codigoProd: item._codigoProd
-    };
-    if (Array.isArray(item.local)) {
-      for (const s of item.local) {
-        const { status, op } = splitLocalEntry(s);
-        if (!cols[status]) cols[status] = [];
-        cols[status].push({ op, status, ...base });
-      }
-    }
-  }
-  return cols;
-}
 
 /* lê o MAIOR nº que existir em QUALQUER cartão.local-[]  */
 function nextOpFromKanban () {
@@ -470,62 +323,6 @@ function lerEstoque() {
 function gravarEstoque(obj) {
   fs.writeFileSync(estoquePath, JSON.stringify(obj, null, 2), 'utf8');
 }
-
-
-// 🔁 Genérico: define etapa explicitamente
-// ========= ROTA ÚNICA: mover por etapa (10/20/30/40/60) =========
-app.post('/api/preparacao/op/:op/etapa/:etapa', express.json(), async (req, res) => {
-  const { op, etapa } = req.params;
-  const etapaStr = String(etapa);
-  const status = ETAPA_TO_STATUS[etapaStr];
-  const usarDb = shouldUseDb(req);
-
-  console.log('[MOVE] op=%s etapa=%s status=%s usarDb=%s', op, etapaStr, status, usarDb);
-
-  if (!status) {
-    return res.status(400).json({ error: 'Etapa inválida', etapa: etapaStr });
-  }
-
-  try {
-    if (!usarDb) {
-      // ------- MODO LOCAL (JSON) -------
-      const carimbo = buildStamp('M', req); // Move
-      const result = await moverOpLocalArrayPorEtapa(op, etapaStr, carimbo);
-      console.log('[MOVE][local] ->', result);
-      return res.json({ mode: 'local-json', op, status, etapa: etapaStr, ok: true });
-    }
-
-    // ------- MODO POSTGRES -------
-    // 1) atualiza a etapa da OP
-    const r = await dbQuery('select public.mover_op($1,$2) as ok', [op, status]);
-    const ok = r?.rows?.[0]?.ok === true;
-    console.log('[MOVE][pg] mover_op -> ok=%s', ok);
-
-    // 2) registra evento apenas quando a sua constraint permite (I/F)
-    const usuario = (req.session?.user?.fullName)
-                 || (req.session?.user?.username)
-                 || 'Not-user';
-
-    const tipoEvento =
-      etapaStr === '20' ? 'I' :   // Produzindo -> Início
-      etapaStr === '60' ? 'F' :   // concluido  -> Fim
-      null;
-
-    if (tipoEvento) {
-      await dbQuery(
-        'insert into public.op_event(op,tipo,usuario) values ($1,$2,$3)',
-        [op, tipoEvento, usuario]
-      );
-    } else {
-      console.log('[MOVE][pg] etapa %s não gera evento (constraint aceita só I/F).', etapaStr);
-    }
-
-    return res.json({ mode: 'postgres', op, status, etapa: etapaStr, ok });
-  } catch (err) {
-    console.error('[MOVE] erro:', err);
-    return res.status(500).json({ error: err.message || String(err) });
-  }
-});
 
 
 // valida o token do OMIE presente na query ?token=...
@@ -634,43 +431,66 @@ app.post('/webhooks/omie/op', chkOmieToken, express.json(), async (req, res) => 
 // alias com /api para ficar consistente com suas outras rotas
 app.post('/api/omie/op',      chkOmieToken, express.json(), handleOpWebhook);
 
+// helper único: usa a MESMA lógica da rota principal
+async function alterarEtapaImpl(req, res, etapa) {
+  const op = req.params.op;
+  const isCodInt = !/^\d+$/.test(op);  // se não for só dígito, trata como cCodIntOP
+  const hojeISO = new Date().toISOString().slice(0,10);
 
-// ▶ iniciar → etapa 20 (Produzindo)
-app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
-  req.params.etapa = '20';
-  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/20`);
-});
+  const identificacao = isCodInt ? { cCodIntOP: op } : { nCodOP: Number(op) };
+  const infAdicionais = { cEtapa: etapa };
+  if (etapa === '20') infAdicionais.dDtInicio    = hojeISO;
+  if (etapa === '60') infAdicionais.dDtConclusao = hojeISO;
 
-// ▷ parcial → etapa 30 (teste 1)
-app.post('/api/preparacao/op/:op/parcial', async (req, res) => {
-  req.params.etapa = '30';
-  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/30`);
-});
+  const payload = {
+    call: 'AlterarOrdemProducao',
+    app_key: process.env.OMIE_APP_KEY,
+    app_secret: process.env.OMIE_APP_SECRET,
+    param: [{ identificacao, infAdicionais }]
+  };
 
-// ▷ final → etapa 40 (teste final)
-app.post('/api/preparacao/op/:op/final', async (req, res) => {
-  req.params.etapa = '40';
-  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/40`);
-});
+  // 1) Omie
+  const r = await fetch('https://app.omie.com.br/api/v1/industria/op/', {
+    method: 'POST', headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const j = await r.json();
+  if (!r.ok || j?.faultstring || j?.error) {
+    return res.status(400).json({ ok:false, stage: etapa, omie: j });
+  }
 
-// ✔ concluir → etapa 60 (concluido)
-app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
-  req.params.etapa = '60';
-  return app._router.handle(req, res, () => {}, 'post', `/api/preparacao/op/${req.params.op}/etapa/60`);
-});
+  // 2) Reflete no Postgres
+  const ETAPA_TO_STATUS = { '10':'A Produzir', '20':'Produzindo', '30':'teste 1', '40':'teste final', '60':'concluido' };
+  const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
+  try { await dbQuery('select public.mover_op($1,$2)', [op, status]); } catch (e) { console.warn('[mover_op] falhou:', e.message); }
+
+  // 3) Dispara SSE
+  req.app.get('notifyProducts')?.();
+
+  return res.json({ ok:true, stage: etapa, mode:'pg', omie: j });
+}
+
+app.post('/api/preparacao/op/:op/etapa/:etapa', (req, res) =>
+  alterarEtapaImpl(req, res, String(req.params.etapa)));
+
+app.post('/api/preparacao/op/:op/iniciar', (req, res) =>
+  alterarEtapaImpl(req, res, '30'));
+
+app.post('/api/preparacao/op/:op/concluir', (req, res) =>
+  alterarEtapaImpl(req, res, '60'));
+
+
 
 app.use(require('express').json({ limit: '5mb' }));
 
 app.use('/api/produtos', produtosRouter);
 
 // (opcional) compat: algumas partes do código usam "notifyProducts"
-app.set('notifyProducts', () => {
-  try {
-    if (typeof produtosRouter.__sseBroadcast === 'function') {
-      produtosRouter.__sseBroadcast({ type: 'produtos_changed', at: Date.now() });
-    }
-  } catch {}
+app.set('notifyProducts', (msg) => {
+  const payload = msg || { type: 'produtos_changed', at: Date.now() };
+  try { app.get('sseBroadcast')?.(payload); } catch {}
 });
+
 
 
 
@@ -2404,57 +2224,6 @@ app.get('/api/preparacao/listar', async (req, res) => {
   }
 });
 
-// === Mudar etapa da OP na Omie e refletir no Postgres ===
-app.post('/api/preparacao/op/:op/etapa/:etapa', async (req, res) => {
-  const { op, etapa } = req.params;            // etapa: '10' | '20' | '30' | '40' | '60'
-  const isCodInt = /^P\d+/i.test(op);          // P101102 → cCodIntOP; 10713583228 → nCodOP
-
-  // payload Omie
-  const hojeISO = new Date().toISOString().slice(0,10); // 'AAAA-MM-DD'
-  const identificacao = isCodInt ? { cCodIntOP: op } : { nCodOP: Number(op) };
-  const infAdicionais = { cEtapa: etapa };
-  if (etapa === '20') infAdicionais.dDtInicio    = hojeISO; // marcou início
-  if (etapa === '60') infAdicionais.dDtConclusao = hojeISO; // marcou conclusão
-
-  const payload = {
-    call: 'AlterarOrdemProducao',
-    app_key: process.env.OMIE_APP_KEY,
-    app_secret: process.env.OMIE_APP_SECRET,
-    param: [{ identificacao, infAdicionais }]
-  };
-
-  try {
-    // 1) manda pra Omie
-    const r = await fetch('https://app.omie.com.br/api/v1/industria/op/', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const j = await r.json();
-
-    if (!r.ok || j?.faultstring || j?.error) {
-      return res.status(400).json({ ok:false, stage: etapa, omie: j });
-    }
-
-    // 2) reflete no Postgres pra UI não ficar esperando webhook
-    //    (mapeia etapa → status humano do kanban)
-    const ETAPA_TO_STATUS = { '10':'A Produzir', '20':'Produzindo', '30':'teste 1', '40':'teste final', '60':'concluido' };
-    const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
-    try {
-      await dbQuery('select public.mover_op($1,$2)', [op, status]); // função já usada no server
-    } catch (e) {
-      console.warn('[mover_op] falhou (segue sem travar):', e.message);
-    }
-
-    // 3) avisa o SSE pra atualizar telas abertas
-    req.app.get('notifyProducts')?.(); // seu helper compat, já presente no server. :contentReference[oaicite:2]{index=2}
-
-    return res.json({ ok:true, stage: etapa, mode:'pg', omie:j });
-  } catch (err) {
-    return res.status(500).json({ ok:false, error: err.message || String(err) });
-  }
-});
-
 
 // Comercial: lista itens por coluna a partir do Postgres
 app.get('/api/kanban/comercial/listar', async (req, res) => {
@@ -2494,80 +2263,6 @@ app.get('/api/kanban/comercial/listar', async (req, res) => {
     return res.status(500).json({ error: err.message || 'Erro ao consultar comercial no banco' });
   }
 });
-
-// === Backfill de códigos de produto (Preparação) ===
-// Atualiza op_info.produto_codigo com o "código" (ex.: QDS-..., 04.PP....)
-// a partir das tabelas produtos e, como fallback, op_ordens.
-const backfillCodigos = async (req, res) => {
-  try {
-    // 1) usa a tabela produtos (codigo_prod -> codigo)
-    const r1 = await dbQuery(`
-      update public.op_info oi
-         set produto_codigo = p.codigo,
-             updated_at     = now()
-        from public.produtos p
-       where (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
-         and (
-              p.codigo_prod::text = oi.produto_codigo
-           or p.codigo_prod       = oi.n_cod_prod
-         );
-    `);
-
-    // 2) fallback: usa op_ordens (quando já temos o código salvo nas ordens)
-    const r2 = await dbQuery(`
-      update public.op_info oi
-         set produto_codigo = o.codigo,
-             updated_at     = now()
-        from public.op_ordens o
-       where (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
-         and o.n_cod_prod = oi.n_cod_prod;
-    `);
-
-    const atualizados = (r1.rowCount || 0) + (r2.rowCount || 0);
-    res.json({ ok: true, atualizados });
-  } catch (e) {
-    console.error('[backfill-codigos] erro:', e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-};
-
-// Disponibiliza POST (local) e GET (Render) para facilitar chamar via curl/navegador
-app.post('/api/preparacao/backfill-codigos', backfillCodigos);
-app.get('/api/preparacao/backfill-codigos', backfillCodigos);
-
-// ==== Backfill dos códigos de produto (preenche produto_codigo a partir do op_raw) ====
-// ✅ Backfill/propaga códigos legíveis para as OPs (funciona com GET/POST)
-app.all('/api/preparacao/backfill-codigos', async (req, res) => {
-  try {
-    const sql = `
-      -- Dedup de produtos por codigo_prod (evita múltiplas linhas no join)
-      with dedup as (
-        select codigo_prod::text as codigo_prod,
-               max(codigo) as codigo
-        from public.produtos
-        group by codigo_prod::text
-      ),
-      upd as (
-        update public.op_info oi
-           set produto_codigo = p.codigo,
-               updated_at     = now()
-        from dedup p
-        where (p.codigo_prod = oi.n_cod_prod::text
-               or p.codigo_prod = oi.produto_codigo)
-          and (oi.produto_codigo is null or oi.produto_codigo ~ '^[0-9]+$')
-        returning 1
-      )
-      select count(*)::int as atualizados from upd;
-    `;
-    const { rows } = await dbQuery(sql);
-    return res.json({ ok: true, atualizados: rows?.[0]?.atualizados ?? 0 });
-  } catch (e) {
-    console.error('[backfill-codigos] erro:', e);
-    return res.status(500).json({ ok: false, error: String(e.message || e) });
-  }
-});
-
-
 
 
 // ——— Kanban Preparação – backfill de códigos (1 só rota, rápida, usando produtos já no DB) ———
@@ -2616,82 +2311,6 @@ app.get('/api/preparacao/backfill-codigos', async (req, res) => {
   } catch (e) {
     console.error('[backfill-codigos][GET]', e);
     res.status(500).json({ ok:false, error:String(e.message||e) });
-  }
-});
-
-
-app.get('/api/preparacao/eventos.csv', async (req, res) => {
-  // Reutiliza a rota JSON acima e forma o CSV
-  try {
-    // chama a mesma lógica via fetch interno seria overkill; refaz rápido:
-    const { op, from, to, limit, order } = req.query;
-
-    if (!isLocalRequest(req) && isDbEnabled) {
-      const where = [];
-      const params = [];
-      let p = 1;
-      const lim = Math.min(parseInt(limit || '100', 10), 500);
-      const ord = (String(order || 'desc').toLowerCase() === 'asc') ? 'ASC' : 'DESC';
-
-      if (op) { where.push(`op = $${p++}`); params.push(op.trim().toUpperCase()); }
-      if (from) { where.push(`momento >= $${p++}`); params.push(new Date(from)); }
-      if (to)   { where.push(`momento < ($${p++}::date + interval '1 day')`); params.push(to); }
-
-      const sql = `
-        SELECT id, op, tipo, usuario, momento, payload
-        FROM public.op_event
-        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-        ORDER BY momento ${ord}
-        LIMIT ${lim}
-      `;
-      const { rows } = await dbQuery(sql, params);
-
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', 'attachment; filename="op_eventos.csv"');
-      const header = 'momento,tipo,op,usuario,etapa,pedido,codigo,quantidade\n';
-      const body = rows.map(r => {
-        const p = r.payload || {};
-        const etapa = (p.etapa ?? p.status ?? '');
-        const pedido = (p.pedido ?? '');
-        const codigo = (p.codigo ?? p.produto_codigo ?? '');
-        const quantidade = (p.quantidade ?? p.qtd ?? '');
-        return [
-          new Date(r.momento).toISOString(),
-          r.tipo || '',
-          r.op || '',
-          r.usuario || '',
-          etapa, pedido, codigo, quantidade
-        ].map(v => String(v).replace(/"/g,'""')).map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(',');
-      }).join('\n');
-      return res.send(header + body);
-    }
-
-    // MODO LOCAL → Aproveita a rota JSON local de cima com um mini-fetch interno
-    const axios = require('axios');
-    const url = req.protocol + '://' + req.get('host') + req.path.replace(/\.csv$/, '');
-    const { data } = await axios.get(url, { params: { op, from, to, limit, order } });
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="op_eventos.csv"');
-    const header = 'momento,tipo,op,usuario,etapa,pedido,codigo,quantidade\n';
-    const body = (data.data || []).map(r => {
-      const p = r.payload || {};
-      const etapa = (p.etapa ?? p.status ?? '');
-      const pedido = (p.pedido ?? '');
-      const codigo = (p.codigo ?? p.produto_codigo ?? '');
-      const quantidade = (p.quantidade ?? p.qtd ?? '');
-      return [
-        new Date(r.momento).toISOString(),
-        r.tipo || '',
-        r.op || '',
-        r.usuario || '',
-        etapa, pedido, codigo, quantidade
-      ].map(v => String(v).replace(/"/g,'""')).map(v => /[",\n]/.test(v) ? `"${v}"` : v).join(',');
-    }).join('\n');
-    return res.send(header + body);
-  } catch (err) {
-    console.error('[GET /api/preparacao/eventos.csv] erro:', err);
-    return res.status(500).send('Falha ao gerar CSV');
   }
 });
 
