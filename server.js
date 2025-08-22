@@ -33,28 +33,42 @@ app.get('/api/produtos/stream', (req, res) => {
   res.setHeader('Content-Type',  'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection',    'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');   // evita buffering em proxies (ex.: Render/Nginx)
   if (res.flushHeaders) res.flushHeaders();
 
-  // manda um "hello" para o cliente saber que conectou
+  // dica: instrui reconexão do EventSource em 10s se cair
+  res.write('retry: 10000\n');
+
+  // hello inicial
   res.write(`data: ${JSON.stringify({ type: 'hello' })}\n\n`);
 
-  const client = { res };
+  // heartbeat a cada 15s (comentário SSE não vira onmessage, mas mantém conexão viva)
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch {}
+  }, 15000);
+
+  const client = { res, heartbeat };
   sseClients.add(client);
 
-  req.on('close', () => {
+  // limpeza completa em fechamento/erro
+  const clean = () => {
+    clearInterval(heartbeat);
     sseClients.delete(client);
-  });
+    try { res.end(); } catch {}
+  };
+  req.on('close', clean);
+  res.on('error', clean);
 });
 
-// função para notificar todos os clientes conectados
+// broadcast
 function sseBroadcast(payload) {
   const line = `data: ${JSON.stringify(payload)}\n\n`;
   for (const { res } of sseClients) {
-    try { res.write(line); } catch {}
+    try { res.write(line); } catch {/* cliente já caiu */}
   }
 }
-// deixa acessível para os routers via req.app.get('sseBroadcast')
 app.set('sseBroadcast', sseBroadcast);
+
 // ============================================================================
 
 
