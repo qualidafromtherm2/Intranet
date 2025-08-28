@@ -4074,17 +4074,3 @@ table.tabela td.num {
 }
 
 .iniciar-prod-btn{ margin-bottom:1rem; }
-
-/* ———————————————————————————————
-   Kanban PREPARAÇÃO — colunas estreitas
-   ——————————————————————————————— */
-#conteudo-preparacao .kanban-column {
-  flex: 0 0 190px;
-  max-width: 190px;
-  min-width: 190px;
-}
-
-/* opcional: encosta um pouco as colunas no Prep. */
-#conteudo-preparacao .kanban-board {
-  gap: 12px;            /* estava 20px no global */
-}

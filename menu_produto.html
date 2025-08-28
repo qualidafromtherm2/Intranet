@@ -726,17 +726,16 @@
       <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
     </div>
 
-    <!-- Coluna 3: teste 1 -->
+    <!-- Coluna 3: teste 1
     <div class="kanban-column">
       <div class="kanban-header"><span>teste 1</span></div>
       <ul id="coluna-prep-estoque" class="kanban-list"></ul>
     </div>
 
-    <!-- Coluna 4: teste final -->
     <div class="kanban-column">
       <div class="kanban-header"><span>teste final</span></div>
       <ul id="coluna-prep-teste-final" class="kanban-list"></ul>
-    </div>
+    </div> -->
 
     <!-- Coluna 5: concluido -->
     <div class="kanban-column">
@@ -813,6 +812,361 @@
   <script type="module" src="kanban/kanban_preparacao.js"></script>
 
   <script type="module" src="./kanban/kanban.js" defer></script>
+
+<style>
+  .mp-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin:12px 0 8px; padding:0 4px; color:#e5e7eb;
+  }
+  .mp-header .mp-title{ font-size:1.25rem; font-weight:700; }
+  .mp-header .mp-title .muted{ opacity:.7; font-weight:600; }
+  .mp-header .mp-back{
+    padding:8px 14px; border:0; border-radius:10px;
+    background:#0ea5e9; color:#fff; cursor:pointer;
+    box-shadow:0 6px 14px rgba(14,165,233,.25);
+  }
+  .mp-header .mp-back:hover{ filter:brightness(1.05); }
+
+    .kanban-list.droptarget { outline: 2px dashed #60a5fa; outline-offset: 2px; }
+  .kanban-card.dragging   { opacity: .6; }
+</style>
+
+
+
+<script>
+/* ========= Menu Produto: Kanban Preparação → modo OPs + Header + Drag&Drop ========= */
+(() => {
+  // IDs das 3 colunas deste quadro (iguais ao seu HTML)
+  const IDS = {
+    fila: 'coluna-prep-fila',
+    em:   'coluna-prep-em-producao',
+    conc: 'coluna-prep-concluido'
+  };
+
+  // --- Localização do wrapper certo (3 colunas) e onde inserir o header ---
+  function getBoardWrapper() {
+    // o board que queremos é o dentro da guia "Preparação"
+    const wrapper = document.querySelector('#conteudo-preparacao .kanban-board');
+    return wrapper || null;
+  }
+
+  function ensureHeader() {
+    const wrapper = getBoardWrapper();
+    if (!wrapper) return;
+
+    let hdr = document.getElementById('mp-ops-header');
+    if (!hdr) {
+      hdr = document.createElement('div');
+      hdr.id = 'mp-ops-header';
+      hdr.className = 'mp-header';
+      hdr.style.display = 'none';
+      hdr.innerHTML = `
+        <div class="mp-title">
+          <span class="muted">Produto — </span><span id="mp-ops-code"></span>
+        </div>
+        <button id="mp-ops-exit" class="mp-back">Voltar</button>
+      `;
+      // Insere o header ANTES do grid de colunas (fica entre as abas e os kanbans)
+      wrapper.parentElement.insertBefore(hdr, wrapper);
+      document.getElementById('mp-ops-exit').onclick = exitOpsMode;
+    } else {
+      // se por algum motivo estiver longe, realoca para antes do wrapper
+      if (hdr.nextElementSibling !== wrapper) {
+        hdr.remove();
+        wrapper.parentElement.insertBefore(hdr, wrapper);
+      }
+    }
+  }
+
+  function showHeaderWithCode(codAlfa) {
+    ensureHeader();
+    const hdr  = document.getElementById('mp-ops-header');
+    const code = document.getElementById('mp-ops-code');
+    if (hdr && code) {
+      code.textContent = codAlfa;
+      hdr.style.display = 'flex';
+    }
+  }
+
+  // --- Drag & Drop helpers ---
+  function statusFromUlId(ulId) {
+    if (ulId === IDS.fila) return 'A Produzir';
+    if (ulId === IDS.em)   return 'Produzindo';
+    if (ulId === IDS.conc) return 'concluido';
+    return null;
+  }
+
+  async function moveOpAPI(op, novoStatus) {
+    const resp = await fetch(`/api/preparacao/op/${encodeURIComponent(op)}/mover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: novoStatus })
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || j.ok === false) {
+      throw new Error(j.error || `Falha ao mover OP para ${novoStatus}`);
+    }
+    return j;
+  }
+
+  function attachOpDrag(li) {
+    li.setAttribute('draggable', 'true');
+    li.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer.setData('application/json', JSON.stringify({ op: li.dataset.op || '' }));
+      ev.dataTransfer.effectAllowed = 'move';
+      li.classList.add('dragging');
+    });
+    li.addEventListener('dragend', () => li.classList.remove('dragging'));
+  }
+
+
+  // Encontra o <li> da OP atual no mini-kanban
+function findOpLi(op) {
+  // OPs são do tipo P101101 → seguro usar direto no seletor
+  return document.querySelector(`li.kanban-card[data-op="${op}"]`);
+}
+
+// Liga/desliga o “estado carregando” no cartão da OP
+function setOpLoading(op, on) {
+  const li = findOpLi(op);
+  if (!li) return;
+
+  if (on) {
+    if (!li.classList.contains('loading')) {
+      li.classList.add('loading'); // já tem estilo no seu CSS
+      // spinner (mesmo do Comercial)
+      const spin = document.createElement('i');
+      spin.className = 'fas fa-spinner fa-spin kanban-spinner';
+      spin.dataset.role = 'op-spinner';
+      // barra de progresso (já estilizada no seu CSS)
+      const bar = document.createElement('div');
+      bar.className = 'loading-bar';
+      bar.dataset.role = 'op-loading-bar';
+      const prog = document.createElement('div');
+      prog.className = 'progress';
+      bar.appendChild(prog);
+
+      li.appendChild(spin);
+      li.appendChild(bar);
+    }
+  } else {
+    li.classList.remove('loading');
+    li.querySelectorAll('[data-role="op-spinner"],[data-role="op-loading-bar"]').forEach(n => n.remove());
+  }
+}
+
+function attachDropZone(ul) {
+  if (!ul) return;
+
+  ul.addEventListener('dragover', (ev) => {
+    if (ev.dataTransfer.types.includes('application/json')) {
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      ul.classList.add('droptarget');
+    }
+  });
+
+  ul.addEventListener('dragleave', () => ul.classList.remove('droptarget'));
+
+  ul.addEventListener('drop', async (ev) => {
+    ev.preventDefault();
+    ul.classList.remove('droptarget');
+
+    let data = {};
+    try { data = JSON.parse(ev.dataTransfer.getData('application/json') || '{}'); } catch {}
+    const op = (data.op || '').trim().toUpperCase();
+    const novoStatus = statusFromUlId(ul.id);
+    if (!op || !novoStatus) return;
+
+    // 🔔 feedback visual no cartão enquanto processa
+    setOpLoading(op, true);
+
+    try {
+      await moveOpAPI(op, novoStatus);
+
+      // redesenha o mini-kanban (vai remover o <li> antigo)
+      const alfa = (window.codigoSelecionado || '').trim();
+      const cp   = (window.codigoSelecionadoCP || '').toString().trim() || null;
+      if (alfa) await window.renderOpsBoard(alfa, cp);
+
+      // atualiza painéis globais também
+      try { await window.Preparacao?.refreshPreparacaoUI?.(); } catch {}
+    } catch (e) {
+      // erro: tira o loading do cartão que ficou no lugar
+      setOpLoading(op, false);
+      alert(e.message || e);
+    } finally {
+      // se o <li> antigo ainda existir (ex.: erro), garanta que saiu do loading
+      setOpLoading(op, false);
+    }
+  });
+}
+
+
+  // --- Resolvedor CP→Alfa para filtrar corretamente por produto ---
+  let renderToken = 0;
+  async function buildCpToAlphaMap(buckets) {
+    const all = [...(buckets.fila||[]), ...(buckets.em||[]), ...(buckets.conc||[])];
+    const cps = [...new Set(all.map(c => String(c.produto_codigo ?? '').trim()).filter(s => /^\d+$/.test(s)))];
+    if (!cps.length) return {};
+    const qs = cps.map(cp => 'cp=' + encodeURIComponent(cp)).join('&');
+    try {
+      const r = await fetch('/api/produtos/codigos?' + qs);
+      const j = await r.json();
+      return j?.data || {};
+    } catch { return {}; }
+  }
+  const alphaFromMap = (map, cp) => (map[cp]?.codigo || null);
+
+  // =================== RENDER mini-kanban de OPs (para 1 produto) ===================
+  async function renderOpsBoard(codigoAlfa, codigoNum) {
+    const rid = ++renderToken;
+
+    const ulFila = document.getElementById(IDS.fila);
+    const ulEm   = document.getElementById(IDS.em);
+    const ulConc = document.getElementById(IDS.conc);
+    if (!ulFila || !ulEm || !ulConc) return;
+
+    const resp = await fetch('/api/preparacao/listar', { cache: 'no-store' });
+    const payload = await resp.json();
+    const data   = payload?.data || {};
+    const buckets = {
+      fila: data['A Produzir'] || [],
+      em:   data['Produzindo'] || [],
+      conc: data['concluido']  || []
+    };
+
+    const cpMap   = await buildCpToAlphaMap(buckets);
+    const codAlfa = String(codigoAlfa || '').trim();
+    const codNum  = codigoNum ? String(codigoNum).trim() : null;
+
+    const matchProd = (c) => {
+      const cp   = String(c.produto_codigo ?? '').trim();
+      const alfa = alphaFromMap(cpMap, cp) || cp; // fallback: cp
+      if (codNum  && cp   === codNum)  return true;
+      if (codAlfa && alfa === codAlfa) return true;
+      return false;
+    };
+
+    const dedupeByOp = (arr) => {
+      const seen = new Set();
+      return arr.filter(c => {
+        const k = String(c.op || '').trim();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    };
+
+    let listaFila   = dedupeByOp(buckets.fila.filter(matchProd));
+    let listaEmProd = dedupeByOp(buckets.em.filter(matchProd));
+    let listaConc   = dedupeByOp(buckets.conc.filter(matchProd));
+
+    // prioridade: Em produção > A Produzir
+    const emOps = new Set(listaEmProd.map(x => x.op));
+    listaFila = listaFila.filter(x => !emOps.has(x.op));
+
+    if (rid !== renderToken) return;
+
+    const fragFila = document.createDocumentFragment();
+    const fragEm   = document.createDocumentFragment();
+    const fragConc = document.createDocumentFragment();
+
+    const pushOp = (frag, op) => {
+      const li = document.createElement('li');
+      li.className = 'kanban-card';
+      li.textContent = op || '—';
+      li.dataset.op = op;        // marca como item de OP
+      attachOpDrag(li);          // ativa arraste
+      frag.appendChild(li);
+    };
+
+    if (!listaFila.length)  { const li = document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
+    else { for (const c of listaFila)   pushOp(fragFila, c.op); }
+
+    if (!listaEmProd.length){ const li = document.createElement('li'); li.className='empty'; li.textContent='—'; fragEm.appendChild(li); }
+    else { for (const c of listaEmProd) pushOp(fragEm, c.op); }
+
+    if (!listaConc.length)  { const li = document.createElement('li'); li.className='empty'; li.textContent='—'; fragConc.appendChild(li); }
+    else { for (const c of listaConc)   pushOp(fragConc, c.op); }
+
+    if (rid !== renderToken) return;
+    ulFila.replaceChildren(fragFila);
+    ulEm.replaceChildren(fragEm);
+    ulConc.replaceChildren(fragConc);
+
+    // Header “Produto — … [Voltar]” logo acima do quadro
+    showHeaderWithCode(codAlfa);
+
+    // As 3 colunas passam a aceitar drop
+    attachDropZone(ulFila);
+    attachDropZone(ulEm);
+    attachDropZone(ulConc);
+  }
+
+  // =================== Entrar/Sair do modo OPs ===================
+  function enterOpsMode(codigoAlfa, codigoNum) {
+    window.__mpOpsMode = true;
+    window.codigoSelecionado   = codigoAlfa;
+    window.codigoSelecionadoCP = codigoNum || '';
+    ensureHeader();
+    renderOpsBoard(codigoAlfa, codigoNum);
+  }
+
+  async function renderAggregateBoard() {
+    // Deixa o renderer oficial desenhar o kanban por produtos, se existir:
+    if (typeof window.carregarKanbanPreparacao === 'function') {
+      await window.carregarKanbanPreparacao();
+    } else if (typeof window.initPreparacaoKanban === 'function') {
+      await window.initPreparacaoKanban(true);
+    } else {
+      // Fallback duro
+      location.reload();
+    }
+    // Esconde header
+    const hdr = document.getElementById('mp-ops-header');
+    if (hdr) hdr.style.display = 'none';
+  }
+
+  async function exitOpsMode() {
+    window.__mpOpsMode = false;
+    await renderAggregateBoard(); // volta ao kanban por produtos nesta mesma guia
+  }
+
+  // =================== Clique no cartão de PRODUTO → entra no modo OPs ===================
+  function installClickDelegation() {
+    const wrapper = getBoardWrapper();
+    if (!wrapper) return;
+
+    wrapper.addEventListener('click', (ev) => {
+      const li = ev.target.closest('li.kanban-card');
+      if (!li) return;
+      // se já é item de OP (tem data-op), não reentra
+      if (li.dataset && li.dataset.op) return;
+
+      const alfa = (li.dataset?.codigo || '').trim();
+      if (!alfa) return; // precisa do código alfanumérico
+      const cp   = (li.dataset?.cp || '').trim(); // se tiver, ajuda o matching
+      enterOpsMode(alfa, cp || null);
+    });
+
+    // ESC para sair do modo OPs
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && window.__mpOpsMode) exitOpsMode();
+    });
+  }
+
+  // Exporte as funções úteis se quiser chamá-las de outros scripts
+  window.renderOpsBoard = renderOpsBoard;
+  window.enterOpsMode   = enterOpsMode;
+  window.exitOpsMode    = exitOpsMode;
+  window.showHeaderWithCode = showHeaderWithCode;
+
+  // Boot: garante header e clique
+  ensureHeader();
+  installClickDelegation();
+})();
+</script>
 
 </body>
 </html>

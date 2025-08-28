@@ -2,9 +2,8 @@
 import config from '../config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 
- // Decide em qual endpoint salvar
- const getKanbanEndpoint = destino =>
-   destino === 'preparacao' ? '/api/kanban_preparacao' : '/api/kanban';
+const getKanbanEndpoint = destino =>
+  destino === 'preparacao' ? '/api/preparacao/listar' : '/api/kanban';
 
 // Define a URL-base das chamadas à API: usa window.location.origin
 const API_BASE = window.location.origin;
@@ -807,5 +806,25 @@ for (const tObj of ticketsParaImprimir) {
 
     });
     ulListenersInitialized = true;
+  }
+} 
+
+// ──────────────────────────────────────────────────────────────
+// Persistência do Kanban (stub seguro)
+// Se quiser salvar no servidor depois, é só trocar o console.debug por um fetch.
+// ──────────────────────────────────────────────────────────────
+export async function salvarKanbanLocal(itemsKanban, destino = 'comercial') {
+  try {
+    console.debug('[salvarKanbanLocal]', destino, (itemsKanban && itemsKanban.length) || 0);
+    // Exemplo futuro (quando quiser persistir de verdade):
+    // await fetch(`${window.location.origin}/api/kanban/salvar`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ destino, items: itemsKanban }),
+    // });
+    return true;
+  } catch (err) {
+    console.warn('[salvarKanbanLocal] falha não crítica:', err);
+    return false;
   }
 }

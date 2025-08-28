@@ -1,6 +1,14 @@
 // kanban.js  (substitua todo o arquivo)
 
-import { renderKanbanDesdeJSON, enableDragAndDrop } from './kanban_base.js';
+import {
+  renderKanbanDesdeJSON,
+  enableDragAndDrop,
+  salvarKanbanLocal,
+  gerarEtiqueta,
+  gerarEtiquetaPP,
+  gerarEtiquetaObs
+} from './kanban_base.js';
+
 // kanban.js  – depois dos imports
 let pcpOpBusy = false;      // evita cliques repetidos enquanto processa
 
@@ -502,7 +510,7 @@ const getNextOP = async destino => {
   /* 2) se for preparação, consulta também o arquivo em disco */
   if (destino === 'preparacao') {
     try {
-      const resp = await fetch('/api/kanban_preparacao');
+      const resp = await fetch('/api/preparacao/listar');
       if (resp.ok) {
         const prep = await resp.json();
         prep.forEach(reg => {
@@ -522,31 +530,43 @@ const getNextOP = async destino => {
 };
 
 
-        const primeiroOP = await getNextOP(destino);
 
-
-
-for (let i = 0; i < fator; i++) {
-
-  const numero    = primeiroOP + i;
-  const cCodIntOP = destino === 'preparacao'
-    ? `P${numero}`
-    : String(numero);
+ for (let i = 0; i < fator; i++) {
+   let cCodIntOP = null; // o servidor vai gerar e devolver
 
   /* 3.1) cria OP --------------------------------------------------- */
-  const payloadOP = {
-    call      : 'IncluirOrdemProducao',
-    app_key   : OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
-    param:[{identificacao:{ cCodIntOP, dDtPrevisao:dPrev,
-                             nCodProduto, nQtde:1 }}]
-  };
-  const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
-    method :'POST',
-    headers:{'Content-Type':'application/json'},
-    body   : JSON.stringify(payloadOP)
-  });
-  const jOP = await rOP.json();
+const payloadOP = {
+  call      : 'IncluirOrdemProducao',
+  app_key   : OMIE_APP_KEY,
+  app_secret: OMIE_APP_SECRET,
+  param: [{
+    identificacao: {
+      cCodIntOP,
+      dDtPrevisao: dPrev,            // ← hoje
+      nCodProduto,
+      nQtde: 1,                      // ← sempre 1
+      codigo_local_estoque: COD_LOCAL_PCP  // ← 10564345392 fixo
+    }
+  }]
+};
+
+const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payloadOP)
+});
+const jOP = await rOP.json();
+if (jOP?.used_cCodIntOP) cCodIntOP = jOP.used_cCodIntOP;
+
+if (!rOP.ok || jOP?.faultstring || jOP?.error) {
+  console.error('Falha ao criar OP:', jOP || rOP.statusText);
+  throw new Error(jOP?.faultstring || jOP?.error || 'Falha ao criar OP');
+}
+
+// 🔑 use sempre o código que o servidor gerou
+if (jOP?.used_cCodIntOP) cCodIntOP = jOP.used_cCodIntOP;
+
+
   if (jOP.faultstring || jOP.error) {
     console.warn('Falha OP', cCodIntOP, jOP);
     continue;
@@ -899,39 +919,55 @@ function attachDoubleClick(itemsKanban) {
     }
   });
 }
-
 export async function initKanban() {
-  startComercialSSE?.();           // liga o webhook (com trava anti-duplicado)
-  // Mostra spinner se existir
+  // mostra spinner se existir (já tinha no seu código)
   if (typeof showSpinner === 'function') showSpinner();
 
   try {
-    // carrega SEMPRE do servidor (SQL), tanto local quanto no Render
-    const resp = await fetch(`${API_BASE}/api/kanban/sync`, { cache: 'no-store' });
+    // 1) carrega do SQL: só etapa 80
+    const resp = await fetch(`${API_BASE}/api/comercial/pedidos/kanban`, { cache: 'no-store' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const payload = await resp.json();
 
-    const items = await resp.json();
-    const arr   = Array.isArray(items) ? items : [];
+    // 2) pega apenas a coluna "Pedido aprovado"
+    const aprov = (payload?.colunas?.['Pedido aprovado']) || [];
 
-    // cache e render
+    // 3) adapta cada linha do SQL ao formato do seu renderizador
+    //    - 'pedido'  → numero_pedido (fallback: codigo_pedido)
+    //    - 'codigo'  → produto_codigo_txt
+    //    - 'quantidade' → usa para repetir o status "Pedido aprovado" no array 'local'
+    const arr = aprov.map((r) => {
+      const qtd = Math.max(1, Number(r.quantidade || 1));
+      const local = Array.from({ length: qtd }, () => 'Pedido aprovado'); // p/ (count)
+
+      return {
+        pedido     : String(r.numero_pedido || r.codigo_pedido || ''),
+        codigo     : String(r.produto_codigo_txt || ''),
+        quantidade : qtd,
+        estoque    : 0,                   // saldo pode ser atualizado depois, se quiser
+        local,                            // usado pelo renderKanbanDesdeJSON p/ (count)
+        // campos extras úteis (sem quebrar nada):
+        _codigo_pedido : String(r.codigo_pedido || ''),
+        _descricao     : String(r.produto_descricao || ''),
+        _previsao_br   : r.data_previsao_br || r.data_previsao || null,
+        _valor_total   : r.valor_total_pedido || null,
+      };
+    });
+
+    // 4) cache e render com seus utilitários já existentes
     if (typeof kanbanCache !== 'undefined') kanbanCache = arr;
-    renderKanbanDesdeJSON(arr);
-    enableDragAndDrop(arr);
+    renderKanbanDesdeJSON(arr);      // já usa "Pedido aprovado" → "coluna-comercial"
+    enableDragAndDrop(arr);          // mantém DnD preparado p/ fase 100/101
 
-    // atualiza saldos para “Pedido aprovado” se essa função existir
-    if (typeof atualizarEstoqueKanban === 'function') {
-      await atualizarEstoqueKanban();
-    }
-
-    // ganchos auxiliares já existentes
+    // 5) ganchos auxiliares que você já usa (detalhes, busca, abas…)
     if (typeof attachDoubleClick === 'function') attachDoubleClick(arr, {});
     if (typeof setupAddToggle === 'function') setupAddToggle();
     if (typeof setupProductSearch === 'function') setupProductSearch();
     if (typeof setupTabNavigation === 'function') setupTabNavigation();
 
   } catch (err) {
-    console.error('[KANBAN] Falha ao carregar do servidor:', err);
-    alert('Falha ao carregar o Kanban via /api/kanban/sync. Veja o console.');
+    console.error('[KANBAN] Falha ao carregar do SQL:', err);
+    alert('Falha ao carregar o Kanban do SQL em /api/comercial/pedidos/kanban.');
   } finally {
     if (typeof hideSpinner === 'function') hideSpinner();
   }
@@ -941,7 +977,7 @@ export async function initKanban() {
 /* ------------------------------------------------------------------ */
 /* 2) Nova função assíncrona                                          */
 async function carregarPosicaoEstoque() {
-  const OMIE_URL   = `${API_BASE}/api/omie/estoque/consulta`;
+  const OMIE_URL   = `${API_BASE}/api/omie/estoque/resumo`;
   const HOJE       = new Date().toLocaleDateString('pt-BR'); // 26/06/2025 → dd/mm/yyyy
   const POR_PAGINA = 50;
 
