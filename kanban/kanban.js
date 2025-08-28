@@ -350,17 +350,17 @@ function setupProductSearch() {
         return;
       }
       try {
-        const url = `/api/produtos/search?q=${encodeURIComponent(term)}&limit=40`;
-        const resp = await fetch(url, { credentials: 'include' });
-        const json = await resp.json();
-        const items = json?.items || [];
+const url = `/api/produtos/search?q=${encodeURIComponent(term)}&limit=40`;
+const resp = await fetch(url, { credentials: 'include' });
+const json = await resp.json();
+const items = json?.data || [];   // <-- era json.items
 
-        results.innerHTML = '';
-        items.forEach(p => {
-          const li = document.createElement('li');
-          li.classList.add('result-item');
-          li.textContent = `${p.codigo} — ${p.descricao}`;
-          li.dataset.desc = p.descricao;
+results.innerHTML = '';
+items.forEach(p => {
+  const li = document.createElement('li');
+  li.classList.add('result-item');
+  li.textContent = `${p.codigo} — ${p.descricao}`;
+  li.dataset.desc = p.descricao;
 
           li.addEventListener('click', ev => {
             ev.preventDefault();

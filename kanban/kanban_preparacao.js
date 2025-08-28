@@ -356,22 +356,29 @@ class ProductSearch {
     this.debounceTimeouts.set(timeoutKey, debounceId);
   }
 
-  async performSearch(query, list) {
-    list.innerHTML = '<li>Carregando catálogo…</li>';
-    try {
-      await this.cache.buildTipo03Cache();
-      const resultados = this.cache.tipo03Cache
-        .filter(produto =>
-          produto.codigo.toLowerCase().includes(query) ||
-          (produto.descricao || '').toLowerCase().includes(query)
-        )
-        .sort((a, b) => a.codigo.localeCompare(b.codigo));
+async performSearch(query, list) {
+  list.innerHTML = '<li>Carregando catálogo…</li>';
+  try {
+    const r = await fetch(`/api/produtos/search?q=${encodeURIComponent(query)}&limit=40`, {
+      credentials: 'include'
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
 
-      this.renderSearchResults(resultados, list);
-    } catch (err) {
-      list.innerHTML = `<li class="error">Erro: ${err.message}</li>`;
-    }
+    // Normaliza para o formato esperado pelo renderizador
+    const resultados = (j.data || j.items || []).map(p => ({
+      codigo: p.codigo,
+      descricao: p.descricao
+    }))
+    .sort((a, b) => a.codigo.localeCompare(b.codigo));
+
+    this.renderSearchResults(resultados, list);
+  } catch (e) {
+    console.error('[PCP buscar] erro:', e);
+    list.innerHTML = '<li class="error">Erro ao buscar</li>';
   }
+}
+
 
   handleResultClick(event, input, list) {
     const li = event.target.closest('.result-item');
