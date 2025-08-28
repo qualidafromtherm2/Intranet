@@ -543,20 +543,37 @@ app.get('/api/produtos/search', async (req, res) => {
 
     // Busca por código OU pela descrição (case/accent-insensitive)
     // Usa índices: idx_produtos_codigo, idx_produtos_desc_trgm
-    const { rows } = await pool.query(
-      `
-      SELECT codigo, descricao, tipo
-      FROM public.produtos
-      WHERE codigo ILIKE $1
-         OR unaccent(descricao) ILIKE unaccent($2)
-      ORDER BY
-        -- força códigos que começam com q a aparecerem antes
-        (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
-        codigo
-      LIMIT $4
-      `,
-      [`%${q}%`, `%${q}%`, `${q}%`, limit]
-    );
+// SUBSTITUA o SQL dentro de GET /api/produtos/search por isto:
+const { rows } = await pool.query(
+  `
+  WITH m AS (
+    SELECT p.codigo, p.descricao, p.tipo, 1 AS prio
+      FROM public.produtos p
+     WHERE p.codigo ILIKE $1
+        OR unaccent(p.descricao) ILIKE unaccent($2)
+
+    UNION ALL
+
+    SELECT v.codigo, v.descricao, NULL::text AS tipo, 2 AS prio
+      FROM public.vw_lista_produtos v
+     WHERE v.codigo ILIKE $1
+        OR unaccent(v.descricao) ILIKE unaccent($2)
+  ),
+  dedup AS (
+    SELECT DISTINCT ON (codigo) codigo, descricao, tipo, prio
+      FROM m
+     ORDER BY codigo, prio        -- prefere linha da tabela (prio=1) se existir
+  )
+  SELECT codigo, descricao, tipo
+    FROM dedup
+   ORDER BY
+     (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
+     codigo
+   LIMIT $4
+  `,
+  [`%${q}%`, `%${q}%`, `${q}%`, limit]
+);
+
 
     res.json({ ok: true, total: rows.length, data: rows });
   } catch (err) {
@@ -1822,71 +1839,160 @@ app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
 });
 
 //------------------------------------------------------------------
-// Armazéns → Almoxarifado (POSIÇÃO DE ESTOQUE)
+// Armazéns → Almoxarifado (LENDO DO POSTGRES)
 //------------------------------------------------------------------
-app.post(
-  '/api/armazem/almoxarifado',
-  express.json(),                     // garante req.body parseado
-async (req, res) => {
+app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   try {
-    // 1) CHAMADA RÁPIDA: pega só o total ---------------------------
-    const payload1 = {
-      call : 'ListarPosEstoque',
-      app_key   : OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param : [{
-        nPagina: 1,
-        nRegPorPagina: 1,                    // ← apenas 1 registro
-        dDataPosicao: new Date().toLocaleDateString('pt-BR'),
-        cExibeTodos : 'N',
-        codigo_local_estoque : 10408201806
-      }]
-    };
-    const r1 = await omieCall(
-      'https://app.omie.com.br/api/v1/estoque/consulta/',
-      payload1
-    );
-    const total = r1.nTotRegistros || 50;   // 872 no seu caso
+    const { rows } = await pool.query(`
+      SELECT
+        local,
+        produto_codigo   AS codigo,
+        produto_descricao AS descricao,
+        estoque_minimo   AS min,
+        fisico,
+        reservado,
+        saldo,
+        cmc
+      FROM v_almoxarifado_grid
+      ORDER BY local, produto_codigo
+    `);
 
-    // 2) CHAMADA COMPLETA: traz *todos* os itens de uma vez ---------
-    const payload2 = {
-      ...payload1,
-      param : [{
-        ...payload1.param[0],
-        nPagina: 1,
-        nRegPorPagina: total                // ← agora 872
-      }]
-    };
-    const r2 = await omieCall(
-      'https://app.omie.com.br/api/v1/estoque/consulta/',
-      payload2
-    );
-
-    // 3) Filtra campos p/ front ------------------------------------
-    const dados = (r2.produtos || []).map(p => ({
-      codigo    : p.cCodigo,
-      descricao : p.cDescricao,
-      min       : p.estoque_minimo,
-      fisico    : p.fisico,
-      reservado : p.reservado,
-      saldo     : p.nSaldo,
-      cmc       : p.nCMC
+    // normaliza números (o front soma/filtra)
+    const dados = rows.map(r => ({
+      codigo   : r.codigo || '',
+      descricao: r.descricao || '',
+      min      : Number(r.min)       || 0,
+      fisico   : Number(r.fisico)    || 0,
+      reservado: Number(r.reservado) || 0,
+      saldo    : Number(r.saldo)     || 0,
+      cmc      : Number(r.cmc)       || 0,
     }));
 
-    res.json({
-      ok: true,
-      pagina: 1,
-      totalPaginas: 1,      // sempre 1 agora
-      dados
-    });
+    res.json({ ok: true, pagina: 1, totalPaginas: 1, dados });
+  } catch (err) {
+    console.error('[almoxarifado SQL]', err);
+    res.status(500).json({ ok:false, error: String(err.message || err) });
+  }
+});
+
+//------------------------------------------------------------------
+// Admin → Importar posição de estoque da Omie para o Postgres
+//------------------------------------------------------------------
+app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
+  const localCodigo = String(req.body?.local || 10408201806); // seu padrão atual
+  const dataBR = req.body?.data || new Date().toLocaleDateString('pt-BR'); // dd/mm/aaaa
+
+  const brToISO = (ddmmyyyy) => {
+    const [d,m,y] = ddmmyyyy.split('/');
+    return `${y}-${m}-${d}`; // YYYY-MM-DD
+  };
+  const dataISO = brToISO(dataBR);
+
+  const payloadBase = {
+    call: 'ListarPosEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      nPagina: 1,
+      nRegPorPagina: 1,                 // 1ª passada: só pra buscar total
+      dDataPosicao: dataBR,
+      cExibeTodos : 'N',
+      codigo_local_estoque: Number(localCodigo)
+    }]
+  };
+
+  try {
+    // 1) total de registros
+    const r1 = await omieCall('https://app.omie.com.br/api/v1/estoque/consulta/', payloadBase);
+    const total = r1.nTotRegistros || 200;
+
+    // 2) pega tudo de uma vez
+    const payloadAll = {
+      ...payloadBase,
+      param: [{ ...payloadBase.param[0], nPagina: 1, nRegPorPagina: total }]
+    };
+    const r2 = await omieCall('https://app.omie.com.br/api/v1/estoque/consulta/', payloadAll);
+
+    const produtos = Array.isArray(r2.produtos) ? r2.produtos : [];
+    if (!produtos.length) return res.json({ ok:true, imported: 0, msg: 'Sem itens retornados pela Omie.' });
+
+    // 3) transação
+    const cli = await pool.connect();
+    try {
+      await cli.query('BEGIN');
+
+      // garante local no catálogo (nome é opcional; ajuste se quiser)
+      await cli.query(
+        `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
+         VALUES ($1, $2, TRUE, now())
+         ON CONFLICT (local_codigo)
+         DO UPDATE SET nome = EXCLUDED.nome, ativo = TRUE, updated_at = now()`,
+        [localCodigo, 'Almoxarifado']
+      );
+
+      // UPSERT por item
+      const sqlUpsert = `
+        INSERT INTO omie_estoque_posicao (
+          data_posicao, ingested_at, local_codigo,
+          omie_prod_id, cod_int, codigo, descricao,
+          preco_unitario, saldo, cmc, pendente, estoque_minimo, reservado, fisico
+        ) VALUES (
+          $1::date, now(), $2,
+          $3, $4, $5, $6,
+          $7, $8, $9, $10, $11, $12, $13
+        )
+        ON CONFLICT ON CONSTRAINT uq_posicao_uni
+        DO UPDATE SET
+          descricao      = EXCLUDED.descricao,
+          preco_unitario = EXCLUDED.preco_unitario,
+          saldo          = EXCLUDED.saldo,
+          cmc            = EXCLUDED.cmc,
+          pendente       = EXCLUDED.pendente,
+          estoque_minimo = EXCLUDED.estoque_minimo,
+          reservado      = EXCLUDED.reservado,
+          fisico         = EXCLUDED.fisico,
+          ingested_at    = now()
+      `;
+
+      let count = 0;
+      for (const p of produtos) {
+        // campos retornados pela Omie (ajustados pra número)
+        const row = {
+          omie_prod_id   : Number(p.nCodProd) || 0,
+          cod_int        : p.cCodInt || null,
+          codigo         : p.cCodigo || null,
+          descricao      : p.cDescricao || '',
+          preco_unitario : Number(p.nPrecoUnitario) || 0,
+          saldo          : Number(p.nSaldo) || 0,
+          cmc            : Number(p.nCMC) || 0,
+          pendente       : Number(p.nPendente) || 0,
+          estoque_minimo : Number(p.estoque_minimo) || 0,
+          reservado      : Number(p.reservado) || 0,
+          fisico         : Number(p.fisico) || 0,
+        };
+
+        await cli.query(sqlUpsert, [
+          dataISO, localCodigo,
+          row.omie_prod_id, row.cod_int, row.codigo, row.descricao,
+          row.preco_unitario, row.saldo, row.cmc, row.pendente, row.estoque_minimo, row.reservado, row.fisico
+        ]);
+        count++;
+      }
+
+      await cli.query('COMMIT');
+      res.json({ ok:true, imported: count, local: localCodigo, data_posicao: dataISO });
+    } catch (e) {
+      await cli.query('ROLLBACK');
+      throw e;
+    } finally {
+      cli.release();
+    }
 
   } catch (err) {
-    console.error('[armazem/almoxarifado]', err);
-    res.status(500).json({ ok:false, error:'Falha ao consultar Omie' });
+    console.error('[admin/sync/almox]', err);
+    res.status(500).json({ ok:false, error: String(err.message || err) });
   }
-}
-
-);
+});
 
 //------------------------------------------------------------------
 // Armazéns → Produção (POSIÇÃO DE ESTOQUE)
