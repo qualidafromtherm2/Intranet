@@ -184,27 +184,16 @@ function setupAddToggle() {
 
   const btn     = col.querySelector('.add-btn');
   const input   = col.querySelector('.add-search');
-  const results = col.querySelector('.add-results');   // 🔹  ADICIONE ESTA LINHA
+  const results = col.querySelector('.add-results');
 
   btn.addEventListener('click', async () => {
     col.classList.toggle('search-expand');
     if (!col.classList.contains('search-expand')) return;
-
     setTimeout(() => input.focus(), 100);
-
-    /* —— novo bloco: carrega cache na 1ª vez —— */
-    if (!productsCache) {
-      results.innerHTML = '<li>Carregando produtos…</li>';
-      try {
-        await loadProductsCache();          // função de cache
-        results.innerHTML = '';             // limpa lista temporária
-      } catch (err) {
-        results.innerHTML =
-          `<li class="error">Falha ao carregar: ${err.message}</li>`;
-      }
-    }
+    results.innerHTML = ''; // nada de pré-carregar
   });
 }
+
 
 /* Fecha o painel de busca: remove a classe, limpa UL e zera o input */
  function collapseSearchPanel() {
@@ -351,24 +340,54 @@ function setupProductSearch() {
   const input   = col.querySelector('.add-search');
   const results = col.querySelector('.add-results');
 
-  /* debounced filtering */
   let debounce;
-input.addEventListener('input', () => {
-  clearTimeout(debounce);
-  debounce = setTimeout(() => {
-    const term = input.value.trim().toLowerCase();
-    if (!productsCache || term.length < 2) {
-      results.innerHTML = '';
-      return;
-    }
-    const found = productsCache
-      .filter(p => p.codigo.toLowerCase().includes(term))
-      .slice(0, 40);                // mostra no máx. 40 itens
-    renderSearchResults(found, results);
-  }, 150);
-});
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      const term = input.value.trim();
+      if (term.length < 2) {
+        results.innerHTML = '';
+        return;
+      }
+      try {
+        const url = `/api/produtos/search?q=${encodeURIComponent(term)}&limit=40`;
+        const resp = await fetch(url, { credentials: 'include' });
+        const json = await resp.json();
+        const items = json?.items || [];
 
+        results.innerHTML = '';
+        items.forEach(p => {
+          const li = document.createElement('li');
+          li.classList.add('result-item');
+          li.textContent = `${p.codigo} — ${p.descricao}`;
+          li.dataset.desc = p.descricao;
+
+          li.addEventListener('click', ev => {
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            input.value = `${p.codigo} — ${p.descricao}`;
+
+            // recolhe a caixa
+            results.innerHTML = '';
+            col.classList.remove('search-expand');
+
+            // troca para a aba PCP para montar a lista de peças
+            document.querySelector(
+              '#kanbanTabs .main-header-link[data-kanban-tab="pcp"]'
+            )?.click();
+          });
+
+          results.appendChild(li);
+        });
+      } catch (err) {
+        console.error('[autocomplete produtos]', err);
+        results.innerHTML = '<li class="error">Erro ao buscar</li>';
+      }
+    }, 150);
+  });
 }
+
 
 
 function filtrarPorEstoque() {
