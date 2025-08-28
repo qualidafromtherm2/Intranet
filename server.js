@@ -446,15 +446,90 @@ app.post('/webhooks/omie/op', chkOmieToken, express.json(), async (req, res) => 
   }
 });
 
-// ——— Webhook de Pedidos de Venda (stub de teste) ———
+// ——— Webhook de Pedidos de Venda (OMIE Connect 2.0) ———
 app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
-  chkOmieToken,
+  chkOmieToken,                     // valida ?token=...
   express.json(),
-  (req, res) => {
-    console.log('[WEBHOOK-PEDIDOS][TESTE] body=', JSON.stringify(req.body).slice(0,700));
-    return res.json({ ok: true, stub: true, received: !!req.body });
+  async (req, res) => {
+    const usarDb = true;           // webhook só faz sentido com DB
+    const body   = req.body || {};
+    const ev     = body.event || body;
+
+    // Campos que podem vir no Connect 2.0:
+    const etapa          = String(ev.etapa || ev.cEtapa || '').trim();   // ex.: "80", "20"…
+    const idPedido       = ev.idPedido || ev.codigo_pedido || ev.codigoPedido;
+    const numeroPedido   = ev.numeroPedido || ev.numero_pedido;
+
+    const ret = { ok:true, updated:0, upserted:false, etapa: etapa || null,
+                  idPedido: idPedido || null, numeroPedido: numeroPedido || null };
+
+    try {
+      // 1) Atualiza etapa rapidamente (reflexo imediato no Kanban /api/comercial/pedidos/kanban)
+      if (usarDb && (idPedido || numeroPedido) && etapa) {
+        if (idPedido) {
+          const r = await pool.query(
+            `UPDATE public.pedidos_venda
+               SET etapa = $1, updated_at = now()
+             WHERE codigo_pedido = $2`,
+            [etapa, idPedido]
+          );
+          ret.updated += r.rowCount|0;
+        }
+        if (!ret.updated && numeroPedido) {
+          const r = await pool.query(
+            `UPDATE public.pedidos_venda
+               SET etapa = $1, updated_at = now()
+             WHERE numero_pedido = $2`,
+            [etapa, String(numeroPedido)]
+          );
+          ret.updated += r.rowCount|0;
+        }
+      }
+
+      // 2) Busca o pedido completo na OMIE e faz upsert (cabecalho + itens)
+      //    Isso garante que o SQL reflita descontos, valores, itens etc.
+      try {
+        const param = [];
+        if (numeroPedido)       param.push({ numero_pedido: String(numeroPedido) });
+        else if (idPedido)      param.push({ codigo_pedido: Number(idPedido) });
+
+        if (param.length) {
+          const payload = {
+            call: 'ConsultarPedido',
+            app_key:    process.env.OMIE_APP_KEY,
+            app_secret: process.env.OMIE_APP_SECRET,
+            param
+          };
+
+          const j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload, 20000);
+          // normaliza em lista:
+          const ped = Array.isArray(j?.pedido_venda_produto)
+                        ? j.pedido_venda_produto
+                        : (j?.pedido_venda_produto ? [j.pedido_venda_produto] : []);
+          if (ped.length) {
+            // usa sua função de upsert em lote que já criamos no Postgres:
+            //   SELECT public.pedidos_upsert_from_list($1::jsonb)
+            await dbQuery('select public.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
+            ret.upserted = true;
+          }
+        }
+      } catch (e) {
+        // Não derruba o webhook se a OMIE estiver indisponível;
+        // ao menos a etapa já ficou correta no SQL.
+        ret.upsert_error = String(e?.message || e);
+      }
+
+      // 3) Notifica a UI (SSE) para recarregar o quadro, se você quiser “ao vivo”
+      try { req.app.get('sseBroadcast')?.({ type:'produtos_changed', at: Date.now() }); } catch {}
+
+      return res.json(ret);
+    } catch (err) {
+      console.error('[webhooks/omie/pedidos] erro:', err);
+      return res.status(500).json({ ok:false, error:String(err?.message||err) });
+    }
   }
 );
+
 
 
 // alias com /api para ficar consistente com suas outras rotas
