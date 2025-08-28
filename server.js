@@ -530,49 +530,40 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
   }
 );
 
-// 🔎 Busca de produtos direto no Postgres
+
+// --- Buscar produtos no Postgres (autocomplete do PCP) ---
 app.get('/api/produtos/search', async (req, res) => {
   try {
-    const q     = String(req.query.q || '').trim();
-    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
-    const tipo  = (req.query.tipo || '').trim();   // ex.: '04' se quiser filtrar acabados
+    const q = (req.query.q || '').trim();
+    const limit = Math.min(parseInt(req.query.limit ?? '40', 10) || 40, 100);
 
-    if (q.length < 2) return res.json({ ok: true, items: [] });
-
-    const values = [];
-    let i = 1;
-
-    // match por código OU descrição (case/acentos-insensitive)
-    let where = `(codigo ILIKE $${i} OR unaccent(descricao) ILIKE unaccent($${i}))`;
-    values.push(`%${q}%`); i++;
-
-    if (tipo) {
-      where += ` AND tipo = $${i}`;
-      values.push(tipo); i++;
+    if (q.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Informe ?q= com pelo menos 2 caracteres' });
     }
 
-    values.push(limit);
-
-    const sql = `
-      SELECT codigo, descricao
+    // Busca por código OU pela descrição (case/accent-insensitive)
+    // Usa índices: idx_produtos_codigo, idx_produtos_desc_trgm
+    const { rows } = await pool.query(
+      `
+      SELECT codigo, descricao, tipo
       FROM public.produtos
-      WHERE ${where}
+      WHERE codigo ILIKE $1
+         OR unaccent(descricao) ILIKE unaccent($2)
       ORDER BY
-        -- prioriza quem começa com o termo, depois contém:
-        (CASE WHEN lower(codigo) LIKE lower($1) THEN 0 ELSE 1 END),
-        (CASE WHEN lower(descricao) LIKE lower($1) THEN 0 ELSE 1 END),
+        -- força códigos que começam com q a aparecerem antes
+        (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
         codigo
-      LIMIT $${i}
-    `;
+      LIMIT $4
+      `,
+      [`%${q}%`, `%${q}%`, `${q}%`, limit]
+    );
 
-    const { rows } = await pg.query(sql, values);
-    res.json({ ok: true, items: rows });
+    res.json({ ok: true, total: rows.length, data: rows });
   } catch (err) {
-    console.error('[GET /api/produtos/search]', err);
+    console.error('[GET /api/produtos/search] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
-
 
 // alias com /api para ficar consistente com suas outras rotas
 app.post('/api/omie/op',      chkOmieToken, express.json(), handleOpWebhook);
