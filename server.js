@@ -28,6 +28,9 @@ const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
 // ==== SSE (Server-Sent Events) para avisar o front ao vivo ==================
 const sseClients = new Set();
+// polyfill de fetch (Node < 18)
+const safeFetch = (...args) =>
+  (global.fetch ? global.fetch(...args) : import('node-fetch').then(({ default: f }) => f(...args)));
 
 app.get('/api/produtos/stream', (req, res) => {
   res.setHeader('Content-Type',  'text/event-stream');
@@ -58,6 +61,21 @@ app.get('/api/produtos/stream', (req, res) => {
   };
   req.on('close', clean);
   res.on('error', clean);
+});
+
+// Conexão Postgres (Render)
+const { Pool } = require('pg');
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL, // no Render, já vem setado
+  ssl: { rejectUnauthorized: false }          // necessário no Render
+});
+
+// opcional: log de saúde
+pool.query('SELECT 1').then(() => {
+  console.log('[pg] conectado');
+}).catch(err => {
+  console.error('[pg] falha conexão:', err?.message || err);
 });
 
 // broadcast
@@ -428,6 +446,17 @@ app.post('/webhooks/omie/op', chkOmieToken, express.json(), async (req, res) => 
   }
 });
 
+// ——— Webhook de Pedidos de Venda (stub de teste) ———
+app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
+  chkOmieToken,
+  express.json(),
+  (req, res) => {
+    console.log('[WEBHOOK-PEDIDOS][TESTE] body=', JSON.stringify(req.body).slice(0,700));
+    return res.json({ ok: true, stub: true, received: !!req.body });
+  }
+);
+
+
 // alias com /api para ficar consistente com suas outras rotas
 app.post('/api/omie/op',      chkOmieToken, express.json(), handleOpWebhook);
 
@@ -448,6 +477,10 @@ async function alterarEtapaImpl(req, res, etapa) {
     app_secret: process.env.OMIE_APP_SECRET,
     param: [{ identificacao, infAdicionais }]
   };
+
+
+      // 🔹 LOGA O PAYLOAD ANTES DE ENVIAR
+    console.log('[OMIE payload]', JSON.stringify(payload, null, 2));
 
   // 1) Omie
   const r = await fetch('https://app.omie.com.br/api/v1/industria/op/', {
@@ -473,12 +506,342 @@ async function alterarEtapaImpl(req, res, etapa) {
 app.post('/api/preparacao/op/:op/etapa/:etapa', (req, res) =>
   alterarEtapaImpl(req, res, String(req.params.etapa)));
 
-app.post('/api/preparacao/op/:op/iniciar', (req, res) =>
-  alterarEtapaImpl(req, res, '30'));
+// === Preparação: INICIAR produção (mover_op + overlay "Produzindo") =========
+app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
 
-app.post('/api/preparacao/op/:op/concluir', (req, res) =>
-  alterarEtapaImpl(req, res, '60'));
+  const STATUS_UI   = 'Produzindo';                     // ← chave que a UI usa
+  const TRY_TARGETS = ['Produzindo', 'Em produção', '30'];
 
+  const out = { ok:false, op, attempts:[], before:null, after:null, overlay:null, errors:[] };
+
+  try {
+    // estado "antes"
+    try {
+      const b = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view
+          WHERE op = $1
+          LIMIT 1`, [op]
+      );
+      out.before = b.rows;
+    } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
+
+    // 1) tenta mover na base oficial
+    let changed = false;
+    let beforeStatus = out.before?.[0]?.status || null;
+
+    for (const tgt of TRY_TARGETS) {
+      try {
+        await pool.query('SELECT mover_op($1,$2)', [op, tgt]);
+        out.attempts.push({ via:'mover_op', target:tgt, ok:true });
+
+        // revalida a view
+        const chk = await pool.query(
+          `SELECT kanban_coluna FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]
+        );
+        const now = chk.rows[0]?.kanban_coluna;
+        if (now && now !== beforeStatus) { changed = true; break; }
+      } catch (e) {
+        out.attempts.push({ via:'mover_op', target:tgt, ok:false, err:String(e?.message||e) });
+        out.errors.push('[mover_op '+tgt+'] '+(e?.message||e));
+      }
+    }
+
+    // 2) FORCE overlay = "Produzindo" (mesmo se a view já mudou; é idempotente)
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+          op         text PRIMARY KEY,
+          status     text NOT NULL,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      const up = await pool.query(
+        `INSERT INTO public.op_status_overlay (op, status, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (op) DO UPDATE
+           SET status = EXCLUDED.status,
+               updated_at = now()`,
+        [op, STATUS_UI]
+      );
+      out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
+    } catch (e) {
+      out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
+      out.errors.push('[overlay] '+(e?.message||e));
+    }
+
+    // 3) estado "depois"
+    try {
+      const a = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view
+          WHERE op = $1
+          LIMIT 1`, [op]
+      );
+      out.after = a.rows;
+    } catch (e) { out.errors.push('[after] '+(e?.message||e)); }
+
+    out.ok = true;
+    return res.json(out);
+
+  } catch (err) {
+    out.errors.push(String(err?.message||err));
+    return res.status(500).json(out);
+  }
+});
+
+
+// GET /api/produtos/codigos?cp=10569202060&cp=10634218771
+// (compat: também aceita ?n=...)
+app.get('/api/produtos/codigos', async (req, res) => {
+  try {
+    let cps = req.query.cp ?? req.query.n;
+    if (!cps) return res.status(400).json({ ok:false, error:'informe ?cp=...' });
+
+    // aceita "cp=1&cp=2" ou "cp=1,2"
+    if (typeof cps === 'string') cps = cps.split(',').map(s => s.trim()).filter(Boolean);
+    if (!Array.isArray(cps)) cps = [String(cps)];
+
+    const wanted = [...new Set(cps.map(String))].filter(s => /^\d+$/.test(s));
+    if (wanted.length === 0) return res.json({ ok:true, data:{} });
+
+    const q = await pool.query(
+      `
+      WITH want AS (SELECT UNNEST($1::text[]) AS cp)
+      SELECT
+        w.cp AS codigo_produto,
+        COALESCE(v.codigo, p.codigo)     AS codigo,
+        COALESCE(v.descricao, p.descricao) AS descricao
+      FROM want w
+      LEFT JOIN public.vw_lista_produtos v ON v.codigo_produto::text = w.cp
+      LEFT JOIN public.produtos         p ON p.codigo_prod::text     = w.cp
+      `,
+      [wanted]
+    );
+
+    const map = {};
+    for (const r of q.rows) {
+      map[r.codigo_produto] = { codigo: r.codigo || null, descricao: r.descricao || null };
+    }
+    return res.json({ ok:true, data: map });
+  } catch (err) {
+    console.error('[api/produtos/codigos] erro:', err);
+    return res.status(500).json({ ok:false, error: String(err?.message || err) });
+  }
+});
+
+
+// GET /api/produtos/por-codigo?c=04.PP.N.51005&c=07.MP.N.31400
+app.get('/api/produtos/por-codigo', async (req, res) => {
+  try {
+    let cs = req.query.c;
+    if (!cs) return res.status(400).json({ ok:false, error:'informe ?c=...' });
+
+    if (typeof cs === 'string') cs = cs.split(',').map(s => s.trim()).filter(Boolean);
+    if (!Array.isArray(cs)) cs = [String(cs)];
+
+    const wanted = [...new Set(cs.map(String))];
+    if (wanted.length === 0) return res.json({ ok:true, data:{} });
+
+    const q = await pool.query(
+      `
+      WITH want AS (SELECT UNNEST($1::text[]) AS c)
+      SELECT
+        w.c AS codigo,
+        COALESCE(v.descricao, p.descricao) AS descricao
+      FROM want w
+      LEFT JOIN public.vw_lista_produtos v ON v.codigo = w.c
+      LEFT JOIN public.produtos         p ON p.codigo = w.c
+      `,
+      [wanted]
+    );
+
+    const map = {};
+    for (const r of q.rows) {
+      map[r.codigo] = { descricao: r.descricao || null };
+    }
+    return res.json({ ok:true, data: map });
+  } catch (err) {
+    console.error('[api/produtos/por-codigo] erro:', err);
+    return res.status(500).json({ ok:false, error: String(err?.message || err) });
+  }
+});
+
+// === Preparação: CONCLUIR produção (Omie + SQL + overlay, sempre 200) ======
+app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
+
+  // chaves de status aceitas pela sua base/view
+  const STATUS_UI      = 'concluido';
+  const TRY_TARGETS    = ['concluido', 'Concluído', '60', '80'];
+
+  // datas
+  const pad2 = n => String(n).padStart(2,'0');
+  const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+  const parseData = (s) => {
+    if (!s) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
+    return null;
+  };
+
+  const qtd = Math.max(1, Number(req.body?.quantidade ?? req.body?.nQtdeProduzida ?? 1));
+  const dt  = parseData(req.body?.data || req.body?.dDtConclusao) || new Date();
+  const dDtConclusao = fmtDDMMYYYY(dt);
+
+  const out = { ok:false, op, omie:{}, attempts:[], overlay:null, before:null, after:null, errors:[] };
+
+  try {
+    // estado ANTES
+    try {
+      const b = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
+      out.before = b.rows;
+    } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
+
+    // 1) Concluir na OMIE (se houver credenciais)
+    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
+    const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
+
+    if (APP_KEY && APP_SEC) {
+      const payload = {
+        call: 'ConcluirOrdemProducao',
+        app_key: APP_KEY,
+        app_secret: APP_SEC,
+        param: [{ cCodIntOP: op, dDtConclusao, nQtdeProduzida: qtd }]
+      };
+
+      try {
+        const resp = await safeFetch('https://app.omie.com.br/api/v1/produtos/op/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const text = await resp.text();
+        let j = null; try { j = JSON.parse(text); } catch {}
+        const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
+        if (omieErr) {
+          out.omie = { ok:false, http:resp.status, body:j||text };
+          // não aborta; seguimos para mover localmente e aplicar overlay
+        } else {
+          out.omie = { ok:true, body:j||text };
+        }
+      } catch (e) {
+        out.omie = { ok:false, error:String(e?.message||e) };
+        // segue fluxo local mesmo assim
+      }
+    } else {
+      out.omie = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
+    }
+
+    // 2) Mover na base "oficial"
+    let changed = false;
+    let beforeStatus = out.before?.[0]?.status || null;
+
+    for (const tgt of TRY_TARGETS) {
+// 3) SEMPRE aplicar overlay = 'concluido' (garante UI instantânea)
+try {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+      op         text PRIMARY KEY,
+      status     text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  const up = await pool.query(
+    `INSERT INTO public.op_status_overlay (op, status, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (op) DO UPDATE
+       SET status = EXCLUDED.status,
+           updated_at = now()`,
+    [op, 'concluido']
+  );
+  out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
+} catch (e) {
+  out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
+  out.errors.push('[overlay] ' + (e?.message||e));
+}
+
+    }
+
+    // 3) Overlay para UI se a view não mudou
+    if (!changed) {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+            op         text PRIMARY KEY,
+            status     text NOT NULL,
+            updated_at timestamptz NOT NULL DEFAULT now()
+          )
+        `);
+        const up = await pool.query(
+          `INSERT INTO public.op_status_overlay (op, status, updated_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (op) DO UPDATE
+             SET status = EXCLUDED.status, updated_at = now()`,
+          [op, STATUS_UI]
+        );
+        out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
+      } catch (e) {
+        out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
+      }
+    }
+
+    // estado DEPOIS
+    try {
+      const a = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
+      out.after = a.rows;
+    } catch (e) { out.errors.push('[after] '+(e?.message||e)); }
+
+    out.ok = true;
+    return res.json(out);
+
+  } catch (err) {
+    out.errors.push(String(err?.message||err));
+    // ainda assim devolve 200 para a UI poder se atualizar e você ver o log
+    return res.json(out);
+  }
+});
+
+
+// === DEBUG: ver como o banco enxerga a OP ===========================
+app.get('/api/preparacao/debug/:op', async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  try {
+    const view = await pool.query(
+      `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+         FROM public.kanban_preparacao_view
+        WHERE op = $1
+        ORDER BY 1
+        LIMIT 20`, [op]);
+
+    const os = await pool.query(
+      `SELECT produto_codigo, op, status, updated_at
+         FROM public.op_status
+        WHERE op = $1
+        ORDER BY updated_at DESC
+        LIMIT 20`, [op]);
+
+    const oi = await pool.query(
+      `SELECT c_cod_int_op, c_num_op, n_cod_op, c_cod_int_prod, n_cod_prod, updated_at
+         FROM public.op_info
+        WHERE c_cod_int_op = $1
+           OR c_num_op = $1
+           OR n_cod_op::text = $1
+        ORDER BY updated_at DESC
+        LIMIT 20`, [op]);
+
+    res.json({ ok:true, op, view:view.rows, op_status:os.rows, op_info:oi.rows });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e?.message || e) });
+  }
+});
 
 
 app.use(require('express').json({ limit: '5mb' }));
@@ -489,6 +852,8 @@ app.use('/api/produtos', produtosRouter);
 app.set('notifyProducts', (msg) => {
   const payload = msg || { type: 'produtos_changed', at: Date.now() };
   try { app.get('sseBroadcast')?.(payload); } catch {}
+
+
 });
 
 
@@ -611,6 +976,171 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
     res.status(500).json({ error: String(err) });
   }
 });
+
+// polyfill de fetch (Node < 18)
+const httpFetch = (...args) =>
+  (global.fetch ? global.fetch(...args) : import('node-fetch').then(({ default: f }) => f(...args)));
+
+// ===================== mover OP (A Produzir / Produzindo / concluido + Omie) =====================
+app.post('/api/preparacao/op/:op/mover', async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
+
+  // normalização
+  const norm = (s) => {
+    const x = String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').trim();
+    if (['a produzir','fila de producao','fila de produção','20'].includes(x)) return 'A Produzir';
+    if (['produzindo','em producao','em produção','30'].includes(x))          return 'Produzindo';
+    if (['concluido','concluido.','concluido ','60','80','concluído'].includes(x)) return 'concluido';
+    return null;
+  };
+
+  const target = norm(req.body?.status);
+  if (!target) return res.status(422).json({ ok:false, error:'status inválido', got:req.body?.status });
+
+  const TRY_TARGETS = {
+    'A Produzir': ['A Produzir','Fila de produção','Fila de producao','20'],
+    'Produzindo': ['Produzindo','Em produção','Em producao','30'],
+    'concluido' : ['concluido','Concluído','Concluido','60','80'],
+  }[target];
+
+  // Sempre concluir com qtd=1 e data de hoje
+  const pad2 = n => String(n).padStart(2,'0');
+  const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+  const dDtConclusao = fmtDDMMYYYY(new Date());
+  const qtd = 1;
+
+  const out = { ok:false, op, target, omie_concluir:null, omie_reverter:null, attempts:[], before:null, after:null, overlay:null, errors:[] };
+
+  try {
+    // Estado ANTES (para saber se estava concluído)
+    try {
+      const b = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view
+          WHERE op = $1 LIMIT 1`, [op]
+      );
+      out.before = b.rows;
+    } catch (e) { out.errors.push('[before] ' + (e?.message||e)); }
+
+    const beforeStatusRaw = out.before?.[0]?.status || null;
+    const beforeStatus = norm(beforeStatusRaw);
+    const wasConcluded = beforeStatus === 'concluido';
+    const goingToConcluded = target === 'concluido';
+
+    // Credenciais Omie (se existirem)
+    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
+    const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
+
+    // 1A) Se arrastou PARA concluído → ConcluirOrdemProducao (qtd=1, hoje)
+    if (goingToConcluded && APP_KEY && APP_SEC) {
+      const payload = {
+        call: 'ConcluirOrdemProducao',
+        app_key: APP_KEY,
+        app_secret: APP_SEC,
+        param: [{ cCodIntOP: op, dDtConclusao, nQtdeProduzida: qtd }]
+      };
+      try {
+        const resp = await httpFetch('https://app.omie.com.br/api/v1/produtos/op/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const text = await resp.text();
+        let j = null; try { j = JSON.parse(text); } catch {}
+        const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
+        out.omie_concluir = omieErr ? { ok:false, http:resp.status, body:j||text } : { ok:true, body:j||text };
+      } catch (e) {
+        out.omie_concluir = { ok:false, error:String(e?.message||e) };
+      }
+    } else if (goingToConcluded) {
+      out.omie_concluir = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
+    }
+
+    // 1B) Se estava concluído E foi arrastado para outra coluna → ReverterOrdemProducao
+    if (wasConcluded && !goingToConcluded) {
+      if (APP_KEY && APP_SEC) {
+        const payload = {
+          call: 'ReverterOrdemProducao',
+          app_key: APP_KEY,
+          app_secret: APP_SEC,
+          param: [{ cCodIntOP: op }]
+        };
+        try {
+          const resp = await httpFetch('https://app.omie.com.br/api/v1/produtos/op/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const text = await resp.text();
+          let j = null; try { j = JSON.parse(text); } catch {}
+          const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
+          out.omie_reverter = omieErr ? { ok:false, http:resp.status, body:j||text } : { ok:true, body:j||text };
+        } catch (e) {
+          out.omie_reverter = { ok:false, error:String(e?.message||e) };
+        }
+      } else {
+        out.omie_reverter = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
+      }
+    }
+
+    // 2) Mover na base oficial
+    let changed = false;
+    for (const tgt of TRY_TARGETS) {
+      try {
+        await pool.query('SELECT mover_op($1,$2)', [op, tgt]);
+        out.attempts.push({ via:'mover_op', target:tgt, ok:true });
+        // Não precisamos revalidar aqui para "break" — seguimos para overlay idempotente
+        changed = true;
+        break;
+      } catch (e) {
+        out.attempts.push({ via:'mover_op', target:tgt, ok:false, err:String(e?.message||e) });
+        out.errors.push('[mover_op '+tgt+'] ' + (e?.message||e));
+      }
+    }
+
+    // 3) Overlay garante UI instantânea
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+          op         text PRIMARY KEY,
+          status     text NOT NULL,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      const up = await pool.query(
+        `INSERT INTO public.op_status_overlay (op, status, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (op) DO UPDATE
+           SET status = EXCLUDED.status,
+               updated_at = now()`,
+        [op, target]
+      );
+      out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
+    } catch (e) {
+      out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
+      out.errors.push('[overlay] ' + (e?.message||e));
+    }
+
+    // 4) Estado DEPOIS
+    try {
+      const a = await pool.query(
+        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
+           FROM public.kanban_preparacao_view
+          WHERE op = $1 LIMIT 1`, [op]
+      );
+      out.after = a.rows;
+    } catch (e) { out.errors.push('[after] ' + (e?.message||e)); }
+
+    out.ok = true;
+    return res.json(out);
+
+  } catch (err) {
+    out.errors.push(String(err?.message||err));
+    return res.status(500).json(out);
+  }
+});
+
 
 
 // === Consulta de eventos de OP (JSON & CSV) ===============================
@@ -1065,55 +1595,72 @@ const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
     res.json({ ok: true });
   });
 
-// rota para listar ordem de produção para ver qual a ultima op gerada
-app.post('/api/omie/produtos/op', async (req, res) => {
+app.post('/api/omie/produtos/op', express.json(), async (req, res) => {
   try {
-    /* 1. Payload recebido */
-    const front = req.body;
+    const front = req.body || {};
+    front.param = front.param || [{}];
+    front.param[0] = front.param[0] || {};
+    front.param[0].identificacao = front.param[0].identificacao || {};
+    const ident = front.param[0].identificacao;
 
-    /* 2. Define (ou reaproveita) o código da OP */
-    let novoCodInt = front.param?.[0]?.identificacao?.cCodIntOP
-                  || nextOpFromKanban();
-    front.param[0].identificacao.cCodIntOP = novoCodInt;
+    // 1) Defaults obrigatórios (servidor é a fonte da verdade)
+    ident.codigo_local_estoque = 10564345392;             // fixo
+    ident.nQtde       = Math.max(1, Number(ident.nQtde || 1));
+    ident.dDtPrevisao = toOmieDate(new Date());
 
-    /* 3. Agora SIM é seguro registrar no log */
-    const linha = `[${new Date().toISOString()}] Geração de OP – Pedido: ${front.param?.[0]?.identificacao?.nCodPed}, Código OP: ${novoCodInt}\n`;
-    fs.appendFile(LOG_FILE, linha, err => {
-      if (err) console.error('Erro ao gravar log de OP:', err);
-    });
+    // 2) Descobrir o código textual do produto (para regra do prefixo "P")
+    const nCodProduto = Number(ident.nCodProduto) || null;
+    let prodCodigo = null;
+    try {
+      const r = await dbQuery(
+        'SELECT codigo FROM produtos WHERE codigo_prod = $1 LIMIT 1',
+        [nCodProduto]
+      );
+      prodCodigo = r?.rows?.[0]?.codigo || null;
+    } catch {}
 
-    /* 4. Logs de depuração */
-    console.log('[produtos/op] nCodProduto enviado →',
-                front.param?.[0]?.identificacao?.nCodProduto);
-    console.log('[produtos/op] payload completo →\n',
-                JSON.stringify(front, null, 2));
+    // 3) Pede ao Postgres o próximo código de OP (regra do "PP")
+    async function nextOpFromDb(codigoProduto) {
+      try {
+        const r = await dbQuery('SELECT next_c_cod_int_op($1) AS op', [codigoProduto]);
+        return r?.rows?.[0]?.op || null;
+      } catch { return null; }
+    }
 
-    /* 5. Tenta incluir OP (até 5 tentativas em caso de duplicidade) */
+    // Sempre sobrepõe qualquer cCodIntOP vindo do front
+    ident.cCodIntOP = await nextOpFromDb(prodCodigo) || ident.cCodIntOP || String(Date.now());
+    front.param[0].identificacao = ident;
+
+    // 4) Logs úteis
+    console.log('[produtos/op] nCodProduto →', nCodProduto, 'prodCodigo →', prodCodigo);
+    console.log('[produtos/op] cCodIntOP gerado →', ident.cCodIntOP);
+
+    // 5) Tenta incluir OP (retry para duplicidade)
     let tentativa = 0;
     let resposta;
-
     while (tentativa < 5) {
-      resposta = await omieCall(
-        'https://app.omie.com.br/api/v1/produtos/op/',
-        front
-      );
+      resposta = await omieCall('https://app.omie.com.br/api/v1/produtos/op/', front);
 
-      if (resposta?.faultcode === 'SOAP-ENV:Client-102') { // já existe
-        novoCodInt = nextOpFromKanban();                   // pega próximo
-        front.param[0].identificacao.cCodIntOP = novoCodInt;
+      // Duplicado? Gere OUTRO número no banco e tente de novo
+      if (resposta?.faultcode === 'SOAP-ENV:Client-102') {
+        ident.cCodIntOP = await nextOpFromDb(prodCodigo) || String(Date.now());
+        front.param[0].identificacao.cCodIntOP = ident.cCodIntOP;
         tentativa++;
         continue;
       }
       break; // sucesso ou erro diferente
     }
 
-    res.status(resposta?.faultstring ? 500 : 200).json(resposta);
+    // Resposta: mantém campos da Omie e adiciona o código efetivamente usado
+    const payload = { used_cCodIntOP: ident.cCodIntOP, ...resposta };
+    res.status(resposta?.faultstring ? 500 : 200).json(payload);
 
   } catch (err) {
     console.error('[produtos/op] erro →', err);
-    res.status(err.status || 500).json({ error: String(err) });
+    res.status(err.status || 500).json({ error: String(err?.faultstring || err?.message || err) });
   }
 });
+
 
   // lista pedidos
 app.post('/api/omie/pedidos', express.json(), async (req, res) => {
@@ -2186,43 +2733,63 @@ if (conteudo?.endsWith('_7E')) {
 });
 
 app.get('/api/preparacao/listar', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  if (!isDbEnabled) return res.status(503).json({ error: 'Banco de dados não configurado.' });
-
   try {
-    const { rows } = await dbQuery(`
-      SELECT
-        op,                                -- <- usa a coluna "op" da view (cCodIntOP/cNumOP fallback)
-        c_cod_int_prod AS produto_codigo,
-        kanban_coluna  AS status
-      FROM public.kanban_preparacao_view
+    // garante a tabela de overlay
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+        op         text PRIMARY KEY,
+        status     text NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    // status_raw = overlay → op_status → view
+    const { rows } = await pool.query(`
+      WITH src AS (
+        SELECT
+          v.op,
+          v.c_cod_int_prod AS produto_codigo,
+          COALESCE(ov.status, os.status, v.kanban_coluna) AS status_raw
+        FROM public.kanban_preparacao_view v
+        LEFT JOIN public.op_status_overlay ov ON ov.op = v.op
+        LEFT JOIN public.op_status        os ON os.op = v.op
+      )
+      SELECT DISTINCT
+        op,
+        produto_codigo,
+        CASE
+          WHEN lower(status_raw) IN ('a produzir','fila de produção','fila de producao')      THEN 'A Produzir'
+          WHEN lower(status_raw) IN ('produzindo','em produção','em producao','30')           THEN 'Produzindo'
+          WHEN lower(status_raw) IN ('teste 1','teste1')                                       THEN 'teste 1'
+          WHEN lower(status_raw) IN ('teste final','testefinal')                               THEN 'teste final'
+          WHEN lower(status_raw) IN ('concluido','concluído','60','80')                        THEN 'concluido'
+          ELSE status_raw
+        END AS status
+      FROM src
       ORDER BY status, op
     `);
 
     const data = {
-      'A Produzir': [],
-      'Produzindo': [],
-      'teste 1': [],
+      'A Produzir':  [],
+      'Produzindo':  [],
+      'teste 1':     [],
       'teste final': [],
-      'concluido': []
+      'concluido':   []
     };
-    const ALLOWED = new Set(Object.keys(data));
 
     for (const r of rows) {
-      if (!ALLOWED.has(r.status)) continue;  // qualquer coisa fora das 5 some (ex.: 80)
-      data[r.status].push({
-        op: r.op,
-        produto: r.produto_codigo,
-        status: r.status
-      });
+      if (!data[r.status]) data[r.status] = [];
+      data[r.status].push({ op: r.op, produto_codigo: r.produto_codigo });
     }
 
-    return res.json({ mode: 'pg', data });
+    res.json({ mode: 'pg', data });
   } catch (err) {
     console.error('[preparacao/listar] erro:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao consultar preparação' });
+    res.status(500).json({ ok:false, error:String(err?.message || err) });
   }
 });
+
+
 
 
 // Comercial: lista itens por coluna a partir do Postgres
@@ -2311,6 +2878,107 @@ app.get('/api/preparacao/backfill-codigos', async (req, res) => {
   } catch (e) {
     console.error('[backfill-codigos][GET]', e);
     res.status(500).json({ ok:false, error:String(e.message||e) });
+  }
+});
+
+async function ensureOverlayTable() {
+  // Cria se não existir (idempotente)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+      op         text PRIMARY KEY,
+      status     text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+}
+ensureOverlayTable()
+  .then(() => console.log('[db] op_status_overlay pronto'))
+  .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
+
+
+// ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
+const PV_REGS_PER_PAGE = 200;
+
+async function omiePedidosListarPagina(pagina, filtros = {}) {
+  const payload = {
+    call: 'ListarPedidos',
+    app_key: process.env.OMIE_APP_KEY,
+    app_secret: process.env.OMIE_APP_SECRET,
+    param: [{
+      pagina,
+      registros_por_pagina: PV_REGS_PER_PAGE,
+      ...(filtros.data_de  ? { data_previsao_de:  toOmieDate(filtros.data_de) }  : {}),
+      ...(filtros.data_ate ? { data_previsao_ate: toOmieDate(filtros.data_ate) } : {}),
+      ...(filtros.etapa    ? { etapa: String(filtros.etapa) }                     : {}) // <- AQUI
+    }]
+  };
+  return omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload);
+}
+
+
+// ====== COMERCIAL: leitura do Kanban (somente "Pedido aprovado" = etapa 80)
+app.get('/api/comercial/pedidos/kanban', async (req, res) => {
+  try {
+// substitua a query da rota /api/comercial/pedidos/kanban por esta:
+const r = await pool.query(`
+  SELECT
+    p.codigo_pedido,
+    p.numero_pedido,
+    p.numero_pedido_cliente,
+    p.codigo_cliente,
+    p.etapa,
+    p.data_previsao,                                -- date “cru”
+    to_char(p.data_previsao, 'DD/MM/YYYY') AS data_previsao_br, -- pronto p/ tela
+    p.valor_total_pedido,
+    i.seq,
+    i.codigo        AS produto_codigo_txt,
+    i.descricao     AS produto_descricao,
+    i.quantidade,
+    i.unidade
+  FROM public.pedidos_venda p
+  LEFT JOIN public.pedidos_venda_itens i
+    ON i.codigo_pedido = p.codigo_pedido
+  WHERE p.etapa = '80'
+  ORDER BY p.data_previsao NULLS LAST, p.codigo_pedido DESC, i.seq ASC
+  LIMIT 500
+`);
+return res.json({ ok:true, colunas: { "Pedido aprovado": r.rows } });
+
+  } catch (e) {
+    console.error('[kanban comercial etapa 80] erro:', e);
+    return res.status(500).json({ ok:false, error: String(e?.message||e) });
+  }
+});
+
+
+app.post('/api/comercial/pedidos/importar', express.json(), async (req, res) => {
+  try {
+    if (!process.env.DATABASE_URL) {
+      return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
+    }
+  const { data_de, data_ate, max_paginas = 999, etapa } = req.body || {};
+    let pagina = 1, totalPaginas = 1, totalRegistros = 0, importados = 0;
+
+    while (pagina <= totalPaginas && pagina <= Number(max_paginas)) {
+      const lote = await omiePedidosListarPagina(pagina, { data_de, data_ate, etapa });
+      pagina++;
+      totalPaginas   = Number(lote.total_de_paginas || 1);
+      totalRegistros = Number(lote.total_de_registros || 0);
+      const arr = Array.isArray(lote.pedido_venda_produto) ? lote.pedido_venda_produto : [];
+
+      for (const pedido of arr) {
+        await pool.query('select public.pedido_upsert_from_payload($1::jsonb)', [pedido]);
+        importados++;
+      }
+    }
+
+    // avisa consumidores SSE (se houver)
+    req.app.get('sseBroadcast')?.({ type:'pedidos_changed', at: Date.now() });
+
+    return res.json({ ok:true, mode:'postgres', total_registros: totalRegistros, importados });
+  } catch (e) {
+    console.error('[importar Pedidos] erro:', e);
+    return res.status(500).json({ ok:false, error: String(e?.message || e) });
   }
 });
 
@@ -2442,6 +3110,85 @@ app.get('/api/preparacao/csv', async (req, res) => {
   }
 });
 
+// === WEBHOOK: Pedidos de Venda (Omie) =======================================
+// Aceita (A) payload Omie Connect 2.0 { event: { numero_pedido, tipo, ... } }
+//     ou (B) um objeto com { cabecalho, det, ... } para upsert direto.
+app.post('/webhooks/omie/pedidos', chkOmieToken, express.json(), async (req, res) => {
+  try {
+    const usarDb = shouldUseDb?.(req) ?? true; // mesmo helper usado nas outras rotas
+    let pedObj = null;
+
+    // B1) Se já veio o pedido completo, usa direto
+    if (req.body?.cabecalho && req.body?.det) {
+      pedObj = req.body;
+
+    // A) Omie Connect: vem algo como { event: { numero_pedido, tipo, ... } }
+    } else if (req.body?.event?.numero_pedido) {
+      const numero_pedido = String(req.body.event.numero_pedido);
+      // consulta 1 pedido completo na Omie
+      const data = await omieCall('https://app.omie.com.br/api/v1/produtos/pedido/', {
+        call: 'ConsultarPedido',
+        app_key:    process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param: [{ numero_pedido }]
+      });
+      pedObj = Array.isArray(data?.pedido_venda_produto)
+        ? data.pedido_venda_produto[0]
+        : data.pedido_venda_produto;
+    }
+
+    if (!pedObj) {
+      return res.status(400).json({ ok:false, error:'payload inválido (sem pedido nem numero_pedido)' });
+    }
+
+    // grava no Postgres (funções que já criamos no SQL)
+    if (usarDb) {
+      await dbQuery('select public.pedido_upsert_from_payload($1::jsonb)', [pedObj]);
+      await dbQuery('select public.pedido_itens_upsert_from_payload($1::jsonb)', [pedObj]);
+      return res.json({ ok:true, mode:'postgres', codigo_pedido: pedObj?.cabecalho?.codigo_pedido });
+    }
+
+    // fallback (sem DB)
+    return res.json({ ok:true, mode:'no-db' });
+
+  } catch (e) {
+    console.error('[webhooks/omie/pedidos] erro:', e);
+    return res.status(500).json({ ok:false, error: String(e?.faultstring || e?.message || e) });
+  }
+});
+
+// (Opcional) alias com /api, como já existe para /api/omie/op
+app.post('/api/webhooks/omie/pedidos', chkOmieToken, express.json(),
+  (req,res) => app._router.handle(req, res, () => {},) // reusa handler acima
+);
+
+
+// .env (ou variável no Render)
+// OMIE_WEBHOOK_TOKEN=um_token_bem_secreto
+
+app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (req, res) => {
+  try {
+    const token = req.query.token || req.headers['x-webhook-token'];
+    if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
+      return res.status(401).json({ ok:false, error:'unauthorized' });
+    }
+
+    // normaliza: aceita objeto ou wrapper com "pedido_venda_produto"
+    const body = req.body || {};
+    const wrapper = body.pedido_venda_produto ? body : { pedido_venda_produto: [body] };
+
+    const r = await pool.query('SELECT public.pedidos_upsert_from_list($1::jsonb) AS n;', [wrapper]);
+    const n = r.rows?.[0]?.n ?? 0;
+
+    // responda rápido para não estourar timeout do Omie
+    return res.json({ ok:true, upserts:n });
+  } catch (err) {
+    console.error('[WEBHOOK][OMIE] erro:', err);
+    // mesmo em erro, responda 200 para evitar desativação; loga tudo
+    return res.status(200).json({ ok:false, error:String(err.message||err) });
+  }
+});
+
   // ——————————————————————————————
   // 5) Inicia o servidor
   // ——————————————————————————————
@@ -2454,3 +3201,45 @@ app.listen(PORT, HOST, () => {
 
 
 })();
+
+
+
+
+// DEBUG: lista as rotas registradas
+app.get('/__routes', (req, res) => {
+  const list = [];
+  app._router.stack.forEach((m) => {
+    if (m.route && m.route.path) {
+      list.push({ methods: m.route.methods, path: m.route.path });
+    } else if (m.name === 'router' && m.handle?.stack) {
+      m.handle.stack.forEach((h) => {
+        if (h.route?.path) list.push({ methods: h.route.methods, path: h.route.path });
+      });
+    }
+  });
+  res.json({ ok: true, routes: list });
+});
+
+// DEBUG: sanity check do webhook (GET simples)
+app.get('/webhooks/omie/pedidos', (req, res) => {
+  res.json({ ok: true, method: 'GET', msg: 'rota existe (POST é o real)' });
+});
+
+// DEBUG: lista as rotas registradas
+app.get('/__routes', (req, res) => {
+  const list = [];
+  app._router?.stack?.forEach(m => {
+    if (m.route?.path) list.push({ methods: m.route.methods, path: m.route.path });
+    else if (m.name === 'router' && m.handle?.stack) {
+      m.handle.stack.forEach(h => {
+        if (h.route?.path) list.push({ methods: h.route.methods, path: h.route.path });
+      });
+    }
+  });
+  res.json({ ok: true, routes: list });
+});
+
+// DEBUG: checagem simples do webhook (GET)
+app.get('/webhooks/omie/pedidos', (req, res) => {
+  res.json({ ok: true, method: 'GET', msg: 'rota existe (POST é o real)' });
+});
