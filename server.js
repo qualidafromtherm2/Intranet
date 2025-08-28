@@ -530,6 +530,48 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
   }
 );
 
+// 🔎 Busca de produtos direto no Postgres
+app.get('/api/produtos/search', async (req, res) => {
+  try {
+    const q     = String(req.query.q || '').trim();
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const tipo  = (req.query.tipo || '').trim();   // ex.: '04' se quiser filtrar acabados
+
+    if (q.length < 2) return res.json({ ok: true, items: [] });
+
+    const values = [];
+    let i = 1;
+
+    // match por código OU descrição (case/acentos-insensitive)
+    let where = `(codigo ILIKE $${i} OR unaccent(descricao) ILIKE unaccent($${i}))`;
+    values.push(`%${q}%`); i++;
+
+    if (tipo) {
+      where += ` AND tipo = $${i}`;
+      values.push(tipo); i++;
+    }
+
+    values.push(limit);
+
+    const sql = `
+      SELECT codigo, descricao
+      FROM public.produtos
+      WHERE ${where}
+      ORDER BY
+        -- prioriza quem começa com o termo, depois contém:
+        (CASE WHEN lower(codigo) LIKE lower($1) THEN 0 ELSE 1 END),
+        (CASE WHEN lower(descricao) LIKE lower($1) THEN 0 ELSE 1 END),
+        codigo
+      LIMIT $${i}
+    `;
+
+    const { rows } = await pg.query(sql, values);
+    res.json({ ok: true, items: rows });
+  } catch (err) {
+    console.error('[GET /api/produtos/search]', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 
 // alias com /api para ficar consistente com suas outras rotas
