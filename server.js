@@ -2210,11 +2210,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
 
 
 
-// ------------------------------------------------------------------
-// Armazéns → Produção (AGORA LENDO DO POSTGRES)
-// local padrão = 10564345392 (o mesmo que você usava na Omie)
-// pode sobrescrever com ?local=... ou body { local: ... }
-// ------------------------------------------------------------------
+// ========== Produção ==========
 const PRODUCAO_LOCAL_PADRAO = process.env.PRODUCAO_LOCAL_PADRAO || '10564345392';
 
 app.post('/api/armazem/producao', express.json(), async (req, res) => {
@@ -2230,9 +2226,10 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
         reservado,
         saldo,
         cmc
-      FROM v_almoxarifado_grid
+      FROM v_almoxarifado_grid_atual
       WHERE local = $1
-      ORDER BY produto_codigo
+        AND (COALESCE(saldo,0) > 0 OR COALESCE(fisico,0) > 0 OR COALESCE(reservado,0) > 0)
+      ORDER BY codigo
     `, [local]);
 
     const dados = rows.map(r => ({
@@ -2251,6 +2248,46 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
     res.status(500).json({ ok:false, error:String(err.message || err) });
   }
 });
+
+// ========== Almoxarifado ==========
+const ALMOX_LOCAL_PADRAO = process.env.ALMOX_LOCAL_PADRAO || '10408201806';
+
+app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
+  try {
+    const local = String(req.query.local || req.body?.local || ALMOX_LOCAL_PADRAO);
+
+    const { rows } = await pool.query(`
+      SELECT
+        produto_codigo     AS codigo,
+        produto_descricao  AS descricao,
+        estoque_minimo     AS min,
+        fisico,
+        reservado,
+        saldo,
+        cmc
+      FROM v_almoxarifado_grid_atual
+      WHERE local = $1
+        AND (COALESCE(saldo,0) > 0 OR COALESCE(fisico,0) > 0 OR COALESCE(reservado,0) > 0)
+      ORDER BY codigo
+    `, [local]);
+
+    const dados = rows.map(r => ({
+      codigo   : r.codigo || '',
+      descricao: r.descricao || '',
+      min      : Number(r.min)       || 0,
+      fisico   : Number(r.fisico)    || 0,
+      reservado: Number(r.reservado) || 0,
+      saldo    : Number(r.saldo)     || 0,
+      cmc      : Number(r.cmc)       || 0,
+    }));
+
+    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
+  } catch (err) {
+    console.error('[almoxarifado SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
 
 
 // ------------------------------------------------------------------
