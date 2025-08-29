@@ -2016,124 +2016,90 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
 
 // ------------------------------------------------------------------
 // Admin → Importar posição de estoque da Omie para o Postgres
-// POST /api/admin/sync/almoxarifado[?dry=1&timeout=60000&retry=2]
-// Body JSON: { "local": 10408201806, "data": "28/08/2025" }  // dd/mm/aaaa ou ISO
+// Agora: cExibeTodos = 'N' (apenas itens com saldo) e filtro por codigo_local_estoque
 // ------------------------------------------------------------------
 app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
   const startedAt = Date.now();
 
-  // chaves Omie (env)
   const OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
   const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     return res.status(500).json({ ok:false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.' });
   }
 
-  // params
   const localCodigo = String(req.body?.local || 10408201806);
   const dataInput   = String(req.body?.data || new Date().toLocaleDateString('pt-BR')); // dd/mm/aaaa
-  const dry         = String(req.query.dry || '0') === '1';
-  const tmo         = Number(req.query.timeout || 60000); // ms
-  const retryCount  = Number(req.query.retry || 2);       // tentativas extra ao detectar cache da Omie
-  const perPage     = 200; // menor página = respostas mais rápidas/estáveis
+  const tmo         = Number(req.query.timeout || 60000);
+  const retryCount  = Number(req.query.retry || 2);
+  const perPage     = 200;
 
-  const brToISO = (s) => {
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-      const [d,m,y] = s.split('/');
-      return `${y}-${m}-${d}`;
-    }
-    return s;
-  };
+  const brToISO = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s) ? s.split('/').reverse().join('-') : s;
   const dataBR  = /^\d{4}-\d{2}-\d{2}$/.test(dataInput) ? dataInput.split('-').reverse().join('/') : dataInput;
   const dataISO = brToISO(dataInput);
   const clamp   = n => Math.max(0, Number(n) || 0);
   const sleep   = ms => new Promise(r => setTimeout(r, ms));
 
-  if (dry) {
-    return res.json({ ok:true, dry:true, local: localCodigo, data: dataBR, msg:'rota viva ✅' });
-  }
-
-  // fetch com timeout
   const fetchWithTimeout = async (url, opts = {}, ms = 20000) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), ms);
-    try {
-      const resp = await fetch(url, { ...opts, signal: controller.signal });
-      return resp;
-    } finally {
-      clearTimeout(id);
-    }
+    try { return await fetch(url, { ...opts, signal: controller.signal }); }
+    finally { clearTimeout(id); }
   };
-
   const omieFetch = async (payload) => {
     const resp = await fetchWithTimeout(
       'https://app.omie.com.br/api/v1/estoque/consulta/',
-      {
-        method : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body   : JSON.stringify(payload),
-      },
+      { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) },
       tmo
     );
-    if (!resp.ok) {
-      const text = await resp.text().catch(()=>'');
-      throw new Error(`Omie HTTP ${resp.status} ${resp.statusText} :: ${text.slice(0,300)}`);
-    }
+    if (!resp.ok) throw new Error(`Omie HTTP ${resp.status} ${resp.statusText} :: ${(await resp.text().catch(()=>''))?.slice(0,300)}`);
     return resp.json();
   };
-
-  // retry quando a Omie retornar "Consumo redundante detectado" (cache de 30s)
   const omieFetchRetry = async (payload) => {
     for (let i = 0; i <= retryCount; i++) {
-      try {
-        return await omieFetch(payload);
-      } catch (e) {
-        const msg = String(e?.message || '');
-        const isCache = msg.includes('Consumo redundante detectado');
-        if (isCache && i < retryCount) {
-          const wait = 35000; // 35s > 30s do cache
-          console.warn(`[almox sync] cache Omie detectado; aguardando ${wait}ms e tentando de novo (${i+1}/${retryCount})`);
-          await sleep(wait);
-          continue;
-        }
+      try { return await omieFetch(payload); }
+      catch (e) {
+        const isCache = String(e?.message||'').includes('Consumo redundante detectado');
+        if (isCache && i < retryCount) { await sleep(35000); continue; }
         throw e;
       }
     }
   };
 
   try {
-    // 1) primeira página para total
+    // 1) primeira página — **cExibeTodos: 'N'** (apenas itens com saldo)
     const basePayload = {
-      call     : 'ListarPosEstoque',
-      app_key  : OMIE_APP_KEY,
+      call: 'ListarPosEstoque',
+      app_key: OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET,
       param: [{
-        nPagina            : 1,
-        nRegPorPagina      : perPage,
-        dDataPosicao       : dataBR,   // dd/mm/aaaa
-        cExibeTodos        : 'S',      // pega tudo (com e sem saldo)
+        nPagina: 1,
+        nRegPorPagina: perPage,
+        dDataPosicao: dataBR,
+        cExibeTodos : 'N',                       // <<< aqui o ajuste
         codigo_local_estoque: Number(localCodigo)
       }]
     };
 
-    const r0     = await omieFetchRetry(basePayload);
-    const total  = Number(r0.nTotRegistros || (Array.isArray(r0.produtos) ? r0.produtos.length : 0));
+    const r0 = await omieFetchRetry(basePayload);
+    const total   = Number(r0.nTotRegistros || (Array.isArray(r0.produtos) ? r0.produtos.length : 0));
     const paginas = Math.max(1, Math.ceil(total / perPage));
 
-    // 2) paginação
+    // 2) paginação + **filtro por local** (defensivo)
     const itens = [];
     for (let pg = 1; pg <= paginas; pg++) {
-      const payload = { ...basePayload, param: [{ ...basePayload.param[0], nPagina: pg, nRegPorPagina: perPage }] };
+      const payload = { ...basePayload, param: [{ ...basePayload.param[0], nPagina: pg }] };
       const r = await omieFetchRetry(payload);
-      const arr = Array.isArray(r.produtos) ? r.produtos : [];
+      const arr = (Array.isArray(r.produtos) ? r.produtos : []).filter(
+        it => Number(it?.codigo_local_estoque) === Number(localCodigo)
+      );
       itens.push(...arr);
     }
 
     if (!itens.length) {
-      return res.json({ ok:true, imported: 0, local: localCodigo, data_posicao: dataISO, msg: 'Sem itens retornados pela Omie.' });
+      return res.json({ ok:true, imported: 0, local: localCodigo, data_posicao: dataISO, msg: 'Sem itens com saldo para este local.' });
     }
 
-    // 3) transação + UPSERT
+    // 3) UPSERT
     const cli = await pool.connect();
     try {
       await cli.query('BEGIN');
@@ -2143,7 +2109,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
          VALUES ($1, $2, TRUE, now())
          ON CONFLICT (local_codigo)
          DO UPDATE SET nome = EXCLUDED.nome, ativo = TRUE, updated_at = now()`,
-        [localCodigo, 'Almoxarifado']
+        [localCodigo, 'Almoxarifado/Produção']
       );
 
       const upsertSQL = `
@@ -2171,24 +2137,19 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
 
       let count = 0;
       for (const p of itens) {
-        const row = {
-          omie_prod_id   : Number(p.nCodProd) || 0,
-          cod_int        : p.cCodInt || null,
-          codigo         : p.cCodigo || null,
-          descricao      : p.cDescricao || '',
-          preco_unitario : clamp(p.nPrecoUnitario),
-          saldo          : clamp(p.nSaldo),
-          cmc            : clamp(p.nCMC),
-          pendente       : clamp(p.nPendente),
-          estoque_minimo : clamp(p.estoque_minimo),
-          reservado      : clamp(p.reservado),
-          fisico         : clamp(p.fisico),
-        };
-
         await cli.query(upsertSQL, [
           dataISO, localCodigo,
-          row.omie_prod_id, row.cod_int, row.codigo, row.descricao,
-          row.preco_unitario, row.saldo, row.cmc, row.pendente, row.estoque_minimo, row.reservado, row.fisico
+          Number(p.nCodProd) || 0,
+          p.cCodInt || null,
+          p.cCodigo || '',
+          p.cDescricao || '',
+          clamp(p.nPrecoUnitario),
+          clamp(p.nSaldo),
+          clamp(p.nCMC),
+          clamp(p.nPendente),
+          clamp(p.estoque_minimo),
+          clamp(p.reservado),
+          clamp(p.fisico),
         ]);
         count++;
       }
@@ -2197,8 +2158,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
       const ms = Date.now() - startedAt;
       return res.json({ ok:true, imported: count, local: localCodigo, data_posicao: dataISO, ms });
     } catch (e) {
-      await cli.query('ROLLBACK');
-      throw e;
+      await cli.query('ROLLBACK'); throw e;
     } finally {
       cli.release();
     }
@@ -2207,6 +2167,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
     return res.status(500).json({ ok:false, error: String(err?.message || err) });
   }
 });
+
 
 
 
