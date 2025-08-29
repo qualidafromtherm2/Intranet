@@ -2211,6 +2211,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
 
 
 // ========== Produção ==========
+// Produção → só estoque atual do local e com saldo positivo
 const PRODUCAO_LOCAL_PADRAO = process.env.PRODUCAO_LOCAL_PADRAO || '10564345392';
 
 app.post('/api/armazem/producao', express.json(), async (req, res) => {
@@ -2228,7 +2229,7 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
         cmc
       FROM v_almoxarifado_grid_atual
       WHERE local = $1
-        AND (COALESCE(saldo,0) > 0 OR COALESCE(fisico,0) > 0 OR COALESCE(reservado,0) > 0)
+        AND COALESCE(saldo,0) > 0
       ORDER BY codigo
     `, [local]);
 
@@ -2248,6 +2249,7 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
     res.status(500).json({ ok:false, error:String(err.message || err) });
   }
 });
+
 
 // ========== Almoxarifado ==========
 const ALMOX_LOCAL_PADRAO = process.env.ALMOX_LOCAL_PADRAO || '10408201806';
