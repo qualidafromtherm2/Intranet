@@ -2,10 +2,11 @@
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
 require('dotenv').config();
-
+const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
-
+// local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
+const ALMOX_LOCAL_PADRAO = process.env.ALMOX_LOCAL_PADRAO || '10408201806';
 // ——————————————————————————————
 // 1) Imports e configurações iniciais
 // ——————————————————————————————
@@ -1843,21 +1844,23 @@ app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
 //------------------------------------------------------------------
 app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
   try {
+    const local = String(req.query.local || req.body?.local || ALMOX_LOCAL_PADRAO);
+
     const { rows } = await pool.query(`
       SELECT
         local,
-        produto_codigo   AS codigo,
-        produto_descricao AS descricao,
-        estoque_minimo   AS min,
+        produto_codigo     AS codigo,
+        produto_descricao  AS descricao,
+        estoque_minimo     AS min,
         fisico,
         reservado,
         saldo,
         cmc
       FROM v_almoxarifado_grid
-      ORDER BY local, produto_codigo
-    `);
+      WHERE local = $1
+      ORDER BY produto_codigo
+    `, [local]);
 
-    // normaliza números (o front soma/filtra)
     const dados = rows.map(r => ({
       codigo   : r.codigo || '',
       descricao: r.descricao || '',
@@ -1868,60 +1871,273 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
       cmc      : Number(r.cmc)       || 0,
     }));
 
-    res.json({ ok: true, pagina: 1, totalPaginas: 1, dados });
+    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
   } catch (err) {
     console.error('[almoxarifado SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+app.post('/api/admin/sync/almoxarifado/all', express.json(), async (req, res) => {
+  try {
+    const data = req.body?.data || new Date().toLocaleDateString('pt-BR');
+    const timeout = Number(req.query.timeout || 90000);
+    const retry   = Number(req.query.retry || 1);
+
+    const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE ORDER BY local_codigo');
+    const results = [];
+
+    for (const r of rows) {
+      const local = String(r.local_codigo);
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5001}/api/admin/sync/almoxarifado?timeout=${timeout}&retry=${retry}`, {
+          method : 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body   : JSON.stringify({ local: Number(local), data }),
+        });
+        const json = await resp.json();
+        results.push({ local, ...json });
+        await new Promise(ok => setTimeout(ok, 800)); // respiro entre chamadas
+      } catch (e) {
+        results.push({ local, ok:false, error:String(e.message || e) });
+      }
+    }
+
+    res.json({ ok:true, total: results.length, results });
+  } catch (err) {
+    console.error('[admin/sync/almox ALL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+// ---------------------------------------------------------------
+// Webhook Omie (genérico) -> armazena e agenda re-sync do estoque
+// ---------------------------------------------------------------
+const SYNC_DEBOUNCE_MS = 45_000; // >= 30s do cache da Omie
+const syncTimers = new Map();
+function scheduleSync(localCodigo, dataBR) {
+  clearTimeout(syncTimers.get(localCodigo));
+  const t = setTimeout(async () => {
+    try {
+      await fetch(`http://localhost:${process.env.PORT || 5001}/api/admin/sync/almoxarifado?timeout=90000&retry=1`, {
+        method : 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body   : JSON.stringify({ local: Number(localCodigo), data: dataBR }),
+      });
+    } catch (e) {
+      console.error('[webhook] re-sync falhou', e);
+    }
+  }, SYNC_DEBOUNCE_MS);
+  syncTimers.set(localCodigo, t);
+}
+
+async function scheduleSyncAll(dataBR) {
+  const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE');
+  for (const r of rows) scheduleSync(String(r.local_codigo), dataBR);
+}
+
+function pickLocalFromPayload(body) {
+  return (
+    body?.codigo_local_estoque ??
+    body?.param?.[0]?.codigo_local_estoque ??
+    body?.dados?.codigo_local_estoque ??
+    null
+  );
+}
+
+// ====== rota do webhook ======
+app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
+  try {
+    // 1) token opcional (se OMIE_WEBHOOK_TOKEN estiver setado, passa a exigir)
+    if (OMIE_WEBHOOK_TOKEN) {
+      const token = req.query.token || req.headers['x-omie-token'];
+      if (token !== OMIE_WEBHOOK_TOKEN) {
+        return res.status(401).json({ ok:false, error:'token inválido' });
+      }
+    }
+
+    const body = req.body || {};
+    const tipo = body?.event_type || body?.tipoEvento || 'estoque';
+
+    // 2) guarda o evento cru (auditoria)
+    await pool.query(
+      `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
+       VALUES ($1,$2,$3)`,
+      [ body?.event_id || null, tipo, body ]
+    );
+
+    // 3) agenda re-sync
+    const hojeBR = new Date().toLocaleDateString('pt-BR');
+    const localDoPayload = pickLocalFromPayload(body);
+
+    if (localDoPayload) {
+      scheduleSync(String(localDoPayload), hojeBR);
+      return res.json({ ok:true, scheduled:true, scope:'local', local:String(localDoPayload) });
+    } else {
+      await scheduleSyncAll(hojeBR);
+      return res.json({ ok:true, scheduled:true, scope:'all' });
+    }
+  } catch (err) {
+    console.error('[webhook/omie/estoque]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    // 1) guarda o evento "como veio"
+    await pool.query(
+      `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
+       VALUES ($1,$2,$3)`,
+      [ body?.event_id || null, body?.event_type || 'estoque', body ]
+    );
+
+    // 2) tenta descobrir o local do estoque no payload; se não achar, usa o padrão
+    const localDoPayload =
+      body?.codigo_local_estoque ||
+      body?.param?.[0]?.codigo_local_estoque ||
+      body?.dados?.codigo_local_estoque ||
+      10408201806;
+
+    // data de posição padrão = hoje (BR)
+    const hojeBR = new Date().toLocaleDateString('pt-BR');
+
+    // 3) agenda re-sync (debounced)
+    scheduleSync(String(localDoPayload), hojeBR);
+
+    res.json({ ok:true, scheduled:true, local: String(localDoPayload) });
+  } catch (err) {
+    console.error('[webhook/omie/estoque]', err);
     res.status(500).json({ ok:false, error: String(err.message || err) });
   }
 });
 
-//------------------------------------------------------------------
+// ------------------------------------------------------------------
 // Admin → Importar posição de estoque da Omie para o Postgres
-//------------------------------------------------------------------
+// POST /api/admin/sync/almoxarifado[?dry=1&timeout=60000&retry=2]
+// Body JSON: { "local": 10408201806, "data": "28/08/2025" }  // dd/mm/aaaa ou ISO
+// ------------------------------------------------------------------
 app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
-  const localCodigo = String(req.body?.local || 10408201806); // seu padrão atual
-  const dataBR = req.body?.data || new Date().toLocaleDateString('pt-BR'); // dd/mm/aaaa
+  const startedAt = Date.now();
 
-  const brToISO = (ddmmyyyy) => {
-    const [d,m,y] = ddmmyyyy.split('/');
-    return `${y}-${m}-${d}`; // YYYY-MM-DD
+  // chaves Omie (env)
+  const OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return res.status(500).json({ ok:false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.' });
+  }
+
+  // params
+  const localCodigo = String(req.body?.local || 10408201806);
+  const dataInput   = String(req.body?.data || new Date().toLocaleDateString('pt-BR')); // dd/mm/aaaa
+  const dry         = String(req.query.dry || '0') === '1';
+  const tmo         = Number(req.query.timeout || 60000); // ms
+  const retryCount  = Number(req.query.retry || 2);       // tentativas extra ao detectar cache da Omie
+  const perPage     = 200; // menor página = respostas mais rápidas/estáveis
+
+  const brToISO = (s) => {
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+      const [d,m,y] = s.split('/');
+      return `${y}-${m}-${d}`;
+    }
+    return s;
   };
-  const dataISO = brToISO(dataBR);
+  const dataBR  = /^\d{4}-\d{2}-\d{2}$/.test(dataInput) ? dataInput.split('-').reverse().join('/') : dataInput;
+  const dataISO = brToISO(dataInput);
+  const clamp   = n => Math.max(0, Number(n) || 0);
+  const sleep   = ms => new Promise(r => setTimeout(r, ms));
 
-  const payloadBase = {
-    call: 'ListarPosEstoque',
-    app_key: OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
-    param: [{
-      nPagina: 1,
-      nRegPorPagina: 1,                 // 1ª passada: só pra buscar total
-      dDataPosicao: dataBR,
-      cExibeTodos : 'N',
-      codigo_local_estoque: Number(localCodigo)
-    }]
+  if (dry) {
+    return res.json({ ok:true, dry:true, local: localCodigo, data: dataBR, msg:'rota viva ✅' });
+  }
+
+  // fetch com timeout
+  const fetchWithTimeout = async (url, opts = {}, ms = 20000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), ms);
+    try {
+      const resp = await fetch(url, { ...opts, signal: controller.signal });
+      return resp;
+    } finally {
+      clearTimeout(id);
+    }
+  };
+
+  const omieFetch = async (payload) => {
+    const resp = await fetchWithTimeout(
+      'https://app.omie.com.br/api/v1/estoque/consulta/',
+      {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(payload),
+      },
+      tmo
+    );
+    if (!resp.ok) {
+      const text = await resp.text().catch(()=>'');
+      throw new Error(`Omie HTTP ${resp.status} ${resp.statusText} :: ${text.slice(0,300)}`);
+    }
+    return resp.json();
+  };
+
+  // retry quando a Omie retornar "Consumo redundante detectado" (cache de 30s)
+  const omieFetchRetry = async (payload) => {
+    for (let i = 0; i <= retryCount; i++) {
+      try {
+        return await omieFetch(payload);
+      } catch (e) {
+        const msg = String(e?.message || '');
+        const isCache = msg.includes('Consumo redundante detectado');
+        if (isCache && i < retryCount) {
+          const wait = 35000; // 35s > 30s do cache
+          console.warn(`[almox sync] cache Omie detectado; aguardando ${wait}ms e tentando de novo (${i+1}/${retryCount})`);
+          await sleep(wait);
+          continue;
+        }
+        throw e;
+      }
+    }
   };
 
   try {
-    // 1) total de registros
-    const r1 = await omieCall('https://app.omie.com.br/api/v1/estoque/consulta/', payloadBase);
-    const total = r1.nTotRegistros || 200;
-
-    // 2) pega tudo de uma vez
-    const payloadAll = {
-      ...payloadBase,
-      param: [{ ...payloadBase.param[0], nPagina: 1, nRegPorPagina: total }]
+    // 1) primeira página para total
+    const basePayload = {
+      call     : 'ListarPosEstoque',
+      app_key  : OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        nPagina            : 1,
+        nRegPorPagina      : perPage,
+        dDataPosicao       : dataBR,   // dd/mm/aaaa
+        cExibeTodos        : 'S',      // pega tudo (com e sem saldo)
+        codigo_local_estoque: Number(localCodigo)
+      }]
     };
-    const r2 = await omieCall('https://app.omie.com.br/api/v1/estoque/consulta/', payloadAll);
 
-    const produtos = Array.isArray(r2.produtos) ? r2.produtos : [];
-    if (!produtos.length) return res.json({ ok:true, imported: 0, msg: 'Sem itens retornados pela Omie.' });
+    const r0     = await omieFetchRetry(basePayload);
+    const total  = Number(r0.nTotRegistros || (Array.isArray(r0.produtos) ? r0.produtos.length : 0));
+    const paginas = Math.max(1, Math.ceil(total / perPage));
 
-    // 3) transação
+    // 2) paginação
+    const itens = [];
+    for (let pg = 1; pg <= paginas; pg++) {
+      const payload = { ...basePayload, param: [{ ...basePayload.param[0], nPagina: pg, nRegPorPagina: perPage }] };
+      const r = await omieFetchRetry(payload);
+      const arr = Array.isArray(r.produtos) ? r.produtos : [];
+      itens.push(...arr);
+    }
+
+    if (!itens.length) {
+      return res.json({ ok:true, imported: 0, local: localCodigo, data_posicao: dataISO, msg: 'Sem itens retornados pela Omie.' });
+    }
+
+    // 3) transação + UPSERT
     const cli = await pool.connect();
     try {
       await cli.query('BEGIN');
 
-      // garante local no catálogo (nome é opcional; ajuste se quiser)
       await cli.query(
         `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
          VALUES ($1, $2, TRUE, now())
@@ -1930,8 +2146,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
         [localCodigo, 'Almoxarifado']
       );
 
-      // UPSERT por item
-      const sqlUpsert = `
+      const upsertSQL = `
         INSERT INTO omie_estoque_posicao (
           data_posicao, ingested_at, local_codigo,
           omie_prod_id, cod_int, codigo, descricao,
@@ -1955,23 +2170,22 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
       `;
 
       let count = 0;
-      for (const p of produtos) {
-        // campos retornados pela Omie (ajustados pra número)
+      for (const p of itens) {
         const row = {
           omie_prod_id   : Number(p.nCodProd) || 0,
           cod_int        : p.cCodInt || null,
           codigo         : p.cCodigo || null,
           descricao      : p.cDescricao || '',
-          preco_unitario : Number(p.nPrecoUnitario) || 0,
-          saldo          : Number(p.nSaldo) || 0,
-          cmc            : Number(p.nCMC) || 0,
-          pendente       : Number(p.nPendente) || 0,
-          estoque_minimo : Number(p.estoque_minimo) || 0,
-          reservado      : Number(p.reservado) || 0,
-          fisico         : Number(p.fisico) || 0,
+          preco_unitario : clamp(p.nPrecoUnitario),
+          saldo          : clamp(p.nSaldo),
+          cmc            : clamp(p.nCMC),
+          pendente       : clamp(p.nPendente),
+          estoque_minimo : clamp(p.estoque_minimo),
+          reservado      : clamp(p.reservado),
+          fisico         : clamp(p.fisico),
         };
 
-        await cli.query(sqlUpsert, [
+        await cli.query(upsertSQL, [
           dataISO, localCodigo,
           row.omie_prod_id, row.cod_int, row.codigo, row.descricao,
           row.preco_unitario, row.saldo, row.cmc, row.pendente, row.estoque_minimo, row.reservado, row.fisico
@@ -1980,19 +2194,21 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
       }
 
       await cli.query('COMMIT');
-      res.json({ ok:true, imported: count, local: localCodigo, data_posicao: dataISO });
+      const ms = Date.now() - startedAt;
+      return res.json({ ok:true, imported: count, local: localCodigo, data_posicao: dataISO, ms });
     } catch (e) {
       await cli.query('ROLLBACK');
       throw e;
     } finally {
       cli.release();
     }
-
   } catch (err) {
-    console.error('[admin/sync/almox]', err);
-    res.status(500).json({ ok:false, error: String(err.message || err) });
+    console.error('[almox sync] FAIL', err);
+    return res.status(500).json({ ok:false, error: String(err?.message || err) });
   }
 });
+
+
 
 //------------------------------------------------------------------
 // Armazéns → Produção (POSIÇÃO DE ESTOQUE)
