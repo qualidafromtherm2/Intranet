@@ -2210,73 +2210,48 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
 
 
 
-//------------------------------------------------------------------
-// Armazéns → Produção (POSIÇÃO DE ESTOQUE)
-//------------------------------------------------------------------
-app.post(
-  '/api/armazem/producao',
-  express.json(),
-  async (req, res) => {
-    try {
-      const HOJE = new Date().toLocaleDateString('pt-BR');
+// ------------------------------------------------------------------
+// Armazéns → Produção (AGORA LENDO DO POSTGRES)
+// local padrão = 10564345392 (o mesmo que você usava na Omie)
+// pode sobrescrever com ?local=... ou body { local: ... }
+// ------------------------------------------------------------------
+const PRODUCAO_LOCAL_PADRAO = process.env.PRODUCAO_LOCAL_PADRAO || '10564345392';
 
-      // 1ª chamada — pegar total de páginas
-      const first = await omieCall(
-        'https://app.omie.com.br/api/v1/estoque/consulta/',
-        {
-          call : 'ListarPosEstoque',
-          app_key   : OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param : [{
-            nPagina: 1,
-            nRegPorPagina: 50,
-            dDataPosicao: HOJE,
-            cExibeTodos : 'N',
-            codigo_local_estoque: 10564345392   // <<< Produção
-          }]
-        }
-      );
+app.post('/api/armazem/producao', express.json(), async (req, res) => {
+  try {
+    const local = String(req.query.local || req.body?.local || PRODUCAO_LOCAL_PADRAO);
 
-      const totalPag = first.nTotPaginas || 1;
-      let produtos = first.produtos || [];
+    const { rows } = await pool.query(`
+      SELECT
+        produto_codigo     AS codigo,
+        produto_descricao  AS descricao,
+        estoque_minimo     AS min,
+        fisico,
+        reservado,
+        saldo,
+        cmc
+      FROM v_almoxarifado_grid
+      WHERE local = $1
+      ORDER BY produto_codigo
+    `, [local]);
 
-      for (let p = 2; p <= totalPag; p++) {
-        const lote = await omieCall(
-          'https://app.omie.com.br/api/v1/estoque/consulta/',
-          {
-            call : 'ListarPosEstoque',
-            app_key   : OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param : [{
-              nPagina: p,
-              nRegPorPagina: 50,
-              dDataPosicao: HOJE,
-              cExibeTodos : 'N',
-              codigo_local_estoque: 10564345392
-            }]
-          }
-        );
-        produtos = produtos.concat(lote.produtos || []);
-      }
+    const dados = rows.map(r => ({
+      codigo   : r.codigo || '',
+      descricao: r.descricao || '',
+      min      : Number(r.min)       || 0,
+      fisico   : Number(r.fisico)    || 0,
+      reservado: Number(r.reservado) || 0,
+      saldo    : Number(r.saldo)     || 0,
+      cmc      : Number(r.cmc)       || 0,
+    }));
 
-      const dados = produtos.map(p => ({
-        codigo    : p.cCodigo,
-        descricao : p.cDescricao,
-        min       : p.estoque_minimo,
-        fisico    : p.fisico,
-        reservado : p.reservado,
-        saldo     : p.nSaldo,
-        cmc       : p.nCMC
-      }));
-
-      res.json({ ok:true, pagina:1, totalPaginas:1, dados });
-
-    } catch (err) {
-      console.error('[armazem/producao]', err);
-      res.status(500).json({ ok:false, error:'Falha ao consultar Omie' });
-    }
+    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
+  } catch (err) {
+    console.error('[armazem/producao SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
   }
-);
+});
+
 
 // ------------------------------------------------------------------
 // Alias: /api/omie/produto  →  mesma lógica de /api/omie/produtos
