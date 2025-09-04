@@ -1,235 +1,182 @@
 // login/login.js
 import config from '../config.client.js';
 
-const API_BASE =
-  (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:5001'
-    : window.location.origin;      // Render ou outro domínio
+// opção A (recomendada): sempre a mesma origem
+const API_BASE = '';
+
     
 document.addEventListener('DOMContentLoaded', async () => {
+  // base da API (se não existir API_BASE, usa vazio e chama no mesmo origin)
+  const BASE = typeof window.API_BASE === 'string' ? window.API_BASE : '';
+
   // 1) Pega o container onde injetaremos o HTML do login
   const overlay = document.getElementById('authOverlay');
 
   // 2) Carrega e injeta o HTML do formulário
-  const html = await fetch('login/login.html').then(r => r.text());
+  const html = await fetch('login/login.html', { credentials: 'include' }).then(r => r.text());
   overlay.innerHTML = html;
 
   // 3) Agora sim podemos selecionar os elementos do form
-// 3) Agora sim podemos selecionar os elementos do form
-const form        = overlay.querySelector('#formSignIn');
+  const form        = overlay.querySelector('#formSignIn');
 
-// 🔻 NOVO – painéis “logado” / “deslogado”
-const divNotLogged      = overlay.querySelector('#overlayNotLoggedIn');
-const divLogged         = overlay.querySelector('#overlayLoggedIn');
-const nomeUsuarioSpan   = overlay.querySelector('#nomeUsuarioOverlay');
+  // painéis “logado” / “deslogado”
+  const divNotLogged      = overlay.querySelector('#overlayNotLoggedIn');
+  const divLogged         = overlay.querySelector('#overlayLoggedIn');
+  const nomeUsuarioSpan   = overlay.querySelector('#nomeUsuarioOverlay');
 
-  
   const inpUser     = overlay.querySelector('#signInEmail');
   const inpPass     = overlay.querySelector('#signInPassword');
   const chkRemember = overlay.querySelector('#rememberMe');
   const loggedContainer = overlay.querySelector('#loggedInContainer');
 
-  // 🔻 NOVO – onde cada bloco RESIDE no HTML original
-  const signInPane   = overlay.querySelector('.sign-in-container'); // cinza
-  const overlayRight = overlay.querySelector('#overlayLoggedIn');  // roxo
-  const overlayRightPanel = overlayRight.parentElement;            // 🔻 NOVO
+  // onde cada bloco RESIDE no HTML original
+  const signInPane        = overlay.querySelector('.sign-in-container'); // cinza
+  const overlayRight      = overlay.querySelector('#overlayLoggedIn');   // roxo
+  const overlayRightPanel = overlayRight?.parentElement;
 
-  
-
-
-/* ---------------- mover blocos ---------------- */
-function moverDadosParaDireita () {
-  overlayRightPanel.appendChild(loggedContainer);
-  loggedContainer.classList.add('on-overlay');
-  
-  signInPane.classList.add('centered');        // 🔻 NOVO
-  
-
-  loggedContainer.classList.add('on-overlay');   // 🆕
-  loggedContainer.style.display = 'block';
-
-  signInPane.appendChild(divLogged);             // mensagem → cinza
-}
-
-function moverDadosParaEsquerda () {
-  signInPane.appendChild(loggedContainer);
-  loggedContainer.classList.remove('on-overlay'); // 🆕
-  loggedContainer.style.display = 'none';
-
-  overlayRightPanel.appendChild(divLogged);  // mensagem → roxo
-  signInPane.classList.remove('centered');   // 🔻 NOVO
-  
-}
-
-
-
-// 🔻 NOVO – placeholders que receberão dados da Omie
-const uiCargo    = overlay.querySelector('#uiCargo');
-const uiEndereco = overlay.querySelector('#uiEndereco');
-const uiCel      = overlay.querySelector('#uiCel');
-const uiNomeCompleto = overlay.querySelector('#uiNomeCompleto');
-const uiDtNasc       = overlay.querySelector('#uiDtNasc');
-const uiEmail        = overlay.querySelector('#uiEmail');
-const uiObs          = overlay.querySelector('#uiObs');
-const uiNCod         = overlay.querySelector('#uiNCod');
-const uiNCodConta    = overlay.querySelector('#uiNCodConta');
-const uiNCodVend     = overlay.querySelector('#uiNCodVend');
-
-
-/* =========================================================
- *  Carrega dados do colaborador na Omie
- * ========================================================= */
-async function loadUserInfo(username) {
-  try {
-
-
-    /* ➕ NOVO — loga quem estamos procurando */
-console.log('[loadUserInfo] username →', username);
-
-/* monta payload só para logar */
-const payload = { pagina:1, registros_por_pagina:50 };
-console.log('[loadUserInfo] payload  →', payload);
-
-const res = await fetch(`${API_BASE}/api/omie/login/contatos`, {
-  method : 'POST',
-  headers: { 'Content-Type':'application/json' },
-  body   : JSON.stringify(payload)
-});
-
-/* ➕ NOVO — loga status & body bruto */
-console.log('[loadUserInfo] status   →', res.status);
-
-const data = await res.json();
-console.log('[loadUserInfo] resposta →', data);
-
-
-    if (!data.cadastros) throw new Error('Lista vazia');
-
-    const contato = data.cadastros.find(c =>
-           c.identificacao?.cCodInt?.toLowerCase() === username.toLowerCase() ||
-           c.identificacao?.cNome?.toLowerCase()   === username.toLowerCase());
-
-    if (!contato) throw new Error('Usuário não encontrado');
-
-// ► Nome completo + data de nascimento
-uiNomeCompleto.textContent =
-  `${contato.identificacao.cNome} ${contato.identificacao.cSobrenome}`;
-uiDtNasc.textContent = contato.identificacao.dDtNasc;
-
-// ► Demais campos na ordem solicitada
-uiCargo.textContent  = contato.identificacao.cCargo;
-uiCel.textContent    =
-  `(${contato.telefone_email.cDDDCel1}) ${contato.telefone_email.cNumCel1}`;
-uiEmail.textContent  = contato.telefone_email.cEmail || '-';
-
-uiEndereco.textContent =
-  `${contato.endereco.cEndereco} ${contato.endereco.cCompl || ''} – ` +
-  `${contato.endereco.cBairro}, ${contato.endereco.cCidade} – ` +
-  `${contato.endereco.cUF} ${contato.endereco.cCEP}`;
-
-uiObs.textContent       = contato.cObs || '-';
-uiNCod.textContent      = contato.identificacao.nCod;
-uiNCodConta.textContent = contato.identificacao.nCodConta;
-uiNCodVend.textContent  = contato.identificacao.nCodVend;
-
-/* ➕ NOVO – personaliza a saudação */
-const hBemVindo = divLogged.querySelector('h1');         // pega o <h1>
-if (hBemVindo) {
-  hBemVindo.textContent =
-    `Olá ${contato.identificacao.cNome}, seja bem vindo`;
-}
-
-    loggedContainer.style.display = 'block';
-  } catch (err) {
-    console.error('[loadUserInfo] ', err.message);
+  /* ---------------- mover blocos ---------------- */
+  function moverDadosParaDireita () {
+    if (overlayRightPanel && loggedContainer) {
+      overlayRightPanel.appendChild(loggedContainer);
+      loggedContainer.classList.add('on-overlay');
+      loggedContainer.style.display = 'block';
+    }
+    if (signInPane && divLogged) {
+      signInPane.classList.add('centered');
+      signInPane.appendChild(divLogged); // mensagem → cinza
+    }
   }
-}
+
+  function moverDadosParaEsquerda () {
+    if (signInPane && loggedContainer) {
+      signInPane.appendChild(loggedContainer);
+      loggedContainer.classList.remove('on-overlay');
+      loggedContainer.style.display = 'none';
+    }
+    if (overlayRightPanel && divLogged) {
+      overlayRightPanel.appendChild(divLogged); // mensagem → roxo
+    }
+    if (signInPane) {
+      signInPane.classList.remove('centered');
+    }
+  }
+
+  // placeholders (p/ quando migrarmos o perfil pro SQL)
+  const uiCargo        = overlay.querySelector('#uiCargo');
+  const uiEndereco     = overlay.querySelector('#uiEndereco');
+  const uiCel          = overlay.querySelector('#uiCel');
+  const uiNomeCompleto = overlay.querySelector('#uiNomeCompleto');
+  const uiDtNasc       = overlay.querySelector('#uiDtNasc');
+  const uiEmail        = overlay.querySelector('#uiEmail');
+  const uiObs          = overlay.querySelector('#uiObs');
+  const uiNCod         = overlay.querySelector('#uiNCod');
+  const uiNCodConta    = overlay.querySelector('#uiNCodConta');
+  const uiNCodVend     = overlay.querySelector('#uiNCodVend');
+
+  /* =========================================================
+   *  Carrega dados do colaborador (dummy por enquanto)
+   * ========================================================= */
+  async function loadUserInfo(username) {
+    try {
+      // mostra painel “logado”
+      divNotLogged.style.display = 'none';
+      divLogged.style.display    = 'block';
+      nomeUsuarioSpan.textContent = username || '';
+
+      // apenas consulta status (mantém coerência visual)
+      const stResp = await fetch(`${BASE}/api/auth/status`, { credentials: 'include' });
+      const js     = stResp.ok ? await stResp.json() : { loggedIn:false };
+      // (campos de perfil ficam vazios até migrarmos 100% pro SQL)
+
+    } catch (err) {
+      console.warn('[loadUserInfo]', err);
+    }
+  }
 
   // 4) Pré-preenche com localStorage
   const savedU = localStorage.getItem('user');
   const savedP = localStorage.getItem('password');
   if (savedU) inpUser.value = savedU;
   if (savedP) inpPass.value = savedP;
+  if (savedU && savedP && chkRemember) chkRemember.checked = true;
 
-  // 8) Ao abrir a página, verifica se já está logado
-  const status = await fetch(`${API_BASE}/api/auth/status`).then(r => r.json());
-  // só conta como “já logado” se a senha salva NÃO for a padrão
+  // 8) Ao abrir a página, checa sessão e configura a UI
+  const st = await fetch(`${BASE}/api/auth/status`, { credentials: 'include' })
+    .then(r => r.json())
+    .catch(() => ({ loggedIn:false }));
+
+  // deixa disponível p/ o resto da UI (menus etc)
+  window.__sessionUser = st.loggedIn ? st.user : null;
+
   const savedPass = localStorage.getItem('password');
-  if (status.loggedIn && savedPass && savedPass !== '123') {
-    form.style.display            = 'none';
-    updateMessageCount();
-    
-    loadUserInfo(status.user.id);
-    moverDadosParaDireita();               // 🔻 NOVO
-    
-  
-    // 🔻 NOVO
+
+  if (st.loggedIn && savedPass && savedPass !== '123') {
+    form.style.display = 'none';
+    try { await updateMessageCount?.(); } catch {}
+    await loadUserInfo(st.user.id);
+    moverDadosParaDireita();
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
-    nomeUsuarioSpan.textContent = status.user.id;
+    nomeUsuarioSpan.textContent = st.user.id;
   } else {
-    // 🔻 NOVO – garante que o painel correto apareça deslogado
     divNotLogged.style.display = 'block';
     divLogged.style.display    = 'none';
+    moverDadosParaEsquerda();
   }
-  
-  
 
-  // 9) Resto do seu código de abrir/fechar modal
-// 9) Resto do seu código de abrir/fechar modal
-// ➡  agora enviamos as três divs para dentro da função
-bindAuthModal(
-  overlay,
-  divNotLogged,
-  divLogged,
-  nomeUsuarioSpan,
-  moverDadosParaDireita,
-  moverDadosParaEsquerda,
-  loadUserInfo            // 🔻 NOVO
-);
+  // 9) Abrir/fechar modal (usa sua função existente)
+  bindAuthModal(
+    overlay,
+    divNotLogged,
+    divLogged,
+    nomeUsuarioSpan,
+    moverDadosParaDireita,
+    moverDadosParaEsquerda,
+    loadUserInfo
+  );
 
+  // 10) Logout
+  const btnLogout = overlay.querySelector('#btnLogout');
+  if (btnLogout) {
+    btnLogout.addEventListener('click', async () => {
+      try {
+        await fetch(`${BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+      } catch {}
+      // limpa localStorage (caso "lembrar-me")
+      localStorage.removeItem('user');
+      localStorage.removeItem('password');
 
+      // volta a exibir o form e esconder o painel de boas-vindas
+      form.style.display            = '';
+      loggedContainer && (loggedContainer.style.display = 'none');
+      divNotLogged.style.display    = 'block';
+      divLogged.style.display       = 'none';
+      moverDadosParaEsquerda();
 
-  
-  // 9) Liga o logout para limpar a sessão e mostrar o form de novo
-const btnLogout = overlay.querySelector('#btnLogout');
-btnLogout.addEventListener('click', async () => {
-  // chama o endpoint que você já tem em routes/auth.js
-  await fetch(`${API_BASE}/api/auth/logout`, { method: 'POST' });
+      window.__sessionUser = null;
+      window.dispatchEvent(new Event('auth:changed'));
 
-  // limpa localStorage (caso tenha marcado "Lembrar-me")
-  localStorage.removeItem('user');
-  localStorage.removeItem('password');
-  
-  // volta a exibir o form e esconder o painel de boas-vindas
-  form.style.display           = '';
-  loggedContainer.style.display = 'none';
+      overlay.querySelector('#container')?.classList.remove('right-panel-active');
+    });
+  }
 
-  // 🔻 NOVO – volta a exibir o bloco de não logado
-  divNotLogged.style.display = 'block';
-  divLogged.style.display    = 'none';
-  moverDadosParaEsquerda();           // 🔻 NOVO
+  // mesmo handler para o botão do painel direito (se existir)
+  const btnOverlayLogout = overlay.querySelector('#btnOverlayLogout');
+  if (btnOverlayLogout) {
+    btnOverlayLogout.addEventListener('click', (e) => {
+      e.preventDefault();
+      btnLogout?.click();
+    });
+  }
 
-  
-  // se você tiver a “troca de painel” Sign Up / Sign In, volte pra Sign In:
-  overlay.querySelector('#container')
-         .classList.remove('right-panel-active');
-});
-
-// 🔻 NOVO – mesmo handler para o botão do painel direito
-const btnOverlayLogout = overlay.querySelector('#btnOverlayLogout');
-btnOverlayLogout.addEventListener('click', () => btnLogout.click());  
-  
-  
-  ;
-
-
-
+  // força todo mundo (menus, botões, abas) a reavaliar visibilidade
+  window.dispatchEvent(new Event('auth:changed'));
 });
 
 
 
-// ➡  recebe as três referências como parâmetros
+
+// ➡ recebe as referências como parâmetros
 function bindAuthModal(
   overlay,
   divNotLogged,
@@ -237,168 +184,173 @@ function bindAuthModal(
   nomeUsuarioSpan,
   moverDadosParaDireita,
   moverDadosParaEsquerda,
-  loadUserInfo            // 🔻 NOVO
+  loadUserInfo
 ) {
-
-
-
   const profileArea = document.getElementById('profile-icon');
   const closeBtn    = overlay.querySelector('.close-auth');
   const formSignIn  = overlay.querySelector('#formSignIn');
+  const container   = overlay.querySelector('#container');
 
-  // abre modal ao clicar no perfil
-  profileArea.addEventListener('click', e => {
-    overlay.classList.add('is-active');
-  });
-  
+  // abre modal ao clicar no ícone de perfil
+  profileArea?.addEventListener('click', () => overlay.classList.add('is-active'));
   window.openLoginModal = () => overlay.classList.add('is-active');
 
-  // fecha modal
-  closeBtn.addEventListener('click', () => {
-    overlay.classList.remove('is-active');
-  });
+  // fechar modal
+  closeBtn?.addEventListener('click', () => overlay.classList.remove('is-active'));
   overlay.addEventListener('click', e => {
     if (e.target === overlay) overlay.classList.remove('is-active');
   });
 
-  // Alterna entre Sign Up / Sign In (já existente)
-// Solicitar – grava pedido de reset para os administradores
-overlay.querySelector('#signUp').addEventListener('click', async () => {
-  const username = overlay.querySelector('#signInEmail').value.trim();
-  if (!username) {
-    alert('Preencha o campo usuário antes de solicitar.');
-    return;
-  }
-
-  // envia o pedido para que os admins vejam em users.json
-  const res = await fetch(`${API_BASE}/api/users/request-reset`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username })
+  // alterna para painel de login
+  overlay.querySelector('#signIn')?.addEventListener('click', () => {
+    container?.classList.remove('right-panel-active');
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    alert(err.error || 'Falha ao registrar o pedido.');
-    return;
-  }
-
-  alert('Pedido enviado! Um administrador fará a troca da sua senha.');
-  // permanece na tela de login — não muda de painel
-});
-
-
-  overlay.querySelector('#signIn').addEventListener('click', () => {
-    overlay.querySelector('#container').classList.remove('right-panel-active');
-  });
-
-// 0) guarda o id do usuário logado
-let loggedUserId = null;
-
-formSignIn.addEventListener('submit', async e => {
-  e.preventDefault();
-  const username = overlay.querySelector('#signInEmail').value.trim();
-  const password = overlay.querySelector('#signInPassword').value.trim();
-  const remember = overlay.querySelector('#rememberMe').checked;
-
-  if (password === '123') {
-    // confirma que o usuário ainda está com senha 123
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ user: username, senha: '123' })
-    });
-    if (!res.ok) {
-      return alert('Usuário não encontrado ou a senha já foi alterada.');
+  // “Solicitar” (pedido de reset para admins)
+  overlay.querySelector('#signUp')?.addEventListener('click', async () => {
+    const username = overlay.querySelector('#signInEmail')?.value.trim();
+    if (!username) return alert('Preencha o usuário antes de solicitar.');
+    try {
+      const res = await fetch('/api/users/request-reset', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        return alert(err.error || 'Falha ao registrar o pedido.');
+      }
+      alert('Pedido enviado! Um administrador fará a troca da sua senha.');
+    } catch (e) {
+      alert('Falha ao enviar o pedido.');
     }
-  
-    const { user: userData } = await res.json();
-    loggedUserId = userData.id;   // mantém sessão ativa
-  
-    overlay.querySelector('#container').classList.add('right-panel-active');
-    overlay.querySelector('#formCriarConta input[name="user"]').value = username;
-    return; // não continua para o login normal
-  }
-  
-
-  // 2) fluxo normal de login
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: username, senha: password }),
-    credentials: 'include'
   });
-  if (!res.ok) {
-    const err = await res.json();
-    return alert(err.error || 'Usuário ou senha inválidos');
-  }
-  const { user: userData } = await res.json();
 
-  // grava ou limpa localStorage
-  if (remember) {
-    localStorage.setItem('user', username);
-    localStorage.setItem('password', password);
-  } else {
-    localStorage.removeItem('user');
+  // guarda id do usuário logado (para o fluxo “criar nova senha”)
+  let loggedUserId = null;
+
+  // === SUBMIT DE LOGIN (único) ===
+  formSignIn?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const userEl   = overlay.querySelector('#signInEmail');
+    const passEl   = overlay.querySelector('#signInPassword');
+    const remember = overlay.querySelector('#rememberMe');
+
+    const username = (userEl?.value || '').trim();
+    const password = (passEl?.value || '');
+
+    if (!username || !password) {
+      alert('Preencha usuário e senha.');
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: username, senha: password })
+      });
+      const data = await resp.json();
+
+      if (!resp.ok || !data.ok) {
+        alert(data.error || 'Usuário ou senha inválidos');
+        return;
+      }
+
+      // lembrar credenciais (opcional)
+      if (remember?.checked) {
+        localStorage.setItem('user', username);
+        localStorage.setItem('password', password);
+      } else {
+        localStorage.removeItem('user');
+        localStorage.removeItem('password');
+      }
+
+      // mantém na memória do front e atualiza UI
+      window.__sessionUser = data.user;
+      loggedUserId = String(data.user.id || '');
+
+      // fecha modal + ajusta painéis
+      overlay.classList.remove('is-active');
+      formSignIn.reset();
+
+      divNotLogged.style.display = 'none';
+      divLogged.style.display    = 'block';
+      if (nomeUsuarioSpan) {
+        nomeUsuarioSpan.textContent = data.user.username || data.user.id || username;
+      }
+      if (typeof moverDadosParaDireita === 'function') moverDadosParaDireita();
+
+      // notifica a app (menus/abas reavaliam permissões)
+      window.dispatchEvent(new Event('auth:changed'));
+    } catch (err) {
+      console.error('[login] falha', err);
+      alert('Falha no login. Tente novamente.');
+    }
+  });
+
+  // === SUBMIT: criar/alterar senha inicial ===
+  const formCriar = overlay.querySelector('#formCriarConta');
+  formCriar?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const newPass     = overlay.querySelector('#newPassword')?.value.trim();
+    const confirmPass = overlay.querySelector('#confirmPassword')?.value.trim();
+    if (!newPass || newPass !== confirmPass) return alert('As senhas não conferem');
+
+    // 1) grava nova senha
+    const ok = await fetch(`/api/users/${loggedUserId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type':'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ password: newPass })
+    }).then(r => r.ok);
+    if (!ok) return alert('Erro ao atualizar a senha');
+
+    // 2) encerra sessão temporária
+    await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+
+    // 3) volta para o painel de login
+    container?.classList.remove('right-panel-active');
+    overlay.querySelector('.sign-up-container')?.style && (overlay.querySelector('.sign-up-container').style.display = 'none');
+    overlay.querySelector('.sign-in-container')?.style && (overlay.querySelector('.sign-in-container').style.display = 'block');
+    const passField = overlay.querySelector('#signInPassword');
+    if (passField) { passField.value = ''; passField.focus(); }
+
     localStorage.removeItem('password');
-  }
-
-  // mostra painel de boas-vindas e fecha modal
-  overlay.querySelector('#formSignIn').style.display        = 'none';
-  await updateMessageCount();
-  overlay.classList.remove('is-active');
-  
-  // 🔻 NOVO – oculta bloco “Olá colaborador” e mostra o painel logado
-  divNotLogged.style.display = 'none';
-  divLogged.style.display    = 'block';
-  nomeUsuarioSpan.textContent = userData.id;
-  loadUserInfo(userData.id);             // 🔻 NOVO
-  moverDadosParaDireita();               // 🔻 NOVO
-
-
-});
-
-
-
-// 3) listener para salvar a nova senha
-const formCriar = overlay.querySelector('#formCriarConta');
-// listener do  formCriarConta
-formCriar.addEventListener('submit', async e => {
-  e.preventDefault();
-  const newPass     = overlay.querySelector('#newPassword').value.trim();
-  const confirmPass = overlay.querySelector('#confirmPassword').value.trim();
-  if (newPass !== confirmPass) return alert('As senhas não conferem');
-
-  /* 1. PUT  /api/users/:id  – grava a nova senha ------------------- */
-  const ok = await fetch(`/api/users/${loggedUserId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type':'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ password: newPass })
-  }).then(r => r.ok);
-  if (!ok) return alert('Erro ao atualizar a senha');
-
-
-  /* 2. NOVO fluxo -------------------------------------------------- */
-  // encerra a sessão temporária (senha 123)
-  await fetch(`${API_BASE}/api/auth/logout`, { method:'POST', credentials:'include' });
-
-  // volta para o painel de login
-  overlay.querySelector('#container').classList.remove('right-panel-active');
-  overlay.querySelector('.sign-up-container').style.display  = 'none';
-  overlay.querySelector('.sign-in-container').style.display  = 'block';
-  overlay.querySelector('#signInPassword').value = '';        // limpa campo
-  overlay.querySelector('#signInPassword').focus();           // cursor
-
-  // NÃO grava nova senha no localStorage
-  localStorage.removeItem('password');
-
-  alert('Senha alterada! Entre novamente com seu usuário e a nova senha.');
-}); 
+    alert('Senha alterada! Entre novamente com seu usuário e a nova senha.');
+  });
 }
 
 
+function ativarInicioAposLogin() {
+  // esconde a aba de colaboradores se existir
+  const colab = document.getElementById('dadosColaboradores');
+  if (colab) {
+    colab.style.display = 'none';
+    colab.classList.remove('active');
+  }
+  // ativa o painel de Início
+  const home = document.getElementById('paginaInicio');
+  if (home) {
+    const root =
+      home.parentElement ||
+      document.querySelector('.main-container .tab-content') ||
+      document.querySelector('.tab-content');
+
+    if (root) {
+      root.querySelectorAll(':scope > .tab-pane').forEach(p => {
+        const ativa = (p === home);
+        p.style.display = ativa ? 'block' : 'none';
+        p.classList.toggle('active', ativa);
+      });
+    }
+    try { home.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+  }
+  try { history.replaceState(null, '', '#inicio'); } catch {}
+}
 
 async function updateMessageCount() {
   const badge = document.querySelector('.notification-number');
@@ -537,3 +489,22 @@ document.addEventListener('click', e => {
     acessos?.classList.remove('hidden');
   }
 });
+
+// LOGOUT — ADICIONE ESTE BLOCO (mapeia #btn-logout ou qualquer [data-logout])
+(function bindLogoutButton(){
+  function handler(btn){
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      } catch {}
+      window.__sessionUser = null;
+      window.dispatchEvent(new Event('auth:changed'));
+    });
+  }
+  const tryBind = () => {
+    const btn = document.querySelector('#btn-logout, [data-logout]');
+    if (btn) handler(btn);
+  };
+  document.addEventListener('DOMContentLoaded', tryBind);
+})();

@@ -267,6 +267,30 @@ window.fetch = async function(input, init = {}) {
   }
 };
 
+// injeta CSS para esconder via classe
+(function ensurePermCss(){
+  if (document.getElementById('perm-hide-style')) return;
+  const st = document.createElement('style');
+  st.id = 'perm-hide-style';
+  st.textContent = `.perm-hidden{display:none !important;}`;
+  document.head.appendChild(st);
+})();
+
+
+
+// chame ao logar e depois de salvar permissões
+// ex.: depois do login bem-sucedido:
+setTimeout(() => {
+  if (typeof applyCurrentUserPermissionsToUI === 'function') applyCurrentUserPermissionsToUI();
+}, 0);
+
+
+// Exemplo: chamar após confirmar sessão
+document.addEventListener('DOMContentLoaded', () => {
+  // quando você já tiver setado window.__sessionUser
+  setTimeout(applyCurrentUserPermissionsToUI, 200);
+});
+
 function loadEstruturaProduto(codigo) {
   if (!codigo) return;
   ultimoCodigo = codigo;
@@ -276,39 +300,41 @@ function loadEstruturaProduto(codigo) {
   ul.innerHTML  = '';                     // limpa antes de começar
   spinner.style.display = 'inline-flex';  // mostra spinner
 
- fetch(`${API_BASE}/api/malha`, {
-   method:      'POST',
-   credentials: 'include',               // se precisar enviar cookies
-   headers:     { 'Content-Type':'application/json' },
-   body:        JSON.stringify({ intProduto: codigo })
- })
+  // >>> NOVO: agora lê do SQL via nossa API /api/pcp/estrutura
+  fetch(`${API_BASE}/api/pcp/estrutura?pai_codigo=${encodeURIComponent(codigo)}`, {
+    method:      'POST',
+    credentials: 'include',
+    headers:     { 'Content-Type':'application/json' },
+    body:        '{}'                                      // sem payload; usamos query string
+  })
   .then(r => r.json())
   .then(json => {
     spinner.style.display = 'none';
 
-       // aceita tanto { itens: [...] } como [...] puro
-   const itens = Array.isArray(json.itens)
-     ? json.itens
-     : Array.isArray(json)
-       ? json
-       : [];
+    if (!json.ok) {
+      ul.innerHTML = `<li class="fault-message">Erro: ${json.error || 'Falha na API'}</li>`;
+      return;
+    }
 
-    if (json.notFound || !Array.isArray(json.itens)) {
+    const itens = Array.isArray(json.dados) ? json.dados : [];
+    if (!itens.length) {
       ul.innerHTML = '<li class="fault-message">Estrutura não cadastrada</li>';
       return;
     }
 
-    json.itens.forEach(it => {
+    // json.dados vem no formato do SQL:
+    // comp_codigo, comp_descricao, comp_unid, comp_tipo, comp_qtd, comp_perda_pct, comp_qtd_bruta
+    itens.forEach(it => {
       const li = document.createElement('li');
       li.innerHTML = `
-        <div>${it.codProdMalha}</div>
-        <div class="status">${it.descrProdMalha}</div>
-        <div class="qtd">${it.quantProdMalha}</div>
-        <div class="unidade">${it.unidProdMalha}</div>
-        <div class="custo-real">${it.custoReal ?? '–'}</div>
+        <div>${it.comp_codigo}</div>
+        <div class="status">${it.comp_descricao}</div>
+        <div class="qtd">${it.comp_qtd}</div>
+        <div class="unidade">${it.comp_unid}</div>
+        <div class="custo-real">–</div>
         <div class="button-wrapper">
           <button class="content-button status-button open"
-                  data-cod="${it.codProdMalha}">Editar</button>
+                  data-cod="${it.comp_codigo}">Editar</button>
         </div>`;
       ul.appendChild(li);
     });
@@ -318,6 +344,7 @@ function loadEstruturaProduto(codigo) {
     ul.innerHTML = `<li class="fault-message">Erro: ${err.message}</li>`;
   });
 }
+
 window.loadEstruturaProduto = loadEstruturaProduto;   // ← deixa global
 
 // Abre a aba Dados do produto
@@ -1266,3 +1293,259 @@ document.addEventListener('DOMContentLoaded', () => {
        window.inicializarImportacaoCaracteristicas();
 });
 
+// quando clicar na sub-aba "Estrutura de produto"
+document.querySelector('#produto-tabs [data-subtab="estrutura"]')?.addEventListener('click', () => {
+  const codigo =
+    // 1) algum elemento que mostra o código na área "Dados do produto"
+    document.querySelector('#dados-produto .produto-codigo')?.textContent?.trim()
+    // 2) ou algo global que você já usa
+    || window.codigoProdutoAtual
+    || window.prepCodigoSelecionado
+    || '';
+  if (codigo) {
+    window.loadEstruturaProduto(codigo);
+  }
+});
+
+// ========== Abrir Produto por código (força a guia Produto/Dados do produto) ==========
+window.openProdutoPorCodigo = async function openProdutoPorCodigo(codigo) {
+  try {
+    // 1) mostra o bloco de produto e esconde as outras páginas
+    const prodTabs   = document.getElementById('produtoTabs');
+    const inicioPane = document.getElementById('paginaInicio');
+    if (inicioPane)  inicioPane.style.display = 'none';
+    if (prodTabs)    prodTabs.style.display   = 'block';
+
+    // 2) ativa a aba principal "Dados do produto"
+    document.querySelectorAll('#produtoTabs .main-header .main-header-link')
+      .forEach(a => a.classList.remove('is-active'));
+    const linkDados = document.querySelector('#produtoTabs .main-header .main-header-link[data-target="dadosProduto"]');
+    if (linkDados) linkDados.classList.add('is-active');
+
+    // mostra apenas o painel de dados
+    document.querySelectorAll('#produtoTabs .tab-content .tab-pane').forEach(p => p.style.display = 'none');
+    const paneDados = document.getElementById('dadosProduto');
+    if (paneDados) paneDados.style.display = 'block';
+
+    // 3) guarda global (o resto da UI já usa essa variável)
+    window.codigoSelecionado = (codigo || '').trim();
+
+    // 4) dispara o carregamento normal dos “Dados do produto”
+    if (typeof window.loadDadosProduto === 'function') {
+      await window.loadDadosProduto(codigo);
+    }
+
+    // 5) não carrega estrutura aqui; deixamos o clique da sub-aba disparar (ver passo 3)
+  } catch (e) {
+    console.warn('[openProdutoPorCodigo]', e);
+  }
+};
+
+// ========== Interceptar navegadores antigos para "Início" ==========
+(function interceptarNavigateToDetalhes() {
+  const prev = window.navigateToDetalhes;
+  window.navigateToDetalhes = function patchedNavigateToDetalhes(target, codigo) {
+    // se vierem pedindo "iniciar" com código, redireciona para Produto
+    if (codigo && (String(target).toLowerCase() === 'iniciar' || String(target).toLowerCase() === 'inicio')) {
+      return window.openProdutoPorCodigo(codigo);
+    }
+    if (typeof prev === 'function') return prev(target, codigo);
+  };
+})();
+
+// Função que desenha a estrutura do SQL na UL #malha
+window.loadEstruturaProduto = async function loadEstruturaProduto(codigo) {
+  const ul = document.querySelector('#estruturaProduto #malha');
+  if (!ul) return;
+
+  const cod = (codigo || window.codigoSelecionado || '').trim();
+  if (!cod) {
+    // deixa o cabeçalho e limpa o conteúdo
+    ul.innerHTML = `
+      <li class="header-row">
+        <div>Código</div><div>Descrição</div><div>QTD</div>
+        <div>Unidade</div><div>Custo real</div><div>Editar</div>
+      </li>
+      <li><div colspan="6" style="opacity:.7">Selecione um produto.</div></li>`;
+    return;
+  }
+
+  // mantém o header e mostra “carregando…”
+  ul.innerHTML = `
+    <li class="header-row">
+      <div>Código</div><div>Descrição</div><div>QTD</div>
+      <div>Unidade</div><div>Custo real</div><div>Editar</div>
+    </li>
+    <li><div style="opacity:.7">Carregando estrutura de ${cod}…</div></li>`;
+
+  try {
+    const r = await fetch('/api/pcp/estrutura?pai_codigo=' + encodeURIComponent(cod), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    const j = await r.json();
+    const dados = Array.isArray(j?.dados) ? j.dados : [];
+
+    const frag = document.createDocumentFragment();
+
+    // repõe header
+    const header = document.createElement('li');
+    header.className = 'header-row';
+    header.innerHTML = `
+      <div>Código</div><div>Descrição</div><div>QTD</div>
+      <div>Unidade</div><div>Custo real</div><div>Editar</div>`;
+    frag.appendChild(header);
+
+    if (!dados.length) {
+      const li = document.createElement('li');
+      li.innerHTML = `<div style="opacity:.7">Estrutura de produto (${cod}) vazia.</div>`;
+      frag.appendChild(li);
+    } else {
+      dados.forEach(row => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <div>${row.comp_codigo}</div>
+          <div title="${row.comp_descricao || ''}">${(row.comp_descricao || '').slice(0, 80)}</div>
+          <div>${Number(row.comp_qtd || 0)}</div>
+          <div>${row.comp_unid || ''}</div>
+          <div>—</div>
+          <div><button class="btn tiny" disabled>Editar</button></div>`;
+        frag.appendChild(li);
+      });
+    }
+    ul.replaceChildren(frag);
+  } catch (e) {
+    console.error('[loadEstruturaProduto]', e);
+    ul.innerHTML = `
+      <li class="header-row">
+        <div>Código</div><div>Descrição</div><div>QTD</div>
+        <div>Unidade</div><div>Custo real</div><div>Editar</div>
+      </li>
+      <li><div style="color:#ef4444">Falha ao carregar estrutura.</div></li>`;
+  }
+};
+
+// Disparo ao clicar na sub-aba “Estrutura de produto”
+(function bindEstruturaTabClick() {
+  const link = document.querySelector('#produtoTabs .main-header .main-header-link[data-target="estruturaProduto"]');
+  if (!link) return;
+  link.addEventListener('click', () => {
+    // ativa visualmente a tab
+    document.querySelectorAll('#produtoTabs .main-header .main-header-link')
+      .forEach(a => a.classList.remove('is-active'));
+    link.classList.add('is-active');
+    // mostra o pane correto
+    document.querySelectorAll('#produtoTabs .tab-content .tab-pane').forEach(p => p.style.display = 'none');
+    const pane = document.getElementById('estruturaProduto');
+    if (pane) pane.style.display = 'block';
+    // carrega do SQL
+    const cod = (window.codigoSelecionado || '').trim();
+    window.loadEstruturaProduto(cod);
+  });
+})();
+
+// ===== VISIBILIDADE POR AUTENTICAÇÃO & PERMISSÕES =====
+
+// CSS utilitário (1x)
+(function ensureAuthCss(){
+  if (document.getElementById('perm-hide-style')) return;
+  const st = document.createElement('style');
+  st.id = 'perm-hide-style';
+  st.textContent = `.perm-hidden{display:none!important}`;
+  document.head.appendChild(st);
+})();
+
+// O que pode ficar visível quando DESLOGADO
+const PUBLIC_WHEN_LOGGED_OUT = [
+  '#menu-inicio',          // Início no topo
+  '#profile-icon',         // ícone usuário (abre login)
+  '#btn-login','#user-button','#btn-user','#login-btn' // fallbacks, se existirem
+];
+
+// **TUDO** que é controlado por login/permissão
+const GATED_SELECTORS = [
+  // topo (qualquer item com id #menu-*)
+  'a[id^="menu-"]',
+  '.header .header-menu > .menu-link',
+
+  // abas internas (Produto, etc.)
+  '#produtoTabs .main-header .main-header-link',
+  '#kanbanTabs .main-header .main-header-link',
+  '#armazemTabs .main-header .main-header-link',
+
+  // lateral
+  '.side-menu-item',
+  '.left-side .side-menu a',
+  '.sidebar a',
+  '.menu-lateral a',
+
+  // genéricos
+  '.tab-header a',
+  '.tab-header button',
+  '[data-top]', '[data-menu]', '[data-submenu]'
+].join(',');
+
+function findGatedCandidates(){
+  return document.querySelectorAll(GATED_SELECTORS);
+}
+
+// Deslogado: esconde tudo e mostra só Início + Login
+function applyLoggedOutUI(){
+  const gated = findGatedCandidates();
+  gated.forEach(el => el.classList.add('perm-hidden'));
+  PUBLIC_WHEN_LOGGED_OUT.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => el.classList.remove('perm-hidden'));
+  });
+}
+
+// Logado: revela só o que a ÁRVORE permitir
+async function applyCurrentUserPermissionsToUI(){
+  // começa escondendo tudo
+  const gated = findGatedCandidates();
+  gated.forEach(el => el.classList.add('perm-hidden'));
+
+  const me = window.__sessionUser;
+  if (!me) { applyLoggedOutUI(); return; }
+
+  const r = await fetch(`/api/users/${me.id}/permissions/tree`, { credentials:'include' });
+  if (!r.ok) { applyLoggedOutUI(); return; }
+  const data = await r.json();
+
+  for (const n of data.nodes || []) {
+    if (!n.selector) continue;
+    document.querySelectorAll(n.selector).forEach(el => {
+      el.classList.toggle('perm-hidden', !n.allowed);
+    });
+  }
+
+  // Início sempre visível
+  document.querySelectorAll('#menu-inicio').forEach(el => el.classList.remove('perm-hidden'));
+}
+
+// Checa auth no backend e aplica estado
+async function ensureAuthVisibility(){
+  try {
+    // estado seguro imediato
+    applyLoggedOutUI();
+
+    const r  = await fetch('/api/auth/status', { credentials:'include' });
+    const st = r.ok ? await r.json() : { loggedIn:false };
+    window.__sessionUser = st.loggedIn ? st.user : null;
+
+    if (st.loggedIn) await applyCurrentUserPermissionsToUI();
+    else             applyLoggedOutUI();
+  } catch {
+    applyLoggedOutUI();
+  }
+}
+
+// lifecycle
+document.addEventListener('DOMContentLoaded', () => {
+  applyLoggedOutUI();
+  ensureAuthVisibility();
+});
+
+// reapply quando login/logout ou permissões mudarem
+window.addEventListener('auth:changed', ensureAuthVisibility);
+window.applyCurrentUserPermissionsToUI = applyCurrentUserPermissionsToUI;

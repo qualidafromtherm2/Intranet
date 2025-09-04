@@ -100,13 +100,15 @@
           <div class="side-title">Recursos humanos</div>
           <div class="side-menu">
 
-<a href="#" id="btn-colaboradores">
+<a href="#" id="btn-colaboradores"
+   data-colab="colab" data-nav="colaboradores" class="side-menu-item">
   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
        style="margin-right:8px; flex-shrink:0;">
     <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/>
   </svg>
   Cadastro de colaboradores
 </a>
+
             <a href="#" class="menu-link">Aniversariantes</a>
 
             <!-- … até em construção 18 … -->
@@ -685,20 +687,53 @@
     <div class="kanban-board">…</div>
   </div>
 
-<!-- === bloco PCP ÚNICO (colar aqui) ============================ -->
+
 <div id="conteudo-pcp" class="kanban-page" style="display:none;">
   <div id="listaPecasPCP">
     <div class="content-wrapper">
       <div class="content-section">
-        <div class="title-wrapper">
+
+        <!-- Barra: código do produto selecionado + multiplicador + OK + observação -->
+<div id="pcp-code-bar" class="code-bar" style="display:none; margin:6px 0 12px;">
+  <span id="pcp-code" class="prod-code"></span>
+  <button id="pcp-open-search" class="plus-btn" title="Escolher outro produto">+</button>
+
+  <input id="pcp-factor" class="qty-input" type="number" min="1" step="1" value="1" />
+  <button id="pcp-ok" class="ok-btn">OK</button>
+
+  <input id="pcp-obs" type="text" placeholder="Observações…" style="flex:1; min-width:220px;">
+</div>
+
+        <div class="title-wrapper" style="gap:12px; align-items:center;">
           <div class="content-section-title">Lista de peças</div>
+
+          <!-- toolbar da lista (select do produto + filtro + spinner) -->
+          <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+          </div>
         </div>
-        <!-- É aqui que o JS injeta os <li> -->
-        <ul id="listaPecasPCPList" class="content-list"></ul>
+
+
+
+        <!-- Lista de peças (cabeçalho fixo + linhas dinâmicas) -->
+<ul id="listaPecasPCPList" class="grid-pecas">
+<li class="header-row">
+  <div class="cod">Código</div>
+  <div class="unid">Unid</div>
+  <div class="qtd">Qtd</div>
+  <div class="perda">% perda</div>
+  <div class="qtdb">Qtd bruta</div>
+  <div class="qtdpro">Qtd Pro</div>
+  <div class="qtdalm">Qtd Alm</div>
+  <!-- NOVO -->
+  <div class="acao">Ação</div>
+</li>
+
+        </ul>
       </div>
     </div>
   </div>
 </div>
+
 <!-- ============================================================ -->
 
 <!-- === bloco PREPARAÇÃO (Kanban) ============================ -->
@@ -1167,6 +1202,7 @@ function attachDropZone(ul) {
   installClickDelegation();
 })();
 </script>
+
 
 </body>
 </html>
