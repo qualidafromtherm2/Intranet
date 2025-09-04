@@ -78,18 +78,34 @@
     banner.id = 'fotoCooldown';
     container.parentNode.insertBefore(banner, container.nextSibling);
   
-  // 1) Salva o load original
-  const originalLoad = window.loadDadosProduto;
+// 1) Salva o load original
+const originalLoad = window.loadDadosProduto;
 
-  // 2) Sobrescreve sem await, chamando loadFotos em paralelo
-  window.loadDadosProduto = function(codigo) {
-    // Dispara o carregamento dos dados do produto
-    const promise = originalLoad(codigo);
-    // Atualiza as fotos imediatamente (sempre que mudar de produto)
-    loadFotos(codigo);
-    // Retorna a promise original pra quem usar await
-    return promise;
-  };
+// 2) Sobrescreve sem await: fotos + ESTRUTURA (SQL) em paralelo
+window.loadDadosProduto = function(codigo) {
+  // dispara o fluxo original (dados do produto)
+  const promise = (typeof originalLoad === 'function')
+    ? originalLoad(codigo)
+    : Promise.resolve();
+
+  // fotos (mantém como estava)
+  try { loadFotos(codigo); } catch (e) { console.warn('[fotos]', e); }
+
+  // **Estrutura de produto (SQL)**
+  try {
+    if (typeof window.loadEstruturaProduto === 'function') {
+      window.loadEstruturaProduto(codigo);
+    } else {
+      console.warn('[estrutura] loadEstruturaProduto() indisponível');
+    }
+  } catch (e) {
+    console.warn('[estrutura]', e);
+  }
+
+  return promise;
+};
+
+
 
   // 3) Expõe loadFotos globalmente (caso precise chamar em outro lugar)
   window.loadFotos = loadFotos;

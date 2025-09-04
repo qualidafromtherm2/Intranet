@@ -401,349 +401,215 @@ function filtrarPorEstoque() {
 }
 
 // ─── 1) Renderiza a Lista de Peças na aba PCP ────────────────────────
-async function renderListaPecasPCP() {
-// renderListaPecasPCP()
-console.debug('[PCP] renderListaPecasPCP() começou');
-
-
-// 1) encontra a UL
-const ul = document.getElementById('listaPecasPCPList');
-if (!ul) { console.warn('[PCP] UL não encontrada'); return; }
-
-// 2) encontra o input correto navegando pela coluna
-const col = document
-  .getElementById('coluna-pcp-aprovado')
-  .closest('.kanban-column');
-const input = col?.querySelector('.add-search');
-
-  // ——— patch: código vindo da aba “Solicitar produção” ———
-  if (window.prepCodigoSelecionado) {     // ← SEM checar se está vazio
-    input.value = window.prepCodigoSelecionado;   // cola o código
-    window.prepCodigoSelecionado = null;          // zera a variável
-  }
-
-console.log('[PCP] input encontrado:', input);
-if (!input) { console.warn('[PCP] input .add-search não encontrado'); return; }
-
-// 3) extrai o código
-const raw = input.value;
-const codigo = raw.split('—')[0]?.trim();
-console.debug('[PCP] Código lido =', codigo);
-if (!codigo) { console.warn('[PCP] Sem código válido'); return; }
-
-/* ───────────────────── Cabeçalho da aba PCP ───────────────────── */
-function renderCodigoHeader () {
-  const alvo = document.querySelector('#listaPecasPCP .title-wrapper')
-             || document.getElementById('listaPecasPCP');
-  if (!alvo) return;
-
-  /* cria só 1 vez -------------------------------------------------------- */
-  let barra = document.getElementById('pcp-code-bar');
-  if (!barra) {
-    barra = document.createElement('div');
-    barra.id        = 'pcp-code-bar';
-    barra.className = 'code-bar';
-    barra.innerHTML = `
-      <span class="prod-code"></span>
-      <i id="pcpSpinner" class="fas fa-spinner fa-spin kanban-spinner"
-         style="display:none;margin-left:6px"></i>
-
-      <input id="pcp-factor" class="qty-input" type="number"
-             min="1" max="999" value="1" title="Quantidade" style="width:60px">
-
-      <button id="pcp-ok"  class="ok-btn">OK</button>
-
-      <textarea id="pcp-obs" rows="2" placeholder="Observações…"
-                style="margin-left:10px;width:300px;resize:vertical"></textarea>
-    `;
-    alvo.parentNode.insertBefore(barra, alvo);   /* irmão ANTES do wrapper */
-  }
-
-  /* sempre actualiza o código e mostra o spinner ------------------------ */
-  barra.querySelector('.prod-code').textContent = codigo;
-  barra.querySelector('#pcpSpinner').style.display = 'inline-block';
-
-  /* ───────────── 1)  EVENTO DO BOTÃO OK  (uma única vez) ────────────── */
-  const okBtn = barra.querySelector('#pcp-ok');
-  if (!okBtn.dataset.init) {          /* evita duplicar o listener */
-    okBtn.dataset.init = '1';
-
-    okBtn.addEventListener('click', async () => {
-      if (pcpOpBusy) return;
-      pcpOpBusy = true;
-
-      /* desabilita controles enquanto roda ----------------------------- */
-      okBtn.disabled  = true;
-      barra.querySelector('#pcp-factor').disabled = true;
-
-      try {
-        /* 0) valida quantidade ---------------------------------------- */
-        const fator = Number(barra.querySelector('#pcp-factor').value || 0);
-
-                /* lê o código visível no header e decide o destino do Kanban */
-        const codigoOK = barra.querySelector('.prod-code').textContent.trim();
-        const destino = /PP/i.test(codigoOK) ? 'preparacao' : 'comercial';
-
-
-
-
-
-
-        if (!Number.isInteger(fator) || fator < 1) return;
-
-        /* 1) busca nCodProduto --------------------------------------- */
-let nCodProduto = 0;
-let descOK      = '';               // ← já declara aqui
-try {
-  const r = await fetch(`/api/produtos/detalhes/${encodeURIComponent(codigoOK)}`);
-  const d = await r.json();
-
-  nCodProduto = d.codigo_produto ?? d.codigo_produto_integracao ?? 0;
-  descOK      = (d.descricao || '').trim();   // 👈 captura descrição
-} catch {/* se falhar, descOK fica vazio */}
-
-
-        /* 2) data +2 dias -------------------------------------------- */
-        const hoje  = new Date();
-        const prev  = new Date(hoje.getTime() + 2*24*60*60*1e3);
-        const dPrev = prev.toLocaleDateString('pt-BR');   // dd/mm/aaaa
-
-        /* 3) gera N OPs + etiquetas ---------------------------------- */
-        const localArr   = [];
-        const txtObs = barra.querySelector('#pcp-obs').value.trim();
-
-                /* ——— descobre o maior nº de OP já usado ——— */
-/* ——— descobre o maior nº de OP já usado ——— */
-const getNextOP = async destino => {
-  let max = 100000;                           // ponto de partida seguro
-
-  /* 1) percorre o cache já carregado (tela atual) */
-  kanbanCache.forEach(reg => {
-    reg.local.forEach(tag => {
-      const id  = tag.split(',')[1];          // "P101050"
-      const num = parseInt(id?.replace(/^P/, ''), 10);
-      if (!isNaN(num) && num > max) max = num;
-    });
-  });
-
-  /* 2) se for preparação, consulta também o arquivo em disco */
-  if (destino === 'preparacao') {
-    try {
-      const resp = await fetch('/api/preparacao/listar');
-      if (resp.ok) {
-        const prep = await resp.json();
-        prep.forEach(reg => {
-          reg.local.forEach(tag => {
-            const id  = tag.split(',')[1];
-            const num = parseInt(id?.replace(/^P/, ''), 10);
-            if (!isNaN(num) && num > max) max = num;
-          });
-        });
-      }
-    } catch (e) {
-      console.warn('[getNextOP] Falha lendo kanban_preparacao:', e);
+// Resolve o código de produto que a PCP deve usar agora
+function _pcpResolveCodigoAtual() {
+  // 1) veio da aba Preparação (kanban_preparacao.js seta window.prepCodigoSelecionado)
+  if (window.prepCodigoSelecionado && typeof window.prepCodigoSelecionado === 'string') {
+    const cod = window.prepCodigoSelecionado.trim();
+    if (cod) {
+      window.pcpCodigoAtual = cod;      // memoriza
+      window.prepCodigoSelecionado = null;
+      return cod;
     }
   }
 
-  return max + 1;                              // próximo livre
-};
+  // 2) já usamos algo antes nesta sessão
+  if (window.pcpCodigoAtual) return String(window.pcpCodigoAtual).trim();
 
-
-
- for (let i = 0; i < fator; i++) {
-   let cCodIntOP = null; // o servidor vai gerar e devolver
-
-  /* 3.1) cria OP --------------------------------------------------- */
-const payloadOP = {
-  call      : 'IncluirOrdemProducao',
-  app_key   : OMIE_APP_KEY,
-  app_secret: OMIE_APP_SECRET,
-  param: [{
-    identificacao: {
-      cCodIntOP,
-      dDtPrevisao: dPrev,            // ← hoje
-      nCodProduto,
-      nQtde: 1,                      // ← sempre 1
-      codigo_local_estoque: COD_LOCAL_PCP  // ← 10564345392 fixo
-    }
-  }]
-};
-
-const rOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payloadOP)
-});
-const jOP = await rOP.json();
-if (jOP?.used_cCodIntOP) cCodIntOP = jOP.used_cCodIntOP;
-
-if (!rOP.ok || jOP?.faultstring || jOP?.error) {
-  console.error('Falha ao criar OP:', jOP || rOP.statusText);
-  throw new Error(jOP?.faultstring || jOP?.error || 'Falha ao criar OP');
-}
-
-// 🔑 use sempre o código que o servidor gerou
-if (jOP?.used_cCodIntOP) cCodIntOP = jOP.used_cCodIntOP;
-
-
-  if (jOP.faultstring || jOP.error) {
-    console.warn('Falha OP', cCodIntOP, jOP);
-    continue;
+  // 3) fallback: lê o input da coluna “Separação logística” (se existir)
+  const col = document.getElementById('coluna-pcp-aprovado')?.closest('.kanban-column');
+  const input = col?.querySelector('.add-search');
+  const raw = input?.value || '';
+  const cod = raw.split('—')[0]?.trim();
+  if (cod) {
+    window.pcpCodigoAtual = cod;
+    return cod;
   }
 
-  /* 3.2) etiqueta + observação ------------------------------------ */
-  localArr.push(`Fila de produção,${cCodIntOP}`);
-
-
-if (/PP/i.test(codigoOK)) {
-  const zplPP = gerarEtiquetaPP({
-    codMP     : codigoOK,
-    op        : cCodIntOP,
-    descricao : descOK            // ← já vem da Omie
-  });
-
-    await fetch('/api/etiquetas/gravar', {
-      method : 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body   : JSON.stringify({
-        file: `mp_${cCodIntOP}.zpl`,
-        zpl : zplPP,
-        ns  : '',
-        tipo: 'Teste'
-      })
-    });
-  } else {
-    await gerarEtiqueta(cCodIntOP, codigoOK);        // modelo antigo
-  }
-
-  if (txtObs) await gerarEtiquetaObs(txtObs);        // observação
-
-  /* 3.3) respeita 2 req/s ----------------------------------------- */
-  if (i < fator - 1) await sleep(600);
+  return '';
 }
 
+// Re-renderiza a lista ao clicar OK (multiplicador) sem recarregar de novo do servidor
+function _pcpReaplicarFator(ul, dados) {
+  const fator = Math.max(1, parseFloat(document.getElementById('pcp-factor')?.value || '1') || 1);
+  // remove todas as linhas (menos o cabeçalho)
+  ul.querySelectorAll('li:not(.header-row)').forEach(li => li.remove());
 
-        /* 4) actualiza Kanban / salva -------------------------------- */
-        if (localArr.length) {
-
- const existente = kanbanCache.find(it =>
-   it.pedido==='Estoque' && it.codigo===codigoOK);
-
-
-          if (existente) {
-            existente.quantidade += localArr.length;
-            existente.local.push(...localArr);
-          } else {
-            kanbanCache.push({
-              pedido:'Estoque', codigo: codigoOK,
-              quantidade: localArr.length,
-              local: localArr, estoque:0, _codigoProd:nCodProduto
-            });
-          }
-
-
-           /* — separa os arrays e salva no arquivo certo — */
-           const arrPrep = kanbanCache.filter(it => /PP/i.test(it.codigo));
-           const arrCom  = kanbanCache.filter(it => !/PP/i.test(it.codigo));
-
-if (arrCom.length)  await salvarKanbanLocal(arrCom , 'comercial');
-if (arrPrep.length) await salvarKanbanLocal(arrPrep, 'preparacao');
-
-
-
-          renderKanbanDesdeJSON(kanbanCache);
-          enableDragAndDrop(kanbanCache);
-        }
-
-  /* 5) escolhe a aba correta */
-  const tabSelector = destino === 'preparacao'
-    ? '[data-kanban-tab="preparacao"]'
-    : '[data-kanban-tab="comercial"]';
-  document.querySelector(`#kanbanTabs .main-header-link${tabSelector}`)?.click();
-        setTimeout(() => {
-          const col = document.getElementById('coluna-pcp-aprovado');
-          col?.lastElementChild?.classList.add('flash-new');
-          setTimeout(() => col?.lastElementChild?.classList.remove('flash-new'),
-                     3000);
-        }, 80);
-
-      } catch (err) {
-        console.error('[PCP-OK] erro:', err);
-        alert('Erro ao gerar OP/etiquetas:\n' + err.message);
-      } finally {
-        okBtn.disabled  = false;
-        barra.querySelector('#pcp-factor').disabled = false;
-        pcpOpBusy = false;
-        barra.querySelector('#pcp-factor').value = 1;   /* limpa */
-      }
-    });
-  }
-}
-renderCodigoHeader();   //  <-- executa agora
-/* ———————————————————————————————————————————————————————————————— */
-
-
-
-
-  // 3.2) Chama o seu proxy de “ConsultarEstrutura”
-  console.log('[PCP] Enviando requisição para /api/omie/estrutura', codigo);
-  const resp = await fetch(`${API_BASE}/api/omie/estrutura`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ param:[{ codProduto: codigo }] })
-  });
-  console.log('[PCP] status HTTP:', resp.status);
-
-  // 3.3) Parse do JSON
-  let data;
-  try {
-    data = await resp.json();
-    console.log('[PCP] JSON recebido:', data);
-} catch (err) {
-  console.error('[PCP] Erro ao ler JSON:', err);
-  const sp = document.getElementById('pcpSpinner');
-  if (sp) sp.style.display = 'none';
-  return;
-}
-
-
-
-  // 3.4) Pega o array de peças (ajuste o nome se for diferente)
-  const pecas = data.itens || data.pecas || [];
-  console.log('[PCP] Total de peças:', pecas.length);
-
-  // 3.5) Limpa e popula o UL
-  ul.innerHTML = '';
-  pecas.forEach(p => {
+  dados.forEach(p => {
     const li = document.createElement('li');
-  li.classList.add('content-item');
-  li.innerHTML = `
-    <span class="cod">${p.codProdMalha}</span>
-    <span class="desc">${p.descrProdMalha}</span>
-    <span class="qtd">(Qtd: ${p.quantProdMalha})</span>
-  `;
-    li.dataset.codigo    = p.codProdMalha.toLowerCase();
-    li.dataset.descricao = p.descrProdMalha.toLowerCase();
-    li.dataset.qtd      = p.quantProdMalha;          //  ← novo
-    li.dataset.qtdBase  = p.quantProdMalha;
-    li.dataset.unid      = p.unidProdMalha        // ➕ primeiro nome possível
- || p.unidade               // ➕ ou este…
- || p.unidProduto           // ➕ …ou este
- || '';                     // ➕ fallback vazio
+// util leve pra escapar HTML quando usado em template string
+function _esc(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+
+li.innerHTML = `
+  <div class="cod" title="${_esc(p.comp_descricao)}" data-full="${_esc(p.comp_descricao)}">${_esc(p.comp_codigo)}</div>
+  <div class="unid" style="text-align:center">${_esc(p.comp_unid || '')}</div>
+  <div class="qtd"  style="text-align:center">${(Number(p.comp_qtd) * fator).toLocaleString('pt-BR')}</div>
+  <div class="perda" style="text-align:center">${Number(p.comp_perda_pct || 0).toLocaleString('pt-BR')}</div>
+  <div class="qtdb" style="text-align:center">${(Number(p.comp_qtd_bruta) * fator).toLocaleString('pt-BR')}</div>
+  <div class="qtdpro" style="text-align:center">-</div>
+  <div class="qtdalm" style="text-align:center">-</div>
+  <div class="acao" style="text-align:center">
+    <button type="button" class="content-button status-button pcp-request" data-codigo="${_esc(p.comp_codigo)}" title="Solicitar produto">Solicitar</button>
+  </div>
+`;
+
+li.dataset.codigo    = String(p.comp_codigo || '').toLowerCase();
+li.dataset.descricao = String(p.comp_descricao || '').toLowerCase();
+
+
     ul.appendChild(li);
   });
+}
 
-console.log('[PCP] UL populada no DOM com as peças');
-try {
-  await carregarPosicaoEstoque();
-  filtrarPorEstoque();
-} finally {
-  const sp = document.getElementById('pcpSpinner');
-  if (sp) sp.style.display = 'none';
+function _pcpColetarCodigosDaUL(ul) {
+  return Array.from(ul.querySelectorAll('li:not(.header-row) .cod'))
+    .map(el => (el.textContent || '').trim())
+    .filter(Boolean);
+}
+
+async function pcpPreencherSaldosDuplos(ul) {
+  try {
+    const codigos = _pcpColetarCodigosDaUL(ul);
+    if (!codigos.length) return;
+
+    const r = await fetch('/api/armazem/saldos_duplos', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ codigos })
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const pro = j?.pro || {};
+    const alm = j?.alm || {};
+
+    // aplica nos elementos
+    ul.querySelectorAll('li:not(.header-row)').forEach(li => {
+      const cod = (li.querySelector('.cod')?.textContent || '').trim();
+      const qtdProEl = li.querySelector('.qtdpro');
+      const qtdAlmEl = li.querySelector('.qtdalm');
+
+      const vPro = Number(pro[cod] ?? 0);
+      const vAlm = Number(alm[cod] ?? 0);
+
+      if (qtdProEl) qtdProEl.textContent = vPro.toLocaleString('pt-BR');
+      if (qtdAlmEl) qtdAlmEl.textContent = vAlm.toLocaleString('pt-BR');
+
+      // feedback visual opcional (sem bloquear):
+      if (qtdProEl && vPro <= 0) qtdProEl.style.color = '#e44';
+      if (qtdAlmEl && vAlm <= 0) qtdAlmEl.style.color = '#e44';
+    });
+  } catch (e) {
+    console.warn('[PCP] preencher saldos duplos falhou:', e);
+  }
 }
 
 
+async function renderListaPecasPCP() {
+  console.debug('[PCP] renderListaPecasPCP()');
+  const ul = document.getElementById('listaPecasPCPList');
+  if (!ul) { console.warn('[PCP] UL não encontrada'); return; }
+
+  // 1) qual código vamos usar?
+  const codigo = _pcpResolveCodigoAtual();
+  if (!codigo) {
+    // sem código → limpa linhas e esconde a barra
+    ul.querySelectorAll('li:not(.header-row)').forEach(li => li.remove());
+    const bar = document.getElementById('pcp-code-bar');
+    if (bar) bar.style.display = 'none';
+    console.warn('[PCP] Nenhum código disponível para listar peças.');
+    return;
+  }
+
+  // 2) mostra a barra e preenche os campos
+  const bar = document.getElementById('pcp-code-bar');
+  if (bar) {
+    bar.style.display = '';
+    const elCode = document.getElementById('pcp-code');
+    if (elCode) elCode.textContent = codigo;
+    const elFactor = document.getElementById('pcp-factor');
+    if (elFactor && !elFactor.value) elFactor.value = 1;
+  }
+
+  // 3) busca no SQL (nosso endpoint já testado via curl)
+  //    Ex.: POST /api/pcp/estrutura?pai_codigo=04.PP.N.51005  body: {}
+  let json;
+  try {
+    const r = await fetch(`/api/pcp/estrutura?pai_codigo=${encodeURIComponent(codigo)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      credentials: 'include'
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    json = await r.json();
+  } catch (e) {
+    console.error('[PCP] erro buscando SQL:', e);
+    return;
+  }
+
+  const dados = Array.isArray(json?.dados) ? json.dados : [];
+  console.debug('[PCP] itens na estrutura:', dados.length);
+
+  // 4) preenche a lista aplicando o multiplicador atual
+  _pcpReaplicarFator(ul, dados);
+
+  // 5) botão OK reaplica o fator localmente (sem pedir de novo ao servidor)
+  const ok = document.getElementById('pcp-ok');
+  if (ok) {
+    ok.onclick = () => _pcpReaplicarFator(ul, dados);
+  }
+
+  // 6) “+” abre a busca (reaproveita o input da coluna de Separação logística)
+  const plus = document.getElementById('pcp-open-search');
+  if (plus) {
+    plus.onclick = () => {
+      const col = document.getElementById('coluna-pcp-aprovado')?.closest('.kanban-column');
+      col?.classList.add('search-expand');              // mostra o painel de busca
+      col?.querySelector('.add-search')?.focus();
+    };
+  }
+  await pcpPreencherSaldosDuplos(ul);
+
 }
+
+function pcpBindDescTooltipOnce() {
+  if (pcpBindDescTooltipOnce._bound) return;
+  pcpBindDescTooltipOnce._bound = true;
+
+  const ul = document.getElementById('listaPecasPCPList');
+  if (!ul) return;
+
+  const tip = document.createElement('div');
+  tip.className = 'pcp-tip';
+  document.body.appendChild(tip);
+
+  let active = null;
+
+  ul.addEventListener('mouseover', (ev) => {
+    const d = ev.target.closest('.desc');
+    if (!d || !ul.contains(d)) return;
+    active = d;
+    tip.textContent = d.dataset.full || d.textContent || '';
+    tip.classList.add('show');
+  });
+
+  ul.addEventListener('mousemove', (ev) => {
+    if (!active) return;
+    tip.style.left = `${ev.clientX}px`;
+    tip.style.top  = `${ev.clientY}px`;
+  });
+
+  const hide = () => { active = null; tip.classList.remove('show'); };
+  ul.addEventListener('mouseout', (ev) => {
+    const to = ev.relatedTarget;
+    if (active && (!to || !active.contains(to))) hide();
+  });
+  document.addEventListener('scroll', hide, true);
+}
+
+// depois que você termina de montar a lista:
+pcpBindDescTooltipOnce();
 
 
 
@@ -993,93 +859,58 @@ export async function initKanban() {
 }
 
 
-/* ------------------------------------------------------------------ */
-/* 2) Nova função assíncrona                                          */
 async function carregarPosicaoEstoque() {
-  const OMIE_URL   = `${API_BASE}/api/omie/estoque/resumo`;
-  const HOJE       = new Date().toLocaleDateString('pt-BR'); // 26/06/2025 → dd/mm/yyyy
-  const POR_PAGINA = 50;
-
-  let pagina      = 1;
-  let totPaginas  = 1;          // valor inicial fictício
-  const mapFisico = {};         // código → quantidade
-
-  do {
- const payload = {
-   call  : 'ListarPosEstoque',
-   param : [{
-      nPagina          : pagina,
-      nRegPorPagina    : POR_PAGINA,
-      dDataPosicao     : HOJE,
-      cExibeTodos      : 'N',
-      codigo_local_estoque : COD_LOCAL_PCP,
-      cTipoItem        : '01'
-    }]
- };
-
-    const res  = await fetch(OMIE_URL, {
-      method  : 'POST',
-      headers : { 'Content-Type':'application/json' },
-      body    : JSON.stringify(payload)
+  try {
+    const r = await fetch('/api/armazem/producao', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      credentials: 'include'
     });
-    const dat  = await res.json();
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
 
-    // atualiza total de páginas na 1ª volta
-    totPaginas = dat.nTotPaginas ?? 1;
-
-    // guarda fisico de cada produto
-    (dat.produtos || []).forEach(p => {
-      mapFisico[p.cCodigo.toLowerCase()] = p.fisico ?? 0;
+    const mapSaldo = {};
+    (j.dados || []).forEach(it => {
+      const k = String(it.codigo || '').toLowerCase();
+      const saldo = (typeof it.saldo === 'number') ? it.saldo
+                  : (typeof it.fisico === 'number') ? it.fisico
+                  : 0;
+      mapSaldo[k] = saldo;
     });
 
-    pagina++;
-  } while (pagina <= totPaginas);
+    // injeta unidade + (Est: …) nos itens já renderizados
+    document.querySelectorAll('#listaPecasPCPList li').forEach(li => {
+      const codigo = li.dataset.codigo;
+      const qtdEl  = li.querySelector('.qtd') || li;
+      const val    = mapSaldo[codigo];
 
-  /* --- 3) percorre a UL que já existe e injeta o (Est:…) ------------ */
-/* --- 3) percorre a UL e injeta unidade + estoque ------------------- */
-document.querySelectorAll('#listaPecasPCPList li')
-  .forEach(li => {
-    const codigo = li.dataset.codigo;
-    const qtdEl  = li.querySelector('.qtd') || li;   // <span class="qtd">
-    const valor  = mapFisico[codigo];
-    const unid   = li.dataset.unid || '';
+      // unidade (se existir no data attr)
+      const un = (li.dataset.unid || '').trim();
+      if (un) {
+        const spanUn = document.createElement('span');
+        spanUn.className = 'unit';
+        spanUn.textContent = ` ${un}`;
+        qtdEl.appendChild(spanUn);
+      }
 
-    /* 0) Remove spans antigos — evita duplicar quando a aba é reaberta */
-    qtdEl.querySelector('.unit')?.remove();
-    qtdEl.querySelector('.est') ?.remove();
-
-    /* 1) Unidade ------------- */
-    if (unid) {
-      const spanU = document.createElement('span');
-      spanU.className   = 'unit';
-      spanU.textContent = ` ${unid}`;   // espaço antes deixa “) UN” colado
-      qtdEl.appendChild(spanU);
-    }
-
-    /* 2) Estoque ------------- */
-    if (valor !== undefined) {
+      // (Est: …)
       const spanEst = document.createElement('span');
-      spanEst.className   = 'est';
-      spanEst.textContent = ` (Est: ${valor})`;
-      li.dataset.est = valor;          // ← grava o estoque numérico
-      const qtd = Number(li.dataset.qtd) || 0;
-if (valor < 1 || valor < qtd) {          // critério de “baixo estoque”
-  spanEst.classList.add('low');          //  ← ADICIONE ESTA LINHA
-  spanEst.style.color = '#e44';          // vermelho
-} else {
-  spanEst.classList.remove('low');       // garante consistência
+      spanEst.className = 'est';
+      if (typeof val === 'number') {
+        spanEst.textContent = ` (Est: ${val})`;
+        if (val < 1) spanEst.style.color = '#e44';
+      } else {
+        spanEst.textContent = ' (Est: –)';
+      }
+      qtdEl.appendChild(spanEst);
+    });
+  } catch (e) {
+    console.warn('[PCP] carregarPosicaoEstoque (SQL) falhou:', e);
+  }
 }
 
-      qtdEl.appendChild(spanEst);
-} else {                                     // ← NOVO: item não existe no depósito
-  const spanEst = document.createElement('span');
-  spanEst.className   = 'est low';           // já entra com .low
-  spanEst.textContent = ' (Est:–)';          // hífen indica inexistente
-  qtdEl.appendChild(spanEst);
-}
-  });
-filtrarPorEstoque();
-}
+
 function aplicarMultiplicador (fator) {
   document.querySelectorAll('#listaPecasPCPList li').forEach(li => {
     const base = Number(li.dataset.qtdBase);

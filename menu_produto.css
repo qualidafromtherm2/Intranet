@@ -4074,3 +4074,66 @@ table.tabela td.num {
 }
 
 .iniciar-prod-btn{ margin-bottom:1rem; }
+
+
+  /* Força 8 colunas só para a lista do PCP */
+  /* já está usando grid de 8 colunas; garantimos e alinham-se as células */
+  #listaPecasPCPList.grid-pecas li {
+  display: grid;
+  /*                cod   desc  unid  qtd   perda qtdb   qpro   qalm   acao   */
+  grid-template-columns: 140px 1fr  80px  80px  110px  90px   90px   110px !important;
+  gap: 8px;
+  align-items: center;
+  }
+  #listaPecasPCPList .unid,
+  #listaPecasPCPList .qtd,
+  #listaPecasPCPList .perda,
+  #listaPecasPCPList .qtdb,
+  #listaPecasPCPList .qtdpro,
+  #listaPecasPCPList .qtdalm { text-align: center; }
+
+  /* desc: elipse no grid; tooltip mostra o texto completo */
+  #listaPecasPCPList .desc {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* tooltip flutuante */
+  .pcp-tip {
+    position: fixed;
+    z-index: 9999;
+    max-width: 60ch;
+    pointer-events: none;
+    background: rgba(18,18,20,0.98);
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    font-size: 12.5px;
+    line-height: 1.35;
+    transform: translate(-50%, calc(-100% - 10px));
+    opacity: 0;
+    transition: opacity .08s ease-out;
+  }
+  .pcp-tip.show { opacity: 1; }
+
+  /* ——— Login sempre no topo ——— */
+.overlay-app {
+  position: fixed;
+  inset: 0;                 /* top/right/bottom/left:0 */
+  z-index: 12000 !important;/* acima de qualquer modal/tabela/tooltip */
+  pointer-events: all;
+}
+
+.overlay-app.is-active {    /* já existia, reforço para interação */
+  visibility: visible;
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* o conteúdo do popup também ganha uma camada própria */
+.overlay-app .auth-popup {
+  position: relative;
+  z-index: 12001;           /* acima do backdrop */
+}

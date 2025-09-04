@@ -10,6 +10,10 @@
 import config from '../config.client.js';
 
 
+// === KILL-SWITCH DA OMIE (evita /api/omie/estoque/consulta) ===
+// Se já existir a função, esta substituição entra depois do load:
+// Evita consumir Omie na navegação normal
+window.buildPosEstoqueCache = async function() { return {}; };
 
 /* === DEBUG helper ==================================================== */
 function dbg(...msg) {
@@ -209,7 +213,7 @@ window.updateCustoReal = updateCustoReal;
    const original = window.loadDadosProduto;
    if (typeof original === 'function') {
      setTimeout(window.updateCustoReal, 0);
-     window.loadDadosProduto = async function (codigo) {
+     window.loadDadosProdutoEnviar = async function (codigo) {
        await original(codigo);
       // carrega o cache de estoque só na primeira vez
       if (!window.__posEstoqueReady) {

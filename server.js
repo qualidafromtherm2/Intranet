@@ -6,7 +6,13 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
 // local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
-const ALMOX_LOCAL_PADRAO = process.env.ALMOX_LOCAL_PADRAO || '10408201806';
+const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
+const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
+
+
+
+
+
 // ——————————————————————————————
 // 1) Imports e configurações iniciais
 // ——————————————————————————————
@@ -32,6 +38,29 @@ const sseClients = new Set();
 // polyfill de fetch (Node < 18)
 const safeFetch = (...args) =>
   (global.fetch ? global.fetch(...args) : import('node-fetch').then(({ default: f }) => f(...args)));
+// server.js — sessão/cookies (COLE ANTES DAS ROTAS!)
+
+// 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
+const isProd = process.env.NODE_ENV === 'production';
+app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
+// server.js — imediatamente após const app = express();
+app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
+
+
+app.use(session({
+  name: 'sid',
+  secret: process.env.SESSION_SECRET || 'troque-isto-em-producao',
+  resave: false,
+  saveUninitialized: false,
+  proxy: true,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isProd,                    // true em produção (HTTPS), false em dev local (HTTP)
+    maxAge: 7 * 24 * 60 * 60 * 1000    // 7 dias
+  }
+}));
+
 
 app.get('/api/produtos/stream', (req, res) => {
   res.setHeader('Content-Type',  'text/event-stream');
@@ -970,7 +999,7 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
 });
 
 
-app.use(require('express').json({ limit: '5mb' }));
+//app.use(require('express').json({ limit: '5mb' }));
 
 app.use('/api/produtos', produtosRouter);
 
@@ -1036,16 +1065,23 @@ function chkToken(req, res, next) {
 }
 
 // Sessão (cookies) para manter usuário logado
-app.use(session({
-  secret: 'uma_chave_secreta_forte', // troque por algo mais seguro
+// 🔐 sessão (cookies) — antes das rotas que usam req.session
+app.set('trust proxy', 1); // necessário atrás de proxy (Render) p/ cookie "secure" funcionar
+
+app.use(require('express-session')({
+  name: 'sid',
+  secret: process.env.SESSION_SECRET || 'troque-isto-em-producao',
   resave: false,
   saveUninitialized: false,
+  proxy: true,                           // reconhece X-Forwarded-* do Render
   cookie: {
-    maxAge: 24 * 60 * 60 * 1000, // 1 dia
     httpOnly: true,
-    secure: false              // em produção, true se rodar via HTTPS
+    sameSite: 'lax',                     // funciona bem com navegação normal
+    secure: process.env.NODE_ENV === 'production', // true em prod (HTTPS)
+    maxAge: 7 * 24 * 60 * 60 * 1000      // 7 dias
   }
 }));
+
 const LOG_FILE = path.join(__dirname, 'data', 'kanban.log');  // ou outro nome
 
 app.post('/api/logs/arrasto', express.json(), (req, res) => {
@@ -2173,7 +2209,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
 
 // ========== Produção ==========
 // Produção → só estoque atual do local e com saldo positivo
-const PRODUCAO_LOCAL_PADRAO = process.env.PRODUCAO_LOCAL_PADRAO || '10564345392';
+
 
 app.post('/api/armazem/producao', express.json(), async (req, res) => {
   try {
@@ -2211,47 +2247,14 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
   }
 });
 
-
-// ========== Almoxarifado ==========
-const ALMOX_LOCAL_PADRAO = process.env.ALMOX_LOCAL_PADRAO || '10408201806';
-
-app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
-  try {
-    const local = String(req.query.local || req.body?.local || ALMOX_LOCAL_PADRAO);
-
-    const { rows } = await pool.query(`
-      SELECT
-        produto_codigo     AS codigo,
-        produto_descricao  AS descricao,
-        estoque_minimo     AS min,
-        fisico,
-        reservado,
-        saldo,
-        cmc
-      FROM v_almoxarifado_grid_atual
-      WHERE local = $1
-        AND (COALESCE(saldo,0) > 0 OR COALESCE(fisico,0) > 0 OR COALESCE(reservado,0) > 0)
-      ORDER BY codigo
-    `, [local]);
-
-    const dados = rows.map(r => ({
-      codigo   : r.codigo || '',
-      descricao: r.descricao || '',
-      min      : Number(r.min)       || 0,
-      fisico   : Number(r.fisico)    || 0,
-      reservado: Number(r.reservado) || 0,
-      saldo    : Number(r.saldo)     || 0,
-      cmc      : Number(r.cmc)       || 0,
-    }));
-
-    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
-  } catch (err) {
-    console.error('[almoxarifado SQL]', err);
-    res.status(500).json({ ok:false, error:String(err.message || err) });
-  }
-});
-
-
+// helpers locais deste bloco
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ac.signal }); }
+  finally { clearTimeout(id); }
+};
 
 // ------------------------------------------------------------------
 // Alias: /api/omie/produto  →  mesma lógica de /api/omie/produtos
@@ -3607,24 +3610,6 @@ app.listen(PORT, HOST, () => {
 
 })();
 
-
-
-
-// DEBUG: lista as rotas registradas
-app.get('/__routes', (req, res) => {
-  const list = [];
-  app._router.stack.forEach((m) => {
-    if (m.route && m.route.path) {
-      list.push({ methods: m.route.methods, path: m.route.path });
-    } else if (m.name === 'router' && m.handle?.stack) {
-      m.handle.stack.forEach((h) => {
-        if (h.route?.path) list.push({ methods: h.route.methods, path: h.route.path });
-      });
-    }
-  });
-  res.json({ ok: true, routes: list });
-});
-
 // DEBUG: sanity check do webhook (GET simples)
 app.get('/webhooks/omie/pedidos', (req, res) => {
   res.json({ ok: true, method: 'GET', msg: 'rota existe (POST é o real)' });
@@ -3644,7 +3629,362 @@ app.get('/__routes', (req, res) => {
   res.json({ ok: true, routes: list });
 });
 
-// DEBUG: checagem simples do webhook (GET)
-app.get('/webhooks/omie/pedidos', (req, res) => {
-  res.json({ ok: true, method: 'GET', msg: 'rota existe (POST é o real)' });
+// ===================== PCP / ESTRUTURAS (BOM) — BLOCO AUTOSSUFICIENTE =====================
+
+// URLs/keys
+const PCP_OMIE_ESTRUTURA_URL = process.env.OMIE_ESTRUTURA_URL
+  || 'https://app.omie.com.br/api/v1/geral/malha/';
+
+const PCP_OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
+const PCP_OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+// Helpers isolados (nomes únicos pra não colidir)
+const pcpSleep = (ms) => new Promise(r => setTimeout(r, ms));
+const pcpFetchWithTimeout = async (url, opts = {}, ms = 60000) => {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+  finally { clearTimeout(id); }
+};
+const pcpBrToISO = (s) => {
+  if (!s) return null;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y] = s.split('/'); return `${y}-${m}-${d}`; }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return null;
+};
+const pcpClampN = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+
+// Chamada à Omie (com retry/debounce de cache)
+const pcpOmieCall = async (call, param, { timeout = 60000, retry = 2 } = {}) => {
+  if (!PCP_OMIE_APP_KEY || !PCP_OMIE_APP_SECRET) {
+    throw new Error('OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.');
+  }
+  const payload = {
+    call,
+    app_key: PCP_OMIE_APP_KEY,
+    app_secret: PCP_OMIE_APP_SECRET,
+    param: Array.isArray(param) ? param : [param],
+  };
+
+  for (let i = 0; i <= retry; i++) {
+    try {
+      const resp = await pcpFetchWithTimeout(PCP_OMIE_ESTRUTURA_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, timeout);
+      if (!resp.ok) {
+        const txt = await resp.text().catch(()=> '');
+        throw new Error(`Omie HTTP ${resp.status} ${resp.statusText} :: ${txt.slice(0,300)}`);
+      }
+      const json = await resp.json();
+      if (json?.faultstring) throw new Error(`${json.faultstring} (${json.faultcode||''})`);
+      return json;
+    } catch (e) {
+      const msg = String(e?.message || '');
+      const isCache = msg.includes('Consumo redundante detectado');
+      if (isCache && i < retry) { await pcpSleep(35000); continue; }
+      if (i < retry) { await pcpSleep(1500); continue; }
+      throw e;
+    }
+  }
+};
+
+// Persistência
+async function pcpUpsertEstruturaCab(cli, ident) {
+  const sql = `
+    INSERT INTO omie_malha_cab (
+      produto_id, produto_codigo, produto_descricao,
+      familia_id, familia_codigo, familia_descricao,
+      tipo_produto, unidade, peso_liq, peso_bruto, last_synced_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+    ON CONFLICT (produto_id) DO UPDATE SET
+      produto_codigo    = EXCLUDED.produto_codigo,
+      produto_descricao = EXCLUDED.produto_descricao,
+      familia_id        = EXCLUDED.familia_id,
+      familia_codigo    = EXCLUDED.familia_codigo,
+      familia_descricao = EXCLUDED.familia_descricao,
+      tipo_produto      = EXCLUDED.tipo_produto,
+      unidade           = EXCLUDED.unidade,
+      peso_liq          = EXCLUDED.peso_liq,
+      peso_bruto        = EXCLUDED.peso_bruto,
+      last_synced_at    = now()
+  `;
+  await cli.query(sql, [
+    Number(ident.idProduto) || 0,
+    ident.codProduto || null,
+    ident.descrProduto || null,
+    Number(ident.idFamilia) || null,
+    ident.codFamilia || null,
+    ident.descrFamilia || null,
+    ident.tipoProduto || null,
+    ident.unidProduto || null,
+    pcpClampN(ident.pesoLiqProduto),
+    pcpClampN(ident.pesoBrutoProduto),
+  ]);
+}
+
+async function pcpReplaceEstruturaItens(cli, produtoId, itens) {
+  await cli.query('DELETE FROM omie_malha_item WHERE produto_id = $1', [produtoId]);
+  if (!Array.isArray(itens) || !itens.length) return 0;
+
+  const sql = `
+    INSERT INTO omie_malha_item (
+      produto_id, item_malha_id, item_prod_id, item_codigo, item_descricao,
+      item_unidade, item_tipo,
+      item_familia_id, item_familia_codigo, item_familia_desc,
+      quantidade, perc_perda, peso_liq, peso_bruto,
+      codigo_local_estoque,
+      d_inc, h_inc, u_inc, d_alt, h_alt, u_alt
+    ) VALUES (
+      $1,$2,$3,$4,$5,
+      $6,$7,
+      $8,$9,$10,
+      $11,$12,$13,$14,
+      $15,
+      $16,$17,$18,$19,$20,$21
+    )
+    ON CONFLICT ON CONSTRAINT uq_malha_item
+    DO UPDATE SET
+      item_codigo     = EXCLUDED.item_codigo,
+      item_descricao  = EXCLUDED.item_descricao,
+      item_unidade    = EXCLUDED.item_unidade,
+      item_tipo       = EXCLUDED.item_tipo,
+      item_familia_id = EXCLUDED.item_familia_id,
+      item_familia_codigo = EXCLUDED.item_familia_codigo,
+      item_familia_desc   = EXCLUDED.item_familia_desc,
+      quantidade      = EXCLUDED.quantidade,
+      perc_perda      = EXCLUDED.perc_perda,
+      peso_liq        = EXCLUDED.peso_liq,
+      peso_bruto      = EXCLUDED.peso_bruto,
+      codigo_local_estoque = EXCLUDED.codigo_local_estoque,
+      d_inc = EXCLUDED.d_inc, h_inc = EXCLUDED.h_inc, u_inc = EXCLUDED.u_inc,
+      d_alt = EXCLUDED.d_alt, h_alt = EXCLUDED.h_alt, u_alt = EXCLUDED.u_alt
+  `;
+
+  let count = 0;
+  for (const it of itens) {
+    await cli.query(sql, [
+      Number(produtoId) || 0,
+      Number(it.idMalha) || null,
+      Number(it.idProdMalha) || 0,
+      it.codProdMalha || '',
+      it.descrProdMalha || null,
+      it.unidProdMalha || null,
+      it.tipoProdMalha || null,
+      Number(it.idFamMalha) || null,
+      it.codFamMalha || null,
+      it.descrFamMalha || null,
+      pcpClampN(it.quantProdMalha),
+      pcpClampN(it.percPerdaProdMalha),
+      pcpClampN(it.pesoLiqProdMalha),
+      pcpClampN(it.pesoBrutoProdMalha),
+      it.codigo_local_estoque ? Number(it.codigo_local_estoque) : null,
+      pcpBrToISO(it.dIncProdMalha), it.hIncProdMalha || null, it.uIncProdMalha || null,
+      pcpBrToISO(it.dAltProdMalha), it.hAltProdMalha || null, it.uAltProdMalha || null,
+    ]);
+    count++;
+  }
+  return count;
+}
+
+// ---------- SYNC: uma estrutura (por idProduto ou codProduto) ----------
+app.post('/api/admin/sync/pcp/estrutura', express.json(), async (req, res) => {
+  try {
+    const timeout = Number(req.query.timeout || 60000);
+    const retry   = Number(req.query.retry || 2);
+    const codProduto = req.body?.codProduto ? String(req.body.codProduto) : null;
+    const idProduto  = req.body?.idProduto ? Number(req.body.idProduto) : null;
+
+    if (!codProduto && !idProduto) {
+      return res.status(400).json({ ok:false, error:'Informe idProduto OU codProduto' });
+    }
+
+    const param = idProduto ? { idProduto } : { codProduto };
+    const r = await pcpOmieCall('ConsultarEstrutura', param, { timeout, retry });
+
+    const ident = r?.ident || {};
+    const itens = Array.isArray(r?.itens) ? r.itens : [];
+
+    if (!ident?.idProduto) {
+      return res.json({ ok:true, imported:0, warn:'Estrutura não encontrada', ident });
+    }
+
+    const cli = await pool.connect();
+    try {
+      await cli.query('BEGIN');
+      await pcpUpsertEstruturaCab(cli, ident);
+      const n = await pcpReplaceEstruturaItens(cli, ident.idProduto, itens);
+      await cli.query('COMMIT');
+      return res.json({ ok:true, imported:n, produto_id: ident.idProduto, cod: ident.codProduto });
+    } catch (e) {
+      await cli.query('ROLLBACK'); throw e;
+    } finally {
+      cli.release();
+    }
+  } catch (err) {
+    console.error('[pcp/estrutura one] FAIL', err);
+    res.status(500).json({ ok:false, error:String(err.message||err) });
+  }
+});
+
+// ---------- SYNC: todas as estruturas (ListarEstruturas → ConsultarEstrutura) ----------
+// ---------- SYNC: todas as estruturas (ListarEstruturas paginado → persiste ident+itens) ----------
+app.post('/api/admin/sync/pcp/estruturas', express.json(), async (req, res) => {
+  try {
+    const timeout = Number(req.query.timeout || 60000);
+    const retry   = Number(req.query.retry || 2);
+    const perPage = Number(req.query.perPage || 200);
+    const sleepMs = Number(req.query.sleepMs || 150);
+
+    let pagina = 1, nTotPaginas = 1;
+    let totalPais = 0, totalItens = 0;
+
+    const cli = await pool.connect();
+    try {
+      while (pagina <= nTotPaginas) {
+        // 1) página da Omie
+        const r = await pcpOmieCall('ListarEstruturas', {
+          nPagina: pagina,
+          nRegPorPagina: perPage
+          // você pode adicionar filtros de data se quiser (dInc*/dAlt*), mas aqui deixamos geral
+        }, { timeout, retry });
+
+        // 2) pega a lista correta
+        const lista = Array.isArray(r?.produtosEncontrados) ? r.produtosEncontrados : [];
+
+        // 3) persiste cada produto-pai + seus itens
+        for (const item of lista) {
+          const ident = item?.ident || {};
+          const itens = Array.isArray(item?.itens) ? item.itens : [];
+
+          if (!ident?.idProduto) continue;
+
+          try {
+            await cli.query('BEGIN');
+            await pcpUpsertEstruturaCab(cli, ident);
+            const n = await pcpReplaceEstruturaItens(cli, ident.idProduto, itens);
+            await cli.query('COMMIT');
+
+            totalPais += 1;
+            totalItens += n;
+          } catch (e) {
+            await cli.query('ROLLBACK').catch(()=>{});
+            console.warn('[pcp/estruturas] falha ao persistir', ident?.codProduto || ident?.idProduto, e.message);
+          }
+
+          if (sleepMs) await pcpSleep(sleepMs);
+        }
+
+        // 4) paginação
+        nTotPaginas = Number(r?.nTotPaginas || nTotPaginas || 1);
+        if (!nTotPaginas) nTotPaginas = 1;
+        pagina++;
+      }
+    } finally {
+      cli.release();
+    }
+
+    res.json({ ok:true, pais: totalPais, itens: totalItens });
+  } catch (err) {
+    console.error('[pcp/estruturas ALL] FAIL', err);
+    res.status(500).json({ ok:false, error:String(err.message||err) });
+  }
+});
+
+
+// ---------- UI: leitura da estrutura (SQL) ----------
+app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
+  try {
+    const pai_codigo = (req.body?.pai_codigo || req.query.pai_codigo || '').toString().trim();
+    const pai_id     = req.body?.pai_id ? Number(req.body.pai_id) : (
+      req.query?.pai_id ? Number(req.query.pai_id) : null
+    );
+
+    let rows;
+    if (pai_id || pai_codigo) {
+      const where = pai_id ? 'cab.produto_id = $1' : 'cab.produto_codigo = $1';
+      const param = pai_id ? [pai_id] : [pai_codigo];
+
+      rows = (await pool.query(`
+        SELECT
+          cab.produto_id            AS pai_id,
+          cab.produto_codigo        AS pai_codigo,
+          cab.produto_descricao     AS pai_descricao,
+          it.item_prod_id           AS comp_id,
+          it.item_codigo            AS comp_codigo,
+          it.item_descricao         AS comp_descricao,
+          it.item_unidade           AS comp_unid,
+          it.item_tipo              AS comp_tipo,
+          it.quantidade             AS comp_qtd,
+          it.perc_perda             AS comp_perda_pct,
+          (it.quantidade * (1 + COALESCE(it.perc_perda,0)/100.0))::NUMERIC(18,6) AS comp_qtd_bruta
+        FROM omie_malha_item it
+        JOIN omie_malha_cab  cab ON cab.produto_id = it.produto_id
+        WHERE ${where}
+        ORDER BY it.item_codigo
+      `, param)).rows;
+    } else {
+      rows = (await pool.query(`
+        SELECT produto_id AS pai_id, produto_codigo AS pai_codigo, produto_descricao AS pai_descricao
+        FROM omie_malha_cab
+        ORDER BY produto_codigo
+        LIMIT 500
+      `)).rows;
+    }
+
+    const dados = rows.map(r => ({
+      pai_id         : Number(r.pai_id) || null,
+      pai_codigo     : r.pai_codigo || '',
+      pai_descricao  : r.pai_descricao || '',
+      comp_id        : r.comp_id || null,
+      comp_codigo    : r.comp_codigo || '',
+      comp_descricao : r.comp_descricao || '',
+      comp_unid      : r.comp_unid || '',
+      comp_tipo      : r.comp_tipo || '',
+      comp_qtd       : Number(r.comp_qtd) || 0,
+      comp_perda_pct : Number(r.comp_perda_pct) || 0,
+      comp_qtd_bruta : Number(r.comp_qtd_bruta) || 0,
+    }));
+
+    res.json({ ok:true, count: dados.length, dados });
+  } catch (err) {
+    console.error('[pcp/estrutura SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message||err) });
+  }
+});
+
+// --- SQL helper: saldos por local para uma lista de códigos ---
+app.post('/api/armazem/saldos_duplos', express.json(), async (req, res) => {
+  try {
+    const codigos = Array.isArray(req.body?.codigos) ? req.body.codigos.filter(Boolean) : [];
+    if (!codigos.length) return res.json({ ok: true, pro: {}, alm: {} });
+
+const sql = `
+  SELECT
+    local,
+    produto_codigo AS codigo,         -- alias p/ manter o nome "codigo" na resposta
+    COALESCE(saldo,0) AS saldo
+  FROM v_almoxarifado_grid_atual
+  WHERE local IN ($1, $2)
+    AND produto_codigo = ANY($3::text[])   -- <— aqui também usa produto_codigo
+`;
+
+    const { rows } = await pool.query(sql, [PRODUCAO_LOCAL_PADRAO, ALMOX_LOCAL_PADRAO, codigos]);
+
+    const pro = {}, alm = {};
+    for (const r of rows) {
+      const k = String(r.codigo || '');
+      if (r.local === PRODUCAO_LOCAL_PADRAO) pro[k] = Number(r.saldo) || 0;
+      else if (r.local === ALMOX_LOCAL_PADRAO) alm[k] = Number(r.saldo) || 0;
+    }
+    // faltantes viram 0 no front
+    res.json({ ok: true, pro, alm, locais: { producao: PRODUCAO_LOCAL_PADRAO, almox: ALMOX_LOCAL_PADRAO } });
+  } catch (err) {
+    console.error('[saldos_duplos] FAIL', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
 });
