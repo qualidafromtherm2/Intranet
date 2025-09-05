@@ -1,4 +1,4 @@
-// routes/users.js — SQL-only + perfil + permissões
+// routes/users.js — SQL only (com self-or-manage e salvamento de permissões)
 const express = require('express');
 const { Pool } = require('pg');
 
@@ -10,298 +10,160 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-/* -------- helpers de auth -------- */
-function adminOnly(req, res, next) {
-  const roles = req.session.user?.roles || [];
-  if (!roles.includes('admin')) return res.status(403).json({ error: 'Sem permissão' });
+/* ----------------- helpers ----------------- */
+function requireLogin(req, res, next) {
+  if (!req.session?.user) return res.status(401).json({ error: 'Não autenticado' });
   next();
 }
-function selfOrAdmin(req, res, next) {
-  const me = req.session.user;
+
+async function hasManagePermission(userId) {
+  const { rows } = await pool.query(
+    `SELECT EXISTS(
+       SELECT 1 FROM public.auth_user_permissions_tree($1) t
+       WHERE t.key='side:rh:cad-colab' AND t.allowed
+     ) AS ok`,
+    [userId]
+  );
+  return !!rows[0]?.ok;
+}
+
+async function manageOnly(req, res, next) {
+  const me = req.session?.user;
   if (!me) return res.status(401).json({ error: 'Não autenticado' });
-  const isAdmin = (me.roles || []).includes('admin');
-  const target = String(req.params.id);
-  const isSelf  = String(me.id) === target || String(me.username) === target;
-  if (isAdmin || isSelf) return next();
+  if (await hasManagePermission(me.id)) return next();
   return res.status(403).json({ error: 'Sem permissão' });
 }
-async function resolveTarget(client, idOrName) {
-  const q = `
-    SELECT id, username, roles
-      FROM public.auth_user
-     WHERE id::text = $1 OR username = $1
-     LIMIT 1`;
-  const r = await client.query(q, [String(idOrName)]);
-  return r.rows[0] || null;
+
+async function selfOrManage(req, res, next) {
+  const me = req.session?.user;
+  if (!me) return res.status(401).json({ error: 'Não autenticado' });
+
+  const p = String(req.params.id || '');
+  if (String(me.id) === p || String(me.username) === p) return next(); // próprio usuário
+
+  if (await hasManagePermission(me.id)) return next();                 // pode gerenciar
+  return res.status(403).json({ error: 'Sem permissão' });
 }
 
-/* -------- lookups -------- */
-router.get('/lookups', async (_req, res) => {
-  const cli = await pool.connect();
-  try {
-    const s = await cli.query('SELECT name FROM public.auth_sector WHERE active=true ORDER BY name');
-    const f = await cli.query('SELECT name FROM public.auth_funcao WHERE active=true ORDER BY name');
-    res.json({ setores: s.rows, funcoes: f.rows });
-  } finally { cli.release(); }
-});
-
-// --- LOOKUPS: criar setor (admin only) ---
-router.post('/lookups/sector', adminOnly, async (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  if (!name) return res.status(400).json({ error: 'nome obrigatório' });
-  try {
-    await pool.query('INSERT INTO public.auth_sector(name,active) VALUES ($1,true) ON CONFLICT (name) DO UPDATE SET active=true', [name]);
-    const { rows } = await pool.query('SELECT name FROM public.auth_sector WHERE active=true ORDER BY name');
-    res.status(201).json({ ok: true, setores: rows });
-  } catch (e) {
-    console.error('[sector:create]', e);
-    res.status(500).json({ error: 'falha ao criar setor' });
-  }
-});
-
-// --- LOOKUPS: criar função (admin only) ---
-router.post('/lookups/funcao', adminOnly, async (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  if (!name) return res.status(400).json({ error: 'nome obrigatório' });
-  try {
-    await pool.query('INSERT INTO public.auth_funcao(name,active) VALUES ($1,true) ON CONFLICT (name) DO UPDATE SET active=true', [name]);
-    const { rows } = await pool.query('SELECT name FROM public.auth_funcao WHERE active=true ORDER BY name');
-    res.status(201).json({ ok: true, funcoes: rows });
-  } catch (e) {
-    console.error('[funcao:create]', e);
-    res.status(500).json({ error: 'falha ao criar função' });
-  }
-});
-
-// --- PERMISSÕES: árvore para um usuário ---
-router.get('/:id/permissions/tree', selfOrAdmin, async (req, res) => {
-  const cli = await pool.connect();
-  try {
-    const t = await cli.query(`
-      SELECT * FROM public.auth_user_permissions_tree(
-        (SELECT id FROM public.auth_user WHERE id::text=$1 OR username=$1 LIMIT 1)
-      )`, [req.params.id]);
-    res.json({ nodes: t.rows });
-  } finally { cli.release(); }
-});
-
-// --- PERMISSÕES: salvar overrides (admin altera de qualquer um; usuário só o próprio) ---
-router.put('/:id/permissions/overrides', selfOrAdmin, async (req, res) => {
-  const { overrides } = req.body || {};
-  if (!overrides || typeof overrides !== 'object') {
-    return res.status(400).json({ error: 'overrides inválido' });
-  }
-  const cli = await pool.connect();
-  try {
-    const who = await cli.query(`SELECT id FROM public.auth_user WHERE id::text=$1 OR username=$1 LIMIT 1`, [req.params.id]);
-    if (who.rowCount === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
-    const targetId = who.rows[0].id;
-
-    // mapeia key -> id
-    const keys = Object.keys(overrides);
-    if (keys.length === 0) return res.json({ ok: true });
-    const map = await cli.query(
-      `SELECT id, key FROM public.nav_node WHERE key = ANY($1::text[])`,
-      [keys]
-    );
-    const idByKey = new Map(map.rows.map(r => [r.key, r.id]));
-
-    await cli.query('BEGIN');
-    for (const [k, v] of Object.entries(overrides)) {
-      const nodeId = idByKey.get(k);
-      if (!nodeId) continue;
-      if (v === null) {
-        // remove override
-        await cli.query(`DELETE FROM public.auth_user_permission WHERE user_id=$1 AND node_id=$2`, [targetId, nodeId]);
-      } else if (typeof v === 'boolean') {
-        // upsert override (true/false)
-        await cli.query(`
-          INSERT INTO public.auth_user_permission(user_id,node_id,allow)
-          VALUES ($1,$2,$3)
-          ON CONFLICT (user_id,node_id) DO UPDATE SET allow=EXCLUDED.allow
-        `, [targetId, nodeId, v]);
-      }
-    }
-    await cli.query('COMMIT');
-    res.json({ ok: true });
-  } catch (e) {
-    await pool.query('ROLLBACK').catch(()=>{});
-    console.error('[perm:overrides]', e);
-    res.status(500).json({ error: 'falha ao salvar overrides' });
-  } finally { cli.release(); }
-});
-
-/* -------- CRUD usuários básico -------- */
-router.get('/', adminOnly, async (_req, res) => {
+async function idFromParam(p) {
   const { rows } = await pool.query(
-    'SELECT id, username, roles FROM public.auth_users_public ORDER BY username'
+    `SELECT id FROM public.auth_user WHERE id::text=$1 OR username=$1 LIMIT 1`,
+    [p]
   );
-  res.json(rows);
-});
-router.post('/', adminOnly, async (req, res) => {
-  const { username, password, roles } = req.body || {};
-  if (!username || !password || !Array.isArray(roles)) {
-    return res.status(400).json({ error: 'username, password e roles são obrigatórios' });
-  }
-  try {
-    const r = await pool.query(
-      'SELECT * FROM public.auth_create_user($1,$2,$3)',
-      [username, password, roles]
-    );
-    res.json({ ok: true, user: r.rows[0] || null });
-  } catch (err) {
-    if (String(err.message).includes('auth_user_username_key')) {
-      return res.status(409).json({ error: 'Usuário já existe' });
-    }
-    console.error('[users:create]', err);
-    res.status(500).json({ error: 'Falha ao criar usuário' });
-  }
-});
-router.put('/:id', selfOrAdmin, async (req, res) => {
-  const { password, roles } = req.body || {};
-  const client = await pool.connect();
-  try {
-    const target = await resolveTarget(client, req.params.id);
-    if (!target) return res.status(404).json({ error: 'Usuário não encontrado' });
+  return rows[0]?.id || null;
+}
 
-    if (password) {
-      await client.query('SELECT public.auth_set_password($1,$2)', [target.username, password]);
-    }
-    const isAdmin = (req.session.user?.roles || []).includes('admin');
-    if (isAdmin && Array.isArray(roles)) {
-      await client.query('UPDATE public.auth_user SET roles = $1 WHERE id = $2', [roles, target.id]);
-    }
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[users:update]', err);
-    res.status(500).json({ error: 'Falha ao atualizar usuário' });
-  } finally { client.release(); }
-});
-router.delete('/:id', adminOnly, async (req, res) => {
-  const p = String(req.params.id);
-  const q = /^\d+$/.test(p)
-    ? ['DELETE FROM public.auth_user WHERE id = $1', [Number(p)]]
-    : ['DELETE FROM public.auth_user WHERE username = $1', [p]];
-  const r = await pool.query(q[0], q[1]);
-  if (r.rowCount === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
-  res.json({ ok: true });
-});
-
-/* -------- mensagens -------- */
-router.get('/me/messages', async (req, res) => {
-  const me = req.session.user;
-  if (!me) return res.status(401).json({ error: 'Não autenticado' });
-  const { rows } = await pool.query(
-    'SELECT id, body, created_at FROM public.auth_messages_for($1)',
-    [me.id]
-  );
-  res.json({ count: rows.length, messages: rows });
-});
-router.post('/me/messages/delete', async (req, res) => {
-  const me = req.session.user;
-  if (!me) return res.status(401).json({ error: 'Não autenticado' });
-  const msgId = Number(req.body?.id);
-  if (!Number.isInteger(msgId) || msgId <= 0) return res.status(400).json({ error: 'id inválido' });
-  const { rows } = await pool.query('SELECT public.auth_message_delete($1,$2) AS ok', [me.id, msgId]);
-  if (!rows[0]?.ok) return res.status(400).json({ error: 'Falha ao excluir' });
-  res.json({ ok: true });
-});
-router.post('/request-reset', async (req, res) => {
-  const { username } = req.body || {};
-  if (!username) return res.status(400).json({ error: 'username obrigatório' });
-  await pool.query('SELECT public.auth_request_reset($1,$2)', [
-    username,
-    req.session.user?.id || null
-  ]);
-  res.json({ ok: true });
-});
-
-/* -------- perfil (setor/função) -------- */
-router.get('/:id/profile', selfOrAdmin, async (req, res) => {
-  const p = String(req.params.id);
+/* ----------------- 1) Listar usuários (precisa poder gerenciar) ----------------- */
+router.get('/', requireLogin, manageOnly, async (_req, res) => {
   const q = `
-    SELECT v.user_id, v.username, v.setor, v.funcao
-      FROM public.auth_user_profile_v v
-     WHERE v.user_id::text = $1 OR v.username = $1
+    SELECT u.id::text AS id, u.username::text AS username, u.roles,
+           s.name AS setor, f.name AS funcao
+      FROM public.auth_user u
+      LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+      LEFT JOIN public.auth_sector s ON s.id = up.sector_id
+      LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+     ORDER BY u.username`;
+  const { rows } = await pool.query(q);
+  res.json(rows.map(r => ({
+    id: r.id, username: r.username, roles: r.roles || [],
+    setor: r.setor || null, funcao: r.funcao || null
+  })));
+});
+
+/* ----------------- 2) Obter 1 usuário + perfil (self OU quem pode gerenciar) ----------------- */
+router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
+  const uid = await idFromParam(req.params.id);
+  if (!uid) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+  const q = `
+    SELECT u.id::text AS id, u.username::text AS username, u.roles,
+           s.name AS setor, f.name AS funcao
+      FROM public.auth_user u
+      LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+      LEFT JOIN public.auth_sector s ON s.id = up.sector_id
+      LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+     WHERE u.id = $1
      LIMIT 1`;
-  const r = await pool.query(q, [p]);
-  res.json(r.rows[0] || { user_id: null, username: p, setor: null, funcao: null });
+  const { rows } = await pool.query(q, [uid]);
+  const r = rows[0];
+  res.json({
+    user:    { id: r.id, username: r.username, roles: r.roles || [] },
+    profile: { setor: r.setor || null, funcao: r.funcao || null }
+  });
 });
 
-router.put('/:id/profile', selfOrAdmin, async (req, res) => {
-  const { setor, funcao } = req.body || {};
-  if (!setor && !funcao) return res.status(400).json({ error: 'Nada para atualizar' });
-
-  const c = await pool.connect();
-  try {
-    const target = await resolveTarget(c, req.params.id);
-    if (!target) return res.status(404).json({ error: 'Usuário não encontrado' });
-
-    await c.query('SELECT public.auth_profile_set($1,$2,$3)', [
-      target.id,
-      setor || NULL,
-      funcao || NULL
-    ]);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('[profile:set]', e);
-    res.status(500).json({ error: 'Falha ao salvar perfil' });
-  } finally { c.release(); }
+/* ----------------- 3) Árvore de permissões (SELF OU quem pode gerenciar) ----------------- */
+// rota "me" (facilita no front). IMPORTANTE: declarar ANTES de "/:id/..."
+router.get('/me/permissions/tree', requireLogin, async (req, res) => {
+  const uid = req.session.user.id;
+  const { rows } = await pool.query(
+    `SELECT t.id, t.parent_id, t.key, t.label, t.pos, t.sort, t.allowed, t.user_override,
+            (SELECT selector FROM public.nav_node n WHERE n.id=t.id) AS selector
+       FROM public.auth_user_permissions_tree($1) t
+     ORDER BY t.pos, t.parent_id NULLS FIRST, t.sort, t.id`,
+    [uid]
+  );
+  res.json({ userId: String(uid), nodes: rows });
 });
 
-/* -------- permissões -------- */
-router.get('/:id/permissions/tree', selfOrAdmin, async (req, res) => {
-  const c = await pool.connect();
-  try {
-    // aceita id ou username
-    const t = await resolveTarget(c, req.params.id);
-    if (!t) return res.status(404).json({ error: 'Usuário não encontrado' });
-    const r = await c.query('SELECT * FROM public.auth_user_permissions_tree($1)', [t.id]);
-    res.json({ user: { id: t.id, username: t.username }, nodes: r.rows });
-  } finally { c.release(); }
+router.get('/:id/permissions/tree', requireLogin, selfOrManage, async (req, res) => {
+  const uid = await idFromParam(req.params.id);
+  if (!uid) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+  const { rows } = await pool.query(
+    `SELECT t.id, t.parent_id, t.key, t.label, t.pos, t.sort, t.allowed, t.user_override,
+            (SELECT selector FROM public.nav_node n WHERE n.id=t.id) AS selector
+       FROM public.auth_user_permissions_tree($1) t
+     ORDER BY t.pos, t.parent_id NULLS FIRST, t.sort, t.id`,
+    [uid]
+  );
+  res.json({ userId: String(uid), nodes: rows });
 });
 
-/* Define overrides explícitos por usuário.
-   body: { overrides: { "<key>": true|false|null, ... } }
-   true/false => UPSERT; null => REMOVE override
-*/
-router.put('/:id/permissions/overrides', selfOrAdmin, async (req, res) => {
-  const map = req.body?.overrides || {};
-  const c = await pool.connect();
-  try {
-    const t = await resolveTarget(c, req.params.id);
-    if (!t) return res.status(404).json({ error: 'Usuário não encontrado' });
+/* ----------------- 4) Salvar permissões (precisa poder gerenciar) ----------------- */
+router.post('/:id/permissions/save', requireLogin, manageOnly, async (req, res) => {
+  const uid = await idFromParam(req.params.id);
+  if (!uid) return res.status(404).json({ error: 'Usuário não encontrado' });
 
-    // resolve keys -> ids
-    const keys = Object.keys(map);
-    if (keys.length === 0) return res.json({ ok: true });
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: 'Nada para salvar' });
 
-    const qids = await c.query(
-      'SELECT id, key FROM public.nav_node WHERE key = ANY($1::text[])',
-      [keys]
-    );
-    const idByKey = Object.fromEntries(qids.rows.map(r => [r.key, r.id]));
+  const rowsToInsert = items
+    .map(it => ({ node_id: Number(it.node_id ?? it.id), allow: !!it.allowed }))
+    .filter(it => Number.isInteger(it.node_id));
 
-    // aplica mudanças
-    for (const k of keys) {
-      const v = map[k];
-      const nodeId = idByKey[k];
-      if (!nodeId) continue;
-      if (v === null) {
-        await c.query('DELETE FROM public.auth_user_permission WHERE user_id=$1 AND node_id=$2', [t.id, nodeId]);
-      } else {
-        await c.query(`
-          INSERT INTO public.auth_user_permission(user_id, node_id, allow)
-          VALUES ($1,$2,$3)
-          ON CONFLICT (user_id,node_id) DO UPDATE SET allow=EXCLUDED.allow
-        `, [t.id, nodeId, !!v]);
-      }
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('[perm:overrides]', e);
-    res.status(500).json({ error: 'Falha ao salvar permissões' });
-  } finally { c.release(); }
+  if (!rowsToInsert.length) return res.status(400).json({ error: 'Itens inválidos' });
+
+  const values = [];
+  const params = [];
+  let i = 1;
+  for (const it of rowsToInsert) {
+    params.push(uid, it.node_id, it.allow);
+    values.push(`($${i++}, $${i++}, $${i++})`);
+  }
+  const sql = `
+    INSERT INTO public.auth_user_permission(user_id, node_id, allow)
+    VALUES ${values.join(',')}
+    ON CONFLICT (user_id, node_id) DO UPDATE SET allow = EXCLUDED.allow`;
+  await pool.query(sql, params);
+
+  res.json({ ok: true, updated: rowsToInsert.length });
+});
+
+/* ----------------- 5) Atualizar senha/roles (mantive a regra de “pode gerenciar”) ----------------- */
+router.put('/:id', requireLogin, manageOnly, async (req, res) => {
+  const uid = await idFromParam(req.params.id);
+  if (!uid) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+  const { password, roles } = req.body || {};
+  if (password) {
+    const { rows } = await pool.query('SELECT username FROM public.auth_user WHERE id=$1', [uid]);
+    await pool.query('SELECT public.auth_set_password($1,$2)', [rows[0].username, password]);
+  }
+  if (Array.isArray(roles)) {
+    await pool.query('UPDATE public.auth_user SET roles=$1 WHERE id=$2', [roles, uid]);
+  }
+  res.json({ ok: true });
 });
 
 module.exports = router;

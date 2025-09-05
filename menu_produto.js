@@ -34,6 +34,17 @@ let almoxTipoMap        = new Map();   // desc  -> prefixo (Tipo do produto)
 let almoxActivePrefixes = new Set();   // prefixos atualmente exibidos
 let almoxCsvLoaded      = false;
 
+// === PATCH GLOBAL DO FETCH (garante cookie da sessão em TODAS as requests) ===
+(function hardenFetchCredentials(){
+  const _fetch = window.fetch;
+  window.fetch = function(input, init) {
+    init = init || {};
+    // preserva se já estiver setado; senão, força 'include'
+    if (!init.credentials) init.credentials = 'include';
+    return _fetch(input, init);
+  };
+})();
+
 // ——— formatação numérica (xx.xxx,yy) ———
 const fmtBR = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 2,
@@ -1539,6 +1550,62 @@ async function ensureAuthVisibility(){
     applyLoggedOutUI();
   }
 }
+
+// ====== AUTODESCoberta de navegação + sync ======
+function _navComputeSelector(el) {
+  // Preferimos um seletor estável pelo próprio data-nav-key
+  const key = el.dataset.navKey;
+  if (key) return `[data-nav-key="${key}"]`;
+  // fallback: id
+  if (el.id) return `#${el.id}`;
+  return null; // sem selector -> só aparece na lista, não oculta nada na UI
+}
+
+function collectNavNodesFromDOM() {
+  const els = document.querySelectorAll('[data-nav-key]');
+  const nodes = [];
+  els.forEach(el => {
+    const key   = el.dataset.navKey;
+    const label = el.dataset.navLabel?.trim() || (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    const pos   = (el.dataset.navPos || '').toLowerCase() === 'top' ? 'top' : 'side';
+    const parentKey = el.dataset.navParent || null;
+    const sort  = Number(el.dataset.navSort || 0) || 0;
+    const selector = el.dataset.navSelector || _navComputeSelector(el);
+    if (key && label && pos) {
+      nodes.push({ key, label, position: pos, parentKey, sort, selector });
+    }
+  });
+  return nodes;
+}
+
+async function syncNavNodes() {
+  try {
+    const nodes = collectNavNodesFromDOM();
+    if (!nodes.length) return;
+    await fetch('/api/nav/sync', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nodes })
+    });
+  } catch (e) {
+    console.warn('[nav-sync] falhou', e);
+  }
+}
+
+window.syncNavNodes = syncNavNodes;   // deixa disponível para outros arquivos chamarem
+
+// depois do login ok:
+window.dispatchEvent(new Event('auth:changed'));
+syncNavNodes(); // garante que o SQL conhece os nós atuais
+
+// no seu fluxo que abre o modal "Permissões":
+await syncNavNodes(); // upsert dos nós
+// depois busca a árvore normalmente:
+/*
+const tree = await fetch(`/api/users/${targetId}/permissions/tree`, { credentials:'include' }).then(r=>r.json());
+renderPermissoes(tree.nodes);
+*/
 
 // lifecycle
 document.addEventListener('DOMContentLoaded', () => {
