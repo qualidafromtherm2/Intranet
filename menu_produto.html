@@ -30,16 +30,45 @@
   <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
 
   <!-- Links que podem “sobrar” -->
-  <nav id="mainMenu" class="header-menu">
+<nav id="mainMenu" class="header-menu">
 
- <a id="menu-inicio"
-    class="menu-link is-active"
-    data-target="paginaInicio">Início</a>
-    <a id="menu-produto"       class="menu-link" href="#">Produto</a>
-    <a id="menu-qualidade"     class="menu-link" href="#">Qualidade</a>
-    <a id="menu-acessos"       class="menu-link" href="#">Acessos</a>
-    <a id="menu-notificacoes"  class="menu-link" href="#">Notificações</a>
-  </nav>
+  <a id="menu-inicio"
+     class="menu-link is-active"
+     data-target="paginaInicio"
+     data-nav-key="top:inicio"
+     data-nav-pos="top"
+     data-nav-label="Início"
+     data-nav-selector="#menu-inicio">Início</a>
+
+  <a id="menu-produto"
+     class="menu-link" href="#"
+     data-nav-key="top:produto"
+     data-nav-pos="top"
+     data-nav-label="Produto"
+     data-nav-selector="#menu-produto">Produto</a>
+
+  <a id="menu-qualidade"
+     class="menu-link" href="#"
+     data-nav-key="top:qualidade"
+     data-nav-pos="top"
+     data-nav-label="Qualidade"
+     data-nav-selector="#menu-qualidade">Qualidade</a>
+
+  <a id="menu-acessos"
+     class="menu-link" href="#"
+     data-nav-key="top:acessos"
+     data-nav-pos="top"
+     data-nav-label="Acessos"
+     data-nav-selector="#menu-acessos">Acessos</a>
+
+  <a id="menu-notificacoes"
+     class="menu-link" href="#"
+     data-nav-key="top:notificacoes"
+     data-nav-pos="top"
+     data-nav-label="Notificações"
+     data-nav-selector="#menu-notificacoes">Notificações</a>
+</nav>
+
 
   <!-- Botão …  (fica invisível até o JS precisar dele) -->
 <button id="moreBtn" class="more-btn" aria-label="Mais opções">
@@ -74,65 +103,121 @@
     <div class="wrapper">
       <!-- Menu lateral -->
       <div class="left-side">
-        <div class="side-wrapper">
-          <div class="side-title">Produtos</div>
-          <div class="side-menu">
-            <a href="#" id="btn-omie-list1">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
-                   style="margin-right:8px;flex-shrink:0;">
-                <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-              </svg>
-              
-              Lista de produtos
-            </a>
-            <a href="#" id="btn-omie-list">
-              <svg viewBox="0 0 512 512"><!-- ícone --></svg>
-              em construção 2
-            </a>
-            <a href="#">
-              <svg viewBox="0 0 488.932 488.932" fill="currentColor"><!-- ícone --></svg>
-              em construção 3
-              <span class="notification-number updates">3</span>
-            </a>
-          </div>
-        </div>
-        <div class="side-wrapper">
-          <div class="side-title">Recursos humanos</div>
-          <div class="side-menu">
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:produtos"
+       data-nav-pos="side"
+       data-nav-label="Produtos">Produtos</div>
 
-<a href="#" id="btn-colaboradores"
-   data-colab="colab" data-nav="colaboradores" class="side-menu-item">
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"
-       style="margin-right:8px; flex-shrink:0;">
-    <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/>
-  </svg>
-  Cadastro de colaboradores
-</a>
+  <div class="side-menu">
+    <a href="#"
+       id="btn-omie-list1"
+       data-nav-key="side:produtos:lista"
+       data-nav-parent="side:produtos"
+       data-nav-pos="side"
+       data-nav-label="Lista de produtos"
+       data-nav-selector="#btn-omie-list1">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;flex-shrink:0;">
+        <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+      </svg>
+      Lista de produtos
+    </a>
 
-            <a href="#" class="menu-link">Aniversariantes</a>
+    <a href="#"
+       id="btn-omie-list"
+       data-nav-key="side:produtos:constr2"
+       data-nav-parent="side:produtos"
+       data-nav-pos="side"
+       data-nav-label="em construção 2"
+       data-nav-selector="#btn-omie-list">
+      <svg viewBox="0 0 512 512"></svg>
+      em construção 2
+    </a>
 
-            <!-- … até em construção 18 … -->
-            <a href="#">… em construção 18 …</a>
-          </div>
+    <a href="#"
+       data-nav-key="side:produtos:constr3"
+       data-nav-parent="side:produtos"
+       data-nav-pos="side"
+       data-nav-label="em construção 3">
+      <svg viewBox="0 0 488.932 488.932" fill="currentColor"></svg>
+      em construção 3
+      <span class="notification-number updates">3</span>
+    </a>
+  </div>
+</div>
+
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:rh"
+       data-nav-pos="side"
+       data-nav-label="Recursos humanos">Recursos humanos</div>
+
+  <div class="side-menu">
+
+    <a href="#"
+       id="btn-colaboradores"
+       class="side-menu-item"
+       data-colab="colab"
+       data-nav="colaboradores"
+       data-nav-key="side:rh:cad-colab"
+       data-nav-parent="side:rh"
+       data-nav-pos="side"
+       data-nav-label="Cadastro de colaboradores"
+       data-nav-selector="#btn-colaboradores">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px; flex-shrink:0;">
+        <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/>
+      </svg>
+      Cadastro de colaboradores
+    </a>
+
+    <a href="#" class="menu-link"
+       data-nav-key="side:rh:aniversariantes"
+       data-nav-parent="side:rh"
+       data-nav-pos="side"
+       data-nav-label="Aniversariantes">Aniversariantes</a>
+
+    <a href="#"
+       data-nav-key="side:rh:constr18"
+       data-nav-parent="side:rh"
+       data-nav-pos="side"
+       data-nav-label="… em construção 18 …">… em construção 18 …</a>
+  </div>
+</div>
+
 
 
 
 <!-- Nova categoria: Logística -->
 <div class="side-wrapper">
-  <div class="side-title">Logística</div>
+  <div class="side-title"
+       data-nav-key="side:log"
+       data-nav-pos="side"
+       data-nav-label="Logística">Logística</div>
+
   <div class="side-menu">
-    <!-- Botão existente -->
-    <a href="#" id="menu-pedidos" class="menu-link">
+    <a href="#"
+       id="menu-pedidos"
+       class="menu-link"
+       data-nav-key="side:log:pedidos"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Pedidos"
+       data-nav-selector="#menu-pedidos">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
         <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
       </svg>
       Pedidos
     </a>
 
-    <!-- ✅ Botão armazen -->
-    <a href="#" id="menu-armazens" class="menu-link">
+    <a href="#"
+       id="menu-armazens"
+       class="menu-link"
+       data-nav-key="side:log:armazens"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Armazéns"
+       data-nav-selector="#menu-armazens">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
-        <!-- Ícone de armazém (FA6: fa-warehouse) -->
         <path d="M3 9.5V21h3v-7h12v7h3V9.5L12 3 3 9.5zM9 19H6v-5h3v5zm9 0h-3v-5h3v5z"/>
       </svg>
       Armazéns
@@ -142,7 +227,6 @@
 
 
 
-        </div>
       </div>
 
       <!-- Conteúdo principal -->
@@ -153,18 +237,27 @@
     <div class="content-section">
 
 <div class="inicio-grid">
-  <button class="inicio-btn">Linha de produção</button>
+  <button class="inicio-btn"
+          id="btn-linha-producao"
+          data-nav-key="inicio:linha-producao"
+          data-nav-pos="top"
+          data-nav-label="Linha de produção"
+          data-nav-selector="#btn-linha-producao">Linha de produção</button>
 
-  <!-- único botão Preparação elétrica -->
-  <button id="btn-prep-eletrica" class="inicio-btn">
-    Preparação elétrica
-  </button>
+  <button id="btn-prep-eletrica" class="inicio-btn"
+          data-nav-key="inicio:prep-eletrica"
+          data-nav-pos="top"
+          data-nav-label="Preparação elétrica"
+          data-nav-selector="#btn-prep-eletrica">Preparação elétrica</button>
 
-  <button class="inicio-btn">Preparação da base</button>
-  <button class="inicio-btn">Preparação da tampa</button>
-  <button class="inicio-btn">Preparação da evaporadora</button>
-  <button class="inicio-btn">Kit cobre</button>
+  <button class="inicio-btn"
+          data-nav-key="inicio:prep-base"
+          data-nav-pos="top"
+          data-nav-label="Preparação da base">Preparação da base</button>
+
+
 </div>
+
 
 
     </div>
@@ -223,15 +316,65 @@
 <div id="produtoTabs">
 
         <!-- Abas internas principais -->
-        <div class="main-header">
-          <div class="header-menu">
-            <a class="main-header-link is-active" href="#" data-target="dadosProduto">Dados do produto</a>
-            <a class="main-header-link"       href="#" data-target="estruturaProduto">Estrutura de produto</a>
-            <a class="main-header-link"       href="#" data-target="listaPecasTab">Lista de peças</a>
-            <a class="main-header-link"       href="#" data-target="listaCaracteristica">Características</a>
-            <a class="main-header-link"       href="#" data-target="listaFotos">Fotos</a>
-          </div>
-        </div>
+<div class="main-header">
+  <div class="header-menu">
+    <a class="main-header-link is-active"
+       href="#"
+       data-target="dadosProduto"
+       data-nav-key="produto:dados"
+       data-nav-parent="top:produto"
+       data-nav-pos="top"
+       data-nav-label="Dados do produto"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="dadosProduto"]'>
+       Dados do produto
+    </a>
+
+    <a class="main-header-link"
+       href="#"
+       data-target="estruturaProduto"
+       data-nav-key="produto:estrutura"
+       data-nav-parent="top:produto"
+       data-nav-pos="top"
+       data-nav-label="Estrutura do produto"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="estruturaProduto"]'>
+       Estrutura de produto
+    </a>
+
+    <a class="main-header-link"
+       href="#"
+       data-target="listaPecasTab"
+       data-nav-key="produto:estrutura:lista-pecas"
+       data-nav-parent="produto:estrutura"
+       data-nav-pos="top"
+       data-nav-label="Lista de peças"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaPecasTab"]'>
+       Lista de peças
+    </a>
+
+    <a class="main-header-link"
+       href="#"
+       data-target="listaCaracteristica"
+       data-nav-key="produto:estrutura:caracteristica"
+       data-nav-parent="produto:estrutura"
+       data-nav-pos="top"
+       data-nav-label="Características"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaCaracteristica"]'>
+       Características
+    </a>
+
+    <a class="main-header-link"
+       href="#"
+       data-target="listaFotos"
+       data-nav-key="produto:estrutura:fotos"
+       data-nav-parent="produto:estrutura"
+       data-nav-pos="top"
+       data-nav-label="Fotos"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaFotos"]'>
+       Fotos
+    </a>
+  </div>
+</div>
+
 
 
         <div class="tab-content">
@@ -259,23 +402,64 @@
 <!-- 2) Novo conjunto de abas dentro de Dados do produto -->
 <div class="main-header sub-tabs" style="margin-top: 20px;">
   <div class="header-menu">
-    <a class="main-header-link is-active" href="#" data-subtarget="detalhesTab">
-      Detalhes do produto
+
+    <a class="main-header-link is-active" href="#" data-subtarget="detalhesTab"
+       data-nav-key="produto:dados:detalhes"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Detalhes do produto"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="detalhesTab"]'>
+       Detalhes do produto
     </a>
-    <a class="main-header-link" href="#" data-subtarget="cadastroTab">
-      Dados de cadastro
+
+    <a class="main-header-link" href="#" data-subtarget="cadastroTab"
+       data-nav-key="produto:dados:cadastro"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Dados de cadastro"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="cadastroTab"]'>
+       Dados de cadastro
     </a>
-    <a class="main-header-link" href="#" data-subtarget="financeiroTab">
-      Financeiro
+
+    <a class="main-header-link" href="#" data-subtarget="financeiroTab"
+       data-nav-key="produto:dados:financeiro"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Financeiro"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="financeiroTab"]'>
+       Financeiro
     </a>
-    <a class="main-header-link" href="#" data-subtarget="logisticaTab">
-      Logística
+
+    <a class="main-header-link" href="#" data-subtarget="logisticaTab"
+       data-nav-key="produto:dados:logistica"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Logística"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="logisticaTab"]'>
+       Logística
     </a>
-    <a href="#" class="main-header-link" data-subtarget="pdv">PDV</a>
-    <a href="#" class="main-header-link" data-subtarget="compras">Compras</a>
-    
+
+    <a href="#" class="main-header-link" data-subtarget="pdv"
+       data-nav-key="produto:dados:pdv"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="PDV"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="pdv"]'>
+       PDV
+    </a>
+
+    <a href="#" class="main-header-link" data-subtarget="compras"
+       data-nav-key="produto:dados:compras"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Compras"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="compras"]'>
+       Compras
+    </a>
+
   </div>
 </div>
+
 
 <!-- 3) Blocos de conteúdo secundário (um para cada aba) -->
 <div class="sub-content" id="detalhesTab">

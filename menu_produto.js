@@ -288,14 +288,6 @@ window.fetch = async function(input, init = {}) {
 })();
 
 
-
-// chame ao logar e depois de salvar permissões
-// ex.: depois do login bem-sucedido:
-setTimeout(() => {
-  if (typeof applyCurrentUserPermissionsToUI === 'function') applyCurrentUserPermissionsToUI();
-}, 0);
-
-
 // Exemplo: chamar após confirmar sessão
 document.addEventListener('DOMContentLoaded', () => {
   // quando você já tiver setado window.__sessionUser
@@ -1578,34 +1570,68 @@ function collectNavNodesFromDOM() {
   return nodes;
 }
 
-async function syncNavNodes() {
+// === SINCRONIZAÇÃO DE NÓS DE NAVEGAÇÃO COM O SQL ===
+// ====== NAV SYNC (com cache) ======
+window.__navSync = window.__navSync || { running:false, last:0 };
+
+// chama o /api/nav/sync somente se logado e só a cada N ms
+window.syncNavNodes = async function(force = false) {
   try {
-    const nodes = collectNavNodesFromDOM();
-    if (!nodes.length) return;
-    await fetch('/api/nav/sync', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      credentials: 'include',
+    if (!window.__sessionUser) return; // precisa estar logado
+    if (window.__navSync.running) return;
+    const now = Date.now();
+    if (!force && now - window.__navSync.last < 60_000) return; // 1 min de cache
+
+    window.__navSync.running = true;
+
+    // coleta os nós do DOM
+    const els = document.querySelectorAll('[data-nav-key]');
+    const nodes = [];
+    els.forEach(el => {
+      const key       = el.dataset.navKey;
+      const label     = el.dataset.navLabel?.trim() || (el.textContent || '').trim().replace(/\s+/g,' ').slice(0,60);
+      const position  = (el.dataset.navPos || '').toLowerCase() === 'top' ? 'top' : 'side';
+      const parentKey = el.dataset.navParent || null;
+      const sort      = Number(el.dataset.navSort || 0) || 0;
+      const selector  = el.dataset.navSelector || null;
+      if (key && label && position) nodes.push({ key, label, position, parentKey, sort, selector });
+    });
+    if (!nodes.length) { window.__navSync.running = false; return; }
+
+    const r = await fetch('/api/nav/sync', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      credentials:'include',
       body: JSON.stringify({ nodes })
     });
+    if (!r.ok) {
+      const e = await r.json().catch(()=>({}));
+      console.warn('[nav-sync]', r.status, e);
+    } else {
+      window.__navSync.last = Date.now();
+    }
   } catch (e) {
     console.warn('[nav-sync] falhou', e);
+  } finally {
+    window.__navSync.running = false;
   }
-}
+};
 
-window.syncNavNodes = syncNavNodes;   // deixa disponível para outros arquivos chamarem
+// helper que só chama se passou o cache
+window.maybeSyncNavNodes = function() {
+  return window.syncNavNodes(false); // respeita o cache
+};
+
+// Opcional: após login, sincroniza uma vez
+window.addEventListener('auth:changed', () => {
+  if (window.__sessionUser) window.syncNavNodes(true); // força UMA vez pós-login
+});
+
+
+
 
 // depois do login ok:
 window.dispatchEvent(new Event('auth:changed'));
-syncNavNodes(); // garante que o SQL conhece os nós atuais
-
-// no seu fluxo que abre o modal "Permissões":
-await syncNavNodes(); // upsert dos nós
-// depois busca a árvore normalmente:
-/*
-const tree = await fetch(`/api/users/${targetId}/permissions/tree`, { credentials:'include' }).then(r=>r.json());
-renderPermissoes(tree.nodes);
-*/
 
 // lifecycle
 document.addEventListener('DOMContentLoaded', () => {
@@ -1615,4 +1641,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // reapply quando login/logout ou permissões mudarem
 window.addEventListener('auth:changed', ensureAuthVisibility);
+
+// após login/logout, sincroniza nós (se logado)
+window.addEventListener('auth:changed', async () => {
+  if (window.__sessionUser) {
+    try { await window.syncNavNodes?.(); } catch {}
+  }
+});
+
+
 window.applyCurrentUserPermissionsToUI = applyCurrentUserPermissionsToUI;
