@@ -46,7 +46,7 @@ app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure f
 // server.js — imediatamente após const app = express();
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
-app.use('/api/nav', require('./routes/nav'));
+
 
 app.use(session({
   name: 'sid',
@@ -62,6 +62,7 @@ app.use(session({
   }
 }));
 
+app.use('/api/nav', require('./routes/nav'));
 
 app.get('/api/produtos/stream', (req, res) => {
   res.setHeader('Content-Type',  'text/event-stream');
@@ -244,6 +245,71 @@ async function withRetry(fn, tries = 3) {
   throw lastErr;
 }
 
+// === NAV SYNC =====================================================
+// Precisa estar DEPOIS de app.use(session(...)) e app.use(express.json())
+
+function ensureLoggedIn(req, res, next) {
+  if (req.session && req.session.user && req.session.user.id) return next();
+  return res.status(401).json({ error: 'Não autenticado' });
+}
+
+app.post('/api/nav/sync', ensureLoggedIn, async (req, res) => {
+  try {
+    const { nodes } = req.body || {};
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      return res.json({ ok: true, updated: 0 });
+    }
+
+    // upsert de nós (key única), resolvendo parent por parentKey se vier
+    // usa transação simples p/ evitar FK quebrada
+    await pool.query('BEGIN');
+
+    // cache de {key->id} para resolver parent mais tarde
+    const ids = new Map();
+
+    // 1) garanta todos os pais (sem parent) primeiro
+    for (const n of nodes.filter(n => !n.parentKey)) {
+      const r = await pool.query(
+        `INSERT INTO public.nav_node(key,label,position,parent_id,sort,active,selector)
+         VALUES ($1,$2,$3,NULL,COALESCE($4,0),TRUE,$5)
+         ON CONFLICT (key) DO UPDATE
+            SET label=EXCLUDED.label, position=EXCLUDED.position,
+                sort=EXCLUDED.sort, active=TRUE, selector=EXCLUDED.selector
+         RETURNING id,key`,
+        [n.key, n.label, n.position, n.sort ?? 0, n.selector || null]
+      );
+      ids.set(r.rows[0].key, r.rows[0].id);
+    }
+
+    // 2) agora os que têm pai
+    for (const n of nodes.filter(n => n.parentKey)) {
+      // pega id do pai pelo cache; se não tiver, tenta buscar do DB
+      let parentId = ids.get(n.parentKey);
+      if (!parentId) {
+        const p = await pool.query('SELECT id FROM public.nav_node WHERE key=$1', [n.parentKey]);
+        parentId = p.rows[0]?.id || null;
+      }
+      const r = await pool.query(
+        `INSERT INTO public.nav_node(key,label,position,parent_id,sort,active,selector)
+         VALUES ($1,$2,$3,$4,COALESCE($5,0),TRUE,$6)
+         ON CONFLICT (key) DO UPDATE
+            SET label=EXCLUDED.label, position=EXCLUDED.position,
+                parent_id=EXCLUDED.parent_id, sort=EXCLUDED.sort,
+                active=TRUE, selector=EXCLUDED.selector
+         RETURNING id,key`,
+        [n.key, n.label, n.position, parentId, n.sort ?? 0, n.selector || null]
+      );
+      ids.set(r.rows[0].key, r.rows[0].id);
+    }
+
+    await pool.query('COMMIT');
+    res.json({ ok: true, updated: ids.size });
+  } catch (e) {
+    await pool.query('ROLLBACK').catch(()=>{});
+    console.error('[nav/sync]', e);
+    res.status(500).json({ error: 'Falha ao sincronizar navegação' });
+  }
+});
 
 
 // Timeout p/ chamadas OMIE (evita pendurar quando o BG “trava”)

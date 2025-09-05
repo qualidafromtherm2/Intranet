@@ -272,6 +272,19 @@ formSignIn?.addEventListener('submit', async (e) => {
     // guarda o usuário de sessão para os outros módulos
     window.__sessionUser = data.user;
 
+// depois que o login deu ok e __sessionUser foi definido:
+try {
+  // sincroniza mapa de botões/menus com o SQL (agora com cookie já setado)
+  if (typeof window.syncNavNodes === 'function') {
+    await window.syncNavNodes();   // se não estiver logado, retorna false sem erro
+  }
+} catch (e) {
+  console.warn('[login] syncNavNodes falhou', e);
+}
+
+// avisa todo mundo pra reavaliar a UI por permissões/menus
+window.dispatchEvent(new Event('auth:changed'));
+
     // 👉 NOVO: sincroniza os nós de navegação com o SQL **antes** de avisar a UI
     try { await window.syncNavNodes?.(); } catch (e) { console.warn('[nav-sync pós-login]', e); }
 

@@ -210,7 +210,11 @@ async function abrirDetalhes(u){
     } catch (e) {
       console.warn('[perm-sync]', e);
     }
+
+    try { await window.syncNavNodes?.(); } catch (e) { console.warn('[perm-sync]', e); }
+
     await showPermissoes(String(user.id), user.username);
+
   });
 }
 
@@ -333,88 +337,110 @@ function renderPermissoes(nodes, currentMap) {
   return wrap;
 }
 
+// ====== Permissões: abre rápido e sincroniza em paralelo ======
 async function showPermissoes(userId, username) {
-  try {
-    // 1) Garante que os nós atuais do DOM já estejam no SQL
-    if (window.syncNavNodes) await window.syncNavNodes();
+  // 1) Abre o modal imediatamente (skeleton)
+  if (!window.__permModalEl) {
+    window.__permModalEl = document.createElement('div');
+    window.__permModalEl.className = 'perm-modal';
+    Object.assign(window.__permModalEl.style, {
+      position:'fixed', inset:'0', background:'rgba(0,0,0,.5)',
+      display:'flex', alignItems:'center', justifyContent:'center', zIndex: 9999
+    });
+    document.body.appendChild(window.__permModalEl);
+  }
+  const $ = window.__permModalEl;
+  $.innerHTML = `
+    <div style="width:min(900px,95vw);max-height:90vh;overflow:auto;background:#1f2430;border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.4)">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <h3 style="margin:0;flex:1">Permissões de <span style="opacity:.8">${username}</span></h3>
+        <button id="permClose" class="content-button status-button">Fechar</button>
+      </div>
+      <div id="permBody">
+        <div style="padding:24px 8px;opacity:.7">Carregando permissões…</div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="permSalvar" class="content-button status-button">Salvar alterações</button>
+      </div>
+    </div>`;
+  $.style.display = 'flex';
 
-    // 2) Busca a árvore de permissões do usuário alvo
-    const resp = await fetch(`/api/users/${userId}/permissions/tree`, { credentials:'include' });
-    if (!resp.ok) {
-      const err = await resp.json().catch(()=>({}));
-      alert(err.error || 'Sem permissão para ver as permissões deste usuário.');
+  const btnFechar = $.querySelector('#permClose');
+  btnFechar.onclick = () => ($.style.display='none');
+
+  const body = $.querySelector('#permBody');
+
+  // 2) Dispara a sync em paralelo (NÃO aguarda)
+  try { window.maybeSyncNavNodes?.(); } catch {}
+
+  // 3) Busca a árvore de permissões imediatamente
+  let tree;
+  try {
+    const r = await fetch(`/api/users/${userId}/permissions/tree`, { credentials:'include' });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    tree = await r.json();
+  } catch (e) {
+    body.innerHTML = `<div style="color:#f66">Falha ao carregar permissões (${e.message||e}).</div>`;
+    return;
+  }
+
+  // 4) Render bonitinho: “Menu lateral” / “Menu superior” com divisórias
+  const byPos = { side: [], top: [] };
+  for (const n of (tree.nodes || [])) byPos[n.pos]?.push(n);
+
+  function renderGroup(title, arr) {
+    if (!arr.length) return '';
+    // Ordena por parent->sort->label
+    arr.sort((a,b)=> (a.parent_id||0)-(b.parent_id||0) || a.sort-b.sort || a.label.localeCompare(b.label,'pt'));
+    // Agrupa por parent_id
+    const groups = new Map();
+    arr.forEach(n => {
+      const pid = n.parent_id || 0;
+      if (!groups.has(pid)) groups.set(pid, []);
+      groups.get(pid).push(n);
+    });
+    let html = `<div style="margin:18px 0 10px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
+                  <div style="opacity:.8;margin-bottom:8px;font-weight:600">${title}</div>`;
+    for (const [pid, items] of groups.entries()) {
+      // cabeçalho do pai (se houver)
+      const parent = arr.find(x => x.id === pid);
+      if (pid && parent) {
+        html += `<div style="margin:6px 0 4px;opacity:.7">${parent.label}</div>`;
+      }
+      for (const it of items) {
+        const disabled = false; // habilitados por padrão
+        html += `<label style="display:flex;gap:8px;align-items:center;padding:6px 4px">
+                   <input type="checkbox" class="perm-cb" data-node="${it.id}" ${it.allowed ? 'checked':''} ${disabled?'disabled':''}>
+                   <span>${it.label}</span>
+                 </label>`;
+      }
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  body.innerHTML = renderGroup('Menu lateral', byPos.side) + renderGroup('Menu superior', byPos.top);
+
+  // 5) Salvar
+  $.querySelector('#permSalvar').onclick = async () => {
+    const cbs = $.querySelectorAll('.perm-cb');
+    const overrides = [];
+    cbs.forEach(cb => overrides.push({ node_id: Number(cb.dataset.node), allow: cb.checked }));
+    const r = await fetch(`/api/users/${userId}/permissions/override`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body: JSON.stringify({ overrides })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      alert('Falha ao salvar: ' + (err.error||r.status));
       return;
     }
-    const data  = await resp.json();
-    const nodes = data.nodes || [];
-
-    // 3) Estado atual (Map por key)
-    const current = new Map(nodes.map(n => [n.key, !!n.allowed]));
-
-    // 4) Cria/abre modal
-    let modal = document.getElementById('permModal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'permModal';
-      modal.className = 'perm-modal';
-      modal.innerHTML = `
-        <div class="perm-box">
-          <div class="perm-head">
-            <strong>Permissões de <span id="permUser"></span></strong>
-            <button type="button" class="perm-close">×</button>
-          </div>
-          <div class="perm-body"></div>
-          <div class="perm-footer">
-            <button class="content-button status-button perm-save">Salvar alterações</button>
-            <button class="content-button perm-cancel">Fechar</button>
-          </div>
-        </div>`;
-      document.body.appendChild(modal);
-      modal.querySelector('.perm-close').onclick =
-      modal.querySelector('.perm-cancel').onclick = () => modal.remove();
-    }
-    modal.querySelector('#permUser').textContent = username || userId;
-
-    const body = modal.querySelector('.perm-body');
-    body.innerHTML = '';
-    body.appendChild(renderPermissoes(nodes, current));
-
-    modal.style.display = 'flex';
-
-    // 5) Salvar
-    const saveBtn = modal.querySelector('.perm-save');
-    saveBtn.onclick = async () => {
-      const changes = [];
-      body.querySelectorAll('input[type="checkbox"][data-node-id]').forEach(chk => {
-        const key = chk.dataset.nodeKey;
-        const novo = !!chk.checked;
-        if (current.get(key) !== novo) {
-          changes.push({ node_id: Number(chk.dataset.nodeId), allow: novo });
-        }
-      });
-
-      try {
-        if (changes.length) {
-          const r = await fetch(`/api/users/${userId}/permissions`, {
-            method:'POST',
-            headers:{ 'Content-Type':'application/json' },
-            credentials:'include',
-            body: JSON.stringify({ changes })
-          });
-          if (!r.ok) throw new Error('HTTP '+r.status);
-        }
-        // força UI a reavaliar (menus/botões com perm-hidden)
-        window.dispatchEvent(new Event('auth:changed'));
-        alert('Permissões salvas!');
-        modal.remove();
-      } catch (e) {
-        console.error('[perm-save]', e);
-        alert('Falha ao salvar permissões.');
-      }
-    };
-  } catch (e) {
-    console.error('[showPermissoes]', e);
-    alert('Erro ao abrir permissões.');
-  }
+    alert('Permissões salvas.');
+    window.__navSync.last = 0;          // força próxima sync a enviar estado novo
+    window.syncNavNodes?.(true);        // dispara uma sync forçada em background
+    window.dispatchEvent(new Event('auth:changed')); // reavalia visibilidade
+  };
 }
 
