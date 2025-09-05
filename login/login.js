@@ -231,66 +231,69 @@ function bindAuthModal(
   let loggedUserId = null;
 
   // === SUBMIT DE LOGIN (único) ===
-  formSignIn?.addEventListener('submit', async (e) => {
-    e.preventDefault();
+formSignIn?.addEventListener('submit', async (e) => {
+  e.preventDefault();
 
-    const userEl   = overlay.querySelector('#signInEmail');
-    const passEl   = overlay.querySelector('#signInPassword');
-    const remember = overlay.querySelector('#rememberMe');
+  const userEl   = overlay.querySelector('#signInEmail');
+  const passEl   = overlay.querySelector('#signInPassword');
+  const remember = overlay.querySelector('#rememberMe');
 
-    const username = (userEl?.value || '').trim();
-    const password = (passEl?.value || '');
+  const username = (userEl?.value || '').trim();
+  const password = (passEl?.value || '');
 
-    if (!username || !password) {
-      alert('Preencha usuário e senha.');
+  if (!username || !password) {
+    alert('Preencha usuário e senha.');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: username, senha: password })
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || !data.ok) {
+      alert(data.error || 'Usuário ou senha inválidos');
       return;
     }
 
-    try {
-      const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: username, senha: password })
-      });
-      const data = await resp.json();
-
-      if (!resp.ok || !data.ok) {
-        alert(data.error || 'Usuário ou senha inválidos');
-        return;
-      }
-
-      // lembrar credenciais (opcional)
-      if (remember?.checked) {
-        localStorage.setItem('user', username);
-        localStorage.setItem('password', password);
-      } else {
-        localStorage.removeItem('user');
-        localStorage.removeItem('password');
-      }
-
-      // mantém na memória do front e atualiza UI
-      window.__sessionUser = data.user;
-      loggedUserId = String(data.user.id || '');
-
-      // fecha modal + ajusta painéis
-      overlay.classList.remove('is-active');
-      formSignIn.reset();
-
-      divNotLogged.style.display = 'none';
-      divLogged.style.display    = 'block';
-      if (nomeUsuarioSpan) {
-        nomeUsuarioSpan.textContent = data.user.username || data.user.id || username;
-      }
-      if (typeof moverDadosParaDireita === 'function') moverDadosParaDireita();
-
-      // notifica a app (menus/abas reavaliam permissões)
-      window.dispatchEvent(new Event('auth:changed'));
-    } catch (err) {
-      console.error('[login] falha', err);
-      alert('Falha no login. Tente novamente.');
+    // lembrar credenciais (opcional)
+    if (remember?.checked) {
+      localStorage.setItem('user', username);
+      localStorage.setItem('password', password);
+    } else {
+      localStorage.removeItem('user');
+      localStorage.removeItem('password');
     }
-  });
+
+    // guarda o usuário de sessão para os outros módulos
+    window.__sessionUser = data.user;
+
+    // 👉 NOVO: sincroniza os nós de navegação com o SQL **antes** de avisar a UI
+    try { await window.syncNavNodes?.(); } catch (e) { console.warn('[nav-sync pós-login]', e); }
+
+    // fecha modal + ajusta painéis
+    overlay.classList.remove('is-active');
+    formSignIn.reset();
+
+    divNotLogged.style.display = 'none';
+    divLogged.style.display    = 'block';
+    if (nomeUsuarioSpan) {
+      nomeUsuarioSpan.textContent = data.user.username || data.user.id || username;
+    }
+    if (typeof moverDadosParaDireita === 'function') moverDadosParaDireita();
+
+    // avisa a aplicação (menus, abas e botões com permissão se atualizam)
+    window.dispatchEvent(new Event('auth:changed'));
+  } catch (err) {
+    console.error('[login] falha', err);
+    alert('Falha no login. Tente novamente.');
+  }
+});
+
 
   // === SUBMIT: criar/alterar senha inicial ===
   const formCriar = overlay.querySelector('#formCriarConta');

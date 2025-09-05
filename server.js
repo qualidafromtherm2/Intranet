@@ -46,6 +46,7 @@ app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure f
 // server.js — imediatamente após const app = express();
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
+app.use('/api/nav', require('./routes/nav'));
 
 app.use(session({
   name: 'sid',

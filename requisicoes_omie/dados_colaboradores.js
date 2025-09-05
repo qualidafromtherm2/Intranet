@@ -1,673 +1,420 @@
-// SEM forçar porta; mesma origem
-const API_BASE = '';
-const COLAB_LOG = (...a) => console.log('[COLAB]', ...a);
+// requisicoes_omie/dados_colaboradores.js
+// Cadastro de Colaboradores (SQL) — com editor de permissões
+let _inited = false;
+function LOG(...a){ console.log('[COLAB]', ...a); }
 
-export function initDadosColaboradoresUI() {
-  if (window.__colabInitDone) { COLAB_LOG('init: já inicializado'); return; }
-  window.__colabInitDone = true;
-  COLAB_LOG('init: começando');
-
-  // Botão do menu lateral
-  const btn = document.querySelector(
-    '#btn-colaboradores, [data-colab="colab"], [data-nav="colaboradores"], a[href="#colaboradores"]'
-  );
-  COLAB_LOG('init: botão encontrado?', !!btn, btn);
-
-  const onClick = (ev) => {
-    COLAB_LOG('click: capturado', { target: ev.target, currentTarget: ev.currentTarget });
-    try { ev.preventDefault(); } catch {}
-    openColaboradores();
-  };
-
-  if (btn) {
-    if (!btn.dataset.colabBind) {
-      btn.dataset.colabBind = '1';
-      btn.addEventListener('click', onClick);
-      COLAB_LOG('init: listener vinculado ao botão');
-    } else {
-      COLAB_LOG('init: botão já tinha listener');
-    }
-  } else {
-    // fallback por delegação
-    COLAB_LOG('init: botão não encontrado — delegação por texto');
-    document.addEventListener('click', (ev) => {
-      const a = ev.target.closest('a,button,.main-header-link,.side-menu a');
-      if (!a) return;
-      const txt = (a.textContent || '').toLowerCase();
-      if (/colaborador/.test(txt) || a.id === 'btn-colaboradores' || a.dataset.colab === 'colab') {
-        COLAB_LOG('delegation: clique detectado em', a);
-        try { ev.preventDefault(); } catch {}
-        openColaboradores();
-      }
-    }, true);
-  }
-
-  // ⬇️ AQUI ESTÁ O AJUSTE DE RAIZ
-  function findTabsRoot() {
-    // Preferimos o mesmo container onde vivem as abas principais como #listaProdutos e #paginaInicio
-    const lp = document.getElementById('listaProdutos');
-    if (lp?.parentElement) {
-      COLAB_LOG('findTabsRoot: usando parent de #listaProdutos', lp.parentElement);
-      return lp.parentElement;
-    }
-    const pi = document.getElementById('paginaInicio');
-    if (pi?.parentElement) {
-      COLAB_LOG('findTabsRoot: usando parent de #paginaInicio', pi.parentElement);
-      return pi.parentElement;
-    }
-    // Caso extremo: pega um container que contenha .tab-pane mas NÃO esteja dentro de #produtoTabs .tab-content
-    const candidates = Array.from(document.querySelectorAll('.tab-pane'))
-      .map(p => p.parentElement)
-      .filter(el => el && !el.closest('#produtoTabs .tab-content'));
-    const root = candidates[0] || document.body;
-    COLAB_LOG('findTabsRoot: candidato backup =', root);
-    return root;
-  }
-
-  function hideSiblings(root, pane) {
-    // Esconde apenas irmãos de primeiro nível
-    const siblings = root.querySelectorAll(':scope > .tab-pane');
-    COLAB_LOG('hideSiblings: total panes =', siblings.length);
-    siblings.forEach(p => {
-      if (p === pane) return;
-      p.classList.remove('active');
-      p.style.display = 'none';
-    });
-  }
-
-  function ensurePane(root) {
-    let pane = document.getElementById('dadosColaboradores');
-    if (pane && pane.parentElement !== root) {
-      COLAB_LOG('ensurePane: movendo pane para o contêiner correto');
-      pane.parentElement?.removeChild(pane);
-      root.appendChild(pane);
-    }
-    if (!pane) {
-      COLAB_LOG('ensurePane: criando pane');
-      pane = document.createElement('div');
-      pane.id = 'dadosColaboradores';
-      pane.className = 'tab-pane';
-      pane.innerHTML = `
-        <div class="content-wrapper">
-          <div class="content-section">
-            <div class="title-wrapper">
-              <div class="content-section-title">Colaboradores</div>
-              <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-                <input id="filtroColab" placeholder="Filtrar por usuário/ID/role"
-                       style="padding:6px 10px;border-radius:10px;border:1px solid #ddd;min-width:260px"/>
-                <button id="btnRecarregarColab" class="content-button status-button">Recarregar</button>
-              </div>
-            </div>
-            <ul id="colaboradoresList" class="grid-pecas" style="list-style:none;margin:12px 0;padding:0"></ul>
-          </div>
-        </div>
-      `;
-      root.appendChild(pane);
-    } else {
-      COLAB_LOG('ensurePane: reutilizando pane existente');
-    }
-
-    // Força visibilidade no layout principal
-    pane.classList.add('active');
-    pane.style.display   = 'block';
-    pane.style.flex      = '1 1 auto';
-    pane.style.width     = '100%';
-    pane.style.minHeight = '40vh';
-    pane.style.overflow  = 'auto';
-    pane.style.zIndex    = '1';
-
-    return pane;
-  }
-
-async function carregarLista(pane) {
-  const ul     = pane.querySelector('#colaboradoresList');
-  const filtro = pane.querySelector('#filtroColab');
-  const btnRel = pane.querySelector('#btnRecarregarColab');
-
-  ul.innerHTML = '<li>Carregando…</li>';
-
-  // status para saber se pode editar roles
-  let isAdmin = false;
-  try {
-    const st = await fetch('/api/auth/status', { credentials: 'include' });
-    const sj = st.ok ? await st.json() : { loggedIn:false };
-    isAdmin = !!(sj?.user?.roles || []).includes('admin');
-  } catch {}
-
-  try {
-    const resp = await fetch(`/api/users`, { credentials: 'include' });
-    if (!resp.ok) {
-      const txt = await resp.text().catch(()=> '');
-      ul.innerHTML = `<li>Falha ao listar usuários (HTTP ${resp.status}) ${txt}</li>`;
-      return;
-    }
-
-    const data  = await resp.json();
-    const users = Array.isArray(data) ? data : (data.users || data.data || data.items || []);
-
-    const render = () => {
-      ul.innerHTML = '';
-
-      const termos = (filtro.value || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
-
-      // cabeçalho
-      const header = document.createElement('li');
-      header.className = 'header-row';
-      header.style.display = 'grid';
-      header.style.gridTemplateColumns = '200px 120px 1fr 120px';
-      header.style.gap = '8px';
-      header.style.alignItems = 'center';
-      header.innerHTML = `
-        <div><b>Usuário</b></div>
-        <div><b>ID</b></div>
-        <div><b>Perfis (roles)</b></div>
-        <div style="text-align:center"><b>Ação</b></div>
-      `;
-      ul.appendChild(header);
-
-      users
-        .filter(u => {
-          if (!termos.length) return true;
-          const hay = `${u.username||''} ${u.id||''} ${(u.roles||[]).join(' ')}`.toLowerCase();
-          return termos.every(t => hay.includes(t));
-        })
-        .forEach(u => {
-          const li = document.createElement('li');
-          li.style.display = 'grid';
-          li.style.gridTemplateColumns = '200px 120px 1fr 120px';
-          li.style.gap = '8px';
-          li.style.alignItems = 'center';
-          li.style.padding = '6px 0';
-          li.innerHTML = `
-            <div class="col-username" title="${(u.username||'')}">${(u.username||'')}</div>
-            <div class="col-id"       title="${(u.id||'')}">${(u.id||'')}</div>
-            <div class="col-roles"    title="${(u.roles||[]).join(', ')}">${(u.roles||[]).join(', ')}</div>
-            <div class="acao" style="text-align:center">
-              <button type="button" class="content-button status-button ver-detalhes" data-username="${(u.username||'')}">
-                Detalhes
-              </button>
-            </div>
-          `;
-          ul.appendChild(li);
-        });
-
-      if (ul.children.length <= 1) ul.innerHTML += '<li>Nenhum usuário encontrado.</li>';
-    };
-
-    render();
-
-    // filtro & recarregar
-    filtro.oninput = render;
-    btnRel.onclick = async () => {
-      // reconsulta do servidor
-      const r = await fetch(`/api/users`, { credentials:'include' });
-      const j = r.ok ? await r.json() : [];
-      const arr = Array.isArray(j) ? j : (j.users || j.data || j.items || []);
-      users.splice(0, users.length, ...arr);
-      render();
-    };
-
-    // ——— clique em DETALHES (abre modal) ———
-    ul.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('.ver-detalhes');
-      if (!btn) return;
-
-      const username = btn.dataset.username;
-      const user = users.find(u => String(u.username) === String(username));
-      if (!user) return;
-
-      _openUserDetailsModal(user, {
-        isAdmin,
-        onSaved: ({ roles }) => {
-          // se alterou roles, reflete na linha
-          if (roles) {
-            const row = btn.closest('li');
-            if (row) row.querySelector('.col-roles').textContent = roles.join(', ');
-            // também atualiza o objeto em memória para o filtro refletir
-            const target = users.find(u => u.username === user.username);
-            if (target) target.roles = roles;
-          }
-        }
-      });
-    });
-
-  } catch (err) {
-    console.error('[Colaboradores] erro:', err);
-    ul.innerHTML = `<li>Erro ao carregar: ${err.message||err}</li>`;
-  }
+function findTabsRoot(){
+  return document.querySelector('.main-container')
+      || document.querySelector('.tab-content')
+      || document.body;
+}
+function mk(tag, cls, txt){
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (txt != null) el.textContent = txt;
+  return el;
 }
 
+/* ============ Página ============ */
+function ensurePane(root){
+  let pane = document.getElementById('dadosColaboradores');
+  if (pane) return pane;
 
-  // injeta estilos do modal (uma vez)
-function _ensureColabModalStyles() {
-  if (document.getElementById('colab-modal-styles')) return;
-  const css = document.createElement('style');
-  css.id = 'colab-modal-styles';
-  css.textContent = `
-    .colab-modal-backdrop{
-      position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:8000;
-      display:none; align-items:center; justify-content:center; padding:24px;
-    }
-    .colab-modal{
-      width:520px; max-width:100%; background:#1f2430; color:#eaeaea; border-radius:14px;
-      box-shadow:0 12px 36px rgba(0,0,0,.35); overflow:hidden;
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .colab-modal header{
-      padding:14px 18px; font-weight:600; background:#232938; border-bottom:1px solid rgba(255,255,255,.06);
-    }
-    .colab-modal .body{ padding:16px 18px; display:grid; gap:12px; }
-    .colab-modal .row{ display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; }
-    .colab-modal .row input[type="text"],
-    .colab-modal .row input[type="password"]{
-      background:#131722; border:1px solid rgba(255,255,255,.12); color:#eaeaea; border-radius:10px; padding:8px 10px;
-    }
-    .colab-modal .roles { display:flex; gap:10px; flex-wrap:wrap; }
-    .colab-modal footer{ padding:12px 18px; display:flex; gap:10px; justify-content:flex-end; background:#232938; border-top:1px solid rgba(255,255,255,.06); }
-    .btn{ padding:8px 14px; border-radius:10px; border:0; cursor:pointer }
-    .btn.primary{ background:#3b82f6; color:#fff; }
-    .btn.ghost{ background:transparent; color:#eaeaea; border:1px solid rgba(255,255,255,.18); }
-  `;
-  document.head.appendChild(css);
-}
-
-function _openUserDetailsModal(user, { isAdmin, onSaved } = {}) {
-  _ensureColabModalStyles();
-
-  let backdrop = document.getElementById('colabModal');
-  if (!backdrop) {
-    backdrop = document.createElement('div');
-    backdrop.id = 'colabModal';
-    backdrop.className = 'colab-modal-backdrop';
-    document.body.appendChild(backdrop);
-  }
-
-  backdrop.innerHTML = `
-    <div class="colab-modal" role="dialog" aria-modal="true">
-      <header>Detalhes do usuário</header>
-      <div class="body">
-
-        <!-- VIEW: DETALHES -->
-        <div class="view view-details">
-          <div class="row"><div>Usuário</div><input id="cm-username" type="text" readonly></div>
-          <div class="row"><div>ID</div><input id="cm-id" type="text" readonly></div>
-
-          <div class="row"><div>Setor</div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <select id="cm-setor" class="cm-select"></select>
-              <button class="btn" id="cm-setor-add" title="Adicionar setor">+</button>
-            </div>
-          </div>
-
-          <div class="row"><div>Função</div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <select id="cm-funcao" class="cm-select"></select>
-              <button class="btn" id="cm-funcao-add" title="Adicionar função">+</button>
-            </div>
-          </div>
-
-          <div class="row"><div>Perfis (roles)</div>
-            <div class="roles">
-              <label><input id="cm-role-admin"  type="checkbox" value="admin"> admin</label>
-              <label><input id="cm-role-editor" type="checkbox" value="editor"> editor</label>
-            </div>
-          </div>
-
-          <div class="row"><div>Nova senha</div><input id="cm-pass" type="password" placeholder="deixe vazio para não alterar"></div>
-
-          <div class="row"><div>Permissões</div>
-            <button class="btn ghost" id="cm-perms">Permissões…</button>
+  pane = document.createElement('div');
+  pane.id = 'dadosColaboradores';
+  pane.className = 'tab-pane';
+  pane.style.display = 'none';
+  pane.innerHTML = `
+    <div class="content-wrapper">
+      <div class="content-section">
+        <div class="title-wrapper">
+          <div class="content-section-title">Cadastro de colaboradores</div>
+          <div class="side-by-side">
+            <input id="colabFilter" type="text" placeholder="Filtrar por usuário/ID/role">
+            <button id="btnRecarregarColab" class="content-button status-button">Recarregar</button>
           </div>
         </div>
 
-        <!-- VIEW: PERMISSÕES -->
-        <div class="view view-perms" style="display:none">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
-            <div style="font-weight:600">Permissões</div>
-            <div>
-              <button class="btn ghost" id="cm-perm-back">Voltar</button>
-              <button class="btn primary" id="cm-perm-save">Salvar permissões</button>
-            </div>
-          </div>
-          <div id="permTree" style="max-height:52vh; overflow:auto; padding:6px 2px;"></div>
+        <div class="table-grid colab-grid">
+          <div class="th">Usuário</div>
+          <div class="th">ID</div>
+          <div class="th">Setor</div>
+          <div class="th">Função</div>
+          <div class="th">Ações</div>
         </div>
-
       </div>
+    </div>
+  `;
+  root.appendChild(pane);
+
+  const st = document.createElement('style');
+  st.textContent = `
+    .colab-grid{display:grid;grid-template-columns:1fr 80px 160px 240px 140px;gap:8px}
+    .colab-grid .th{font-weight:600;opacity:.9;padding:8px 10px}
+    .colab-grid .td{padding:8px 10px;border-radius:8px;background:var(--ds-card,rgba(255,255,255,.04))}
+    .colab-grid .btn-acao{justify-self:end}
+    @media(max-width:1100px){.colab-grid{grid-template-columns:1fr 70px 130px 200px 120px}}
+
+    .colab-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.54);backdrop-filter:saturate(120%) blur(2px);z-index:9998;display:flex;align-items:center;justify-content:center}
+    .colab-modal{width:min(920px,94vw);max-height:88vh;overflow:auto;background:#151923;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.5)}
+    .colab-modal header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.08)}
+    .colab-modal header h3{margin:0;font-size:18px}
+    .colab-modal .body{padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .colab-modal .row{display:flex;gap:8px;align-items:center}
+    .colab-modal label{opacity:.8;width:110px}
+    .colab-modal .pill{display:inline-flex;gap:6px;flex-wrap:wrap}
+    .colab-modal .pill .badge{background:rgba(80,120,255,.18);padding:4px 8px;border-radius:999px}
+    .colab-modal footer{padding:14px 20px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:8px;justify-content:flex-end}
+
+    .btn{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#eaeaea;cursor:pointer}
+    .btn.primary{background:#2d6bff;border-color:#2d6bff;color:white}
+    .btn.ghost{background:transparent}
+
+    .perm-toolbar{grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+    .sep{height:1px;background:rgba(255,255,255,.08);grid-column:1/-1;margin:4px 0}
+
+    .perm-list{grid-column:1/-1}
+    .perm-list .grp{margin:10px 0;padding:10px;border-radius:10px;background:rgba(255,255,255,.03)}
+    .perm-list .grp h4{margin:0 0 8px 0;font-size:14px;opacity:.9}
+    .perm-list .node{display:flex;gap:8px;align-items:center;padding:4px 0}
+    .perm-list .node .indent{display:inline-block;width:18px}
+  `;
+  pane.appendChild(st);
+
+  pane.querySelector('#btnRecarregarColab')
+      .addEventListener('click', () => carregarLista(pane));
+  pane.querySelector('#colabFilter')
+      .addEventListener('input', () => aplicarFiltro(pane));
+
+  return pane;
+}
+
+/* ============ Lista ============ */
+function renderLinhas(pane, lista){
+  const grid = pane.querySelector('.colab-grid');
+  grid.querySelectorAll('.td').forEach(n => n.remove());
+
+  lista.forEach(u => {
+    const c1 = mk('div','td', u.username);
+    const c2 = mk('div','td', String(u.id));
+    const c3 = mk('div','td', u.setor  || '—');
+    const c4 = mk('div','td', u.funcao || '—');
+    const c5 = mk('div','td');
+    const b  = mk('button','content-button status-button btn-acao','Detalhes');
+    b.addEventListener('click', () => abrirDetalhes(u));
+    c5.appendChild(b);
+    grid.append(c1,c2,c3,c4,c5);
+  });
+
+  pane._raw = lista;
+  aplicarFiltro(pane);
+}
+function aplicarFiltro(pane){
+  const filtro = (pane.querySelector('#colabFilter').value || '').toLowerCase().trim();
+  const grid   = pane.querySelector('.colab-grid');
+  const tds    = Array.from(grid.querySelectorAll('.td'));
+  for (let i=0;i<tds.length;i+=5){
+    const cols = tds.slice(i,i+5);
+    const txt = cols.map(c=>c.textContent).join(' ').toLowerCase();
+    const ok  = !filtro || txt.includes(filtro);
+    cols.forEach(n => n.style.display = ok ? '' : 'none');
+  }
+}
+
+/* ============ API ============ */
+async function carregarLista(pane){
+  const res = await fetch('/api/users', { credentials:'include' });
+  if (!res.ok){
+    const err = await res.json().catch(()=> ({}));
+    throw new Error(`Falha ao listar usuários (HTTP ${res.status}) ${JSON.stringify(err)}`);
+  }
+  const arr = await res.json();
+  const lista = arr.map(x => ({
+    id: String(x.id),
+    username: x.username,
+    roles: Array.isArray(x.roles) ? x.roles : [],
+    setor:  x.setor  || x.profile?.setor  || '',
+    funcao: x.funcao || x.profile?.funcao || ''
+  }));
+  renderLinhas(pane, lista);
+}
+
+/* ============ Modal Detalhes + Editor de Permissões ============ */
+function closeModal(mod){ mod?.remove(); document.body.style.overflow=''; }
+function showModal(html){
+  const back = document.createElement('div');
+  back.className = 'colab-modal-backdrop';
+  back.innerHTML = html;
+  document.body.appendChild(back);
+  document.body.style.overflow = 'hidden';
+  back.addEventListener('click', e => { if (e.target === back) closeModal(back); });
+  document.addEventListener('keydown', escOnce);
+  function escOnce(ev){ if (ev.key === 'Escape'){ closeModal(back); document.removeEventListener('keydown', escOnce); } }
+  return back;
+}
+
+async function abrirDetalhes(u){
+  // enriquece com perfil
+  let enriched = null;
+  try {
+    const r = await fetch(`/api/users/${encodeURIComponent(u.id)}`, { credentials:'include' });
+    if (r.ok) enriched = await r.json();
+  } catch {}
+  const user    = enriched?.user    || u;
+  const profile = enriched?.profile || {};
+  const roles   = user.roles || [];
+  const setor   = profile.setor  || u.setor  || '';
+  const funcao  = profile.funcao || u.funcao || '';
+
+  const html = `
+    <div class="colab-modal" role="dialog" aria-modal="true">
+      <header>
+        <h3>Colaborador — ${user.username}</h3>
+        <button class="btn ghost js-close">Fechar</button>
+      </header>
+
+      <div class="body">
+        <div class="row"><label>ID</label><div>${user.id}</div></div>
+        <div class="row"><label>Usuário</label><div>${user.username}</div></div>
+        <div class="row"><label>Perfis</label>
+          <div class="pill">${roles.length ? roles.map(r=>`<span class="badge">${r}</span>`).join(' ') : '—'}</div>
+        </div>
+        <div class="row"><label>Setor</label><div>${setor || '—'}</div></div>
+        <div class="row"><label>Função</label><div>${funcao || '—'}</div></div>
+
+        <div class="sep"></div>
+
+        <div class="row" style="grid-column:1/-1">
+          <button class="btn primary js-open-perm">Permissões</button>
+        </div>
+
+        <!-- o editor não é mais renderizado aqui; usamos showPermissoes() -->
+        <div class="perm-list" style="display:none"></div>
+        <div class="perm-toolbar" style="display:none"></div>
+      </div>
+
       <footer>
-        <button class="btn ghost" id="cm-cancel">Fechar</button>
-        <button class="btn primary" id="cm-save">Salvar</button>
+        <button class="btn ghost js-close">Fechar</button>
       </footer>
     </div>
   `;
 
-  // CSS extra p/ separadores
-  if (!document.getElementById('perm-style')) {
-    const st = document.createElement('style');
-    st.id = 'perm-style';
-    st.textContent = `
-      .colab-modal .perm-sep { border:0; border-top:1px solid #ddd; margin:10px 0; }
-      .colab-modal .perm-group-title { font-weight:600; opacity:.8; margin:6px 0 4px; }
-    `;
-    document.head.appendChild(st);
-  }
+  const modal = showModal(html);
+  modal.querySelectorAll('.js-close').forEach(b => b.addEventListener('click', () => closeModal(modal)));
 
-  const $ = (q) => backdrop.querySelector(q);
-  const viewDetails = backdrop.querySelector('.view-details');
-  const viewPerms   = backdrop.querySelector('.view-perms');
-  const footerSaveBtn = $('#cm-save');
-
-  function showDetails(){
-    viewDetails.style.display = '';
-    viewPerms.style.display   = 'none';
-    footerSaveBtn.style.display = ''; // exibe "Salvar"
-  }
-  function showPerms(){
-    viewDetails.style.display = 'none';
-    viewPerms.style.display   = '';
-    footerSaveBtn.style.display = 'none'; // esconde "Salvar" da view de detalhes
-  }
-
-  // Preenche campos fixos
-  $('#cm-username').value = user.username || '';
-  $('#cm-id').value = String(user.id || '');
-
-  // Roles
-  const chkAdmin  = $('#cm-role-admin');
-  const chkEditor = $('#cm-role-editor');
-  const rolesSet = new Set((user.roles || []).map(String));
-  chkAdmin.checked  = rolesSet.has('admin');
-  chkEditor.checked = rolesSet.has('editor');
-  chkAdmin.disabled = chkEditor.disabled = !isAdmin;
-
-  const passInput = $('#cm-pass');
-
-  // Lookups & perfil (cache local p/ não perder ao alternar)
-  let cacheLookups = null;
-  let cacheProfile = null;
-
-  (async () => {
+  // 👉 NOVO: abre o editor moderno de permissões (aquele com “Menu lateral / Menu superior”)
+  modal.querySelector('.js-open-perm').addEventListener('click', async () => {
     try {
-      const [lk, pf] = await Promise.all([
-        fetch('/api/users/lookups', { credentials:'include' }).then(r=>r.json()),
-        fetch(`/api/users/${user.id}/profile`, { credentials:'include' }).then(r=>r.json())
-      ]);
-      cacheLookups = lk;
-      cacheProfile = pf;
-
-      const setorSel  = $('#cm-setor');
-      const funcaoSel = $('#cm-funcao');
-      function fillSelect(sel, opts, current) {
-        sel.innerHTML = `<option value="">(não informado)</option>` +
-          (opts||[]).map(o => `<option value="${o.name}">${o.name}</option>`).join('');
-        if (current) sel.value = current;
-      }
-      fillSelect(setorSel,  lk.setores, pf?.setor);
-      fillSelect(funcaoSel, lk.funcoes, pf?.funcao);
-
-      const me = window.__sessionUser;
-      const isSelf = me && String(me.id) === String(user.id);
-      const canEditProfile = isAdmin || isSelf;
-      setorSel.disabled  = !canEditProfile;
-      funcaoSel.disabled = !canEditProfile;
-
-      // botões "+" (somente admin)
-      $('#cm-setor-add').disabled  = !isAdmin;
-      $('#cm-funcao-add').disabled = !isAdmin;
-
-      $('#cm-setor-add').onclick = async () => {
-        const name = prompt('Nome do novo setor:')?.trim();
-        if (!name) return;
-        const r = await fetch('/api/users/lookups/sector', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          credentials:'include', body: JSON.stringify({ name })
-        });
-        if (!r.ok) return alert('Falha ao criar setor.');
-        const data = await r.json();
-        cacheLookups.setores = data.setores;
-        fillSelect(setorSel, data.setores, name);
-      };
-
-      $('#cm-funcao-add').onclick = async () => {
-        const name = prompt('Nome da nova função:')?.trim();
-        if (!name) return;
-        const r = await fetch('/api/users/lookups/funcao', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          credentials:'include', body: JSON.stringify({ name })
-        });
-        if (!r.ok) return alert('Falha ao criar função.');
-        const data = await r.json();
-        cacheLookups.funcoes = data.funcoes;
-        fillSelect(funcaoSel, data.funcoes, name);
-      };
-
+      // garante que os nós atuais do DOM já estejam no SQL antes de abrir
+      if (window.syncNavNodes) await window.syncNavNodes();
     } catch (e) {
-      console.warn('[modal] lookups/profile falhou', e);
+      console.warn('[perm-sync]', e);
     }
-  })();
-
-  // Salvar (DETALHES)
-  footerSaveBtn.onclick = async () => {
-    try {
-      const payloadUser = {};
-      const newRoles = [];
-      if (chkAdmin.checked)  newRoles.push('admin');
-      if (chkEditor.checked) newRoles.push('editor');
-      if (isAdmin) payloadUser.roles = newRoles;
-      const newPass = passInput.value.trim();
-      if (newPass) payloadUser.password = newPass;
-
-      if (Object.keys(payloadUser).length) {
-        const r = await fetch(`/api/users/${user.id}`, {
-          method:'PUT', headers:{'Content-Type':'application/json'},
-          credentials:'include', body: JSON.stringify(payloadUser)
-        });
-        if (!r.ok) throw new Error(await r.text());
-      }
-
-      const setorSel  = $('#cm-setor');
-      const funcaoSel = $('#cm-funcao');
-      if (setorSel || funcaoSel) {
-        const setor  = setorSel ? (setorSel.value || null) : null;
-        const funcao = funcaoSel ? (funcaoSel.value || null) : null;
-        if (setor !== null || funcao !== null) {
-          const r2 = await fetch(`/api/users/${user.id}/profile`, {
-            method:'PUT', headers:{'Content-Type':'application/json'},
-            credentials:'include', body: JSON.stringify({ setor, funcao })
-          });
-          if (!r2.ok) throw new Error(await r2.text());
-        }
-      }
-
-      onSaved?.({ roles: (isAdmin ? newRoles : user.roles) });
-      alert('Alterações salvas.');
-      backdrop.style.display = 'none';
-    } catch (err) {
-      alert(err.message || 'Erro ao salvar.');
-      console.error('[modal save]', err);
-    }
-  };
-
-  // --- PERMISSÕES ---
-  let permTreeLoaded = false;
-
-  $('#cm-perms').onclick = async () => {
-    showPerms();
-    try {
-      if (permTreeLoaded) return; // constroi só 1x
-      const data = await fetch(`/api/users/${user.id}/permissions/tree`, { credentials:'include' })
-        .then(r => r.json());
-      const container = $('#permTree');
-
-      // agrupar por parent
-      const byParent = {};
-      for (const n of data.nodes) {
-        const pid = n.parent_id || 0;
-        (byParent[pid] ||= []).push(n);
-      }
-      Object.values(byParent).forEach(arr => arr.sort((a,b) => (a.sort-b.sort) || a.id-b.id));
-
-      const roots = (byParent[0] || []);
-      roots.forEach((root, idx) => {
-        const groupTitle = document.createElement('div');
-        groupTitle.className = 'perm-group-title';
-        groupTitle.textContent = `${root.label} (${root.key})`;
-        container.appendChild(groupTitle);
-
-        renderNode(root, 0);
-
-        if (idx < roots.length - 1) {
-          const hr = document.createElement('hr');
-          hr.className = 'perm-sep';
-          container.appendChild(hr);
-        }
-      });
-
-      function renderNode(n, depth) {
-        const pad = 12*depth;
-        const id  = `perm_${n.id}`;
-        const row = document.createElement('div');
-        row.style.display = 'grid';
-        row.style.gridTemplateColumns = '28px 1fr';
-        row.style.alignItems = 'center';
-        row.style.padding = '4px 6px';
-        row.innerHTML = `
-          <div style="padding-left:${pad}px">
-            <input type="checkbox" id="${id}"
-                   ${n.allowed ? 'checked':''}
-                   data-key="${n.key}"
-                   data-allowed="${n.allowed ? '1':'0'}"
-                   data-override="${n.user_override ? '1':'0'}">
-          </div>
-          <label for="${id}" style="user-select:none">${n.label} <span style="opacity:.6;font-size:.9em">(${n.key})</span></label>
-        `;
-        container.appendChild(row);
-        const children = byParent[n.id] || [];
-        children.forEach(c => renderNode(c, depth+1));
-      }
-
-      permTreeLoaded = true;
-    } catch (e) {
-      alert('Falha ao carregar permissões.');
-      console.error('[perms]', e);
-      showDetails(); // volta se falhar
-    }
-  };
-
-  $('#cm-perm-back').onclick = () => {
-    showDetails(); // sem recriar HTML => valores intactos
-  };
-
-  $('#cm-perm-save').onclick = async () => {
-    try {
-      const container = $('#permTree');
-      const inputs = container.querySelectorAll('input[type="checkbox"][data-key]');
-      const overrides = {};
-      inputs.forEach(inp => {
-        const key   = inp.dataset.key;
-        const was   = inp.dataset.allowed === '1';
-        const hadOv = inp.dataset.override === '1';
-        const now   = inp.checked;
-
-        if (hadOv) {
-          if (now === was) overrides[key] = null;
-          else overrides[key] = now;
-        } else {
-          if (now !== was) overrides[key] = now;
-        }
-      });
-
-      const r = await fetch(`/api/users/${user.id}/permissions/overrides`, {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        credentials:'include',
-        body: JSON.stringify({ overrides })
-      });
-      if (!r.ok) {
-        const t = await r.text().catch(()=> '');
-        throw new Error(t || 'Falha ao salvar permissões');
-      }
-
-      alert('Permissões atualizadas.');
-
-      // Se for o usuário logado, aplica imediatamente na UI
-      const me = window.__sessionUser;
-      if (me && String(me.id) === String(user.id) && typeof window.applyCurrentUserPermissionsToUI === 'function') {
-        window.applyCurrentUserPermissionsToUI();
-      }
-
-      showDetails();
-    } catch (e) {
-      alert('Falha ao salvar permissões.');
-      console.error('[perms-save]', e);
-    }
-  };
-
-  // fechar modal
-  $('#cm-cancel').onclick = () => { backdrop.style.display = 'none'; };
-  backdrop.onclick = (ev) => { if (ev.target === backdrop) backdrop.style.display = 'none'; };
-
-  // garante CSS p/ esconder coisas sem permissão
-  (function ensurePermCss(){
-    if (document.getElementById('perm-hide-style')) return;
-    const st = document.createElement('style');
-    st.id = 'perm-hide-style';
-    st.textContent = `.perm-hidden{display:none !important;}`;
-    document.head.appendChild(st);
-  })();
-
-  backdrop.style.display = 'flex';
+    await showPermissoes(String(user.id), user.username);
+  });
 }
 
 
-
-
-
-function openColaboradores() {
-  COLAB_LOG('open: acionado');
-
-  // 1) Descobre a raiz onde ficam as abas principais
+/* ============ Abrir página ============ */
+async function doOpen(){
   const root = findTabsRoot();
-
-  // 2) Garante que a aba de colaboradores existe e está no container certo
   const pane = ensurePane(root);
 
-  // 3) Esconde TAMBÉM o painel de Início (ele não é irmão do root)
-  const home = document.getElementById('paginaInicio');
-  if (home) {
-    home.style.display = 'none';
-    home.classList.remove('active');
-    COLAB_LOG('open: ocultando #paginaInicio');
+  try { await carregarLista(pane); }
+  catch (err){
+    LOG('erro:', err);
+    pane.querySelector('.colab-grid').insertAdjacentHTML(
+      'beforeend',
+      `<div class="td" style="grid-column:1/-1;color:salmon">${String(err.message||err)}</div>`
+    );
   }
 
-  // 4) Esconde as abas irmãs dentro da raiz principal
-  hideSiblings(root, pane);
-
-  // 5) Mostra a aba de colaboradores com força total (contra CSS teimoso)
-  pane.classList.add('active');
-  pane.style.display   = 'block';
-  pane.style.flex      = '1 1 auto';
-  pane.style.width     = '100%';
-  pane.style.minHeight = '40vh';
-  pane.style.overflow  = 'auto';
-  pane.style.zIndex    = '1';
-
-  // 6) Carrega a lista
-  carregarLista(pane);
-
-  // 7) Conveniência visual e diagnóstico
-  try { pane.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
-  const r = pane.getBoundingClientRect();
-  COLAB_LOG('pane bbox:', r);
+  if (typeof window.showMainTab === 'function'){
+    window.showMainTab('dadosColaboradores');
+  } else {
+    document.querySelectorAll('.tab-pane, .kanban-page').forEach(el => {
+      const ativa = (el.id === 'dadosColaboradores');
+      el.style.display = ativa ? 'block' : 'none';
+      el.classList.toggle('active', ativa);
+    });
+    try { history.replaceState(null,'','#colaboradores'); } catch {}
+  }
 }
 
+export function initDadosColaboradoresUI(){
+  if (_inited) return;
+  _inited = true;
+  const btn = document.querySelector('#btn-colaboradores');
+  LOG('init: botão encontrado?', !!btn, btn);
+  if (!btn) return;
+  if (!btn.dataset.colabBind){
+    btn.addEventListener('click', (e) => { e.preventDefault(); doOpen(); });
+    btn.dataset.colabBind = '1';
+  }
+  window.openColaboradores = doOpen; // debug
+}
+export const openColaboradores = doOpen;
 
-  // modo “ferramenta” para testar pelo console
-  window.openColaboradores = openColaboradores;
-  COLAB_LOG('init: pronto. Use openColaboradores() no console para testar.');
+function renderPermissoes(nodes, currentMap) {
+  // nodes: array vindo de /permissions/tree
+  // currentMap: Map(key => allowed) com estado atual permitido/negado
+  const byPos = { side: [], top: [] };
+  nodes.forEach(n => byPos[n.pos].push(n));
+
+  const wrap = document.createElement('div');
+  wrap.className = 'perm-wrap';
+
+  // CSS básico (somente uma vez)
+  if (!document.getElementById('permCss')) {
+    const css = document.createElement('style');
+    css.id='permCss';
+    css.textContent = `
+      .perm-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center}
+      .perm-box{width:min(920px,95vw);max-height:85vh;overflow:auto;background:#1f232b;border-radius:12px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+      .perm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+      .perm-body h3{margin:12px 0 6px;font-weight:600;opacity:.9}
+      .perm-item{display:flex;gap:8px;align-items:center;padding:2px 0}
+      .perm-item input[type="checkbox"]{transform:scale(1.05)}
+      .perm-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
+      .perm-lbl{opacity:.9}
+      hr{border:0;border-top:1px solid rgba(255,255,255,.08);margin:12px 0}
+    `;
+    document.head.appendChild(css);
+  }
+
+  ['side','top'].forEach(pos => {
+    const grupo = byPos[pos];
+    if (!grupo.length) return;
+
+    const header = document.createElement('h3');
+    header.textContent = (pos === 'side') ? 'Menu lateral' : 'Menu superior';
+    wrap.appendChild(header);
+
+    // organiza por pai -> filhos
+    const byParent = new Map(); // parent_id -> []
+    const roots = [];
+    grupo.forEach(n => {
+      if (n.parent_id) {
+        if (!byParent.has(n.parent_id)) byParent.set(n.parent_id, []);
+        byParent.get(n.parent_id).push(n);
+      } else {
+        roots.push(n);
+      }
+    });
+
+    const sortFn = (a,b) => (a.sort - b.sort) || (a.id - b.id);
+
+    function makeItem(n, depth=0) {
+      const line = document.createElement('div');
+      line.className = 'perm-item';
+      line.style.marginLeft = `${depth*16}px`;
+
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.checked = !!currentMap.get(n.key);
+      chk.dataset.nodeId  = n.id;
+      chk.dataset.nodeKey = n.key;
+
+      const lbl = document.createElement('span');
+      lbl.className = 'perm-lbl';
+      lbl.textContent = n.label;
+
+      line.append(chk, lbl);
+      wrap.appendChild(line);
+
+      (byParent.get(n.id) || []).sort(sortFn).forEach(c => makeItem(c, depth+1));
+    }
+
+    roots.sort(sortFn).forEach(r => makeItem(r, 0));
+
+    wrap.appendChild(document.createElement('hr')); // divisória entre grupos
+  });
+
+  return wrap;
 }
 
-// auto-init
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initDadosColaboradoresUI);
-} else {
-  initDadosColaboradoresUI();
+async function showPermissoes(userId, username) {
+  try {
+    // 1) Garante que os nós atuais do DOM já estejam no SQL
+    if (window.syncNavNodes) await window.syncNavNodes();
+
+    // 2) Busca a árvore de permissões do usuário alvo
+    const resp = await fetch(`/api/users/${userId}/permissions/tree`, { credentials:'include' });
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({}));
+      alert(err.error || 'Sem permissão para ver as permissões deste usuário.');
+      return;
+    }
+    const data  = await resp.json();
+    const nodes = data.nodes || [];
+
+    // 3) Estado atual (Map por key)
+    const current = new Map(nodes.map(n => [n.key, !!n.allowed]));
+
+    // 4) Cria/abre modal
+    let modal = document.getElementById('permModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'permModal';
+      modal.className = 'perm-modal';
+      modal.innerHTML = `
+        <div class="perm-box">
+          <div class="perm-head">
+            <strong>Permissões de <span id="permUser"></span></strong>
+            <button type="button" class="perm-close">×</button>
+          </div>
+          <div class="perm-body"></div>
+          <div class="perm-footer">
+            <button class="content-button status-button perm-save">Salvar alterações</button>
+            <button class="content-button perm-cancel">Fechar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      modal.querySelector('.perm-close').onclick =
+      modal.querySelector('.perm-cancel').onclick = () => modal.remove();
+    }
+    modal.querySelector('#permUser').textContent = username || userId;
+
+    const body = modal.querySelector('.perm-body');
+    body.innerHTML = '';
+    body.appendChild(renderPermissoes(nodes, current));
+
+    modal.style.display = 'flex';
+
+    // 5) Salvar
+    const saveBtn = modal.querySelector('.perm-save');
+    saveBtn.onclick = async () => {
+      const changes = [];
+      body.querySelectorAll('input[type="checkbox"][data-node-id]').forEach(chk => {
+        const key = chk.dataset.nodeKey;
+        const novo = !!chk.checked;
+        if (current.get(key) !== novo) {
+          changes.push({ node_id: Number(chk.dataset.nodeId), allow: novo });
+        }
+      });
+
+      try {
+        if (changes.length) {
+          const r = await fetch(`/api/users/${userId}/permissions`, {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json' },
+            credentials:'include',
+            body: JSON.stringify({ changes })
+          });
+          if (!r.ok) throw new Error('HTTP '+r.status);
+        }
+        // força UI a reavaliar (menus/botões com perm-hidden)
+        window.dispatchEvent(new Event('auth:changed'));
+        alert('Permissões salvas!');
+        modal.remove();
+      } catch (e) {
+        console.error('[perm-save]', e);
+        alert('Falha ao salvar permissões.');
+      }
+    };
+  } catch (e) {
+    console.error('[showPermissoes]', e);
+    alert('Erro ao abrir permissões.');
+  }
 }
+
