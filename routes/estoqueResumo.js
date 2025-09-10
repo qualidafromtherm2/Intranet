@@ -1,6 +1,5 @@
 // routes/estoqueResumo.js
 const express = require('express');
-const fetch   = require('node-fetch');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 
 const router = express.Router();
@@ -8,7 +7,7 @@ const router = express.Router();
 router.post('/', async (req, res) => {
   try {
     const { call, param } = req.body;
-    const omieRes = await fetch(
+    const omieRes = await safeFetch(
       'https://app.omie.com.br/api/v1/estoque/resumo/',
       {
         method:  'POST',

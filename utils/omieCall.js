@@ -1,8 +1,7 @@
 // utils/omieCall.js
-const fetch = require('node-fetch');
 
 async function omieCall(url, body) {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     method : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body   : JSON.stringify(body)
