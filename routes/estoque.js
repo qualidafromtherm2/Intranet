@@ -9,7 +9,6 @@ const {
   OMIE_APP_KEY,
   OMIE_APP_SECRET
 } = require('../config.server');
-const fetch   = require('node-fetch');
 const router = express.Router();
 const OMIE_URL = 'https://app.omie.com.br/api/v1/estoque/consulta/';
 
@@ -123,7 +122,7 @@ router.post('/ajuste', async (req, res) => {
       param:     req.body.param   // espera [{ cod_int, quan_min }]
     };
 
-    const resp = await fetch(
+    const resp = await safeFetch(
       'https://app.omie.com.br/api/v1/estoque/ajuste/',
       {
         method:  'POST',

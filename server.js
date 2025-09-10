@@ -22,22 +22,23 @@ const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
 const multer        = require('multer');
-const fetch = require('node-fetch');
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
 const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
+if (!globalThis.fetch) {
+  globalThis.fetch = require("node-fetch");
+}
+const safeFetch = (...args) => globalThis.fetch(...args);
+global.safeFetch = (...args) => globalThis.fetch(...args);
 const app = express();
 // ===== Ingestão inicial de OPs (Omie → Postgres) ============================
 const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
 // ==== SSE (Server-Sent Events) para avisar o front ao vivo ==================
 const sseClients = new Set();
-// polyfill de fetch (Node < 18)
-const safeFetch = (...args) =>
-  (global.fetch ? global.fetch(...args) : import('node-fetch').then(({ default: f }) => f(...args)));
 // server.js — sessão/cookies (COLE ANTES DAS ROTAS!)
 
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
@@ -1207,8 +1208,7 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
 });
 
 // polyfill de fetch (Node < 18)
-const httpFetch = (...args) =>
-  (global.fetch ? global.fetch(...args) : import('node-fetch').then(({ default: f }) => f(...args)));
+const httpFetch = (...args) => globalThis.fetch(...args);
 
 // ===================== mover OP (A Produzir / Produzindo / concluido + Omie) =====================
 app.post('/api/preparacao/op/:op/mover', async (req, res) => {
@@ -1518,6 +1518,49 @@ app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
 
   fs.writeFileSync(path.join(pasta, file), zpl.trim(), 'utf8');
   res.json({ ok: true });
+});
+
+
+// Salva etiqueta no PostgreSQL (sem gerar arquivo)
+app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
+  try {
+    const {
+      numero_op,
+      codigo_produto,
+      tipo_etiqueta = 'Teste',
+      local_impressao = 'localhost',
+      conteudo_zpl,
+      usuario_criacao = null,
+      observacoes = null,
+    } = req.body || {};
+
+    if (!numero_op || !codigo_produto || !conteudo_zpl) {
+      return res.status(400).json({ ok: false, error: 'Campos obrigatórios: numero_op, codigo_produto, conteudo_zpl' });
+    }
+
+    const sql = `
+      INSERT INTO etiquetas_impressas
+        (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+      VALUES
+        ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING id, data_criacao
+    `;
+    const params = [
+      String(numero_op),
+      String(codigo_produto),
+      String(tipo_etiqueta),
+      String(local_impressao),
+      String(conteudo_zpl),
+      usuario_criacao,
+      observacoes,
+    ];
+
+    const { rows } = await pool.query(sql, params);
+    return res.json({ ok: true, id: rows?.[0]?.id, data_criacao: rows?.[0]?.data_criacao });
+  } catch (err) {
+    console.error('[etiquetas/salvar-db] erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao salvar etiqueta no banco' });
+  }
 });
 
 /* ============================================================================

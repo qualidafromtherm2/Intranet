@@ -30,6 +30,33 @@ let draggedFromColumn = null;
 /* controla a diferença entre click e dblclick */
 let clickTimerId = null;        // null = nenhum clique pendente
 
+// Helper para salvar etiqueta no banco (Render ou local)
+async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zpl, usuario = null, observacoes = null }) {
+  const local_impressao = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'localhost'
+    : 'producao'; // chame como preferir: 'render'/'producao'
+
+  const resp = await fetch(`${API_BASE}/api/etiquetas/salvar-db`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      numero_op,
+      codigo_produto,
+      tipo_etiqueta,
+      local_impressao,
+      conteudo_zpl: zpl,
+      usuario_criacao: usuario,
+      observacoes,
+    }),
+  });
+
+  if (!resp.ok) {
+    const msg = await resp.text().catch(() => '');
+    throw new Error(`Falha ao salvar etiqueta no DB: ${resp.status} ${msg}`);
+  }
+  return resp.json();
+}
 
 /* ——— devolve o próximo código sequencial gravado no backend ——— */
 export async function gerarTicket () {
@@ -241,16 +268,13 @@ const zpl = `
 // decide a pasta onde o .zpl será salvo
 const pastaTipo = isLocal ? 'Teste' : 'Expedicao';
 
-await fetch('/api/etiquetas/gravar', {
-  method : 'POST',
-  headers: { 'Content-Type':'application/json' },
-  body   : JSON.stringify({
-    file: nomeArq,
-    zpl,
-    ns,
-    tipo: pastaTipo          // ← aqui a mágica
-  })
+await salvarEtiquetaNoDB({
+  numero_op: String(pedido),
+  codigo_produto: String(codigo),
+  tipo_etiqueta: 'Pedido em separacao',
+  zpl: zplCompacta,
 });
+
 
 }
 
@@ -288,11 +312,13 @@ export function gerarEtiquetaObs (texto) {
   const nomeArq = `obs_${Date.now()}.zpl`;
   const pasta   = isLocal ? 'Teste' : 'Expedicao';
 
-  return fetch('/api/etiquetas/gravar', {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify({ file:nomeArq, zpl, tipo:pasta })
-  });
+return salvarEtiquetaNoDB({
+  numero_op: String(pedido),
+  codigo_produto: String(codigo),
+  tipo_etiqueta: 'Observacao',
+  zpl,
+});
+
 }
 
 
