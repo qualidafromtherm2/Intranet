@@ -30,11 +30,19 @@ let draggedFromColumn = null;
 /* controla a diferença entre click e dblclick */
 let clickTimerId = null;        // null = nenhum clique pendente
 
-// Helper para salvar etiqueta no banco (Render ou local)
+// Helper para salvar etiqueta no banco (Render ou local) com roteirização por código
 async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zpl, usuario = null, observacoes = null }) {
-  const local_impressao = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'localhost'
-    : 'producao'; // chame como preferir: 'render'/'producao'
+  // Regra de roteamento:
+  // - Se código começa com "04." e logo depois tem "PP" => Preparação elétrica
+  // - Caso contrário => Produção
+  // Ex.: 04.PP.N.51005 => Preparação elétrica
+  //     04.ASDF...    => Produção
+  //     07.PP...      => Produção
+  const ehPrepEletrica = /^04\.PP\b/.test(String(codigo_produto || ''));
+
+  const local_impressao = ehPrepEletrica
+    ? 'Preparação elétrica'
+    : 'Produção';
 
   const resp = await fetch(`${API_BASE}/api/etiquetas/salvar-db`, {
     method: 'POST',
@@ -44,7 +52,7 @@ async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zp
       numero_op,
       codigo_produto,
       tipo_etiqueta,
-      local_impressao,
+      local_impressao,     // << aqui já vai “Preparação elétrica” ou “Produção”
       conteudo_zpl: zpl,
       usuario_criacao: usuario,
       observacoes,
@@ -57,6 +65,7 @@ async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zp
   }
   return resp.json();
 }
+
 
 /* ——— devolve o próximo código sequencial gravado no backend ——— */
 export async function gerarTicket () {
