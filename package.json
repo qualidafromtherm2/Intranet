@@ -16,6 +16,7 @@
     "@aws-sdk/s3-request-presigner": "^3.797.0",
     "@fortawesome/fontawesome": "^1.1.8",
     "@octokit/rest": "^21.1.1",
+    "@supabase/supabase-js": "^2.57.4",
     "archiver": "^7.0.1",
     "axios": "^1.8.1",
     "bcrypt": "^6.0.0",
@@ -26,10 +27,12 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "jszip": "^3.10.1",
+    "mime-types": "^3.0.1",
     "multer": "^1.4.5-lts.2",
     "node-fetch": "^2.7.0",
     "papaparse": "^5.5.2",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "uuid": "^13.0.0"
   },
   "repository": {
     "type": "git",

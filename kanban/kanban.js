@@ -6,7 +6,9 @@ import {
   salvarKanbanLocal,
   gerarEtiqueta,
   gerarEtiquetaPP,
-  gerarEtiquetaObs
+  gerarEtiquetaObs,
+  gerarEtiquetaSeparacao,
+  gerarTicket
 } from './kanban_base.js';
 
 // kanban.js  – depois dos imports
@@ -555,10 +557,128 @@ async function renderListaPecasPCP() {
   _pcpReaplicarFator(ul, dados);
 
   // 5) botão OK reaplica o fator localmente (sem pedir de novo ao servidor)
-  const ok = document.getElementById('pcp-ok');
-  if (ok) {
-    ok.onclick = () => _pcpReaplicarFator(ul, dados);
+const ok = document.getElementById('pcp-ok');
+if (ok) {
+ok.onclick = async () => {
+  // helper local p/ data dd/mm/aaaa
+  const ddmmyyyy = (d) => {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    return `${dd}/${mm}/${yy}`;
+  };
+
+  try {
+    // 0) dados básicos da tela/modal
+    const codigo = (window.pcpCodigoAtual || '').trim();
+    const pedido = (window.pcpPedidoAtual || '').toString().trim();
+    if (!codigo) throw new Error('Código do produto não encontrado no PCP.');
+
+    // 1) resolver nCodProduto (numérico) se não estiver no item
+    let nCodProduto = 0;
+    try {
+      const mapResp = await fetch(`/api/produtos/detalhes/${encodeURIComponent(codigo)}`);
+      const mapJson = await mapResp.json().catch(() => ({}));
+      nCodProduto = Number(
+        mapJson?.codigo_prod ||
+        mapJson?.codigo_produto ||
+        mapJson?.produto?.codigo_produto ||
+        0
+      );
+    } catch (_) {}
+    if (!nCodProduto) throw new Error('nCodProduto ausente (não foi possível mapear o produto).');
+
+    // 2) datas e defaults
+    const previsao = new Date();
+    previsao.setDate(previsao.getDate() + 1); // previsão = amanhã
+    const dDtPrevisao = ddmmyyyy(previsao);
+    const cCodIntOP   = String(Date.now());   // identificador interno
+
+    // 3) MONTA A PAYLOAD AQUI (sem depender de variável externa)
+const payloadOP = {
+  call: 'IncluirOrdemProducao',
+  // deixe o servidor injetar as chaves via .env
+  // 👉 mande também o CÓDIGO TEXTUAL para habilitar a regra do .PP.
+  codigo: (window.pcpCodigoAtual || codigo || '').trim(),
+  param: [{
+    identificacao: {
+      cCodIntOP,
+      dDtPrevisao,
+      nCodProduto,
+      nQtde: 1,
+      codigo_local_estoque: 10564345392
+    }
+  }]
+};
+
+
+    // 4) LOG DE ENVIO (FRONT) — mascara segredos caso existam
+    const payloadSafe = JSON.parse(JSON.stringify(payloadOP));
+    if (payloadSafe.app_secret) {
+      const s = String(payloadSafe.app_secret);
+      payloadSafe.app_secret = s.slice(0, 2) + '***' + s.slice(-2);
+    }
+    console.groupCollapsed('%c[OP][FRONT] POST /api/omie/produtos/op', 'color:#09f');
+    console.log('Headers:', { 'Content-Type': 'application/json' });
+    console.log('Payload (mask):', payloadSafe);
+    console.groupEnd();
+
+    // 5) envia ao backend que chama a OMIE
+    const t0 = performance.now();
+const resp = await fetch(`${API_BASE || ''}/api/omie/produtos/op`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  // garante que o campo "codigo" vai junto
+  body: JSON.stringify(payloadOP)
+});
+
+    const dataOP = await resp.json().catch(() => ({}));
+    const dt = (performance.now() - t0).toFixed(0);
+
+    console.groupCollapsed('%c[OP][FRONT] RESPOSTA /api/omie/produtos/op', 'color:#0a0');
+    console.log('Status:', resp.status, resp.statusText, `(${dt}ms)`);
+    console.log('Body:', dataOP);
+    console.groupEnd();
+
+    if (!resp.ok) {
+      const msg = dataOP?.faultstring || dataOP?.message || '';
+      throw new Error(`HTTP ${resp.status}${msg ? ' - ' + msg : ''}`);
+    }
+    if (dataOP?.faultstring || dataOP?.error) {
+      const msg = dataOP?.faultstring || dataOP?.error?.message || 'Falha OMIE';
+      throw new Error(msg);
+    }
+
+    // 6) número da OP (varia conforme retorno da OMIE; pegamos o que existir)
+    const nCodOP = dataOP?.nCodOP
+                || dataOP?.copIncluirResponse?.nCodOP
+                || dataOP?.identificacao?.nCodOP
+                || null;
+    const cNumOP = dataOP?.cNumOP
+                || dataOP?.copIncluirResponse?.cNumOP
+                || dataOP?.identificacao?.cNumOP
+                || null;
+
+    if (!nCodOP && !cNumOP) {
+      // sua mensagem original — agora só dispara se realmente não veio nada
+      throw new Error('OP gerada, mas sem número retornado');
+    }
+
+    // 7) aqui você pode seguir seu fluxo (atualizar card/etiqueta etc.)
+    // exemplo simples de notificação:
+    console.log('[OP] criada com sucesso →', { cCodIntOP, nCodOP, cNumOP, pedido, codigo });
+
+  } catch (e) {
+    console.error('[OP][FRONT] Falha ao incluir OP:', e);
+    alert(`❌ Falha ao incluir OP: ${e.message}`);
+    // deixo o throw para o handler pai se você quiser manter
+    // throw e;
   }
+};
+
+}
+
+
 
   // 6) “+” abre a busca (reaproveita o input da coluna de Separação logística)
   const plus = document.getElementById('pcp-open-search');
