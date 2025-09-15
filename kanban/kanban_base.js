@@ -120,12 +120,14 @@ export function enableDragAndDrop(itemsKanban) {
       draggedFromColumn = e.target.dataset.column;
       e.dataTransfer.setData('text/plain', '');
       e.dataTransfer.effectAllowed = 'move';
+      e.target.classList.add('dragging');
     });
 
-    li.addEventListener('dragend', () => {
+    li.addEventListener('dragend', e => {
       removePlaceholder();
       draggedIndex = null;
       draggedFromColumn = null;
+      e.target.classList.remove('dragging');
     });
   });
 
