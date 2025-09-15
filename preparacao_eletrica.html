@@ -488,6 +488,49 @@
       background: rgba(255, 255, 255, 0.3);
     }
   </style>
+
+  <script>
+  // Checa sessão o mais cedo possível. Se não logado, manda pra página inicial.
+  (async () => {
+    try {
+      const r  = await fetch('/api/auth/status', { credentials: 'include', cache: 'no-store' });
+      const js = await r.json();
+      if (!js?.loggedIn) {
+        // você pode usar replace para não deixar voltar com "voltar do navegador"
+        location.replace('menu_produto.html#login-required');
+        // interrompe qualquer execução extra
+        return;
+      }
+      // injeta um title no avatar com o user (qualquer dos campos que existir)
+      const u = js.user || {};
+      window.__USER__ = u; // útil pra outras partes se quiser
+      // quando o DOM montar, coloca o title no avatar
+      document.addEventListener('DOMContentLoaded', () => {
+        const img = document.getElementById('profile-icon');
+        if (img) img.title = (u.nome || u.user || u.username || 'Usuário');
+      });
+    } catch (e) {
+      // Em caso de falha na checagem, aja como se não logado
+      location.replace('menu_produto.html#login-required');
+    }
+  })();
+
+  function bindLogoHomeShortcut() {
+  const logo = document.querySelector('img[alt="Logo da empresa"]');
+  if (!logo) return; // se a página não tiver o logo, não faz nada
+
+  // deixa claro que é clicável
+  try { logo.style.cursor = 'pointer'; } catch {}
+
+  logo.addEventListener('click', (e) => {
+    e.preventDefault();
+    // volta para a página inicial
+    window.location.href = 'menu_produto.html';
+  });
+}
+
+</script>
+
 </head>
 
 <body>
@@ -703,11 +746,14 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script type="module" src="./kanban/kanban.js" defer></script>
   <script src="/preparacao_api.js"></script>
+<!-- Modal de autenticação: usa o mesmo HTML/JS do menu_produto -->
+<script type="module" src="login/login.js" defer></script>
 
   <script type="module">
     import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
 
     document.addEventListener('DOMContentLoaded', () => {
+      bindLogoHomeShortcut();
       initPreparacaoKanban();
 
       // ===== Referências da UI =====

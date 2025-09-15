@@ -6,7 +6,6 @@ const getKanbanEndpoint = destino =>
   destino === 'preparacao' ? '/api/preparacao/listar' : '/api/kanban';
 
 // Define a URL-base das chamadas à API: usa window.location.origin
-const API_BASE = window.location.origin;
 const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no Render
  // Mantenha o token original
  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -30,19 +29,20 @@ let draggedFromColumn = null;
 /* controla a diferença entre click e dblclick */
 let clickTimerId = null;        // null = nenhum clique pendente
 
-// Helper para salvar etiqueta no banco (Render ou local) com roteirização por código
-async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zpl, usuario = null, observacoes = null }) {
-  // Regra de roteamento:
-  // - Se código começa com "04." e logo depois tem "PP" => Preparação elétrica
-  // - Caso contrário => Produção
-  // Ex.: 04.PP.N.51005 => Preparação elétrica
-  //     04.ASDF...    => Produção
-  //     07.PP...      => Produção
-  const ehPrepEletrica = /^04\.PP\b/.test(String(codigo_produto || ''));
+// URL base da API ('' = mesma origem; se quiser, defina window.API_BASE em algum <script>)
+const API_BASE = (typeof window !== 'undefined' && window.API_BASE) ? window.API_BASE : '';
 
-  const local_impressao = ehPrepEletrica
-    ? 'Preparação elétrica'
-    : 'Produção';
+// Helper p/ salvar etiqueta no banco + roteirização por código (04.PP => Preparação elétrica)
+async function salvarEtiquetaNoDB({
+  numero_op,
+  codigo_produto,
+  tipo_etiqueta,
+  zpl,
+  usuario = null,
+  observacoes = null
+}) {
+  const ehPrepEletrica = /^04\.PP\b/.test(String(codigo_produto || ''));
+  const local_impressao = ehPrepEletrica ? 'Preparação elétrica' : 'Produção';
 
   const resp = await fetch(`${API_BASE}/api/etiquetas/salvar-db`, {
     method: 'POST',
@@ -52,11 +52,11 @@ async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zp
       numero_op,
       codigo_produto,
       tipo_etiqueta,
-      local_impressao,     // << aqui já vai “Preparação elétrica” ou “Produção”
+      local_impressao,
       conteudo_zpl: zpl,
       usuario_criacao: usuario,
-      observacoes,
-    }),
+      observacoes
+    })
   });
 
   if (!resp.ok) {
@@ -66,7 +66,108 @@ async function salvarEtiquetaNoDB({ numero_op, codigo_produto, tipo_etiqueta, zp
   return resp.json();
 }
 
+function ddmmyyyy(d) {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
+}
 
+/**
+ * Cria OP na OMIE para o item do Kanban.
+ * Resolve nCodProduto se não estiver em item._codigoProd.
+ * Lê JSON da resposta e lança erro com faultstring quando houver.
+ */
+export async function incluirOP_omie(item, diasPrazo = 1) {
+  if (!item || !item.codigo) throw new Error('Item inválido.');
+
+  // Data de previsão (amanhã por padrão)
+  const now = new Date();
+  const when = new Date(now.getTime() + diasPrazo * 24 * 60 * 60 * 1000);
+  const dDtPrevisao = ddmmyyyy(when);
+
+  // Garante nCodProduto
+  let nCodProduto = Number(item._codigoProd) || 0;
+  if (!nCodProduto) {
+    const respDet = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
+    const detJson = await respDet.json().catch(() => ({}));
+    nCodProduto = Number(
+      detJson?.codigo_prod ||
+      detJson?.codigo_produto ||
+      detJson?.produto?.codigo_produto ||
+      0
+    );
+  }
+  if (!nCodProduto) {
+    throw new Error('nCodProduto ausente (não foi possível mapear o produto).');
+  }
+
+  const payloadOP = {
+    call: 'IncluirOrdemProducao',
+    // pode mandar a chave aqui ou deixar o servidor injetar via env
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      identificacao: {
+        cCodIntOP: String(Date.now()),
+        dDtPrevisao,
+        nCodProduto,
+        nQtde: 1,
+        codigo_local_estoque: 10564345392 // ajuste se usar env no servidor
+      }
+    }]
+  };
+
+  // Envia ao backend (que repassa para OMIE)
+// ==== LOG DE ENVIO DA OP (FRONT: kanban_base.js) ====
+const payloadMasked = (() => {
+  const p = JSON.parse(JSON.stringify(payloadOP || {}));
+  if (p?.app_secret) p.app_secret = String(p.app_secret).slice(0,2) + '***' + String(p.app_secret).slice(-2);
+  return p;
+})();
+
+console.groupCollapsed('%c[OP][FRONT] POST /api/omie/produtos/op', 'color:#09f');
+console.log('Headers:', { 'Content-Type': 'application/json' });
+console.log('Payload OP (mask):', payloadMasked);
+console.groupEnd();
+
+const t0 = performance.now();
+const resp = await fetch(`${API_BASE}/api/omie/produtos/op`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payloadOP)
+});
+const dataOP = await resp.json().catch(() => ({}));
+const dt = (performance.now() - t0).toFixed(0);
+
+console.groupCollapsed('%c[OP][FRONT] RESPOSTA /api/omie/produtos/op', 'color:#0a0');
+console.log('Status:', resp.status, resp.statusText, `(${dt}ms)`);
+console.log('Body:', dataOP);
+console.groupEnd();
+
+if (!resp.ok) {
+  const msg = dataOP?.faultstring || dataOP?.message || '';
+  throw new Error(`HTTP ${resp.status}${msg ? ' - ' + msg : ''}`);
+}
+if (dataOP?.faultstring || dataOP?.error) {
+  const msg = dataOP?.faultstring || dataOP?.error?.message || 'Falha OMIE';
+  throw new Error(msg);
+}
+
+
+  // Sempre leia o corpo para obter faultstring
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const msg = data?.faultstring || data?.message || '';
+    throw new Error(`HTTP ${resp.status}${msg ? ' - ' + msg : ''}`);
+  }
+  if (data?.faultstring || data?.error) {
+    const msg = data?.faultstring || data?.error?.message || 'Falha OMIE';
+    throw new Error(msg);
+  }
+
+  return data;
+}
 /* ——— devolve o próximo código sequencial gravado no backend ——— */
 export async function gerarTicket () {
   const resp = await fetch('/api/op/next-code/0', { credentials: 'include' });
@@ -274,18 +375,15 @@ const zpl = `
 ;
 
 
-// decide a pasta onde o .zpl será salvo
-const pastaTipo = isLocal ? 'Teste' : 'Expedicao';
-
+// grava direto no SQL (roteia por código: 04.PP → “Preparação elétrica”, senão “Produção”)
 await salvarEtiquetaNoDB({
   numero_op: String(pedido),
   codigo_produto: String(codigo),
   tipo_etiqueta: 'Pedido em separacao',
-  zpl: zplCompacta,
+  zpl,                           // usa o ZPL montado acima
 });
-
-
 }
+
 
 /* ───────────────── Etiqueta de OBSERVAÇÃO ───────────────────── */
 /**
@@ -435,6 +533,10 @@ li.addEventListener('click', ev => {
     const idx = +li.dataset.index;
     const it  = itemsKanban[idx];
     if (!it) return;
+
+    // memoriza para o botão OK
+window.pcpPedidoAtual = it.pedido;
+window.pcpCodigoAtual = it.codigo;
 
     /* 1) preenche o campo do “+” */
     const col = document.getElementById('coluna-pcp-aprovado')
@@ -777,38 +879,70 @@ const cCodIntOP = await gerarTicket();   // já vem sequencial do backend
       const y2 = tom.getFullYear();
       const dDtPrevisao = `${d}/${m2}/${y2}`;
 
-      const payloadOP = {
-        call: 'IncluirOrdemProducao',
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param: [{
-          identificacao: { cCodIntOP, dDtPrevisao, nCodProduto: item._codigoProd, nQtde: 1 }
-        }]
-      };
+// 1) Garanta nCodProduto numérico — se não vier no item, resolva por endpoint local
+let nCodProduto = Number(item._codigoProd);
+if (!nCodProduto) {
+  const mapResp = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
+  const mapJson = await mapResp.json().catch(() => ({}));
+  nCodProduto = Number(
+    mapJson?.codigo_prod ||
+    mapJson?.codigo_produto ||
+    mapJson?.produto?.codigo_produto ||
+    0
+  );
+  if (!nCodProduto) throw new Error('nCodProduto ausente (não foi possível mapear o código do produto).');
+}
 
-      const respOP = await fetch(`${API_BASE}/api/omie/produtos/op`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadOP)
-      });
-      const dataOP = await respOP.json();
+// 2) Monte a payload completa (inclua o local de estoque)
+const payloadOP = {
+  call: 'IncluirOrdemProducao',
+  app_key: OMIE_APP_KEY,
+  app_secret: OMIE_APP_SECRET,
+  param: [{
+    identificacao: {
+      cCodIntOP: String(Date.now()),
+      dDtPrevisao,
+      nCodProduto,
+      nQtde: 1,
+      codigo_local_estoque: 10564345392   // ajuste se tiver env para isso
+    }
+  }]
+};
 
-      if (!dataOP.faultstring && !dataOP.error) {
-        const arr = item.local;
-        const idxMov = arr.findIndex(s => s === newColumn);
-        if (idxMov !== -1) {
-          arr[idxMov] = `${newColumn},${cCodIntOP}`;
-          try {
-            await fetch(`${API_BASE}/api/etiquetas`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ numeroOP: cCodIntOP, tipo: 'Expedicao' })
-            });
-          } catch (err) {
-            console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
-          }
-        }
-      }
+console.log('[OP] payloadOP →', JSON.stringify(payloadOP, null, 2));
+
+// 3) Envie, leia o JSON e exponha a faultstring quando houver
+const respop = await fetch(`${API_BASE}/api/omie/produtos/op`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payloadOP)
+});
+const dataOP = await respop.json().catch(() => ({}));
+if (!respop.ok) {
+  const msg = dataOP?.faultstring || dataOP?.message || '';
+  throw new Error(`HTTP ${respop.status}${msg ? ' - ' + msg : ''}`);
+}
+if (dataOP?.faultstring || dataOP?.error) {
+  const msg = dataOP?.faultstring || dataOP?.error?.message || 'Falha OMIE';
+  throw new Error(`OMIE: ${msg}`);
+}
+
+// 4) Atualize o cartão somente após sucesso na OMIE
+const arr = item.local;
+const idxMov = arr.findIndex(s => s === newColumn);
+if (idxMov !== -1) {
+  arr[idxMov] = `${newColumn},${cCodIntOP}`;
+  try {
+    await fetch(`${API_BASE}/api/etiquetas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numeroOP: cCodIntOP, tipo: 'Expedicao' })
+    });
+  } catch (err) {
+    console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
+  }
+}
+
     }
 
     // 6) Persiste e re-renderiza o Kanban

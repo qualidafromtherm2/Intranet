@@ -8,6 +8,7 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 // local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
 const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
+// outros requires de rotas...
 
 
 
@@ -16,7 +17,7 @@ const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '1056434539
 // ——————————————————————————————
 // 1) Imports e configurações iniciais
 // ——————————————————————————————
-const express       = require('express');
+const express = require('express');
 const session       = require('express-session');
 const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
@@ -44,7 +45,6 @@ const sseClients = new Set();
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
 const isProd = process.env.NODE_ENV === 'production';
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
-// server.js — imediatamente após const app = express();
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
 
@@ -223,14 +223,10 @@ const STATUS_TO_ETAPA = Object.fromEntries(
 
 
 function toOmieDate(d) {
-  if (!d) return undefined;
-  if (typeof d === 'string' && d.includes('/')) return d; // já dd/mm/aaaa
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return undefined;
-  const dd = String(dt.getDate()).padStart(2,'0');
-  const mm = String(dt.getMonth()+1).padStart(2,'0');
-  const yyyy = dt.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
 }
 
 // retry simples para 500 BG
@@ -413,25 +409,6 @@ app.post('/api/preparacao/importar', express.json(), async (req, res) => {
 });
 
 
-/* lê o MAIOR nº que existir em QUALQUER cartão.local-[]  */
-function nextOpFromKanban () {
-  try {
-    const items = JSON.parse(fs.readFileSync(KANBAN_FILE,'utf8'));   // ← é um array
-    const nums  = items
-      .flatMap(it => Array.isArray(it.local) ? it.local : [])
-      .map(s => {
-        const m = String(s).match(/,\s*(\d+)\s*$/);   // “…,21007”
-        return m ? Number(m[1]) : NaN;
-      })
-      .filter(n => !Number.isNaN(n));
-
-    const maior = nums.length ? Math.max(...nums) : 21000;
-    return String(maior + 1);           // 21001, 21002, …
-  } catch (err) {
-    console.error('[nextOpFromKanban]', err);
-    return '21001';
-  }
-}
 
 function lerEstoque() {
   return JSON.parse(fs.readFileSync(estoquePath, 'utf8'));
@@ -543,6 +520,29 @@ app.post('/webhooks/omie/op', chkOmieToken, express.json(), async (req, res) => 
     return res.status(400).json({ ok: false, error: String(e.message || e) });
   }
 });
+
+// === OMIE: incluir OP (compat) =========================================
+app.post('/api/omie/op/incluir', express.json(), async (req, res) => {
+  try {
+    const front = req.body && req.body.call
+      ? req.body
+      : {
+          call      : 'IncluirOrdemProducao',
+          app_key   : req.body.app_key,
+          app_secret: req.body.app_secret,
+          param     : req.body.param
+        };
+
+    const r = await require('./utils/omieCall')
+      .omieCall('https://app.omie.com.br/api/v1/produtos/op/', front);
+
+    res.json(r);
+  } catch (e) {
+    res.status(e.status || 500).send(e.message || String(e));
+  }
+});
+
+
 
 // ——— Webhook de Pedidos de Venda (OMIE Connect 2.0) ———
 app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
@@ -1066,10 +1066,15 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
   }
 });
 
+// outros requires de rotas...
+const produtosFotosRouter = require('./routes/produtosFotos'); // <-- ADICIONE ESTA LINHA
 
 //app.use(require('express').json({ limit: '5mb' }));
 
 app.use('/api/produtos', produtosRouter);
+
+// adiciona o router das fotos no MESMO prefixo:
+app.use('/api/produtos', produtosFotosRouter);
 
 // (opcional) compat: algumas partes do código usam "notifyProducts"
 app.set('notifyProducts', (msg) => {
@@ -1524,6 +1529,11 @@ app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
 // Salva etiqueta no PostgreSQL (sem gerar arquivo)
 app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
   try {
+        console.log('[POST /api/etiquetas/salvar-db] body=', {
+      numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+      zpl_len: conteudo_zpl ? conteudo_zpl.length : 0
+    });
+
     const {
       numero_op,
       codigo_produto,
@@ -1868,70 +1878,412 @@ const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
   });
 
 app.post('/api/omie/produtos/op', express.json(), async (req, res) => {
+  // ===================== HELPERS LOCAIS ======================
+  const { Pool } = require('pg');
+  const omieCall = require('./utils/omieCall.js');
+
+  // Data no formato dd/mm/aaaa (OMIE)
+  const toOmieDate = (d) => {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yy = d.getFullYear();
+    return `${dd}/${mm}/${yy}`;
+  };
+
+  // === SUA FUNÇÃO DE ETIQUETA (mantida 1:1) ==================
+function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
+  // ====== CONFIGURAÇÃO DA MÍDIA (em milímetros) ======
+  const DPI = 203;                          // Densidade da impressora (203 dpi é padrão Zebra)
+  const DOTS_PER_MM = DPI / 25.4;           // Conversão mm -> dots (~8.0 em 203 dpi)
+  const LABEL_W_MM = 50;                    // Largura física da etiqueta (ajuste p/ sua mídia)
+  const LABEL_H_MM = 30;                    // Altura física da etiqueta (ajuste p/ sua mídia)
+
+  // Converte mm da mídia para "dots" usados pelo ZPL
+  const PW = Math.round(LABEL_W_MM * DOTS_PER_MM); // ^PW = Print Width (largura total em dots)
+  const LL = Math.round(LABEL_H_MM * DOTS_PER_MM); // ^LL = Label Length (altura total em dots)
+
+  // ====== AJUSTES FINOS DE POSIÇÃO ======
+  let DX = 5;                               // Offset horizontal global (empurra tudo p/ direita)
+  let DY = 5;                               // Offset vertical global (empurra tudo p/ baixo)
+  const DESENHAR_BORDA = true;              // true = desenha um retângulo da área útil (debug)
+
+  // Data/hora carimbada na etiqueta
+  const agora = new Date();
+  const dataHora =
+    agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  // Helper: gera ^FO somando os offsets DX/DY (x=coluna, y=linha, em dots)
+  const fo = (x, y) => `^FO${x + DX},${y + DY}`; // Ex.: ${fo(7,10)} → desloca 7 à direita e 10 p/ baixo
+
+  // ====== CONSTRUÇÃO DO ZPL ======
+  const z = [];
+
+  z.push('^XA');                            // ^XA = início do formato ZPL (obrigatório)
+  z.push(`^PW${PW}`);                       // ^PW = largura total da etiqueta (em dots)
+  z.push(`^LL${LL}`);                       // ^LL = altura total da etiqueta (em dots)
+  z.push('^FWB');                           // ^FW = orientação do texto/gráficos; B = 90° (rotate)
+                                            // Troque para ^FWN se quiser sem rotação
+
+  if (DESENHAR_BORDA) {
+    z.push(`^FO0,0^GB${PW},${LL},1^FS`);    // ^GB = desenha uma borda (w=PW, h=LL, espessura=1px)
+  }
+
+  // ---- QRCode (conteúdo: codMP-OP) ----
+  z.push(`${fo(7, 10)}`);                   // ^FO = posiciona o próximo elemento (x=7,y=10) + offsets
+  z.push('^BQN,2,4');                       // ^BQN = QR Code (Modelo 2; Modo 2; escala 4)
+  z.push(`^FDQA,${codMP}-${op}^FS`);        // ^FD = dados do QR (QA=modo automático); ^FS = fim do campo
+
+  // ---- Código do material (grande) ----
+  z.push(`${fo(135, 10)}`);                 // Posição do texto do codMP (ajuste se precisar)
+  z.push('^A0B,35,30');                     // ^A0B = fonte 0, orientação B (90°); altura=40, largura=35
+  z.push(`^FD ${codMP} ^FS`);               // Conteúdo do campo: codMP em destaque
+
+  // ---- Data/hora ----
+  z.push(`${fo(170, 50)}`);                 // Posição da data/hora
+  z.push('^A0B,20,20');                     // Fonte 0, orientação B; tamanho menor
+  z.push(`^FD ${dataHora} ^FS`);            // Conteúdo: data/hora atual
+
+  // ---- Separador 1 ----
+  z.push(`${fo(180, 0)}`);                  // Posição do separador
+  z.push('^A0B,23,23');                     // Define fonte/altura para a linha de traços (opcional)
+  z.push('^FB320,1,0,L,0');                 // ^FB = bloco de texto (largura=320, 1 linha, alinhado à esquerda)
+  z.push('^FD --------------- ^FS');        // Traços (você pode trocar por ^GB horizontal, se preferir)
+
+  // ---- Número da OP ----
+  z.push(`${fo(20, 0)}`);                   // Posição do campo "OP: ..."
+  z.push('^A0B,17,17');                     // Fonte 0, orientação B; tamanho 20/20
+  z.push('^FB230,2,0,L,0');                 // Bloco de texto com largura 230, máx 2 linhas
+  z.push(`^FD OP: ${op} ^FS`);              // Conteúdo: número interno da OP
+
+  // ---- Separador 2 ----
+  z.push(`${fo(196, 0)}`);                  // Posição do segundo separador
+  z.push('^A0B,23,23');                     // Mesmo tamanho do separador anterior
+  z.push('^FB320,1,0,L,0');                 // Bloco com largura 320
+  z.push('^FD --------------- ^FS');        // Traços
+
+  // ---- Descrição (com quebra automática) ----
+  z.push(`${fo(210, 10)}`);                 // Posição da descrição
+  z.push('^A0B,23,23');                     // Fonte 0, orientação B; tamanho 23/23 (ajuste se cortar)
+  z.push('^FB220,8,0,L,0');                 // ^FB = largura 220, máx 8 linhas, alinhado à esquerda
+  z.push(`^FD ${descricao || 'SEM DESCRIÇÃO'} ^FS`); // Conteúdo da descrição (fallback se vazio)
+
+  // ---- Rodapé ----
+  z.push(`${fo(110, 10)}`);                 // Posição do rodapé (ajuste conforme necessário)
+  z.push('^A0B,20,20');                     // Tamanho 20/20
+  z.push('^FB225,1,0,L,0');                 // Largura 225, 1 linha
+  z.push('^FD FT-M00-ETQP - REV01 ^FS');    // Texto fixo do rodapé (troque a revisão se mudar layout)
+
+  z.push('^XZ');                            // ^XZ = fim do formato ZPL (obrigatório)
+
+  return z.join('\n');                      // Retorna o ZPL completo
+}
+
+
+
+  // Salva uma etiqueta na tabela etiquetas_impressas (permitindo injetar o ZPL já pronto)
+  async function salvarEtiquetaOP(pool, {
+    numero_op,
+    codigo_produto,
+    conteudo_zpl,                 // <- se vier pronto, usa; se não, monta com gerarEtiquetaPP
+    tipo_etiqueta   = 'Expedicao',
+    local_impressao = 'Preparação elétrica',
+    impressa        = false,
+    usuario_criacao = 'API',
+    observacoes     = null
+  }) {
+    if (!numero_op)      throw new Error('numero_op obrigatório');
+    if (!codigo_produto) throw new Error('codigo_produto obrigatório');
+    if (!tipo_etiqueta)  throw new Error('tipo_etiqueta obrigatório');
+    if (!local_impressao)throw new Error('local_impressao obrigatório');
+
+    const zpl = conteudo_zpl && String(conteudo_zpl).trim().length
+      ? conteudo_zpl
+      : gerarEtiquetaPP({ codMP: codigo_produto, op: numero_op, descricao: '' });
+
+    const sql = `
+      INSERT INTO etiquetas_impressas
+        (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+         conteudo_zpl, impressa, usuario_criacao, observacoes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING id, data_criacao
+    `;
+    const params = [
+      numero_op,
+      codigo_produto,
+      tipo_etiqueta,
+      local_impressao,
+      zpl,
+      impressa,
+      usuario_criacao,
+      observacoes
+    ];
+
+    const { rows } = await pool.query(sql, params);
+    return rows[0]; // { id, data_criacao }
+  }
+
+  // Próximo código sequencial PaaNNNNN (ignora se registros antigos têm ou não 'P')
+  async function getNextPPCode(pg, ano2) {
+    await pg.query(`
+      CREATE TABLE IF NOT EXISTS op_codigos_log (
+        id          BIGSERIAL PRIMARY KEY,
+        ccodintop   TEXT NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+    const { rows } = await pg.query(`
+      WITH x AS (
+        SELECT (regexp_matches(UPPER(ccodintop), '^[P]?([0-9]{2})([0-9]{5})$')) AS m
+        FROM op_codigos_log
+      ),
+      y AS (
+        SELECT (m)[1]::int AS yy, (m)[2]::int AS seq
+        FROM x
+        WHERE m IS NOT NULL
+      )
+      SELECT COALESCE(MAX(seq), 0) AS max_seq
+      FROM y
+      WHERE yy = $1::int
+    `, [ano2]);
+    const next = (rows?.[0]?.max_seq || 0) + 1;
+    const seq5 = String(next).padStart(5, '0');
+    return `P${String(ano2).padStart(2, '0')}${seq5}`;
+  }
+  async function logGeneratedCode(pg, ccod) {
+    try { await pg.query('INSERT INTO op_codigos_log(ccodintop) VALUES ($1)', [ccod]); } catch {}
+  }
+
+  // ===================== INÍCIO DA ROTA ======================
+  const dsn = process.env.DATABASE_URL
+    || 'postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a/intranet_db_yd0w';
+  const pool = new Pool({ connectionString: dsn, ssl: { rejectUnauthorized: false } });
+
   try {
+    const OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+    // 0) payload de entrada
     const front = req.body || {};
-    front.param = front.param || [{}];
+    front.call       = front.call       || 'IncluirOrdemProducao';
+    front.app_key    = front.app_key    || OMIE_APP_KEY;
+    front.app_secret = front.app_secret || OMIE_APP_SECRET;
+
+    if (!front.app_key || !front.app_secret) {
+      return res.status(200).json({
+        faultstring: 'A chave de acesso não está preenchida ou não é válida. (faltam OMIE_APP_KEY/OMIE_APP_SECRET)',
+        faultcode  : 'SOAP-ENV:Server'
+      });
+    }
+
+    // 1) normalize param/ident
+    front.param = Array.isArray(front.param) && front.param.length ? front.param : [{}];
     front.param[0] = front.param[0] || {};
     front.param[0].identificacao = front.param[0].identificacao || {};
     const ident = front.param[0].identificacao;
 
-    // 1) Defaults obrigatórios (servidor é a fonte da verdade)
-    ident.codigo_local_estoque = 10564345392;             // fixo
-    ident.nQtde       = Math.max(1, Number(ident.nQtde || 1));
-    ident.dDtPrevisao = toOmieDate(new Date());
+    // recebe informações do front
+    const codigoTextual = String(front.codigo || front.cCodigo || '').trim(); // codMP
+    const descricaoFront = (typeof front.descricao === 'string') ? front.descricao.trim() : '';
 
-    // 2) Descobrir o código textual do produto (para regra do prefixo "P")
-    const nCodProduto = Number(ident.nCodProduto) || null;
-    let prodCodigo = null;
-    try {
-      const r = await dbQuery(
-        'SELECT codigo FROM produtos WHERE codigo_prod = $1 LIMIT 1',
-        [nCodProduto]
-      );
-      prodCodigo = r?.rows?.[0]?.codigo || null;
-    } catch {}
+    // 2) defaults
+    ident.dDtPrevisao          = ident.dDtPrevisao || toOmieDate(new Date());
+    ident.nQtde                = Math.max(1, Number(ident.nQtde || 1));
+    ident.codigo_local_estoque = Number(process.env.PRODUCAO_LOCAL_PADRAO) || 10564345392;
 
-    // 3) Pede ao Postgres o próximo código de OP (regra do "PP")
-    async function nextOpFromDb(codigoProduto) {
+    // 3) resolver nCodProduto via ConsultarProduto (se necessário)
+    if (!ident.nCodProduto && codigoTextual) {
       try {
-        const r = await dbQuery('SELECT next_c_cod_int_op($1) AS op', [codigoProduto]);
-        return r?.rows?.[0]?.op || null;
-      } catch { return null; }
+        const consultarPayload = {
+          call: 'ConsultarProduto',
+          app_key: front.app_key,
+          app_secret: front.app_secret,
+          param: [{ codigo: codigoTextual }]
+        };
+        const prod = await omieCall('https://app.omie.com.br/api/v1/geral/produtos/', consultarPayload);
+        const n = Number(
+          prod?.codigo_produto ||
+          prod?.produto_servico_cadastro?.codigo_produto ||
+          0
+        );
+        if (n) ident.nCodProduto = n;
+
+        // tenta puxar uma descrição básica do retorno, se veio
+        if (!descricaoFront) {
+          front.descricao = prod?.descricao || prod?.produto_servico_cadastro?.descricao || '';
+        }
+      } catch (e) {
+        console.warn('[produtos/op] ConsultarProduto falhou:', e?.message || e);
+      }
+    }
+    if (!ident.nCodProduto) {
+      return res.status(200).json({
+        faultstring: 'nCodProduto ausente e não foi possível resolver via "codigo".',
+        faultcode  : 'SOAP-ENV:Server'
+      });
     }
 
-    // Sempre sobrepõe qualquer cCodIntOP vindo do front
-    ident.cCodIntOP = await nextOpFromDb(prodCodigo) || ident.cCodIntOP || String(Date.now());
+    // 4) Gerar cCodIntOP PaaNNNNN quando contém ".PP."
+    const temPP = /\.PP\./i.test(codigoTextual);
+    if (temPP) {
+      const ano2 = (new Date().getFullYear() % 100);
+      const novoCodigo = await getNextPPCode(pool, ano2);
+      await logGeneratedCode(pool, novoCodigo);
+      ident.cCodIntOP = novoCodigo;
+    } else {
+      ident.cCodIntOP = ident.cCodIntOP || String(Date.now());
+    }
+
+    // 5) Chamar OMIE
     front.param[0].identificacao = ident;
 
-    // 4) Logs úteis
-    console.log('[produtos/op] nCodProduto →', nCodProduto, 'prodCodigo →', prodCodigo);
-    console.log('[produtos/op] cCodIntOP gerado →', ident.cCodIntOP);
-
-    // 5) Tenta incluir OP (retry para duplicidade)
-    let tentativa = 0;
-    let resposta;
-    while (tentativa < 5) {
-      resposta = await omieCall('https://app.omie.com.br/api/v1/produtos/op/', front);
-
-      // Duplicado? Gere OUTRO número no banco e tente de novo
-      if (resposta?.faultcode === 'SOAP-ENV:Client-102') {
-        ident.cCodIntOP = await nextOpFromDb(prodCodigo) || String(Date.now());
-        front.param[0].identificacao.cCodIntOP = ident.cCodIntOP;
-        tentativa++;
-        continue;
+    let omieResp;
+    try {
+      omieResp = await omieCall('https://app.omie.com.br/api/v1/produtos/op/', front);
+    } catch (e) {
+      const raw = String(e?.message || '');
+      try {
+        const j = JSON.parse(raw);
+        if (j?.faultstring || j?.error) {
+          return res.status(200).json(j); // devolve para o front tratar mensagem
+        }
+      } catch (_) {}
+      if (e?.status === 403) {
+        return res.status(200).json({
+          faultstring: 'A OMIE recusou a requisição (403). Verifique app_key/app_secret.',
+          faultcode  : 'SOAP-ENV:Server'
+        });
       }
-      break; // sucesso ou erro diferente
+      console.error('[omie/produtos/op] EXCEPTION:', e);
+      return res.status(500).json({ error: 'internal', message: String(e?.message || e) });
     }
 
-    // Resposta: mantém campos da Omie e adiciona o código efetivamente usado
-    const payload = { used_cCodIntOP: ident.cCodIntOP, ...resposta };
-    res.status(resposta?.faultstring ? 500 : 200).json(payload);
+    if (omieResp?.faultstring || omieResp?.error) {
+      return res.status(200).json(omieResp);
+    }
 
-  } catch (err) {
-    console.error('[produtos/op] erro →', err);
-    res.status(err.status || 500).json({ error: String(err?.faultstring || err?.message || err) });
+    // 6) Pós-sucesso: GERAR ETIQUETA com seu layout e inserir pendente
+    try {
+      const ccodintop = omieResp?.cCodIntOP || ident.cCodIntOP || null;  // op
+      const ncodop    = omieResp?.nCodOP   || null;
+      const numeroOP  = ccodintop || String(ncodop || '');
+      const codMP     = codigoTextual || '';
+      // prioridade da descrição: front.descricao -> DB -> fallback
+      let descricao   = (front.descricao || descricaoFront || '').trim();
+
+      // tenta buscar descrição no DB se não veio do front
+      if (!descricao) {
+        try {
+          const q1 = await pool.query(`
+            SELECT descricao FROM produtos WHERE codigo = $1 LIMIT 1
+          `, [codMP]);
+          descricao = q1.rows?.[0]?.descricao || descricao;
+        } catch {}
+        if (!descricao) {
+          try {
+            const q2 = await pool.query(`
+              SELECT descricao FROM produtos_omie WHERE codigo = $1 LIMIT 1
+            `, [codMP]);
+            descricao = q2.rows?.[0]?.descricao || descricao;
+          } catch {}
+        }
+      }
+      if (!descricao) descricao = 'SEM DESCRIÇÃO';
+
+      const zpl = gerarEtiquetaPP({ codMP, op: numeroOP, descricao });
+
+      await salvarEtiquetaOP(pool, {
+        numero_op: numeroOP,
+        codigo_produto: codMP,
+        conteudo_zpl: zpl,                     // usa exatamente seu layout
+        tipo_etiqueta: 'Expedicao',
+        local_impressao: 'Preparação elétrica',
+        impressa: false,                       // o agente marca como true
+        usuario_criacao: (req.user?.name || 'API'),
+        observacoes: null
+      });
+
+      console.log('[etiquetas] gerada para OP', numeroOP, 'codMP', codMP);
+    } catch (e) {
+      console.error('[etiquetas] falha ao salvar etiqueta:', e?.message || e);
+      // não quebra a resposta da OP
+    }
+
+    // resposta final para o front
+    const ccodintop = omieResp?.cCodIntOP || ident.cCodIntOP || null;
+    const codprod   = codigoTextual || null;
+    return res.json({ ...omieResp, cCodIntOP: ccodintop, codigo: codprod });
+
+  } catch (e) {
+    console.error('[omie/produtos/op] EXCEPTION (outer):', e);
+    return res.status(500).json({ error: 'internal', message: String(e?.message || e) });
+  } finally {
+    try { await pool.end(); } catch {}
   }
 });
+
+
+
+
+// === salva uma etiqueta de OP na tabela `etiquetas_impressas` ===
+function buildZPL({ titulo = 'OP – Expedição', numero_op = '', codigo_produto = '' } = {}) {
+  return [
+    '^XA',
+    '^PW800',
+    '^LL500',
+    '^CF0,40',
+    `^FO40,40^FD${titulo}^FS`,
+    '^FO40,100^GB700,2,2^FS',
+    '^CF0,30',
+    `^FO40,150^FDOP: ${numero_op}^FS`,
+    `^FO40,200^FDCódigo: ${codigo_produto}^FS`,
+    '^FO40,260^BQN,2,4^FDMA,Fromtherm OP^FS',
+    '^XZ',
+  ].join('\n');
+}
+
+async function salvarEtiquetaOP(pool, {
+  numero_op,
+  codigo_produto,
+  tipo_etiqueta   = 'Expedicao',
+  local_impressao = 'Preparação elétrica',
+  impressa        = false,
+  usuario_criacao = 'API',
+  observacoes     = null
+}) {
+  // valida mínimos exigidos pela tabela (NOT NULL)
+  if (!numero_op)      throw new Error('numero_op obrigatório');
+  if (!codigo_produto) throw new Error('codigo_produto obrigatório');
+  if (!tipo_etiqueta)  throw new Error('tipo_etiqueta obrigatório');
+  if (!local_impressao)throw new Error('local_impressao obrigatório');
+
+  const conteudo_zpl = buildZPL({ numero_op, codigo_produto });
+
+  const sql = `
+    INSERT INTO etiquetas_impressas
+      (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+       conteudo_zpl, impressa, usuario_criacao, observacoes)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    RETURNING id, data_criacao
+  `;
+  const params = [
+    numero_op,
+    codigo_produto,
+    tipo_etiqueta,
+    local_impressao,
+    conteudo_zpl,
+    impressa,
+    usuario_criacao,
+    observacoes
+  ];
+
+  const { rows } = await pool.query(sql, params);
+  return rows[0]; // { id, data_criacao }
+}
+
+
+
+
 
 
   // lista pedidos
@@ -2612,7 +2964,6 @@ app.post(
     res.json({ ok: true });
   });
 
-
   // ——————————————————————————————
   // 3.2) Rotas de autenticação e proxy OMIE
   // ——————————————————————————————
@@ -2625,7 +2976,6 @@ app.post(
   // app.use('/api/omie/estoque/resumo',estoqueResumoRouter);
 
   app.post('/api/omie/produtos', async (req, res) => {
-    console.log('☞ BODY recebido em /api/omie/produtos:', req.body);
 
     try {
       const data = await omieCall(
@@ -3174,6 +3524,14 @@ function buildStamp(prefix, req) {
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
 app.use(express.static(path.join(__dirname)));
+
+app.get('/preparacao_eletrica.html', (req, res) => {
+  if (!req.session || !req.session.user) {
+    // redireciona para a home (que tem o login visível)
+    return res.redirect('/menu_produto.html#login-required');
+  }
+  return res.sendFile(path.join(__dirname, 'preparacao_eletrica.html'));
+});
 
 // ────────────────────────────────────────────
 // 5) Só para rotas HTML do seu SPA, devolva o index

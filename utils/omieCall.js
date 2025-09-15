@@ -1,47 +1,41 @@
 // utils/omieCall.js
 
+// utils/omieCall.js
+// Chama endpoints JSON da OMIE e SEMPRE preserva faultstring/faultcode no erro.
+
 async function omieCall(url, body) {
-  const res = await safeFetch(url, {
-    method : 'POST',
+  const bodyMasked = (() => {
+    const p = JSON.parse(JSON.stringify(body || {}));
+    if (p?.app_secret) p.app_secret = String(p.app_secret).slice(0,2) + '***' + String(p.app_secret).slice(-2);
+    return p;
+  })();
+
+  console.groupCollapsed('[omieCall] →', url);
+  console.log('headers:', { 'Content-Type': 'application/json' });
+  console.log('body (mask):', bodyMasked);
+  console.groupEnd();
+
+  const t0 = Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body   : JSON.stringify(body)
+    body: JSON.stringify(body || {})
   });
+  const text = await res.text();
+  const ms = Date.now() - t0;
 
-  const txt = await res.text();
-  let json;
-  try {
-    json = JSON.parse(txt);
-  } catch {
-    // Resposta nem era JSON ⇒ lança imediatamente
-    const err = new Error(txt);
-    err.status = res.status;
-    throw err;
-  }
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (_) {}
 
-  /*  BG intermitente vem com status 500 + corpo:
-      { error:{ faultstring:'SOAP-ERROR: Broken response…', … } }      */
   if (!res.ok) {
-    let fault;
-    if (json.error) {
-      try {
-        const inner = typeof json.error === 'string'
-          ? JSON.parse(json.error)
-          : json.error;
-        fault = inner.faultstring;
-      } catch {/* ignore */}
-    }
-
-    // Apenas avisa se for o BG genérico
-    if ((fault || txt).includes('Broken response')) {
-      console.warn('[Omie] BG intermitente – retorno vazio');
-    }
-
-    const err = new Error(fault || txt);
+    console.error('[omieCall] ←', url, { status: res.status, ms, body: json || text });
+    const err = new Error(json ? JSON.stringify(json) : text);
     err.status = res.status;
     throw err;
   }
 
-  return json;
+  console.log('[omieCall] ←', url, { status: res.status, ms, body: json });
+  return json || {};
 }
-
 module.exports = omieCall;
+

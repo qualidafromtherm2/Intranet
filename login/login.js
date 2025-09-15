@@ -434,78 +434,6 @@ async function openNotificacoes() {
 }
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 
-// Botões Reset / Excluir dentro da lista
-document.getElementById('listaNotificacoes')
-        .addEventListener('click', async e => {
-  const li = e.target.closest('li[data-idx]');
-  if (!li) return;
-  const idx = Number(li.dataset.idx);   // garante número
-
-  /* RESET ------------------------------------------------------- */
-  if (e.target.classList.contains('btn-reset')) {
-    const raw = decodeURIComponent(li.dataset.raw);     // "Recuperar … \"user\""
-    const m   = /"([^"]+)"/.exec(raw);
-    if (!m) return alert('Formato inválido.');
-    const username = m[1];
-
-    const ok = await fetch(`${API_BASE}/api/users/reset-password`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({ username })
-    }).then(r => r.ok);
-
-    if (!ok) return alert('Falha ao resetar senha.');
-
-    await fetch(`${API_BASE}/api/users/me/messages/delete`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({ index: idx })   // idx já é Number
-    });
-  }                                          // ← fecha btn-reset
-
-
-  /* EXCLUIR ----------------------------------------------------- */
-  if (e.target.classList.contains('btn-del')) {
-    const ok = await fetch(`${API_BASE}/api/users/me/messages/delete`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({ index: idx })
-    }).then(r => r.ok);
-
-    if (!ok) return alert('Erro ao excluir mensagem.');
-  }
-
-  // recarrega lista e badge
-  openNotificacoes();
-});
-
-
-// Clique no sininho  →  abre / fecha o painel Notificações
-// sininho vira atalho para a aba Notificações
-document.querySelector('.notification')
-        .addEventListener('click', e => {
-  e.stopPropagation();        // não deixa abrir o modal login
-  openNotificacoes();
-});
-
-
-
-// Fecha o painel Notificações se clicar fora dele ou fora do sininho
-document.addEventListener('click', e => {
-  const clicouSino   = e.target.closest('.notification');
-  const clicouPainel = e.target.closest('#notificacoes');
-
-  if (!clicouSino && !clicouPainel) {
-    const painel  = document.getElementById('notificacoes');
-    const acessos = document.getElementById('acessos');
-    painel?.classList.remove('visible');
-    acessos?.classList.remove('hidden');
-  }
-});
-
 // LOGOUT — ADICIONE ESTE BLOCO (mapeia #btn-logout ou qualquer [data-logout])
 (function bindLogoutButton(){
   function handler(btn){
@@ -524,3 +452,95 @@ document.addEventListener('click', e => {
   };
   document.addEventListener('DOMContentLoaded', tryBind);
 })();
+
+
+function bindNotificationBell() {
+  const bell = document.querySelector('.notification');
+  if (!bell) return; // página sem sininho → não binda
+
+  bell.addEventListener('click', (e) => {
+    e.stopPropagation(); // evita interações colaterais (ex.: abrir login)
+    try {
+      if (typeof window.openNotificacoes === 'function') {
+        window.openNotificacoes();
+      }
+    } catch (err) {
+      console.warn('[bindNotificationBell] falha ao abrir notificações', err);
+    }
+  });
+
+  // fechar painel se clicar fora
+  document.addEventListener('click', (e) => {
+    const clicouSino   = e.target.closest('.notification');
+    const clicouPainel = e.target.closest('#notificacoes');
+    if (!clicouSino && !clicouPainel) {
+      const painel  = document.getElementById('notificacoes');
+      const acessos = document.getElementById('acessos');
+      painel?.classList.remove('visible');
+      acessos?.classList.remove('hidden');
+    }
+  });
+}
+
+
+function bindNotificacoesListClicks() {
+  const ul = document.getElementById('listaNotificacoes');
+  if (!ul) return; // página sem lista → não binda
+
+  ul.addEventListener('click', async (e) => {
+    const li  = e.target.closest('li[data-idx]');
+    if (!li) return;
+    const idx = Number(li.dataset.idx);
+
+    // RESET
+    if (e.target.classList.contains('btn-reset')) {
+      const raw = decodeURIComponent(li.dataset.raw || '');
+      const m   = /"([^"]+)"/.exec(raw);
+      if (!m) return alert('Formato inválido.');
+      const username = m[1];
+
+      const ok = await fetch(`${API_BASE}/api/users/reset-password`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify({ username })
+      }).then(r => r.ok);
+
+      if (!ok) return alert('Falha ao resetar senha.');
+
+      await fetch(`${API_BASE}/api/users/me/messages/delete`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify({ index: idx })
+      });
+    }
+
+    // EXCLUIR
+    if (e.target.classList.contains('btn-del')) {
+      const ok = await fetch(`${API_BASE}/api/users/me/messages/delete`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include',
+        body: JSON.stringify({ index: idx })
+      }).then(r => r.ok);
+
+      if (!ok) return alert('Erro ao excluir mensagem.');
+    }
+
+    // recarrega lista e badge
+    try { 
+      if (typeof window.openNotificacoes === 'function') window.openNotificacoes();
+    } catch {}
+  });
+}
+
+
+function bindNotificationsUI() {
+  try { bindNotificationBell(); } catch (e) { console.warn('[bindNotificationsUI] bell', e); }
+  try { bindNotificacoesListClicks(); } catch (e) { console.warn('[bindNotificationsUI] list', e); }
+}
+
+window.openNotificacoes = openNotificacoes;   // torna global imediatamente
+
+bindNotificationsUI();
