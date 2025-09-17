@@ -12,43 +12,18 @@
   /* trava zoom automático do Android */
   html{-webkit-text-size-adjust:100%}
 
-/* --- FULL-HEIGHT FIX (2025-09-17) --- */
-@media (max-width: 1368px), (hover: none) and (pointer: coarse) {
-  html, body { min-height: 100dvh; }
-  #app, main, #produtoTab, #produtoTab .content-wrapper {
-    min-height: 100dvh;
-    display: flex;
-    flex-direction: column;
+/* --- LAYOUT TOP-ALIGNED: override body flex centering from menu_produto.css --- */
+@media (max-width: 2000px) and (hover: none) and (pointer: coarse),
+       (max-width: 1368px){
+  body{
+    display: block !important;           /* cancela flex do body */
+    justify-content: flex-start !important;
+    align-items: stretch !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 100dvh !important;
   }
-  #produtoTab .produto-layout {
-    flex: 1 1 auto;
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 16px;
-    align-content: start; /* evita espaços vazios */
-    padding-bottom: env(safe-area-inset-bottom, 0);
-  }
-  /* Foto + botões primeiro; board ocupa o restante */
-  #produtoTab .side-actions { order: 1 !important; }
-  #produtoTab .kanban-board { order: 2 !important; }
-
-  #produtoTab .kanban-board.mini-board{
-    display:grid !important;
-    grid-template-columns: 1fr !important;
-    gap:12px;
-    overflow-x:visible;
-    align-content:start;
-  }
-
-  /* Limite de 3 itens com rolagem nas listas */
-  #produtoTab .kanban-list{
-    --item-h: 64px;
-    --gap: 10px;
-    max-height: calc(3 * var(--item-h) + 2 * var(--gap));
-    overflow-y: auto;
-    padding-right: 6px;
-  }
-  #produtoTab .kanban-list > li{ min-height: var(--item-h); }
+  #app{ margin: 0 auto; }
 }
 
 </style>
