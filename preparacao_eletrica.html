@@ -121,12 +121,13 @@
 
 /* board “mini” (aba Produto) */
 .kanban-board.mini-board{
-  display:grid!important;
-  grid-template-columns:repeat(2,minmax(320px,1fr)); /* 2 colunas lado a lado */
-  gap:24px;
-  overflow-x:auto;             /* fallback horizontal */
-  -webkit-overflow-scrolling:touch;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  gap: 24px;
+  overflow-x: auto;                 /* fallback p/ ver todas as colunas */
+  -webkit-overflow-scrolling: touch;
 }
+
 
 /* coluna do kanban */
 .kanban-column{
@@ -205,13 +206,38 @@
 
 /* Tablet paisagem amplo (SM-T220 costuma reportar > 980px) */
 /* Força empilhamento no layout do Produto */
-@media (max-width:1400px){
-  .produto-layout{display:grid!important;grid-template-columns:1fr!important;gap:16px}
-  .kanban-board.mini-board{display:grid!important;grid-template-columns:1fr!important;gap:12px;overflow-x:visible}
-  .kanban-board.mini-board .kanban-column{width:100%!important;max-width:none!important;flex:1 1 auto!important;min-height:0}
-  .side-actions{order:2;width:100%;max-width:640px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:12px}
-  .side-actions .btn-stack .content-button{width:100%}
+/* Empilhar SOMENTE em telas menores (≤ 980px) */
+@media (max-width: 980px){
+  .produto-layout{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+  .kanban-board.mini-board{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+    overflow-x: visible;   /* quando empilha, não precisa rolar na horizontal */
+  }
+  .kanban-board.mini-board .kanban-column{
+    width: 100% !important;
+    max-width: none !important;
+    flex: 1 1 auto !important;
+    min-height: 0;
+  }
+  .side-actions{
+    order: 2;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .side-actions .btn-stack .content-button{ width: 100%; }
 }
+
 
 /* Telefones / tablet retrato */
 @media (max-width:980px){
