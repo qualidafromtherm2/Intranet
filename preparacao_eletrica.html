@@ -30,7 +30,8 @@
         referrerpolicy="no-referrer" />
   
   <!-- CSS principal -->
-  <link rel="stylesheet" href="/menu_produto.css?v=pe-004" />
+  <link rel="stylesheet" href="/menu_produto.css?v=pe-005" />
+
 
   
   <style>
@@ -82,13 +83,15 @@ body {
 /* LAYOUT GERAL                   */
 /* ============================== */
 /* LAYOUT DA ABA PRODUTO: grid com board (à esquerda) + lateral (à direita) */
+/* LAYOUT DA ABA PRODUTO: board (esq) + lateral (dir) */
 .produto-layout{
   display: grid;
-  grid-template-columns: minmax(680px, 1fr) 260px; /* board  ➜   lateral fixa */
+  grid-template-columns: minmax(0, 1fr) 240px; /* <<< lateral 240 para sobrar + ao board */
   gap: 24px;
   align-items: start;
   margin-top: 24px;
 }
+
 
 .side-actions{
   width: auto;          /* não força 240px; quem define é a coluna do grid (260) */
@@ -157,15 +160,16 @@ body {
   gap:24px;max-width:none!important;margin-top:24px
 }
 
-/* board “mini” (aba Produto) */
-/* Board “mini” da aba Produto: sempre 2 colunas no tablet/desktop */
+
+/* Board “mini” da aba Produto: sempre 2 colunas; cada uma encolhe até caber */
 .kanban-board.mini-board{
   display: grid !important;
-  grid-template-columns: repeat(2, minmax(320px, 1fr));
-  gap: 24px;
-  overflow-x: hidden;               /* sem rolagem lateral quando couber */
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);  /* <<< sempre 2 colunas */
+  gap: 20px;
+  overflow-x: visible;              /* não esconda a 2ª coluna */
   -webkit-overflow-scrolling: touch;
 }
+
 
 
 
@@ -284,17 +288,22 @@ body {
   .btn-stack .btn-modern{padding:14px 18px;font-size:1rem}
   .kanban-list{padding-bottom:16px}
 }
-
-/* Tablet/laptops médios: encolhe um pouco a lateral e as colunas para caber tudo sem cortar */
-@media (max-width: 1200px){
+/* Tablet/laptops médios: apertar um pouco sem quebrar as 2 colunas */
+@media (max-width: 1368px){
   .produto-layout{
-    grid-template-columns: minmax(620px, 1fr) 220px; /* lateral um pouco menor */
-    gap: 20px;
+    grid-template-columns: minmax(0,1fr) 200px; /* lateral menor */
+    gap: 16px;
   }
   .kanban-board.mini-board{
-    grid-template-columns: repeat(2, minmax(300px, 1fr));
-    gap: 20px;
+    gap: 16px;                                 /* cards mais próximos */
   }
+  .kanban-column{
+    padding: 16px;                             /* menos padding interno */
+  }
+}
+
+@media (max-width: 1368px){
+  .kanban-card{ font-size: 14px; }
 }
 
 /* Empilhar só em telas realmente estreitas (celular/retrato) */
