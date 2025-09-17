@@ -3416,13 +3416,20 @@ function buildStamp(prefix, req) {
 // ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'public'), {
+// estáticos unificados (CSS/JS/img) — antes das rotas HTML
+app.use(express.static(path.join(__dirname), {
+  etag: false,                 // evita servir HTML por engano via cache
+  maxAge: '1h',
   setHeaders: (res, p) => {
     if (p.endsWith('.webmanifest')) {
       res.setHeader('Content-Type', 'application/manifest+json');
     }
+    if (p.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
   }
 }));
+
 
 
 app.get('/preparacao_eletrica.html', (req, res) => {
