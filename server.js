@@ -3416,7 +3416,14 @@ function buildStamp(prefix, req) {
 // ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, p) => {
+    if (p.endsWith('.webmanifest')) {
+      res.setHeader('Content-Type', 'application/manifest+json');
+    }
+  }
+}));
+
 
 app.get('/preparacao_eletrica.html', (req, res) => {
   if (!req.session || !req.session.user) {
