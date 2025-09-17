@@ -12,44 +12,48 @@
   /* trava zoom automático do Android */
   html{-webkit-text-size-adjust:100%}
 
-/* --- MOBILE/TABLET LAYOUT FIX v2 (2025-09-17) --- */
+/* --- FULL-HEIGHT FIX (2025-09-17) --- */
 @media (max-width: 1368px), (hover: none) and (pointer: coarse) {
-  /* 1) Empilhar FOTO/BOTÕES acima do kanban */
-  .produto-layout{
+  html, body { min-height: 100dvh; }
+  #app, main, #produtoTab, #produtoTab .content-wrapper {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  #produtoTab .produto-layout {
+    flex: 1 1 auto;
     display: grid !important;
     grid-template-columns: 1fr !important;
     gap: 16px;
+    align-content: start; /* evita espaços vazios */
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
-  .produto-layout > .side-actions{ order: 1 !important; }
-  .produto-layout > .kanban-board{ order: 2 !important; }
+  /* Foto + botões primeiro; board ocupa o restante */
+  #produtoTab .side-actions { order: 1 !important; }
+  #produtoTab .kanban-board { order: 2 !important; }
 
-  /* 2) Board vira 1 coluna (cada coluna empilha) */
-  .kanban-board.mini-board{
-    display: grid !important;
+  #produtoTab .kanban-board.mini-board{
+    display:grid !important;
     grid-template-columns: 1fr !important;
-    gap: 12px;
-    overflow-x: visible;
+    gap:12px;
+    overflow-x:visible;
+    align-content:start;
   }
 
-  /* 3) Limitar listas a 3 itens visíveis (com rolagem) – só na aba Produto */
+  /* Limite de 3 itens com rolagem nas listas */
   #produtoTab .kanban-list{
     --item-h: 64px;
     --gap: 10px;
     max-height: calc(3 * var(--item-h) + 2 * var(--gap));
     overflow-y: auto;
-    padding-right: 6px;   /* espaço para a barra de rolagem */
+    padding-right: 6px;
   }
-  #produtoTab .kanban-list > li{
-    min-height: var(--item-h);
-  }
-
-  /* 4) Evitar cortes por min-width herdados */
-  .kanban-board, .kanban-column, .side-actions{ min-width: 0 !important; }
+  #produtoTab .kanban-list > li{ min-height: var(--item-h); }
 }
 
 </style>
 
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0" /> -->
   <title>Preparação Elétrica | Sistema de Produção</title>
   <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
