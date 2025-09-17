@@ -1488,17 +1488,19 @@ body .options .option:nth-child(5) {
 body .options .option:nth-child(6) {
   --defaultBackground:#AC92EC;
 }
+/* ativa: cresce com base fixa → garante expansão igual em qualquer posição */
+/* ativa: garante base de largura para realmente expandir */
 body .options .option.active {
-  flex-grow: 10000;
+  flex: 1 1 600px;      /* <<< base explícita; você já tem max-width:600px logo abaixo */
   transform: scale(1);
   max-width: 600px;
   margin: 0px;
   border-radius: 40px;
   background-size: auto 100%;
-  /*&:active {
-     transform:scale(0.9);
-  }*/
+  /* &:active { transform: scale(0.9); } */
 }
+
+
 body .options .option.active .shadow {
   box-shadow: inset 0 -120px 120px -120px black, inset 0 -120px 120px -100px black;
 }
@@ -1510,10 +1512,12 @@ body .options .option.active .label .info > div {
   left: 0px;
   opacity: 1;
 }
+/* não-ativas: estreitas e elásticas */
 body .options .option:not(.active) {
-  flex-grow: 1;
+  flex: 1 1 60px;       /* <<< base estreita estável (antes só flex-grow) */
   border-radius: 30px;
 }
+
 body .options .option:not(.active) .shadow {
   bottom: -40px;
   box-shadow: inset 0 -120px 0px -120px black, inset 0 -120px 0px -100px black;
@@ -1574,17 +1578,21 @@ body .options .option .label .info .sub {
 }
 /* === Carousel Foto: ocupar 100% da largura interna da faixa azul === */
 #listaFotos .options {
-  /* remover limites de largura */
+    display: flex;
+  align-items: stretch;
+  gap: 10px;          /* opcional: espaçamento entre cartões */
+  
   min-width: 0 !important;
   max-width: none !important;
-  /* ocupar toda a largura do container pai */
   width: 100% !important;
-  /* (opcional) centralizar, caso o pai tenha padding */
   margin: 0 auto;
-  /* manter altura e overflow */
   height: 400px;
   overflow: hidden;
 }
+/* Escopo específico da guia Fotos (se desejar isolar o comportamento) */
+#listaFotos .options .option.active     { flex: 1 1 600px; }
+#listaFotos .options .option:not(.active) { flex: 1 1 60px; }
+
 
 .foto-modal-overlay {
   position: fixed;
@@ -4165,3 +4173,5 @@ table.tabela td.num {
 .colab-pane .row:last-child { border-bottom: none; }
 .colab-pane .col.acoes { justify-self: end; }
 .colab-pane .loading, .colab-pane .error { padding: 16px; }
+
+

@@ -243,6 +243,16 @@ camposCompras.forEach(f => {
     { key: 'descr_detalhada',   label: 'Descrição detalhada'},
     { key: 'obs_internas',      label: 'Obs internas'      }
   ];
+
+  // === garante que o carrossel use SEMPRE o código numérico ===
+try {
+  const hid = document.getElementById('codigo_produto');
+  // ajuste o campo abaixo conforme como sua API retorna (ex.: dados.codigo_produto)
+  const codNum = String(dados.codigo_produto || dados.codigo || '').trim();
+  if (hid && codNum) hid.value = codNum;
+} catch {}
+
+
   const ulDetalhes = document.getElementById('detalhesList');
   ulDetalhes.innerHTML = '';
   camposDetalhes.forEach(f => {
