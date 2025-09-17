@@ -12,23 +12,60 @@
   /* trava zoom automático do Android */
   html{-webkit-text-size-adjust:100%}
 
-/* --- LAYOUT TOP-ALIGNED: override body flex centering from menu_produto.css --- */
-@media (max-width: 2000px) and (hover: none) and (pointer: coarse),
-       (max-width: 1368px){
+/* ===== MOBILE/TABLET CONSOLIDATED FIX (v6) ===== */
+
+/* Remove sidebar permanently on this page and let main expand */
+.left-side{ display:none !important; }
+.wrapper{ overflow:visible !important; }
+
+/* Ensure body doesn't center everything and uses full height */
+@media (hover:none) and (pointer:coarse), (max-width:1368px){
   body{
-    display: block !important;           /* cancela flex do body */
-    justify-content: flex-start !important;
-    align-items: stretch !important;
-    padding: 0 !important;
-    height: auto !important;
-    min-height: 100dvh !important;
+    display:block !important;
+    justify-content:flex-start !important;
+    align-items:stretch !important;
+    padding:0 !important;
+    height:auto !important;
+    min-height:100dvh !important;
   }
-  #app{ margin: 0 auto; }
+  #app, main, #produtoTab, #produtoTab .content-wrapper{
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* Foto + botões acima; Kanban abaixo */
+  #produtoTab .produto-layout{
+    flex:1 1 auto;
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:16px;
+    align-content:start;
+  }
+  #produtoTab .side-actions{ order:1 !important; display:block !important; }
+  #produtoTab .kanban-board{ order:2 !important; }
+
+  /* Board vira 1 coluna empilhada */
+  #produtoTab .kanban-board.mini-board{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:12px;
+    overflow-x:visible;
+    align-content:start;
+  }
+
+  /* Cada lista limitada a 3 itens com rolagem */
+  #produtoTab .kanban-list{
+    --item-h:64px; --gap:10px;
+    max-height:calc(3*var(--item-h) + 2*var(--gap));
+    overflow-y:auto; padding-right:6px;
+  }
+  #produtoTab .kanban-list > li{ min-height:var(--item-h); }
 }
 
 </style>
 
-  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0" /> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>Preparação Elétrica | Sistema de Produção</title>
   <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -394,15 +431,7 @@ body {
 
     <div class="wrapper">
       <!-- ===== MENU LATERAL ===== -->
-      <aside class="left-side" role="complementary">
-        <div class="side-wrapper">
-          <div class="side-title">Aqui será a NIQ</div>
-          <nav class="side-menu" aria-label="Menu lateral">
-            <a href="#" class="menu-link">Item a ser verificado 01</a>
-            <a href="#" class="menu-link">Item a ser verificado 02</a>
-          </nav>
-        </div>
-      </aside>
+      
 
       <!-- ===== CONTEÚDO PRINCIPAL ===== -->
       <main role="main">
