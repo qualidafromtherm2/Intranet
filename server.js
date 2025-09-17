@@ -44,6 +44,7 @@ const sseClients = new Set();
 
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
 const isProd = process.env.NODE_ENV === 'production';
+const callOmieDedup = require('./utils/callOmieDedup');
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
@@ -230,17 +231,36 @@ function toOmieDate(d) {
 }
 
 // retry simples para 500 BG
+// retry com tratamento para "Consumo redundante" do Omie
 async function withRetry(fn, tries = 3) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
-    try { return await fn(); } catch (e) {
+    try {
+      return await fn();
+    } catch (e) {
       lastErr = e;
-      if (!String(e.message).includes('Broken response')) break; // só retry p/ BG intermitente
-      await new Promise(r => setTimeout(r, [300, 800, 1500][i] || 1500));
+      const msg = String(e?.message || e);
+
+      // Caso clássico do Omie: mesmo payload repetido em < 30s
+      if (/Consumo redundante/i.test(msg) || /SOAP-ENV:Client-6/.test(msg)) {
+        // o Omie fala "aguarde 30 segundos": espera um pouco mais e tenta de novo
+        await new Promise(r => setTimeout(r, 35000));
+        continue;
+      }
+
+      // BG do Omie às vezes devolve "Broken response"/timeout → retry curto
+      if (/Broken response|timeout/i.test(msg)) {
+        await new Promise(r => setTimeout(r, [300, 800, 1500][i] || 1500));
+        continue;
+      }
+
+      // outros erros: não insistir
+      throw e;
     }
   }
   throw lastErr;
 }
+
 
 // === NAV SYNC =====================================================
 // Precisa estar DEPOIS de app.use(session(...)) e app.use(express.json())
@@ -330,7 +350,6 @@ async function omiePost(url, payload, timeoutMs = 20000) {
     clearTimeout(timer);
   }
 }
-
 
 
 async function listarOPPagina(pagina, filtros = {}) {
@@ -1172,14 +1191,6 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
 
 // Multer para upload de imagens
 const upload = multer({ storage: multer.memoryStorage() });
-
-
-// ——————————————————————————————
-// 3) Inicializa Octokit (GitHub) e monta todas as rotas
-// ——————————————————————————————
-(async () => {
-  const { Octokit } = await import('@octokit/rest');
-  const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 
 /* ============================================================================
@@ -2718,19 +2729,17 @@ const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
   finally { clearTimeout(id); }
 };
 
-// ------------------------------------------------------------------
-// Alias: /api/omie/produto  →  mesma lógica de /api/omie/produtos
-// ------------------------------------------------------------------
 app.post('/api/omie/produto', async (req, res) => {
   try {
-    const data = await omieCall(
+    const data = await callOmieDedup(
       'https://app.omie.com.br/api/v1/geral/produtos/',
       {
-        call:       req.body.call,    // ex.: "ConsultarProduto"
+        call:       req.body.call,   // ex.: "ConsultarProduto"
         app_key:    OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param:      req.body.param
-      }
+      },
+      { waitMs: 5000 }
     );
     return res.json(data);
   } catch (err) {
@@ -2740,6 +2749,7 @@ app.post('/api/omie/produto', async (req, res) => {
       .json({ error: err.faultstring || err.message });
   }
 });
+
 
 // ─── Rota para ConsultarCliente ───
 app.post('/api/omie/cliente', express.json(), async (req, res) => {
@@ -3092,28 +3102,27 @@ app.post(
   });
 
 
-  // ——————————————————————————————
-  // 3.3) Rotas de produtos e características
-  // ——————————————————————————————
-  app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
-    try {
-      const data = await omieCall(
-        'https://app.omie.com.br/api/v1/geral/produtos/',
-        {
-          call:       'ConsultarProduto',
-          app_key:    OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param:      [{ codigo: req.params.codigo }]
-        }
-      );
-      return res.json(data);
-    } catch (err) {
-      if (err.message.includes('faultstring')) {
-        return res.json({ error: 'Produto não cadastrado' });
-      }
-      return res.status(500).json({ error: err.message });
+app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
+  try {
+    const data = await callOmieDedup(
+      'https://app.omie.com.br/api/v1/geral/produtos/',
+      {
+        call:       'ConsultarProduto',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      [{ codigo: req.params.codigo }]
+      },
+      { waitMs: 5000 } // opcional: 5s entre tentativas se cair no redundante
+    );
+    return res.json(data);
+  } catch (err) {
+    if (String(err.message || '').includes('faultstring')) {
+      return res.json({ error: 'Produto não cadastrado' });
     }
-  });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
   app.post('/api/produtos/alterar', async (req, res) => {
     try {
@@ -3215,122 +3224,6 @@ app.post(
 
   app.use('/api/malha/consultar', malhaConsultar);
 
-
-  // ——————————————————————————————
-  // 3.5) Upload / Deleção de fotos
-  // ——————————————————————————————
-  app.post(
-    '/api/produtos/:codigo/foto',
-    upload.single('file'),
-    async (req, res) => {
-      try {
-        const { codigo } = req.params;
-        const index      = parseInt(req.body.index, 10);
-        const file       = req.file;
-        const ext        = file.mimetype.split('/')[1];
-        const safeLabel  = req.body.label.replace(/[\/\\?#]/g, '-');
-        const filename   = `${safeLabel} ${codigo}.${ext}`;
-        const ghPath     = `${GITHUB_PATH}/${filename}`;
-
-        let sha;
-        try {
-          const { data } = await octokit.repos.getContent({
-            owner: GITHUB_OWNER,
-            repo:  GITHUB_REPO,
-            path:  ghPath,
-            ref:   GITHUB_BRANCH
-          });
-          sha = data.sha;
-        } catch (err) {
-          if (err.status !== 404) throw err;
-        }
-
-        await octokit.repos.createOrUpdateFileContents({
-          owner:   GITHUB_OWNER,
-          repo:    GITHUB_REPO,
-          branch:  GITHUB_BRANCH,
-          path:    ghPath,
-          message: `Atualiza ${req.body.label} do produto ${codigo}`,
-          content: file.buffer.toString('base64'),
-          sha
-        });
-
-        const rawUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${encodeURIComponent(ghPath)}`;
-        const produto = await omieCall(
-          'https://app.omie.com.br/api/v1/geral/produtos/',
-          {
-            call:       'ConsultarProduto',
-            app_key:    OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param:      [{ codigo }]
-          }
-        );
-
-        const imgs = (produto.imagens || []).map(i => i.url_imagem);
-        if (!isNaN(index) && index >= 0 && index < imgs.length) {
-          imgs[index] = rawUrl;
-        } else {
-          imgs.push(rawUrl);
-        }
-
-        await omieCall(
-          'https://app.omie.com.br/api/v1/geral/produtos/',
-          {
-            call:       'AlterarProduto',
-            app_key:    OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param:      [{ codigo, imagens: imgs.map(u => ({ url_imagem: u })) }]
-          }
-        );
-
-        res.json({ imagens: imgs });
-      } catch (err) {
-        console.error('Erro no upload GitHub/Omie:', err);
-        res.status(err.status || 500).json({ error: err.message });
-      }
-    }
-  );
-
-  app.post(
-    '/api/produtos/:codigo/foto-delete',
-    express.json(),
-    async (req, res) => {
-      try {
-        const { codigo } = req.params;
-        const { index }  = req.body;
-        const rawLogo    = `${req.protocol}://${req.get('host')}/img/logo.png`;
-
-        const produto = await omieCall(
-          'https://app.omie.com.br/api/v1/geral/produtos/',
-          {
-            call:       'ConsultarProduto',
-            app_key:    OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param:      [{ codigo }]
-          }
-        );
-        const imgs = (produto.imagens || []).map(i => i.url_imagem);
-        if (index >= 0 && index < imgs.length) {
-          imgs[index] = rawLogo;
-        }
-
-        await omieCall(
-          'https://app.omie.com.br/api/v1/geral/produtos/',
-          {
-            call:       'AlterarProduto',
-            app_key:    OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param:      [{ codigo, imagens: imgs.map(u => ({ url_imagem: u })) }]
-          }
-        );
-
-        res.json({ imagens: imgs });
-      } catch (err) {
-        console.error('Erro ao deletar foto no Omie:', err);
-        res.status(err.status || 500).json({ error: err.message });
-      }
-    }
-  );
 
 // substitua seu fetch manual por isto:
 // dentro do seu IIFE em server.js, antes de app.use(express.static)
@@ -4074,9 +3967,6 @@ app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
 });
-
-
-})();
 
 // DEBUG: sanity check do webhook (GET simples)
 app.get('/webhooks/omie/pedidos', (req, res) => {
