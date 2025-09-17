@@ -7,13 +7,39 @@
 
   <style>
     
-  html,body{max-width:100vw;overflow-x:hidden}
+  html,body{max-width:100%;overflow-x:clip}
   img,svg,canvas,video{max-width:100%;height:auto}
   /* trava zoom automático do Android */
   html{-webkit-text-size-adjust:100%}
-</style>
 
-  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0" /> -->
+/* --- MOBILE/TABLET FIX (2025-09-17) --- */
+@media (max-width: 1368px), (hover: none) and (pointer: coarse) {
+  .produto-layout{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+  .kanban-board.mini-board{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+    overflow-x: visible;
+  }
+  .kanban-board, .kanban-column, .side-actions{
+    min-width: 0 !important;  /* impede overflow por min-width implícito */
+  }
+  .side-actions{
+    order: 2;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+}
+
+
+  </style>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <title>Preparação Elétrica | Sistema de Produção</title>
   <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -251,7 +277,7 @@ body {
 /* Tablet paisagem amplo (SM-T220 costuma reportar > 980px) */
 /* Força empilhamento no layout do Produto */
 /* Empilhar SOMENTE em telas menores (≤ 980px) */
-@media (max-width: 980px){
+@media (max-width: 1200px){
   .produto-layout{
     display: grid !important;
     grid-template-columns: 1fr !important;
@@ -307,7 +333,7 @@ body {
 }
 
 /* Empilhar só em telas realmente estreitas (celular/retrato) */
-@media (max-width: 980px){
+@media (max-width: 1200px){
   .produto-layout{
     grid-template-columns: 1fr; /* board em cima, lateral embaixo */
     gap: 16px;
@@ -318,6 +344,32 @@ body {
     overflow-x: visible;
   }
 }
+
+  
+/* --- MOBILE/TABLET FIX (2025-09-17) --- */
+@media (max-width: 1368px), (hover: none) and (pointer: coarse) {
+  .produto-layout{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+  .kanban-board.mini-board{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+    overflow-x: visible;
+  }
+  .kanban-board, .kanban-column, .side-actions{
+    min-width: 0 !important;  /* impede overflow por min-width implícito */
+  }
+  .side-actions{
+    order: 2;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+}
+
 
   </style>
 </head>
