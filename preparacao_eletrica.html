@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+  <link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0f0f1e">
+
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Preparação Elétrica | Sistema de Produção</title>
@@ -130,6 +133,14 @@
       align-items: flex-start;
       margin-top: 24px;
     }
+    /* garante que nada “prenda” a altura das colunas/ULs */
+.produto-layout,
+.kanban-board.mini-board,
+.kanban-column {
+  min-height: 0;
+}
+#produtoTab .content-wrapper { overflow: visible; } /* não corta a base do painel */
+
 
     .mini-board {
       flex: 1;
@@ -417,51 +428,60 @@
       margin-top: 16px;
     }
 
-    /* ========== RESPONSIVO ========== */
-    @media (max-width: 1200px) {
-      .produto-layout,
-      .gestao-layout {
-        flex-direction: column;
-      }
-      
-      .side-actions {
-        width: 100%;
-        flex: 0 0 auto;
-      }
+/* ====== Tablet (Galaxy Tab A7 Lite SM-T220) ====== */
+/* paisagem do Tab A7 Lite é ~800px de largura -> breakpoint 980 cobre bem */
 
-      .kanban-board:not(.mini-board) {
-        grid-template-columns: repeat(2, minmax(300px, 1fr));
-      }
-    }
+@media (max-width: 1100px) {
+  #produtoTab .content-wrapper { padding: 12px; }
+  .kanban-column { padding: 14px; }
+  .produto-foto-box { aspect-ratio: 16 / 9; }  /* foto um pouco mais “wide” em tablet */
+}
 
-    @media (max-width: 768px) {
-      .kanban-board:not(.mini-board),
-      .kanban-board.mini-board {
-        grid-template-columns: 1fr;
-      }
+/* <= 980: empilha conteúdo e evita corte dos kanbans */
+@media (max-width: 980px) {
+  /* Empilha o layout principal: board em cima, ações (foto+botões) embaixo */
+  .produto-layout {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
 
-      .btn-stack {
-        flex-direction: row;
-        flex-wrap: wrap;
-      }
+  .kanban-board.mini-board { order: 1; }
+  .side-actions {
+    order: 2;
+    width: 100%;
+    max-width: 560px;       /* mantém bonito no centro */
+    margin: 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .side-actions .btn-stack button { width: 100%; }
 
-      .btn-stack .btn-modern {
-        flex: 1;
-        min-width: 140px;
-      }
+  /* Kanbans em uma coluna (largura total) */
+  .kanban-board.mini-board {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  .kanban-column {
+    width: 100% !important;
+    max-width: none !important;
+    flex: 1 1 auto !important;
+    min-height: 0; /* anti-corte em pais flex/grid */
+  }
 
-      #qrModal {
-        padding: 16px;
-      }
+  /* A lista rola por dentro e sem cortar o final */
+  .kanban-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    max-height: none;       /* o JS fitProdutoKanbanHeight ajusta a altura final */
+    padding-right: 6px;
+    padding-bottom: 16px;   /* respiro p/ último card */
+  }
+}
 
-      .qr-box {
-        padding: 20px;
-      }
-
-      #qrReader {
-        height: 50vh;
-      }
-    }
 
     /* ========== UTILITÁRIOS ========== */
     .loading {
@@ -822,6 +842,9 @@
           elements.ulMiniFila.innerHTML = '<li class="empty">Selecione um item na Fila de produção</li>';
           elements.ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
         }
+        // recalcula altura após a aba aparecer na tela
+setTimeout(fitProdutoKanbanHeight, 50);
+
       });
 
       elements.menuGestao?.addEventListener('click', (e) => {
@@ -963,19 +986,37 @@ async function updateProdutoFotoFrame(codigoPreferencial) {
 }
 
 // ===== Ajuste de altura dos kanbans (produto) =====
+// ===== Ajuste de altura dos kanbans (produto) =====
 function fitProdutoKanbanHeight() {
-  const ids = ['prod-col-fila', 'prod-col-emprod'];
-  const padBottom = 16; // respiro do final
-  ids.forEach(id => {
+  // limite inferior = menor “bottom” entre o painel e a janela
+  const limits = [];
+  const addLimit = (sel) => {
+    const el = document.querySelector(sel);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 0) limits.push(r.bottom);
+    }
+  };
+  // painel da aba produto e wrappers relevantes
+  addLimit('#produtoTab .content-wrapper');
+  addLimit('#produtoTab');
+  addLimit('main');
+  // sempre considera o viewport também
+  limits.push(window.innerHeight);
+
+  const yLimit = Math.min(...limits);   // onde o painel termina
+  const padBottom = 16;                 // respiro no final
+
+  ['prod-col-fila', 'prod-col-emprod'].forEach(id => {
     const ul = document.getElementById(id);
     if (!ul) return;
-    // topo da UL relativo ao viewport
     const top = ul.getBoundingClientRect().top;
-    const available = Math.max(160, window.innerHeight - top - padBottom);
+    const available = Math.max(100, Math.floor(yLimit - top - padBottom));
     ul.style.maxHeight = `${available}px`;
     ul.style.overflowY = 'auto';
   });
 }
+
 
 window.addEventListener('resize', fitProdutoKanbanHeight);
 document.addEventListener('DOMContentLoaded', fitProdutoKanbanHeight);
@@ -1420,6 +1461,12 @@ const setupQRFunctionality = () => {
 
       console.log('✅ Preparação Elétrica inicializada com sucesso');
     });
+
+    if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
   </script>
 </body>
 </html>
