@@ -20,539 +20,205 @@
   <link rel="stylesheet" href="menu_produto.css" />
   
   <style>
-    /* ========== VARIÁVEIS CSS ========== */
-    :root {
-      --primary: #4f46e5;
-      --primary-light: #22d3ee;
-      --success: #16a34a;
-      --success-light: #22c55e;
-      --header-bg: #111;
-      --text: #fff;
-      --text-muted: #a1a1aa;
-      --bg-card: rgba(255, 255, 255, 0.05);
-      --border-radius: 16px;
-      --border-radius-sm: 12px;
-      --shadow-base: 0 12px 22px rgba(79, 70, 229, 0.22), 0 6px 10px rgba(34, 211, 238, 0.18);
-      --shadow-hover: 0 16px 26px rgba(79, 70, 229, 0.28), 0 10px 14px rgba(34, 211, 238, 0.22);
-      --transition: all 0.2s ease;
-    }
+  /* ============================== */
+/* VARIÁVEIS (tema)               */
+/* ============================== */
+:root{
+  --primary:#4f46e5;
+  --primary-light:#22d3ee;
+  --success:#16a34a;
+  --success-light:#22c55e;
+  --header-bg:#111;
+  --text:#fff;
+  --text-muted:#a1a1aa;
+  --bg-card:rgba(255,255,255,.05);
+  --border-radius:16px;
+  --border-radius-sm:12px;
+  --shadow-base:0 12px 22px rgba(79,70,229,.22),0 6px 10px rgba(34,211,238,.18);
+  --shadow-hover:0 16px 26px rgba(79,70,229,.28),0 10px 14px rgba(34,211,238,.22);
+  --transition:all .2s ease;
+}
 
-    /* ========== QR MODAL ========== */
-    #qrModal {
-      position: fixed;
-      inset: 0;
-      display: none;
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(4px);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      animation: fadeIn 0.3s ease-out;
-    }
+/* ============================== */
+/* MODAL QR                       */
+/* ============================== */
+#qrModal{position:fixed;inset:0;display:none;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:2000;align-items:center;justify-content:center;padding:24px;animation:fadeIn .3s ease-out}
+#qrModal.open{display:flex}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.qr-box{width:min(640px,100%);background:var(--header-bg);color:var(--text);border-radius:var(--border-radius);box-shadow:0 25px 50px rgba(0,0,0,.4);padding:24px;animation:slideUp .3s ease-out}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.qr-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,.1)}
+.qr-close{appearance:none;border:0;background:transparent;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);transition:var(--transition);padding:8px;border-radius:8px}
+.qr-close:hover{color:var(--text);background:rgba(255,255,255,.1)}
+#qrReader{width:100%;height:60vh;max-height:400px;background:#000;border-radius:var(--border-radius-sm);overflow:hidden;margin-bottom:16px}
+#qrReader video{width:100%!important;height:100%!important;object-fit:cover;filter:brightness(1.15) contrast(1.08)}
 
-    #qrModal.open {
-      display: flex;
-    }
+/* ============================== */
+/* LAYOUT GERAL                   */
+/* ============================== */
+.produto-layout,
+.gestao-layout{display:flex;gap:20px;align-items:flex-start;margin-top:24px}
 
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .qr-box {
-      width: min(640px, 100%);
-      background: var(--header-bg);
-      color: var(--text);
-      border-radius: var(--border-radius);
-      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
-      padding: 24px;
-      animation: slideUp 0.3s ease-out;
-    }
-
-    @keyframes slideUp {
-      from { 
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to { 
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .qr-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .qr-close {
-      appearance: none;
-      border: 0;
-      background: transparent;
-      font-size: 26px;
-      line-height: 1;
-      cursor: pointer;
-      color: var(--text-muted);
-      transition: var(--transition);
-      padding: 8px;
-      border-radius: 8px;
-    }
-
-    .qr-close:hover {
-      color: var(--text);
-      background: rgba(255, 255, 255, 0.1);
-    }
-
-    #qrReader {
-      width: 100%;
-      height: 60vh;
-      max-height: 400px;
-      background: #000;
-      border-radius: var(--border-radius-sm);
-      overflow: hidden;
-      margin-bottom: 16px;
-    }
-
-    #qrReader video {
-      width: 100% !important;
-      height: 100% !important;
-      object-fit: cover;
-      filter: brightness(1.15) contrast(1.08);
-    }
-
-    /* ========== LAYOUT RESPONSIVO ========== */
-    .produto-layout,
-    .gestao-layout {
-      display: flex;
-      gap: 20px;
-      align-items: flex-start;
-      margin-top: 24px;
-    }
-    /* garante que nada “prenda” a altura das colunas/ULs */
+/* anti-corte para filhos que rolam */
 .produto-layout,
 .kanban-board.mini-board,
-.kanban-column {
-  min-height: 0;
-}
-#produtoTab .content-wrapper { overflow: visible; } /* não corta a base do painel */
+.kanban-column{min-height:0}
+#produtoTab .content-wrapper{overflow:visible}
 
+/* bloco lateral (foto + botões) */
+.side-actions{position:relative;width:240px;flex:0 0 240px;display:flex;flex-direction:column;align-items:stretch;gap:12px}
+.side-actions .btn-stack{width:100%}
+.side-actions .produto-foto-box{width:100%}
 
-    .mini-board {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .side-actions {
-      position: relative;
-      width: 240px;
-      flex: 0 0 240px;
-      display: flex;
-  flex-direction: column;  /* empilha: foto em cima, botões embaixo */
-  align-items: stretch;    /* foto e botões ocupam a mesma largura */
-  gap: 12px;               /* espaço entre foto e botões */
-    }
-
-/* Botões ocupam toda a largura do bloco */
-.side-actions .btn-stack{
-  width: 100%;
-}
-
-/* Foto ocupa a largura toda do bloco lateral */
-.side-actions .produto-foto-box{
-  width: 100%;
-}
-
-
-    /* ===== Quadro da foto do produto (aba Produto, coluna da direita) ===== */
+/* ============================== */
+/* QUADRO DA FOTO DO PRODUTO      */
+/* ============================== */
 .produto-foto-box{
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  margin-bottom: 12px;
-  border-radius: var(--border-radius);
-  overflow: hidden;
-  background: rgba(255,255,255,0.06) url('../img/logo.png') center/contain no-repeat;
-  border: 1px solid rgba(255,255,255,0.08);
-  display: grid;
-  place-items: center;
+  width:100%;
+  aspect-ratio:4/3;
+  margin-bottom:12px;
+  border-radius:var(--border-radius);
+  overflow:hidden;
+  background:rgba(255,255,255,.06) url('../img/logo.png') center/contain no-repeat;
+  border:1px solid rgba(255,255,255,.08);
+  display:grid;place-items:center
 }
-.produto-foto-box img{
-  width: 100%;
-  height: 100%;
-  object-fit: cover;   /* foto real preenche; no fallback ajusto pra 'contain' via JS */
-  display: block;
-}
+.produto-foto-box img{width:100%;height:100%;object-fit:cover;display:block}
 
+/* ============================== */
+/* BOTÕES                         */
+/* ============================== */
+.btn-stack{display:flex;flex-direction:column;gap:12px;width:100%}
+.btn-modern{appearance:none;border:0;width:100%;padding:16px 20px;border-radius:var(--border-radius);font-weight:600;letter-spacing:.3px;cursor:pointer;color:var(--text);background:linear-gradient(135deg,var(--primary),var(--primary-light));box-shadow:var(--shadow-base);transition:var(--transition);position:relative;overflow:hidden;font-size:14px}
+.btn-modern::before{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);transition:left .5s ease}
+.btn-modern:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover)}
+.btn-modern:hover::before{left:100%}
+.btn-modern:active{transform:translateY(0);filter:brightness(.96)}
+.btn-modern.btn-success{background:linear-gradient(135deg,var(--success),var(--success-light));box-shadow:0 12px 22px rgba(22,163,74,.22),0 6px 10px rgba(34,197,94,.18)}
+.btn-modern.btn-success:hover{box-shadow:0 16px 26px rgba(22,163,74,.28),0 10px 14px rgba(34,197,94,.22)}
+.btn-modern.btn-ghost{background:transparent;color:var(--primary);box-shadow:inset 0 0 0 2px rgba(79,70,229,.45)}
+.btn-modern.btn-ghost:hover{transform:none;filter:none;box-shadow:inset 0 0 0 2px rgba(79,70,229,.65),0 4px 12px rgba(0,0,0,.1);background:rgba(79,70,229,.05)}
 
-    /* ========== BOTÕES MODERNOS ========== */
-    .btn-stack {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      width: 100%;
-    }
+/* ============================== */
+/* MENU SQL (Gestão)              */
+/* ============================== */
+.sql-menu{position:absolute;right:0;top:calc(100% + 12px);background:var(--header-bg);color:var(--text);border-radius:var(--border-radius-sm);box-shadow:0 20px 40px rgba(0,0,0,.3);padding:8px;min-width:220px;display:none;z-index:3000;border:1px solid rgba(255,255,255,.1)}
+.sql-menu.open{display:block;animation:slideDown .2s ease-out}
+@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+.sql-menu button{width:100%;appearance:none;border:0;background:transparent;text-align:left;padding:12px 16px;cursor:pointer;border-radius:8px;color:inherit;transition:var(--transition);font-size:14px}
+.sql-menu button:hover{background:rgba(255,255,255,.1);color:var(--primary-light)}
+.sql-menu button:active{background:rgba(255,255,255,.15)}
 
-    .btn-modern {
-      appearance: none;
-      border: 0;
-      width: 100%;
-      padding: 16px 20px;
-      border-radius: var(--border-radius);
-      font-weight: 600;
-      letter-spacing: 0.3px;
-      cursor: pointer;
-      color: var(--text);
-      background: linear-gradient(135deg, var(--primary), var(--primary-light));
-      box-shadow: var(--shadow-base);
-      transition: var(--transition);
-      position: relative;
-      overflow: hidden;
-      font-size: 14px;
-    }
-
-    .btn-modern::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-      transition: left 0.5s ease;
-    }
-
-    .btn-modern:hover {
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-hover);
-    }
-
-    .btn-modern:hover::before {
-      left: 100%;
-    }
-
-    .btn-modern:active {
-      transform: translateY(0);
-      filter: brightness(0.96);
-    }
-
-    .btn-modern.btn-success {
-      background: linear-gradient(135deg, var(--success), var(--success-light));
-      box-shadow: 0 12px 22px rgba(22, 163, 74, 0.22), 0 6px 10px rgba(34, 197, 94, 0.18);
-    }
-
-    .btn-modern.btn-success:hover {
-      box-shadow: 0 16px 26px rgba(22, 163, 74, 0.28), 0 10px 14px rgba(34, 197, 94, 0.22);
-    }
-
-    .btn-modern.btn-ghost {
-      background: transparent;
-      color: var(--primary);
-      box-shadow: inset 0 0 0 2px rgba(79, 70, 229, 0.45);
-    }
-
-    .btn-modern.btn-ghost:hover {
-      transform: none;
-      filter: none;
-      box-shadow: inset 0 0 0 2px rgba(79, 70, 229, 0.65), 0 4px 12px rgba(0, 0, 0, 0.1);
-      background: rgba(79, 70, 229, 0.05);
-    }
-
-    /* ========== MENU SQL ========== */
-    .sql-menu {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 12px);
-      background: var(--header-bg);
-      color: var(--text);
-      border-radius: var(--border-radius-sm);
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-      padding: 8px;
-      min-width: 220px;
-      display: none;
-      z-index: 3000;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .sql-menu.open {
-      display: block;
-      animation: slideDown 0.2s ease-out;
-    }
-
-    @keyframes slideDown {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .sql-menu button {
-      width: 100%;
-      appearance: none;
-      border: 0;
-      background: transparent;
-      text-align: left;
-      padding: 12px 16px;
-      cursor: pointer;
-      border-radius: 8px;
-      color: inherit;
-      transition: var(--transition);
-      font-size: 14px;
-    }
-
-    .sql-menu button:hover {
-      background: rgba(255, 255, 255, 0.1);
-      color: var(--primary-light);
-    }
-
-    .sql-menu button:active {
-      background: rgba(255, 255, 255, 0.15);
-    }
-
-    /* ========== KANBAN BOARD ========== */
-    .kanban-board:not(.mini-board) {
-      display: grid !important;
-      grid-template-columns: repeat(3, minmax(320px, 1fr));
-      gap: 24px;
-      max-width: none !important;
-      margin-top: 24px;
-    }
-
-    .kanban-board.mini-board {
-      display: grid !important;
-      grid-template-columns: repeat(2, minmax(300px, 1fr));
-      gap: 20px;
-    }
-
-.kanban-column {
-  width: auto !important;
-  max-width: none !important;
-  flex: 0 0 auto !important;
-  background: var(--bg-card);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-
-  /* NOVO: coluna em flex para a lista ocupar o restante e rolar por dentro */
-  display: flex;
-  flex-direction: column;
-  min-height: 0; /* evita corte quando o pai tem altura limitada */
+/* ============================== */
+/* KANBAN BOARD                   */
+/* ============================== */
+/* board “grande” (página inicial) */
+.kanban-board:not(.mini-board){
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(320px,1fr));
+  gap:24px;max-width:none!important;margin-top:24px
 }
 
-
-    .kanban-header {
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .kanban-header span {
-      font-weight: 600;
-      font-size: 16px;
-      color: var(--text);
-    }
-
-.kanban-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-
-  /* NOVO: ocupa o resto da coluna e rola dentro */
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 6px;   /* espaço pro scrollbar não cobrir conteúdo */
-  padding-bottom: 8px;  /* dá respiro no final p/ último card não cortar */
+/* board “mini” (aba Produto) */
+.kanban-board.mini-board{
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(320px,1fr)); /* 2 colunas lado a lado */
+  gap:24px;
+  overflow-x:auto;             /* fallback horizontal */
+  -webkit-overflow-scrolling:touch;
 }
 
-
-    .kanban-card {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: var(--border-radius-sm);
-      padding: 16px;
-      margin-bottom: 12px;
-      cursor: pointer;
-      transition: var(--transition);
-    }
-
-    .kanban-card:hover {
-      background: rgba(255, 255, 255, 0.1);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-    }
-
-    .kanban-card:last-child {
-      margin-bottom: 0;
-    }
-
-    .empty {
-      color: var(--text-muted);
-      font-style: italic;
-      text-align: center;
-      padding: 24px 16px;
-    }
-
-    /* ========== INPUTS E FORMS ========== */
-    .input-modern {
-      width: 100%;
-      padding: 12px 16px;
-      border-radius: var(--border-radius-sm);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text);
-      font-size: 14px;
-      transition: var(--transition);
-    }
-
-    .input-modern:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
-    }
-
-    .input-modern::placeholder {
-      color: var(--text-muted);
-    }
-
-    .input-group {
-      display: flex;
-      gap: 12px;
-      margin-top: 16px;
-    }
-
-/* ====== Tablet (Galaxy Tab A7 Lite SM-T220) ====== */
-/* paisagem do Tab A7 Lite é ~800px de largura -> breakpoint 980 cobre bem */
-
-@media (max-width: 1100px) {
-  #produtoTab .content-wrapper { padding: 12px; }
-  .kanban-column { padding: 14px; }
-  .produto-foto-box { aspect-ratio: 16 / 9; }  /* foto um pouco mais “wide” em tablet */
+/* coluna do kanban */
+.kanban-column{
+  width:auto!important;max-width:none!important;flex:0 0 auto!important;
+  background:var(--bg-card);
+  border-radius:var(--border-radius);
+  padding:20px;border:1px solid rgba(255,255,255,.1);
+  display:flex;flex-direction:column;min-height:0
 }
 
-/* <= 980: empilha conteúdo e evita corte dos kanbans */
-@media (max-width: 980px) {
-  /* Empilha o layout principal: board em cima, ações (foto+botões) embaixo */
-  .produto-layout {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 16px;
-  }
+/* cabeçalho da coluna */
+.kanban-header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.1)}
+.kanban-header span{font-weight:600;font-size:16px;color:var(--text)}
 
-  .kanban-board.mini-board { order: 1; }
-  .side-actions {
-    order: 2;
-    width: 100%;
-    max-width: 560px;       /* mantém bonito no centro */
-    margin: 0 auto;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  .side-actions .btn-stack button { width: 100%; }
-
-  /* Kanbans em uma coluna (largura total) */
-  .kanban-board.mini-board {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 12px;
-  }
-  .kanban-column {
-    width: 100% !important;
-    max-width: none !important;
-    flex: 1 1 auto !important;
-    min-height: 0; /* anti-corte em pais flex/grid */
-  }
-
-  /* A lista rola por dentro e sem cortar o final */
-  .kanban-list {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    max-height: none;       /* o JS fitProdutoKanbanHeight ajusta a altura final */
-    padding-right: 6px;
-    padding-bottom: 16px;   /* respiro p/ último card */
-  }
+/* lista de cards (área rolável) */
+.kanban-list{
+  list-style:none;padding:0;margin:0;
+  flex:1 1 auto;min-height:0;overflow-y:auto;
+  padding-right:6px;padding-bottom:8px
 }
 
+/* card */
+.kanban-card{
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:var(--border-radius-sm);
+  padding:16px;margin-bottom:12px;
+  cursor:pointer;transition:var(--transition)
+}
+.kanban-card:hover{background:rgba(255,255,255,.1);transform:translateY(-2px);box-shadow:0 8px 16px rgba(0,0,0,.2)}
+.kanban-card:last-child{margin-bottom:0}
+.empty{color:var(--text-muted);font-style:italic;text-align:center;padding:24px 16px}
 
-    /* ========== UTILITÁRIOS ========== */
-    .loading {
-      opacity: 0.6;
-      pointer-events: none;
-    }
+/* ============================== */
+/* INPUTS                         */
+/* ============================== */
+.input-modern{width:100%;padding:12px 16px;border-radius:var(--border-radius-sm);border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05);color:var(--text);font-size:14px;transition:var(--transition)}
+.input-modern:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,70,229,.1)}
+.input-modern::placeholder{color:var(--text-muted)}
+.input-group{display:flex;gap:12px;margin-top:16px}
 
-    .fade-in {
-      animation: fadeIn 0.3s ease-out;
-    }
+/* ============================== */
+/* UTILITÁRIOS & ACESSIBILIDADE   */
+/* ============================== */
+.loading{opacity:.6;pointer-events:none}
+.fade-in{animation:fadeIn .3s ease-out}
+.slide-up{animation:slideUp .3s ease-out}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.btn-modern:focus-visible,.qr-close:focus-visible{outline:2px solid var(--primary-light);outline-offset:2px}
+.kanban-card:focus-visible{outline:2px solid var(--primary-light);outline-offset:2px}
 
-    .slide-up {
-      animation: slideUp 0.3s ease-out;
-    }
+/* ============================== */
+/* ESTADOS                        */
+/* ============================== */
+.btn-modern[disabled]{opacity:.6;cursor:not-allowed;transform:none}
+.btn-modern[disabled]:hover{transform:none;box-shadow:var(--shadow-base)}
 
-    /* ========== MELHORIAS DE ACESSIBILIDADE ========== */
-    .sr-only {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    }
+/* ============================== */
+/* SCROLLBAR (WebKit)             */
+/* ============================== */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
 
-    /* Focus indicators melhorados */
-    .btn-modern:focus-visible,
-    .qr-close:focus-visible {
-      outline: 2px solid var(--primary-light);
-      outline-offset: 2px;
-    }
+/* ============================== */
+/* BREAKPOINTS                    */
+/* ============================== */
 
-    .kanban-card:focus-visible {
-      outline: 2px solid var(--primary-light);
-      outline-offset: 2px;
-    }
+/* Tablet/laptops médios: pequenos ajustes */
+@media (max-width:1100px){
+  #produtoTab .content-wrapper{padding:12px}
+  .kanban-column{padding:14px}
+  .produto-foto-box{aspect-ratio:16/9}
+}
 
-    /* ========== ESTADOS DE CARREGAMENTO ========== */
-    .btn-modern[disabled] {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
-    }
+/* Tablet paisagem amplo (SM-T220 costuma reportar > 980px) */
+/* Força empilhamento no layout do Produto */
+@media (max-width:1400px){
+  .produto-layout{display:grid!important;grid-template-columns:1fr!important;gap:16px}
+  .kanban-board.mini-board{display:grid!important;grid-template-columns:1fr!important;gap:12px;overflow-x:visible}
+  .kanban-board.mini-board .kanban-column{width:100%!important;max-width:none!important;flex:1 1 auto!important;min-height:0}
+  .side-actions{order:2;width:100%;max-width:640px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:12px}
+  .side-actions .btn-stack .content-button{width:100%}
+}
 
-    .btn-modern[disabled]:hover {
-      transform: none;
-      box-shadow: var(--shadow-base);
-    }
+/* Telefones / tablet retrato */
+@media (max-width:980px){
+  .btn-stack .btn-modern{padding:14px 18px;font-size:1rem}
+  .kanban-list{padding-bottom:16px}
+}
 
-    /* ========== SCROLLBAR CUSTOMIZADO ========== */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(255, 255, 255, 0.3);
-    }
   </style>
 </head>
 
