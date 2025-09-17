@@ -12,60 +12,152 @@
   /* trava zoom automático do Android */
   html{-webkit-text-size-adjust:100%}
 
-/* ===== MOBILE/TABLET CONSOLIDATED FIX (v6) ===== */
+/* ===== PREPARACAO ELETRICA — SCOPED FIX (v8) ===== */
+body[data-page="prep-eletrica"]{ min-height:100dvh; }
 
-/* Remove sidebar permanently on this page and let main expand */
-.left-side{ display:none !important; }
-.wrapper{ overflow:visible !important; }
+/* limpar fundos internos e usar 100% da área */
+body[data-page="prep-eletrica"] .content-wrapper{
+  background: transparent !important;
+  padding: 8px 12px !important;
+}
 
-/* Ensure body doesn't center everything and uses full height */
-@media (hover:none) and (pointer:coarse), (max-width:1368px){
-  body{
-    display:block !important;
-    justify-content:flex-start !important;
-    align-items:stretch !important;
-    padding:0 !important;
-    height:auto !important;
-    min-height:100dvh !important;
-  }
-  #app, main, #produtoTab, #produtoTab .content-wrapper{
-    min-height:100dvh;
-    display:flex;
-    flex-direction:column;
-  }
+/* esconder barra NIQ e aproveitar largura sem mexer no HTML global */
+body[data-page="prep-eletrica"] .left-side{ display:none !important; }
 
-  /* Foto + botões acima; Kanban abaixo */
-  #produtoTab .produto-layout{
-    flex:1 1 auto;
-    display:grid !important;
-    grid-template-columns:1fr !important;
-    gap:16px;
-    align-content:start;
-  }
-  #produtoTab .side-actions{ order:1 !important; display:block !important; }
-  #produtoTab .kanban-board{ order:2 !important; }
+/* simplificar topo: sem busca, sininho, impressora, nuvem, avatar, e esconder a guia Gestão */
+body[data-page="prep-eletrica"] .search-bar,
+body[data-page="prep-eletrica"] .header-profile{ display:none !important; }
+body[data-page="prep-eletrica"] #menu-gestao{ display:none !important; }
 
-  /* Board vira 1 coluna empilhada */
-  #produtoTab .kanban-board.mini-board{
-    display:grid !important;
-    grid-template-columns:1fr !important;
-    gap:12px;
-    overflow-x:visible;
-    align-content:start;
-  }
+/* ordem: foto + botões acima; kanban abaixo */
+body[data-page="prep-eletrica"] .produto-layout{
+  display:grid !important;
+  grid-template-columns:1fr !important;
+  gap:16px;
+  align-content:start;
+}
+body[data-page="prep-eletrica"] .side-actions{ order:1 !important; display:block !important; }
+body[data-page="prep-eletrica"] .kanban-board{ order:2 !important; }
 
-  /* Cada lista limitada a 3 itens com rolagem */
-  #produtoTab .kanban-list{
-    --item-h:64px; --gap:10px;
-    max-height:calc(3*var(--item-h) + 2*var(--gap));
-    overflow-y:auto; padding-right:6px;
+/* kanban sem “caixa” e sem cortes; alinhar à esquerda */
+body[data-page="prep-eletrica"] .kanban-board{
+  justify-content:flex-start !important;
+  max-height:none !important;
+  overflow-x:visible !important;
+}
+body[data-page="prep-eletrica"] .kanban-board.mini-board{
+  display:grid !important;
+  grid-template-columns:1fr !important;
+  gap:12px;
+  align-content:start;
+}
+
+/* listas com 3 itens visíveis e rolagem */
+body[data-page="prep-eletrica"] #prod-col-fila,
+body[data-page="prep-eletrica"] #prod-col-emprod{
+  --item-h:64px; --gap:10px;
+  max-height:calc(3*var(--item-h) + 2*var(--gap));
+  overflow-y:auto;
+  padding-right:6px;
+}
+body[data-page="prep-eletrica"] .kanban-list > li{ min-height:var(--item-h); }
+
+
+/* ===== SCOPED ADDITIONS (v9) ===== */
+body[data-page="prep-eletrica"] #menu-notificacoes{ display:none !important; }
+
+/* Garante que a página fique colada no topo e ocupe toda a altura sem centralização */
+body[data-page="prep-eletrica"]{
+  display:block !important;
+  justify-content:flex-start !important;
+  align-items:stretch !important;
+  padding:0 !important;
+  height:auto !important;
+  min-height:100dvh !important;
+}
+body[data-page="prep-eletrica"] .wrapper{ overflow:visible !important; }
+
+/* Nunca cortar o quadro Kanban nesta página */
+body[data-page="prep-eletrica"] .kanban-board{ max-height:none !important; overflow-y:visible !important; }
+
+
+/* ===== SCOPED HEIGHT/OVERFLOW FIX (v10) ===== */
+body[data-page="prep-eletrica"] main,
+body[data-page="prep-eletrica"] .content-wrapper{
+  height:auto !important;
+  min-height:100dvh !important;
+  overflow:visible !important;
+}
+
+/* torne a coluna “mais comprida” para abrigar bem as listas */
+body[data-page="prep-eletrica"] .kanban-column{ min-height:60vh !important; }
+
+/* em telas >=900px, duas colunas lado a lado */
+@media (min-width:900px){
+  body[data-page="prep-eletrica"] .kanban-board.mini-board{
+    grid-template-columns: 1fr 1fr !important;
   }
-  #produtoTab .kanban-list > li{ min-height:var(--item-h); }
+}
+
+
+/* ===== REMOVE FAIXA ESCURA — v11 (scoped) ===== */
+body[data-page="prep-eletrica"] .kanban-page,
+body[data-page="prep-eletrica"] .kanban-board,
+body[data-page="prep-eletrica"] .kanban-column,
+body[data-page="prep-eletrica"] .kanban-header,
+body[data-page="prep-eletrica"] .kanban-list{
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-page="prep-eletrica"] .kanban-column{
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  min-height: 60vh !important; /* mantém mais comprida */
+}
+body[data-page="prep-eletrica"] .kanban-header{
+  border: 0 !important;
+  padding-left: 0.25rem !important;
+  padding-right: 0.25rem !important;
+}
+
+
+/* ===== LAYOUT REFINEMENT — v12 ===== */
+body[data-page="prep-eletrica"] .kanban-board{
+  justify-content:flex-start !important;
+  align-items:flex-start !important;
+  max-height:none !important;
+  overflow:visible !important;
+}
+/* 1 coluna em telas pequenas; 2 colunas já a partir de 768px */
+body[data-page="prep-eletrica"] .kanban-board.mini-board{
+  display:grid !important;
+  grid-template-columns:1fr !important;
+  gap:12px;
+}
+@media (min-width:768px){
+  body[data-page="prep-eletrica"] .kanban-board.mini-board{
+    grid-template-columns:1fr 1fr !important;
+  }
+}
+/* Colunas sem altura mínima para não criar “vazio” enorme */
+body[data-page="prep-eletrica"] .kanban-column{
+  min-height:auto !important;
+}
+/* remove qualquer overflow escondido em contêineres ancestrais */
+body[data-page="prep-eletrica"] .wrapper,
+body[data-page="prep-eletrica"] main,
+body[data-page="prep-eletrica"] #produtoTab .content-wrapper{
+  overflow:visible !important;
+  height:auto !important;
+  min-height:100dvh !important;
 }
 
 </style>
 
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0" /> -->
   <title>Preparação Elétrica | Sistema de Produção</title>
   <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -374,7 +466,7 @@ body {
   </style>
 </head>
 
-<body>
+<body data-page="prep-eletrica">
   <div class="dark-light">
     <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
          stroke-linecap="round" stroke-linejoin="round">
@@ -431,7 +523,15 @@ body {
 
     <div class="wrapper">
       <!-- ===== MENU LATERAL ===== -->
-      
+      <aside class="left-side" role="complementary">
+        <div class="side-wrapper">
+          <div class="side-title">Aqui será a NIQ</div>
+          <nav class="side-menu" aria-label="Menu lateral">
+            <a href="#" class="menu-link">Item a ser verificado 01</a>
+            <a href="#" class="menu-link">Item a ser verificado 02</a>
+          </nav>
+        </div>
+      </aside>
 
       <!-- ===== CONTEÚDO PRINCIPAL ===== -->
       <main role="main">
@@ -1278,5 +1378,19 @@ if ('serviceWorker' in navigator) {
   });
 }
   </script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  try{ window.scrollTo(0,0); }catch(e){}
+  // se trocar de aba, ainda forçamos o topo
+  var mainMenu = document.getElementById('mainMenu');
+  if (mainMenu){
+    mainMenu.addEventListener('click', function(){
+      setTimeout(function(){ try{ window.scrollTo(0,0); }catch(e){} }, 0);
+    });
+  }
+});
+</script>
+
 </body>
 </html>
