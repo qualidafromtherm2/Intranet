@@ -2,13 +2,17 @@
 <html lang="pt-BR">
 <head>
   <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#0f0f1e">
 
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Preparação Elétrica | Sistema de Produção</title>
   <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
-  
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f1e">
+  <meta name="mobile-web-app-capable" content="yes">
+
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png">
+
   <!-- Font Awesome -->
   <link rel="stylesheet" 
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
@@ -20,6 +24,16 @@
   <link rel="stylesheet" href="menu_produto.css" />
   
   <style>
+    html, body { height: 100%; }
+body {
+  min-height: 100svh; /* usa viewport dinâmico (móvel) */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background-color: #0f0f1e;
+}
+
   /* ============================== */
 /* VARIÁVEIS (tema)               */
 /* ============================== */
@@ -1154,11 +1168,14 @@ const setupQRFunctionality = () => {
       console.log('✅ Preparação Elétrica inicializada com sucesso');
     });
 
-    if ('serviceWorker' in navigator) {
+
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   });
 }
+
+
   </script>
 </body>
 </html>
