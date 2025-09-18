@@ -1,10 +1,36 @@
 
 /* =============================
-   PREPARAÇÃO ELÉTRICA — JS
-   (código exclusivo desta página; sem depender de CSS externo)
+   PREPARAÇÃO ELÉTRICA — JS (independente)
+   Correções:
+   - API_BASE configurável (meta[name="api-base"] ou auto por host)
+   - Normalização de URL de imagem (evita mixed-content http/https)
+   - Rotas do fetch usam API_BASE (Render e localhost)
    ============================= */
 
 import { initPreparacaoKanban } from '../kanban/kanban_preparacao.js';
+
+/* ---------- Base de API ----------
+   1) Se existir <meta name="api-base" content="..."> usa ela
+   2) Se estiver em *.onrender.com usa https://<host>/api
+   3) Senão, usa '/api' (localhost) */
+export const API_BASE = (() => {
+  const meta = document.querySelector('meta[name="api-base"]')?.content?.trim();
+  if (meta) return meta.replace(/\/$/, '');
+  if (location.hostname.endsWith('onrender.com')) {
+    return `https://${location.host}/api`;
+  }
+  return '/api';
+})();
+
+// Normaliza URL de imagem: resolve relativa e força https quando a página for https
+function normalizeImageUrl(imgUrl) {
+  if (!imgUrl) return null;
+  try {
+    const u = new URL(String(imgUrl), location.href);
+    if (location.protocol === 'https:' && u.protocol === 'http:') u.protocol = 'https:';
+    return u.toString();
+  } catch { return imgUrl; }
+}
 
 // força rolar para o topo quando a página/abas carregam
 const forceTop = () => { try { window.scrollTo(0,0); } catch(e){} };
@@ -102,7 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const openEventosQuery = (query) => {
       const csv = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
-      const base = csv ? '/api/preparacao/eventos.csv' : '/api/preparacao/eventos';
+      const base = csv ? `${API_BASE}/preparacao/eventos.csv` : `${API_BASE}/preparacao/eventos`;
       const qs = new URLSearchParams(query);
       const url = `${base}?${qs.toString()}`;
       if (csv) { const a = document.createElement('a'); a.href=url; a.download='op_eventos.csv'; document.body.appendChild(a); a.click(); a.remove(); }
@@ -128,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     elements.btnBaixarCsv?.addEventListener('click', () => {
       const a = document.createElement('a');
-      a.href = '/api/preparacao/csv'; a.download = 'preparacao.csv';
+      a.href = `${API_BASE}/preparacao/csv`; a.download = 'preparacao.csv';
       document.body.appendChild(a); a.click(); a.remove();
     });
   };
@@ -142,21 +168,25 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ===== Foto do produto =====
-  async function fetchPrimeiraFoto(codigoAlfa) {
-    if (!codigoAlfa) return null;
-    const resp = await fetch(`/api/produtos/${encodeURIComponent(codigoAlfa)}/fotos`, { cache: 'no-store' });
-    if (!resp.ok) return null;
-    const j = await resp.json();
-    const fotos = Array.isArray(j?.fotos) ? j.fotos : [];
-    if (!fotos.length) return null;
-    const ord = fotos.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
-    const f0  = ord[0];
-    return (f0 && typeof f0.url_imagem === 'string' && f0.url_imagem.trim()) ? f0.url_imagem.trim() : null;
+  async function fetchPrimeiraFoto(codigoAlfaOuNum) {
+    if (!codigoAlfaOuNum) return null;
+    const endpoint = `${API_BASE}/produtos/${encodeURIComponent(codigoAlfaOuNum)}/fotos`;
+    try {
+      const resp = await fetch(endpoint, { cache: 'no-store', credentials: 'include' });
+      if (!resp.ok) return null;
+      const j = await resp.json();
+      // aceita {fotos: [...] } ou { data: [...] }
+      const fotos = Array.isArray(j?.fotos) ? j.fotos : (Array.isArray(j?.data) ? j.data : []);
+      if (!fotos.length) return null;
+      const ord = fotos.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
+      const f0  = ord[0];
+      const raw = f0?.url_imagem ?? f0?.url ?? f0?.imagem ?? null;
+      return normalizeImageUrl(raw);
+    } catch { return null; }
   }
   async function updateProdutoFotoFrame(codigoPreferencial) {
-    const box = document.getElementById('produto-foto-box');
     const img = document.getElementById('produto-foto-img');
-    if (!box || !img) return;
+    if (!img) return;
     let url = null;
     try { url = await fetchPrimeiraFoto(codigoPreferencial); } catch{}
     if (url) { img.src = url; img.style.objectFit='cover'; }
@@ -198,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ulMiniFila || !ulMiniEm){ console.warn('[mini-board] listas não encontradas'); return; }
 
     try {
-      const resp = await fetch('/api/preparacao/listar', { cache:'no-store' });
+      const resp = await fetch(`${API_BASE}/preparacao/listar`, { cache:'no-store', credentials:'include' });
       const payload = await resp.json();
       const data   = payload?.data || {};
       const fila   = data['A Produzir'] || [];
@@ -207,8 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const codAlfa = String(codigoAlfa || '').trim();
       const codNum  = codigoProdutoNum ? String(codigoProdutoNum).trim() : null;
 
-      let fotoAlfa = codAlfa;
-      if (!fotoAlfa && codNum) fotoAlfa = codNum;
+      let fotoAlfa = codAlfa || codNum || null;
       await updateProdutoFotoFrame(fotoAlfa);
 
       // resolver CP → alfa
@@ -217,8 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
       let cpToAlpha = {};
       if (cps.length){
         const qs = cps.map(cp => 'cp='+encodeURIComponent(cp)).join('&');
-        try { const r = await fetch('/api/produtos/codigos?'+qs); const j = await r.json(); cpToAlpha = j?.data || {}; }
-        catch(e){ console.warn('[mini-board] falha ao resolver CP→alfa:', e); }
+        try {
+          const r = await fetch(`${API_BASE}/produtos/codigos?`+qs, { credentials:'include' });
+          const j = await r.json();
+          cpToAlpha = j?.data || {};
+        } catch(e){ console.warn('[mini-board] falha ao resolver CP→alfa:', e); }
       }
       const alphaFromCP = cp => (cpToAlpha[cp]?.codigo || null);
 
@@ -251,20 +283,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const pushLi = (frag, op) => {
         const li = document.createElement('li'); li.className='kanban-card'; li.textContent = op || '—'; frag.appendChild(li);
       };
-      if (listaFila.length === 0) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
-      else { for (const c of listaFila) pushLi(fragFila, c.op); }
-
       if (listaEmProd.length === 0) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragEm.appendChild(li); }
       else { for (const c of listaEmProd) pushLi(fragEm, c.op); }
 
+      if (listaFila.length === 0) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
+      else { for (const c of listaFila) pushLi(fragFila, c.op); }
+
       if (rid !== window.__miniRID) return;
-      ulMiniFila.replaceChildren(fragFila);
       ulMiniEm.replaceChildren(fragEm);
+      ulMiniFila.replaceChildren(fragFila);
     } catch (err){
       if (rid !== window.__miniRID) return;
       console.error('[mini-board] erro:', err);
-      document.getElementById('prod-col-fila').innerHTML = '<li class="empty">Erro carregando dados</li>';
-      document.getElementById('prod-col-emprod').innerHTML = '';
+      document.getElementById('prod-col-emprod').innerHTML = '<li class="empty">Erro carregando dados</li>';
+      document.getElementById('prod-col-fila').innerHTML = '';
     }
     fitProdutoKanbanHeight();
   }
@@ -406,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     try {
-      const eventSource = new EventSource('/api/produtos/stream');
+      const eventSource = new EventSource(`${API_BASE}/produtos/stream`);
       eventSource.onmessage = (event) => {
         try { const message = JSON.parse(event.data); if (message?.type === 'hello') return; } catch {}
         refresh();
