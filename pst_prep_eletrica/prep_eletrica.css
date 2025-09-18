@@ -1,227 +1,133 @@
 
-/* =============================
-   PREPARAÇÃO ELÉTRICA — CSS (independente)
-   ============================= */
+/* ============================================
+   PREPARAÇÃO ELÉTRICA — CSS LIMPO (independente)
+   Mantém somente o necessário para esta página.
+   ============================================ */
 
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap");
 
 :root{
-  --theme-bg-color: rgba(16 18 27 / 40%);
-  --border-color: rgba(113 119 144 / 25%);
-  --theme-color: #f9fafb;
-  --inactive-color: rgb(113 119 144 / 78%);
-  --body-font: "Poppins", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  --header-height: 58px;
+  --bg: #0f0f1e;
+  --fg: #f9fafb;
+  --muted: rgb(113 119 144 / 78%);
+  --border: rgba(113 119 144 / 25%);
+  --header-h: 58px;
+
   --primary:#4f46e5;
-  --primary-light:#22d3ee;
+  --primary-2:#22d3ee;
   --success:#16a34a;
-  --success-light:#22c55e;
-  --bg-card:rgba(255,255,255,.05);
-  --radius-lg: 14px;
-  --radius: 12px;
+  --success-2:#22c55e;
+
+  --card: rgba(255,255,255,.06);
+  --card-2: rgba(255,255,255,.05);
+
+  --radius: 14px;
 }
 
-*{box-sizing:border-box;outline:none}
-html,body{height:100%;max-width:100vw;overflow-x:hidden;-webkit-text-size-adjust:100%}
-img,svg,video,canvas{max-width:100%;height:auto;display:block}
+*{ box-sizing: border-box; }
+html,body{ height:100%; max-width:100vw; overflow-x:hidden; -webkit-text-size-adjust:100%; }
 body{
   margin:0;
-  background:#0f0f1e;
-  color:var(--theme-color);
-  font-family:var(--body-font);
+  background:var(--bg);
+  color:var(--fg);
+  font-family:"Poppins", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   line-height:1.35;
 }
 
-.app{
-  width:100%;
-  max-width:1250px;
-  margin-inline:auto;
-  display:flex;
-  flex-direction:column;
-  position:relative;
-  border-radius:var(--radius-lg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
+/* ---------- App & Header minimal ---------- */
+.app{ max-width:1250px; margin-inline:auto; display:flex; flex-direction:column; }
 .header{
-  height:var(--header-height);
-  display:flex;
-  align-items:center;
-  padding:0 30px;
-  border-bottom:1px solid var(--border-color);
-  gap:0.75rem;
+  height:var(--header-h);
+  display:flex; align-items:center; gap:.75rem;
+  padding:0 30px; border-bottom:1px solid var(--border);
 }
 .menu-logo{ width:100px; height:15px; object-fit:cover; margin-right:195px; flex-shrink:0; }
-.header-menu{ display:flex; align-items:center; flex:1 1 auto; overflow:hidden; }
-.header-menu .menu-link{
-  padding:20px 24px; text-decoration:none; color:var(--inactive-color);
-  border-bottom:2px solid transparent; transition:.25s;
-}
+.header-menu{ display:flex; align-items:center; gap:6px; }
+.header-menu .menu-link{ padding:20px 24px; text-decoration:none; color:var(--muted); border-bottom:2px solid transparent; }
 .header-menu .menu-link.is-active,
-.header-menu .menu-link:hover{ color:var(--theme-color); border-bottom-color:var(--theme-color); }
+.header-menu .menu-link:hover{ color:var(--fg); border-bottom-color:var(--fg); }
 
-.more-btn{ display:none; background:none; border:0; color:var(--inactive-color); font-size:24px; cursor:pointer; }
-.more-menu{ position:absolute; top:var(--header-height); right:30px; display:none; flex-direction:column;
-  min-width:160px; background:#21242d; border:1px solid var(--border-color); border-radius:4px; z-index:100; }
-.more-menu.open{ display:flex; }
-.more-menu a{ padding:10px 16px; color:var(--theme-color); text-decoration:none; white-space:nowrap; }
-.more-menu a:hover{ background:#2a2e3c; }
+/* removidos elementos que não usamos */
+.search-bar,.header-profile,.left-side,.more-btn,.more-menu,.dark-light{ display:none !important; }
 
-.search-bar{ display:none; }
-.header-profile{ display:none; }
-.left-side{ display:none !important; }
+/* ---------- Conteúdo ---------- */
+.wrapper{ display:flex; flex:1 1 auto; }
+main{ width:100%; }
+.content-wrapper{ padding:20px 40px; }
+.content-section-title{ margin:0 0 8px 0; font-size:1.25rem; }
 
-.wrapper{ display:flex; flex-grow:1; }
-.content-wrapper{
-  flex:1 1 auto;
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-  padding:20px 40px;
-  color:var(--theme-color);
-  background:transparent;
-}
-.content-section-title{ font-size:1.25rem; margin:0; }
-
-/* ===== PRODUTO ===== */
-/* Foto+botões em cima, board abaixo */
-.produto-layout{
-  display:flex !important;
-  flex-direction:column !important;
-  gap:16px !important;
-}
-.side-actions{ display:flex; flex-direction:column; gap:12px; }
-.btn-stack{ display:flex; flex-direction:column; gap:12px; width:100%; }
-
-/* Foto */
+/* ---------- Foto + Botões ---------- */
 .produto-foto-box{
-  width:100%;
-  aspect-ratio:4/3;
-  border-radius:var(--radius-lg);
-  overflow:hidden;
-  background:rgba(255,255,255,.06) center/contain no-repeat;
+  width:100%; aspect-ratio:16/9; border-radius:var(--radius);
+  background:var(--card) center/cover no-repeat;
   border:1px solid rgba(255,255,255,.08);
-  display:grid; place-items:center;
+  overflow:hidden; display:grid; place-items:center;
 }
 .produto-foto-box img{ width:100%; height:100%; object-fit:cover; }
 
-/* Botões */
+.btn-stack{ display:flex; flex-direction:column; gap:12px; margin-top:12px; }
 .btn-modern{
-  appearance:none; border:0; width:100%;
-  padding:16px 20px; border-radius:var(--radius-lg);
-  font-weight:600; letter-spacing:.3px; cursor:pointer;
-  color:#fff; background:linear-gradient(135deg,var(--primary),var(--primary-light));
+  appearance:none; border:0; width:100%; padding:16px 20px; border-radius:var(--radius);
+  font-weight:600; letter-spacing:.3px; cursor:pointer; color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-2));
   box-shadow:0 12px 22px rgba(79,70,229,.22),0 6px 10px rgba(34,211,238,.18);
-  transition: all .2s ease;
+  transition:transform .15s ease, box-shadow .15s ease;
 }
 .btn-modern:hover{ transform:translateY(-2px); box-shadow:0 16px 26px rgba(79,70,229,.28),0 10px 14px rgba(34,211,238,.22); }
-.btn-modern:active{ transform:none; }
-.btn-modern.btn-success{ background:linear-gradient(135deg,var(--success),var(--success-light)); }
+.btn-modern.btn-success{ background:linear-gradient(135deg,var(--success),var(--success-2)); }
 
-/* Kanban */
-.kanban-page{ width:100%; }
-.kanban-board{ display:grid !important; grid-template-columns: repeat(3, minmax(280px,1fr)); gap:24px; margin-top:12px;
-               justify-content:flex-start; align-items:flex-start; max-height:none; overflow:visible; }
+/* ---------- Layout da aba Produto ---------- */
+.produto-layout{ display:flex; flex-direction:column; gap:16px; }
 
-/* Mini-board SEMPRE com 2 colunas lado a lado */
+/* Mini-board: SEMPRE 2 colunas lado a lado
+   Ordem do DOM deve ser: Em produção (1ª) | Fila de produção (2ª) */
 .kanban-board.mini-board{
   display:grid !important;
-  grid-template-columns: 1fr 1fr !important; /* Em produção | Fila de produção */
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr) !important;
   gap:16px !important;
   align-items:start !important;
   justify-content:start !important;
   overflow:visible !important;
 }
-/* neutraliza qualquer order/width anteriores */
+
+/* neutraliza qualquer regra antiga de reordenação ou largura */
 .kanban-board.mini-board .kanban-column{
   order:initial !important;
   flex:initial !important;
   width:auto !important;
+  max-width:none !important;
+  min-width:0 !important;
 }
 
+/* ---------- Estilo de coluna e cartões ---------- */
 .kanban-column{
-  background:var(--bg-card);
-  border-radius:var(--radius-lg);
-  border:1px solid rgba(255,255,255,.1);
-  padding:20px;
-  display:flex; flex-direction:column; min-height:0;
+  background:var(--card-2);
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:var(--radius);
+  padding:16px;
+  display:flex; flex-direction:column;
 }
-.kanban-header{ margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid rgba(255,255,255,.1); }
-.kanban-header span{ font-weight:600; font-size:16px; }
+.kanban-header{ margin:0 0 12px 0; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,.1); }
+.kanban-header span{ font-weight:600; }
 
-.kanban-list{
-  list-style:none; margin:0; padding:0;
-  flex:1 1 auto; min-height:0; overflow-y:auto; padding-right:6px; padding-bottom:8px;
-}
+.kanban-list{ list-style:none; margin:0; padding:0; max-height:60vh; overflow:auto; }
 .kanban-card{
   background:rgba(255,255,255,.05);
   border:1px solid rgba(255,255,255,.1);
   border-radius:12px;
-  padding:16px; margin-bottom:12px;
-  transition:.2s ease; cursor:default;
+  padding:14px; margin-bottom:10px;
 }
-.kanban-card:hover{ background:rgba(255,255,255,.1); transform:translateY(-2px); }
 .kanban-card:last-child{ margin-bottom:0; }
-.empty{ color:#a1a1aa; font-style:italic; text-align:center; padding:24px 16px; }
+.empty{ color: #a1a1aa; font-style: italic; text-align:center; padding:18px 8px; }
 
-/* Scrollbar */
+/* ---------- Scrollbar simpática ---------- */
 ::-webkit-scrollbar{ width:8px; height:8px }
 ::-webkit-scrollbar-track{ background:rgba(255,255,255,.05); border-radius:4px }
 ::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.2); border-radius:4px }
 ::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,.3) }
 
-/* Responsivo base (mantém foto 16:9 em telas menores) */
+/* ---------- Ajustes responsivos leves ---------- */
 @media (max-width:1100px){
-  .kanban-column{ padding:14px }
-  .produto-foto-box{ aspect-ratio:16/9 }
-}
-
-/* hotfix: esconder ícone dark/light gigante */
-.dark-light{ display:none !important; }
-.dark-light svg{ width:24px; height:24px; }
-
-
-/* === MINI-BOARD: sempre duas colunas, Em produção | Fila de produção === */
-.kanban-board.mini-board{
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) minmax(0,1fr) !important;
-  gap: 16px !important;
-  align-items: start !important;
-  justify-content: start !important;
-  overflow: visible !important;
-}
-/* garante que nenhuma regra antiga de flex/order interfira */
-.kanban-board.mini-board .kanban-column{
-  order: initial !important;
-  flex: initial !important;
-  width: auto !important;
-  min-width: 0 !important;
-}
-
-/* === MINI-BOARD: SEMPRE 2 colunas, Em produção | Fila de produção === */
-body[data-page="prep-eletrica"] #produtoTab .kanban-board.mini-board{
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) minmax(0,1fr) !important;
-  grid-auto-flow: column !important; /* garante preenchimento por coluna/ordem do DOM */
-  gap: 16px !important;
-  align-items: start !important;
-  justify-content: start !important;
-  overflow: visible !important;
-}
-
-/* neutraliza qualquer reordenação/largura herdada (flex/order/width:100%) */
-body[data-page="prep-eletrica"] #produtoTab .kanban-board.mini-board .kanban-column{
-  order: initial !important;
-  flex: initial !important;
-  width: auto !important;
-  max-width: none !important;
-  min-width: 0 !important;
-}
-
-/* certifica que o board fica ABAIXO da foto+botões, mas as colunas lado a lado */
-body[data-page="prep-eletrica"] #produtoTab .produto-layout{
-  display: flex !important;
-  flex-direction: column !important; /* foto/botões em cima; board abaixo */
-  gap: 16px !important;
+  .content-wrapper{ padding:16px 20px; }
+  .produto-foto-box{ aspect-ratio:4/3; }
 }
