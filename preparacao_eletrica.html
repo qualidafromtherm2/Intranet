@@ -1,473 +1,29 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <link rel="manifest" href="/manifest.webmanifest">
-
   <meta charset="UTF-8" />
-
-  <style>
-    
-  html,body{max-width:100vw;overflow-x:hidden}
-  img,svg,canvas,video{max-width:100%;height:auto}
-  /* trava zoom automático do Android */
-  html{-webkit-text-size-adjust:100%}
-
-/* ===== PREPARACAO ELETRICA — SCOPED FIX (v8) ===== */
-body[data-page="prep-eletrica"]{ min-height:100dvh; }
-
-/* limpar fundos internos e usar 100% da área */
-body[data-page="prep-eletrica"] .content-wrapper{
-  background: transparent !important;
-  padding: 8px 12px !important;
-}
-
-/* esconder barra NIQ e aproveitar largura sem mexer no HTML global */
-body[data-page="prep-eletrica"] .left-side{ display:none !important; }
-
-/* simplificar topo: sem busca, sininho, impressora, nuvem, avatar, e esconder a guia Gestão */
-body[data-page="prep-eletrica"] .search-bar,
-body[data-page="prep-eletrica"] .header-profile{ display:none !important; }
-body[data-page="prep-eletrica"] #menu-gestao{ display:none !important; }
-
-/* ordem: foto + botões acima; kanban abaixo */
-body[data-page="prep-eletrica"] .produto-layout{
-  display:grid !important;
-  grid-template-columns:1fr !important;
-  gap:16px;
-  align-content:start;
-}
-body[data-page="prep-eletrica"] .side-actions{ order:1 !important; display:block !important; }
-body[data-page="prep-eletrica"] .kanban-board{ order:2 !important; }
-
-/* kanban sem “caixa” e sem cortes; alinhar à esquerda */
-body[data-page="prep-eletrica"] .kanban-board{
-  justify-content:flex-start !important;
-  max-height:none !important;
-  overflow-x:visible !important;
-}
-body[data-page="prep-eletrica"] .kanban-board.mini-board{
-  display:grid !important;
-  grid-template-columns:1fr !important;
-  gap:12px;
-  align-content:start;
-}
-
-/* listas com 3 itens visíveis e rolagem */
-body[data-page="prep-eletrica"] #prod-col-fila,
-body[data-page="prep-eletrica"] #prod-col-emprod{
-  --item-h:64px; --gap:10px;
-  max-height:calc(3*var(--item-h) + 2*var(--gap));
-  overflow-y:auto;
-  padding-right:6px;
-}
-body[data-page="prep-eletrica"] .kanban-list > li{ min-height:var(--item-h); }
-
-
-/* ===== SCOPED ADDITIONS (v9) ===== */
-body[data-page="prep-eletrica"] #menu-notificacoes{ display:none !important; }
-
-/* Garante que a página fique colada no topo e ocupe toda a altura sem centralização */
-body[data-page="prep-eletrica"]{
-  display:block !important;
-  justify-content:flex-start !important;
-  align-items:stretch !important;
-  padding:0 !important;
-  height:auto !important;
-  min-height:100dvh !important;
-}
-body[data-page="prep-eletrica"] .wrapper{ overflow:visible !important; }
-
-/* Nunca cortar o quadro Kanban nesta página */
-body[data-page="prep-eletrica"] .kanban-board{ max-height:none !important; overflow-y:visible !important; }
-
-
-/* ===== SCOPED HEIGHT/OVERFLOW FIX (v10) ===== */
-body[data-page="prep-eletrica"] main,
-body[data-page="prep-eletrica"] .content-wrapper{
-  height:auto !important;
-  min-height:100dvh !important;
-  overflow:visible !important;
-}
-
-/* torne a coluna “mais comprida” para abrigar bem as listas */
-body[data-page="prep-eletrica"] .kanban-column{ min-height:60vh !important; }
-
-/* em telas >=900px, duas colunas lado a lado */
-@media (min-width:900px){
-  body[data-page="prep-eletrica"] .kanban-board.mini-board{
-    grid-template-columns: 1fr 1fr !important;
-  }
-}
-
-
-/* ===== REMOVE FAIXA ESCURA — v11 (scoped) ===== */
-body[data-page="prep-eletrica"] .kanban-page,
-body[data-page="prep-eletrica"] .kanban-board,
-body[data-page="prep-eletrica"] .kanban-column,
-body[data-page="prep-eletrica"] .kanban-header,
-body[data-page="prep-eletrica"] .kanban-list{
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-body[data-page="prep-eletrica"] .kanban-column{
-  border: none !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  min-height: 60vh !important; /* mantém mais comprida */
-}
-body[data-page="prep-eletrica"] .kanban-header{
-  border: 0 !important;
-  padding-left: 0.25rem !important;
-  padding-right: 0.25rem !important;
-}
-
-
-/* ===== LAYOUT REFINEMENT — v12 ===== */
-body[data-page="prep-eletrica"] .kanban-board{
-  justify-content:flex-start !important;
-  align-items:flex-start !important;
-  max-height:none !important;
-  overflow:visible !important;
-}
-/* 1 coluna em telas pequenas; 2 colunas já a partir de 768px */
-body[data-page="prep-eletrica"] .kanban-board.mini-board{
-  display:grid !important;
-  grid-template-columns:1fr !important;
-  gap:12px;
-}
-@media (min-width:768px){
-  body[data-page="prep-eletrica"] .kanban-board.mini-board{
-    grid-template-columns:1fr 1fr !important;
-  }
-}
-/* Colunas sem altura mínima para não criar “vazio” enorme */
-body[data-page="prep-eletrica"] .kanban-column{
-  min-height:auto !important;
-}
-/* remove qualquer overflow escondido em contêineres ancestrais */
-body[data-page="prep-eletrica"] .wrapper,
-body[data-page="prep-eletrica"] main,
-body[data-page="prep-eletrica"] #produtoTab .content-wrapper{
-  overflow:visible !important;
-  height:auto !important;
-  min-height:100dvh !important;
-}
-
-</style>
-
-  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0" /> -->
-  <title>Preparação Elétrica | Sistema de Produção</title>
-  <meta name="description" content="Sistema de gestão de preparação elétrica com kanban board">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f0f1e">
-<meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0f0f1e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png">
 
-<link rel="icon" href="/icons/icon-192.png">
-
-  <!-- Font Awesome -->
-  <link rel="stylesheet" 
+  <!-- Font Awesome (ícones) -->
+  <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
         integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw=="
-        crossorigin="anonymous"
-        referrerpolicy="no-referrer" />
-  
-  <!-- CSS principal -->
-  <link rel="stylesheet" href="/menu_produto.css?v=pe-005" />
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
 
+  <!-- CSS exclusivo desta página -->
+  <link rel="stylesheet" href="./pst_prep_eletrica/prep_eletrica.css">
 
-  
-  <style>
-
-    html, body { height: 100%; }
-body {
-  min-height: 100svh; /* usa viewport dinâmico (móvel) */
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  background-color: #0f0f1e;
-}
-
-  /* ============================== */
-/* VARIÁVEIS (tema)               */
-/* ============================== */
-:root{
-  --primary:#4f46e5;
-  --primary-light:#22d3ee;
-  --success:#16a34a;
-  --success-light:#22c55e;
-  --header-bg:#111;
-  --text:#fff;
-  --text-muted:#a1a1aa;
-  --bg-card:rgba(255,255,255,.05);
-  --border-radius:16px;
-  --border-radius-sm:12px;
-  --shadow-base:0 12px 22px rgba(79,70,229,.22),0 6px 10px rgba(34,211,238,.18);
-  --shadow-hover:0 16px 26px rgba(79,70,229,.28),0 10px 14px rgba(34,211,238,.22);
-  --transition:all .2s ease;
-}
-
-/* ============================== */
-/* MODAL QR                       */
-/* ============================== */
-#qrModal{position:fixed;inset:0;display:none;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:2000;align-items:center;justify-content:center;padding:24px;animation:fadeIn .3s ease-out}
-#qrModal.open{display:flex}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.qr-box{width:min(640px,100%);background:var(--header-bg);color:var(--text);border-radius:var(--border-radius);box-shadow:0 25px 50px rgba(0,0,0,.4);padding:24px;animation:slideUp .3s ease-out}
-@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-.qr-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,.1)}
-.qr-close{appearance:none;border:0;background:transparent;font-size:26px;line-height:1;cursor:pointer;color:var(--text-muted);transition:var(--transition);padding:8px;border-radius:8px}
-.qr-close:hover{color:var(--text);background:rgba(255,255,255,.1)}
-#qrReader{width:100%;height:60vh;max-height:400px;background:#000;border-radius:var(--border-radius-sm);overflow:hidden;margin-bottom:16px}
-#qrReader video{width:100%!important;height:100%!important;object-fit:cover;filter:brightness(1.15) contrast(1.08)}
-
-/* ============================== */
-/* LAYOUT GERAL                   */
-/* ============================== */
-/* LAYOUT DA ABA PRODUTO: grid com board (à esquerda) + lateral (à direita) */
-/* LAYOUT DA ABA PRODUTO: board (esq) + lateral (dir) */
-.produto-layout{
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px; /* <<< lateral 240 para sobrar + ao board */
-  gap: 24px;
-  align-items: start;
-  margin-top: 24px;
-}
-
-
-.side-actions{
-  width: auto;          /* não força 240px; quem define é a coluna do grid (260) */
-  flex: initial;        /* neutraliza configs antigas de flex */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.gestao-layout{display:flex;gap:20px;align-items:flex-start;margin-top:24px}
-.kanban-board.mini-board,
-.kanban-column{min-height:0}
-#produtoTab .content-wrapper{overflow:visible}
-
-/* bloco lateral (foto + botões) */
-.side-actions .btn-stack{width:100%}
-.side-actions .produto-foto-box{width:100%}
-
-/* ============================== */
-/* QUADRO DA FOTO DO PRODUTO      */
-/* ============================== */
-.produto-foto-box{
-  width:100%;
-  aspect-ratio:4/3;
-  margin-bottom:12px;
-  border-radius:var(--border-radius);
-  overflow:hidden;
-  background:rgba(255,255,255,.06) url('../img/logo.png') center/contain no-repeat;
-  border:1px solid rgba(255,255,255,.08);
-  display:grid;place-items:center
-}
-.produto-foto-box img{width:100%;height:100%;object-fit:cover;display:block}
-
-/* ============================== */
-/* BOTÕES                         */
-/* ============================== */
-.btn-stack{display:flex;flex-direction:column;gap:12px;width:100%}
-.btn-modern{appearance:none;border:0;width:100%;padding:16px 20px;border-radius:var(--border-radius);font-weight:600;letter-spacing:.3px;cursor:pointer;color:var(--text);background:linear-gradient(135deg,var(--primary),var(--primary-light));box-shadow:var(--shadow-base);transition:var(--transition);position:relative;overflow:hidden;font-size:14px}
-.btn-modern::before{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);transition:left .5s ease}
-.btn-modern:hover{transform:translateY(-2px);box-shadow:var(--shadow-hover)}
-.btn-modern:hover::before{left:100%}
-.btn-modern:active{transform:translateY(0);filter:brightness(.96)}
-.btn-modern.btn-success{background:linear-gradient(135deg,var(--success),var(--success-light));box-shadow:0 12px 22px rgba(22,163,74,.22),0 6px 10px rgba(34,197,94,.18)}
-.btn-modern.btn-success:hover{box-shadow:0 16px 26px rgba(22,163,74,.28),0 10px 14px rgba(34,197,94,.22)}
-.btn-modern.btn-ghost{background:transparent;color:var(--primary);box-shadow:inset 0 0 0 2px rgba(79,70,229,.45)}
-.btn-modern.btn-ghost:hover{transform:none;filter:none;box-shadow:inset 0 0 0 2px rgba(79,70,229,.65),0 4px 12px rgba(0,0,0,.1);background:rgba(79,70,229,.05)}
-
-/* ============================== */
-/* MENU SQL (Gestão)              */
-/* ============================== */
-.sql-menu{position:absolute;right:0;top:calc(100% + 12px);background:var(--header-bg);color:var(--text);border-radius:var(--border-radius-sm);box-shadow:0 20px 40px rgba(0,0,0,.3);padding:8px;min-width:220px;display:none;z-index:3000;border:1px solid rgba(255,255,255,.1)}
-.sql-menu.open{display:block;animation:slideDown .2s ease-out}
-@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
-.sql-menu button{width:100%;appearance:none;border:0;background:transparent;text-align:left;padding:12px 16px;cursor:pointer;border-radius:8px;color:inherit;transition:var(--transition);font-size:14px}
-.sql-menu button:hover{background:rgba(255,255,255,.1);color:var(--primary-light)}
-.sql-menu button:active{background:rgba(255,255,255,.15)}
-
-/* ============================== */
-/* KANBAN BOARD                   */
-/* ============================== */
-/* board “grande” (página inicial) */
-.kanban-board:not(.mini-board){
-  display:grid!important;
-  grid-template-columns:repeat(3,minmax(320px,1fr));
-  gap:24px;max-width:none!important;margin-top:24px
-}
-
-
-/* Board “mini” da aba Produto: sempre 2 colunas; cada uma encolhe até caber */
-.kanban-board.mini-board{
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) minmax(0,1fr);  /* <<< sempre 2 colunas */
-  gap: 20px;
-  overflow-x: visible;              /* não esconda a 2ª coluna */
-  -webkit-overflow-scrolling: touch;
-}
-
-
-
-
-/* coluna do kanban */
-.kanban-column{
-  width:auto!important;max-width:none!important;flex:0 0 auto!important;
-  background:var(--bg-card);
-  border-radius:var(--border-radius);
-  padding:20px;border:1px solid rgba(255,255,255,.1);
-  display:flex;flex-direction:column;min-height:0
-}
-
-/* cabeçalho da coluna */
-.kanban-header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.1)}
-.kanban-header span{font-weight:600;font-size:16px;color:var(--text)}
-
-/* lista de cards (área rolável) */
-.kanban-list{
-  list-style:none;padding:0;margin:0;
-  flex:1 1 auto;min-height:0;overflow-y:auto;
-  padding-right:6px;padding-bottom:8px
-}
-
-/* card */
-.kanban-card{
-  background:rgba(255,255,255,.05);
-  border:1px solid rgba(255,255,255,.1);
-  border-radius:var(--border-radius-sm);
-  padding:16px;margin-bottom:12px;
-  cursor:pointer;transition:var(--transition)
-}
-.kanban-card:hover{background:rgba(255,255,255,.1);transform:translateY(-2px);box-shadow:0 8px 16px rgba(0,0,0,.2)}
-.kanban-card:last-child{margin-bottom:0}
-.empty{color:var(--text-muted);font-style:italic;text-align:center;padding:24px 16px}
-
-/* ============================== */
-/* INPUTS                         */
-/* ============================== */
-.input-modern{width:100%;padding:12px 16px;border-radius:var(--border-radius-sm);border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05);color:var(--text);font-size:14px;transition:var(--transition)}
-.input-modern:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(79,70,229,.1)}
-.input-modern::placeholder{color:var(--text-muted)}
-.input-group{display:flex;gap:12px;margin-top:16px}
-
-/* ============================== */
-/* UTILITÁRIOS & ACESSIBILIDADE   */
-/* ============================== */
-.loading{opacity:.6;pointer-events:none}
-.fade-in{animation:fadeIn .3s ease-out}
-.slide-up{animation:slideUp .3s ease-out}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-.btn-modern:focus-visible,.qr-close:focus-visible{outline:2px solid var(--primary-light);outline-offset:2px}
-.kanban-card:focus-visible{outline:2px solid var(--primary-light);outline-offset:2px}
-
-/* ============================== */
-/* ESTADOS                        */
-/* ============================== */
-.btn-modern[disabled]{opacity:.6;cursor:not-allowed;transform:none}
-.btn-modern[disabled]:hover{transform:none;box-shadow:var(--shadow-base)}
-
-/* ============================== */
-/* SCROLLBAR (WebKit)             */
-/* ============================== */
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:4px}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
-
-/* ============================== */
-/* BREAKPOINTS                    */
-/* ============================== */
-
-/* Tablet/laptops médios: pequenos ajustes */
-@media (max-width:1100px){
-  #produtoTab .content-wrapper{padding:12px}
-  .kanban-column{padding:14px}
-  .produto-foto-box{aspect-ratio:16/9}
-}
-
-/* Tablet paisagem amplo (SM-T220 costuma reportar > 980px) */
-/* Força empilhamento no layout do Produto */
-/* Empilhar SOMENTE em telas menores (≤ 980px) */
-@media (max-width: 980px){
-  .produto-layout{
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 16px;
-  }
-  .kanban-board.mini-board{
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 12px;
-    overflow-x: visible;   /* quando empilha, não precisa rolar na horizontal */
-  }
-  .kanban-board.mini-board .kanban-column{
-    width: 100% !important;
-    max-width: none !important;
-    flex: 1 1 auto !important;
-    min-height: 0;
-  }
-  .side-actions{
-    order: 2;
-    width: 100%;
-    max-width: 640px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  .side-actions .btn-stack .content-button{ width: 100%; }
-}
-
-
-/* Telefones / tablet retrato */
-@media (max-width:980px){
-  .btn-stack .btn-modern{padding:14px 18px;font-size:1rem}
-  .kanban-list{padding-bottom:16px}
-}
-/* Tablet/laptops médios: apertar um pouco sem quebrar as 2 colunas */
-@media (max-width: 1368px){
-  .produto-layout{
-    grid-template-columns: minmax(0,1fr) 200px; /* lateral menor */
-    gap: 16px;
-  }
-  .kanban-board.mini-board{
-    gap: 16px;                                 /* cards mais próximos */
-  }
-  .kanban-column{
-    padding: 16px;                             /* menos padding interno */
-  }
-}
-
-@media (max-width: 1368px){
-  .kanban-card{ font-size: 14px; }
-}
-
-/* Empilhar só em telas realmente estreitas (celular/retrato) */
-@media (max-width: 980px){
-  .produto-layout{
-    grid-template-columns: 1fr; /* board em cima, lateral embaixo */
-    gap: 16px;
-  }
-  .kanban-board.mini-board{
-    grid-template-columns: 1fr; /* colunas do kanban empilham */
-    gap: 12px;
-    overflow-x: visible;
-  }
-}
-
-  </style>
+  <title>Preparação Elétrica | Sistema de Produção</title>
 </head>
-
 <body data-page="prep-eletrica">
-  <div class="dark-light">
+
+  <!-- botão dark/light (decorativo) -->
+  <div class="dark-light" aria-hidden="true">
     <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" fill="none"
          stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
@@ -475,179 +31,122 @@ body {
   </div>
 
   <div class="app">
-    <!-- ===== CABEÇALHO PRINCIPAL ===== -->
+    <!-- ===== CABEÇALHO ===== -->
     <header class="header" id="appHeader" role="banner">
       <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
 
       <nav id="mainMenu" class="header-menu" role="navigation" aria-label="Menu principal">
-        <a id="menu-inicio" class="menu-link is-active" data-target="paginaInicio" role="tab" aria-selected="true">
-          Início
-        </a>
-        <a id="menu-produto" class="menu-link" href="#" data-target="produtoTab" role="tab" aria-selected="false">
-          Produto
-        </a>
-        <a id="menu-qualidade" class="menu-link" href="#" role="tab" aria-selected="false">
-          Qualidade
-        </a>
-        <a id="menu-gestao" class="menu-link" href="#" role="tab" aria-selected="false">
-          Gestão
-        </a>
-        <a id="menu-notificacoes" class="menu-link" href="#" role="tab" aria-selected="false">
-          Notificações
-        </a>
+        <a id="menu-inicio" class="menu-link is-active" data-target="paginaInicio" role="tab" aria-selected="true">Início</a>
+        <a id="menu-produto" class="menu-link" href="#" data-target="produtoTab" role="tab" aria-selected="false">Produto</a>
+        <a id="menu-qualidade" class="menu-link" href="#" role="tab" aria-selected="false">Qualidade</a>
+        <a id="menu-gestao" class="menu-link" href="#" role="tab" aria-selected="false">Gestão</a>
       </nav>
 
       <button id="moreBtn" class="more-btn" aria-label="Mais opções" aria-expanded="false">
         <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
       </button>
 
-      <div class="search-bar" id="searchBar" role="search">
-        <label for="searchInput" class="sr-only">Pesquisar produto</label>
-        <input id="searchInput" type="text" placeholder="Pesquisar produto" />
-      </div>
-
-      <div class="header-profile">
-        <div class="notification">
-          <span class="notification-number" aria-label="5 notificações">5</span>
-          <i class="fa-solid fa-bell" aria-hidden="true"></i>
-        </div>
-        <button aria-label="Imprimir"><i class="fa-solid fa-print" aria-hidden="true"></i></button>
-        <button aria-label="Nuvem"><i class="fa-solid fa-cloud" aria-hidden="true"></i></button>
-        <img id="profile-icon" class="profile-img"
-             src="https://images.unsplash.com/photo-1600353068440-6361ef3a86e8?auto=format&fit=crop&w=1000&q=80"
-             alt="Foto do perfil">
-      </div>
-
       <div id="moreMenu" class="more-menu" role="menu"></div>
     </header>
 
     <div class="wrapper">
-      <!-- ===== MENU LATERAL ===== -->
-      <aside class="left-side" role="complementary">
-        <div class="side-wrapper">
-          <div class="side-title">Aqui será a NIQ</div>
-          <nav class="side-menu" aria-label="Menu lateral">
-            <a href="#" class="menu-link">Item a ser verificado 01</a>
-            <a href="#" class="menu-link">Item a ser verificado 02</a>
-          </nav>
-        </div>
-      </aside>
-
-      <!-- ===== CONTEÚDO PRINCIPAL ===== -->
       <main role="main">
+
         <!-- Painel Preparação elétrica -->
-        <section id="paginaPrepEletrica" class="tab-pane fade-in" style="display:block;" role="tabpanel" aria-labelledby="menu-inicio">
+        <section id="paginaPrepEletrica" class="tab-pane" style="display:block;" role="tabpanel" aria-labelledby="menu-inicio">
           <div id="conteudo-preparacao" class="kanban-page">
             <div class="kanban-board" role="region" aria-label="Quadro Kanban de Preparação">
-              
               <!-- Coluna 1: A Produzir -->
               <div class="kanban-column">
                 <div class="kanban-header">
-                  <div class="title-wrapper">
-                    <span>A Produzir</span>
-                  </div>
-                  <button class="fas fa-plus add-btn" style="display:none" aria-label="Adicionar item"></button>
-                  <div class="add-container" style="display:none"></div>
+                  <div class="title-wrapper"><span>A Produzir</span></div>
                 </div>
                 <ul id="coluna-prep-fila" class="kanban-list" role="list" aria-label="Itens a produzir"></ul>
               </div>
 
               <!-- Coluna 2: Em produção -->
               <div class="kanban-column">
-                <div class="kanban-header">
-                  <span>Em produção</span>
-                </div>
+                <div class="kanban-header"><span>Em produção</span></div>
                 <ul id="coluna-prep-em-producao" class="kanban-list" role="list" aria-label="Itens em produção"></ul>
               </div>
 
               <!-- Coluna 3: Concluído -->
               <div class="kanban-column">
-                <div class="kanban-header">
-                  <span>Concluído</span>
-                </div>
+                <div class="kanban-header"><span>Concluído</span></div>
                 <ul id="coluna-prep-concluido" class="kanban-list" role="list" aria-label="Itens concluídos"></ul>
               </div>
-
             </div>
           </div>
         </section>
 
-        <!-- Aba Produto -->
-        <section id="produtoTab" class="tab-pane" style="display:none;" role="tabpanel" aria-labelledby="menu-produto">
-          <div class="content-wrapper">
-            <div class="title-wrapper">
-              <h1 class="content-section-title">
-                Produto <span id="produtoSelecionado"></span>
-              </h1>
-            </div>
+<!-- Aba Produto -->
+<section id="produtoTab" class="tab-pane" style="display:none;" role="tabpanel" aria-labelledby="menu-produto">
+  <div class="content-wrapper">
+    <div class="title-wrapper">
+      <h1 class="content-section-title">Produto <span id="produtoSelecionado"></span></h1>
+    </div>
 
-            <div class="produto-layout">
-              <div class="kanban-board mini-board" role="region" aria-label="Quadro Kanban do Produto">
-                <div class="kanban-column">
-                  <div class="kanban-header"><span>Fila de produção</span></div>
-                  <ul id="prod-col-fila" class="kanban-list" role="list"></ul>
-                </div>
+    <div class="produto-layout">
+      <!-- 1) FOTO -->
+      <div class="side-actions">
+        <div id="produto-foto-box" class="produto-foto-box" aria-label="Foto do produto">
+          <img id="produto-foto-img" alt="Foto do produto" />
+        </div>
 
-                <div class="kanban-column">
-                  <div class="kanban-header"><span>Em produção</span></div>
-                  <ul id="prod-col-emprod" class="kanban-list" role="list"></ul>
-                </div>
-              </div>
+        <!-- 2) BOTÕES -->
+        <div class="btn-stack">
+          <button id="btn-iniciar" class="btn-modern" type="button">
+            <i class="fas fa-play" aria-hidden="true"></i> Iniciar produção
+          </button>
+          <button id="btn-finalizar" class="btn-modern btn-success" type="button">
+            <i class="fas fa-check" aria-hidden="true"></i> Finalizar produção
+          </button>
+        </div>
+      </div>
 
-              <div class="side-actions">
+      <!-- 3) KANBAN — Em produção primeiro, depois Fila -->
+      <div class="kanban-board mini-board" role="region" aria-label="Quadro Kanban do Produto">
+        <div class="kanban-column">
+          <div class="kanban-header"><span>Em produção</span></div>
+          <ul id="prod-col-emprod" class="kanban-list" role="list"></ul>
+        </div>
+        <div class="kanban-column">
+          <div class="kanban-header"><span>Fila de produção</span></div>
+          <ul id="prod-col-fila" class="kanban-list" role="list"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-                <!-- Quadro da foto do produto -->
-<div id="produto-foto-box" class="produto-foto-box" aria-label="Foto do produto">
-  <img id="produto-foto-img" alt="Foto do produto" />
-</div>
-
-                <div class="btn-stack">
-                  <button id="btn-iniciar" class="btn-modern" type="button">
-                    <i class="fas fa-play" aria-hidden="true"></i>
-                    Iniciar produção
-                  </button>
-                  <button id="btn-finalizar" class="btn-modern btn-success" type="button">
-                    <i class="fas fa-check" aria-hidden="true"></i>
-                    Finalizar produção
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <!-- Aba Gestão -->
         <section id="gestaoTab" class="tab-pane" style="display:none;" role="tabpanel" aria-labelledby="menu-gestao">
           <div class="content-wrapper">
-            <div class="title-wrapper">
-              <h1 class="content-section-title">Gestão</h1>
-            </div>
-
+            <div class="title-wrapper"><h1 class="content-section-title">Gestão</h1></div>
             <div class="gestao-layout">
               <div class="side-actions">
                 <div class="btn-stack">
                   <button id="btn-baixar-csv-gestao" class="btn-modern" type="button">
-                    <i class="fas fa-download" aria-hidden="true"></i>
-                    Baixar CSV
+                    <i class="fas fa-download" aria-hidden="true"></i> Baixar CSV
                   </button>
                   <button id="btn-sql-gestao" class="btn-modern" type="button" aria-expanded="false">
-                    <i class="fas fa-database" aria-hidden="true"></i>
-                    SQL
+                    <i class="fas fa-database" aria-hidden="true"></i> SQL
                   </button>
                 </div>
               </div>
             </div>
           </div>
         </section>
-      </main>
 
+      </main>
     </div>
 
     <div class="overlay-app" id="authOverlay"></div>
   </div>
 
   <!-- Modal de etiquetas -->
-  <div id="etiquetasModal" class="modal" role="dialog" aria-labelledby="etiquetasTitle" aria-hidden="true">
+  <div id="etiquetasModal" class="modal" role="dialog" aria-labelledby="etiquetasTitle" aria-hidden="true" style="display:none;">
     <div class="modal-content">
       <button class="close-modal" aria-label="Fechar modal">&times;</button>
       <h3 id="etiquetasTitle">Etiquetas disponíveis</h3>
@@ -656,24 +155,18 @@ body {
   </div>
 
   <!-- Modal QR Code -->
-  <div id="qrModal" class="modal" role="dialog" aria-labelledby="qrTitle" aria-hidden="true">
+  <div id="qrModal" class="modal" role="dialog" aria-labelledby="qrTitle" aria-hidden="true" style="display:none;">
     <div class="qr-box">
       <div class="qr-header">
         <h3 id="qrTitle">Ler QR-Code</h3>
         <button class="qr-close" id="qrClose" aria-label="Fechar leitor QR">&times;</button>
       </div>
-
       <div id="qrReader" role="region" aria-label="Leitor de QR Code"></div>
-
       <div class="input-group">
-        <input id="qrManual" type="text" class="input-modern" 
-               placeholder="Cole/digite aqui a OP (ex.: P101086)" 
-               aria-label="Entrada manual da OP" />
-        <button id="qrManualBtn" class="btn-modern btn-ghost" type="button">
-          Usar valor
-        </button>
+        <input id="qrManual" type="text" class="input-modern"
+               placeholder="Cole/digite aqui a OP (ex.: P101086)" aria-label="Entrada manual da OP" />
+        <button id="qrManualBtn" class="btn-modern btn-ghost" type="button">Usar valor</button>
       </div>
-
       <details style="margin-top: 16px;">
         <summary>Ver log de depuração</summary>
         <pre id="qrDebug" style="max-height: 200px; overflow: auto; background: #111; color: #9fe; padding: 12px; border-radius: 8px; margin-top: 8px; font-size: 12px;"></pre>
@@ -681,716 +174,12 @@ body {
     </div>
   </div>
 
-  <!-- Scripts -->
+  <!-- Libs/serviços já usados pelo seu projeto -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script type="module" src="./kanban/kanban.js" defer></script>
   <script src="/preparacao_api.js"></script>
 
-  <script type="module">
-    import { initPreparacaoKanban } from './kanban/kanban_preparacao.js';
-
-    document.addEventListener('DOMContentLoaded', () => {
-      initPreparacaoKanban();
-
-      // ===== Referências da UI =====
-      const elements = {
-        menuInicio: document.getElementById('menu-inicio'),
-        menuProduto: document.getElementById('menu-produto'),
-        menuGestao: document.getElementById('menu-gestao'),
-        paginaPrep: document.getElementById('paginaPrepEletrica'),
-        produtoTab: document.getElementById('produtoTab'),
-        gestaoTab: document.getElementById('gestaoTab'),
-        miniCodigoEl: document.getElementById('produtoSelecionado'),
-        ulMiniFila: document.getElementById('prod-col-fila'),
-        ulMiniEmProd: document.getElementById('prod-col-emprod'),
-        btnBaixarCsv: document.getElementById('btn-baixar-csv-gestao'),
-        btnSqlGestao: document.getElementById('btn-sql-gestao'),
-        btnIniciar: document.getElementById('btn-iniciar'),
-        btnFinalizar: document.getElementById('btn-finalizar'),
-        ulFila: document.getElementById('coluna-prep-fila'),
-        ulEmProd: document.getElementById('coluna-prep-em-producao')
-      };
-
-      window.codigoSelecionado = null;
-
-      // ===== Navegação das abas =====
-      const setActiveTab = (activeEl) => {
-        // Remove active de todos
-        document.querySelectorAll('#mainMenu .menu-link').forEach(a => {
-          a.classList.remove('is-active');
-          a.setAttribute('aria-selected', 'false');
-        });
-        
-        // Ativa o clicado
-        activeEl.classList.add('is-active');
-        activeEl.setAttribute('aria-selected', 'true');
-        
-        // Esconde todas as abas
-        document.querySelectorAll('.tab-pane').forEach(pane => {
-          pane.style.display = 'none';
-        });
-      };
-
-      // Event listeners para navegação
-      elements.menuInicio?.addEventListener('click', (e) => {
-        e.preventDefault();
-        setActiveTab(elements.menuInicio);
-        elements.paginaPrep.style.display = 'block';
-        elements.paginaPrep.classList.add('fade-in');
-      });
-
-      elements.menuProduto?.addEventListener('click', (e) => {
-        e.preventDefault();
-        setActiveTab(elements.menuProduto);
-        elements.produtoTab.style.display = 'block';
-        elements.produtoTab.classList.add('fade-in');
-
-        if (window.codigoSelecionado) {
-          renderMiniKanban(window.codigoSelecionado);
-        } else {
-          elements.miniCodigoEl.textContent = '';
-          elements.ulMiniFila.innerHTML = '<li class="empty">Selecione um item na Fila de produção</li>';
-          elements.ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
-        }
-        // recalcula altura após a aba aparecer na tela
-setTimeout(fitProdutoKanbanHeight, 50);
-
-      });
-
-      elements.menuGestao?.addEventListener('click', (e) => {
-        e.preventDefault();
-        setActiveTab(elements.menuGestao);
-        elements.gestaoTab.style.display = 'block';
-        elements.gestaoTab.classList.add('fade-in');
-      });
-
-      // ===== Funcionalidades da aba Gestão =====
-      const setupGestaoTab = () => {
-        const sideBox = document.querySelector('#gestaoTab .side-actions');
-        
-        const sqlMenu = document.createElement('div');
-        sqlMenu.className = 'sql-menu';
-        sqlMenu.setAttribute('role', 'menu');
-        sqlMenu.innerHTML = `
-          <button data-act="last100" role="menuitem">Últimos 100</button>
-          <button data-act="byop" role="menuitem">Digite a OP…</button>
-          <button data-act="today" role="menuitem">Hoje</button>
-          <button data-act="range" role="menuitem">Entre datas…</button>
-        `;
-        sideBox?.appendChild(sqlMenu);
-
-        elements.btnSqlGestao?.addEventListener('click', (e) => {
-          e.preventDefault();
-          const isOpen = sqlMenu.classList.contains('open');
-          sqlMenu.classList.toggle('open');
-          elements.btnSqlGestao.setAttribute('aria-expanded', !isOpen);
-        });
-
-        // Fechar menu ao clicar fora
-        document.addEventListener('click', (e) => {
-          if (!sqlMenu.contains(e.target) && e.target !== elements.btnSqlGestao) {
-            sqlMenu.classList.remove('open');
-            elements.btnSqlGestao?.setAttribute('aria-expanded', 'false');
-          }
-        });
-
-        const openEventosQuery = (query) => {
-          const csv = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
-          const base = csv ? '/api/preparacao/eventos.csv' : '/api/preparacao/eventos';
-          const qs = new URLSearchParams(query);
-          const url = `${base}?${qs.toString()}`;
-          
-          if (csv) {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'op_eventos.csv';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-          } else {
-            window.open(url, '_blank');
-          }
-        };
-
-        sqlMenu.addEventListener('click', (e) => {
-          const act = e.target?.dataset?.act;
-          if (!act) return;
-          
-          sqlMenu.classList.remove('open');
-          elements.btnSqlGestao?.setAttribute('aria-expanded', 'false');
-
-          switch (act) {
-            case 'last100':
-              openEventosQuery({ limit: '100', order: 'desc' });
-              break;
-            case 'byop':
-              const op = prompt('Digite a OP (ex.: P101086):');
-              if (op) openEventosQuery({ op: op.trim().toUpperCase() });
-              break;
-            case 'today':
-              const d = new Date();
-              const dateStr = d.toISOString().split('T')[0];
-              openEventosQuery({ from: dateStr, to: dateStr });
-              break;
-            case 'range':
-              const de = prompt('Data inicial (AAAA-MM-DD):');
-              if (!de) return;
-              const ate = prompt('Data final (AAAA-MM-DD):');
-              if (!ate) return;
-              openEventosQuery({ from: de.trim(), to: ate.trim() });
-              break;
-          }
-        });
-
-        elements.btnBaixarCsv?.addEventListener('click', () => {
-          const a = document.createElement('a');
-          a.href = '/api/preparacao/csv';
-          a.download = 'preparacao.csv';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-        });
-      };
-
-      setupGestaoTab();
-
-      // ===== Função global para ativar aba Produto =====
-      window.ativarAbaProduto = function() {
-        setActiveTab(elements.menuProduto);
-        elements.produtoTab.style.display = 'block';
-        elements.produtoTab.classList.add('fade-in');
-      };
-
-      // ===== Foto do produto (primeira URL do SQL) =====
-async function fetchPrimeiraFoto(codigoAlfa) {
-  if (!codigoAlfa) return null;
-  const resp = await fetch(`/api/produtos/${encodeURIComponent(codigoAlfa)}/fotos`, { cache: 'no-store' });
-  if (!resp.ok) return null;
-  const j = await resp.json();
-  const fotos = Array.isArray(j?.fotos) ? j.fotos : [];
-  if (!fotos.length) return null;
-
-  // escolhe a menor pos disponível (prioriza pos=0; compatível com legado pos=1..6)
-  const ord = fotos.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
-  const f0  = ord[0];
-  return (f0 && typeof f0.url_imagem === 'string' && f0.url_imagem.trim()) ? f0.url_imagem.trim() : null;
-}
-
-async function updateProdutoFotoFrame(codigoPreferencial) {
-  const box = document.getElementById('produto-foto-box');
-  const img = document.getElementById('produto-foto-img');
-  if (!box || !img) return;
-
-  let url = null;
-  try {
-    url = await fetchPrimeiraFoto(codigoPreferencial);
-  } catch {}
-
-  if (url) {
-    img.src = url;
-    img.style.objectFit = 'cover';
-  } else {
-    img.src = '../img/logo.png';
-    img.style.objectFit = 'contain';
-  }
-}
-
-// ===== Ajuste de altura dos kanbans (produto) =====
-// ===== Ajuste de altura dos kanbans (produto) =====
-function fitProdutoKanbanHeight() {
-  // limite inferior = menor “bottom” entre o painel e a janela
-  const limits = [];
-  const addLimit = (sel) => {
-    const el = document.querySelector(sel);
-    if (el) {
-      const r = el.getBoundingClientRect();
-      if (r.bottom > 0) limits.push(r.bottom);
-    }
-  };
-  // painel da aba produto e wrappers relevantes
-  addLimit('#produtoTab .content-wrapper');
-  addLimit('#produtoTab');
-  addLimit('main');
-  // sempre considera o viewport também
-  limits.push(window.innerHeight);
-
-  const yLimit = Math.min(...limits);   // onde o painel termina
-  const padBottom = 16;                 // respiro no final
-
-  ['prod-col-fila', 'prod-col-emprod'].forEach(id => {
-    const ul = document.getElementById(id);
-    if (!ul) return;
-    const top = ul.getBoundingClientRect().top;
-    const available = Math.max(100, Math.floor(yLimit - top - padBottom));
-    ul.style.maxHeight = `${available}px`;
-    ul.style.overflowY = 'auto';
-  });
-}
-
-
-window.addEventListener('resize', fitProdutoKanbanHeight);
-document.addEventListener('DOMContentLoaded', fitProdutoKanbanHeight);
-
-      // ===== Renderização do Mini Kanban =====
-
-
-async function renderMiniKanban(codigoAlfa, codigoProdutoNum = null) {
-  // token anti-corrida: só a chamada mais recente pode renderizar
-  const rid = (window.__miniRID = (window.__miniRID || 0) + 1);
-
-  const headerEl   = document.getElementById('produtoSelecionado');
-  const ulMiniFila = document.getElementById('prod-col-fila') 
-                  || document.getElementById('coluna-prod-fila');
-  const ulMiniEm   = document.getElementById('prod-col-emprod') 
-                  || document.getElementById('coluna-prod-em-producao');
-
-  if (headerEl) headerEl.textContent = `Produto — ${codigoAlfa || ''}`;
-  if (!ulMiniFila || !ulMiniEm) {
-    console.warn('[mini-board] listas não encontradas (verifique IDs)');
-    return;
-  }
-
-  // Em vez de limpar aqui, só limparemos quando formos a chamada "viva"
-  // ulMiniFila.innerHTML = '';
-  // ulMiniEm.innerHTML   = '';
-
-  try {
-    const resp = await fetch('/api/preparacao/listar', { cache: 'no-store' });
-    const payload = await resp.json();
-    const data   = payload?.data || {};
-    const fila   = data['A Produzir'] || [];
-    const emprod = data['Produzindo'] || [];
-
-    const codAlfa = String(codigoAlfa || '').trim();
-    const codNum  = codigoProdutoNum ? String(codigoProdutoNum).trim() : null;
-
-    // Atualiza o quadro da foto (usa alfanumérico mapeado pelo CP quando existir)
-let fotoAlfa = codAlfa;
-if (!fotoAlfa && codNum) fotoAlfa = codNum; // fallback
-await updateProdutoFotoFrame(fotoAlfa);
-
-    // Coletar CPs para resolver → alfanumérico quando preciso
-    const all = [...fila, ...emprod];
-    const cps = [...new Set(
-      all.map(c => String(c.produto_codigo ?? '').trim())
-         .filter(s => /^\d+$/.test(s))
-    )];
-
-    // Resolver CP → { codigo, descricao } (tolerante a falhas)
-    let cpToAlpha = {};
-    if (cps.length) {
-      const qs = cps.map(cp => 'cp=' + encodeURIComponent(cp)).join('&');
-      try {
-        const r = await fetch('/api/produtos/codigos?' + qs);
-        const j = await r.json();
-        cpToAlpha = j?.data || {};
-      } catch (e) {
-        console.warn('[mini-board] falha ao resolver CP→alfa, seguindo sem mapear:', e);
-      }
-    }
-    const alphaFromCP = cp => (cpToAlpha[cp]?.codigo || null);
-
-    const matchProd = (c) => {
-      const cp   = String(c.produto_codigo ?? '').trim();
-      const alfa = alphaFromCP(cp) || cp; // se não resolver, fica CP
-      if (codNum  && cp   === codNum)  return true;
-      if (codAlfa && alfa === codAlfa) return true;
-      return false;
-    };
-
-    // dedupe por OP dentro de cada lista
-    const dedupeByOp = (arr) => {
-      const seen = new Set();
-      return arr.filter(c => {
-        const k = String(c.op || '').trim();
-        if (!k || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-    };
-
-    let listaFila   = dedupeByOp(fila.filter(matchProd));
-    let listaEmProd = dedupeByOp(emprod.filter(matchProd));
-
-    // se a mesma OP estiver nas duas, prioriza "Em produção"
-    const emOps = new Set(listaEmProd.map(x => x.op));
-    listaFila = listaFila.filter(x => !emOps.has(x.op));
-
-    // 👉 Só continua se esta ainda for a chamada mais recente
-    if (rid !== window.__miniRID) return;
-
-    // Construir DOM fora e aplicar de uma vez (evita flicker/duplicação)
-    const fragFila = document.createDocumentFragment();
-    const fragEm   = document.createDocumentFragment();
-
-    const pushLi = (frag, op) => {
-      const li = document.createElement('li');
-      li.className = 'kanban-card';
-      li.textContent = op || '—';
-      frag.appendChild(li);
-    };
-
-    if (listaFila.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'empty';
-      li.textContent = '—';
-      fragFila.appendChild(li);
-    } else {
-      for (const c of listaFila) pushLi(fragFila, c.op);
-    }
-
-    if (listaEmProd.length === 0) {
-      const li = document.createElement('li');
-      li.className = 'empty';
-      li.textContent = '—';
-      fragEm.appendChild(li);
-    } else {
-      for (const c of listaEmProd) pushLi(fragEm, c.op);
-    }
-
-    // 👉 Valida de novo antes de tocar no DOM
-    if (rid !== window.__miniRID) return;
-
-    // Aplica de uma vez (limpa e substitui)
-    ulMiniFila.replaceChildren(fragFila);
-    ulMiniEm.replaceChildren(fragEm);
-
-  } catch (err) {
-    // 👉 Se não for a chamada mais recente, não faz nada
-    if (rid !== window.__miniRID) return;
-
-    console.error('[mini-board] erro:', err);
-    ulMiniFila.innerHTML = '<li class="empty">Erro carregando dados</li>';
-    ulMiniEm.innerHTML   = '';
-  }
-  fitProdutoKanbanHeight();
-
-}
-
-// export para o clique do cartão chamar (deixe UMA linha só)
-window.renderMiniKanban = renderMiniKanban;
-
-
-// garante export para quem chama no clique
-window.renderMiniKanban = renderMiniKanban;
-
-
-      // ===== Event Listeners para seleção de produtos =====
-      const setupProductSelection = (ul) => {
-        ul?.addEventListener('click', (e) => {
-          const card = e.target.closest('li');
-          if (!card || card.classList.contains('empty')) return;
-
-          const code = extractProductCode(card);
-          const cp = card.dataset?.cp || card.getAttribute?.('data-cp') || null;
-
-          if (!code) return;
-
-          window.codigoSelecionado = code;
-          window.codigoSelecionadoCP = cp;
-
-          // Visual feedback
-          card.style.transform = 'scale(0.95)';
-          setTimeout(() => {
-            card.style.transform = '';
-            window.ativarAbaProduto();
-            renderMiniKanban(window.codigoSelecionado, window.codigoSelecionadoCP);
-          }, 150);
-        });
-
-        // Suporte a teclado
-        ul?.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            e.target.click();
-          }
-        });
-      };
-
-      const extractProductCode = (card) => {
-        return card.dataset?.codigo ||
-               card.querySelector('[data-codigo]')?.dataset?.codigo ||
-               card.querySelector('.codigo')?.textContent?.trim() ||
-               (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]);
-      };
-
-      setupProductSelection(elements.ulFila);
-      setupProductSelection(elements.ulEmProd);
-
-      // ===== Funcionalidade QR Code =====
-// ===== Funcionalidade QR Code (com refresh global pós-ação) =====
-const setupQRFunctionality = () => {
-  const qrModal    = document.getElementById('qrModal');
-  const qrClose    = document.getElementById('qrClose');
-  const qrManual   = document.getElementById('qrManual');
-  const qrManualBtn= document.getElementById('qrManualBtn');
-  const qrDebug    = document.getElementById('qrDebug');
-
-  const btnIniciar   = document.getElementById('btn-iniciar');
-  const btnFinalizar = document.getElementById('btn-finalizar');
-
-  // Refresh global: quadro principal + mini-kanban
-  const forceRefreshUI = async () => {
-    // se a API do prep tiver o refresher, use-o
-    if (window.Preparacao?.refreshPreparacaoUI) {
-      await window.Preparacao.refreshPreparacaoUI();
-      return;
-    }
-    // Fallback: recarrega quadro principal
-    try {
-      if (typeof initPreparacaoKanban === 'function') {
-        await initPreparacaoKanban(true);
-      }
-    } catch (e) { console.warn('[fallback] initPreparacaoKanban falhou:', e); }
-    // Fallback: redesenha mini-kanban se houver produto selecionado
-    try {
-      const alfa = (window.codigoSelecionado || '').trim();
-      const cp   = (window.codigoSelecionadoCP || '').toString().trim() || null;
-      if (alfa && typeof window.renderMiniKanban === 'function') {
-        await window.renderMiniKanban(alfa, cp);
-      }
-    } catch (e) { console.warn('[fallback] renderMiniKanban falhou:', e); }
-  };
-
-  const logDebug = (...args) => {
-    try {
-      const message = args.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
-      qrDebug.textContent += message + '\n';
-      qrDebug.scrollTop = qrDebug.scrollHeight;
-    } catch {}
-  };
-
-  const fecharModal = () => {
-    qrModal.classList.remove('open');
-    qrModal.setAttribute('aria-hidden', 'true');
-    try { if (window.qrReader) window.qrReader.stop(); } catch {}
-    qrManual.value = '';
-    qrDebug.textContent = '';
-  };
-
-  const abrirLeitorQRComAcao = (acao) => {
-    return new Promise((resolve, reject) => {
-      const onScan = async (raw) => {
-        try {
-          const op = (raw || '').trim().toUpperCase();
-          if (!op) { alert('QR/valor vazio'); return; }
-
-          logDebug('[onScan]', op);
-          btnIniciar.disabled = true;
-          btnFinalizar.disabled = true;
-
-          if (acao === 'iniciar') {
-            await Preparacao.iniciarProducao(op);
-          } else if (acao === 'concluir') {
-            await Preparacao.finalizarProducao(op);
-          } else {
-            throw new Error('Ação desconhecida: ' + acao);
-          }
-
-          // 🔄 Atualiza UI principal + mini-kanban
-          await forceRefreshUI();
-
-          fecharModal();
-          resolve(op);
-        } catch (err) {
-          logDebug('[erro]', err?.message || err);
-          alert('Falha: ' + (err?.message || err));
-          reject(err);
-        } finally {
-          btnIniciar.disabled = false;
-          btnFinalizar.disabled = false;
-        }
-      };
-
-      // Eventos do modal
-      qrClose.onclick = () => { fecharModal(); reject(new Error('cancelado')); };
-
-      qrManualBtn.onclick = () => {
-        const value = qrManual.value.trim();
-        if (!value) { alert('Digite uma OP'); qrManual.focus(); return; }
-        logDebug('[manual]', value);
-        onScan(value);
-      };
-      qrManual.onkeydown = (ev) => { if (ev.key === 'Enter') qrManualBtn.click(); };
-
-      document.addEventListener('keydown', function escapeHandler(e) {
-        if (e.key === 'Escape') {
-          document.removeEventListener('keydown', escapeHandler);
-          fecharModal();
-          reject(new Error('cancelado'));
-        }
-      });
-
-      // Inicia câmera (tolerante a erro)
-      if (window.Html5Qrcode) {
-        try {
-          window.qrReader = new Html5Qrcode("qrReader");
-          window.qrReader.start(
-            { facingMode: "environment" },
-            { fps: 10, qrbox: 250 },
-            (decodedText) => { logDebug('[camera]', decodedText); onScan(decodedText); },
-            () => {}
-          ).catch(e => logDebug('[camera-erro]', e?.message || e));
-        } catch (e) {
-          logDebug('[camera-erro]', e?.message || e);
-        }
-      } else {
-        logDebug('Html5Qrcode não disponível, use o campo manual.');
-      }
-
-      // Abre modal
-      qrModal.classList.add('open');
-      qrModal.setAttribute('aria-hidden', 'false');
-      qrManual.focus();
-    });
-  };
-
-  // Botões da aba Produto
-  btnIniciar?.addEventListener('click', (e) => {
-    e.preventDefault();
-    abrirLeitorQRComAcao('iniciar');
-  });
-
-  btnFinalizar?.addEventListener('click', (e) => {
-    e.preventDefault();
-    abrirLeitorQRComAcao('concluir');
-  });
-};
-
-
-      setupQRFunctionality();
-
-      // ===== Atualização em tempo real via SSE =====
-      const setupLiveUpdates = () => {
-        let debounceId;
-
-        const refresh = async () => {
-          clearTimeout(debounceId);
-          debounceId = setTimeout(async () => {
-            try {
-              await initPreparacaoKanban();
-              if (window.codigoSelecionado && typeof window.renderMiniKanban === 'function') {
-                await window.renderMiniKanban(window.codigoSelecionado);
-              }
-            } catch (e) {
-              console.warn('[prep-eletrica] refresh falhou:', e);
-            }
-          }, 300);
-        };
-
-        try {
-          const eventSource = new EventSource('/api/produtos/stream');
-
-          eventSource.onmessage = (event) => {
-            try {
-              const message = JSON.parse(event.data);
-              if (message && message.type === 'hello') return;
-            } catch {}
-            refresh();
-          };
-
-          eventSource.onerror = (error) => {
-            console.warn('[SSE] Erro de conexão:', error);
-          };
-
-          // Cleanup ao sair da página
-          window.addEventListener('beforeunload', () => {
-            eventSource.close?.();
-          });
-        } catch {
-          // Fallback para polling se SSE não estiver disponível
-          console.log('[SSE] Não disponível, usando polling como fallback');
-          setInterval(refresh, 30000);
-        }
-      };
-
-      setupLiveUpdates();
-
-      // ===== Funcionalidades de acessibilidade =====
-      const setupAccessibility = () => {
-        // Navegação por teclado no menu
-        const menuLinks = document.querySelectorAll('#mainMenu .menu-link');
-        menuLinks.forEach((link, index) => {
-          link.addEventListener('keydown', (e) => {
-            let targetIndex;
-            
-            switch (e.key) {
-              case 'ArrowRight':
-                e.preventDefault();
-                targetIndex = (index + 1) % menuLinks.length;
-                menuLinks[targetIndex].focus();
-                break;
-              case 'ArrowLeft':
-                e.preventDefault();
-                targetIndex = (index - 1 + menuLinks.length) % menuLinks.length;
-                menuLinks[targetIndex].focus();
-                break;
-            }
-          });
-        });
-
-        // Anúncio de mudanças de aba para screen readers
-        const announceTabChange = (tabName) => {
-          const announcement = document.createElement('div');
-          announcement.setAttribute('aria-live', 'polite');
-          announcement.setAttribute('aria-atomic', 'true');
-          announcement.className = 'sr-only';
-          announcement.textContent = `Aba ${tabName} ativada`;
-          document.body.appendChild(announcement);
-          
-          setTimeout(() => {
-            document.body.removeChild(announcement);
-          }, 1000);
-        };
-
-        // Adicionar anúncios aos event listeners existentes
-        elements.menuInicio?.addEventListener('click', () => {
-          setTimeout(() => announceTabChange('Início'), 100);
-        });
-
-        elements.menuProduto?.addEventListener('click', () => {
-          setTimeout(() => announceTabChange('Produto'), 100);
-        });
-
-        elements.menuGestao?.addEventListener('click', () => {
-          setTimeout(() => announceTabChange('Gestão'), 100);
-        });
-      };
-
-      setupAccessibility();
-
-      // ===== Tratamento de erros global =====
-      window.addEventListener('error', (e) => {
-        console.error('[Global Error]', e.error);
-        // Aqui você pode implementar um sistema de notificação de erros
-      });
-
-      window.addEventListener('unhandledrejection', (e) => {
-        console.error('[Unhandled Promise Rejection]', e.reason);
-      });
-
-      console.log('✅ Preparação Elétrica inicializada com sucesso');
-    });
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(()=>{});
-  });
-}
-  </script>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  try{ window.scrollTo(0,0); }catch(e){}
-  // se trocar de aba, ainda forçamos o topo
-  var mainMenu = document.getElementById('mainMenu');
-  if (mainMenu){
-    mainMenu.addEventListener('click', function(){
-      setTimeout(function(){ try{ window.scrollTo(0,0); }catch(e){} }, 0);
-    });
-  }
-});
-</script>
-
+  <!-- JS exclusivo desta página -->
+  <script type="module" src="./pst_prep_eletrica/prep_eletrica.js" defer></script>
 </body>
 </html>
