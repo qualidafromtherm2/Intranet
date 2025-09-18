@@ -104,16 +104,20 @@
       </div>
 
       <!-- 3) KANBAN — Em produção primeiro, depois Fila -->
-      <div class="kanban-board mini-board" role="region" aria-label="Quadro Kanban do Produto">
-        <div class="kanban-column">
-          <div class="kanban-header"><span>Em produção</span></div>
-          <ul id="prod-col-emprod" class="kanban-list" role="list"></ul>
-        </div>
-        <div class="kanban-column">
-          <div class="kanban-header"><span>Fila de produção</span></div>
-          <ul id="prod-col-fila" class="kanban-list" role="list"></ul>
-        </div>
-      </div>
+<div class="kanban-board mini-board" role="region" aria-label="Quadro Kanban do Produto">
+  <!-- Em produção (ESQUERDA) -->
+  <div class="kanban-column">
+    <div class="kanban-header"><span>Em produção</span></div>
+    <ul id="prod-col-emprod" class="kanban-list" role="list"></ul>
+  </div>
+
+  <!-- Fila de produção (DIREITA) -->
+  <div class="kanban-column">
+    <div class="kanban-header"><span>Fila de produção</span></div>
+    <ul id="prod-col-fila" class="kanban-list" role="list"></ul>
+  </div>
+</div>
+
     </div>
   </div>
 </section>
