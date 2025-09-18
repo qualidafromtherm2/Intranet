@@ -85,12 +85,11 @@ body{
 .content-section-title{ font-size:1.25rem; margin:0; }
 
 /* ===== PRODUTO ===== */
+/* Foto+botões em cima, board abaixo */
 .produto-layout{
-  display:grid;
-  grid-template-columns: minmax(0,1fr) 240px; /* kanban + lateral */
-  gap: 24px;
-  align-items:flex-start;
-  margin-top: 12px;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:16px !important;
 }
 .side-actions{ display:flex; flex-direction:column; gap:12px; }
 .btn-stack{ display:flex; flex-direction:column; gap:12px; width:100%; }
@@ -124,7 +123,22 @@ body{
 .kanban-page{ width:100%; }
 .kanban-board{ display:grid !important; grid-template-columns: repeat(3, minmax(280px,1fr)); gap:24px; margin-top:12px;
                justify-content:flex-start; align-items:flex-start; max-height:none; overflow:visible; }
-.kanban-board.mini-board{ grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+
+/* Mini-board SEMPRE com 2 colunas lado a lado */
+.kanban-board.mini-board{
+  display:grid !important;
+  grid-template-columns: 1fr 1fr !important; /* Em produção | Fila de produção */
+  gap:16px !important;
+  align-items:start !important;
+  justify-content:start !important;
+  overflow:visible !important;
+}
+/* neutraliza qualquer order/width anteriores */
+.kanban-board.mini-board .kanban-column{
+  order:initial !important;
+  flex:initial !important;
+  width:auto !important;
+}
 
 .kanban-column{
   background:var(--bg-card);
@@ -157,71 +171,12 @@ body{
 ::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.2); border-radius:4px }
 ::-webkit-scrollbar-thumb:hover{ background:rgba(255,255,255,.3) }
 
-/* Responsivo base */
+/* Responsivo base (mantém foto 16:9 em telas menores) */
 @media (max-width:1100px){
   .kanban-column{ padding:14px }
   .produto-foto-box{ aspect-ratio:16/9 }
 }
-@media (max-width:980px){
-  .produto-layout{ grid-template-columns:1fr; gap:16px; }
-  .kanban-board.mini-board{ grid-template-columns:1fr; gap:12px; overflow-x:visible; }
-}
 
-/* === hotfix: esconder ícone dark/light gigante === */
+/* hotfix: esconder ícone dark/light gigante */
 .dark-light{ display:none !important; }
 .dark-light svg{ width:24px; height:24px; }
-
-/* === ORDEM DOS BLOCOS (Produto) ===
-   Ordem desejada: Título -> Foto -> Botões -> Em produção -> Fila de produção */
-@media (max-width: 980px){
-  .produto-layout{ 
-    display:flex !important; 
-    flex-direction:column !important; 
-    gap:16px !important; 
-  }
-  .side-actions{ order:1 !important; }              /* Foto + Botões */
-  .kanban-board.mini-board{ order:2 !important; }   /* Board abaixo */
-
-  /* mini-board vira flex para reordenar colunas */
-  .kanban-board.mini-board{ 
-    display:flex !important; 
-    flex-wrap:wrap !important; 
-    gap:12px !important;
-    justify-content:flex-start !important;
-  }
-  /* Em produção primeiro, Fila depois */
-  .kanban-board.mini-board .kanban-column:nth-child(1){ order:2 !important; } /* Fila */
-  .kanban-board.mini-board .kanban-column:nth-child(2){ order:1 !important; } /* Em produção */
-  .kanban-board.mini-board .kanban-column{ flex:1 1 100% !important; }
-}
-
-/* ≥ 981px: duas colunas lado a lado, Em produção à esquerda */
-@media (min-width: 981px){
-  .kanban-board.mini-board{ 
-    display:flex !important; 
-    flex-wrap:wrap !important; 
-    gap:20px !important;
-  }
-  .kanban-board.mini-board .kanban-column{ flex:1 1 calc(50% - 10px) !important; }
-  .kanban-board.mini-board .kanban-column:nth-child(1){ order:2 !important; } /* Fila */
-  .kanban-board.mini-board .kanban-column:nth-child(2){ order:1 !important; } /* Em produção */
-}
-
-/* Empilha tudo na ordem do HTML */
-.produto-layout{ display:flex !important; flex-direction:column !important; gap:16px !important; }
-
-/* Mini-board sem reordenação por nth-child */
-.kanban-board.mini-board{
-  display:flex !important;
-  flex-wrap:wrap !important;
-  gap:12px !important;
-}
-.kanban-board.mini-board .kanban-column{
-  order:initial !important;         /* neutraliza qualquer order anterior */
-  flex:1 1 100% !important;         /* coluna inteira no mobile */
-}
-
-/* ≥ 981px: duas colunas lado a lado mantendo a ordem do HTML (Em produção | Fila) */
-@media (min-width:981px){
-  .kanban-board.mini-board .kanban-column{ flex:1 1 calc(50% - 10px) !important; }
-}
