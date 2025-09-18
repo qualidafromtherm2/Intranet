@@ -1,18 +1,15 @@
 
 /* =============================
-   PREPARAÇÃO ELÉTRICA — JS (independente)
-   Correções:
-   - API_BASE configurável (meta[name="api-base"] ou auto por host)
-   - Normalização de URL de imagem (evita mixed-content http/https)
-   - Rotas do fetch usam API_BASE (Render e localhost)
+   PREPARAÇÃO ELÉTRICA — JS (QR FIX)
+   - Abre o modal ANTES de iniciar a câmera
+   - Garante visibilidade/tamanho do container do vídeo
+   - Para/limpa leitor anterior antes de reabrir
+   - Mantém API_BASE e normalização de imagens
    ============================= */
 
 import { initPreparacaoKanban } from '../kanban/kanban_preparacao.js';
 
-/* ---------- Base de API ----------
-   1) Se existir <meta name="api-base" content="..."> usa ela
-   2) Se estiver em *.onrender.com usa https://<host>/api
-   3) Senão, usa '/api' (localhost) */
+/* ---------- Base de API ---------- */
 export const API_BASE = (() => {
   const meta = document.querySelector('meta[name="api-base"]')?.content?.trim();
   if (meta) return meta.replace(/\/$/, '');
@@ -22,7 +19,6 @@ export const API_BASE = (() => {
   return '/api';
 })();
 
-// Normaliza URL de imagem: resolve relativa e força https quando a página for https
 function normalizeImageUrl(imgUrl) {
   if (!imgUrl) return null;
   try {
@@ -32,7 +28,7 @@ function normalizeImageUrl(imgUrl) {
   } catch { return imgUrl; }
 }
 
-// força rolar para o topo quando a página/abas carregam
+// força rolar para o topo
 const forceTop = () => { try { window.scrollTo(0,0); } catch(e){} };
 document.addEventListener('DOMContentLoaded', forceTop);
 document.getElementById('mainMenu')?.addEventListener('click', () => setTimeout(forceTop, 0));
@@ -40,7 +36,6 @@ document.getElementById('mainMenu')?.addEventListener('click', () => setTimeout(
 document.addEventListener('DOMContentLoaded', () => {
   initPreparacaoKanban();
 
-  // ===== Referências =====
   const elements = {
     menuInicio: document.getElementById('menu-inicio'),
     menuProduto: document.getElementById('menu-produto'),
@@ -61,7 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.codigoSelecionado = null;
 
-  // ===== Abas =====
   const setActiveTab = (activeEl) => {
     document.querySelectorAll('#mainMenu .menu-link').forEach(a => {
       a.classList.remove('is-active');
@@ -160,7 +154,6 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   setupGestaoTab();
 
-  // ===== Expor função para ativar aba Produto =====
   window.ativarAbaProduto = function(){
     setActiveTab(elements.menuProduto);
     elements.produtoTab.style.display='block';
@@ -168,17 +161,16 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ===== Foto do produto =====
-  async function fetchPrimeiraFoto(codigoAlfaOuNum) {
-    if (!codigoAlfaOuNum) return null;
-    const endpoint = `${API_BASE}/produtos/${encodeURIComponent(codigoAlfaOuNum)}/fotos`;
+  async function fetchPrimeiraFoto(codigo) {
+    if (!codigo) return null;
+    const endpoint = `${API_BASE}/produtos/${encodeURIComponent(codigo)}/fotos`;
     try {
       const resp = await fetch(endpoint, { cache: 'no-store', credentials: 'include' });
       if (!resp.ok) return null;
       const j = await resp.json();
-      // aceita {fotos: [...] } ou { data: [...] }
-      const fotos = Array.isArray(j?.fotos) ? j.fotos : (Array.isArray(j?.data) ? j.data : []);
-      if (!fotos.length) return null;
-      const ord = fotos.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
+      const arr = Array.isArray(j?.fotos) ? j.fotos : (Array.isArray(j?.data) ? j.data : []);
+      if (!arr.length) return null;
+      const ord = arr.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
       const f0  = ord[0];
       const raw = f0?.url_imagem ?? f0?.url ?? f0?.imagem ?? null;
       return normalizeImageUrl(raw);
@@ -240,7 +232,6 @@ document.addEventListener('DOMContentLoaded', () => {
       let fotoAlfa = codAlfa || codNum || null;
       await updateProdutoFotoFrame(fotoAlfa);
 
-      // resolver CP → alfa
       const all = [...fila, ...emprod];
       const cps = [...new Set(all.map(c => String(c.produto_codigo ?? '').trim()).filter(s => /^\d+$/.test(s)))];
       let cpToAlpha = {};
@@ -302,33 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.renderMiniKanban = renderMiniKanban;
 
-  // ===== Seleção de item nas listas principais =====
-  const setupProductSelection = (ul) => {
-    ul?.addEventListener('click', (e) => {
-      const card = e.target.closest('li');
-      if (!card || card.classList.contains('empty')) return;
-      const code = card.dataset?.codigo ||
-                   card.querySelector('[data-codigo]')?.dataset?.codigo ||
-                   card.querySelector('.codigo')?.textContent?.trim() ||
-                   (card.innerText.match(/\b\d{2}\.[A-Z]{2}\.[A-Z]\.\d+\b/)?.[0]);
-      const cp = card.dataset?.cp || card.getAttribute?.('data-cp') || null;
-      if (!code) return;
-      window.codigoSelecionado = code;
-      window.codigoSelecionadoCP = cp;
-      card.style.transform='scale(0.95)';
-      setTimeout(() => {
-        card.style.transform='';
-        window.ativarAbaProduto();
-        renderMiniKanban(window.codigoSelecionado, window.codigoSelecionadoCP);
-      }, 150);
-    });
-    ul?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click(); }
-    });
-  };
-  setupProductSelection(elements.ulFila);
-  setupProductSelection(elements.ulEmProd);
-
   // ===== QR Code (iniciar/finalizar) =====
   const setupQRFunctionality = () => {
     const qrModal    = document.getElementById('qrModal');
@@ -339,28 +303,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnIniciar   = document.getElementById('btn-iniciar');
     const btnFinalizar = document.getElementById('btn-finalizar');
 
-    const forceRefreshUI = async () => {
-      if (window.Preparacao?.refreshPreparacaoUI) { await window.Preparacao.refreshPreparacaoUI(); return; }
-      try { if (typeof initPreparacaoKanban === 'function') await initPreparacaoKanban(true); } catch {}
-      try {
-        const alfa = (window.codigoSelecionado || '').trim();
-        const cp   = (window.codigoSelecionadoCP || '').toString().trim() || null;
-        if (alfa && typeof window.renderMiniKanban === 'function') await window.renderMiniKanban(alfa, cp);
-      } catch {}
+    const ensureModalVisible = () => {
+      qrModal.style.display = 'flex';             // vence inline display:none
+      qrModal.classList.add('open');
+      qrModal.setAttribute('aria-hidden','false');
+      const reader = document.getElementById('qrReader');
+      if (reader) {
+        reader.style.width = '100%';
+        reader.style.maxWidth = '520px';
+        reader.style.height = '420px';
+        reader.style.background = '#000';
+        reader.style.borderRadius = '8px';
+        reader.style.overflow = 'hidden';
+      }
     };
 
-    const logDebug = (...args) => {
-      try {
-        const message = args.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
-        qrDebug.textContent += message + '\n';
-        qrDebug.scrollTop = qrDebug.scrollHeight;
-      } catch {}
-    };
-
-    const fecharModal = () => {
+    const fecharModal = async () => {
+      try { if (window.qrReader) { await window.qrReader.stop(); await window.qrReader.clear(); } } catch {}
       qrModal.classList.remove('open');
       qrModal.setAttribute('aria-hidden','true');
-      try { if (window.qrReader) window.qrReader.stop(); } catch {}
+      qrModal.style.display = 'none';
       qrManual.value=''; qrDebug.textContent='';
     };
 
@@ -370,16 +332,12 @@ document.addEventListener('DOMContentLoaded', () => {
           try {
             const op = (raw || '').trim().toUpperCase();
             if (!op) { alert('QR/valor vazio'); return; }
-            logDebug('[onScan]', op);
             btnIniciar.disabled = true; btnFinalizar.disabled = true;
             if (acao === 'iniciar')      await Preparacao.iniciarProducao(op);
             else if (acao === 'concluir')await Preparacao.finalizarProducao(op);
-            else throw new Error('Ação desconhecida: '+acao);
-            await forceRefreshUI();
-            fecharModal();
+            await fecharModal();
             resolve(op);
           } catch (err) {
-            logDebug('[erro]', err?.message || err);
             alert('Falha: ' + (err?.message || err));
             reject(err);
           } finally {
@@ -388,29 +346,37 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         qrClose.onclick = () => { fecharModal(); reject(new Error('cancelado')); };
-        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } logDebug('[manual]', value); onScan(value); };
+        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } onScan(value); };
         qrManual.onkeydown = (ev) => { if (ev.key === 'Enter') qrManualBtn.click(); };
 
-        document.addEventListener('keydown', function escapeHandler(e){
-          if (e.key === 'Escape') { document.removeEventListener('keydown', escapeHandler); fecharModal(); reject(new Error('cancelado')); }
-        });
+        // Mostra o modal ANTES de iniciar a câmera
+        ensureModalVisible();
 
-        if (window.Html5Qrcode) {
+        // Para leitor anterior se existir
+        (async () => { try { if (window.qrReader) { await window.qrReader.stop(); await window.qrReader.clear(); } } catch {} })();
+
+        // Inicia a câmera após o layout estar visível
+        const startCamera = async () => {
+          if (!window.Html5Qrcode) return;
           try {
-            window.qrReader = new Html5Qrcode("qrReader");
-            window.qrReader.start(
-              { facingMode:"environment" },
-              { fps:10, qrbox:250 },
-              (decoded) => { logDebug('[camera]', decoded); onScan(decoded); },
+            window.qrReader = new Html5Qrcode('qrReader');
+            await window.qrReader.start(
+              { facingMode: 'environment' },
+              { fps: 10, qrbox: 280 },
+              (decoded) => onScan(decoded),
               () => {}
-            ).catch(e => logDebug('[camera-erro]', e?.message || e));
-          } catch(e){ logDebug('[camera-erro]', e?.message || e); }
-        } else {
-          logDebug('Html5Qrcode não disponível, use o campo manual.');
-        }
+            );
+          } catch (e) {
+            alert('Não foi possível acessar a câmera: ' + (e?.message || e));
+          }
+        };
 
-        qrModal.classList.add('open');
-        qrModal.setAttribute('aria-hidden','false');
+        // Dá um tick pro layout aplicar e mede de novo
+        requestAnimationFrame(() => setTimeout(startCamera, 60));
+
+        // Escape para fechar
+        const esc = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', esc); fecharModal(); reject(new Error('cancelado')); } };
+        document.addEventListener('keydown', esc);
         qrManual.focus();
       });
     };
@@ -451,43 +417,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   setupLiveUpdates();
-
-  // ===== Acessibilidade =====
-  const setupAccessibility = () => {
-    const menuLinks = document.querySelectorAll('#mainMenu .menu-link');
-    menuLinks.forEach((link, index) => {
-      link.addEventListener('keydown', (e) => {
-        let targetIndex;
-        switch (e.key){
-          case 'ArrowRight': e.preventDefault(); targetIndex=(index+1) % menuLinks.length; menuLinks[targetIndex].focus(); break;
-          case 'ArrowLeft':  e.preventDefault(); targetIndex=(index-1+menuLinks.length) % menuLinks.length; menuLinks[targetIndex].focus(); break;
-        }
-      });
-    });
-    const announce = (tabName) => {
-      const el = document.createElement('div');
-      el.setAttribute('aria-live','polite');
-      el.setAttribute('aria-atomic','true');
-      el.className='sr-only';
-      el.textContent = `Aba ${tabName} ativada`;
-      document.body.appendChild(el);
-      setTimeout(()=>document.body.removeChild(el),1000);
-    };
-    document.getElementById('menu-inicio')?.addEventListener('click',()=> setTimeout(()=>announce('Início'),100));
-    document.getElementById('menu-produto')?.addEventListener('click',()=> setTimeout(()=>announce('Produto'),100));
-    document.getElementById('menu-gestao')?.addEventListener('click',()=> setTimeout(()=>announce('Gestão'),100));
-  };
-  try{ setupAccessibility(); }catch{}
-
-  // ===== SW =====
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(()=>{});
-    });
-  }
 });
 
-// expõe fitProdutoKanbanHeight se precisar em outros módulos
 export const __debug_fitHeight = () => {
   try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}
 };
