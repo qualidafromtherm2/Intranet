@@ -2,16 +2,7 @@
 const express = require('express');
 const router  = express.Router();
 
-const { Pool } = require('pg');
-const pool = new Pool({
-  host:     process.env.PGHOST || 'localhost',
-  user:     process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  database: process.env.PGDATABASE,
-  port:     Number(process.env.PGPORT || 5432),
-  // Se seu Postgres exigir SSL (ex.: Render), defina PGSSLMODE=require no .env
-  ssl: process.env.PGSSLMODE === 'require' ? { rejectUnauthorized: false } : undefined,
-});
+const { dbQuery } = require('../src/db'); // usa DATABASE_URL com SSL quando em produção
 
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
@@ -32,7 +23,7 @@ async function resolveCodigoProduto(codigoParam) {
      WHERE codigo = $1
      LIMIT 1
   `;
-  const { rows } = await pool.query(sql, [raw]);
+  const { rows } = await dbQuery(sql, [raw]);
   if (!rows.length) {
     const e = new Error('Produto não encontrado para o código informado.');
     e.status = 404;
@@ -145,7 +136,7 @@ router.get('/:codigo/fotos', async (req, res) => {
   try {
     const codigoNum = await resolveCodigoProduto(req.params.codigo);
 
-    const q = await pool.query(
+    const q = await dbQuery(
       `SELECT pos, url_imagem, path_key
          FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1
@@ -154,10 +145,11 @@ router.get('/:codigo/fotos', async (req, res) => {
     );
 
     res.json({ ok: true, codigo: codigoNum, fotos: q.rows });
-  } catch (err) {
-    console.error('[listar fotos]', err);
-    res.status(err.status || 500).json({ error: 'Falha ao listar', detail: String(err.message || err) });
-  }
+ } catch (err) {
+   console.error('[listar fotos]', err);
+   // Evita 500 na UI: devolve vazio
+   res.status(200).json({ ok: true, codigo: null, fotos: [] });
+ }
 });
 
 module.exports = router;
