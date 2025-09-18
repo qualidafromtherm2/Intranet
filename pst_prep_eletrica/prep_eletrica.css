@@ -180,3 +180,21 @@ body{
 /* hotfix: esconder ícone dark/light gigante */
 .dark-light{ display:none !important; }
 .dark-light svg{ width:24px; height:24px; }
+
+
+/* === MINI-BOARD: sempre duas colunas, Em produção | Fila de produção === */
+.kanban-board.mini-board{
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr) !important;
+  gap: 16px !important;
+  align-items: start !important;
+  justify-content: start !important;
+  overflow: visible !important;
+}
+/* garante que nenhuma regra antiga de flex/order interfira */
+.kanban-board.mini-board .kanban-column{
+  order: initial !important;
+  flex: initial !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
