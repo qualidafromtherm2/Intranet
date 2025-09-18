@@ -198,3 +198,30 @@ body{
   width: auto !important;
   min-width: 0 !important;
 }
+
+/* === MINI-BOARD: SEMPRE 2 colunas, Em produção | Fila de produção === */
+body[data-page="prep-eletrica"] #produtoTab .kanban-board.mini-board{
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr) !important;
+  grid-auto-flow: column !important; /* garante preenchimento por coluna/ordem do DOM */
+  gap: 16px !important;
+  align-items: start !important;
+  justify-content: start !important;
+  overflow: visible !important;
+}
+
+/* neutraliza qualquer reordenação/largura herdada (flex/order/width:100%) */
+body[data-page="prep-eletrica"] #produtoTab .kanban-board.mini-board .kanban-column{
+  order: initial !important;
+  flex: initial !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+/* certifica que o board fica ABAIXO da foto+botões, mas as colunas lado a lado */
+body[data-page="prep-eletrica"] #produtoTab .produto-layout{
+  display: flex !important;
+  flex-direction: column !important; /* foto/botões em cima; board abaixo */
+  gap: 16px !important;
+}
