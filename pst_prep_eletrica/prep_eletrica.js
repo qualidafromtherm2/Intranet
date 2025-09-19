@@ -384,11 +384,19 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         qrClose.onclick = () => { fecharModal(); reject(new Error('cancelado')); };
-        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } onScan(value); };
+        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP');
+return; } onScan(value); };
         qrManual.onkeydown = (ev) => { if (ev.key === 'Enter') qrManualBtn.click(); };
 
         // Mostra o modal ANTES de iniciar a câmera
         ensureModalVisible();
+        // não abrir teclado automaticamente:
+        qrManual.removeAttribute('autofocus');
+        qrManual.setAttribute('readonly','readonly');
+        const __enableTyping = () => { qrManual.removeAttribute('readonly'); try{ qrManual.focus({preventScroll:true}); }catch{} };
+        qrManual.addEventListener('touchstart', __enableTyping, { once:true });
+        qrManual.addEventListener('mousedown' , __enableTyping, { once:true });
+    
 
         // Para leitor anterior se existir
         (async () => { try { if (window.qrReader) { await window.qrReader.stop(); await window.qrReader.clear(); } } catch {} })();
@@ -415,8 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Escape para fechar
         const esc = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', esc); fecharModal(); reject(new Error('cancelado')); } };
         document.addEventListener('keydown', esc);
-        qrManual.focus();
-      });
+});
     };
 
     btnIniciar?.addEventListener('click', (e) => { e.preventDefault(); abrirLeitorQRComAcao('iniciar'); });
@@ -458,30 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLiveUpdates();
 });
 
-// deixa o #qrReader quadrado mesmo sem suporte a aspect-ratio
-function lockQrSquare() {
-  const el = document.getElementById('qrReader');
-  if (!el) return;
-  // tamanho baseado na viewport, limitado
-  const maxW = Math.min(window.innerWidth * 0.92, 520);
-  const maxH = Math.min(window.innerHeight * 0.80, 520);
-  const size = Math.max(260, Math.floor(Math.min(maxW, maxH)));
-  el.style.width  = size + 'px';
-  el.style.height = size + 'px';
-}
 
-// depois de mostrar o modal e pegar const reader = document.getElementById('qrReader');
-lockQrSquare();
-window.addEventListener('resize', lockQrSquare, { passive: true });
-
-const size = document.getElementById('qrReader').clientWidth || 320;
-const qrSide = Math.max(220, Math.min(380, Math.floor(size * 0.80)));
-await window.qrReader.start(
-  { facingMode: 'environment' },
-  { fps: 10, qrbox: qrSide, disableFlip: true },  // quadrado baseado no container
-  onScan,
-  () => {}
-);
 
 export const __debug_fitHeight = () => {
   try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}
