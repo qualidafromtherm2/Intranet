@@ -159,11 +159,18 @@ main{ width:100%; }
 }
 
 /* garante que o vídeo e o canvas ocupam 100% da área e não distorcem */
-#qrReader video, 
-#qrReader canvas, 
-#qrReader > div {
+/* vídeo e canvas ocupam todo o container, sem distorcer */
+#qrReader video,
+#qrReader canvas {
   width: 100% !important;
   height: 100% !important;
   display: block;
+  object-fit: cover;
 }
-#qrReader video { object-fit: cover; }
+
+/* reforça que o contorno/área sombreada fique por cima quando o browser é teimoso */
+#qrReader .qr-shaded-region { z-index: 3 !important; }
+#qrReader canvas { z-index: 2 !important; }
+#qrReader video  { z-index: 1 !important; }
+#qrReader { position: relative; }
+
