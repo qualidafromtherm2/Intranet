@@ -48,6 +48,10 @@ const callOmieDedup = require('./utils/callOmieDedup');
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
+// server.js (antes das rotas HTML)
+app.use('/pst_prep_eletrica',
+  express.static(path.join(__dirname, 'pst_prep_eletrica'), { etag:false, maxAge:'1h' })
+);
 
 
 app.use(session({
