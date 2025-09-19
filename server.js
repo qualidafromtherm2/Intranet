@@ -1946,7 +1946,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
 
   // ---- QRCode (conteúdo: codMP-OP) ----
   z.push(`${fo(7, 10)}`);                   // ^FO = posiciona o próximo elemento (x=7,y=10) + offsets
-  z.push('^BQN,2,4');                       // ^BQN = QR Code (Modelo 2; Modo 2; escala 4)
+  z.push('^BQN,2,8');                       // ^BQN = QR Code (Modelo 2; Modo 2; escala 4)
   z.push(`^FDQA,${codMP}-${op}^FS`);        // ^FD = dados do QR (QA=modo automático); ^FS = fim do campo
 
   // ---- Código do material (grande) ----
