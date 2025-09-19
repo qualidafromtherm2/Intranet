@@ -471,17 +471,26 @@ function lockQrSquare() {
 }
 
 // depois de mostrar o modal e pegar const reader = document.getElementById('qrReader');
+// antes de iniciar, garanta que o container está quadrado:
 lockQrSquare();
-window.addEventListener('resize', lockQrSquare, { passive: true });
+const side = document.getElementById('qrReader').clientWidth || 320;
+const qrSide = Math.max(220, Math.min(380, Math.floor(side * 0.80)));
 
-const size = document.getElementById('qrReader').clientWidth || 320;
-const qrSide = Math.max(220, Math.min(380, Math.floor(size * 0.80)));
+window.qrReader = new Html5Qrcode('qrReader');
 await window.qrReader.start(
   { facingMode: { ideal: 'environment' } },
-  { fps: 10, qrbox: qrSide, disableFlip: true },  // quadrado baseado no container
-  onScan,
+  {
+    fps: 10,
+    qrbox: { width: qrSide, height: qrSide }, // quadrado
+    aspectRatio: 1.0,
+    showScanRegionOutline: true,              // <- força mostrar a borda
+    disableFlip: true,
+    rememberLastUsedCamera: true
+  },
+  (decoded) => onScan(decoded),
   () => {}
 );
+
 
 export const __debug_fitHeight = () => {
   try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}
