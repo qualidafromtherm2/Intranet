@@ -384,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         qrClose.onclick = () => { fecharModal(); reject(new Error('cancelado')); };
-        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } onScan(value); };
+        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } handleOP(value, (document.getElementById('qrModal') && document.getElementById('qrModal').dataset ? document.getElementById('qrModal').dataset.acao : 'iniciar')); };
         qrManual.onkeydown = (ev) => { if (ev.key === 'Enter') qrManualBtn.click(); };
 
         // Mostra o modal ANTES de iniciar a câmera
