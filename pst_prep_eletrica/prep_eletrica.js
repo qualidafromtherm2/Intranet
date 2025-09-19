@@ -1,24 +1,24 @@
 
-/* ==============================================
-   PREPARAÇÃO ELÉTRICA — JS (atualizado)
-   - Mantém tudo que já funcionava (abas, mini-kanban, foto)
-   - Clique robusto nos cards para abrir a aba Produto
-   - Modal do QR abre SEM teclado (campo fica readonly até tocar)
-   - Fluxo unificado: leitura via QR == clique "Usar valor"
-   - Leitor quadrado (overlay correto em tablets), com contorno
-   ============================================== */
+/* =============================
+   PREPARAÇÃO ELÉTRICA — JS (QR FIX)
+   - Abre o modal ANTES de iniciar a câmera
+   - Garante visibilidade/tamanho do container do vídeo
+   - Para/limpa leitor anterior antes de reabrir
+   - Mantém API_BASE e normalização de imagens
+   ============================= */
 
 import { initPreparacaoKanban } from '../kanban/kanban_preparacao.js';
 
 /* ---------- Base de API ---------- */
 export const API_BASE = (() => {
-  const meta = document.querySelector('meta[name="api-base"]');
-  if (meta && meta.content) return meta.content.replace(/\/$/, '');
-  if (location.hostname.endsWith('onrender.com')) return `https://${location.host}/api`;
+  const meta = document.querySelector('meta[name="api-base"]')?.content?.trim();
+  if (meta) return meta.replace(/\/$/, '');
+  if (location.hostname.endsWith('onrender.com')) {
+    return `https://${location.host}/api`;
+  }
   return '/api';
 })();
 
-/* ---------- Util ---------- */
 function normalizeImageUrl(imgUrl) {
   if (!imgUrl) return null;
   try {
@@ -28,133 +28,116 @@ function normalizeImageUrl(imgUrl) {
   } catch { return imgUrl; }
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const forceTop = () => { try { window.scrollTo(0, 0); } catch {} };
+// força rolar para o topo
+const forceTop = () => { try { window.scrollTo(0,0); } catch(e){} };
+document.addEventListener('DOMContentLoaded', forceTop);
+document.getElementById('mainMenu')?.addEventListener('click', () => setTimeout(forceTop, 0));
 
-/* ---------- Deixa o #qrReader quadrado (também em tablets antigos) ---------- */
-function lockQrSquare() {
-  const el = document.getElementById('qrReader');
-  if (!el) return;
-  const maxW = Math.min(window.innerWidth * 0.92, 520);
-  const maxH = Math.min(window.innerHeight * 0.80, 520);
-  const size = Math.max(260, Math.floor(Math.min(maxW, maxH)));
-  el.style.width  = size + 'px';
-  el.style.height = size + 'px';
-}
-
-/* ==================================================
-   App
-   ================================================== */
 document.addEventListener('DOMContentLoaded', () => {
-  forceTop();
   initPreparacaoKanban();
 
-  const els = {
-    menuInicio   : document.getElementById('menu-inicio'),
-    menuProduto  : document.getElementById('menu-produto'),
-    menuGestao   : document.getElementById('menu-gestao'),
-    paginaPrep   : document.getElementById('paginaPrepEletrica'),
-    produtoTab   : document.getElementById('produtoTab'),
-    gestaoTab    : document.getElementById('gestaoTab'),
-    miniCodigoEl : document.getElementById('produtoSelecionado'),
-    ulMiniFila   : document.getElementById('prod-col-fila'),
-    ulMiniEmProd : document.getElementById('prod-col-emprod'),
-    btnBaixarCsv : document.getElementById('btn-baixar-csv-gestao'),
-    btnSqlGestao : document.getElementById('btn-sql-gestao'),
-    btnIniciar   : document.getElementById('btn-iniciar'),
-    btnFinalizar : document.getElementById('btn-finalizar'),
+  const elements = {
+    menuInicio: document.getElementById('menu-inicio'),
+    menuProduto: document.getElementById('menu-produto'),
+    menuGestao: document.getElementById('menu-gestao'),
+    paginaPrep: document.getElementById('paginaPrepEletrica'),
+    produtoTab: document.getElementById('produtoTab'),
+    gestaoTab: document.getElementById('gestaoTab'),
+    miniCodigoEl: document.getElementById('produtoSelecionado'),
+    ulMiniFila: document.getElementById('prod-col-fila'),
+    ulMiniEmProd: document.getElementById('prod-col-emprod'),
+    btnBaixarCsv: document.getElementById('btn-baixar-csv-gestao'),
+    btnSqlGestao: document.getElementById('btn-sql-gestao'),
+    btnIniciar: document.getElementById('btn-iniciar'),
+    btnFinalizar: document.getElementById('btn-finalizar'),
+    ulFila: document.getElementById('coluna-prep-fila'),
+    ulEmProd: document.getElementById('coluna-prep-em-producao')
   };
 
   window.codigoSelecionado = null;
 
-  /* ----- Tabs ----- */
   const setActiveTab = (activeEl) => {
     document.querySelectorAll('#mainMenu .menu-link').forEach(a => {
       a.classList.remove('is-active');
-      a.setAttribute('aria-selected', 'false');
+      a.setAttribute('aria-selected','false');
     });
-    if (activeEl) {
-      activeEl.classList.add('is-active');
-      activeEl.setAttribute('aria-selected', 'true');
-    }
-    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+    activeEl.classList.add('is-active');
+    activeEl.setAttribute('aria-selected','true');
+    document.querySelectorAll('.tab-pane').forEach(p => p.style.display='none');
   };
 
-  els.menuInicio && els.menuInicio.addEventListener('click', (e) => {
+  elements.menuInicio?.addEventListener('click', (e) => {
     e.preventDefault();
-    setActiveTab(els.menuInicio);
-    els.paginaPrep.style.display = 'block';
-    els.paginaPrep.classList.add('fade-in');
+    setActiveTab(elements.menuInicio);
+    elements.paginaPrep.style.display = 'block';
+    elements.paginaPrep.classList.add('fade-in');
   });
 
-  els.menuProduto && els.menuProduto.addEventListener('click', (e) => {
+  elements.menuProduto?.addEventListener('click', (e) => {
     e.preventDefault();
-    setActiveTab(els.menuProduto);
-    els.produtoTab.style.display = 'block';
-    els.produtoTab.classList.add('fade-in');
-    if (window.codigoSelecionado) renderMiniKanban(window.codigoSelecionado);
-    else {
-      els.miniCodigoEl.textContent = '';
-      els.ulMiniFila.innerHTML = '<li class="empty">Selecione um item na Fila de produção</li>';
-      els.ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+    setActiveTab(elements.menuProduto);
+    elements.produtoTab.style.display = 'block';
+    elements.produtoTab.classList.add('fade-in');
+
+    if (window.codigoSelecionado) {
+      renderMiniKanban(window.codigoSelecionado);
+    } else {
+      elements.miniCodigoEl.textContent = '';
+      elements.ulMiniFila.innerHTML = '<li class="empty">Selecione um item na Fila de produção</li>';
+      elements.ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
     }
     setTimeout(fitProdutoKanbanHeight, 50);
   });
 
-  els.menuGestao && els.menuGestao.addEventListener('click', (e) => {
+  elements.menuGestao?.addEventListener('click', (e) => {
     e.preventDefault();
-    setActiveTab(els.menuGestao);
-    els.gestaoTab.style.display = 'block';
-    els.gestaoTab.classList.add('fade-in');
+    setActiveTab(elements.menuGestao);
+    elements.gestaoTab.style.display = 'block';
+    elements.gestaoTab.classList.add('fade-in');
   });
 
-  /* ----- Ações de gestão simples ----- */
-  (function setupGestaoTab(){
+  // ===== Gestão (menu SQL simples) =====
+  const setupGestaoTab = () => {
     const sideBox = document.querySelector('#gestaoTab .side-actions');
-    if (!sideBox) return;
     const sqlMenu = document.createElement('div');
-    sqlMenu.className = 'sql-menu'; sqlMenu.setAttribute('role','menu');
+    sqlMenu.className = 'sql-menu';
+    sqlMenu.setAttribute('role','menu');
     sqlMenu.innerHTML = `
       <button data-act="last100" role="menuitem">Últimos 100</button>
       <button data-act="byop" role="menuitem">Digite a OP…</button>
       <button data-act="today" role="menuitem">Hoje</button>
       <button data-act="range" role="menuitem">Entre datas…</button>`;
-    sideBox.appendChild(sqlMenu);
+    sideBox?.appendChild(sqlMenu);
 
-    els.btnSqlGestao && els.btnSqlGestao.addEventListener('click', () => {
+    elements.btnSqlGestao?.addEventListener('click', () => {
       sqlMenu.classList.toggle('open');
-      els.btnSqlGestao.setAttribute('aria-expanded', sqlMenu.classList.contains('open'));
+      elements.btnSqlGestao.setAttribute('aria-expanded', sqlMenu.classList.contains('open'));
     });
     document.addEventListener('click', (e) => {
-      if (!sqlMenu.contains(e.target) && e.target !== els.btnSqlGestao) {
+      if (!sqlMenu.contains(e.target) && e.target !== elements.btnSqlGestao) {
         sqlMenu.classList.remove('open');
-        els.btnSqlGestao && els.btnSqlGestao.setAttribute('aria-expanded','false');
+        elements.btnSqlGestao?.setAttribute('aria-expanded','false');
       }
     });
 
     const openEventosQuery = (query) => {
       const csv = confirm('Baixar CSV? (OK = CSV, Cancelar = ver JSON)');
       const base = csv ? `${API_BASE}/preparacao/eventos.csv` : `${API_BASE}/preparacao/eventos`;
-      const url = `${base}?${new URLSearchParams(query).toString()}`;
-      if (csv) { const a=document.createElement('a'); a.href=url; a.download='op_eventos.csv'; document.body.appendChild(a); a.click(); a.remove(); }
+      const qs = new URLSearchParams(query);
+      const url = `${base}?${qs.toString()}`;
+      if (csv) { const a = document.createElement('a'); a.href=url; a.download='op_eventos.csv'; document.body.appendChild(a); a.click(); a.remove(); }
       else { window.open(url,'_blank'); }
     };
 
     sqlMenu.addEventListener('click', (e) => {
-      const act = e.target && e.target.dataset && e.target.dataset.act;
+      const act = e.target?.dataset?.act;
       if (!act) return;
       sqlMenu.classList.remove('open');
-      els.btnSqlGestao && els.btnSqlGestao.setAttribute('aria-expanded','false');
-      switch (act) {
+      elements.btnSqlGestao?.setAttribute('aria-expanded','false');
+      switch(act){
         case 'last100': openEventosQuery({ limit:'100', order:'desc' }); break;
-        case 'byop': {
-          const op = prompt('Digite a OP (ex.: P101086):'); if(op) openEventosQuery({ op: op.trim().toUpperCase() });
-          break;
-        }
-        case 'today': {
-          const d=new Date(); const dateStr=d.toISOString().split('T')[0]; openEventosQuery({ from:dateStr, to:dateStr });
-          break;
-        }
+        case 'byop': { const op = prompt('Digite a OP (ex.: P101086):'); if(op) openEventosQuery({ op: op.trim().toUpperCase() }); break; }
+        case 'today': { const d=new Date(); const dateStr=d.toISOString().split('T')[0]; openEventosQuery({ from:dateStr, to:dateStr }); break; }
         case 'range': {
           const de=prompt('Data inicial (AAAA-MM-DD):'); if(!de) return;
           const ate=prompt('Data final (AAAA-MM-DD):'); if(!ate) return;
@@ -163,134 +146,145 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    els.btnBaixarCsv && els.btnBaixarCsv.addEventListener('click', () => {
+    elements.btnBaixarCsv?.addEventListener('click', () => {
       const a = document.createElement('a');
       a.href = `${API_BASE}/preparacao/csv`; a.download = 'preparacao.csv';
       document.body.appendChild(a); a.click(); a.remove();
     });
-  })();
+  };
+  setupGestaoTab();
+  wireKanbanClicks();
 
-  /* ----- Clique robusto nas listas principais ----- */
+
+  window.ativarAbaProduto = function(){
+    setActiveTab(elements.menuProduto);
+    elements.produtoTab.style.display='block';
+    elements.produtoTab.classList.add('fade-in');
+  };
+
+  // --- Delegação de clique robusta para abrir a aba "Produto" ---
   function wireKanbanClicks() {
-    ['coluna-prep-fila', 'coluna-prep-em-producao'].forEach((id) => {
+    const listas = ['coluna-prep-fila', 'coluna-prep-em-producao'];
+    for (const id of listas) {
       const ul = document.getElementById(id);
-      if (!ul || ul.__wired) return;
+      if (!ul || ul.__wired) continue;
       ul.__wired = true;
+
       ul.addEventListener('click', (e) => {
         const li = e.target && e.target.closest ? e.target.closest('li') : null;
         if (!li || li.classList.contains('empty')) return;
+
         const codigo =
-          (li.dataset && li.dataset.codigo) ||
-          (li.querySelector('[data-codigo]') && li.querySelector('[data-codigo]').dataset.codigo) ||
-          (li.querySelector('.codigo') && li.querySelector('.codigo').textContent.trim()) ||
+          li.dataset?.codigo ||
+          (li.querySelector('[data-codigo]')?.dataset?.codigo) ||
+          (li.querySelector('.codigo')?.textContent?.trim()) ||
           '';
+
         const cp =
-          (li.dataset && (li.dataset.cp || li.getAttribute('data-cp'))) ||
-          (li.querySelector('[data-cp]') && li.querySelector('[data-cp]').dataset.cp) ||
+          li.dataset?.cp ||
+          li.getAttribute('data-cp') ||
+          (li.querySelector('[data-cp]')?.dataset?.cp) ||
           '';
+
         if (!codigo && !cp) return;
+
         window.codigoSelecionado   = codigo;
         window.codigoSelecionadoCP = cp;
-        window.ativarAbaProduto();
-        window.renderMiniKanban(codigo, cp);
+
+        if (typeof window.ativarAbaProduto === 'function') window.ativarAbaProduto();
+        if (typeof window.renderMiniKanban === 'function') window.renderMiniKanban(codigo, cp);
       }, { passive: true });
-    });
+    }
   }
-  wireKanbanClicks();
 
-  window.ativarAbaProduto = function(){
-    setActiveTab(els.menuProduto);
-    els.produtoTab.style.display='block';
-    els.produtoTab.classList.add('fade-in');
-  };
 
-  /* ----- Foto do produto ----- */
+  // ===== Foto do produto =====
   async function fetchPrimeiraFoto(codigo) {
     if (!codigo) return null;
     const endpoint = `${API_BASE}/produtos/${encodeURIComponent(codigo)}/fotos`;
     try {
-      const resp = await fetch(endpoint, { cache:'no-store', credentials:'include' });
+      const resp = await fetch(endpoint, { cache: 'no-store', credentials: 'include' });
       if (!resp.ok) return null;
       const j = await resp.json();
-      const arr = Array.isArray(j && j.fotos) ? j.fotos : (Array.isArray(j && j.data) ? j.data : []);
+      const arr = Array.isArray(j?.fotos) ? j.fotos : (Array.isArray(j?.data) ? j.data : []);
       if (!arr.length) return null;
-      const ord = arr.slice().sort((a,b)=>Number(a.pos||0)-Number(b.pos||0));
-      const f0 = ord[0];
-      const raw = (f0 && (f0.url_imagem || f0.url || f0.imagem)) || null;
+      const ord = arr.slice().sort((a,b) => Number(a.pos||0) - Number(b.pos||0));
+      const f0  = ord[0];
+      const raw = f0?.url_imagem ?? f0?.url ?? f0?.imagem ?? null;
       return normalizeImageUrl(raw);
     } catch { return null; }
   }
-
   async function updateProdutoFotoFrame(codigoPreferencial) {
     const img = document.getElementById('produto-foto-img');
     if (!img) return;
     let url = null;
-    try { url = await fetchPrimeiraFoto(codigoPreferencial); } catch {}
+    try { url = await fetchPrimeiraFoto(codigoPreferencial); } catch{}
     if (url) { img.src = url; img.style.objectFit='cover'; }
     else { img.src = '../img/logo.png'; img.style.objectFit='contain'; }
   }
 
-  /* ----- Altura das listas (aba Produto) ----- */
+  // ===== Altura das listas (aba Produto) =====
   function fitProdutoKanbanHeight() {
     const limits = [];
-    ['#produtoTab .content-wrapper','#produtoTab','main'].forEach(sel => {
-      const el = document.querySelector(sel); if (!el) return;
-      const r = el.getBoundingClientRect(); if (r.bottom>0) limits.push(r.bottom);
-    });
+    const addLimit = (sel) => {
+      const el = document.querySelector(sel);
+      if (el) { const r = el.getBoundingClientRect(); if (r.bottom > 0) limits.push(r.bottom); }
+    };
+    addLimit('#produtoTab .content-wrapper');
+    addLimit('#produtoTab');
+    addLimit('main');
     limits.push(window.innerHeight);
-    const yLimit = Math.min.apply(Math, limits);
+    const yLimit = Math.min(...limits);
     const padBottom = 16;
     ['prod-col-fila','prod-col-emprod'].forEach(id => {
-      const ul = document.getElementById(id); if (!ul) return;
+      const ul = document.getElementById(id);
+      if (!ul) return;
       const top = ul.getBoundingClientRect().top;
       const available = Math.max(100, Math.floor(yLimit - top - padBottom));
-      ul.style.maxHeight = `${available}px`; ul.style.overflowY = 'auto';
+      ul.style.maxHeight = `${available}px`;
+      ul.style.overflowY = 'auto';
     });
   }
   window.addEventListener('resize', fitProdutoKanbanHeight);
-  fitProdutoKanbanHeight();
+  document.addEventListener('DOMContentLoaded', fitProdutoKanbanHeight);
 
-  /* ----- Mini Kanban (aba Produto) ----- */
+  // ===== Mini Kanban =====
   async function renderMiniKanban(codigoAlfa, codigoProdutoNum=null){
     const rid = (window.__miniRID = (window.__miniRID || 0) + 1);
     const headerEl   = document.getElementById('produtoSelecionado');
     const ulMiniFila = document.getElementById('prod-col-fila');
     const ulMiniEm   = document.getElementById('prod-col-emprod');
     if (headerEl) headerEl.textContent = `Produto — ${codigoAlfa || ''}`;
-    if (!ulMiniFila || !ulMiniEm) return;
+    if (!ulMiniFila || !ulMiniEm){ console.warn('[mini-board] listas não encontradas'); return; }
 
     try {
       const resp = await fetch(`${API_BASE}/preparacao/listar`, { cache:'no-store', credentials:'include' });
       const payload = await resp.json();
-      const data   = (payload && payload.data) || {};
+      const data   = payload?.data || {};
       const fila   = data['A Produzir'] || [];
       const emprod = data['Produzindo'] || [];
 
       const codAlfa = String(codigoAlfa || '').trim();
       const codNum  = codigoProdutoNum ? String(codigoProdutoNum).trim() : null;
 
-      await updateProdutoFotoFrame(codAlfa || codNum || null);
+      let fotoAlfa = codAlfa || codNum || null;
+      await updateProdutoFotoFrame(fotoAlfa);
 
-      const all = fila.concat(emprod);
-      const cps = [];
-      all.forEach(c => {
-        const cp = String(c.produto_codigo || '').trim();
-        if (/^\d+$/.test(cp) && cps.indexOf(cp) === -1) cps.push(cp);
-      });
-
+      const all = [...fila, ...emprod];
+      const cps = [...new Set(all.map(c => String(c.produto_codigo ?? '').trim()).filter(s => /^\d+$/.test(s)))];
       let cpToAlpha = {};
-      if (cps.length) {
-        const qs = cps.map(cp=>'cp='+encodeURIComponent(cp)).join('&');
+      if (cps.length){
+        const qs = cps.map(cp => 'cp='+encodeURIComponent(cp)).join('&');
         try {
           const r = await fetch(`${API_BASE}/produtos/codigos?`+qs, { credentials:'include' });
           const j = await r.json();
-          cpToAlpha = (j && j.data) || {};
-        } catch {}
+          cpToAlpha = j?.data || {};
+        } catch(e){ console.warn('[mini-board] falha ao resolver CP→alfa:', e); }
       }
-      const alphaFromCP = (cp) => (cpToAlpha[cp] && cpToAlpha[cp].codigo) || null;
+      const alphaFromCP = cp => (cpToAlpha[cp]?.codigo || null);
 
       const matchProd = (c) => {
-        const cp   = String(c.produto_codigo || '').trim();
+        const cp   = String(c.produto_codigo ?? '').trim();
         const alfa = alphaFromCP(cp) || cp;
         if (codNum  && cp   === codNum)  return true;
         if (codAlfa && alfa === codAlfa) return true;
@@ -298,130 +292,140 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       const dedupeByOp = (arr) => {
-        const seen = Object.create(null); const out = [];
-        arr.forEach(c => { const k=String(c.op||'').trim(); if(!k || seen[k]) return; seen[k]=1; out.push(c); });
-        return out;
+        const seen = new Set();
+        return arr.filter(c => {
+          const k = String(c.op || '').trim();
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
       };
 
       let listaFila   = dedupeByOp(fila.filter(matchProd));
       let listaEmProd = dedupeByOp(emprod.filter(matchProd));
-      const emOps = {}; listaEmProd.forEach(x => emOps[x.op]=1);
-      listaFila = listaFila.filter(x => !emOps[x.op]);
+      const emOps = new Set(listaEmProd.map(x => x.op));
+      listaFila = listaFila.filter(x => !emOps.has(x.op));
 
       if (rid !== window.__miniRID) return;
       const fragFila = document.createDocumentFragment();
       const fragEm   = document.createDocumentFragment();
-      const pushLi = (frag, op) => { const li=document.createElement('li'); li.className='kanban-card'; li.textContent=op||'—'; frag.appendChild(li); };
-      if (!listaEmProd.length) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragEm.appendChild(li); }
-      else listaEmProd.forEach(c => pushLi(fragEm, c.op));
-      if (!listaFila.length)   { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
-      else listaFila.forEach(c => pushLi(fragFila, c.op));
+      const pushLi = (frag, op) => {
+        const li = document.createElement('li'); li.className='kanban-card'; li.textContent = op || '—'; frag.appendChild(li);
+      };
+      if (listaEmProd.length === 0) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragEm.appendChild(li); }
+      else { for (const c of listaEmProd) pushLi(fragEm, c.op); }
+
+      if (listaFila.length === 0) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
+      else { for (const c of listaFila) pushLi(fragFila, c.op); }
+
       if (rid !== window.__miniRID) return;
       ulMiniEm.replaceChildren(fragEm);
       ulMiniFila.replaceChildren(fragFila);
-    } catch (err) {
+    } catch (err){
       if (rid !== window.__miniRID) return;
-      ulMiniEm.innerHTML  = '<li class="empty">Erro carregando dados</li>';
-      ulMiniFila.innerHTML = '';
+      console.error('[mini-board] erro:', err);
+      document.getElementById('prod-col-emprod').innerHTML = '<li class="empty">Erro carregando dados</li>';
+      document.getElementById('prod-col-fila').innerHTML = '';
     }
     fitProdutoKanbanHeight();
   }
   window.renderMiniKanban = renderMiniKanban;
 
-  /* ===== QR Code (iniciar / concluir) ===== */
-  (function setupQRFunctionality(){
-    const modal     = document.getElementById('qrModal');
-    const btnClose  = document.getElementById('qrClose');
-    const inputOP   = document.getElementById('qrManual');
-    const btnOP     = document.getElementById('qrManualBtn');
-    const btnIniciar   = els.btnIniciar;
-    const btnFinalizar = els.btnFinalizar;
+  // ===== QR Code (iniciar/finalizar) =====
+  const setupQRFunctionality = () => {
+    const qrModal    = document.getElementById('qrModal');
+    const qrClose    = document.getElementById('qrClose');
+    const qrManual   = document.getElementById('qrManual');
+    const qrManualBtn= document.getElementById('qrManualBtn');
+    const qrDebug    = document.getElementById('qrDebug');
+    const btnIniciar   = document.getElementById('btn-iniciar');
+    const btnFinalizar = document.getElementById('btn-finalizar');
 
-    function showModal(){
-      modal.style.display = 'flex';
-      modal.classList.add('open');
-      modal.setAttribute('aria-hidden','false');
-      lockQrSquare();
-      window.addEventListener('resize', lockQrSquare, { passive:true });
-
-      // NÃO abrir teclado automaticamente:
-      inputOP.removeAttribute('autofocus');
-      inputOP.setAttribute('readonly','readonly');
-      const enableTyping = () => {
-        inputOP.removeAttribute('readonly');
-        inputOP.focus({ preventScroll:true });
-      };
-      inputOP.addEventListener('touchstart', enableTyping, { once:true });
-      inputOP.addEventListener('mousedown' , enableTyping, { once:true });
-    }
-
-    async function hideModal(){
-      try { if (window.qrReader){ await window.qrReader.stop(); await window.qrReader.clear(); } } catch {}
-      modal.classList.remove('open');
-      modal.setAttribute('aria-hidden','true');
-      modal.style.display = 'none';
-      inputOP.value = '';
-    }
-
-    let processing = false;
-    const handleOP = async (op, acao) => {
-      op = (op || '').trim().toUpperCase();
-      if (!op || processing) return;
-      processing = true;
-      try {
-        if (window.qrReader){ try { await window.qrReader.stop(); await window.qrReader.clear(); } catch {} }
-        if (acao === 'iniciar')      await Preparacao.iniciarProducao(op);
-        else if (acao === 'concluir')await Preparacao.finalizarProducao(op);
-        await hideModal();
-      } catch (err) {
-        alert('Falha: ' + (err && err.message ? err.message : err));
-      } finally { processing = false; }
+    const ensureModalVisible = () => {
+      qrModal.style.display = 'flex';             // vence inline display:none
+      qrModal.classList.add('open');
+      qrModal.setAttribute('aria-hidden','false');
+      const reader = document.getElementById('qrReader');
+      if (reader) {
+        reader.style.width = '100%';
+        reader.style.maxWidth = '520px';
+        //reader.style.height = '420px';
+        reader.style.background = '#000';
+        reader.style.borderRadius = '8px';
+        reader.style.overflow = 'hidden';
+      }
     };
 
-    async function startQr(acao){
-      showModal();
-      await sleep(50); // deixa o layout aplicar
-      const side = document.getElementById('qrReader').clientWidth || 320;
-      const qrSide = Math.max(220, Math.min(380, Math.floor(side * 0.80)));
-      try {
-        window.qrReader = new Html5Qrcode('qrReader');
-        await window.qrReader.start(
-          { facingMode: { ideal:'environment' } },
-          { fps:10, qrbox:{ width:qrSide, height:qrSide }, aspectRatio:1.0, showScanRegionOutline:true, disableFlip:true, rememberLastUsedCamera:true },
-          (decoded) => { handleOP(decoded, acao); },
-          () => {}
-        );
-      } catch (e) {
-        alert('Não foi possível acessar a câmera: ' + (e && e.message ? e.message : e));
-      }
-    }
+    const fecharModal = async () => {
+      try { if (window.qrReader) { await window.qrReader.stop(); await window.qrReader.clear(); } } catch {}
+      qrModal.classList.remove('open');
+      qrModal.setAttribute('aria-hidden','true');
+      qrModal.style.display = 'none';
+      qrManual.value=''; qrDebug.textContent='';
+    };
 
-    btnOP && btnOP.addEventListener('click', () => {
-      const v = inputOP.value;
-      if (!v.trim()) { alert('Digite uma OP'); return; }
-      handleOP(v, modal.dataset.acao || 'iniciar');
-    });
-    inputOP && inputOP.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        const v = inputOP.value;
-        if (!v.trim()) { alert('Digite uma OP'); return; }
-        handleOP(v, modal.dataset.acao || 'iniciar');
-      }
-    });
+    const abrirLeitorQRComAcao = (acao) => {
+      return new Promise((resolve, reject) => {
+        const onScan = async (raw) => {
+          try {
+            const op = (raw || '').trim().toUpperCase();
+            if (!op) { alert('QR/valor vazio'); return; }
+            btnIniciar.disabled = true; btnFinalizar.disabled = true;
+            if (acao === 'iniciar')      await Preparacao.iniciarProducao(op);
+            else if (acao === 'concluir')await Preparacao.finalizarProducao(op);
+            await fecharModal();
+            resolve(op);
+          } catch (err) {
+            alert('Falha: ' + (err?.message || err));
+            reject(err);
+          } finally {
+            btnIniciar.disabled = false; btnFinalizar.disabled = false;
+          }
+        };
 
-    btnClose && btnClose.addEventListener('click', hideModal);
+        qrClose.onclick = () => { fecharModal(); reject(new Error('cancelado')); };
+        qrManualBtn.onclick = () => { const value = qrManual.value.trim(); if (!value){ alert('Digite uma OP'); qrManual.focus(); return; } onScan(value); };
+        qrManual.onkeydown = (ev) => { if (ev.key === 'Enter') qrManualBtn.click(); };
 
-    btnIniciar && btnIniciar.addEventListener('click', (e) => {
-      e.preventDefault(); modal.dataset.acao = 'iniciar'; startQr('iniciar');
-    });
-    btnFinalizar && btnFinalizar.addEventListener('click', (e) => {
-      e.preventDefault(); modal.dataset.acao = 'concluir'; startQr('concluir');
-    });
-  })();
+        // Mostra o modal ANTES de iniciar a câmera
+        ensureModalVisible();
 
-  /* ----- SSE / Atualização ao vivo ----- */
-  (function setupLiveUpdates(){
+        // Para leitor anterior se existir
+        (async () => { try { if (window.qrReader) { await window.qrReader.stop(); await window.qrReader.clear(); } } catch {} })();
+
+        // Inicia a câmera após o layout estar visível
+        const startCamera = async () => {
+          if (!window.Html5Qrcode) return;
+          try {
+            window.qrReader = new Html5Qrcode('qrReader');
+            await window.qrReader.start(
+              { facingMode: 'environment' },
+              { fps: 10, qrbox: 280 },
+              (decoded) => onScan(decoded),
+              () => {}
+            );
+          } catch (e) {
+            alert('Não foi possível acessar a câmera: ' + (e?.message || e));
+          }
+        };
+
+        // Dá um tick pro layout aplicar e mede de novo
+        requestAnimationFrame(() => setTimeout(startCamera, 60));
+
+        // Escape para fechar
+        const esc = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', esc); fecharModal(); reject(new Error('cancelado')); } };
+        document.addEventListener('keydown', esc);
+        qrManual.focus();
+      });
+    };
+
+    btnIniciar?.addEventListener('click', (e) => { e.preventDefault(); abrirLeitorQRComAcao('iniciar'); });
+    btnFinalizar?.addEventListener('click', (e) => { e.preventDefault(); abrirLeitorQRComAcao('concluir'); });
+  };
+  setupQRFunctionality();
+
+  // ===== SSE / Atualização ao vivo =====
+  const setupLiveUpdates = () => {
     let debounceId;
     const refresh = async () => {
       clearTimeout(debounceId);
@@ -432,21 +436,53 @@ document.addEventListener('DOMContentLoaded', () => {
           if (window.codigoSelecionado && typeof window.renderMiniKanban === 'function') {
             await window.renderMiniKanban(window.codigoSelecionado);
           }
-        } catch (e) { console.warn('[prep-eletrica] refresh falhou:', e); }
-      }, 250);
+        } catch (e) {
+          console.warn('[prep-eletrica] refresh falhou:', e);
+        }
+      }, 300);
     };
+
     try {
-      const es = new EventSource(`${API_BASE}/produtos/stream`);
-      es.onmessage = (event) => { try { const msg = JSON.parse(event.data); if (msg && msg.type === 'hello') return; } catch{} refresh(); };
-      es.onerror   = (err) => { console.warn('[SSE] erro:', err); };
-      window.addEventListener('beforeunload', () => { try { es.close(); } catch{} });
+      const eventSource = new EventSource(`${API_BASE}/produtos/stream`);
+      eventSource.onmessage = (event) => {
+        try { const message = JSON.parse(event.data); if (message?.type === 'hello') return; } catch {}
+        refresh();
+      };
+      eventSource.onerror = (error) => { console.warn('[SSE] Erro de conexão:', error); };
+      window.addEventListener('beforeunload', () => { eventSource.close?.(); });
     } catch {
+      console.log('[SSE] Não disponível, usando polling como fallback');
       setInterval(refresh, 30000);
     }
-  })();
+  };
+  setupLiveUpdates();
+});
 
-}); // DOMContentLoaded
+// deixa o #qrReader quadrado mesmo sem suporte a aspect-ratio
+function lockQrSquare() {
+  const el = document.getElementById('qrReader');
+  if (!el) return;
+  // tamanho baseado na viewport, limitado
+  const maxW = Math.min(window.innerWidth * 0.92, 520);
+  const maxH = Math.min(window.innerHeight * 0.80, 520);
+  const size = Math.max(260, Math.floor(Math.min(maxW, maxH)));
+  el.style.width  = size + 'px';
+  el.style.height = size + 'px';
+}
+
+// depois de mostrar o modal e pegar const reader = document.getElementById('qrReader');
+lockQrSquare();
+window.addEventListener('resize', lockQrSquare, { passive: true });
+
+const size = document.getElementById('qrReader').clientWidth || 320;
+const qrSide = Math.max(220, Math.min(380, Math.floor(size * 0.80)));
+await window.qrReader.start(
+  { facingMode: 'environment' },
+  { fps: 10, qrbox: qrSide, disableFlip: true },  // quadrado baseado no container
+  onScan,
+  () => {}
+);
 
 export const __debug_fitHeight = () => {
-  try { window.dispatchEvent(new Event('resize')); } catch {}
+  try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}
 };
