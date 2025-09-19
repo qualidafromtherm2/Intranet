@@ -1,25 +1,4 @@
 
-    // Extrai a OP de textos vindos do QR (aceita 'OP: P101086', quebras de linha, URLs etc.)
-    function extractOP(raw){
-      if (!raw) return '';
-      var s = String(raw).trim();
-      // tenta padrões comuns: OP: P123456, P123456 isolado, etc.
-      var m = s.match(/OP[:\s-]*([A-Za-z]\d{5,})/i);
-      if (m && m[1]) return m[1].toUpperCase();
-      m = s.match(/\b([A-Za-z]\d{5,})\b/); // ex.: P101086
-      if (m && m[1]) return m[1].toUpperCase();
-      // se QR for uma URL com ?op=
-      try {
-        var u = new URL(s);
-        var opParam = u.searchParams.get('op');
-        if (opParam) return String(opParam).toUpperCase();
-      } catch(e){}
-      // remove não alfanuméricos e tenta pegar algo tipo P + dígitos
-      m = s.replace(/[^A-Za-z0-9]/g,' ').match(/\b([A-Za-z]\d{5,})\b/);
-      if (m && m[1]) return m[1].toUpperCase();
-      return s.toUpperCase(); // fallback: devolve inteiro uppercase
-    }
-
 /* =============================
    PREPARAÇÃO ELÉTRICA — JS (QR FIX)
    - Abre o modal ANTES de iniciar a câmera
@@ -422,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await window.qrReader.start(
               { facingMode: 'environment' },
               { fps: 10, qrbox: 280 },
-              (decoded) => onScan(decoded),
+              (decoded) => handleOP(decoded, acao),
               () => {}
             );
           } catch (e) {
@@ -507,3 +486,45 @@ await window.qrReader.start(
 export const __debug_fitHeight = () => {
   try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}
 };
+
+// fallback extractOP
+
+    // === Extrai a OP a partir do texto do QR ===
+    function extractOP(raw){
+      if (!raw) return '';
+      var s = String(raw).trim();
+      // Se tiver hífen, pega o SUFIXO após o ÚLTIMO "-"
+      if (s.indexOf('-') !== -1){
+        var suf = s.split('-');
+        s = suf[suf.length-1].trim();
+      }
+
+    let __qrProcessing = false;
+    const handleOP = async (op, acao) => {
+      op = extractOP(op);
+      if (!op || __qrProcessing) return;
+      __qrProcessing = true;
+      try {
+        if (window.qrReader){ try { await window.qrReader.stop(); await window.qrReader.clear(); } catch {} }
+        if (acao === 'iniciar')      { await Preparacao.iniciarProducao(op); }
+        else if (acao === 'concluir'){ await Preparacao.finalizarProducao(op); }
+        await hideModal?.();
+      } catch (err) {
+        alert('Falha ao processar OP '+ op +': ' + (err && err.message ? err.message : err));
+      } finally { __qrProcessing = false; }
+    };
+      // Agora tenta achar padrão tipo P+digitos (P2500018, etc.)
+      var m = s.match(/\b([A-Za-z]\d{5,})\b/);
+      if (m && m[1]) return m[1].toUpperCase();
+      // URLs com ?op=
+      try {
+        var u = new URL(String(raw));
+        var qp = u.searchParams.get('op');
+        if (qp) return String(qp).toUpperCase();
+      } catch(e){}
+      // Fallback: remove símbolos e tenta de novo
+      var s2 = s.replace(/[^A-Za-z0-9]/g,' ');
+      m = s2.match(/\b([A-Za-z]\d{5,})\b/);
+      if (m && m[1]) return m[1].toUpperCase();
+      return s.toUpperCase();
+    }
