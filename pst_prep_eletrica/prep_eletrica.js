@@ -349,7 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (reader) {
         reader.style.width = '100%';
         reader.style.maxWidth = '520px';
-        reader.style.height = '420px';
+        //reader.style.height = '420px';
         reader.style.background = '#000';
         reader.style.borderRadius = '8px';
         reader.style.overflow = 'hidden';
@@ -457,6 +457,31 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   setupLiveUpdates();
 });
+
+// deixa o #qrReader quadrado mesmo sem suporte a aspect-ratio
+function lockQrSquare() {
+  const el = document.getElementById('qrReader');
+  if (!el) return;
+  // tamanho baseado na viewport, limitado
+  const maxW = Math.min(window.innerWidth * 0.92, 520);
+  const maxH = Math.min(window.innerHeight * 0.80, 520);
+  const size = Math.max(260, Math.floor(Math.min(maxW, maxH)));
+  el.style.width  = size + 'px';
+  el.style.height = size + 'px';
+}
+
+// depois de mostrar o modal e pegar const reader = document.getElementById('qrReader');
+lockQrSquare();
+window.addEventListener('resize', lockQrSquare, { passive: true });
+
+const size = document.getElementById('qrReader').clientWidth || 320;
+const qrSide = Math.max(220, Math.min(380, Math.floor(size * 0.80)));
+await window.qrReader.start(
+  { facingMode: { ideal: 'environment' } },
+  { fps: 10, qrbox: qrSide, disableFlip: true },  // quadrado baseado no container
+  onScan,
+  () => {}
+);
 
 export const __debug_fitHeight = () => {
   try { const ev = new Event('resize'); window.dispatchEvent(ev); } catch {}

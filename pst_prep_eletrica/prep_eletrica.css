@@ -145,3 +145,25 @@ main{ width:100%; }
 .input-group{ display:flex; gap:8px; margin-top:12px; }
 .input-modern{ flex:1 1 auto; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:#0d0f14; color:#fff; }
 .btn-ghost{ background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:10px 14px; color:#fff; }
+
+
+/* QR modal — manter o leitor QUADRADO em qualquer tela */
+#qrReader{
+  width: min(92vw, 520px);
+  /* browsers modernos: mantém quadrado sem JS extra */
+  aspect-ratio: 1 / 1;
+  height: auto !important;
+  background:#000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* garante que o vídeo e o canvas ocupam 100% da área e não distorcem */
+#qrReader video, 
+#qrReader canvas, 
+#qrReader > div {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+#qrReader video { object-fit: cover; }
