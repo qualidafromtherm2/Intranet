@@ -153,12 +153,50 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
   setupGestaoTab();
+  wireKanbanClicks();
+
 
   window.ativarAbaProduto = function(){
     setActiveTab(elements.menuProduto);
     elements.produtoTab.style.display='block';
     elements.produtoTab.classList.add('fade-in');
   };
+
+  // --- Delegação de clique robusta para abrir a aba "Produto" ---
+  function wireKanbanClicks() {
+    const listas = ['coluna-prep-fila', 'coluna-prep-em-producao'];
+    for (const id of listas) {
+      const ul = document.getElementById(id);
+      if (!ul || ul.__wired) continue;
+      ul.__wired = true;
+
+      ul.addEventListener('click', (e) => {
+        const li = e.target && e.target.closest ? e.target.closest('li') : null;
+        if (!li || li.classList.contains('empty')) return;
+
+        const codigo =
+          li.dataset?.codigo ||
+          (li.querySelector('[data-codigo]')?.dataset?.codigo) ||
+          (li.querySelector('.codigo')?.textContent?.trim()) ||
+          '';
+
+        const cp =
+          li.dataset?.cp ||
+          li.getAttribute('data-cp') ||
+          (li.querySelector('[data-cp]')?.dataset?.cp) ||
+          '';
+
+        if (!codigo && !cp) return;
+
+        window.codigoSelecionado   = codigo;
+        window.codigoSelecionadoCP = cp;
+
+        if (typeof window.ativarAbaProduto === 'function') window.ativarAbaProduto();
+        if (typeof window.renderMiniKanban === 'function') window.renderMiniKanban(codigo, cp);
+      }, { passive: true });
+    }
+  }
+
 
   // ===== Foto do produto =====
   async function fetchPrimeiraFoto(codigo) {
@@ -394,6 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
       debounceId = setTimeout(async () => {
         try {
           await initPreparacaoKanban();
+          wireKanbanClicks();
           if (window.codigoSelecionado && typeof window.renderMiniKanban === 'function') {
             await window.renderMiniKanban(window.codigoSelecionado);
           }
