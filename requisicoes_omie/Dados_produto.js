@@ -117,22 +117,14 @@ export async function loadDadosProduto(codigo) {
   document.getElementById('productTitle').textContent = codigo;
   await loadTipoMap();
 
-  // 3.2) Consulta dados do produto
-  const resProd = await fetch(`${API_BASE}/api/omie/produtos`, {
-    method: 'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      call:    'ConsultarProduto',
-      app_key: OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param:   [{ codigo }]
-    })
-  });
-  if (!resProd.ok) {
-    console.error('Falha ao consultar produto', resProd.status);
-    return;
-  }
-  const dados = await resProd.json();
+// [SQL] Busca dados do produto direto do Postgres
+const resProd = await fetch(`${API_BASE}/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`);
+if (!resProd.ok) {
+  console.error('Falha ao buscar produto no Postgres', resProd.status);
+  return;
+}
+const dados = await resProd.json();
+
 
   // 3.3) Buscar e normalizar resumo de estoque
   const hoje = new Date();
@@ -865,11 +857,16 @@ if (!caracUl._deleteListenerAttached) {
 
 /* ----------------- 5) Estrutura de produto (malha) ---------------- */
 try {
-  const r = await fetch(`${API_BASE}/api/malha`, {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify({ intProduto: codigo })
-  });
+// agora usamos a rota que você já colocou no SQL
+const r = await fetch(`${API_BASE}/api/omie/malha`, {
+  method : 'POST',
+  headers: { 'Content-Type':'application/json' },
+  body   : JSON.stringify({
+    // o handler SQL que você criou aceita `param[0].cCodigo`
+    param: [{ cCodigo: codigo }]
+  })
+});
+
 
   const j = await r.json();
 

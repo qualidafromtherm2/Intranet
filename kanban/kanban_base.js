@@ -17,9 +17,9 @@ const ZPL_TOKEN = 'fr0mTh3rm2025';          // ←  o MESMO valor que está no R
  * Mapeia nomes de coluna para os IDs das <ul>.
  */
 const COLUMN_MAP = {
-  "Pedido aprovado":       "coluna-comercial",
-  "Separação logística":   "coluna-pcp-aprovado",
-  "Fila de produção":      "coluna-pcp-op"
+  "Pedido aprovado":     "coluna-comercial",
+  "Aguardando prazo":   "coluna-pcp-aprovado",
+  "Fila de produção":    "coluna-pcp-op"
 };
 
 let placeholder = null;
@@ -440,12 +440,81 @@ function showSpinnerOnCard(card) {
 function restoreCardContent(card, originalContent) {
   if (!card || !originalContent) return;
   card.textContent = originalContent;
-  card.setAttribute('draggable', 'true');
+  card.setAttribute('draggable', 'false');
 }
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function parseDateTimeParts(value) {
+  if (!value) return null;
+
+  const fromDate = (d) => {
+    if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
+    return {
+      date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+      hour: pad2(d.getHours()),
+      minute: pad2(d.getMinutes()),
+      second: pad2(d.getSeconds())
+    };
+  };
+
+  if (value instanceof Date) {
+    return fromDate(value);
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  if (/Z$/i.test(raw) || /[+-]\d{2}:\d{2}$/.test(raw)) {
+    const dt = new Date(raw);
+    const parsed = fromDate(dt);
+    if (parsed) return parsed;
+  }
+
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match) {
+    return {
+      date: match[1],
+      hour: match[2],
+      minute: match[3],
+      second: match[4] || '00'
+    };
+  }
+
+  const onlyDate = raw.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (onlyDate) {
+    return {
+      date: onlyDate[1],
+      hour: '00',
+      minute: '00',
+      second: '00'
+    };
+  }
+
+  return null;
+}
+
+const normalizeStage = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 
 
 function getUlIdByColumn(columnName) {
   return COLUMN_MAP[columnName] || COLUMN_MAP["Pedido aprovado"];
+}
+
+function formatDateDisplay(iso, etapa = '') {
+  const etapaNorm = normalizeStage(etapa);
+  if (etapaNorm === 'produzindo') return 'Produzindo';
+  if (etapaNorm === 'excluido') return 'Excluído';
+
+  const parts = parseDateTimeParts(iso);
+  if (!parts) return '—';
+  const [yyyy, mm, dd] = parts.date.split('-');
+  return `${dd}/${mm}/${yyyy} ${parts.hour}:${parts.minute}`;
 }
 
 function createPlaceholder() {
@@ -461,17 +530,30 @@ function removePlaceholder() {
 }
 
 export function renderKanbanDesdeJSON(itemsKanban) {
+  const escapeAttr = value =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/'/g, '&#39;');
+
   Object.values(COLUMN_MAP).forEach(ulId => {
     const ul = document.getElementById(ulId);
     if (ul) ul.innerHTML = '';
   });
 
   itemsKanban.forEach((item, index) => {
-    const counts = item.local.reduce((acc, raw) => {
-  const col = raw.split(',')[0];       // pega tudo antes da vírgula
-  acc[col] = (acc[col]||0) + 1;
-  return acc;
-}, {})
+    const counts = Array.isArray(item.local)
+      ? item.local.reduce((acc, raw) => {
+          const col = raw.split(',')[0];
+          acc[col] = (acc[col] || 0) + 1;
+          return acc;
+        }, {})
+      : {};
+    if (!Object.keys(counts).length && item.aguardandoPrazo) {
+      counts['Aguardando prazo'] = item.quantidade || 0;
+    }
 
     Object.entries(counts).forEach(([columnName, count]) => {
       const ulId = getUlIdByColumn(columnName);
@@ -479,504 +561,222 @@ export function renderKanbanDesdeJSON(itemsKanban) {
       if (!ul) return;
 
       const li = document.createElement('li');
-      let text = `${item.pedido} – ${item.codigo} (${count})`;
-      if (columnName === "Pedido aprovado") {
-        text += ` | Estoque: ${item.estoque}`;
-      }
-      li.textContent = text;
       li.classList.add('kanban-card');
-      li.setAttribute('draggable', 'true');
-      li.dataset.index = index;
+      li.setAttribute('draggable', 'false');
+      li.dataset.index  = index;
       li.dataset.column = columnName;
+      li.dataset.codigo = item.codigo || '';
+
+      if (columnName === 'Aguardando prazo') {
+        const localLabel = item.local_impressao_label || item.local_impressao || 'Sem local';
+        const grupos = Array.isArray(item.grupos) ? item.grupos : [];
+        const gruposHtml = grupos.map(grupo => {
+          const opsHtml = grupo.ops.map(op => `<div class="kanban-op-line">${op.numero_op || op}</div>`).join('');
+          const safeLocal = escapeAttr(localLabel);
+          const safeCodigo = escapeAttr(grupo.codigo || '');
+          const firstPedido = Array.isArray(grupo.pedidos) && grupo.pedidos.length
+            ? grupo.pedidos[0].numero_pedido || ''
+            : '';
+          const pedidoAttr = firstPedido
+            ? ` data-pedido="${escapeAttr(firstPedido)}"`
+            : '';
+          return `
+            <div class="kanban-code-block">
+              <div class="kanban-code-header">
+                <span>${grupo.codigo || 'Sem código'}</span>
+                <span class="kanban-code-count">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+              </div>
+              <div class="kanban-op-list">${opsHtml}</div>
+              <div class="kanban-code-actions">
+                <div class="kanban-modal-trigger" data-codigo="${safeCodigo}" data-local="${safeLocal}" data-coluna="${escapeAttr(columnName)}">
+                  ${columnName === 'Fila de produção' ? 'Redefinir prazos' : 'Definir prazos'}
+                </div>
+                <button type="button" class="kanban-stock-trigger" data-codigo="${safeCodigo}"${pedidoAttr}>
+                  Consultar estoque
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        li.innerHTML = `
+          <div class="kanban-card-meta">${localLabel}</div>
+          ${gruposHtml}
+        `;
+        li.dataset.opsCount = grupos.reduce((acc, g) => acc + (g.quantidade || g.ops?.length || 0), 0);
+        li.dataset.localImpressao = item.local_impressao || localLabel.toUpperCase();
+        li.setAttribute('draggable', 'false');
+        li.classList.add('kanban-card-local');
+      } else if (columnName === 'Fila de produção') {
+        const localLabel = item.local_impressao_label || item.local_impressao || 'Sem local';
+        const grupos = Array.isArray(item.grupos) ? item.grupos : [];
+        const gruposHtml = grupos.map(grupo => {
+          const opsHtml = grupo.ops.map(op => {
+            const display = formatDateDisplay(op.data_impressao, op.etapa);
+            return `
+              <div class="kanban-op-line">
+                <span>${op.numero_op || op}</span>
+                <span class="kanban-op-date">${display}</span>
+              </div>
+            `;
+          }).join('');
+          const safeLocal = escapeAttr(localLabel);
+          const safeCodigo = escapeAttr(grupo.codigo || '');
+          const firstPedido = Array.isArray(grupo.pedidos) && grupo.pedidos.length
+            ? grupo.pedidos[0].numero_pedido || ''
+            : '';
+          const pedidoAttr = firstPedido
+            ? ` data-pedido="${escapeAttr(firstPedido)}"`
+            : '';
+          return `
+            <div class="kanban-code-block">
+              <div class="kanban-code-header">
+                <span>${grupo.codigo || 'Sem código'}</span>
+                <span class="kanban-code-count">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+              </div>
+              <div class="kanban-op-list">${opsHtml}</div>
+              <div class="kanban-code-actions">
+                <div class="kanban-modal-trigger" data-codigo="${safeCodigo}" data-local="${safeLocal}" data-coluna="${escapeAttr(columnName)}">
+                  ${columnName === 'Fila de produção' ? 'Redefinir prazos' : 'Definir prazos'}
+                </div>
+                <button type="button" class="kanban-stock-trigger" data-codigo="${safeCodigo}"${pedidoAttr}>
+                  Consultar estoque
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        li.innerHTML = `
+          <div class="kanban-card-meta">${localLabel}</div>
+          ${gruposHtml}
+        `;
+        li.dataset.opsCount = grupos.reduce((acc, g) => acc + (g.quantidade || g.ops?.length || 0), 0);
+        li.dataset.localImpressao = item.local_impressao || localLabel.toUpperCase();
+        li.setAttribute('draggable', 'false');
+        li.classList.add('kanban-card-local', 'kanban-card-production');
+      } else if (columnName === 'Pedido aprovado') {
+        const desc = item.descricao || '';
+        const pedidosHtml = (item.pedidos || []).map(p => `
+          <div class="kanban-op-line">
+            <span>Pedido ${p.numero_pedido || '—'}</span>
+            <span class="kanban-op-date">Qtd ${p.quantidade || 0}</span>
+          </div>
+        `).join('');
+        li.innerHTML = `
+          <div class="kanban-card-meta">${desc || 'Produto'}</div>
+          <div class="kanban-code-header">
+            <span>${item.codigo || 'Sem código'}</span>
+            <span class="kanban-code-count">Qtd ${item.quantidade || 0}</span>
+          </div>
+          <div class="kanban-op-list">${pedidosHtml}</div>
+        `;
+        li.dataset.opsCount = item.quantidade || 0;
+        li.dataset.codigo = item.codigo || '';
+      } else {
+        let text = `${item.pedido} – ${item.codigo} (${count})`;
+        if (columnName === "Pedido aprovado") {
+          text += ` | Estoque: ${item.estoque}`;
+        }
+        li.textContent = text;
+      }
+
 
       ul.appendChild(li);
     });
   });
 }
 
+export async function openPcpForCodigo({ codigo, pedido, descricao } = {}) {
+  const cleanCodigo = String(codigo || '').trim();
+  if (!cleanCodigo) return;
+
+  const map = window.__kanbanPedidosMap;
+  const upper = cleanCodigo.toUpperCase();
+  const entry = map && typeof map?.get === 'function'
+    ? (map.get(upper) || map.get(cleanCodigo) || null)
+    : null;
+
+  let numeroPedido = String(pedido || '').trim();
+  if (!numeroPedido && entry?.pedidos?.length) {
+    const found = entry.pedidos.find(p => p?.numero_pedido);
+    if (found) numeroPedido = String(found.numero_pedido || '').trim();
+  }
+
+  const descricaoFinal = descricao || entry?.descricao || '';
+  const label = descricaoFinal
+    ? `${cleanCodigo} — ${descricaoFinal}`
+    : cleanCodigo;
+
+  window.pcpCodigoAtual = cleanCodigo;
+  window.pcpPedidoAtual = numeroPedido || null;
+
+  const col = document.getElementById('coluna-pcp-aprovado')?.closest('.kanban-column');
+  const inp = col?.querySelector('.add-search');
+  if (inp) inp.value = label;
+
+  window.setPCPProdutoCodigo?.(cleanCodigo);
+  document
+    .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
+    ?.click();
+
+  if (typeof window.ensurePCPEstruturaAutoLoad === 'function') {
+    await window.ensurePCPEstruturaAutoLoad();
+  }
+
+  const resetObs = (txt = '') => {
+    const el = document.getElementById('pcp-obs');
+    if (el) el.value = txt;
+    else setTimeout(() => resetObs(txt), 100);
+  };
+
+  if (!numeroPedido) {
+    resetObs('');
+    return;
+  }
+
+  // Integração OMIE removida: mantemos apenas a limpeza do campo de observações.
+  resetObs('');
+}
+
 export function enableDragAndDrop(itemsKanban) {
   document.querySelectorAll('.kanban-card').forEach(li => {
-    li.addEventListener('dragstart', e => {
-      removePlaceholder();
-      placeholder = createPlaceholder();
-      draggedIndex = parseInt(e.target.dataset.index, 10);
-      draggedFromColumn = e.target.dataset.column;
-      e.dataTransfer.setData('text/plain', '');
-      e.dataTransfer.effectAllowed = 'move';
-    });
+    li.setAttribute('draggable', 'false');
 
-    li.addEventListener('dragend', () => {
-      removePlaceholder();
-      draggedIndex = null;
-      draggedFromColumn = null;
-    });
+    li.addEventListener('click', ev => {
+      if (li.dataset.column !== 'Pedido aprovado') return;
 
-
-/* ───────── clique simples vs. duplo ───────── */
-li.addEventListener('click', ev => {
-  /* se não é da coluna Pedido aprovado, ignore */
-  if (li.dataset.column !== 'Pedido aprovado') return;
-
-  /* 2 cliques? cancela o pending do single e sai */
-  if (ev.detail > 1) {
-    if (clickTimerId) {
-      clearTimeout(clickTimerId);
-      clickTimerId = null;
-    }
-    return;                       // deixa o dblclick agir
-  }
-
-  /* clique simples → agenda abrir PCP */
- clickTimerId = setTimeout(async () => {   //  ⬅️ torna o callback assíncrono
-    clickTimerId = null;          // libera para o próximo
-
-    const idx = +li.dataset.index;
-    const it  = itemsKanban[idx];
-    if (!it) return;
-
-    // memoriza para o botão OK
-window.pcpPedidoAtual = it.pedido;
-window.pcpCodigoAtual = it.codigo;
-
-    /* 1) preenche o campo do “+” */
-    const col = document.getElementById('coluna-pcp-aprovado')
-                 ?.closest('.kanban-column');
-    const inp = col?.querySelector('.add-search');
-    if (!inp) return;
-    inp.value = `${it.codigo} — ${it.codigo}`;
-
-    /* 2) ativa a aba PCP */
-    document
-      .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
-      ?.click();
-
-    /* 3) busca obs_venda do pedido e preenche o campo Observações  */
-    try {
-      const payload = {
-        call      : 'ConsultarPedido',
-        app_key   : OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param     : [{ numero_pedido: it.pedido }]
-      };
-
-      const resp = await fetch(`${API_BASE}/api/omie/pedido`, {
-        method : 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body   : JSON.stringify(payload)
-      });
-      const json = await resp.json();
-
-      /* garante sempre um objeto único */
-      const ped = Array.isArray(json.pedido_venda_produto)
-                ? json.pedido_venda_produto[0]
-                : json.pedido_venda_produto || {};
-
-      /* ➊ pega obs_venda — default = '' */
-      let obs = ped.observacoes?.obs_venda ?? '';
-
-      /* ➋ decodifica &quot; → " e extrai só o interior das aspas   */
-      obs = obs.replace(/&quot;/g, '"');
-      const m = obs.match(/"([^"]+)"/);
-      if (m) obs = m[1];                   // só o texto dentro das aspas
-
-      /* ➌ espera o textarea existir e grava o valor                */
-      const setObs = txt => {
-        const el = document.getElementById('pcp-obs');
-        if (el) { el.value = txt; }
-        else    { setTimeout(() => setObs(txt), 100); }
-      };
-      setObs(obs);
-
-    } catch (err) {
-      console.error('[PCP-obs] falha ao obter obs_venda:', err);
-    }
-
-  }, 350);   // um pouco acima do tempo típico de dbl-click
-});
-/* ───────────────────────────────────────────── */
-
-
-  });
-
-if (!ulListenersInitialized) {
-  Object.values(COLUMN_MAP).forEach(ulId => {
-    const ul = document.getElementById(ulId);
-    if (!ul) return;
-
-    // 1) Quando o cursor entra na UL, expande o espaço
-    ul.addEventListener('dragenter', e => {
-      e.preventDefault();
-      // só expande se for o próprio UL (não filhos)
-      if (e.target === ul) {
-        ul.classList.add('drop-expand');
-        if (!ul.contains(placeholder)) ul.appendChild(placeholder);
+      if (ev.detail > 1) {
+        if (clickTimerId) {
+          clearTimeout(clickTimerId);
+          clickTimerId = null;
+        }
+        return;
       }
+
+      clickTimerId = setTimeout(async () => {
+        clickTimerId = null;
+
+        const idx = parseInt(li.dataset.index, 10);
+        const it  = itemsKanban[idx];
+        if (!it) return;
+
+        const codigo = String(li.dataset.codigo || it.codigo || '').trim();
+        if (!codigo) return;
+
+        const pedidos = Array.isArray(it.pedidos) ? it.pedidos : [];
+        const preferido = String(it.pedido || (pedidos[0]?.numero_pedido) || '').trim();
+
+        await openPcpForCodigo({
+          codigo,
+          pedido: preferido,
+          descricao: it.descricao
+        });
+      }, 300);
     });
-
-    // 2) Enquanto estiver sobre, mantém o espaço
-    ul.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-    });
-
-    // 3) Quando sai de vez da UL (e não apenas de um filho), recolhe
-    ul.addEventListener('dragleave', e => {
-      const to = e.relatedTarget;
-      // se o novo elemento NÃO for filho da UL, então saiu de verdade
-      if (!to || !ul.contains(to)) {
-        ul.classList.remove('drop-expand');
-        removePlaceholder();
-      }
-    });
-
-ul.addEventListener('drop', async e => {
-  const ticketsParaImprimir = [];
-
-  e.preventDefault();
-  ul.classList.remove('drop-expand');
-  removePlaceholder();
-
-    /* ➊ — cria o loader ANTES de qualquer validação */
-  const loadingLi = document.createElement('li');
-  loadingLi.classList.add('kanban-card', 'loading');
-  loadingLi.innerHTML = `
-    <div class="loading-bar"><div class="progress"></div></div>`;
-  ul.appendChild(loadingLi);
-
-  // 0) Valida estado de drag
-  if (draggedIndex === null || !draggedFromColumn) {
-    console.log('[DROP] drag não iniciado corretamente');
-    loadingLi.remove();
-    return;
-  }
-
-  // 1) Identifica coluna de destino e item
-  const destinationUlId = e.currentTarget.id;
-  const newColumn = Object.entries(COLUMN_MAP)
-    .find(([, id]) => id === destinationUlId)?.[0];
-  if (!newColumn) {
-    console.log('[DROP] coluna destino inválida:', destinationUlId);
-    loadingLi.remove();
-    return;
-  }
-  
-  const originColumn = draggedFromColumn;
-  const item = itemsKanban[draggedIndex];
-  if (!item) return;
-
-// ── DEFINIÇÕES DE ESCOPO AMPLO ─────────────────────────
-const estoqueDisp   = Number(item.estoque) || 0;   // saldo atual
-const qtdSolicitada = item.local.length;           // nº de etiquetas
-// ───────────────────────────────────────────────────────
-if (originColumn === 'Pedido aprovado' && newColumn === 'Separação logística') {
-
-    /* ------------------------------------------------------------------
-     BLOCO NOVO – move só a quantidade solicitada e controla NS
-  ------------------------------------------------------------------ */
-
-const estoqueDisp = Number(item.estoque) || 0;     // saldo atual no 105…
-const pendentes   = item.local
-                      .filter(l => l.startsWith('Pedido aprovado'))
-                      .length;                     // só o que falta mover
-const movMax      = Math.min(pendentes, estoqueDisp);
-
-
-  if (movMax < 1) {
-    alert('❌ Sem estoque disponível para mover.');
-    loadingLi.remove();
-    return;
-  }
-
-  /* 1) pergunta ao usuário */
-  let qtdMover = movMax;                          // declara ANTES de usar
-  if (movMax > 1) {
-    const entrada = prompt(
-      `Quantas unidades deseja mover? (1 – ${movMax})`,
-      String(movMax)
-    );
-    if (entrada === null) {                      // Cancelar
-      loadingLi.remove();
-      return;
-    }
-    qtdMover = parseInt(entrada, 10);
-    if (!qtdMover || qtdMover < 1 || qtdMover > movMax) {
-      alert('Valor inválido.');
-      loadingLi.remove();
-      return;
-    }
-
-
-    /* ------------------------------------------------------------------
-   1) registra a movimentação de estoque no OMIE
-   ------------------------------------------------------------------ */
-try {
-  const payloadAjuste = {
-    call: 'IncluirAjusteEstoque',
-    app_key: OMIE_APP_KEY,
-    app_secret: OMIE_APP_SECRET,
-    param: [{
-      codigo_local_estoque        : 10520299822,
-      codigo_local_estoque_destino: 10564345392,
-      id_prod : item._codigoProd,                          // ← do Kanban
-      data    : new Date().toLocaleDateString('pt-BR'),    // dd/mm/aaaa
-      quan    : String(qtdMover),                          // quantidade movida
-      obs     : `Movimentação de pedido de venda ${item.pedido}`,
-      origem  : 'AJU',
-      tipo    : 'TRF',
-      motivo  : 'TRF',
-      valor   : 10
-    }]
-  };
-console.log('[PP→SL] payloadAjuste →',
-            JSON.stringify(payloadAjuste, null, 2));   //  ⬅️  ADICIONE
-  await fetch('/api/omie/estoque/ajuste', {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify(payloadAjuste)
-  });
-} catch (e) {
-  console.warn('[PP→SL] falha ao registrar ajuste de estoque:', e);
-  // não bloqueia o fluxo principal – apenas loga
-}
-
-  }
-
-  /* 2) coleta números-de-série no back-end */
-  const nsMovidos = [];
-  for (let i = 0; i < qtdMover; i++) {
-    const resp = await fetch(
-      `/api/serie/next/${encodeURIComponent(item.codigo)}`
-    );
-    const { ns } = await resp.json();             // p.ex. 101002
-    nsMovidos.push(ns);
-  }
-
-
-  /* ─── NOVO: imprime 2ª etiqueta se houver observação ─── */
-const campoObs = document.getElementById('pcp-obs');
-if (campoObs && campoObs.value.trim()) {
-  await gerarEtiquetaObs(campoObs.value.trim());
-}
-
-
-  /* 3) imprime uma etiqueta (Pedido em separação) para cada NS */
-  for (const serie of nsMovidos) {
-    // dentro do for (const serie of nsMovidos) { … }
-await gerarEtiquetaSeparacao(item.codigo, item.pedido, serie);
-
-
-
-
-
-  }
-
-  /* 4) grava o NS no array local, só nas posições movidas */
-  let movidos = 0;
-  item.local = item.local.map(coluna => {
-    if (
-      movidos < qtdMover &&
-      coluna.startsWith('Pedido aprovado')
-    ) {
-      const serie = nsMovidos[movidos++];
-      return `${newColumn},${serie}`;             // “Separação logística,101002”
-    }
-    return coluna;                                // mantém as demais
-  });
-
-  /* 5) baixa o estoque do cartão */
-  item.estoque = Math.max(0, estoqueDisp - qtdMover);
-
-  /* 6) persiste e re-renderiza */
-  await salvarKanbanLocal(itemsKanban);
-  renderKanbanDesdeJSON(itemsKanban);
-  enableDragAndDrop(itemsKanban);
-
-  loadingLi.remove();
-  draggedIndex = null;
-  draggedFromColumn = null;
-  return;                                         // impede código antigo
-}
-
-
-ul.classList.remove('drop-expand');
-removePlaceholder();
-
-  
-  // 3) Atualiza imediatamente o modelo local
-const idxLocal = item.local.findIndex(
-  c => c.split(',')[0] === originColumn      // ← olha só a coluna
-);
-
-if (idxLocal !== -1) {
-  const ticket = await gerarTicket();
-  ticketsParaImprimir.push({ ticket, codigo: item.codigo });
-      // ← para imprimir depois
-  item.local[idxLocal] = `${newColumn},${ticket}`;
-  item.estoque = Math.max(0, item.estoque - 1); // baixa 1 do saldo
-}
-
-
-if (
-  originColumn === 'Pedido aprovado' &&
-  newColumn    === 'Separação logística' &&
-  item.estoque >= item.local.length      // saldo era suficiente
-) {
-  item.local.forEach(l => {
-    const ticket = l.split(',')[1];      // “F06250142”
-    ticketsParaImprimir.push({ ticket, codigo: item.codigo });
-
   });
 }
-
-
-
-  /* se o movimento foi 100 % do cartão (saldo suficiente),
-   precisamos imprimir 1 etiqueta para CADA ticket que saiu */
-if (
-  originColumn === 'Pedido aprovado' &&
-  newColumn    === 'Separação logística' &&
-  estoqueDisp  >= qtdSolicitada        // ⇢ estamos no caso “saldo suficiente”
-) {
-  item.local.forEach(l => {
-    const ticket = l.split(',')[1];    // pega só “F06250142”
-    ticketsParaImprimir.push({ ticket, codigo: item.codigo });
-
-  });
-}
-
-
-  try {
-    // 4) Envia log de arrasto (se for Separação logística)
-    if (newColumn === 'Separação logística') {
-      await fetch(`${API_BASE}/api/logs/arrasto`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          etapa: 'Arrasto para Separação logística',
-          pedido: item.pedido,
-          codigo: item.codigo,
-          quantidade: item.quantidade
-        })
-      });
-    }
-
-    // 5) Gera OP se necessário
-    const respProd = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
-    const prodData = await respProd.json();
-    const tipoItem = prodData.tipoItem ?? prodData.tipo_item;
-
- const isPPtoSL = originColumn === 'Pedido aprovado' &&
-                  newColumn    === 'Separação logística';
-
- if ( !isPPtoSL &&                                           // ← pula PP→SL
-      (tipoItem === '04' || parseInt(tipoItem, 10) === 4) ) {
-const cCodIntOP = await gerarTicket();   // já vem sequencial do backend
-      const now = new Date();
-      const tom = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const d = String(tom.getDate()).padStart(2, '0');
-      const m2 = String(tom.getMonth() + 1).padStart(2, '0');
-      const y2 = tom.getFullYear();
-      const dDtPrevisao = `${d}/${m2}/${y2}`;
-
-// 1) Garanta nCodProduto numérico — se não vier no item, resolva por endpoint local
-let nCodProduto = Number(item._codigoProd);
-if (!nCodProduto) {
-  const mapResp = await fetch(`/api/produtos/detalhes/${encodeURIComponent(item.codigo)}`);
-  const mapJson = await mapResp.json().catch(() => ({}));
-  nCodProduto = Number(
-    mapJson?.codigo_prod ||
-    mapJson?.codigo_produto ||
-    mapJson?.produto?.codigo_produto ||
-    0
-  );
-  if (!nCodProduto) throw new Error('nCodProduto ausente (não foi possível mapear o código do produto).');
-}
-
-// 2) Monte a payload completa (inclua o local de estoque)
-const payloadOP = {
-  call: 'IncluirOrdemProducao',
-  app_key: OMIE_APP_KEY,
-  app_secret: OMIE_APP_SECRET,
-  param: [{
-    identificacao: {
-      cCodIntOP: String(Date.now()),
-      dDtPrevisao,
-      nCodProduto,
-      nQtde: 1,
-      codigo_local_estoque: 10564345392   // ajuste se tiver env para isso
-    }
-  }]
-};
-
-console.log('[OP] payloadOP →', JSON.stringify(payloadOP, null, 2));
-
-// 3) Envie, leia o JSON e exponha a faultstring quando houver
-const respop = await fetch(`${API_BASE}/api/omie/produtos/op`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(payloadOP)
-});
-const dataOP = await respop.json().catch(() => ({}));
-if (!respop.ok) {
-  const msg = dataOP?.faultstring || dataOP?.message || '';
-  throw new Error(`HTTP ${respop.status}${msg ? ' - ' + msg : ''}`);
-}
-if (dataOP?.faultstring || dataOP?.error) {
-  const msg = dataOP?.faultstring || dataOP?.error?.message || 'Falha OMIE';
-  throw new Error(`OMIE: ${msg}`);
-}
-
-// 4) Atualize o cartão somente após sucesso na OMIE
-const arr = item.local;
-const idxMov = arr.findIndex(s => s === newColumn);
-if (idxMov !== -1) {
-  arr[idxMov] = `${newColumn},${cCodIntOP}`;
-  try {
-    await fetch(`${API_BASE}/api/etiquetas`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ numeroOP: cCodIntOP, tipo: 'Expedicao' })
-    });
-  } catch (err) {
-    console.error('[ETIQUETA] falha ao chamar /api/etiquetas:', err);
-  }
-}
-
-    }
-
-    // 6) Persiste e re-renderiza o Kanban
-    await salvarKanbanLocal(itemsKanban);
-
-    // 6.1) Dispara a impressão de tudo que foi acumulado
-for (const tObj of ticketsParaImprimir) {
-  // cada tObj agora é { ticket, codigo }
-  if (tObj.ticket) await gerarEtiqueta(tObj.ticket, tObj.codigo);
-}
-
-
-    renderKanbanDesdeJSON(itemsKanban);
-    enableDragAndDrop(itemsKanban);
-
-  } catch (err) {
-    // 7) Em caso de erro, remove o loader, reverte o modelo e alerta
-    loadingLi.remove();
-    if (idxLocal !== -1) item.local[idxLocal] = originColumn;
-    alert(`❌ Erro ao mover o cartão: ${err.message}`);
-    renderKanbanDesdeJSON(itemsKanban);
-    enableDragAndDrop(itemsKanban);
-  } finally {
-    // 8) Limpa estado de drag
-    draggedIndex = null;
-    draggedFromColumn = null;
-  }
-});
-
-
-    });
-    ulListenersInitialized = true;
-  }
-} 
+ 
 
 // ──────────────────────────────────────────────────────────────
 // Persistência do Kanban (stub seguro)

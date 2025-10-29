@@ -8,6 +8,9 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
 const OMIE_APP_KEY       = process.env.OMIE_APP_KEY || '';
 const OMIE_APP_SECRET    = process.env.OMIE_APP_SECRET || '';
 const OMIE_PROD_URL      = 'https://app.omie.com.br/api/v1/geral/produtos/';
+// Ctrl+F: require('express')  (cole logo abaixo dos requires)
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || 'changeme';
+const INTERNAL_BASE = `http://localhost:${process.env.PORT || 5001}`;
 
 // Utilzinho pra ocultar chaves em logs
 const mask = s => (s ? String(s).slice(0, 4) + '…' : '');
@@ -55,6 +58,115 @@ async function consultarProdutoOmie({ codigo_produto, codigo }) {
   // pode vir como { produto_servico_cadastro: {...} } ou já flat
   return j?.produto_servico_cadastro || j;
 }
+
+// GET /api/produtos/detalhe?codigo=FTI55DPTBR
+// Retorna os campos para preencher a guia "Dados do produto" direto do Postgres.
+// Fontes: public.produtos_omie + public.produtos_omie_imagens
+router.get('/detalhe', async (req, res) => {
+  try {
+    const codigo = String(req.query?.codigo || '').trim();
+    if (!codigo) {
+      return res.status(400).json({ error: 'Parâmetro ?codigo é obrigatório.' });
+    }
+
+    // 1) Busca o produto na tabela principal
+    const sql = `
+      SELECT
+        p.codigo_produto,
+        p.codigo,
+        p.descricao,
+        p.descricao_familia,
+        p.unidade,
+        p.tipoitem,
+        p.ncm,
+        p.cfop,
+        p.origem_mercadoria,
+        p.cest,
+        p.aliquota_ibpt,
+        p.marca,
+        p.modelo,
+        p.descr_detalhada,
+        p.obs_internas,
+        p.inativo,
+        p.bloqueado,
+        p.bloquear_exclusao,
+        p.quantidade_estoque,
+        p.valor_unitario,
+        p.dalt, p.halt, p.dinc, p.hinc, p.ualt, p.uinc,
+        p.codigo_familia,
+        p.codint_familia
+      FROM public.produtos_omie p
+      WHERE p.codigo = $1
+      LIMIT 1;
+    `;
+    const { rows } = await dbQuery(sql, [codigo]);
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Produto não encontrado no Postgres.' });
+    }
+    const r = rows[0];
+
+    // 2) Busca imagens (se houverem)
+    const imgSql = `
+      SELECT url_imagem, pos
+      FROM public.produtos_omie_imagens
+      WHERE codigo_produto = $1
+      ORDER BY pos ASC
+    `;
+    const { rows: imgs } = await dbQuery(imgSql, [r.codigo_produto]);
+    const imagens = (imgs || []).map(i => ({
+      url_imagem: i.url_imagem,
+      pos: i.pos
+    }));
+
+    // 3) Normaliza o payload para o front (mantendo chaves esperadas)
+    const payload = {
+      codigo_produto: r.codigo_produto,
+      codigo:         r.codigo,
+      descricao:      r.descricao,
+
+      // — Detalhes do produto —
+      descricao_familia: r.descricao_familia,
+      unidade:           r.unidade,
+      tipoItem:          r.tipoitem,                // (mantemos camelCase que o front já usa)
+      marca:             r.marca,
+      modelo:            r.modelo,
+      descr_detalhada:   r.descr_detalhada,
+      obs_internas:      r.obs_internas,
+
+      // — Cadastro —
+      bloqueado:          r.bloqueado,
+      bloquear_exclusao:  r.bloquear_exclusao,
+      inativo:            r.inativo,
+      codigo_familia:     r.codigo_familia,
+      codInt_familia:     r.codint_familia,
+
+      // — Financeiro —
+      ncm:             r.ncm,
+      cfop:            r.cfop,
+      origem_imposto:  r.origem_mercadoria,        // mapeado p/ chave já usada no front
+      cest:            r.cest,
+      aliquota_ibpt:   r.aliquota_ibpt,
+
+      // — Outras infos úteis ao banner e editors —
+      quantidade_estoque: r.quantidade_estoque,
+      valor_unitario:     r.valor_unitario,
+      info: {
+        uAlt: r.ualt, dAlt: r.dalt, hAlt: r.halt,
+        uInc: r.uinc, dInc: r.dinc, hInc: r.hinc
+      },
+      imagens
+    };
+
+    // evita cache
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache'); res.set('Expires', '0'); res.set('Surrogate-Control', 'no-store');
+
+    return res.json(payload);
+  } catch (err) {
+    console.error('[produtos/detalhe] erro →', err);
+    return res.status(500).json({ error: 'Falha ao consultar detalhes do produto (SQL).' });
+  }
+});
 
 // ============================================================================
 // GET /api/produtos/lista
@@ -151,13 +263,36 @@ router.post('/webhook', async (req, res) => {
   let fetched   = 0;   // incrementa quando buscar na Omie
   const failures = [];
 
+  // dispara re-sync da ESTRUTURA (fire-and-forget)
+async function fireAndForgetResyncById(idProduto) {
+  if (!idProduto) return;
+  const url = `${INTERNAL_BASE}/internal/pcp/estrutura/resync?token=${encodeURIComponent(INTERNAL_TOKEN)}`;
+  const body = JSON.stringify({ id_produto: Number(idProduto) });
+  try {
+    httpFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+
   async function upsertNoBanco(item, label = 'raw') {
     try {
       const obj = ensureIntegrationKey({ ...item });
       await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
 
-      const cod = Number(obj.codigo_produto || obj.codigo);
-      if (!Number.isNaN(cod)) touchedIds.add(cod);
+const cod = Number(obj.codigo_produto || obj.codigo);
+if (!Number.isNaN(cod)) {
+  touchedIds.add(cod);
+
+  // não mexe na estrutura quando o evento for Produto.Excluido
+  if ((req.body?.topic || '') !== 'Produto.Excluido') {
+    fireAndForgetResyncById(cod);
+  }
+}
+
 
       processed++; // ← conta aqui, não nos loops
     } catch (e) {
@@ -187,6 +322,8 @@ router.post('/webhook', async (req, res) => {
       });
       if (!produto) throw new Error('payload vazio da Omie');
       await upsertNoBanco(produto, 'omie_connect');
+      fireAndForgetResyncById(produto?.codigo_produto || produto?.codigo);
+
       fetched++; // apenas aqui
     } catch (e) {
       failures.push({ step: 'omie_consulta', id: ev?.codigo_produto || ev?.codigo, error: String(e) });

@@ -139,7 +139,7 @@ const PREP_COLUMNS = {
   'A Produzir': 'coluna-prep-fila',
   'Produzindo': 'coluna-prep-em-producao',
   'Em produção': 'coluna-prep-em-producao',
-  'concluido': 'coluna-prep-concluido',
+  'Produzido': 'coluna-prep-concluido'
 };
 
 const getPrepUlId = name => PREP_COLUMNS[name];
@@ -147,21 +147,28 @@ const getPrepUlId = name => PREP_COLUMNS[name];
 /* ===========================================================
    Data Loading and Processing
    =========================================================== */
-async function carregarKanbanPreparacao() {
-  const data = await new CacheManager().fetchWithErrorHandling('/api/preparacao/listar', {
-    cache: 'no-store'
+async function carregarKanbanPreparacao(fetcher) {
+  const fetchJson = typeof fetcher === 'function'
+    ? fetcher
+    : (url, options) => new CacheManager().fetchWithErrorHandling(url, options);
+
+  const prepRaw = await fetchJson('/api/preparacao/listar', { cache: 'no-store' }).catch(err => {
+    console.error('[Preparação] Falha ao carregar lista base:', err);
+    return null;
   });
 
-  if (data?.mode === 'pg' && data.data) {
-    return processarDadosKanban(data.data);
+  if (prepRaw?.mode === 'pg' && prepRaw.data) {
+    return processarDadosKanban(prepRaw.data);
   }
   return [];
 }
 
-function processarDadosKanban(rawData) {
+function processarDadosKanban(rawData = {}) {
   const perProd = new Map();
 
   Object.entries(rawData).forEach(([status, items]) => {
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+
     (items || []).forEach(item => {
       // chave SEMPRE string, aceita produto_codigo (numérico) ou alfa
       const codigo = String(item.produto || item.produto_codigo || item.codigo || '').trim();
@@ -217,6 +224,7 @@ class KanbanRenderer {
     if (t === 'produzindo' || t === 'em produção' || t === 'em producao')          return 'Produzindo';
     if (t === 'teste 1' || t === 'teste1')                                          return 'teste 1';
     if (t === 'teste final' || t === 'testefinal')                                  return 'teste final';
+    if (t === 'produzido')                                                          return 'Produzido';
     if (t === 'concluido' || t === 'concluído')                                     return 'concluido';
     return null; // ignora o resto
   }
@@ -227,6 +235,7 @@ class KanbanRenderer {
       'Produzindo': 0,
       'teste 1': 0,
       'teste final': 0,
+      'Produzido': 0,
       'concluido': 0
     };
 
@@ -237,6 +246,7 @@ class KanbanRenderer {
       'Produzindo': new Set(),
       'teste 1': new Set(),
       'teste final': new Set(),
+      'Produzido': new Set(),
       'concluido': new Set()
     };
 
@@ -380,20 +390,33 @@ async performSearch(query, list) {
 }
 
 
-  handleResultClick(event, input, list) {
-    const li = event.target.closest('.result-item');
-    if (!li) return;
+async handleResultClick(event, input, list) {
+  const li = event.target.closest('.result-item');
+  if (!li) return;
+  event.preventDefault();
+  event.stopPropagation();
 
-    window.prepCodigoSelecionado = li.dataset.codigo;
-    document.querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')?.click();
+  const codigo = String(li.dataset.codigo || '').trim();
+  if (!codigo) return;
 
-    setTimeout(() => {
-      if (typeof renderListaPecasPCP === 'function') renderListaPecasPCP();
-    }, 80);
+  // 1) Cabeçalho primeiro
+  window.setPCPProdutoCodigo?.(codigo);
 
-    input.value = `${li.dataset.codigo} — ${li.dataset.desc}`;
-    list.innerHTML = '';
-  }
+  // 2) Abre a aba PCP
+  document
+    .querySelector('#kanbanTabs .main-header-link[data-kanban-tab="pcp"]')
+    ?.click();
+
+  // 3) Carrega a estrutura desse código e AGUARDA o render
+  await window.ensurePCPEstruturaAutoLoad?.(); // usa pcpCodigoAtual
+
+
+  // UI da busca
+  input.value = `${li.dataset.codigo} — ${li.dataset.desc}`;
+  list.innerHTML = '';
+}
+
+
 }
 
 /* ===========================================================
@@ -441,7 +464,9 @@ export async function initPreparacaoKanban() {
     renderer.limparColunas();
 
     // Carregar dados
-    const dadosBrutos = await carregarKanbanPreparacao();
+    const dadosBrutos = await carregarKanbanPreparacao(
+      cacheManager.fetchWithErrorHandling.bind(cacheManager)
+    );
 
     // Resolver informações dos produtos
     const numericos = dadosBrutos.map(it => String(it.codigo)).filter(s => /^\d+$/.test(s));

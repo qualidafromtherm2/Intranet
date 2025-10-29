@@ -69,17 +69,11 @@
      data-nav-selector="#menu-notificacoes">Notificações</a>
 </nav>
 
-
-  <!-- Botão …  (fica invisível até o JS precisar dele) -->
-<button id="moreBtn" class="more-btn" aria-label="Mais opções">
-  <!-- era: <i class="fa-solid fa-ellipsis-h"></i> -->
-  <i class="fa-solid fa-ellipsis"></i>
-</button>
-
   <!-- Campo de busca -->
-  <div class="search-bar" id="searchBar">
-    <input type="text" placeholder="Pesquisar produto" />
-  </div>
+<div class="user-badge">
+  <span id="userNameDisplay" class="user-name">Usuário</span>
+</div>
+
 
   <!-- Ícones da direita -->
   <div class="header-profile">
@@ -141,7 +135,6 @@
        data-nav-label="em construção 3">
       <svg viewBox="0 0 488.932 488.932" fill="currentColor"></svg>
       em construção 3
-      <span class="notification-number updates">3</span>
     </a>
   </div>
 </div>
@@ -225,6 +218,191 @@
   </div>
 </div>
 
+<!-- Nova categoria: Qualidade -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Qualidade">Qualidade</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-qualidade-abertura-os"
+       class="menu-link"
+       data-nav-key="side:qualidade:abertura-os"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Abertura de OS"
+       data-nav-selector="#menu-qualidade-abertura-os">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M19 3H5c-1.1 0-2 .9-2 2v14l4-4h12c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+      </svg>
+      Abertura de OS
+    </a>
+
+    <a href="#"
+       id="menu-qualidade-consultar-os"
+       class="menu-link"
+       data-nav-key="side:qualidade:consultar-os"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Consulta"
+       data-nav-selector="#menu-qualidade-consultar-os">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 4h18v2H3V4zm0 6h18v2H3v-2zm0 6h11v2H3v-2z"/>
+      </svg>
+      Consulta
+    </a>
+
+    <a href="#"
+       id="menu-qualidade-consultar-equipamento"
+       class="menu-link"
+       data-nav-key="side:qualidade:consultar-equipamento"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Consultar equipamento"
+       data-nav-selector="#menu-qualidade-consultar-equipamento">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M12 2a7 7 0 017 7c0 3.31-2.21 6.11-5.2 6.86L16 22H8l2.2-6.14C7.21 15.11 5 12.31 5 9a7 7 0 017-7z"/>
+      </svg>
+      Consultar equipamento
+    </a>
+  </div>
+</div>
+
+<!-- Nova categoria: IAPP -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="IAPP">IAPP</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-iapp-sincronizar-op-iapp"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-op-iapp"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar OP IAPP"
+       data-nav-selector="#menu-iapp-sincronizar-op-iapp">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+      </svg>
+      Sincronizar OP IAPP
+    </a>
+
+    <a href="#"
+       id="menu-iapp-sincronizar-lista-pecas"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-lista-pecas"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar Lista de peças"
+       data-nav-selector="#menu-iapp-sincronizar-lista-pecas">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M5 4h14v2H5V4zm0 7h14v2H5v-2zm0 7h14v2H5v-2z"/>
+      </svg>
+      Sincronizar Lista de peças
+    </a>
+
+    <a href="#"
+       id="menu-iapp-sincronizar-op-glide"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-op-glide"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar OP GLIDE"
+       data-nav-selector="#menu-iapp-sincronizar-op-glide">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M4 4h16v2H4V4zm0 6h16v2H4v-2zm0 6h16v2H4v-2z"/>
+      </svg>
+      Sincronizar OP GLIDE
+    </a>
+
+    <a href="#"
+       id="menu-iapp-sincronizar-at"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-at"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar AT"
+       data-nav-selector="#menu-iapp-sincronizar-at">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 3h18v2H3V3zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/>
+      </svg>
+      Sincronizar AT
+    </a>
+
+    <a href="#"
+       id="menu-iapp-sincronizar-originalis"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-originalis"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar Originalis"
+       data-nav-selector="#menu-iapp-sincronizar-originalis">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 3h18v2H3V3zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/>
+      </svg>
+      Sincronizar Originalis
+    </a>
+
+    <a href="#"
+       id="menu-iapp-sincronizar-pre2024"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-pre2024"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar &lt; 2024"
+       data-nav-selector="#menu-iapp-sincronizar-pre2024">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h18v2H3v-2z"/>
+      </svg>
+      Sincronizar &lt; 2024
+    </a>
+
+    <!-- Botão direto para sincronizar Produtos da Omie (atalho) -->
+    <a href="#"
+       id="menu-iapp-sincronizar-produtos-omie"
+       class="menu-link"
+       data-nav-key="side:iapp:sincronizar-produtos-omie"
+       data-nav-parent="side:iapp"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar Produtos (Omie)"
+       data-nav-selector="#menu-iapp-sincronizar-produtos-omie">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M12 4a8 8 0 018 8h2l-3 3-3-3h2a6 6 0 10-6 6v2a8 8 0 110-16z"/>
+      </svg>
+      Sincronizar Produtos (Omie)
+    </a>
+  </div>
+</div>
+
+<!-- Nova categoria: Omie -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:omie"
+       data-nav-pos="side"
+       data-nav-label="Omie">Omie</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-omie-atualizar"
+       class="menu-link"
+       data-nav-key="side:omie:atualizar"
+       data-nav-parent="side:omie"
+       data-nav-pos="side"
+       data-nav-label="Atualizar tabelas"
+       data-nav-selector="#menu-omie-atualizar">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
+        <path d="M12 4a8 8 0 018 8h2l-3 3-3-3h2a6 6 0 10-6 6v2a8 8 0 110-16z"/>
+      </svg>
+      Atualizar tabelas
+    </a>
+  </div>
+</div>
+
 
 
       </div>
@@ -236,30 +414,165 @@
   <div class="content-wrapper">
     <div class="content-section">
 
-<div class="inicio-grid">
-  <button class="inicio-btn"
+<div class="inicio-grid auth-group" id="grupo-acesso-restrito" data-auth-guard>
+  <button class="inicio-btn requires-auth"
           id="btn-linha-producao"
           data-nav-key="inicio:linha-producao"
           data-nav-pos="top"
           data-nav-label="Linha de produção"
           data-nav-selector="#btn-linha-producao">Linha de produção</button>
 
-  <button id="btn-prep-eletrica" class="inicio-btn"
+  <button id="btn-prep-eletrica"
+          class="inicio-btn requires-auth"
           data-nav-key="inicio:prep-eletrica"
           data-nav-pos="top"
           data-nav-label="Preparação elétrica"
           data-nav-selector="#btn-prep-eletrica">Preparação elétrica</button>
 
-  <button class="inicio-btn"
+  <button class="inicio-btn requires-auth"
+          id="btn-prep-base"
           data-nav-key="inicio:prep-base"
           data-nav-pos="top"
-          data-nav-label="Preparação da base">Preparação da base</button>
-
-
+          data-nav-label="Preparação da base"
+          data-nav-selector="#btn-prep-base">Preparação da base</button>
 </div>
 
 
 
+
+</div>
+  </div>
+</div>
+
+<!-- Painel para Abertura de OS (criar/abrir nova OS) -->
+<div id="qualidadeAberturaOsNova" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <h2>Abertura de OS</h2>
+      <p class="content-note">Formulário para abertura de nova Ordem de Serviço.</p>
+      <div class="qualidade-os-form">
+        <div class="form-group">
+          <label for="abertura-os-cliente">Cliente:</label>
+          <input type="text" id="abertura-os-cliente" placeholder="Nome do cliente" />
+        </div>
+        <div class="form-group">
+          <label for="abertura-os-produto">Produto:</label>
+          <input type="text" id="abertura-os-produto" placeholder="Código ou descrição do produto" />
+        </div>
+        <div class="form-group">
+          <label for="abertura-os-descricao">Descrição do problema:</label>
+          <textarea id="abertura-os-descricao" placeholder="Descreva o problema ou serviço solicitado" rows="4"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="abertura-os-prioridade">Prioridade:</label>
+          <select id="abertura-os-prioridade">
+            <option value="baixa">Baixa</option>
+            <option value="media" selected>Média</option>
+            <option value="alta">Alta</option>
+            <option value="urgente">Urgente</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button id="abertura-os-limpar" class="btn-secondary">Limpar</button>
+          <button id="abertura-os-salvar" class="btn-primary">Abrir OS</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Painel para Consultar equipamento (IAPP) -->
+<div id="qualidadeConsultarEquipamento" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <h2>Consultar equipamento (IAPP)</h2>
+      <p class="content-note">Digite o ID numérico da OP na IAPP. Para descobrir o ID, vá na página da OP no sistema IAPP e copie o número que aparece na URL após "id=" (ex.: .../editar?id=1593715).</p>
+      <div class="qualidade-os-search" style="max-width:600px;">
+        <input type="number" id="iapp-consulta-input" placeholder="ID numérico (ex.: 1593715)" autocomplete="off" />
+        <button id="iapp-consulta-btn">Buscar</button>
+        <button id="iapp-listar-btn" style="margin-left:10px;">Listar Todos</button>
+      </div>
+      <div id="iapp-consulta-feedback" class="content-note"></div>
+      <div id="iapp-consulta-resultado" style="margin-top:20px;">
+        <pre id="iapp-consulta-output" style="background:#f5f5f5;color:#000;padding:16px;border-radius:6px;overflow:auto;max-height:600px;font-size:13px;line-height:1.5;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Painel para Consulta de OS -->
+<div id="qualidadeConsultaOs" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <h2>Consulta Abertura de OS</h2>
+      <p class="content-note">Informe o código de OS, OP, NS, NF, nome do cliente ou CNPJ/CPF para localizar registros relacionados.</p>
+      <div class="qualidade-os-search">
+        <input type="text" id="qualidade-os-input" placeholder="Ex.: 625, 8A00240411003121, 14496-A, 10979, Nome Cliente, CNPJ/CPF" autocomplete="off" />
+        <button id="qualidade-os-search-btn">Buscar</button>
+      </div>
+      
+      <!-- Filtro de tabelas (compacto e recolhível) -->
+      <div class="qualidade-filter-panel">
+        <div class="qualidade-filter-header">
+          <div class="qualidade-filter-title">
+            <strong>Filtrar por tabelas</strong>
+            <span id="qualidade-filter-count" class="muted"></span>
+          </div>
+          <div class="qualidade-filter-actions">
+            <button id="qualidade-filter-toggle" class="btn-link" aria-expanded="false">Mostrar filtros</button>
+            <span class="sep">·</span>
+            <button id="qualidade-select-all" class="btn-link">Marcar todas</button>
+            <span class="sep">/</span>
+            <button id="qualidade-deselect-all" class="btn-link">Desmarcar</button>
+          </div>
+        </div>
+        <div id="qualidade-sources-container" class="qualidade-sources-container is-collapsed" aria-hidden="true">
+          <div id="qualidade-sources-checkboxes" class="qualidade-source-list">
+            <label><input type="checkbox" value="controle_assistencia_tecnica" checked /><span>Histórico de OS's</span></label>
+            <label><input type="checkbox" value="historico_op_glide" checked /><span>Histórico OP e NS (GLIDE)</span></label>
+            <label><input type="checkbox" value="historico_op_glide_f_escopo" checked /><span>Histórico OP e NS (F Escopo)</span></label>
+            <label><input type="checkbox" value="historico_op_iapp" checked /><span>Histórico OP (IAPP)</span></label>
+            <label><input type="checkbox" value="historico_pedido_originalis" checked /><span>Histórico NF/OP/Pedidos</span></label>
+            <label><input type="checkbox" value="pedidos_por_cliente" checked /><span>Pedidos por Cliente</span></label>
+            <label><input type="checkbox" value="historico_pre2024" checked /><span>Histórico pré-2024</span></label>
+          </div>
+        </div>
+      </div>
+      
+      <div id="qualidade-os-feedback" class="content-note"></div>
+      <div id="qualidade-os-results" class="qualidade-os-results"></div>
+    </div>
+  </div>
+</div>
+
+<div id="qualidadeAberturaOsDetalhe" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="qualidade-detail-toolbar">
+        <button id="qualidade-os-back" class="qualidade-detail-back">← Voltar</button>
+        <button id="qualidade-os-save" class="qualidade-detail-save" disabled>Salvar alterações</button>
+      </div>
+      <div class="qualidade-detail-header">
+        <h2 id="qualidade-os-detail-title">Detalhes</h2>
+        <span id="qualidade-os-detail-subtitle" class="qualidade-detail-subtitle"></span>
+      </div>
+      <div id="qualidade-os-detail-meta" class="qualidade-detail-meta"></div>
+      <div id="qualidade-os-detail-list" class="qualidade-detail-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="omieAtualizarTabelas" class="tab-pane" style="display:none;">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <h2>Atualizar tabelas Omie</h2>
+      <p class="content-note">
+        Selecione uma tabela para solicitar uma sincronização diretamente com a Omie. As rotinas podem levar alguns minutos.
+      </p>
+      <div id="omie-sync-list" class="omie-sync-grid"></div>
+      <div id="omie-sync-empty" class="content-note" style="display:none;">
+        Nenhuma rotina de atualização disponível.
+      </div>
     </div>
   </div>
 </div>
@@ -539,8 +852,60 @@
           <div id="estruturaProduto" class="tab-pane" style="display:none;">
             <div class="content-wrapper">
               <div class="content-section">
+
+
                 <div class="title-wrapper">
-                  <div class="content-section-title">Estrutura de produto</div>
+                  <div class="content-section-title">
+  Estrutura de produto (<span id="estruturaCount">0</span>)
+</div>
+
+
+
+
+  <button
+    id="btnImportarEstrutura"
+    class="icon-inline-btn"
+    type="button"
+    aria-label="Importar estrutura de produto"
+    title="Importar estrutura de produto">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path d="M12 3v10m0 0l-4-4m4 4l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 21h16a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1h-5l-2 2-2-2H5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </button>
+
+  <!-- Versão & Atualizado por (UI) -->
+  <span id="estruturaVersaoWrap" style="margin-left:12px; display:inline-flex; gap:8px; align-items:center;">
+    <span style="font-weight:600;">Versão:</span>
+    <span id="estruturaVersaoValue" class="chip"
+          style="padding:2px 8px;border-radius:12px;border:1px solid var(--border,#ccc);">
+      —
+    </span>
+
+    <span style="margin-left:16px; font-weight:600;">Atualizado por:</span>
+    <span id="estruturaModValue" class="chip"
+          style="padding:2px 8px;border-radius:12px;border:1px solid var(--border,#ccc);">
+      —
+    </span>
+  </span>
+
+  <button
+  id="btnExportarEstrutura"
+  class="icon-inline-btn"
+  type="button"
+  aria-label="Exportar estrutura de produto"
+  title="Exportar estrutura de produto">
+  <!-- Ícone: seta SAINDO da bandeja (exportar) -->
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <path d="M12 13V3m0 10l-4 4m4-4l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M4 21h16a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1h-5l-2 2-2-2H5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
+
+<!-- Spinner específico da guia Estrutura -->
+<div id="estruturaSpinner" data-pct="0" style="display:none;"></div>
+
+
                   <!-- Spinner + texto -->
                   <div id="estoqueSpinnerBox" class="spinner-box" style="display:none;">
                     <div id="estoqueSpinner" data-pct="0">
@@ -718,6 +1083,7 @@
     <a href="#" data-arm-tab="produto"       class="main-header-link">Produto acabado</a>
     <a href="#" data-arm-tab="terceiros"     class="main-header-link">Terceiros</a>
     <a href="#" data-arm-tab="Geral"     class="main-header-link">geral</a>
+    <a href="#" data-arm-tab="transferencia" class="main-header-link">Transferência</a>
   </div>
 </div>
 
@@ -733,7 +1099,7 @@
 
         <input id="almoxSearch"
        type="text"
-       placeholder="Pesquisar na descrição…"
+       placeholder="Pesquisar por código ou descrição…"
        class="search-box" />
 
        <span id="almoxCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
@@ -758,8 +1124,12 @@
   <table id="tbl-almoxarifado" class="tabela padrao">
     <thead>
       <tr>
-        <th>Código</th><th>Descrição</th><th>Est. mín.</th>
-        <th>Físico</th><th>Reservado</th><th>Saldo</th><th>CMC</th>
+        <th class="sel-col"></th>
+                <th>Código</th>
+                <th>Descrição</th>
+                <th>Qtd</th>
+                <th>Físico</th>
+                <th>Saldo</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -826,6 +1196,76 @@
   <div id="conteudo-produto"      class="armazem-page" style="display:none;"></div>
   <div id="conteudo-terceiros"    class="armazem-page" style="display:none;"></div>
   <div id="conteudo-geral"    class="armazem-page" style="display:none;"></div>
+  <div id="conteudo-transferencia" class="armazem-page" style="display:none;">
+    <div class="content-wrapper">
+      <div class="content-section">
+        <div class="title-wrapper">
+          <div class="content-section-title">Transferência entre armazens</div>
+        </div>
+        <div class="transferencia-locais">
+          <div class="origem-group">
+            <label for="transferOrigem">Origem</label>
+            <select id="transferOrigem" class="transfer-select">
+              <option value="">Selecione…</option>
+            </select>
+          </div>
+          <div class="destino-group">
+            <label for="transferDestino">Destino</label>
+            <div class="destino-inline">
+              <select id="transferDestino" class="transfer-select">
+                <option value="">Selecione…</option>
+              </select>
+              <input id="transferQtdBulk" type="number" min="0" step="0.01" placeholder="Qtd" class="transfer-qtd-bulk" title="Aplicar quantidade para todos" />
+              <button id="transferSelectAllBtn"
+                      type="button"
+                      class="icon-btn"
+                      title="Selecionar todos os itens"
+                      aria-label="Selecionar todos">
+                <i class="fa-solid fa-square-check"></i>
+              </button>
+              <button id="transferenciaBtn"
+                      type="button"
+                      class="icon-btn"
+                      title="Transferir itens selecionados"
+                      aria-label="Transferir itens"
+                      disabled>
+                <i class="fa-solid fa-right-left"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="transferencia-controls">
+          <div class="transferencia-search">
+            <input id="transferSearch" type="text"
+                   placeholder="Adicionar item por código ou descrição…"
+                   class="search-box" autocomplete="off" />
+            <div class="transfer-search-dropdown">
+              <ul id="transferSearchResults" class="transfer-search-results"></ul>
+            </div>
+          </div>
+        </div>
+        <div class="transferencia-wrapper">
+          <table class="tabela padrao transferencia-table">
+            <thead>
+              <tr>
+                <th class="sel-col"></th>
+                <th>Código</th>
+                <th>Descrição</th>
+                <th>Qtd</th>
+                <th>Físico</th>
+                <th>Saldo</th>
+              </tr>
+            </thead>
+            <tbody id="transferenciaTbody">
+              <tr class="transferencia-placeholder">
+                <td colspan="6">Nenhum item selecionado para transferência.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 
@@ -838,27 +1278,40 @@
   <div class="kanban-header">
     <div class="title-wrapper">
       <span>Pedido aprovado</span>
+      <!-- [MOVE] Botão para abrir a busca de produtos (agora nesta coluna) -->
+      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
       <!-- Spinner escondido por CSS até ser exibido pelo JS -->
       <i class="fas fa-spinner fa-spin kanban-spinner"></i>
     </div>
-  </div>
-  <ul id="coluna-comercial" class="kanban-list"></ul>
-</div>
 
-
-<div class="kanban-column">
-  <div class="kanban-header">
-    <div class="title-wrapper">
-      <span>Separação logística</span>
-      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
-    </div>
+    <!-- [MOVE] Painel de busca que antes ficava em “Aguardando prazo” -->
     <div class="add-container">
       <input type="text" class="add-search" placeholder="Pesquisar…" />
       <!-- >>> Lista de resultados da busca <<< -->
       <ul class="add-results"></ul>
     </div>
   </div>
+  <ul id="coluna-comercial" class="kanban-list"></ul>
+
+</div>
+
+
+<div class="kanban-column">
+  <div class="kanban-header">
+    <div class="title-wrapper">
+      <span>Aguardando prazo</span>
+      <button type="button"
+              id="btn-listar-excluidos"
+              class="kanban-icon-btn"
+              title="Listar OPs excluídas"
+              aria-label="Listar OPs excluídas">
+        <i class="fas fa-ban" aria-hidden="true"></i>
+      </button>
+      <!-- [LIMPEZA] Removido o add-btn e o add-container desta coluna -->
+    </div>
+  </div>
   <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
+
 </div>
 
 
@@ -878,19 +1331,23 @@
     <div class="content-wrapper">
       <div class="content-section">
 
-        <!-- Barra: código do produto selecionado + multiplicador + OK + observação -->
+<!-- Barra: observações da PCP -->
 <div id="pcp-code-bar" class="code-bar" style="display:none; margin:6px 0 12px;">
-  <span id="pcp-code" class="prod-code"></span>
-  <button id="pcp-open-search" class="plus-btn" title="Escolher outro produto">+</button>
-
-  <input id="pcp-factor" class="qty-input" type="number" min="1" step="1" value="1" />
-  <button id="pcp-ok" class="ok-btn">OK</button>
-
+  <span id="pcp-code" class="prod-code" style="display:none;"></span>
   <input id="pcp-obs" type="text" placeholder="Observações…" style="flex:1; min-width:220px;">
 </div>
 
         <div class="title-wrapper" style="gap:12px; align-items:center;">
           <div class="content-section-title">Lista de peças</div>
+          <span id="pcpListaVersaoWrap"
+                style="display:inline-flex; align-items:center; gap:6px; font-size:0.85rem;">
+            <span style="font-weight:600;">Versão:</span>
+                <span id="pcpListaVersaoValue"
+                      class="chip"
+                      style="padding:2px 8px; border-radius:12px; border:1px solid var(--border,#ccc);">
+              —
+            </span>
+          </span>
 
           <!-- toolbar da lista (select do produto + filtro + spinner) -->
           <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
@@ -901,17 +1358,21 @@
 
         <!-- Lista de peças (cabeçalho fixo + linhas dinâmicas) -->
 <ul id="listaPecasPCPList" class="grid-pecas">
+<!-- Cabeçalho da Lista de peças (PCP) — rótulos ajustados para Arm Pro / Arm Alm -->
 <li class="header-row">
   <div class="cod">Código</div>
+  <div class="desc">Descrição</div>
   <div class="unid">Unid</div>
   <div class="qtd">Qtd</div>
-  <div class="perda">% perda</div>
-  <div class="qtdb">Qtd bruta</div>
-  <div class="qtdpro">Qtd Pro</div>
-  <div class="qtdalm">Qtd Alm</div>
-  <!-- NOVO -->
+  <div class="qtdprod">Qtd prod</div>
+  <div class="qtdpro">Arm Pro</div> <!-- só mudou o texto -->
+  <div class="qtdalm">Arm Alm</div> <!-- só mudou o texto -->
   <div class="acao">Ação</div>
 </li>
+
+
+
+
 
         </ul>
       </div>
@@ -957,9 +1418,9 @@
       <ul id="coluna-prep-teste-final" class="kanban-list"></ul>
     </div> -->
 
-    <!-- Coluna 5: concluido -->
+    <!-- Coluna 5: Produzido -->
     <div class="kanban-column">
-      <div class="kanban-header"><span>concluido</span></div>
+      <div class="kanban-header"><span>Produzido</span></div>
       <ul id="coluna-prep-concluido" class="kanban-list"></ul>
     </div>
 
@@ -1112,7 +1573,7 @@
   function statusFromUlId(ulId) {
     if (ulId === IDS.fila) return 'A Produzir';
     if (ulId === IDS.em)   return 'Produzindo';
-    if (ulId === IDS.conc) return 'concluido';
+    if (ulId === IDS.conc) return 'Produzido';
     return null;
   }
 
@@ -1253,7 +1714,7 @@ function attachDropZone(ul) {
     const buckets = {
       fila: data['A Produzir'] || [],
       em:   data['Produzindo'] || [],
-      conc: data['concluido']  || []
+      conc: data['Produzido']  || []
     };
 
     const cpMap   = await buildCpToAlphaMap(buckets);
@@ -1387,6 +1848,181 @@ function attachDropZone(ul) {
   installClickDelegation();
 })();
 </script>
+
+<!-- Modal Criar/Editar Colaborador -->
+<!-- Modal Criar/Editar Colaborador -->
+<div id="colabModal" class="modal" style="display:none">
+  <div class="modal-content colab">
+    <div class="modal-header colab">
+      <h3 id="colabModalTitle">Novo colaborador</h3>
+      <button class="modal-close colab" id="colabModalClose" aria-label="Fechar">×</button>
+    </div>
+
+    <div class="modal-body colab">
+      <form id="colabForm" autocomplete="off" class="colab-grid">
+        <!-- Linha 1 -->
+        <div class="form-row">
+          <label class="form-field sm">
+            <span class="label">ID</span>
+            <input id="colab-id" type="text" readonly placeholder="(gerado ao salvar)">
+          </label>
+
+          <label class="form-field">
+            <span class="label">Usuário</span>
+            <input id="colab-username" type="text" required placeholder="ex.: joao.silva">
+          </label>
+        </div>
+
+        <!-- Linha 2 -->
+        <div class="form-row">
+          <div class="form-field">
+            <span class="label">Perfis</span>
+            <div class="chip-row" id="colab-roles">
+              <label class="chip"><input type="checkbox" value="admin"> admin</label>
+              <label class="chip"><input type="checkbox" value="editor"> editor</label>
+            </div>
+          </div>
+          <div class="form-field"></div>
+        </div>
+
+        <!-- Linha 3 -->
+        <div class="form-row">
+          <label class="form-field">
+            <span class="label">Função</span>
+            <div class="inline">
+              <select id="colab-funcao" required></select>
+              <button type="button" id="btn-add-funcao" class="btn-mini" title="Nova função">+</button>
+            </div>
+          </label>
+
+          <label class="form-field">
+            <span class="label">Setor</span>
+            <div class="inline">
+              <select id="colab-setor" required></select>
+              <button type="button" id="btn-add-setor" class="btn-mini" title="Novo setor">+</button>
+            </div>
+          </label>
+        </div>
+
+        <!-- Linha 4 -->
+        <div class="form-row">
+          <label class="form-field full">
+            <span class="label">Operação (Omie)</span>
+            <select id="colab-operacao">
+              <option value="">Selecionar operação…</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field full">
+            <span class="label">Operações selecionadas</span>
+            <div id="colab-operacao-list" class="operacao-list">
+              <div class="operacao-empty">Nenhuma operação adicionada.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Permissões (somente no modo edição) -->
+        <div id="colab-permissoes" class="perm-wrapper" style="display:none">
+          <h4>Permissões</h4>
+          <div id="permissoes-grid"></div>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-footer colab">
+      <button id="colabSalvar" class="btn-primary">Salvar</button>
+      <button id="colabCancelar" class="btn-secondary" type="button">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ====== ESTILOS SOMENTE DO MODAL DE COLABORADOR ======
+     Tudo fica sob #colabModal para não afetar o restante da página. */
+  #colabModal .modal-content { max-width: 720px; border-radius: 14px; padding: 0; }
+  #colabModal .modal-header { display:flex; align-items:center; justify-content:space-between;
+    padding:16px 18px; border-bottom:1px solid rgba(0,0,0,.08); }
+  #colabModal .modal-header h3 { margin:0; font-size:1.15rem; font-weight:700; }
+  #colabModal .modal-close { border:none; background:transparent; font-size:22px; line-height:1;
+    width:36px; height:36px; border-radius:50%; cursor:pointer; }
+  #colabModal .modal-close:hover { background:rgba(0,0,0,.06); }
+
+  #colabModal .modal-body { padding:18px; }
+  #colabModal .modal-footer { display:flex; gap:10px; justify-content:flex-end; padding:14px 18px 18px;
+    border-top:1px solid rgba(0,0,0,.06); }
+
+  #colabModal .colab-grid { display:flex; flex-direction:column; gap:14px; }
+  #colabModal .form-row { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  #colabModal .form-field { display:flex; flex-direction:column; gap:6px; }
+  #colabModal .form-field.sm { max-width:220px; }
+  #colabModal .form-field.full { grid-column:1 / -1; }
+  #colabModal .form-field .label { font-size:.85rem; font-weight:600; color:#333; }
+  #colabModal .form-field input,
+  #colabModal .form-field select {
+    width:100%; height:38px; border-radius:10px; border:1px solid #d9d9d9;
+    padding:0 12px; outline:none; background:#fff;
+  }
+  #colabModal .form-field input[readonly] { background:#f6f6f6; color:#666; }
+
+  #colabModal .inline { display:flex; align-items:center; gap:8px; }
+  #colabModal .chip-row { display:flex; align-items:center; gap:14px; }
+  #colabModal .chip { display:flex; align-items:center; gap:6px; font-size:.95rem; }
+
+  #colabModal .btn-mini {
+    height:34px; min-width:34px; padding:0 10px; border-radius:999px; border:none; cursor:pointer;
+    background:#2f66ff; color:#fff; font-weight:600;
+  }
+  #colabModal .btn-mini:hover { filter:brightness(.95); }
+
+  #colabModal .btn-primary,
+  #colabModal .btn-secondary {
+    height:40px; padding:0 18px; border-radius:999px; border:none; cursor:pointer; font-weight:700;
+  }
+  #colabModal .btn-primary { background:#2f66ff; color:#fff; }
+  #colabModal .btn-primary[disabled] { opacity:.7; cursor:not-allowed; }
+  #colabModal .btn-secondary { background:#eef2ff; color:#2f3a66; }
+
+  #colabModal .perm-wrapper { margin-top:10px; padding-top:10px; border-top:1px dashed rgba(0,0,0,.1); }
+
+  #colabModal .operacao-list { display:flex; flex-wrap:wrap; gap:6px; padding:6px; border-radius:10px; border:1px dashed rgba(0,0,0,.12); background:rgba(0,0,0,.02); min-height:40px; align-items:center; }
+  #colabModal .operacao-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#1f2a4d; font-weight:600; font-size:0.85rem; }
+  #colabModal .operacao-chip button { border:none; background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  #colabModal .operacao-chip button:hover { background:rgba(0,0,0,.08); }
+  #colabModal .operacao-empty { color:#777; font-style:italic; }
+
+  /* Responsivo: 1 coluna no mobile */
+  @media (max-width: 640px) {
+    #colabModal .form-row { grid-template-columns: 1fr; }
+    #colabModal .form-field.sm { max-width:none; }
+  }
+
+  /* Ações da tabela de colaboradores — escopado */
+#dadosColaboradores .td-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#dadosColaboradores .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: #cfd6ff;         /* tom claro para modo escuro */
+  cursor: pointer;
+}
+#dadosColaboradores .btn-icon:hover {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255,255,255,.22);
+}
+
+</style>
 
 
 </body>
