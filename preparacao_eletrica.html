@@ -38,7 +38,9 @@
   <div class="app">
     <!-- ===== CABEÇALHO ===== -->
     <header class="header" id="appHeader" role="banner">
-      <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" />
+      <a href="./menu_produto.html" id="logo-link" aria-label="Voltar ao menu de produtos">
+        <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa">
+      </a>
 
       <nav id="mainMenu" class="header-menu" role="navigation" aria-label="Menu principal">
         <a id="menu-inicio" class="menu-link is-active" data-target="paginaInicio" role="tab" aria-selected="true">Início</a>
@@ -95,7 +97,14 @@
       <!-- 1) FOTO -->
       <div class="side-actions">
         <div id="produto-foto-box" class="produto-foto-box" aria-label="Foto do produto">
+          <button type="button" class="foto-nav foto-prev" aria-label="Foto anterior">
+            <span aria-hidden="true">‹</span>
+          </button>
           <img id="produto-foto-img" alt="Foto do produto" />
+          <button type="button" class="foto-nav foto-next" aria-label="Próxima foto">
+            <span aria-hidden="true">›</span>
+          </button>
+          <div id="produto-foto-counter" class="foto-counter" aria-live="polite"></div>
         </div>
 
         <!-- 2) BOTÕES -->
@@ -106,6 +115,28 @@
           <button id="btn-finalizar" class="btn-modern btn-success" type="button">
             <i class="fas fa-check" aria-hidden="true"></i> Finalizar produção
           </button>
+        </div>
+
+        <div id="estrutura-produto-wrapper" class="estrutura-produto" hidden>
+          <div class="estrutura-header">
+            <div class="estrutura-titulo">Estrutura do produto</div>
+            <div id="estrutura-produto-meta" class="estrutura-meta"></div>
+          </div>
+          <div class="estrutura-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Descrição</th>
+                  <th>Qtd</th>
+                  <th>Unid.</th>
+                </tr>
+              </thead>
+              <tbody id="estrutura-produto-body">
+                <tr><td colspan="4" class="empty">Nenhuma estrutura carregada.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -191,12 +222,7 @@
 
 
   <!-- JS exclusivo desta página -->
-  <script type="module" src="/pst_prep_eletrica/prep_eletrica.js?v=2025-09-19-12" defer></script>
-
-
-
-
-
+  <script type="module" src="/pst_prep_eletrica/prep_eletrica.js?v=2025-09-19-14" defer></script>
 
 
   

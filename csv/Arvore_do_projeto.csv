@@ -14,9 +14,55 @@ pm2 restart intranet_api --env pg
 pm2 save
 
 "Reinicia, verifica se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
-pm2 restart intranet_api --update-env
+# 1) Esvaziar os arquivos de log (sem apagar o processo)
+pm2 flush
+
+# 2) Reiniciar o serviço
+pm2 restart intranet_api
+
+# 3) Tailar só o que surgir a partir de agora
 pm2 logs intranet_api
 
+
+Metodo de orientação (para que a Omie me guie no modo padrão):"
+Segue meu projeto em .zip, ele esta inteiro para vc consultar.
+ao longo de nossas modificações, consulte ele para entender como meu projeto funcniona.
+Sempre que eu pedir uma modificação eu vou enviar o arquivo atualizado para vc revisar se esta correto.
+Me oriente da seguinte forma:
+1 - Qual arquivo: Exemplo: server.js
+2 - Localizar no ctrl+F: Exemplo: app.get('/api/omie/cliente', async (req, res) => {
+3 - Substituir por: Exemplo: app.get('/api/omie/cliente', async (req, res) => {
+4 - ou se para colar embaixo de: Exemplo: app.get('/api/omie/cliente', async (req, res) => {
+5 - Se for uma função ou trecho que abre {, fechar com } no final, me envie o trecho completo.
+6 - Sempre coloque comentario explicativo no inicio e onde aparecer necessário.
+7 - De preferencia para sempre enviar a função completa, para evitar erros de sintaxe.
+8- Dentro do .Zip tem um SQL na raiz que é uma copia do meu SQL que utilizo, caso seja preciso na solicitação, esta em anexo para consulta.
+9- colocar no inicio da sua explicação de uma modificação o "Objetivo:" que é a explicação do porque vai ser aplicado ou modificado um codigo.
+vamos entender como funciona primeiro p vc se localizar no que precisa mexer:
+
+
+"Para baixar o SQL do render:"
+"Dump completo (estrutura + dados)"
+==
+
+"Só a estrutura (schema, sem os dados)"
+PGPASSWORD='amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho' \
+pg_dump \
+  -h dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com \
+  -p 5432 \
+  -U intranet_db_yd0w_user \
+  --schema-only -n public \
+  intranet_db_yd0w \
+  > intranet_db_yd0w_schema.sql
+
+"Compactar já na saída"
+PGPASSWORD='amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho' \
+pg_dump \
+  -h dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com \
+  -p 5432 \
+  -U intranet_db_yd0w_user \
+  intranet_db_yd0w \
+  | gzip > intranet_db_yd0w_dump.sql.gz
 
 "quando quiser trocar de modo"
 "JSON → Postgres:"

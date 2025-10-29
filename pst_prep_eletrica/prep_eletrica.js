@@ -60,14 +60,246 @@ document.addEventListener('DOMContentLoaded', () => {
     gestaoTab    : document.getElementById('gestaoTab'),
     miniCodigoEl : document.getElementById('produtoSelecionado'),
     ulMiniFila   : document.getElementById('prod-col-fila'),
-    ulMiniEmProd : document.getElementById('prod-col-emprod'),
+    ulMiniEm     : document.getElementById('prod-col-emprod'),
     btnBaixarCsv : document.getElementById('btn-baixar-csv-gestao'),
     btnSqlGestao : document.getElementById('btn-sql-gestao'),
     btnIniciar   : document.getElementById('btn-iniciar'),
     btnFinalizar : document.getElementById('btn-finalizar'),
+    estruturaWrapper: document.getElementById('estrutura-produto-wrapper'),
+    estruturaBody   : document.getElementById('estrutura-produto-body'),
+    estruturaMeta   : document.getElementById('estrutura-produto-meta'),
+    fotoImg         : document.getElementById('produto-foto-img'),
+    fotoPrev        : document.querySelector('.foto-nav.foto-prev'),
+    fotoNext        : document.querySelector('.foto-nav.foto-next'),
+    fotoCounter     : document.getElementById('produto-foto-counter'),
   };
 
   window.codigoSelecionado = null;
+  let filaOpsCache = {};
+  let fotosProdutoAtual = [];
+  let fotoIndexAtual = 0;
+  let fotosProdutoCodigoAtual = null;
+  let estruturaProdutoAtual = null;
+  let estruturaOpAtual = null;
+
+
+  const hideEstrutura = () => {
+    if (!els.estruturaWrapper || !els.estruturaBody) return;
+    els.estruturaWrapper.hidden = true;
+    els.estruturaBody.innerHTML = '';
+    if (els.estruturaMeta) els.estruturaMeta.textContent = '';
+    estruturaProdutoAtual = null;
+    estruturaOpAtual = null;
+  };
+
+  const clearEstrutura = (mensagem = 'Nenhuma estrutura carregada.', isError = false) => {
+    if (!els.estruturaWrapper || !els.estruturaBody) return;
+    els.estruturaWrapper.hidden = false;
+    els.estruturaBody.innerHTML = `<tr><td colspan="4" class="${isError ? 'error' : 'empty'}">${mensagem}</td></tr>`;
+    if (els.estruturaMeta) els.estruturaMeta.textContent = '';
+  };
+
+  const renderEstrutura = (payload) => {
+    if (!els.estruturaWrapper || !els.estruturaBody) return;
+    els.estruturaWrapper.hidden = false;
+    const itens = Array.isArray(payload?.itens) ? payload.itens : [];
+    if (!itens.length) {
+      clearEstrutura('Estrutura não encontrada para esta OP.');
+      return;
+    }
+    const meta = payload?.meta || {};
+    if (els.estruturaMeta) {
+      const partes = [];
+      if (meta.versao) partes.push(`Versão v${meta.versao}`);
+      if (meta.custom_suffix) partes.push(`Customização ${meta.custom_suffix}`);
+      if (meta.origem) partes.push(`Fonte: ${meta.origem}`);
+      els.estruturaMeta.textContent = partes.join(' • ');
+    }
+    const frag = document.createDocumentFragment();
+    itens.forEach(item => {
+      const tr = document.createElement('tr');
+      if (item.customizado) tr.classList.add('customizado');
+      const codigoPrincipal = item.codigo || item.codigo_original || '';
+      const descricao = item.descricao || '';
+      const quantidade = Number(item.quantidade ?? 0);
+      const unidade = item.unidade || '';
+      const tdCodigo = document.createElement('td');
+      tdCodigo.innerHTML = `<div>${codigoPrincipal || '—'}</div>`;
+      if (item.customizado && item.codigo_original && item.codigo_original !== codigoPrincipal) {
+        const small = document.createElement('div');
+        small.className = 'small';
+        small.textContent = `Original: ${item.codigo_original}`;
+        tdCodigo.appendChild(small);
+      }
+      const tdDesc = document.createElement('td');
+      tdDesc.textContent = descricao || '—';
+      const tdQtd = document.createElement('td');
+      tdQtd.textContent = quantidade
+        ? quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })
+        : '0';
+      const tdUnid = document.createElement('td');
+      tdUnid.textContent = unidade || '—';
+      tr.append(tdCodigo, tdDesc, tdQtd, tdUnid);
+      frag.appendChild(tr);
+    });
+    els.estruturaBody.replaceChildren(frag);
+  };
+
+  const atualizaFilaCache = (map) => { filaOpsCache = map || {}; };
+
+  const findFilaEntryForOp = (opInput) => {
+    if (!opInput) return null;
+    const key = opInput.toUpperCase();
+    if (filaOpsCache[key]) return filaOpsCache[key];
+    const base = key.split('-')[0];
+    if (base && filaOpsCache[base]) return filaOpsCache[base];
+    if (base.startsWith('OP') && filaOpsCache['OPS' + base.slice(2)]) return filaOpsCache['OPS' + base.slice(2)];
+    if (base.startsWith('OPS') && filaOpsCache['OP' + base.slice(3)]) return filaOpsCache['OP' + base.slice(3)];
+    return null;
+  };
+
+  const carregarEstruturaPersonalizada = async (opCompleta, filaEntry) => {
+    if (!filaEntry) {
+      hideEstrutura();
+      return false;
+    }
+    clearEstrutura('Carregando estrutura…');
+    try {
+      const resp = await fetch(`${API_BASE}/preparacao/op/estrutura`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          op: opCompleta,
+          produtoCodigo: filaEntry.produto_codigo_alfa || filaEntry.produto_codigo || ''
+        })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (json?.ok === false) throw new Error(json?.error || 'Resposta inválida.');
+      renderEstrutura(json);
+      estruturaProdutoAtual = (filaEntry.produto_codigo_alfa || filaEntry.produto_codigo || '').trim().toUpperCase() || null;
+      estruturaOpAtual = opCompleta ? opCompleta.toUpperCase() : null;
+      if (Array.isArray(fotosProdutoAtual) && fotosProdutoAtual.length > 1) {
+        fotoIndexAtual = Math.min(1, fotosProdutoAtual.length - 1);
+        renderFotoAtual();
+      }
+      if (typeof window.renderMiniKanban === 'function' && window.codigoSelecionado) {
+        setTimeout(() => {
+          try {
+            window.renderMiniKanban(window.codigoSelecionado, window.codigoSelecionadoCP || null);
+          } catch (err) {
+            console.warn('[prep-eletrica] falha ao atualizar mini-kanban após etapa:', err);
+          }
+        }, 80);
+      }
+      return true;
+    } catch (err) {
+      console.error('[prep-eletrica] estrutura personalizada', err);
+      clearEstrutura(`Falha ao carregar estrutura: ${err?.message || err}`, true);
+      return false;
+    }
+  };
+
+  const renderFotoAtual = () => {
+    const imgEl = els.fotoImg;
+    if (!imgEl) return;
+    const total = Array.isArray(fotosProdutoAtual) ? fotosProdutoAtual.length : 0;
+    if (total === 0) {
+      imgEl.src = '../img/logo.png';
+      imgEl.style.objectFit = 'contain';
+      if (els.fotoCounter) els.fotoCounter.textContent = '';
+      if (els.fotoPrev) els.fotoPrev.hidden = true;
+      if (els.fotoNext) els.fotoNext.hidden = true;
+      return;
+    }
+
+    if (fotoIndexAtual >= total) fotoIndexAtual = 0;
+    if (fotoIndexAtual < 0) fotoIndexAtual = total - 1;
+    const atual = fotosProdutoAtual[fotoIndexAtual] || null;
+    const rawUrl = atual?.url_imagem || atual?.url || null;
+    const url = normalizeImageUrl(rawUrl);
+
+    if (url) {
+      imgEl.src = url;
+      imgEl.style.objectFit = 'cover';
+    } else {
+      imgEl.src = '../img/logo.png';
+      imgEl.style.objectFit = 'contain';
+    }
+
+    if (els.fotoCounter) {
+      els.fotoCounter.textContent = `${fotoIndexAtual + 1}/${total}`;
+      els.fotoCounter.hidden = total <= 1;
+    }
+    const hasMultiple = total > 1;
+    if (els.fotoPrev) {
+      els.fotoPrev.hidden = !hasMultiple;
+      els.fotoPrev.disabled = !hasMultiple;
+    }
+    if (els.fotoNext) {
+      els.fotoNext.hidden = !hasMultiple;
+      els.fotoNext.disabled = !hasMultiple;
+    }
+  };
+
+  async function loadFotosProduto(codigoPreferencial, codigoNumerico = null) {
+    const codigo = String(codigoPreferencial || codigoNumerico || '').trim();
+    const codigoUpper = codigo.toUpperCase() || null;
+
+    if (codigoUpper && fotosProdutoCodigoAtual === codigoUpper && fotosProdutoAtual.length) {
+      renderFotoAtual();
+      return;
+    }
+
+    fotosProdutoAtual = [];
+    fotoIndexAtual = 0;
+    fotosProdutoCodigoAtual = codigoUpper;
+
+    if (!codigoUpper) {
+      fotosProdutoCodigoAtual = null;
+      renderFotoAtual();
+      return;
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/produtos/${encodeURIComponent(codigo)}/fotos`, {
+        cache: 'no-store',
+        credentials: 'include'
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      const fotos = Array.isArray(json?.fotos) ? json.fotos.slice() : [];
+      fotos.sort((a, b) => Number(a.pos || 0) - Number(b.pos || 0));
+      fotosProdutoAtual = fotos;
+      fotoIndexAtual = 0;
+    } catch (err) {
+      console.warn('[prep-eletrica] falha ao carregar fotos do produto:', err);
+      fotosProdutoAtual = [];
+      fotoIndexAtual = 0;
+      fotosProdutoCodigoAtual = codigoUpper;
+    }
+
+    renderFotoAtual();
+  }
+
+  els.fotoPrev?.addEventListener('click', () => {
+    const total = Array.isArray(fotosProdutoAtual) ? fotosProdutoAtual.length : 0;
+    if (total <= 1) return;
+    fotoIndexAtual = (fotoIndexAtual - 1 + total) % total;
+    renderFotoAtual();
+  });
+
+  els.fotoNext?.addEventListener('click', () => {
+    const total = Array.isArray(fotosProdutoAtual) ? fotosProdutoAtual.length : 0;
+    if (total <= 1) return;
+    fotoIndexAtual = (fotoIndexAtual + 1) % total;
+    renderFotoAtual();
+  });
+
+  renderFotoAtual();
+
+  hideEstrutura();
 
   /* ----- Tabs ----- */
   const setActiveTab = (activeEl) => {
@@ -87,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setActiveTab(els.menuInicio);
     els.paginaPrep.style.display = 'block';
     els.paginaPrep.classList.add('fade-in');
+    hideEstrutura();
   });
 
   els.menuProduto?.addEventListener('click', (e) => {
@@ -98,7 +331,8 @@ document.addEventListener('DOMContentLoaded', () => {
     else {
       els.miniCodigoEl.textContent = '';
       els.ulMiniFila.innerHTML = '<li class="empty">Selecione um item na Fila de produção</li>';
-      els.ulMiniEmProd.innerHTML = '<li class="empty">—</li>';
+      els.ulMiniEm.innerHTML = '<li class="empty">—</li>';
+      hideEstrutura();
     }
     setTimeout(fitProdutoKanbanHeight, 50);
   });
@@ -179,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.codigoSelecionado   = codigo;
         window.codigoSelecionadoCP = cp;
         window.ativarAbaProduto();
+        hideEstrutura();
         window.renderMiniKanban(codigo, cp);
       }, { passive:true });
     });
@@ -191,29 +426,6 @@ document.addEventListener('DOMContentLoaded', () => {
     els.produtoTab.classList.add('fade-in');
   };
 
-  /* ----- Foto do produto ----- */
-  async function fetchPrimeiraFoto(codigo) {
-    if (!codigo) return null;
-    const endpoint = `${API_BASE}/produtos/${encodeURIComponent(codigo)}/fotos`;
-    try {
-      const resp = await fetch(endpoint, { cache:'no-store', credentials:'include' });
-      if (!resp.ok) return null;
-      const j = await resp.json();
-      const arr = Array.isArray(j?.fotos) ? j.fotos : (Array.isArray(j?.data) ? j.data : []);
-      if (!arr.length) return null;
-      const ord = arr.slice().sort((a,b)=>Number(a.pos||0)-Number(b.pos||0));
-      const f0 = ord[0];
-      const raw = f0?.url_imagem ?? f0?.url ?? f0?.imagem ?? null;
-      return normalizeImageUrl(raw);
-    } catch { return null; }
-  }
-  async function updateProdutoFotoFrame(codigoPreferencial) {
-    const img = document.getElementById('produto-foto-img'); if (!img) return;
-    let url = null; try { url = await fetchPrimeiraFoto(codigoPreferencial); } catch {}
-    if (url) { img.src = url; img.style.objectFit='cover'; }
-    else     { img.src = '../img/logo.png'; img.style.objectFit='contain'; }
-  }
-
   /* ----- Altura das listas (aba Produto) ----- */
   function fitProdutoKanbanHeight() {
     const limits = [];
@@ -224,11 +436,14 @@ document.addEventListener('DOMContentLoaded', () => {
     limits.push(window.innerHeight);
     const yLimit = Math.min(...limits);
     const padBottom = 16;
-    ['prod-col-fila','prod-col-emprod'].forEach(id => {
+  ['prod-col-fila','prod-col-emprod'].forEach(id => {
       const ul = document.getElementById(id); if (!ul) return;
       const top = ul.getBoundingClientRect().top;
       const available = Math.max(100, Math.floor(yLimit - top - padBottom));
-      ul.style.maxHeight = `${available}px`; ul.style.overflowY = 'auto';
+      const desired = 10 * 72; // altura aproximada para 10 cards
+      const maxHeight = Math.min(Math.max(desired, available), Math.max(desired, window.innerHeight - 60));
+      ul.style.maxHeight = `${Math.max(220, maxHeight)}px`;
+      ul.style.overflowY = 'auto';
     });
   }
   window.addEventListener('resize', fitProdutoKanbanHeight);
@@ -244,67 +459,183 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!ulMiniFila || !ulMiniEm) return;
 
     try {
-      const resp = await fetch(`${API_BASE}/preparacao/listar`, { cache:'no-store', credentials:'include' });
-      const payload = await resp.json();
-      const data   = payload?.data || {};
-      const fila   = data['A Produzir'] || [];
-      const emprod = data['Produzindo'] || [];
-
       const codAlfa = String(codigoAlfa || '').trim();
       const codNum  = codigoProdutoNum ? String(codigoProdutoNum).trim() : null;
 
-      await updateProdutoFotoFrame(codAlfa || codNum || null);
+      const produtoRef = (codAlfa || codNum || '').toUpperCase();
+      if (!estruturaProdutoAtual || estruturaProdutoAtual !== produtoRef) {
+        hideEstrutura();
+      }
 
-      const all = fila.concat(emprod);
+      await loadFotosProduto(codAlfa || null, codNum || null);
+
+      const prepResp = await fetch(`${API_BASE}/preparacao/listar`, { cache: 'no-store', credentials: 'include' })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)));
+
+      const prepData  = prepResp?.data || {};
+      const filaRaw   = prepData['A Produzir'] || [];
+      const emprod    = prepData['Produzindo'] || [];
+
+      const fila = filaRaw.map(reg => ({
+        op: String(reg?.numero_op || reg?.op || '').trim(),
+        produto_codigo: String(reg?.produto_codigo || reg?.codigo_produto || reg?.codigo || '').trim()
+      })).filter(entry => entry.op);
+
+      const todasReferencias = fila.concat(emprod);
       const cps = [];
-      all.forEach(c => {
+      todasReferencias.forEach(c => {
         const cp = String(c.produto_codigo || '').trim();
         if (/^\d+$/.test(cp) && !cps.includes(cp)) cps.push(cp);
       });
 
       let cpToAlpha = {};
       if (cps.length) {
-        const qs = cps.map(cp=>'cp='+encodeURIComponent(cp)).join('&');
+        const qs = cps.map(cp => 'cp=' + encodeURIComponent(cp)).join('&');
         try {
-          const r = await fetch(`${API_BASE}/produtos/codigos?`+qs, { credentials:'include' });
+          const r = await fetch(`${API_BASE}/produtos/codigos?${qs}`, { credentials: 'include' });
           const j = await r.json();
           cpToAlpha = j?.data || {};
-        } catch {}
+        } catch (e) {
+          console.warn('[prep-eletrica] falha ao mapear CP → código:', e);
+        }
       }
       const alphaFromCP = (cp) => (cpToAlpha[cp]?.codigo) || null;
 
-      const matchProd = (c) => {
-        const cp   = String(c.produto_codigo || '').trim();
+      const matchProd = (registro) => {
+        const cp   = String(registro.produto_codigo || '').trim();
         const alfa = alphaFromCP(cp) || cp;
         if (codNum  && cp   === codNum)  return true;
         if (codAlfa && alfa === codAlfa) return true;
+        if (!codAlfa && !codNum && alfa) return true;
         return false;
       };
 
       const dedupeByOp = (arr) => {
-        const seen = Object.create(null); const out = [];
-        arr.forEach(c => { const k=String(c.op||'').trim(); if(!k || seen[k]) return; seen[k]=1; out.push(c); });
+        const seen = Object.create(null);
+        const out = [];
+        arr.forEach(c => {
+          const key = String(c.op || '').trim();
+          if (!key || seen[key]) return;
+          seen[key] = 1;
+          out.push(c);
+        });
         return out;
       };
 
       let listaFila   = dedupeByOp(fila.filter(matchProd));
       let listaEmProd = dedupeByOp(emprod.filter(matchProd));
-      const emOps = {}; listaEmProd.forEach(x => emOps[x.op]=1);
+      const emOps = {}; listaEmProd.forEach(x => { if (x?.op) emOps[x.op] = 1; });
       listaFila = listaFila.filter(x => !emOps[x.op]);
 
       if (rid !== window.__miniRID) return;
+      const opMap = {};
+      const registrar = (entry) => {
+        const opKey = (entry?.op || '').trim().toUpperCase();
+        if (!opKey) return;
+        const cp = String(entry.produto_codigo || '').trim();
+        const alfa = alphaFromCP(cp) || cp;
+        const payload = {
+          op: opKey,
+          produto_codigo: cp,
+          produto_codigo_alfa: alfa
+        };
+        opMap[opKey] = payload;
+        const base = opKey.split('-')[0];
+        if (base && !opMap[base]) opMap[base] = payload;
+        if (base.startsWith('OP') && !opMap['OPS' + base.slice(2)]) {
+          opMap['OPS' + base.slice(2)] = payload;
+        }
+        if (base.startsWith('OPS') && !opMap['OP' + base.slice(3)]) {
+          opMap['OP' + base.slice(3)] = payload;
+        }
+      };
+      listaFila.forEach(registrar);
+      listaEmProd.forEach(registrar);
+      atualizaFilaCache(opMap);
+
+      let etapasEtiquetas = {};
+      const opKeys = Object.keys(opMap);
+      if (opKeys.length) {
+        try {
+          const respStage = await fetch(`${API_BASE}/etiquetas/op/etapas`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ ops: opKeys })
+          });
+          const jsonStage = await respStage.json().catch(() => ({}));
+          if (respStage.ok && jsonStage && jsonStage.data) {
+            etapasEtiquetas = {};
+            Object.entries(jsonStage.data).forEach(([opKey, stage]) => {
+              if (!opKey) return;
+              etapasEtiquetas[String(opKey).trim().toUpperCase()] = stage ? String(stage).trim() : null;
+            });
+          }
+        } catch (err) {
+          console.warn('[prep-eletrica] falha ao consultar etapas das etiquetas:', err);
+        }
+      }
+
+      const filaAjustada = [];
+      listaFila.forEach(entry => {
+        const opKey = String(entry?.op || '').trim().toUpperCase();
+        const etapaEtiqueta = (etapasEtiquetas[opKey] || '').toUpperCase();
+        if (etapaEtiqueta === 'PRODUZINDO') {
+          if (!emOps[entry.op]) {
+            listaEmProd.push(entry);
+            emOps[entry.op] = 1;
+          }
+        } else {
+          filaAjustada.push(entry);
+        }
+      });
+      listaFila = filaAjustada;
+
       const fragFila = document.createDocumentFragment();
       const fragEm   = document.createDocumentFragment();
-      const pushLi = (frag, op) => { const li=document.createElement('li'); li.className='kanban-card'; li.textContent=op||'—'; frag.appendChild(li); };
-      if (!listaEmProd.length) { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragEm.appendChild(li); }
-      else listaEmProd.forEach(c => pushLi(fragEm, c.op));
-      if (!listaFila.length)   { const li=document.createElement('li'); li.className='empty'; li.textContent='—'; fragFila.appendChild(li); }
-      else listaFila.forEach(c => pushLi(fragFila, c.op));
+      const pushLi = (frag, entry) => {
+        const li = document.createElement('li');
+        li.className = 'kanban-card';
+        const opCode = (entry?.op || entry || '').trim();
+        li.textContent = opCode || '—';
+        if (entry?.op) {
+          li.dataset.op = entry.op;
+          if (entry.produto_codigo) li.dataset.produtoCodigo = entry.produto_codigo;
+          li.addEventListener('click', () => {
+            const alvo = findFilaEntryForOp(entry.op);
+            if (alvo) {
+              carregarEstruturaPersonalizada(entry.op, alvo);
+            } else {
+              clearEstrutura('OP não pertence a este produto.', true);
+            }
+          }, { passive: true });
+        }
+        frag.appendChild(li);
+      };
+      if (!listaEmProd.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = '—';
+        fragEm.appendChild(li);
+      } else {
+        listaEmProd.forEach(c => pushLi(fragEm, c));
+      }
+      if (!listaFila.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = '—';
+        fragFila.appendChild(li);
+      } else {
+        listaFila.forEach(c => pushLi(fragFila, c));
+      }
       if (rid !== window.__miniRID) return;
       ulMiniEm.replaceChildren(fragEm);
       ulMiniFila.replaceChildren(fragFila);
     } catch (err) {
       if (rid !== window.__miniRID) return;
+      fotosProdutoAtual = [];
+      fotoIndexAtual = 0;
+      renderFotoAtual();
       ulMiniEm.innerHTML  = '<li class="empty">Erro carregando dados</li>';
       ulMiniFila.innerHTML = '';
     }
@@ -352,18 +683,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Extrai a OP a partir do texto do QR ===
     function extractOP(raw){
       if (!raw) return '';
-      let s = String(raw).trim();
-      // usa o sufixo após o ÚLTIMO "-"
-      if (s.includes('-')) s = s.split('-').pop().trim();
-      // padrão P + dígitos
-      let m = s.match(/\b([A-Za-z]\d{5,})\b/);
+      const s = String(raw).trim();
+      const pattern = /(OPS?\d+(?:-V\d+(?:C\d+)?)?)/i;
+      const m = s.match(pattern);
       if (m && m[1]) return m[1].toUpperCase();
-      // URL com ?op=
-      try { const u = new URL(String(raw)); const qp = u.searchParams.get('op'); if (qp) return String(qp).toUpperCase(); } catch {}
-      // fallback
-      const s2 = s.replace(/[^A-Za-z0-9]/g,' ');
-      m = s2.match(/\b([A-Za-z]\d{5,})\b/);
-      if (m && m[1]) return m[1].toUpperCase();
+      try {
+        const u = new URL(String(raw));
+        const qp = u.searchParams.get('op');
+        if (qp) {
+          const qpm = String(qp).match(pattern);
+          if (qpm && qpm[1]) return qpm[1].toUpperCase();
+        }
+      } catch {}
+      const generic = s.match(/\b([A-Za-z]\d{5,})\b/);
+      if (generic && generic[1]) return generic[1].toUpperCase();
       return s.toUpperCase();
     }
 
@@ -373,6 +706,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!op || processing) return;
       processing = true;
       try {
+        const filaEntry = findFilaEntryForOp(op);
+        if (acao === 'iniciar' && !filaEntry) {
+          alert('OP não pertence a este produto.');
+          processing = false;
+          return;
+        }
+        if (acao === 'iniciar' && filaEntry) {
+          const ok = await carregarEstruturaPersonalizada(op, filaEntry);
+          if (ok === false) {
+            processing = false;
+            return;
+          }
+        }
         if (window.qrReader){ try { await window.qrReader.stop(); await window.qrReader.clear(); } catch {} }
         if (acao === 'iniciar')      await Preparacao.iniciarProducao(op);
         else if (acao === 'concluir')await Preparacao.finalizarProducao(op);
@@ -463,5 +809,74 @@ document.addEventListener('DOMContentLoaded', () => {
   })();
 
 }); // DOMContentLoaded
+
+// ===== Voltar ao menu pelo logo (tolerante a HTML antigo, preventDefault e caminhos) =====
+(function () {
+  const onReady = (fn) =>
+    (document.readyState === 'loading')
+      ? document.addEventListener('DOMContentLoaded', fn, { once: true })
+      : fn();
+
+  function guessMenuURL() {
+    // Se o <a id="logo-link"> existir e tiver href, respeita-o
+    const href = document.getElementById('logo-link')?.getAttribute('href');
+    if (href && href.trim()) return href.trim();
+
+    // Caso contrário, deduz pelo caminho da página
+    const p = location.pathname || '';
+    // Se estiver dentro de /pst_prep_eletrica/, o menu provavelmente está um nível acima
+    if (p.includes('/pst_prep_eletrica/')) return '../menu_produto.html';
+    // fallback genérico (mesmo nível)
+    return './menu_produto.html';
+  }
+
+  function isLogoNode(n) {
+    if (!n || n === document) return false;
+    if (n.matches?.('#logo-link, header .menu-logo, header img[alt="Logo da empresa"], header .logo')) return true;
+    return false;
+  }
+
+  function getPathNodes(e) {
+    if (e.composedPath) return e.composedPath();
+    const arr = []; let n = e.target;
+    while (n) { arr.push(n); n = n.parentNode; }
+    return arr;
+  }
+
+  onReady(() => {
+    const MENU_URL = guessMenuURL();
+
+    // “mãozinha” e clique garantido no cabeçalho
+    document.querySelectorAll('header .menu-logo, header .logo, #logo-link img').forEach(img => {
+      img.style.cursor = 'pointer';
+      img.style.pointerEvents = 'auto';
+    });
+
+    // Clique do mouse (captura) -> navega
+    document.addEventListener('click', (e) => {
+      const path = getPathNodes(e);
+      if (!path.some(isLogoNode)) return;
+
+      // respeita cliques modificados (abrir nova aba, etc.)
+      if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.assign(MENU_URL);
+    }, true);
+
+    // Teclado (Enter/Espaço) quando o foco estiver no logo/link
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const el = document.activeElement;
+      if (!isLogoNode(el)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.assign(MENU_URL);
+    }, true);
+  });
+})();
+
+
 
 export const __debug_fitHeight = () => { try { window.dispatchEvent(new Event('resize')); } catch {} };

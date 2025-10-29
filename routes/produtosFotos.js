@@ -5,7 +5,7 @@ const router  = express.Router();
 const { dbQuery } = require('../src/db'); // usa DATABASE_URL com SSL quando em produção
 
 const multer = require('multer');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const mime  = require('mime-types');
 
 const supabase = require('../utils/supabase');
@@ -60,7 +60,7 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
     const pos       = Number(req.query.pos ?? 0);
 
     const ext      = mime.extension(req.file.mimetype) || 'bin';
-    const fileName = `${uuidv4()}.${ext}`;
+    const fileName = `${randomUUID()}.${ext}`;
     const pathKey  = `${codigoNum}/${fileName}`; // sempre usa pasta do código numérico
 
     // Envia para Supabase
