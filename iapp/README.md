@@ -25,6 +25,8 @@ Permite listar todas as ordens de produção disponíveis na IAPP.
 2. Clique em "Listar Todos"
 3. Aguarde o carregamento da lista completa
 
+**Nota:** Dependendo da quantidade de ordens, esta operação pode demorar alguns segundos.
+
 ## Página Standalone
 
 Além da integração no menu principal, existe uma página standalone disponível em:
@@ -77,7 +79,9 @@ IAPP_DOMAIN: process.env.IAPP_DOMAIN || '',
 IAPP_INSECURE: (process.env.IAPP_INSECURE || 'true') === 'true'
 ```
 
-**Recomendação:** Em produção, defina as credenciais como variáveis de ambiente:
+**Importante:** Nunca commite credenciais reais no código. O arquivo `config.server.js` está no `.gitignore`.
+
+**Recomendação:** Defina as credenciais como variáveis de ambiente:
 ```bash
 export IAPP_TOKEN="seu_token_aqui"
 export IAPP_SECRET="seu_secret_aqui"
@@ -95,7 +99,7 @@ O sistema fornece feedback visual sobre o status da operação:
 ### Erros Comuns
 
 **"OFFSET não encontrado ou inválido"**
-- Este erro vem da API IAPP quando o parâmetro offset está faltando ou inválido
+- Este erro vem da API IAPP quando o parâmetro offset está ausente ou inválido
 - O código já passa `offset=0` corretamente
 - Pode ser um problema temporário da API IAPP
 
