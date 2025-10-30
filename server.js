@@ -10,7 +10,8 @@ const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '1040820180
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
 // outros requires de rotas...
 
-
+// no topo: já deve ter dotenv/express carregados
+const pcpEstruturaRoutes = require('./routes/pcp_estrutura');
 
 
 
@@ -26,8 +27,6 @@ const multer        = require('multer');
 // logo após os outros requires:
 const archiver = require('archiver');
 const crypto   = require('crypto');
-const uuid     = () => crypto.randomUUID();
-const XLSX     = require('xlsx');
 // (se você usar fetch no Node <18, também faça: const fetch = require('node-fetch');)
 const { parse: csvParse }         = require('csv-parse/sync');
 const estoquePath = path.join(__dirname, 'data', 'estoque_acabado.json');
@@ -37,9 +36,6 @@ if (!globalThis.fetch) {
 const safeFetch = (...args) => globalThis.fetch(...args);
 global.safeFetch = (...args) => globalThis.fetch(...args);
 const app = express();
-const axios = require('axios');
-const http  = require('http');
-const https = require('https');
 // ===== Ingestão inicial de OPs (Omie → Postgres) ============================
 const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
@@ -50,6 +46,8 @@ const sseClients = new Set();
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
 const isProd = process.env.NODE_ENV === 'production';
 const callOmieDedup = require('./utils/callOmieDedup');
+const LOCAIS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const locaisEstoqueCache = { at: 0, data: [], fonte: 'omie' };
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
@@ -57,6 +55,11 @@ app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/a
 app.use('/pst_prep_eletrica',
   express.static(path.join(__dirname, 'pst_prep_eletrica'), { etag:false, maxAge:'1h' })
 );
+
+// === DEBUG BOOT / VIDA ======================================================
+app.get('/__ping', (req, res) => {
+  res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
+});
 
 
 app.use(session({
@@ -74,61 +77,346 @@ app.use(session({
 }));
 
 app.use('/api/nav', require('./routes/nav'));
-
-// Registra endpoints de Qualidade (Consulta Abertura de OS)
-app.use('/api/qualidade', require('./routes/qualidade'));
+app.use('/api/colaboradores', require('./routes/colaboradores'));
 
 app.get('/api/produtos/stream', (req, res) => {
-  res.setHeader('Content-Type',  'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection',    'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');   // evita buffering em proxies (ex.: Render/Nginx)
+  const accept = String(req.headers?.accept || '');
+  if (!accept.includes('text/event-stream')) {
+    return res.status(406).json({ ok: false, error: 'Endpoint exclusivo para SSE (text/event-stream).' });
+  }
+
+  req.socket?.setTimeout?.(0);   // nunca expira
+  req.socket?.setNoDelay?.(true);
+  req.socket?.setKeepAlive?.(true, 15000);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+
   if (res.flushHeaders) res.flushHeaders();
 
-  // dica: instrui reconexão do EventSource em 10s se cair
-  res.write('retry: 10000\n');
+  // instrui reconexão do EventSource em 10s caso a conexão caia
+  res.write('retry: 10000\n\n');
+  res.flush?.();
 
   // hello inicial
   res.write(`data: ${JSON.stringify({ type: 'hello' })}\n\n`);
+  res.flush?.();
 
-  // heartbeat a cada 15s (comentário SSE não vira onmessage, mas mantém conexão viva)
+  // heartbeat a cada 15s (comentário SSE mantém a conexão viva sem gerar eventos)
   const heartbeat = setInterval(() => {
-    try { res.write(': ping\n\n'); } catch {}
+    try {
+      res.write(': ping\n\n');
+      res.flush?.();
+    } catch (err) {
+      clearInterval(heartbeat);
+    }
   }, 15000);
 
   const client = { res, heartbeat };
   sseClients.add(client);
+  console.log('[SSE] cliente conectado. total=', sseClients.size);
 
-  // limpeza completa em fechamento/erro
   const clean = () => {
     clearInterval(heartbeat);
     sseClients.delete(client);
+    console.log('[SSE] cliente desconectado. total=', sseClients.size);
     try { res.end(); } catch {}
   };
-  req.on('close', () => {
-    try { console.debug('[sse] conexão encerrada pelo cliente'); } catch {}
-    clean();
-  });
-  res.on('error', (err) => {
-    try { console.warn('[sse] erro na conexão SSE:', err?.message || err); } catch {}
-    clean();
-  });
+
+  req.on('close', clean);
+  res.on('error', clean);
+  res.on('close', clean);
 });
 
 // Conexão Postgres (Render)
 const { Pool } = require('pg');
-const { spawn, execFile, exec } = require('child_process');
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // no Render, já vem setado
-  ssl: { rejectUnauthorized: false }          // necessário no Render
+  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
+  ssl: { rejectUnauthorized: false },
 });
-
+const ProdutosEstruturaJsonClient = require(
+  path.resolve(__dirname, 'utils/omie/ProdutosEstruturaJsonClient.js')
+);
 // opcional: log de saúde
 pool.query('SELECT 1').then(() => {
   console.log('[pg] conectado');
 }).catch(err => {
   console.error('[pg] falha conexão:', err?.message || err);
+});
+
+
+function parseDateBR(s){ if(!s) return null; const t=String(s).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t); return m?`${m[3]}-${m[2]}-${m[1]}`:null; }
+function parseTimeSafe(s){ if(!s) return null; const t=String(s).trim();
+  return /^\d{2}:\d{2}(:\d{2})?$/.test(t) ? (t.length===5?`${t}:00`:t) : null; }
+
+// upsert do cabeçalho
+async function upsertCabecalho(client, ident={}, observacoes={}, custoProducao={}) {
+  const {
+    idProduto=null, intProduto=null, codProduto=null, descrProduto=null,
+    tipoProduto=null, unidProduto=null, pesoLiqProduto=null, pesoBrutoProduto=null
+  } = ident;
+  const obs = observacoes?.obsRelevantes ?? null;
+  const vMOD = custoProducao?.vMOD ?? null;
+  const vGGF = custoProducao?.vGGF ?? null;
+
+  const sel = await client.query(
+    `SELECT id FROM public.omie_estrutura
+       WHERE (cod_produto=$1 AND $1 IS NOT NULL)
+          OR (id_produto=$2 AND $2 IS NOT NULL)
+          OR (int_produto=$3 AND $3 IS NOT NULL)
+       ORDER BY id ASC LIMIT 1`,
+    [codProduto, idProduto, intProduto]
+  );
+
+  if (sel.rowCount) {
+    const pid = sel.rows[0].id;
+    await client.query(
+      `UPDATE public.omie_estrutura
+         SET descr_produto=$1, tipo_produto=$2, unid_produto=$3,
+             peso_liq_produto=$4, peso_bruto_produto=$5,
+             obs_relevantes=$6, v_mod=$7, v_ggf=$8,
+             id_produto=COALESCE(id_produto,$9),
+             int_produto=COALESCE(int_produto,$10),
+             cod_produto=COALESCE(cod_produto,$11),
+             origem='omie'
+       WHERE id=$12`,
+      [descrProduto,tipoProduto,unidProduto,pesoLiqProduto,pesoBrutoProduto,
+       obs,vMOD,vGGF,idProduto,intProduto,codProduto,pid]
+    );
+    return pid;
+  }
+
+  const ins = await client.query(
+    `INSERT INTO public.omie_estrutura
+     (id_produto,int_produto,cod_produto,descr_produto,tipo_produto,unid_produto,
+      peso_liq_produto,peso_bruto_produto,obs_relevantes,v_mod,v_ggf,origem)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'omie') RETURNING id`,
+    [idProduto,intProduto,codProduto,descrProduto,tipoProduto,unidProduto,
+     pesoLiqProduto,pesoBrutoProduto,obs,vMOD,vGGF]
+  );
+  return ins.rows[0].id;
+}
+
+// Atualiza integralmente a lista de itens da estrutura do 'parentId'.
+// Regras:
+//  - Snapshot ANTES de deletar itens (versao = atual, modificador = 'omie-sync').
+//  - Se já existiam itens, incrementa omie_estrutura.versao; senão mantém 1.
+//  - Atualiza omie_estrutura.modificador em TODOS os casos.
+//  - Depois insere os itens (se houver).
+async function replaceItens(client, parentId, itens = []) {
+  // 1) Versão atual com lock
+  const { rows: verRows } = await client.query(
+    `SELECT COALESCE(versao,1) AS versao
+       FROM public.omie_estrutura
+      WHERE id = $1
+      FOR UPDATE`,
+    [parentId]
+  );
+  const versaoAtual = Number(verRows?.[0]?.versao || 1);
+
+  // 2) Snapshot do estado ATUAL (antes de apagar)
+  const MOD_SINC = 'omie-sync';
+  await client.query(
+    `
+    INSERT INTO public.omie_estrutura_item_versao
+    SELECT t.*, $2::int AS versao, $3::text AS modificador, now() as snapshot_at
+      FROM public.omie_estrutura_item t
+     WHERE t.parent_id = $1
+    `,
+    [parentId, versaoAtual, MOD_SINC]
+  );
+
+  // 3) Apaga itens antigos e mede se havia algo
+  const delRes = await client.query(
+    `DELETE FROM public.omie_estrutura_item WHERE parent_id=$1`,
+    [parentId]
+  );
+  const hadPrevious = Number(delRes.rowCount || 0) > 0;
+
+  // 4) Se não vierem itens, apenas atualiza cabeçalho e sai
+  if (!Array.isArray(itens) || itens.length === 0) {
+    if (hadPrevious) {
+      await client.query(
+        `UPDATE public.omie_estrutura
+            SET versao = COALESCE(versao, 1) + 1,
+                modificador = $2,
+                updated_at = now()
+          WHERE id = $1`,
+        [parentId, MOD_SINC]
+      );
+    } else {
+      await client.query(
+        `UPDATE public.omie_estrutura
+            SET versao = COALESCE(versao, 1),
+                modificador = $2,
+                updated_at = now()
+          WHERE id = $1`,
+        [parentId, MOD_SINC]
+      );
+    }
+    return;
+  }
+
+  // 5) Dedup itens recebidos
+  const norm = v => (v == null ? '' : String(v));
+  const seen = new Set(); const dedup = [];
+  for (const it of itens) {
+    const key = [norm(it.codProdMalha), norm(it.intProdMalha), norm(it.idProdMalha)].join('|');
+    if (seen.has(key)) continue; seen.add(key); dedup.push(it);
+  }
+  if (!dedup.length) {
+    if (hadPrevious) {
+      await client.query(
+        `UPDATE public.omie_estrutura
+            SET versao = COALESCE(versao, 1) + 1,
+                modificador = $2,
+                updated_at = now()
+          WHERE id = $1`,
+        [parentId, MOD_SINC]
+      );
+    } else {
+      await client.query(
+        `UPDATE public.omie_estrutura
+            SET versao = COALESCE(versao, 1),
+                modificador = $2,
+                updated_at = now()
+          WHERE id = $1`,
+        [parentId, MOD_SINC]
+      );
+    }
+    return;
+  }
+
+  // 6) INSERT em lote (como já estava)
+  const text = `
+    INSERT INTO public.omie_estrutura_item(
+      parent_id,
+      id_malha,int_malha,
+      id_prod_malha,int_prod_malha,cod_prod_malha,descr_prod_malha,
+      quant_prod_malha,unid_prod_malha,tipo_prod_malha,
+      id_fam_malha,cod_fam_malha,descr_fam_malha,
+      peso_liq_prod_malha,peso_bruto_prod_malha,
+      perc_perda_prod_malha,obs_prod_malha,
+      d_inc_prod_malha,h_inc_prod_malha,u_inc_prod_malha,
+      d_alt_prod_malha,h_alt_prod_malha,u_alt_prod_malha,
+      codigo_local_estoque
+    )
+    VALUES
+    ${dedup.map((_,i)=>`(
+      $1,
+      $${2+i*23},$${3+i*23},
+      $${4+i*23},$${5+i*23},$${6+i*23},$${7+i*23},
+      $${8+i*23},$${9+i*23},$${10+i*23},
+      $${11+i*23},$${12+i*23},$${13+i*23},
+      $${14+i*23},$${15+i*23},
+      $${16+i*23},$${17+i*23},
+      $${18+i*23},$${19+i*23},$${20+i*23},
+      $${21+i*23},$${22+i*23},$${23+i*23},
+      $${24+i*23}
+    )`).join(',')}
+  `;
+  const vals = [parentId];
+  for (const it of dedup) {
+    vals.push(
+      it.idMalha ?? null, it.intMalha ?? null,
+      it.idProdMalha ?? null, it.intProdMalha ?? null, it.codProdMalha ?? null, it.descrProdMalha ?? null,
+      it.quantProdMalha ?? 0, it.unidProdMalha ?? null, it.tipoProdMalha ?? null,
+      it.idFamMalha ?? null, it.codFamMalha ?? null, it.descrFamMalha ?? null,
+      it.pesoLiqProdMalha ?? null, it.pesoBrutoProdMalha ?? null,
+      it.percPerdaProdMalha ?? null, it.obsProdMalha ?? null,
+      parseDateBR(it.dIncProdMalha), parseTimeSafe(it.hIncProdMalha), it.uIncProdMalha ?? null,
+      parseDateBR(it.dAltProdMalha), parseTimeSafe(it.hAltProdMalha), it.uAltProdMalha ?? null,
+      it.codigo_local_estoque ?? null
+    );
+  }
+  await client.query(text, vals);
+
+  // 7) Incrementa/garante versão **e** marca modificador
+  if (hadPrevious) {
+    await client.query(
+      `UPDATE public.omie_estrutura
+          SET versao = COALESCE(versao, 1) + 1,
+              modificador = $2,
+              updated_at = now()
+        WHERE id = $1`,
+      [parentId, MOD_SINC]
+    );
+  } else {
+    await client.query(
+      `UPDATE public.omie_estrutura
+          SET versao = COALESCE(versao, 1),
+              modificador = $2,
+              updated_at = now()
+        WHERE id = $1`,
+      [parentId, MOD_SINC]
+    );
+  }
+}
+
+
+async function resyncEstruturaDeProduto({ cod_produto=null, id_produto=null, int_produto=null }) {
+  const omie = new ProdutosEstruturaJsonClient();
+  let registro = null;
+  try {
+    if (omie.ConsultarEstrutura) {
+registro = omie.ConsultarEstrutura({
+  ident: {
+    idProduto:  id_produto  || null,
+    codProduto: cod_produto || null,
+    intProduto: int_produto || null,
+  }
+});
+
+    } else {
+      const r = omie.ListarEstruturas({ nPagina:1, nRegPorPagina:200 });
+      registro = (r?.produtosEncontrados || []).find(p=>{
+        const i=p.ident||{};
+        return (cod_produto && i.codProduto===cod_produto)
+            || (id_produto && Number(i.idProduto)===Number(id_produto))
+            || (int_produto && String(i.intProduto)===String(int_produto));
+      }) || null;
+    }
+  } catch(e) {
+    console.error('[estrutura webhook] consulta Omie:', e);
+    registro = null;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (!registro) { await client.query('COMMIT'); return; } // NUNCA apaga em "Excluido"
+    const pid = await upsertCabecalho(client, registro.ident, registro.observacoes, registro.custoProducao);
+    await replaceItens(client, pid, Array.isArray(registro.itens)?registro.itens:[]);
+    await client.query('COMMIT');
+  } catch(e){
+    await client.query('ROLLBACK'); console.error('[estrutura webhook] upsert:', e);
+  } finally { client.release(); }
+}
+
+// --- endpoint interno para re-sincronizar a estrutura de um produto ---
+// proteção simples com token opcional
+const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || null;
+
+app.post('/internal/pcp/estrutura/resync', express.json(), async (req, res) => {
+  try {
+    if (INTERNAL_TOKEN) {
+      const tok = req.get('X-Internal-Token') || req.query.token || '';
+      if (tok !== INTERNAL_TOKEN) return res.status(401).json({ ok:false, error:'unauthorized' });
+    }
+    const { cod_produto = null, id_produto = null, int_produto = null } = req.body || {};
+    await resyncEstruturaDeProduto({ cod_produto, id_produto, int_produto });
+    return res.json({ ok:true });
+  } catch (e) {
+    console.error('[estrutura/resync] erro:', e);
+    return res.status(500).json({ ok:false, error:String(e?.message||e) });
+  }
 });
 
 // broadcast
@@ -141,6 +429,84 @@ function sseBroadcast(payload) {
 app.set('sseBroadcast', sseBroadcast);
 
 // ============================================================================
+app.post('/api/users/:id/permissions/override', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { permissions, overrides } = req.body || {};
+
+  // aceita tanto {permissions:[...]} quanto {overrides:[...]}
+  const raw = Array.isArray(permissions)
+    ? permissions
+    : (Array.isArray(overrides) ? overrides : []);
+
+  // normaliza e valida
+  const rows = raw
+    .map(p => ({
+      node_id: Number(p?.node_id ?? p?.node ?? p?.id),
+      allow: !!p?.allow
+    }))
+    .filter(p => Number.isInteger(p.node_id) && p.node_id > 0);
+
+  try {
+    await pool.query('BEGIN');
+    await pool.query('DELETE FROM auth_user_permission WHERE user_id = $1', [id]);
+
+    if (rows.length) {
+      const ids    = rows.map(r => r.node_id);
+      const allows = rows.map(r => r.allow);
+
+      // insere em lote com unnest (rápido e 100% SQL)
+      await pool.query(
+        `INSERT INTO auth_user_permission (user_id, node_id, allow)
+         SELECT $1, unnest($2::bigint[]), unnest($3::boolean[])`,
+        [id, ids, allows]
+      );
+    }
+
+    await pool.query('COMMIT');
+    res.json({ ok: true, count: rows.length });
+  } catch (e) {
+    await pool.query('ROLLBACK').catch(() => {});
+    console.error('[permissions/override]', e);
+    res.status(500).json({ error: 'Erro ao salvar permissões', detail: String(e.message || e) });
+  }
+});
+
+// Resetar senha para 123 (provisória)
+app.post('/api/users/:id/password/reset', express.json(), async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query(
+      `UPDATE public.auth_user
+         SET password_hash = crypt('123', gen_salt('bf')),
+             updated_at = now()
+       WHERE id = $1`,
+      [id]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[password/reset]', e);
+    res.status(500).json({ error: 'Erro ao resetar senha' });
+  }
+});
+
+
+app.get('/api/users/:id/permissions', async (req,res)=>{
+  const { id } = req.params;
+  try {
+    const q = await pool.query(`
+      SELECT n.id, n.name, n.parent_id,
+             COALESCE(up.allow, false) AS allow
+      FROM auth_node n
+      LEFT JOIN auth_user_permission up
+        ON up.node_id = n.id AND up.user_id = $1
+      ORDER BY n.parent_id NULLS FIRST, n.id
+    `, [id]);
+    res.json(q.rows);
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({ error:'Erro ao listar permissões' });
+  }
+});
 
 
 // ─── Config. dinâmica de etiqueta ─────────────────────────
@@ -225,11 +591,7 @@ const {
   GITHUB_OWNER,
   GITHUB_REPO,
   GITHUB_BRANCH,
-  GITHUB_PATH,
-  IAPP_TOKEN,
-  IAPP_SECRET,
-  IAPP_DOMAIN,
-  IAPP_INSECURE
+  GITHUB_PATH
 } = require('./config.server');
 const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 
@@ -282,6 +644,55 @@ async function withRetry(fn, tries = 3) {
   }
   throw lastErr;
 }
+
+// === Busca de produtos SOMENTE em public.produtos_omie =======================
+// Espera { q } e retorna { itens: [{ codigo, descricao, fontes: ['public.produtos_omie'] }] }
+app.post('/api/produtos/busca', async (req, res) => {
+  try {
+    const q = String(req.body?.q || '').trim();
+    if (q.length < 2) return res.json({ itens: [] });
+
+    // Ajuste o schema abaixo se não for "public"
+    const schemaTable = 'public.produtos_omie';
+
+    // DISTINCT/Group para evitar duplicatas; PP primeiro; limita volume
+    const sql = `
+      SELECT
+        s.codigo,
+        s.descricao,
+        ARRAY['${schemaTable}']::text[] AS fontes
+      FROM (
+        SELECT DISTINCT
+          codigo::text   AS codigo,
+          descricao::text AS descricao
+        FROM ${schemaTable}
+        WHERE codigo ILIKE $1 OR descricao ILIKE $1
+      ) s
+      ORDER BY (CASE WHEN s.codigo ILIKE '%.PP.%' THEN 1 ELSE 0 END) DESC,
+               s.codigo ASC
+      LIMIT 300
+    `;
+
+    const term = `%${q}%`;
+    const { rows } = await pool.query(sql, [term]);
+
+    // Log (até 20 itens)
+    try {
+      const maxLog = Math.min(rows.length, 20);
+      console.log(`[API] /api/produtos/busca (produtos_omie) q="${q}" → ${rows.length} itens (mostrando ${maxLog})`);
+      for (let i = 0; i < maxLog; i++) {
+        const r = rows[i];
+        console.log(`  ${r.codigo} | ${String(r.descricao || '').slice(0, 90)} | fontes: ${r.fontes.join(', ')}`);
+      }
+    } catch (_) {}
+
+    res.json({ itens: rows || [] });
+  } catch (err) {
+    console.error('[API] /api/produtos/busca erro:', err);
+    res.status(500).json({ error: 'Falha na busca' });
+  }
+});
+
 
 
 // === NAV SYNC =====================================================
@@ -350,126 +761,27 @@ app.post('/api/nav/sync', ensureLoggedIn, async (req, res) => {
   }
 });
 
-// Timeout p/ chamadas OMIE (evita pendurar quando o BG "trava")
-// Implementado com axios + agentes sem keepAlive + timeout manual/AbortController
-async function omiePost(url, payload, timeoutMs = 15000) {
-  console.log('[omiePost] Iniciando POST:', { url, timeoutMs, call: payload.call });
-  // Forçar uso do fallback com https.request (axios tem travado neste ambiente)
-  return omiePostHttpFallback(url, payload, timeoutMs);
-}
 
-// Fallback de POST usando https.request puro com timeout rígido
-function omiePostHttpFallback(urlStr, payload, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    try {
-      const u = new URL(urlStr);
-      const isHttps = u.protocol === 'https:';
-      const lib = isHttps ? require('https') : require('http');
-      const body = Buffer.from(JSON.stringify(payload), 'utf8');
-      const options = {
-        hostname: u.hostname,
-        port: u.port || (isHttps ? 443 : 80),
-        path: u.pathname + (u.search || ''),
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Connection': 'close',
-          'Content-Length': body.length
-        },
-        agent: new (isHttps ? require('https').Agent : require('http').Agent)({ keepAlive: false })
-      };
-      const req = lib.request(options, (res) => {
-        const chunks = [];
-        res.on('data', (d) => chunks.push(d));
-        res.on('end', () => {
-          clearTimeout(overallTimer);
-          const buf = Buffer.concat(chunks);
-          const text = buf.toString('utf8');
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(new Error(`Omie HTTP ${res.statusCode} – ${text.slice(0,200)}`));
-          }
-          try {
-            const json = JSON.parse(text || '{}');
-            if (json.faultstring || json.faultcode) {
-              return reject(new Error(`Omie fault: ${json.faultstring || json.faultcode}`));
-            }
-            resolve(json);
-          } catch (e) {
-            reject(new Error('Falha ao parsear JSON da Omie'));
-          }
-        });
-      });
-      req.on('error', (err) => { clearTimeout(overallTimer); reject(err); });
-      // Timeout de inatividade no socket
-      req.setTimeout(timeoutMs + 1000, () => {
-        try { req.destroy(new Error('Timeout no socket Omie (fallback)')); } catch {}
-      });
-      // Timeout geral (inclui DNS)
-      const overallTimer = setTimeout(() => {
-        try { req.destroy(new Error('Timeout geral na chamada Omie (fallback)')); } catch {}
-      }, timeoutMs + 2000);
-      req.end(body);
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-// Chamada GET para IAPP usando https.request com timeout rígido
-function iappGetHttp(urlPath, timeoutMs = 15000, extraHeaders = {}) {
-  return new Promise((resolve, reject) => {
-    try {
-  const base = 'https://api.iniciativaaplicativos.com.br';
-      const urlStr = base.replace(/\/$/, '') + '/api' + (urlPath.startsWith('/') ? urlPath : '/' + urlPath);
-      const u = new URL(urlStr);
-      const lib = require('https');
-      const options = {
-        hostname: u.hostname,
-        port: 443,
-        path: u.pathname + (u.search || ''),
-        method: 'GET',
-        servername: u.hostname, // SNI explícito
-        headers: {
-          'Content-Type': 'application/json',
-          'Connection': 'close',
-          // Alguns serviços aceitam maiúsculas; outros minúsculas. Enviamos ambos por segurança.
-          'Token': IAPP_TOKEN || '',
-          'Secret': IAPP_SECRET || '',
-          'token': IAPP_TOKEN || '',
-          'secret': IAPP_SECRET || '',
-          ...extraHeaders
-        },
-        agent: new lib.Agent({ keepAlive: false, rejectUnauthorized: !IAPP_INSECURE })
-      };
-      const req = lib.request(options, (res) => {
-        const chunks = [];
-        res.on('data', d => chunks.push(d));
-        res.on('end', () => {
-          clearTimeout(overallTimer);
-          const buf = Buffer.concat(chunks);
-          const text = buf.toString('utf8');
-          if (res.statusCode < 200 || res.statusCode >= 300) {
-            return reject(new Error(`IAPP HTTP ${res.statusCode} – ${text.slice(0,200)}`));
-          }
-          try {
-            resolve(JSON.parse(text || '{}'));
-          } catch (e) {
-            resolve({ raw: text }); // algumas respostas podem não ser JSON
-          }
-        });
-      });
-      req.on('error', err => { clearTimeout(overallTimer); reject(err); });
-      req.setTimeout(timeoutMs + 1000, () => {
-        try { req.destroy(new Error('Timeout no socket IAPP')); } catch {}
-      });
-      const overallTimer = setTimeout(() => {
-        try { req.destroy(new Error('Timeout geral na chamada IAPP')); } catch {}
-      }, timeoutMs + 2000);
-      req.end();
-    } catch (e) {
-      reject(e);
-    }
-  });
+// Timeout p/ chamadas OMIE (evita pendurar quando o BG “trava”)
+async function omiePost(url, payload, timeoutMs = 20000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ac.signal
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`Omie HTTP ${r.status}${text ? ` – ${text}` : ''}`);
+    return JSON.parse(text || '{}');
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`Omie timeout (${timeoutMs}ms)`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 
@@ -856,7 +1168,7 @@ async function alterarEtapaImpl(req, res, etapa) {
   }
 
   // 2) Reflete no Postgres
-  const ETAPA_TO_STATUS = { '10':'A Produzir', '20':'Produzindo', '30':'teste 1', '40':'teste final', '60':'concluido' };
+  const ETAPA_TO_STATUS = { '10':'A Produzir', '20':'Produzindo', '30':'teste 1', '40':'teste final', '60':'Produzido' };
   const status = ETAPA_TO_STATUS[etapa] || 'A Produzir';
   try { await dbQuery('select public.mover_op($1,$2)', [op, status]); } catch (e) { console.warn('[mover_op] falhou:', e.message); }
 
@@ -869,10 +1181,211 @@ async function alterarEtapaImpl(req, res, etapa) {
 app.post('/api/preparacao/op/:op/etapa/:etapa', (req, res) =>
   alterarEtapaImpl(req, res, String(req.params.etapa)));
 
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+const normValue = (value) => {
+  if (typeof value === 'string') return value.trim();
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+};
+const maskOmieSecret = (value) => {
+  if (!value) return null;
+  const s = String(value);
+  if (s.length <= 4) return '***';
+  return `${s.slice(0, 2)}***${s.slice(-2)}`;
+};
+
+async function abrirOrdemProducaoNaOmie({
+  op,
+  body = {},
+  poolInstance,
+  out,
+  appKey,
+  appSecret,
+  estoquePadrao = PRODUCAO_LOCAL_PADRAO,
+  hints = {}
+}) {
+  if (!out) return;
+  out.errors = Array.isArray(out.errors) ? out.errors : [];
+
+  const produtoDebug = {
+    ...(out.produtoCodigo || {}),
+    request_alpha: out.produtoCodigo?.request_alpha ?? null,
+    request_num: out.produtoCodigo?.request_num ?? null,
+    op_info_alpha: out.produtoCodigo?.op_info_alpha ?? null,
+    op_info_num: out.produtoCodigo?.op_info_num ?? null,
+    view_before_alpha: out.produtoCodigo?.view_before_alpha ?? null,
+    view_after_alpha: out.produtoCodigo?.view_after_alpha ?? null,
+    produtos_omie_num: out.produtoCodigo?.produtos_omie_num ?? null,
+    final_alpha: out.produtoCodigo?.final_alpha ?? null,
+    final_num: out.produtoCodigo?.final_num ?? null
+  };
+
+  const hintBeforeAlpha = normValue(hints.viewBeforeAlpha);
+  if (hintBeforeAlpha) produtoDebug.view_before_alpha = hintBeforeAlpha;
+  const hintAfterAlpha = normValue(hints.viewAfterAlpha);
+  if (hintAfterAlpha) produtoDebug.view_after_alpha = hintAfterAlpha;
+
+  const requestAlpha = normValue(body.produto_codigo) || normValue(body.codigo);
+  if (requestAlpha) produtoDebug.request_alpha = requestAlpha;
+  const requestNum = normValue(body.produto_codigo_num) ||
+    normValue(body.nCodProd) ||
+    normValue(body.nCodProduto);
+  if (requestNum) produtoDebug.request_num = requestNum;
+
+  let produtoCodigoAlpha =
+    requestAlpha ||
+    normValue(hints.fallbackAlpha) ||
+    produtoDebug.view_before_alpha ||
+    produtoDebug.view_after_alpha ||
+    '';
+
+  let produtoCodigoNum =
+    requestNum ||
+    normValue(hints.fallbackNum) ||
+    '';
+
+  let fetchedOpInfo = false;
+
+  async function ensureProdutoInfoFromOp() {
+    if (fetchedOpInfo) return;
+    fetchedOpInfo = true;
+    try {
+      const { rows } = await poolInstance.query(
+        `SELECT produto_codigo, c_cod_int_prod, n_cod_prod
+           FROM public.op_info
+          WHERE c_cod_int_op = $1
+             OR c_num_op = $1
+             OR n_cod_op::text = $1
+          ORDER BY updated_at DESC
+          LIMIT 1`,
+        [op]
+      );
+      const row = rows?.[0];
+      if (row) {
+        const alpha = normValue(row.produto_codigo) || normValue(row.c_cod_int_prod);
+        const num = normValue(row.n_cod_prod);
+        if (!produtoCodigoAlpha && alpha) produtoCodigoAlpha = alpha;
+        if (!produtoCodigoNum && num) produtoCodigoNum = num;
+        produtoDebug.op_info_alpha = alpha || null;
+        produtoDebug.op_info_num = num ? Number(num) || null : null;
+      }
+    } catch (err) {
+      out.errors.push('[op_info lookup] ' + (err?.message || err));
+    }
+  }
+
+  const digitsRegex = /^\d+$/;
+
+  async function resolveNCodProduto() {
+    if (produtoCodigoNum && digitsRegex.test(produtoCodigoNum)) {
+      return Number(produtoCodigoNum);
+    }
+    await ensureProdutoInfoFromOp();
+    if (produtoCodigoNum && digitsRegex.test(produtoCodigoNum)) {
+      return Number(produtoCodigoNum);
+    }
+
+    const alpha = normValue(produtoCodigoAlpha);
+    if (!alpha) return null;
+    try {
+      const { rows } = await poolInstance.query(
+        `SELECT codigo_produto
+           FROM public.produtos_omie
+          WHERE TRIM(UPPER(codigo)) = TRIM(UPPER($1))
+             OR TRIM(UPPER(codigo_produto_integracao::text)) = TRIM(UPPER($1))
+          ORDER BY codigo_produto ASC
+          LIMIT 1`,
+        [alpha]
+      );
+      const row = rows?.[0];
+      if (row && row.codigo_produto) {
+        const num = Number(row.codigo_produto);
+        if (!Number.isNaN(num) && num > 0) {
+          produtoCodigoNum = String(num);
+          produtoDebug.produtos_omie_num = num;
+          return num;
+        }
+      }
+    } catch (err) {
+      out.errors.push('[produtos_omie lookup] ' + (err?.message || err));
+    }
+    return null;
+  }
+
+  const nCodProduto = await resolveNCodProduto();
+  produtoDebug.final_alpha = produtoCodigoAlpha || null;
+  produtoDebug.final_num = produtoCodigoNum || null;
+  out.produtoCodigo = produtoDebug;
+
+  if (!appKey || !appSecret) {
+    out.omie_incluir = { skipped: true, reason: 'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
+    return;
+  }
+
+  if (!nCodProduto) {
+    out.omie_incluir = {
+      ok: false,
+      skipped: true,
+      reason: 'Não foi possível determinar nCodProduto para abrir OP na OMIE.',
+      produto_codigo: produtoCodigoAlpha || null
+    };
+    console.warn('[prep][omie_incluir] não abriu OP — nCodProduto indisponível', {
+      op,
+      produto_codigo: produtoCodigoAlpha || null
+    });
+    return;
+  }
+
+  const identificacao = {
+    cCodIntOP: op,
+    dDtPrevisao: fmtDDMMYYYY(new Date()),
+    nCodProduto,
+    nQtde: 1
+  };
+
+  if (estoquePadrao && /^\d+$/.test(String(estoquePadrao))) {
+    identificacao.codigo_local_estoque = Number(estoquePadrao);
+  }
+
+  const payload = {
+    call: 'IncluirOrdemProducao',
+    app_key: appKey,
+    app_secret: appSecret,
+    param: [{ identificacao }]
+  };
+
+  console.log('[prep][omie_incluir] → preparando chamada IncluirOrdemProducao', {
+    op,
+    identificacao,
+    app_key: maskOmieSecret(appKey),
+    app_secret: maskOmieSecret(appSecret)
+  });
+
+  try {
+    const resp = await omieCall('https://app.omie.com.br/api/v1/produtos/op/', payload);
+    const fault = resp?.faultstring || resp?.faultcode || resp?.error;
+    if (fault) {
+      out.omie_incluir = { ok: false, body: resp, identificacao };
+      console.warn('[prep][omie_incluir] ← retorno OMIE com fault', { op, fault: resp });
+    } else {
+      out.omie_incluir = { ok: true, body: resp, identificacao };
+      console.log('[prep][omie_incluir] ← retorno OMIE sucesso', { op, body: resp });
+    }
+  } catch (err) {
+    out.omie_incluir = { ok: false, error: String(err?.message || err), identificacao };
+    console.error('[prep][omie_incluir] ← erro ao chamar OMIE', { op, error: err?.message || err });
+  }
+
+  return out.omie_incluir;
+}
+
 // === Preparação: INICIAR produção (mover_op + overlay "Produzindo") =========
 app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
   const op = String(req.params.op || '').trim().toUpperCase();
   if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
+
+  const body = req.body || {};
 
   const STATUS_UI   = 'Produzindo';                     // ← chave que a UI usa
   const TRY_TARGETS = ['Produzindo', 'Em produção', '30'];
@@ -890,6 +1403,32 @@ app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
       );
       out.before = b.rows;
     } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
+
+    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
+    const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
+
+    const omieInclude = await abrirOrdemProducaoNaOmie({
+      op,
+      body,
+      poolInstance: pool,
+      out,
+      appKey: APP_KEY,
+      appSecret: APP_SEC,
+      hints: {
+        viewBeforeAlpha: out.before?.[0]?.produto_codigo
+      }
+    });
+
+    if (!omieInclude || omieInclude.skipped || omieInclude.ok !== true) {
+      const errMsg = omieInclude?.reason || omieInclude?.error || omieInclude?.body?.faultstring || 'Falha ao abrir OP na OMIE.';
+      out.errors.push('[omie_incluir] ' + errMsg);
+      return res.status(409).json({
+        ok: false,
+        error: errMsg,
+        omie: omieInclude || null,
+        produtoCodigo: out.produtoCodigo
+      });
+    }
 
     // 1) tenta mover na base oficial
     let changed = false;
@@ -995,235 +1534,6 @@ app.get('/api/produtos/codigos', async (req, res) => {
   }
 });
 
-// GET /api/produtos/por-codigo?c=04.PP.N.51005&c=07.MP.N.31400
-app.get('/api/produtos/por-codigo', async (req, res) => {
-  try {
-    let cs = req.query.c;
-    if (!cs) return res.status(400).json({ ok:false, error:'informe ?c=...' });
-
-    if (typeof cs === 'string') cs = cs.split(',').map(s => s.trim()).filter(Boolean);
-    if (!Array.isArray(cs)) cs = [String(cs)];
-
-    const wanted = [...new Set(cs.map(String))];
-    if (wanted.length === 0) return res.json({ ok:true, data:{} });
-
-    const q = await pool.query(
-      `
-      WITH want AS (SELECT UNNEST($1::text[]) AS c)
-      SELECT
-        w.c AS codigo,
-        COALESCE(v.descricao, p.descricao) AS descricao
-      FROM want w
-      LEFT JOIN public.vw_lista_produtos v ON v.codigo = w.c
-      LEFT JOIN public.produtos         p ON p.codigo = w.c
-      `,
-      [wanted]
-    );
-
-    const map = {};
-    for (const r of q.rows) {
-      map[r.codigo] = { descricao: r.descricao || null };
-    }
-    return res.json({ ok:true, data: map });
-  } catch (err) {
-    console.error('[api/produtos/por-codigo] erro:', err);
-    return res.status(500).json({ ok:false, error: String(err?.message || err) });
-  }
-});
-
-// === Preparação: CONCLUIR produção (Omie + SQL + overlay, sempre 200) ======
-app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
-  const op = String(req.params.op || '').trim().toUpperCase();
-  if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
-
-  // chaves de status aceitas pela sua base/view
-  const STATUS_UI      = 'concluido';
-  const TRY_TARGETS    = ['concluido', 'Concluído', '60', '80'];
-
-  // datas
-  const pad2 = n => String(n).padStart(2,'0');
-  const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
-  const parseData = (s) => {
-    if (!s) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
-    return null;
-  };
-
-  const qtd = Math.max(1, Number(req.body?.quantidade ?? req.body?.nQtdeProduzida ?? 1));
-  const dt  = parseData(req.body?.data || req.body?.dDtConclusao) || new Date();
-  const dDtConclusao = fmtDDMMYYYY(dt);
-
-  const out = { ok:false, op, omie:{}, attempts:[], overlay:null, before:null, after:null, errors:[] };
-
-  try {
-    // estado ANTES
-    try {
-      const b = await pool.query(
-        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
-           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
-      out.before = b.rows;
-    } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
-
-    // 1) Concluir na OMIE (se houver credenciais)
-    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
-    const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
-
-    if (APP_KEY && APP_SEC) {
-      const payload = {
-        call: 'ConcluirOrdemProducao',
-        app_key: APP_KEY,
-        app_secret: APP_SEC,
-        param: [{ cCodIntOP: op, dDtConclusao, nQtdeProduzida: qtd }]
-      };
-
-      try {
-        const resp = await safeFetch('https://app.omie.com.br/api/v1/produtos/op/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const text = await resp.text();
-        let j = null; try { j = JSON.parse(text); } catch {}
-        const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
-        if (omieErr) {
-          out.omie = { ok:false, http:resp.status, body:j||text };
-          // não aborta; seguimos para mover localmente e aplicar overlay
-        } else {
-          out.omie = { ok:true, body:j||text };
-        }
-      } catch (e) {
-        out.omie = { ok:false, error:String(e?.message||e) };
-        // segue fluxo local mesmo assim
-      }
-    } else {
-      out.omie = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
-    }
-
-    // 2) Mover na base "oficial"
-    let changed = false;
-    let beforeStatus = out.before?.[0]?.status || null;
-
-    for (const tgt of TRY_TARGETS) {
-      try {
-        await pool.query('SELECT mover_op($1,$2)', [op, tgt]);
-        out.attempts.push({ via:'mover_op', target:tgt, ok:true });
-
-        // revalida a view
-        const chk = await pool.query(
-          `SELECT kanban_coluna FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]
-        );
-        const now = chk.rows[0]?.kanban_coluna;
-        if (now && now !== beforeStatus) { changed = true; break; }
-      } catch (e) {
-        out.attempts.push({ via:'mover_op', target:tgt, ok:false, err:String(e?.message||e) });
-        out.errors.push('[mover_op '+tgt+'] '+(e?.message||e));
-      }
-    }
-
-    // 3) SEMPRE aplicar overlay = 'concluido' (garante UI instantânea)
-    try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-          op         text PRIMARY KEY,
-          status     text NOT NULL,
-          updated_at timestamptz NOT NULL DEFAULT now()
-        )
-      `);
-      const up = await pool.query(
-        `INSERT INTO public.op_status_overlay (op, status, updated_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (op) DO UPDATE
-           SET status = EXCLUDED.status,
-               updated_at = now()`,
-        [op, 'concluido']
-      );
-      out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
-    } catch (e) {
-      out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
-      out.errors.push('[overlay] ' + (e?.message||e));
-    }
-
-    // 3) Overlay para UI se a view não mudou
-    if (!changed) {
-      try {
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-            op         text PRIMARY KEY,
-            status     text NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT now()
-          )
-        `);
-        const up = await pool.query(
-          `INSERT INTO public.op_status_overlay (op, status, updated_at)
-           VALUES ($1, $2, now())
-           ON CONFLICT (op) DO UPDATE
-             SET status = EXCLUDED.status, updated_at = now()`,
-          [op, STATUS_UI]
-        );
-        out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
-      } catch (e) {
-        out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
-      }
-    }
-
-    // estado DEPOIS
-    try {
-      const a = await pool.query(
-        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
-           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
-      out.after = a.rows;
-    } catch (e) { out.errors.push('[after] '+(e?.message||e)); }
-
-    out.ok = true;
-    return res.json(out);
-
-  } catch (err) {
-    out.errors.push(String(err?.message||err));
-    // ainda assim devolve 200 para a UI poder se atualizar e você ver o log
-    return res.json(out);
-  }
-});
-
-
-// GET /api/produtos/codigos?cp=10569202060&cp=10634218771
-// (compat: também aceita ?n=...)
-app.get('/api/produtos/codigos', async (req, res) => {
-  try {
-    let cps = req.query.cp ?? req.query.n;
-    if (!cps) return res.status(400).json({ ok:false, error:'informe ?cp=...' });
-
-    // aceita "cp=1&cp=2" ou "cp=1,2"
-    if (typeof cps === 'string') cps = cps.split(',').map(s => s.trim()).filter(Boolean);
-    if (!Array.isArray(cps)) cps = [String(cps)];
-
-    const wanted = [...new Set(cps.map(String))].filter(s => /^\d+$/.test(s));
-    if (wanted.length === 0) return res.json({ ok:true, data:{} });
-
-    const q = await pool.query(
-      `
-      WITH want AS (SELECT UNNEST($1::text[]) AS cp)
-      SELECT
-        w.cp AS codigo_produto,
-        COALESCE(v.codigo, p.codigo)     AS codigo,
-        COALESCE(v.descricao, p.descricao) AS descricao
-      FROM want w
-      LEFT JOIN public.vw_lista_produtos v ON v.codigo_produto::text = w.cp
-      LEFT JOIN public.produtos         p ON p.codigo_prod::text     = w.cp
-      `,
-      [wanted]
-    );
-
-    const map = {};
-    for (const r of q.rows) {
-      map[r.codigo_produto] = { codigo: r.codigo || null, descricao: r.descricao || null };
-    }
-    return res.json({ ok:true, data: map });
-  } catch (err) {
-    console.error('[api/produtos/codigos] erro:', err);
-    return res.status(500).json({ ok:false, error: String(err?.message || err) });
-  }
-});
 
 // GET /api/produtos/por-codigo?c=04.PP.N.51005&c=07.MP.N.31400
 app.get('/api/produtos/por-codigo', async (req, res) => {
@@ -1267,12 +1577,10 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
   if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
 
   // chaves de status aceitas pela sua base/view
-  const STATUS_UI      = 'concluido';
-  const TRY_TARGETS    = ['concluido', 'Concluído', '60', '80'];
+  const STATUS_UI      = 'Produzido';
+  const TRY_TARGETS    = ['Produzido', 'concluido', 'Concluído', '60', '80'];
 
   // datas
-  const pad2 = n => String(n).padStart(2,'0');
-  const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
   const parseData = (s) => {
     if (!s) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
@@ -1280,11 +1588,74 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
     return null;
   };
 
-  const qtd = Math.max(1, Number(req.body?.quantidade ?? req.body?.nQtdeProduzida ?? 1));
-  const dt  = parseData(req.body?.data || req.body?.dDtConclusao) || new Date();
+  const body = req.body || {};
+  const norm = (value) => {
+    if (typeof value === 'string') return value.trim();
+    if (value === undefined || value === null) return '';
+    return String(value).trim();
+  };
+
+  let produtoCodigoAlpha = norm(body.produto_codigo);
+  if (!produtoCodigoAlpha) produtoCodigoAlpha = norm(body.codigo);
+
+  let produtoCodigoNum = norm(body.produto_codigo_num);
+  if (!produtoCodigoNum) produtoCodigoNum = norm(body.nCodProd);
+  if (!produtoCodigoNum) produtoCodigoNum = norm(body.nCodProduto);
+
+  const qtd = Math.max(1, Number(body.quantidade ?? body.nQtdeProduzida ?? 1));
+  const dt  = parseData(body.data || body.dDtConclusao) || new Date();
   const dDtConclusao = fmtDDMMYYYY(dt);
 
-  const out = { ok:false, op, omie:{}, attempts:[], overlay:null, before:null, after:null, errors:[] };
+  const out = {
+    ok:false,
+    op,
+    omie:{},
+    attempts:[],
+    overlay:null,
+    before:null,
+    after:null,
+    errors:[],
+    produtoCodigo:{
+      request_alpha: produtoCodigoAlpha || null,
+      request_num: produtoCodigoNum || null,
+      op_info_alpha: null,
+      op_info_num: null,
+      view_before_alpha: null,
+      view_after_alpha: null,
+      final_alpha: null,
+      final_num: null
+    }
+  };
+
+  let fetchedOpInfo = false;
+
+  async function ensureProdutoInfoFromOp() {
+    if (fetchedOpInfo) return;
+    fetchedOpInfo = true;
+    try {
+      const { rows } = await pool.query(
+        `SELECT produto_codigo, c_cod_int_prod, n_cod_prod
+           FROM public.op_info
+          WHERE c_cod_int_op = $1
+             OR c_num_op = $1
+             OR n_cod_op::text = $1
+          ORDER BY updated_at DESC
+          LIMIT 1`,
+        [op]
+      );
+      const row = rows?.[0];
+      if (row) {
+        const alphaFromOp = norm(row.produto_codigo) || norm(row.c_cod_int_prod);
+        const numFromOp = norm(row.n_cod_prod);
+        if (!produtoCodigoAlpha && alphaFromOp) produtoCodigoAlpha = alphaFromOp;
+        if (!produtoCodigoNum && numFromOp) produtoCodigoNum = numFromOp;
+        out.produtoCodigo.op_info_alpha = alphaFromOp || null;
+        out.produtoCodigo.op_info_num = numFromOp ? Number(numFromOp) || null : null;
+      }
+    } catch (err) {
+      out.errors.push('[op_info lookup] ' + (err?.message || err));
+    }
+  }
 
   try {
     // estado ANTES
@@ -1293,7 +1664,12 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
         `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
            FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
       out.before = b.rows;
+      const hintAlpha = norm(b.rows?.[0]?.produto_codigo);
+      if (!produtoCodigoAlpha && hintAlpha) produtoCodigoAlpha = hintAlpha;
+      out.produtoCodigo.view_before_alpha = hintAlpha || null;
     } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
+
+    await ensureProdutoInfoFromOp();
 
     // 1) Concluir na OMIE (se houver credenciais)
     const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
@@ -1307,6 +1683,16 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
         param: [{ cCodIntOP: op, dDtConclusao, nQtdeProduzida: qtd }]
       };
 
+      const payloadLog = {
+        ...payload,
+        app_key: maskOmieSecret(APP_KEY),
+        app_secret: maskOmieSecret(APP_SEC)
+      };
+      console.log('[prep][omie_concluir] → preparando chamada ConcluirOrdemProducao', {
+        op,
+        payload: payloadLog
+      });
+
       try {
         const resp = await safeFetch('https://app.omie.com.br/api/v1/produtos/op/', {
           method: 'POST',
@@ -1318,16 +1704,40 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
         const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
         if (omieErr) {
           out.omie = { ok:false, http:resp.status, body:j||text };
+          console.warn('[prep][omie_concluir] ← retorno OMIE com fault', {
+            op,
+            status: resp.status,
+            body: j || text
+          });
           // não aborta; seguimos para mover localmente e aplicar overlay
         } else {
           out.omie = { ok:true, body:j||text };
+          console.log('[prep][omie_concluir] ← retorno OMIE sucesso', {
+            op,
+            status: resp.status,
+            body: j || text
+          });
         }
       } catch (e) {
         out.omie = { ok:false, error:String(e?.message||e) };
-        // segue fluxo local mesmo assim
+        console.error('[prep][omie_concluir] ← erro ao chamar OMIE', {
+          op,
+          error: e?.message || e
+        });
       }
     } else {
       out.omie = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
+    }
+
+    if (!out.omie || out.omie.skipped || out.omie.ok !== true) {
+      const errMsg = out.omie?.reason || out.omie?.error || out.omie?.body?.faultstring || 'Falha ao concluir OP na OMIE.';
+      out.errors.push('[omie_concluir] ' + errMsg);
+      return res.status(409).json({
+        ok: false,
+        error: errMsg,
+        omie: out.omie || null,
+        produtoCodigo: out.produtoCodigo
+      });
     }
 
     // 2) Mover na base "oficial"
@@ -1337,9 +1747,8 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
     for (const tgt of TRY_TARGETS) {
       try {
         await pool.query('SELECT mover_op($1,$2)', [op, tgt]);
-        out.attempts.push({ via:'mover_op', target:tgt, ok:true });
+        out.attempts.push({ via: 'mover_op', target: tgt, ok: true });
 
-        // revalida a view
         const chk = await pool.query(
           `SELECT kanban_coluna FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]
         );
@@ -1351,7 +1760,7 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
       }
     }
 
-    // 3) SEMPRE aplicar overlay = 'concluido' (garante UI instantânea)
+    // 3) Overlay garante UI imediata
     try {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.op_status_overlay (
@@ -1366,35 +1775,12 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
          ON CONFLICT (op) DO UPDATE
            SET status = EXCLUDED.status,
                updated_at = now()`,
-        [op, 'concluido']
+        [op, STATUS_UI]
       );
       out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
     } catch (e) {
       out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
       out.errors.push('[overlay] ' + (e?.message||e));
-    }
-
-    // 3) Overlay para UI se a view não mudou
-    if (!changed) {
-      try {
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-            op         text PRIMARY KEY,
-            status     text NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT now()
-          )
-        `);
-        const up = await pool.query(
-          `INSERT INTO public.op_status_overlay (op, status, updated_at)
-           VALUES ($1, $2, now())
-           ON CONFLICT (op) DO UPDATE
-             SET status = EXCLUDED.status, updated_at = now()`,
-          [op, STATUS_UI]
-        );
-        out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
-      } catch (e) {
-        out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
-      }
     }
 
     // estado DEPOIS
@@ -1403,237 +1789,13 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
         `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
            FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
       out.after = a.rows;
+      const alphaAfter = norm(a.rows?.[0]?.produto_codigo);
+      if (!produtoCodigoAlpha && alphaAfter) produtoCodigoAlpha = alphaAfter;
+      out.produtoCodigo.view_after_alpha = alphaAfter || out.produtoCodigo.view_after_alpha || null;
     } catch (e) { out.errors.push('[after] '+(e?.message||e)); }
 
-    out.ok = true;
-    return res.json(out);
-
-  } catch (err) {
-    out.errors.push(String(err?.message||err));
-    // ainda assim devolve 200 para a UI poder se atualizar e você ver o log
-    return res.json(out);
-  }
-});
-
-
-// GET /api/produtos/codigos?cp=10569202060&cp=10634218771
-// (compat: também aceita ?n=...)
-app.get('/api/produtos/codigos', async (req, res) => {
-  try {
-    let cps = req.query.cp ?? req.query.n;
-    if (!cps) return res.status(400).json({ ok:false, error:'informe ?cp=...' });
-
-    // aceita "cp=1&cp=2" ou "cp=1,2"
-    if (typeof cps === 'string') cps = cps.split(',').map(s => s.trim()).filter(Boolean);
-    if (!Array.isArray(cps)) cps = [String(cps)];
-
-    const wanted = [...new Set(cps.map(String))].filter(s => /^\d+$/.test(s));
-    if (wanted.length === 0) return res.json({ ok:true, data:{} });
-
-    const q = await pool.query(
-      `
-      WITH want AS (SELECT UNNEST($1::text[]) AS cp)
-      SELECT
-        w.cp AS codigo_produto,
-        COALESCE(v.codigo, p.codigo)     AS codigo,
-        COALESCE(v.descricao, p.descricao) AS descricao
-      FROM want w
-      LEFT JOIN public.vw_lista_produtos v ON v.codigo_produto::text = w.cp
-      LEFT JOIN public.produtos         p ON p.codigo_prod::text     = w.cp
-      `,
-      [wanted]
-    );
-
-    const map = {};
-    for (const r of q.rows) {
-      map[r.codigo_produto] = { codigo: r.codigo || null, descricao: r.descricao || null };
-    }
-    return res.json({ ok:true, data: map });
-  } catch (err) {
-    console.error('[api/produtos/codigos] erro:', err);
-    return res.status(500).json({ ok:false, error: String(err?.message || err) });
-  }
-});
-
-// GET /api/produtos/por-codigo?c=04.PP.N.51005&c=07.MP.N.31400
-app.get('/api/produtos/por-codigo', async (req, res) => {
-  try {
-    let cs = req.query.c;
-    if (!cs) return res.status(400).json({ ok:false, error:'informe ?c=...' });
-
-    if (typeof cs === 'string') cs = cs.split(',').map(s => s.trim()).filter(Boolean);
-    if (!Array.isArray(cs)) cs = [String(cs)];
-
-    const wanted = [...new Set(cs.map(String))];
-    if (wanted.length === 0) return res.json({ ok:true, data:{} });
-
-    const q = await pool.query(
-      `
-      WITH want AS (SELECT UNNEST($1::text[]) AS c)
-      SELECT
-        w.c AS codigo,
-        COALESCE(v.descricao, p.descricao) AS descricao
-      FROM want w
-      LEFT JOIN public.vw_lista_produtos v ON v.codigo = w.c
-      LEFT JOIN public.produtos         p ON p.codigo = w.c
-      `,
-      [wanted]
-    );
-
-    const map = {};
-    for (const r of q.rows) {
-      map[r.codigo] = { descricao: r.descricao || null };
-    }
-    return res.json({ ok:true, data: map });
-  } catch (err) {
-    console.error('[api/produtos/por-codigo] erro:', err);
-    return res.status(500).json({ ok:false, error: String(err?.message || err) });
-  }
-});
-
-// === Preparação: CONCLUIR produção (Omie + SQL + overlay, sempre 200) ======
-app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
-  const op = String(req.params.op || '').trim().toUpperCase();
-  if (!op) return res.status(400).json({ ok:false, error:'OP inválida' });
-
-  // chaves de status aceitas pela sua base/view
-  const STATUS_UI      = 'concluido';
-  const TRY_TARGETS    = ['concluido', 'Concluído', '60', '80'];
-
-  // datas
-  const pad2 = n => String(n).padStart(2,'0');
-  const fmtDDMMYYYY = (d) => `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
-  const parseData = (s) => {
-    if (!s) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
-    return null;
-  };
-
-  const qtd = Math.max(1, Number(req.body?.quantidade ?? req.body?.nQtdeProduzida ?? 1));
-  const dt  = parseData(req.body?.data || req.body?.dDtConclusao) || new Date();
-  const dDtConclusao = fmtDDMMYYYY(dt);
-
-  const out = { ok:false, op, omie:{}, attempts:[], overlay:null, before:null, after:null, errors:[] };
-
-  try {
-    // estado ANTES
-    try {
-      const b = await pool.query(
-        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
-           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
-      out.before = b.rows;
-    } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
-
-    // 1) Concluir na OMIE (se houver credenciais)
-    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
-    const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
-
-    if (APP_KEY && APP_SEC) {
-      const payload = {
-        call: 'ConcluirOrdemProducao',
-        app_key: APP_KEY,
-        app_secret: APP_SEC,
-        param: [{ cCodIntOP: op, dDtConclusao, nQtdeProduzida: qtd }]
-      };
-
-      try {
-        const resp = await safeFetch('https://app.omie.com.br/api/v1/produtos/op/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const text = await resp.text();
-        let j = null; try { j = JSON.parse(text); } catch {}
-        const omieErr = (!resp.ok) || (j && (j.faultstring || j.faultcode || j.error));
-        if (omieErr) {
-          out.omie = { ok:false, http:resp.status, body:j||text };
-          // não aborta; seguimos para mover localmente e aplicar overlay
-        } else {
-          out.omie = { ok:true, body:j||text };
-        }
-      } catch (e) {
-        out.omie = { ok:false, error:String(e?.message||e) };
-        // segue fluxo local mesmo assim
-      }
-    } else {
-      out.omie = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
-    }
-
-    // 2) Mover na base "oficial"
-    let changed = false;
-    let beforeStatus = out.before?.[0]?.status || null;
-
-    for (const tgt of TRY_TARGETS) {
-      try {
-        await pool.query('SELECT mover_op($1,$2)', [op, tgt]);
-        out.attempts.push({ via:'mover_op', target:tgt, ok:true });
-
-        // revalida a view
-        const chk = await pool.query(
-          `SELECT kanban_coluna FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]
-        );
-        const now = chk.rows[0]?.kanban_coluna;
-        if (now && now !== beforeStatus) { changed = true; break; }
-      } catch (e) {
-        out.attempts.push({ via:'mover_op', target:tgt, ok:false, err:String(e?.message||e) });
-        out.errors.push('[mover_op '+tgt+'] '+(e?.message||e));
-      }
-    }
-
-    // 3) SEMPRE aplicar overlay = 'concluido' (garante UI instantânea)
-    try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-          op         text PRIMARY KEY,
-          status     text NOT NULL,
-          updated_at timestamptz NOT NULL DEFAULT now()
-        )
-      `);
-      const up = await pool.query(
-        `INSERT INTO public.op_status_overlay (op, status, updated_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (op) DO UPDATE
-           SET status = EXCLUDED.status,
-               updated_at = now()`,
-        [op, 'concluido']
-      );
-      out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
-    } catch (e) {
-      out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
-      out.errors.push('[overlay] ' + (e?.message||e));
-    }
-
-    // 3) Overlay para UI se a view não mudou
-    if (!changed) {
-      try {
-        await pool.query(`
-          CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-            op         text PRIMARY KEY,
-            status     text NOT NULL,
-            updated_at timestamptz NOT NULL DEFAULT now()
-          )
-        `);
-        const up = await pool.query(
-          `INSERT INTO public.op_status_overlay (op, status, updated_at)
-           VALUES ($1, $2, now())
-           ON CONFLICT (op) DO UPDATE
-             SET status = EXCLUDED.status, updated_at = now()`,
-          [op, STATUS_UI]
-        );
-        out.overlay = { via:'overlay.upsert', rowCount: up.rowCount };
-      } catch (e) {
-        out.overlay = { via:'overlay.upsert', err:String(e?.message||e) };
-      }
-    }
-
-    // estado DEPOIS
-    try {
-      const a = await pool.query(
-        `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
-           FROM public.kanban_preparacao_view WHERE op = $1 LIMIT 1`, [op]);
-      out.after = a.rows;
-    } catch (e) { out.errors.push('[after] '+(e?.message||e)); }
+    out.produtoCodigo.final_alpha = produtoCodigoAlpha || null;
+    out.produtoCodigo.final_num = produtoCodigoNum || null;
 
     out.ok = true;
     return res.json(out);
@@ -1689,6 +1851,96 @@ app.use('/api/produtos', produtosRouter);
 // adiciona o router das fotos no MESMO prefixo:
 app.use('/api/produtos', produtosFotosRouter);
 
+// [API][produto/descricao] — retorna descr_produto a partir de int_produto (id) OU cod_produto (code)
+app.get('/api/produto/descricao', async (req, res) => {
+  try {
+    const rawId = req.query?.id;
+    const codeRaw = (req.query?.code || req.query?.codigo || '').toString().trim();
+    const id = Number(rawId);
+
+    console.log('[API][produto/descricao] ▶ params:', { rawId, id, codeRaw });
+
+    let descr = null;
+    let used  = null;
+
+    // 1) Tenta por ID (int_produto ou id_produto)
+    if (Number.isFinite(id) && id > 0) {
+      const sqlId = `
+        SELECT descr_produto
+          FROM public.omie_estrutura
+         WHERE CAST(int_produto AS BIGINT) = $1
+            OR CAST(id_produto  AS BIGINT) = $1
+         LIMIT 1
+      `;
+      const r1 = await pool.query(sqlId, [id]);
+      console.log('[API][produto/descricao] ◀ by_id rowCount:', r1.rowCount, r1.rows[0] || null);
+      if (r1.rowCount > 0) {
+        descr = r1.rows[0].descr_produto || null;
+        used  = 'by_id';
+      }
+    }
+
+    // 2) Se não achou por ID e veio código, tenta por cod_produto
+    if (!descr && codeRaw) {
+      // 2.a) match exato
+      const r2 = await pool.query(
+        `SELECT descr_produto FROM public.omie_estrutura WHERE cod_produto = $1 LIMIT 1`,
+        [codeRaw]
+      );
+      console.log('[API][produto/descricao] ◀ by_code_exact rowCount:', r2.rowCount, r2.rows[0] || null);
+      if (r2.rowCount > 0) {
+        descr = r2.rows[0].descr_produto || null;
+        used  = 'by_code_exact';
+      }
+    }
+
+    if (!descr && codeRaw) {
+      // 2.b) TRIM + UPPER
+      const r3 = await pool.query(
+        `SELECT descr_produto
+           FROM public.omie_estrutura
+          WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1))
+          LIMIT 1`,
+        [codeRaw]
+      );
+      console.log('[API][produto/descricao] ◀ by_code_trim_upper rowCount:', r3.rowCount, r3.rows[0] || null);
+      if (r3.rowCount > 0) {
+        descr = r3.rows[0].descr_produto || null;
+        used  = 'by_code_trim_upper';
+      }
+    }
+
+    if (!descr && codeRaw) {
+      // 2.c) prefixo (quando o back manda código truncado ou com sufixos)
+      const r4 = await pool.query(
+        `SELECT descr_produto
+           FROM public.omie_estrutura
+          WHERE cod_produto ILIKE $1
+          ORDER BY LENGTH(cod_produto) ASC
+          LIMIT 1`,
+        [codeRaw + '%']
+      );
+      console.log('[API][produto/descricao] ◀ by_code_prefix rowCount:', r4.rowCount, r4.rows[0] || null);
+      if (r4.rowCount > 0) {
+        descr = r4.rows[0].descr_produto || null;
+        used  = 'by_code_prefix';
+      }
+    }
+
+    return res.json({
+      ok: true,
+      descr_produto: descr,
+      used,
+      id: (Number.isFinite(id) && id > 0) ? id : null,
+      code: codeRaw || null
+    });
+  } catch (e) {
+    console.error('[API][produto/descricao] ❌', e);
+    res.status(500).json({ ok:false, error: String(e?.message || e) });
+  }
+});
+
+
 // (opcional) compat: algumas partes do código usam "notifyProducts"
 app.set('notifyProducts', (msg) => {
   const payload = msg || { type: 'produtos_changed', at: Date.now() };
@@ -1696,6 +1948,9 @@ app.set('notifyProducts', (msg) => {
 
 
 });
+
+
+
 
 /* GET /api/serie/next/:codigo → { ns:"101002" } */
 app.get('/api/serie/next/:codigo', (req, res) => {
@@ -1777,7 +2032,6 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
       return res.status(500).json({ error: 'Falha ao registrar log' });
     }
     res.json({ ok: true });
- 
   });
 });
 
@@ -1828,18 +2082,22 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
     const x = String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').trim();
     if (['a produzir','fila de producao','fila de produção','20'].includes(x)) return 'A Produzir';
     if (['produzindo','em producao','em produção','30'].includes(x))          return 'Produzindo';
+    if (['produzido'].includes(x))                                             return 'Produzido';
     if (['concluido','concluido.','concluido ','60','80','concluído'].includes(x)) return 'concluido';
     return null;
   };
 
-  const target = norm(req.body?.status);
+  let target = norm(req.body?.status);
   if (!target) return res.status(422).json({ ok:false, error:'status inválido', got:req.body?.status });
+  if (target === 'concluido') target = 'Produzido'; // compat: antigas chamadas
 
   const TRY_TARGETS = {
     'A Produzir': ['A Produzir','Fila de produção','Fila de producao','20'],
     'Produzindo': ['Produzindo','Em produção','Em producao','30'],
-    'concluido' : ['concluido','Concluído','Concluido','60','80'],
+    'Produzido' : ['Produzido','concluido','Concluído','Concluido','60','80'],
+    'concluido' : ['concluido','Concluído','Concluido','60','80'] // fallback legado
   }[target];
+  if (!TRY_TARGETS) return res.status(422).json({ ok:false, error:'status inválido', got:req.body?.status });
 
   // Sempre concluir com qtd=1 e data de hoje
   const pad2 = n => String(n).padStart(2,'0');
@@ -1858,19 +2116,19 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
           WHERE op = $1 LIMIT 1`, [op]
       );
       out.before = b.rows;
-    } catch (e) { out.errors.push('[before] '+(e?.message||e)); }
+    } catch (e) { out.errors.push('[before] ' + (e?.message||e)); }
 
     const beforeStatusRaw = out.before?.[0]?.status || null;
     const beforeStatus = norm(beforeStatusRaw);
-    const wasConcluded = beforeStatus === 'concluido';
-    const goingToConcluded = target === 'concluido';
+    const wasProduzido = beforeStatus === 'Produzido' || beforeStatus === 'concluido';
+    const goingToProduzido = target === 'Produzido';
 
     // Credenciais Omie (se existirem)
-    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_SECRET;
+    const APP_KEY = process.env.OMIE_APP_KEY || process.env.APP_KEY || process.env.OMIE_KEY;
     const APP_SEC = process.env.OMIE_APP_SECRET || process.env.APP_SECRET || process.env.OMIE_SECRET;
 
     // 1A) Se arrastou PARA concluído → ConcluirOrdemProducao (qtd=1, hoje)
-    if (goingToConcluded && APP_KEY && APP_SEC) {
+    if (goingToProduzido && APP_KEY && APP_SEC) {
       const payload = {
         call: 'ConcluirOrdemProducao',
         app_key: APP_KEY,
@@ -1890,12 +2148,12 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
       } catch (e) {
         out.omie_concluir = { ok:false, error:String(e?.message||e) };
       }
-    } else if (goingToConcluded) {
+    } else if (goingToProduzido) {
       out.omie_concluir = { skipped:true, reason:'Credenciais OMIE ausentes (OMIE_APP_KEY/SECRET).' };
     }
 
     // 1B) Se estava concluído E foi arrastado para outra coluna → ReverterOrdemProducao
-    if (wasConcluded && !goingToConcluded) {
+    if (wasProduzido && !goingToProduzido) {
       if (APP_KEY && APP_SEC) {
         const payload = {
           call: 'ReverterOrdemProducao',
@@ -1964,7 +2222,8 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
       const a = await pool.query(
         `SELECT op, c_cod_int_prod AS produto_codigo, kanban_coluna AS status
            FROM public.kanban_preparacao_view
-          WHERE op = $1 LIMIT 1`, [op]);
+          WHERE op = $1 LIMIT 1`, [op]
+      );
       out.after = a.rows;
     } catch (e) { out.errors.push('[after] ' + (e?.message||e)); }
 
@@ -1976,6 +2235,7 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
     return res.status(500).json(out);
   }
 });
+
 
 
 // === Consulta de eventos de OP (JSON & CSV) ===============================
@@ -2113,6 +2373,7 @@ app.get('/api/preparacao/eventos.csv', async (req, res) => {
   }
 });
 
+
 // Grava um ZPL pronto vindo do front
 app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
   const { file, zpl, tipo = 'Teste' } = req.body || {};
@@ -2124,6 +2385,7 @@ app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
   fs.writeFileSync(path.join(pasta, file), zpl.trim(), 'utf8');
   res.json({ ok: true });
 });
+
 
 // Salva etiqueta no PostgreSQL (sem gerar arquivo)
 app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
@@ -2148,7 +2410,7 @@ app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
     }
 
     const sql = `
-      INSERT INTO etiquetas_impressas
+      INSERT INTO "OrdemProducao".tab_op
         (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
       VALUES
         ($1,$2,$3,$4,$5,$6,$7)
@@ -2211,28 +2473,18 @@ function wrapText(text, maxChars) {
   return lines;
 }
 
-/* ============================================================================
-   /api/etiquetas – gera o .zpl da etiqueta no layout “compacto” aprovado
-   ============================================================================ */
-app.post('/api/etiquetas', async (req, res) => {
-  try {
-    const { numeroOP, tipo = 'Expedicao', codigo, ns } = req.body;
+async function gerarEtiquetaCompactaZPL({
+  numeroOP,
+  codigo,
+  ns,
+  produtoDet
+}) {
+  if (!numeroOP) throw new Error('numeroOP obrigatório');
 
-
-      // Garante existência da pasta dinâmica (Teste ou Expedicao)
-  const folder = path.join(__dirname, 'etiquetas', tipo);
-  if (!fs.existsSync(folder)) {
-    fs.mkdirSync(folder, { recursive: true });
-  }
-
-    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
-
-    /* ---------------------------------------------------------------------
-       1) Consulta Omie (se veio código)
-    --------------------------------------------------------------------- */
-    let produtoDet = {};
-    if (codigo) {
-      produtoDet = await omieCall(
+  let produtoDetalhado = produtoDet;
+  if (!produtoDetalhado && codigo) {
+    try {
+      produtoDetalhado = await omieCall(
         'https://app.omie.com.br/api/v1/geral/produtos/',
         {
           call:       'ConsultarProduto',
@@ -2241,136 +2493,108 @@ app.post('/api/etiquetas', async (req, res) => {
           param:      [{ codigo }]
         }
       );
+    } catch (err) {
+      console.warn('[etiquetas] falha ao consultar produto Omie:', err?.message || err);
+      produtoDetalhado = {};
     }
-
-    /* ---------------------------------------------------------------------
-       2) Diretório de saída
-    --------------------------------------------------------------------- */
-    const { dirTipo } = getDirs(tipo);
-
-    /* ---------------------------------------------------------------------
-       3) Data de fabricação (MM/AAAA)
-    --------------------------------------------------------------------- */
-    const hoje          = new Date();
-    const hojeFormatado =
-      `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
-
-    /* ---------------------------------------------------------------------
-       4) Características → objeto d   (troca ~ → _7E)
-    --------------------------------------------------------------------- */
-    const cad = produtoDet.produto_servico_cadastro?.[0] || produtoDet;
-    // -------------------------------------------------------------
-// código interno do produto (vem do Omie)
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// MODELO na etiqueta = código com hífen antes do 1º dígito
-// Ex.: ft160 → ft-160   |   FH200 → FH-200   |   fti25b → fti-25b
-// -------------------------------------------------------------
-const modeloParaEtiqueta = (cad.codigo || '')
-  .replace(/^([A-Za-z]+)(\d)/, '$1-$2');
-
-
-    const d   = {};
-    const encodeTilde = s => (s || '').replace(/~/g, '_7E');
-
-    (cad.caracteristicas || []).forEach(c => {
-      d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
-    });
-
-    d.modelo          = cad.modelo      || '';
-    d.ncm             = cad.ncm         || '';
-    d.pesoLiquido     = cad.peso_liq    || '';
-    d.dimensaoProduto =
-      `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
-
-    const z = v => v || '';            // evita undefined em ^FD
-
-/* ---------------------------------------------------------------------
-   5) ZPL – mesmo layout, mas linhas dinâmicas a partir do CSV
---------------------------------------------------------------------- */
-const linhas = separarLinhas(cad);     // usa função criada no topo
-
-// parâmetros de espaçamento (ajuste só se mudar fonte ou margens)
-const startY_E = 540;  // Y inicial da coluna esquerda
-const startY_D = 540;  // Y inicial da coluna direita
-
-const CHAR_W        = 11;  // acertado na calibragem
-const STEP_ITEM     = 40;  // distância até o próximo item “normal”
-const STEP_SUFIXO   = 30;  // distância quando é só o sufixo “(…)”
-const STEP_WRAP     = 20;  // distância entre linhas quebradas do MESMO rótulo
-
-
-function montarColuna(col, startY, xLabel, xValue) {
-  const blocos = [];
-  let   y      = startY;
-
-  const xParenByBase = {};        // base → X do '('
-  let   baseAnterior = '';
-
-  for (const row of col) {
-    const cod   = (row.Caracteristica || '').trim();
-    const valor = z(d[cod]);
-
-    /* separa base + sufixo */
-    const full = (row.Label || '').trim();
-    const m    = full.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
-    const base   = m ? m[1].trim() : full;
-    const sufixo = m ? `(${m[2]})`  : '';
-
-    const sufixoOnly = base === baseAnterior && sufixo;
-
-    /* decide texto + X */
-    let labelPrint, xLabelNow = xLabel;
-    if (sufixoOnly) {
-      labelPrint = sufixo;
-      xLabelNow  = xParenByBase[base];
-    } else {
-      labelPrint   = full;
-      baseAnterior = base;
-      const p = full.indexOf('(');
-      if (p >= 0) xParenByBase[base] = xLabel + p * CHAR_W;
-    }
-
-    /* quebra >25 chars --------------- */
-    const LIM = 25;
-    const partes = [];
-    let txt = labelPrint;
-    while (txt.length > LIM) {
-      const pos = txt.lastIndexOf(' ', LIM);
-      if (pos > 0) { partes.push(txt.slice(0,pos)); txt = txt.slice(pos+1); }
-      else break;
-    }
-    partes.push(txt);
-
-    /* imprime LABEL(es) --------------- */
-    partes.forEach((ln, idx) => {
-      const stepIntra = idx === 0 ? 0 : STEP_WRAP; // 1ª linha = 0
-      blocos.push(
-        `^A0R,25,25`,
-        `^FO${y - stepIntra},${xLabelNow}^FD${ln}^FS`
-      );
-      y -= stepIntra;          // só para linhas quebradas
-    });
-
-    /* imprime VALOR ------------------- */
-    blocos.push(
-      `^A0R,20,20`,
-      `^FO${y},${xValue}^FB200,1,0,R^FH_^FD${valor}^FS`
-    );
-
-    /* avança para o PRÓXIMO item ------ */
-    y -= sufixoOnly ? STEP_SUFIXO : STEP_ITEM;
   }
 
-  return blocos.join('\n');
-}
+  const cad = produtoDetalhado?.produto_servico_cadastro?.[0] || produtoDetalhado || {};
 
-const blocoE = montarColuna(linhas.E, startY_E,  25, 240); // esquerda
-const blocoD = montarColuna(linhas.D, startY_D, 470, 688); // direita
+  const encodeTilde = (s) => (s || '').replace(/~/g, '_7E');
+  const z = (v) => v || '';
 
+  const hoje = new Date();
+  const hojeFormatado = `${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
 
+  const modeloParaEtiqueta = (cad.codigo || '')
+    .replace(/^([A-Za-z]+)(\d)/, '$1-$2');
 
-const zpl = `
+  const d = {};
+  (cad.caracteristicas || []).forEach((c) => {
+    if (!c) return;
+    d[c.cCodIntCaract] = encodeTilde(c.cConteudo);
+  });
+
+  d.modelo          = cad.modelo      || '';
+  d.ncm             = cad.ncm         || '';
+  d.pesoLiquido     = cad.peso_liq    || '';
+  d.dimensaoProduto = `${cad.largura || ''}x${cad.profundidade || ''}x${cad.altura || ''}`;
+
+  const linhas = separarLinhas(cad);
+
+  const startY_E = 540;
+  const startY_D = 540;
+  const CHAR_W   = 11;
+  const STEP_ITEM   = 40;
+  const STEP_SUFIXO = 30;
+  const STEP_WRAP   = 20;
+
+  const montarColuna = (col, startY, xLabel, xValue) => {
+    const blocos = [];
+    let y = startY;
+
+    const xParenByBase = {};
+    let baseAnterior = '';
+
+    for (const row of col) {
+      if (!row) continue;
+      const cod   = (row.Caracteristica || '').trim();
+      const valor = z(d[cod]);
+
+      const full = (row.Label || '').trim();
+      const m    = full.match(/^(.+?)\s*\(([^()]+)\)\s*$/);
+      const base   = m ? m[1].trim() : full;
+      const sufixo = m ? `(${m[2]})`  : '';
+
+      const sufixoOnly = base === baseAnterior && sufixo;
+
+      let labelPrint;
+      let xLabelNow = xLabel;
+      if (sufixoOnly) {
+        labelPrint = sufixo;
+        xLabelNow  = xParenByBase[base] ?? xLabel;
+      } else {
+        labelPrint   = full;
+        baseAnterior = base;
+        const p = full.indexOf('(');
+        if (p >= 0) xParenByBase[base] = xLabel + p * CHAR_W;
+      }
+
+      const LIM = 25;
+      const partes = [];
+      let txt = labelPrint;
+      while (txt.length > LIM) {
+        const pos = txt.lastIndexOf(' ', LIM);
+        if (pos > 0) { partes.push(txt.slice(0, pos)); txt = txt.slice(pos + 1); }
+        else break;
+      }
+      partes.push(txt);
+
+      partes.forEach((ln, idx) => {
+        const stepIntra = idx === 0 ? 0 : STEP_WRAP;
+        blocos.push(
+          '^A0R,25,25',
+          `^FO${y - stepIntra},${xLabelNow}^FD${ln}^FS`
+        );
+        y -= stepIntra;
+      });
+
+      blocos.push(
+        '^A0R,20,20',
+        `^FO${y},${xValue}^FB200,1,0,R^FH_^FD${valor}^FS`
+      );
+
+      y -= sufixoOnly ? STEP_SUFIXO : STEP_ITEM;
+    }
+
+    return blocos.join('\n');
+  };
+
+  const blocoE = montarColuna(linhas.E, startY_E,  25, 240);
+  const blocoD = montarColuna(linhas.D, startY_D, 470, 688);
+
+  const zpl = `
 ^XA
 ^CI28
 ^PW1150
@@ -2394,7 +2618,7 @@ const zpl = `
 ^FO585,405^FH_^FDNCM: ${z(d.ncm)}^FS
 
 ^FO580,595^GB60,235,60^FS
-^A0R,25,25                 ; tamanho da letra do NS numero de serie
+^A0R,25,25
 ^FO585,600^FR^FDNS:^FS
 ^A0R,40,40
 ^FO585,640^FR^FH_^FD${ns || numeroOP}^FS
@@ -2408,19 +2632,658 @@ ${blocoE}
 ${blocoD}
 
 ^XZ
-`;
+`.trim();
 
+  return zpl;
+}
 
-    /* ---------------------------------------------------------------------
-       6) Salva o arquivo .zpl
-    --------------------------------------------------------------------- */
+async function gerarProximoNumeroOP(client, prefix = 'OP') {
+  const prefixUp = String(prefix || 'OP').toUpperCase();
+  const ano = String(new Date().getFullYear()).slice(-2);
+  const likePattern = `${prefixUp}${ano}%`;
+
+  const { rows } = await client.query(
+    `
+  SELECT numero_op
+  FROM "OrdemProducao".tab_op
+      WHERE numero_op LIKE $1
+      ORDER BY numero_op DESC
+      LIMIT 1
+    `,
+    [likePattern]
+  );
+
+  let seqAtual = 0;
+  if (rows?.[0]?.numero_op) {
+    const regex = new RegExp(`^${prefixUp}${ano}(\\d{5})(?:-.*)?$`, 'i');
+    const match = String(rows[0].numero_op).match(regex);
+    if (match) seqAtual = Number(match[1]) || 0;
+  }
+
+  const proximo = seqAtual + 1;
+  const seqStr = String(proximo).padStart(5, '0');
+  return {
+    numero_op: `${prefixUp}${ano}${seqStr}`,
+    ano,
+    sequencia: proximo
+  };
+}
+
+function gerarEtiquetaPPZPL({ codMP, op, descricao = '' }) {
+  const DPI = 203;
+  const DOTS_PER_MM = DPI / 25.4;
+  const LABEL_W_MM = 50;
+  const LABEL_H_MM = 30;
+
+  const PW = Math.round(LABEL_W_MM * DOTS_PER_MM);
+  const LL = Math.round(LABEL_H_MM * DOTS_PER_MM);
+
+  const DX = 5;
+  const DY = 5;
+  const DESENHAR_BORDA = true;
+
+  const agora = new Date();
+  const dataHora =
+    agora.toLocaleDateString('pt-BR') + ' ' +
+    agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const fo = (x, y) => `^FO${x + DX},${y + DY}`;
+
+  const z = [];
+
+  z.push('^XA');
+  z.push(`^PW${PW}`);
+  z.push(`^LL${LL}`);
+  z.push('^FWB');
+
+  if (DESENHAR_BORDA) {
+    z.push(`^FO0,0^GB${PW},${LL},1^FS`);
+  }
+
+  z.push(`${fo(7, 10)}`);
+  z.push('^BQN,2,4');
+  z.push(`^FDQA,${codMP}-${op}^FS`);
+
+  z.push(`${fo(135, 10)}`);
+  z.push('^A0B,35,30');
+  z.push(`^FD ${codMP} ^FS`);
+
+  z.push(`${fo(170, 50)}`);
+  z.push('^A0B,20,20');
+  z.push(`^FD ${dataHora} ^FS`);
+
+  z.push(`${fo(180, 0)}`);
+  z.push('^A0B,23,23');
+  z.push('^FB320,1,0,L,0');
+  z.push('^FD --------------- ^FS');
+
+  z.push(`${fo(20, 0)}`);
+  z.push('^A0B,17,17');
+  z.push('^FB230,2,0,L,0');
+  z.push(`^FD OP: ${op} ^FS`);
+
+  z.push(`${fo(196, 0)}`);
+  z.push('^A0B,23,23');
+  z.push('^FB320,1,0,L,0');
+  z.push('^FD --------------- ^FS');
+
+  z.push(`${fo(210, 10)}`);
+  z.push('^A0B,23,23');
+  z.push('^FB220,8,0,L,0');
+  z.push(`^FD ${descricao || 'SEM DESCRIÇÃO'} ^FS`);
+
+  z.push(`${fo(110, 10)}`);
+  z.push('^A0B,20,20');
+  z.push('^FB225,1,0,L,0');
+  z.push('^FD FT-M00-ETQP - REV01 ^FS');
+
+  z.push('^XZ');
+
+  return z.join('\n');
+}
+
+async function obterOperacaoPorCodigo(client, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+  try {
+    const { rows } = await client.query(
+      `
+        SELECT COALESCE(NULLIF(operacao, ''), NULLIF(comp_operacao, ''), NULLIF(destino, ''), NULLIF(origem, '')) AS operacao
+        FROM public.omie_estrutura_item
+        WHERE cod_prod_malha = $1 OR int_prod_malha = $1 OR int_malha = $1
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        LIMIT 1
+      `,
+      [cod]
+    );
+    return rows?.[0]?.operacao || null;
+  } catch (err) {
+    console.warn('[pcp][etiqueta] falha ao buscar operação:', err?.message || err);
+    return null;
+  }
+}
+
+async function obterDescricaoProduto(client, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+
+  const tryQueries = [
+    ['SELECT descricao FROM produtos WHERE codigo = $1 LIMIT 1', [cod]],
+    ['SELECT descricao FROM produtos_omie WHERE codigo = $1 LIMIT 1', [cod]]
+  ];
+
+  for (const [sql, params] of tryQueries) {
+    try {
+      const { rows } = await client.query(sql, params);
+      if (rows?.[0]?.descricao) return String(rows[0].descricao).trim();
+    } catch (err) {
+      console.warn('[pcp][etiqueta] falha ao buscar descrição:', err?.message || err);
+    }
+  }
+
+  return null;
+}
+
+async function obterVersaoEstrutura(client, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+  try {
+    const { rows } = await client.query(
+      `
+        SELECT versao
+        FROM omie_estrutura
+        WHERE cod_produto = $1 OR CAST(cod_produto AS TEXT) = $1
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        LIMIT 1
+      `,
+      [cod]
+    );
+    const val = rows?.[0]?.versao;
+    const num = Number(val);
+    return Number.isFinite(num) && num > 0 ? num : null;
+  } catch (err) {
+    console.warn('[pcp][etiqueta] falha ao buscar versao estrutura:', err?.message || err);
+    return null;
+  }
+}
+
+function normalizeCustomizacao(item) {
+  if (!item) return null;
+  const original = (item.codigo_original ?? item.original ?? '').toString().trim();
+  const novo = (item.codigo_novo ?? item.codigo_trocado ?? item.novo ?? '').toString().trim();
+  if (!original || !novo || original === novo) return null;
+
+  const descOrig = (item.descricao_original ?? item.descricaoAntiga ?? '').toString().trim() || null;
+  const descNova = (item.descricao_nova ?? item.descricao_trocada ?? '').toString().trim() || null;
+  const tipo = (item.tipo ?? '').toString().trim() || null;
+  const grupo = (item.grupo ?? '').toString().trim() || null;
+  const parentCodigo = (item.parent_codigo ?? '').toString().trim() || null;
+  const qtdRaw = Number(item.quantidade);
+  const quantidade = Number.isFinite(qtdRaw) ? qtdRaw : null;
+
+  return {
+    tipo,
+    grupo,
+    codigo_original: original,
+    codigo_novo: novo,
+    descricao_original: descOrig,
+    descricao_trocada: descNova,
+    parent_codigo: parentCodigo,
+    quantidade
+  };
+}
+
+async function registrarPersonalizacao(client, {
+  codigoPai,
+  versaoBase = null,
+  usuario = null,
+  customizacoes = []
+} = {}) {
+  if (!Array.isArray(customizacoes) || !customizacoes.length) {
+    return { personalizacaoId: null, sufixoCustom: '' };
+  }
+
+  const { rows } = await client.query(
+    `
+      INSERT INTO pcp_personalizacao (codigo_pai, versao_base, criado_por)
+      VALUES ($1,$2,$3)
+      RETURNING id
+    `,
+    [codigoPai, versaoBase ?? null, usuario ?? null]
+  );
+  const personalizacaoId = rows?.[0]?.id || null;
+  if (!personalizacaoId) return { personalizacaoId: null, sufixoCustom: '' };
+
+  const insertItemSql = `
+    INSERT INTO pcp_personalizacao_item
+      (personalizacao_id, tipo, grupo, codigo_original, codigo_trocado, descricao_original, descricao_trocada, parent_codigo, quantidade)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+  `;
+  for (const item of customizacoes) {
+    await client.query(insertItemSql, [
+      personalizacaoId,
+      item.tipo || null,
+      item.grupo || null,
+      item.codigo_original || null,
+      item.codigo_novo || null,
+      item.descricao_original || null,
+      item.descricao_trocada || null,
+      item.parent_codigo || null,
+      item.quantidade != null ? item.quantidade : null
+    ]);
+  }
+
+  return { personalizacaoId, sufixoCustom: `C${personalizacaoId}` };
+}
+
+/* ============================================================================
+   /api/etiquetas – gera o .zpl da etiqueta no layout “compacto” aprovado
+   ============================================================================ */
+app.post('/api/etiquetas', async (req, res) => {
+  try {
+    const { numeroOP, tipo = 'Expedicao', codigo, ns } = req.body;
+
+    const folder = path.join(__dirname, 'etiquetas', tipo);
+    if (!fs.existsSync(folder)) {
+      fs.mkdirSync(folder, { recursive: true });
+    }
+
+    if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
+
+    const { dirTipo } = getDirs(tipo);
+    const zpl = await gerarEtiquetaCompactaZPL({ numeroOP, codigo, ns });
     const fileName = `etiqueta_${numeroOP}.zpl`;
-    fs.writeFileSync(path.join(dirTipo, fileName), zpl.trim(), 'utf8');
+    fs.writeFileSync(path.join(dirTipo, fileName), zpl, 'utf8');
 
     return res.json({ ok: true });
   } catch (err) {
     console.error('[etiquetas] erro →', err);
     return res.status(500).json({ error: 'Erro ao gerar etiqueta' });
+  }
+});
+
+app.post('/api/pcp/etiquetas/pai', async (req, res) => {
+  try {
+    const {
+      codigo_produto,
+      usuario_criacao,
+      observacoes,
+      ns,
+      itens_pp,
+      quantidade_pai,
+      versao_estrutura,
+      customizacoes: customizacoesRaw
+    } = req.body || {};
+
+    const codigo = String(codigo_produto || '').trim();
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'codigo_produto obrigatório' });
+    }
+
+    const usuario = usuario_criacao !== undefined && usuario_criacao !== null
+      ? (String(usuario_criacao).trim() || null)
+      : null;
+    const obs = observacoes !== undefined && observacoes !== null
+      ? (String(observacoes).trim() || null)
+      : null;
+    const itensPP = Array.isArray(itens_pp) ? itens_pp : [];
+    const qtdPaiNum = Number(quantidade_pai);
+    const quantidadePai = Number.isFinite(qtdPaiNum) && qtdPaiNum > 0
+      ? Math.max(1, Math.round(qtdPaiNum))
+      : 1;
+    const versaoPaiRaw = Number(versao_estrutura);
+    const versaoPai = Number.isFinite(versaoPaiRaw) && versaoPaiRaw > 0
+      ? Math.max(1, Math.round(versaoPaiRaw))
+      : 1;
+    const sufixoPai = `-v${versaoPai}`;
+    const customizacoes = Array.isArray(customizacoesRaw)
+      ? customizacoesRaw.map(normalizeCustomizacao).filter(Boolean)
+      : [];
+    let personalizacaoId = null;
+    let sufixoCustom = '';
+
+    let produtoDet = null;
+    try {
+      produtoDet = await omieCall(
+        'https://app.omie.com.br/api/v1/geral/produtos/',
+        {
+          call:       'ConsultarProduto',
+          app_key:    OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param:      [{ codigo }]
+        }
+      );
+    } catch (err) {
+      console.warn('[pcp/etiquetas/pai] consulta Omie falhou:', err?.message || err);
+      produtoDet = {};
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
+
+      const insertSql = `
+  INSERT INTO "OrdemProducao".tab_op
+          (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id, data_criacao
+      `;
+
+      ({ personalizacaoId, sufixoCustom } = await registrarPersonalizacao(client, {
+        codigoPai: codigo,
+        versaoBase: versaoPai,
+        usuario,
+        customizacoes
+      }));
+
+      const opsGerados = [];
+      for (let i = 0; i < quantidadePai; i++) {
+        const { numero_op: numeroBase } = await gerarProximoNumeroOP(client, 'OP');
+        const numeroCompleto = `${numeroBase}${sufixoPai}${sufixoCustom}`;
+        const zplPai = await gerarEtiquetaCompactaZPL({
+          numeroOP: numeroCompleto,
+          codigo,
+          ns,
+          produtoDet
+        });
+
+        const paramsPai = [
+          numeroCompleto,
+          codigo,
+          'Aguardando prazo',
+          'Montagem',
+          zplPai,
+          usuario,
+          obs
+        ];
+
+        const { rows: rowPai } = await client.query(insertSql, paramsPai);
+        opsGerados.push({
+          numero_op: numeroCompleto,
+          id: rowPai?.[0]?.id || null,
+          data_criacao: rowPai?.[0]?.data_criacao || null,
+          versao: versaoPai
+        });
+      }
+
+      const ppResultados = [];
+
+      for (const raw of itensPP) {
+        const codigoPP = String(raw?.codigo || raw?.cod || '').trim();
+        if (!codigoPP) continue;
+
+        const qtdRaw = Number(raw?.quantidade ?? raw?.qtd ?? 1);
+        const qtdInt = Number.isFinite(qtdRaw) && qtdRaw > 0
+          ? Math.max(1, Math.round(qtdRaw))
+          : 1;
+
+        const operacao = await obterOperacaoPorCodigo(client, codigoPP);
+        let descricaoPP = String(raw?.descricao || '').trim();
+        if (!descricaoPP) {
+          descricaoPP = await obterDescricaoProduto(client, codigoPP) || 'SEM DESCRIÇÃO';
+        }
+        const localImpressao = operacao || 'Montagem';
+        const versaoPP = await obterVersaoEstrutura(client, codigoPP) || 1;
+        const sufixoPP = `-v${versaoPP}`;
+        const geradosOps = [];
+
+        for (let i = 0; i < qtdInt; i++) {
+          const { numero_op: numeroOpsBase } = await gerarProximoNumeroOP(client, 'OPS');
+          const numeroOpsSeq = `${numeroOpsBase}${sufixoPP}${sufixoCustom}`;
+
+          const zplPP = gerarEtiquetaPPZPL({ codMP: codigoPP, op: numeroOpsSeq, descricao: descricaoPP });
+
+          const paramsPP = [
+            numeroOpsSeq,
+            codigoPP,
+            'Aguardando prazo',
+            localImpressao,
+            zplPP,
+            usuario,
+            obs
+          ];
+
+          const { rows: rowPP } = await client.query(insertSql, paramsPP);
+          geradosOps.push({
+            numero_op: numeroOpsSeq,
+            id: rowPP?.[0]?.id || null,
+            data_criacao: rowPP?.[0]?.data_criacao || null
+          });
+        }
+
+        ppResultados.push({
+          codigo: codigoPP,
+          local_impressao: localImpressao,
+          quantidade: qtdInt,
+          versao: versaoPP,
+          registros: geradosOps
+        });
+      }
+
+      if (personalizacaoId) {
+        await client.query(
+          'UPDATE pcp_personalizacao SET numero_referencia = $1 WHERE id = $2',
+          [opsGerados[0]?.numero_op || null, personalizacaoId]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      return res.json({
+        ok: true,
+        numero_op: opsGerados[0]?.numero_op || null,
+        id: opsGerados[0]?.id || null,
+        data_criacao: opsGerados[0]?.data_criacao || null,
+        versao: versaoPai,
+        personalizacao_id: personalizacaoId,
+        op_registros: opsGerados,
+        itens_pp: ppResultados
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[pcp/etiquetas/pai] erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao gerar etiqueta' });
+  }
+});
+
+app.post('/api/pcp/etiquetas/pp', async (req, res) => {
+  try {
+    const {
+      codigo_produto,
+      quantidade,
+      descricao: descricaoInicial,
+      usuario_criacao,
+      observacoes,
+      ns,
+      customizacoes: customizacoesRaw
+    } = req.body || {};
+
+    const codigo = String(codigo_produto || '').trim();
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'codigo_produto obrigatório' });
+    }
+
+    const usuario = usuario_criacao !== undefined && usuario_criacao !== null
+      ? (String(usuario_criacao).trim() || null)
+      : null;
+    const obs = observacoes !== undefined && observacoes !== null
+      ? (String(observacoes).trim() || null)
+      : null;
+
+    const qtdRaw = Number(quantidade ?? 1);
+    const qtdInt = Number.isFinite(qtdRaw) && qtdRaw > 0
+      ? Math.max(1, Math.round(qtdRaw))
+      : 1;
+    const customizacoes = Array.isArray(customizacoesRaw)
+      ? customizacoesRaw.map(normalizeCustomizacao).filter(Boolean)
+      : [];
+    let personalizacaoId = null;
+    let sufixoCustom = '';
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
+
+      const localImpressao = await obterOperacaoPorCodigo(client, codigo) || 'Montagem';
+      let descricao = String(descricaoInicial || '').trim();
+      if (!descricao) {
+        descricao = await obterDescricaoProduto(client, codigo) || 'SEM DESCRIÇÃO';
+      }
+      const versaoPP = await obterVersaoEstrutura(client, codigo) || 1;
+      const sufixoPP = `-v${versaoPP}`;
+
+      ({ personalizacaoId, sufixoCustom } = await registrarPersonalizacao(client, {
+        codigoPai: codigo,
+        versaoBase: versaoPP,
+        usuario,
+        customizacoes
+      }));
+
+      const insertSql = `
+  INSERT INTO "OrdemProducao".tab_op
+          (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id, data_criacao
+      `;
+
+      const registros = [];
+      for (let i = 0; i < qtdInt; i++) {
+        const { numero_op: baseNumero } = await gerarProximoNumeroOP(client, 'OPS');
+        const numeroCompleto = `${baseNumero}${sufixoPP}${sufixoCustom}`;
+        const zpl = gerarEtiquetaPPZPL({ codMP: codigo, op: numeroCompleto, descricao });
+
+        const params = [
+          numeroCompleto,
+          codigo,
+          'Aguardando prazo',
+          localImpressao,
+          zpl,
+          usuario,
+          obs
+        ];
+
+        const { rows } = await client.query(insertSql, params);
+        registros.push({
+          numero_op: numeroCompleto,
+          id: rows?.[0]?.id || null,
+          data_criacao: rows?.[0]?.data_criacao || null
+        });
+      }
+
+      if (personalizacaoId) {
+        await client.query(
+          'UPDATE pcp_personalizacao SET numero_referencia = $1 WHERE id = $2',
+          [registros[0]?.numero_op || null, personalizacaoId]
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json({
+        ok: true,
+        codigo_produto: codigo,
+        local_impressao: localImpressao,
+        quantidade: qtdInt,
+        versao: versaoPP,
+        personalizacao_id: personalizacaoId,
+        registros
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[pcp/etiquetas/pp] erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao gerar etiqueta PP' });
+  }
+});
+
+app.post('/api/etiquetas/aguardando/confirmar', express.json(), async (req, res) => {
+  try {
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
+    if (!itens.length) {
+      return res.status(400).json({ ok: false, error: 'Nenhuma OP informada.' });
+    }
+
+    const toTimestampString = (valor) => {
+      if (!valor) return null;
+
+      const pad = (n) => String(n).padStart(2, '0');
+
+      const fromDate = (d) => {
+        if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      };
+
+      if (valor instanceof Date) {
+        return fromDate(valor);
+      }
+
+      const raw = String(valor).trim();
+      if (!raw) return null;
+
+      if (/Z$/i.test(raw) || /[+-]\d{2}:\d{2}$/.test(raw)) {
+        const dt = new Date(raw);
+        const from = fromDate(dt);
+        if (from) return from;
+      }
+
+      const match = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+      if (match) {
+        const sec = match[4] || '00';
+        return `${match[1]} ${match[2]}:${match[3]}:${sec}`;
+      }
+
+      const onlyDate = raw.match(/^(\d{4}-\d{2}-\d{2})$/);
+      if (onlyDate) {
+        return `${onlyDate[1]} 00:00:00`;
+      }
+
+      return null;
+    };
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const updateSql = `
+        UPDATE "OrdemProducao".tab_op
+           SET data_impressao = $2::timestamp,
+               impressa = CASE WHEN $2 IS NULL THEN FALSE ELSE impressa END
+         WHERE numero_op = $1
+        RETURNING numero_op
+      `;
+
+      const atualizados = [];
+      for (const it of itens) {
+        const numeroOp = String(it?.numero_op || '').trim();
+        if (!numeroOp) continue;
+        const dataIso = toTimestampString(it?.data_impressao);
+        const { rows } = await client.query(updateSql, [numeroOp, dataIso]);
+        if (rows?.[0]?.numero_op) {
+          atualizados.push(rows[0].numero_op);
+        }
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok: true, atualizados });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[etiquetas/aguardando/confirmar]', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao atualizar datas' });
   }
 });
 
@@ -2450,6 +3313,9 @@ const rows = csvParse(csvText, {
 
 
   // para imprimir etiquetas ZPL
+
+const uuid = require('uuid').v4;  // para gerar um nome único, se desejar
+
 
   app.post('/api/omie/updateNaoListar', (req, res) => {
     const { groupId, prefix } = req.body;
@@ -2577,7 +3443,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
 
 
 
-  // Salva uma etiqueta na tabela etiquetas_impressas (permitindo injetar o ZPL já pronto)
+  // Salva uma etiqueta na tabela OrdemProducao.tab_op (permitindo injetar o ZPL já pronto)
   async function salvarEtiquetaOP(pool, {
     numero_op,
     codigo_produto,
@@ -2598,8 +3464,9 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
       : gerarEtiquetaPP({ codMP: codigo_produto, op: numero_op, descricao: '' });
 
     const sql = `
-      INSERT INTO etiquetas_impressas
-        (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, impressa, usuario_criacao, observacoes)
+      INSERT INTO "OrdemProducao".tab_op
+        (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+         conteudo_zpl, impressa, usuario_criacao, observacoes)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING id, data_criacao
     `;
@@ -2820,7 +3687,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
 
 
 
-// === salva uma etiqueta de OP na tabela `etiquetas_impressas` ===
+// === salva uma etiqueta de OP na tabela `OrdemProducao`.tab_op ===
 function buildZPL({ titulo = 'OP – Expedição', numero_op = '', codigo_produto = '' } = {}) {
   return [
     '^XA',
@@ -2855,8 +3722,9 @@ async function salvarEtiquetaOP(pool, {
   const conteudo_zpl = buildZPL({ numero_op, codigo_produto });
 
   const sql = `
-    INSERT INTO etiquetas_impressas
-      (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, impressa, usuario_criacao, observacoes)
+    INSERT INTO "OrdemProducao".tab_op
+      (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+       conteudo_zpl, impressa, usuario_criacao, observacoes)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
     RETURNING id, data_criacao
   `;
@@ -2876,379 +3744,747 @@ async function salvarEtiquetaOP(pool, {
 }
 
 
-// Comercial: lista itens por coluna a partir do Postgres
-app.get('/api/kanban/comercial/listar', async (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  if (!isDbEnabled) {
-    return res.status(503).json({ error: 'Banco de dados não configurado.' });
-  }
-  try {
-    const { rows } = await dbQuery(`
-      SELECT
-        numero_pedido   AS pedido,
-        produto_codigo  AS codigo,
-        quantidade,
-        kanban_coluna   AS status
-      FROM kanban_comercial_view
-      ORDER BY kanban_coluna, numero_pedido, produto_codigo
-    `);
 
-    const data = {
-      'Pedido aprovado'     : [],
-      'Separação logística' : [],
-      'Fila de produção'    : []
+
+
+
+  // lista pedidos
+app.post('/api/omie/pedidos', express.json(), async (req, res) => {
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/produtos/pedido/',
+      {
+        call:       'ListarPedidos',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      req.body.param
+      }
+    );
+    return res.json(data);
+  } catch (err) {
+    console.error('[pedidos] erro →', err);
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message });
+  }
+});
+
+// ─── Ajuste / Transferência de estoque ───────────────────────────
+app.post('/api/omie/estoque/ajuste', express.json(), async (req, res) => {
+  // 1) loga o que veio do browser
+  console.log('\n[ajuste] payload recebido →\n',
+              JSON.stringify(req.body, null, 2));
+
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/estoque/ajuste/',
+      req.body
+    );
+
+    // 2) loga a resposta OK do OMIE
+    console.log('[ajuste] OMIE respondeu OK →\n',
+                JSON.stringify(data, null, 2));
+
+    return res.json(data);
+
+  } catch (err) {
+    // 3) loga a falha (faultstring, faultcode, etc.)
+    console.error('[ajuste] ERRO OMIE →',
+                  err.faultstring || err.message,
+                  '\nDetalhes:', err);
+
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message, details: err });
+  }
+});
+
+//------------------------------------------------------------------
+// Armazéns → Almoxarifado (LENDO DO POSTGRES)
+//------------------------------------------------------------------
+app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
+  try {
+    const rawLocal = req.query.local ?? req.body?.local;
+    const local = String(rawLocal ?? '').trim() || ALMOX_LOCAL_PADRAO;
+
+    const { rows } = await pool.query(`
+      SELECT
+        v.local,
+        v.produto_codigo     AS codigo,
+        v.produto_descricao  AS descricao,
+        v.estoque_minimo     AS min,
+        v.fisico,
+        v.reservado,
+        v.saldo,
+        v.cmc,
+        pos.omie_prod_id     AS cod_omie,
+        pos.local_codigo     AS origem_local
+      FROM v_almoxarifado_grid v
+  LEFT JOIN public.omie_estoque_posicao pos
+     ON pos.codigo = v.produto_codigo
+    AND pos.local_codigo::text = $1::text
+      WHERE v.local = $1
+      ORDER BY v.produto_codigo
+    `, [local]);
+
+    const dados = rows.map(r => ({
+      codigo   : r.codigo || '',
+      descricao: r.descricao || '',
+      min      : Number(r.min)       || 0,
+      fisico   : Number(r.fisico)    || 0,
+      reservado: Number(r.reservado) || 0,
+      saldo    : Number(r.saldo)     || 0,
+      cmc      : Number(r.cmc)       || 0,
+      codOmie  : r.cod_omie != null ? String(r.cod_omie) : '',
+      origem   : local,
+    }));
+
+    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
+  } catch (err) {
+    console.error('[almoxarifado SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+async function listarLocaisViaDb() {
+  const { rows } = await pool.query(`
+    SELECT
+      local_codigo,
+      nome,
+      COALESCE(ativo, true) AS ativo
+    FROM public.omie_locais_estoque
+    ORDER BY nome NULLS LAST, local_codigo
+  `);
+
+  return rows.map(row => ({
+    codigo: row.local_codigo || '',
+    descricao: row.nome || '',
+    codigo_local_estoque: String(row.local_codigo || ''),
+    padrao: String(row.local_codigo || '') === ALMOX_LOCAL_PADRAO,
+    inativo: row.ativo === false
+  }));
+}
+
+function normalizarLocalOmie(loc) {
+  return {
+    codigo: loc.codigo || '',
+    descricao: loc.descricao || '',
+    codigo_local_estoque: String(loc.codigo_local_estoque || ''),
+    padrao: String(loc.padrao || '').toUpperCase() === 'S',
+    inativo: String(loc.inativo || '').toUpperCase() === 'S'
+  };
+}
+
+// Lista locais de estoque consultando a Omie (com cache e fallback para o Postgres)
+app.get('/api/armazem/locais', async (req, res) => {
+  const preferSource = String(req.query?.fonte || req.query?.source || '').toLowerCase();
+  const now = Date.now();
+
+  const responder = (locais, fonte) => {
+    const ordenados = [...locais].sort((a, b) => (a.descricao || '').localeCompare(b.descricao || '', 'pt-BR'));
+    return res.json({ ok: true, locais: ordenados, fonte });
+  };
+
+  const servirDoBanco = async () => {
+    try {
+      const locaisDb = await listarLocaisViaDb();
+      locaisEstoqueCache.at = now;
+      locaisEstoqueCache.data = locaisDb;
+      locaisEstoqueCache.fonte = 'db_local';
+      return responder(locaisDb, 'db_local');
+    } catch (err) {
+      console.error('[api/armazem/locais][db] erro →', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  };
+
+  if (preferSource === 'db') {
+    return servirDoBanco();
+  }
+
+  const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return servirDoBanco();
+  }
+
+  if (locaisEstoqueCache.data.length && (now - locaisEstoqueCache.at) < LOCAIS_CACHE_TTL_MS && locaisEstoqueCache.fonte === 'omie') {
+    return responder(locaisEstoqueCache.data, 'omie_cache');
+  }
+
+  try {
+    const payload = {
+      call: 'ListarLocaisEstoque',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{ nPagina: 1, nRegPorPagina: 200 }]
     };
 
-    for (const r of rows) {
-      if (!data[r.status]) continue; // ignora status não mapeado
-      data[r.status].push({
-        pedido: r.pedido,
-        codigo: r.codigo,
-        quantidade: r.quantidade,
-        status: r.status
-      });
+    const primeira = await callOmieDedup('https://app.omie.com.br/api/v1/estoque/local/', payload, { waitMs: 3500 });
+    let locaisRaw = Array.isArray(primeira?.locaisEncontrados) ? [...primeira.locaisEncontrados] : [];
+    const totalPaginas = Number(primeira?.nTotPaginas || 1);
+
+    for (let pagina = 2; pagina <= totalPaginas; pagina += 1) {
+      const extra = await callOmieDedup(
+        'https://app.omie.com.br/api/v1/estoque/local/',
+        { ...payload, param: [{ nPagina: pagina, nRegPorPagina: 200 }] },
+        { waitMs: 3500 }
+      );
+      if (Array.isArray(extra?.locaisEncontrados)) {
+        locaisRaw = locaisRaw.concat(extra.locaisEncontrados);
+      }
     }
-    return res.json({ mode: 'pg', data });
+
+    const normalizados = locaisRaw.map(normalizarLocalOmie);
+    locaisEstoqueCache.at = now;
+    locaisEstoqueCache.data = normalizados;
+    locaisEstoqueCache.fonte = 'omie';
+
+    return responder(normalizados, 'omie');
   } catch (err) {
-    console.error('[comercial/listar] erro:', err);
-    return res.status(500).json({ error: err.message || 'Erro ao consultar comercial no banco' });
+    console.error('[api/armazem/locais][omie] erro →', err?.faultstring || err?.message || err);
+    return servirDoBanco();
   }
 });
 
-
-// ——— Kanban Preparação – backfill de códigos (1 só rota, rápida, usando produtos já no DB) ———
-async function runBackfillCodigos() {
-  if (!isDbEnabled) {
-    return { ok:false, error:'DB desativado neste modo' };
-  }
-  const sql = `
-    WITH m AS (
-      SELECT
-        i.n_cod_op,
-        i.n_cod_prod,
-        COALESCE(p.codigo, p.codigo_familia, p.codigo_produto::text) AS novo_codigo
-      FROM public.op_info i
-      JOIN public.produtos p
-            ON p.codigo_produto::text = i.n_cod_prod::text
-      WHERE (i.produto_codigo IS NULL OR i.produto_codigo ~ '^[0-9]+$')
-        AND i.n_cod_prod IS NOT NULL
-    )
-    UPDATE public.op_info i
-       SET produto_codigo = m.novo_codigo,
-           updated_at     = now()
-      FROM m
-     WHERE i.n_cod_op = m.n_cod_op
-    RETURNING i.n_cod_op, i.n_cod_prod, i.produto_codigo;
-  `;
-  const { rows } = await dbQuery(sql);
-  return { ok:true, total: rows.length, atualizados: rows.length, exemplos: rows.slice(0,5) };
-}
-
-// Disponibiliza tanto POST quanto GET (facilita testar no Render)
-app.post('/api/preparacao/backfill-codigos', async (req, res) => {
+app.post('/api/admin/sync/almoxarifado/all', express.json(), async (req, res) => {
   try {
-    const out = await runBackfillCodigos();
-    res.json(out);
-  } catch (e) {
-    console.error('[backfill-codigos]', e);
-    res.status(500).json({ ok:false, error:String(e.message||e) });
-  }
-});
+    const data = req.body?.data || new Date().toLocaleDateString('pt-BR');
+    const timeout = Number(req.query.timeout || 90000);
+    const retry   = Number(req.query.retry || 1);
 
-app.get('/api/preparacao/backfill-codigos', async (req, res) => {
-  try {
-    const out = await runBackfillCodigos();
-    res.json(out);
-  } catch (e) {
-    console.error('[backfill-codigos][GET]', e);
-    res.status(500).json({ ok:false, error:String(e.message||e) });
-  }
-});
+    const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE ORDER BY local_codigo');
+    const results = [];
 
-async function ensureOverlayTable() {
-  // Cria se não existir (idempotente)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.op_status_overlay (
-      op         text PRIMARY KEY,
-      status     text NOT NULL,
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
-}
-ensureOverlayTable()
-  .then(() => console.log('[db] op_status_overlay pronto'))
-  .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
-
-
-// === Agendamento diário: sincronização de produtos Omie =====================
-// Objetivo: permitir configurar um horário diário (HH:MM) para executar
-// automaticamente a rotina de sincronização dos produtos da Omie
-// (equivalente à rota POST /api/admin/sync/produtos-omie).
-
-async function ensureScheduledTaskTable() {
-  if (!isDbEnabled) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.scheduled_task (
-        key         text PRIMARY KEY,
-        time        char(5) NOT NULL,   -- formato 'HH:MM'
-        enabled     boolean NOT NULL DEFAULT true,
-        filter_column text,
-        filter_values text[],
-        last_run_at   timestamptz,
-        last_ok       boolean,
-        last_summary  text,
-        updated_at    timestamptz NOT NULL DEFAULT now()
-      )
-    `);
-    // assegura colunas extras caso tabela exista de versões anteriores
-    await pool.query(`ALTER TABLE public.scheduled_task ADD COLUMN IF NOT EXISTS filter_column text`);
-    await pool.query(`ALTER TABLE public.scheduled_task ADD COLUMN IF NOT EXISTS filter_values text[]`);
-    await pool.query(`ALTER TABLE public.scheduled_task ADD COLUMN IF NOT EXISTS last_run_at timestamptz`);
-    await pool.query(`ALTER TABLE public.scheduled_task ADD COLUMN IF NOT EXISTS last_ok boolean`);
-    await pool.query(`ALTER TABLE public.scheduled_task ADD COLUMN IF NOT EXISTS last_summary text`);
-  } catch (e) {
-    console.warn('[db] scheduled_task: falha ao garantir tabela:', e?.message || e);
-  }
-}
-ensureScheduledTaskTable()
-  .then(() => console.log('[db] scheduled_task pronto'))
-  .catch(err => console.warn('[db] scheduled_task: erro:', err?.message || err));
-
-function parseHHMM(str) {
-  if (typeof str !== 'string') return null;
-  const m = str.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  return { hh, mm };
-}
-
-function nextOccurrenceTodayOrTomorrow(hh, mm) {
-  const now = new Date();
-  const next = new Date();
-  next.setHours(hh, mm, 0, 0);
-  if (next <= now) {
-    // amanhã
-    next.setDate(next.getDate() + 1);
-  }
-  return next;
-}
-
-let produtosOmieTimer = null;
-
-async function scheduleProdutosOmieJobFromDb() {
-  try {
-    if (!isDbEnabled) return;
-    const { rows } = await pool.query(`
-      SELECT time, enabled, filter_column, filter_values FROM public.scheduled_task WHERE key = 'produtos-omie'
-    `);
-    const conf = rows[0];
-    if (!conf || conf.enabled !== true) {
-      if (produtosOmieTimer) { clearTimeout(produtosOmieTimer); produtosOmieTimer = null; }
-      return;
-    }
-    const t = parseHHMM(conf.time || '');
-    if (!t) {
-      if (produtosOmieTimer) { clearTimeout(produtosOmieTimer); produtosOmieTimer = null; }
-      return;
-    }
-
-    const next = nextOccurrenceTodayOrTomorrow(t.hh, t.mm);
-    const waitMs = Math.max(0, next.getTime() - Date.now());
-
-    if (produtosOmieTimer) clearTimeout(produtosOmieTimer);
-    produtosOmieTimer = setTimeout(async () => {
+    for (const r of rows) {
+      const local = String(r.local_codigo);
       try {
-        // executa sincronização direta (evita problemas com child process + PM2)
-        const filter = (conf.filter_column && Array.isArray(conf.filter_values) && conf.filter_values.length)
-          ? { column: conf.filter_column, values: conf.filter_values }
-          : null;
-        const result = await doSyncProdutosOmie({ max_paginas: 999, filtros: {}, filter });
-        try {
-          await pool.query(`UPDATE public.scheduled_task SET last_run_at = now(), last_ok = $1, last_summary = $2, updated_at = now() WHERE key = 'produtos-omie'`, [true, JSON.stringify(result)]);
-        } catch {}
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5001}/api/admin/sync/almoxarifado?timeout=${timeout}&retry=${retry}`, {
+          method : 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body   : JSON.stringify({ local: Number(local), data }),
+        });
+        const json = await resp.json();
+        results.push({ local, ...json });
+        await new Promise(ok => setTimeout(ok, 800)); // respiro entre chamadas
       } catch (e) {
-        console.error('[agendamento produtos-omie] erro na execução:', e);
-        try {
-          await pool.query(`UPDATE public.scheduled_task SET last_run_at = now(), last_ok = $1, last_summary = $2, updated_at = now() WHERE key = 'produtos-omie'`, [false, String(e?.message || e)]);
-        } catch {}
-      } finally {
-        // agenda a próxima ocorrência (amanhã)
-        scheduleProdutosOmieJobFromDb();
+        results.push({ local, ok:false, error:String(e.message || e) });
       }
-    }, waitMs);
+    }
 
-    console.log('[agendamento produtos-omie] próximo disparo em', Math.round(waitMs/1000), 's');
-  } catch (e) {
-    console.warn('[agendamento produtos-omie] falha ao agendar:', e?.message || e);
+    res.json({ ok:true, total: results.length, results });
+  } catch (err) {
+    console.error('[admin/sync/almox ALL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
   }
+});
+
+// ---------------------------------------------------------------
+// Webhook Omie (genérico) -> armazena e agenda re-sync do estoque
+// ---------------------------------------------------------------
+const SYNC_DEBOUNCE_MS = 45_000; // >= 30s do cache da Omie
+const syncTimers = new Map();
+function scheduleSync(localCodigo, dataBR) {
+  clearTimeout(syncTimers.get(localCodigo));
+  const t = setTimeout(async () => {
+    try {
+      await fetch(`http://localhost:${process.env.PORT || 5001}/api/admin/sync/almoxarifado?timeout=90000&retry=1`, {
+        method : 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body   : JSON.stringify({ local: Number(localCodigo), data: dataBR }),
+      });
+    } catch (e) {
+      console.error('[webhook] re-sync falhou', e);
+    }
+  }, SYNC_DEBOUNCE_MS);
+  syncTimers.set(localCodigo, t);
 }
 
-async function getProdutosOmieSchedule() {
-  if (!isDbEnabled) return { enabled: false, time: null, next_run_iso: null };
-  const { rows } = await pool.query(`
-    SELECT time, enabled, filter_column, filter_values, last_run_at, last_ok, last_summary
-      FROM public.scheduled_task WHERE key = 'produtos-omie'
-  `);
-  const conf = rows[0] || null;
-  if (!conf || conf.enabled !== true) return {
-    enabled: false,
-    time: conf?.time?.trim() || null,
-    next_run_iso: null,
-    filter_column: conf?.filter_column || null,
-    filter_values: conf?.filter_values || [],
-    last_run_at: conf?.last_run_at || null,
-    last_ok: conf?.last_ok ?? null,
-    last_summary: conf?.last_summary || null
-  };
-  const t = parseHHMM(conf.time || '');
-  if (!t) return {
-    enabled: false,
-    time: conf.time?.trim() || null,
-    next_run_iso: null,
-    filter_column: conf?.filter_column || null,
-    filter_values: conf?.filter_values || [],
-    last_run_at: conf?.last_run_at || null,
-    last_ok: conf?.last_ok ?? null,
-    last_summary: conf?.last_summary || null
-  };
-  const next = nextOccurrenceTodayOrTomorrow(t.hh, t.mm);
-  return {
-    enabled: true,
-    time: conf.time.trim(),
-    next_run_iso: next.toISOString(),
-    filter_column: conf?.filter_column || null,
-    filter_values: conf?.filter_values || [],
-    last_run_at: conf?.last_run_at || null,
-    last_ok: conf?.last_ok ?? null,
-    last_summary: conf?.last_summary || null
-  };
+async function scheduleSyncAll(dataBR) {
+  const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE');
+  for (const r of rows) scheduleSync(String(r.local_codigo), dataBR);
 }
 
-// inicia o agendador ao subir o servidor
-scheduleProdutosOmieJobFromDb()
-  .then(() => console.log('[agendamento produtos-omie] verificação inicial concluída'))
-  .catch(err => console.warn('[agendamento produtos-omie] erro na inicialização:', err?.message || err));
+function pickLocalFromPayload(body) {
+  return (
+    body?.codigo_local_estoque ??
+    body?.param?.[0]?.codigo_local_estoque ??
+    body?.dados?.codigo_local_estoque ??
+    null
+  );
+}
 
-// Executor alternativo: roda via exec com timeout para garantir que funciona independente do PM2
-async function runSyncViaChild(max_paginas = 1) {
-  appendSyncLog(`[sync] iniciando via exec: node sync_omie_to_sql.js ${max_paginas}`);
-  
-  return new Promise((resolve, reject) => {
-    const cmd = `node ${path.join(__dirname, 'sync_omie_to_sql.js')} ${max_paginas} 2>&1`;
-    
-    // Timeout manual de 4 minutos
-    const timer = setTimeout(() => {
-      appendSyncLog(`[sync] TIMEOUT após 240s sem resposta`);
-      reject(new Error('Timeout: exec não retornou em 240s'));
-    }, 240000);
-    
-    exec(cmd, {
-      cwd: __dirname,
-      maxBuffer: 10 * 1024 * 1024,
-      env: process.env,
-      timeout: 240000
-    }, (error, stdout, stderr) => {
-      clearTimeout(timer);
-      
-      let totalUpserts = 0;
-      
-      // Log stdout
-      if (stdout) {
-        stdout.split('\n').forEach(line => {
-          if (line.trim()) {
-            appendSyncLog(`[sync] ${line}`);
-            const m = line.match(/Total de upserts:\s*(\d+)/i);
-            if (m) totalUpserts = Number(m[1] || 0);
-          }
-        });
+// ====== rota do webhook ======
+app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
+  try {
+    // 1) token opcional (se OMIE_WEBHOOK_TOKEN estiver setado, passa a exigir)
+    if (OMIE_WEBHOOK_TOKEN) {
+      const token = req.query.token || req.headers['x-omie-token'];
+      if (token !== OMIE_WEBHOOK_TOKEN) {
+        return res.status(401).json({ ok:false, error:'token inválido' });
       }
-      
-      // Log stderr
-      if (stderr) {
-        stderr.split('\n').forEach(line => {
-          if (line.trim()) appendSyncLog(`[sync][err] ${line}`);
-        });
+    }
+
+    const body = req.body || {};
+    const tipo = body?.event_type || body?.tipoEvento || 'estoque';
+
+    // 2) guarda o evento cru (auditoria)
+    await pool.query(
+      `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
+       VALUES ($1,$2,$3)`,
+      [ body?.event_id || null, tipo, body ]
+    );
+
+    // 3) agenda re-sync
+    const hojeBR = new Date().toLocaleDateString('pt-BR');
+    const localDoPayload = pickLocalFromPayload(body);
+
+    if (localDoPayload) {
+      scheduleSync(String(localDoPayload), hojeBR);
+      return res.json({ ok:true, scheduled:true, scope:'local', local:String(localDoPayload) });
+    } else {
+      await scheduleSyncAll(hojeBR);
+      return res.json({ ok:true, scheduled:true, scope:'all' });
+    }
+  } catch (err) {
+    console.error('[webhook/omie/estoque]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    // 1) guarda o evento "como veio"
+    await pool.query(
+      `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
+       VALUES ($1,$2,$3)`,
+      [ body?.event_id || null, body?.event_type || 'estoque', body ]
+    );
+
+    // 2) tenta descobrir o local do estoque no payload; se não achar, usa o padrão
+    const localDoPayload =
+      body?.codigo_local_estoque ||
+      body?.param?.[0]?.codigo_local_estoque ||
+      body?.dados?.codigo_local_estoque ||
+      10408201806;
+
+    // data de posição padrão = hoje (BR)
+    const hojeBR = new Date().toLocaleDateString('pt-BR');
+
+    // 3) agenda re-sync (debounced)
+    scheduleSync(String(localDoPayload), hojeBR);
+
+    res.json({ ok:true, scheduled:true, local: String(localDoPayload) });
+  } catch (err) {
+    console.error('[webhook/omie/estoque]', err);
+    res.status(500).json({ ok:false, error: String(err.message || err) });
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin → Importar posição de estoque da Omie para o Postgres
+// Agora: cExibeTodos = 'N' (apenas itens com saldo) e filtro por codigo_local_estoque
+// ------------------------------------------------------------------
+app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
+  const startedAt = Date.now();
+
+  const OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return res.status(500).json({ ok:false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.' });
+  }
+
+  const localCodigo = String(req.body?.local || 10408201806);
+  const dataInput   = String(req.body?.data || new Date().toLocaleDateString('pt-BR')); // dd/mm/aaaa
+  const tmo         = Number(req.query.timeout || 60000);
+  const retryCount  = Number(req.query.retry || 2);
+  const perPage     = 200;
+
+  const brToISO = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s) ? s.split('/').reverse().join('-') : s;
+  const dataBR  = /^\d{4}-\d{2}-\d{2}$/.test(dataInput) ? dataInput.split('-').reverse().join('/') : dataInput;
+  const dataISO = brToISO(dataInput);
+  const clamp   = n => Math.max(0, Number(n) || 0);
+  const sleep   = ms => new Promise(r => setTimeout(r, ms));
+
+  const fetchWithTimeout = async (url, opts = {}, ms = 20000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), ms);
+    try { return await fetch(url, { ...opts, signal: controller.signal }); }
+    finally { clearTimeout(id); }
+  };
+  const omieFetch = async (payload) => {
+    const resp = await fetchWithTimeout(
+      'https://app.omie.com.br/api/v1/estoque/consulta/',
+      { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) },
+      tmo
+    );
+    if (!resp.ok) throw new Error(`Omie HTTP ${resp.status} ${resp.statusText} :: ${(await resp.text().catch(()=>''))?.slice(0,300)}`);
+    return resp.json();
+  };
+  const omieFetchRetry = async (payload) => {
+    for (let i = 0; i <= retryCount; i++) {
+      try { return await omieFetch(payload); }
+      catch (e) {
+        const isCache = String(e?.message||'').includes('Consumo redundante detectado');
+        if (isCache && i < retryCount) { await sleep(35000); continue; }
+        throw e;
       }
-      
-      if (error) {
-        appendSyncLog(`[sync] erro no exec: ${error.message} (code=${error.code}, signal=${error.signal})`);
-        reject(error);
-      } else {
-        appendSyncLog(`[sync] finalizado. totalUpserts=${totalUpserts}`);
-        resolve({ ok: true, total_upserts: totalUpserts });
+    }
+  };
+
+  try {
+    // 1) primeira página — **cExibeTodos: 'N'** (apenas itens com saldo)
+    const basePayload = {
+      call: 'ListarPosEstoque',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        nPagina: 1,
+        nRegPorPagina: perPage,
+        dDataPosicao: dataBR,
+        cExibeTodos : 'N',                       // <<< aqui o ajuste
+        codigo_local_estoque: Number(localCodigo)
+      }]
+    };
+
+    const r0 = await omieFetchRetry(basePayload);
+    const total   = Number(r0.nTotRegistros || (Array.isArray(r0.produtos) ? r0.produtos.length : 0));
+    const paginas = Math.max(1, Math.ceil(total / perPage));
+
+    // 2) paginação + **filtro por local** (defensivo)
+    const itens = [];
+    for (let pg = 1; pg <= paginas; pg++) {
+      const payload = { ...basePayload, param: [{ ...basePayload.param[0], nPagina: pg }] };
+      const r = await omieFetchRetry(payload);
+      const arr = (Array.isArray(r.produtos) ? r.produtos : []).filter(
+        it => Number(it?.codigo_local_estoque) === Number(localCodigo)
+      );
+      itens.push(...arr);
+    }
+
+    if (!itens.length) {
+      return res.json({ ok:true, imported: 0, local: localCodigo, data_posicao: dataISO, msg: 'Sem itens com saldo para este local.' });
+    }
+
+    // 3) UPSERT
+    const cli = await pool.connect();
+    try {
+      await cli.query('BEGIN');
+
+      await cli.query(
+        `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
+         VALUES ($1, $2, TRUE, now())
+         ON CONFLICT (local_codigo)
+         DO UPDATE SET nome = EXCLUDED.nome, ativo = TRUE, updated_at = now()`,
+        [localCodigo, 'Almoxarifado/Produção']
+      );
+
+      const upsertSQL = `
+        INSERT INTO omie_estoque_posicao (
+          data_posicao, ingested_at, local_codigo,
+          omie_prod_id, cod_int, codigo, descricao,
+          preco_unitario, saldo, cmc, pendente, estoque_minimo, reservado, fisico
+        ) VALUES (
+          $1::date, now(), $2,
+          $3, $4, $5, $6,
+          $7, $8, $9, $10, $11, $12, $13
+        )
+        ON CONFLICT ON CONSTRAINT uq_posicao_uni
+        DO UPDATE SET
+          descricao      = EXCLUDED.descricao,
+          preco_unitario = EXCLUDED.preco_unitario,
+          saldo          = EXCLUDED.saldo,
+          cmc            = EXCLUDED.cmc,
+          pendente       = EXCLUDED.pendente,
+          estoque_minimo = EXCLUDED.estoque_minimo,
+          reservado      = EXCLUDED.reservado,
+          fisico         = EXCLUDED.fisico,
+          ingested_at    = now()
+      `;
+
+      let count = 0;
+      for (const p of itens) {
+        await cli.query(upsertSQL, [
+          dataISO, localCodigo,
+          Number(p.nCodProd) || 0,
+          p.cCodInt || null,
+          p.cCodigo || '',
+          p.cDescricao || '',
+          clamp(p.nPrecoUnitario),
+          clamp(p.nSaldo),
+          clamp(p.nCMC),
+          clamp(p.nPendente),
+          clamp(p.estoque_minimo),
+          clamp(p.reservado),
+          clamp(p.fisico),
+        ]);
+        count++;
       }
+
+      await cli.query('COMMIT');
+      const ms = Date.now() - startedAt;
+      return res.json({ ok:true, imported: count, local: localCodigo, data_posicao: dataISO, ms });
+    } catch (e) {
+      await cli.query('ROLLBACK'); throw e;
+    } finally {
+      cli.release();
+    }
+  } catch (err) {
+    console.error('[almox sync] FAIL', err);
+    return res.status(500).json({ ok:false, error: String(err?.message || err) });
+  }
+});
+
+
+
+
+// ========== Produção ==========
+// Produção → só estoque atual do local e com saldo positivo
+
+
+app.post('/api/armazem/producao', express.json(), async (req, res) => {
+  try {
+    const local = String(req.query.local || req.body?.local || PRODUCAO_LOCAL_PADRAO);
+
+    const { rows } = await pool.query(`
+      SELECT
+        produto_codigo     AS codigo,
+        produto_descricao  AS descricao,
+        estoque_minimo     AS min,
+        fisico,
+        reservado,
+        saldo,
+        cmc
+      FROM v_almoxarifado_grid_atual
+      WHERE local = $1
+        AND COALESCE(saldo,0) > 0
+      ORDER BY codigo
+    `, [local]);
+
+    const dados = rows.map(r => ({
+      codigo   : r.codigo || '',
+      descricao: r.descricao || '',
+      min      : Number(r.min)       || 0,
+      fisico   : Number(r.fisico)    || 0,
+      reservado: Number(r.reservado) || 0,
+      saldo    : Number(r.saldo)     || 0,
+      cmc      : Number(r.cmc)       || 0,
+    }));
+
+    res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
+  } catch (err) {
+    console.error('[armazem/producao SQL]', err);
+    res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+// helpers locais deste bloco
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fetchWithTimeout = async (url, opts = {}, ms = 60000) => {
+  const ac = new AbortController();
+  const id = setTimeout(() => ac.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ac.signal }); }
+  finally { clearTimeout(id); }
+};
+
+app.post('/api/omie/produto', async (req, res) => {
+  try {
+    const data = await callOmieDedup(
+      'https://app.omie.com.br/api/v1/geral/produtos/',
+      {
+        call:       req.body.call,   // ex.: "ConsultarProduto"
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      req.body.param
+      },
+      { waitMs: 5000 }
+    );
+    return res.json(data);
+  } catch (err) {
+    console.error('[produto] erro →', err);
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message });
+  }
+});
+
+
+// ─── Rota para ConsultarCliente ───
+app.post('/api/omie/cliente', express.json(), async (req, res) => {
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/geral/clientes/',
+      {
+        call:       'ConsultarCliente',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      req.body.param
+      }
+    );
+    return res.json(data);
+  } catch (err) {
+    console.error('[cliente] erro →', err);
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message });
+  }
+});
+
+
+// ─── Rota para ConsultarPedido ───
+// ─── Rota para ConsultarPedido (com debug) ───
+app.post('/api/omie/pedido', express.json(), async (req, res) => {
+  console.log('[pedido] body recebido →', JSON.stringify(req.body, null, 2));
+  console.log('[pedido] chaves Omie →', OMIE_APP_KEY, OMIE_APP_SECRET ? 'OK' : 'MISSING');
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/produtos/pedido/',
+      {
+        call:       'ConsultarPedido',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      req.body.param
+      }
+    );
+    console.log('[pedido] resposta OMIE →', JSON.stringify(data, null, 2));
+    return res.json(data);
+  } catch (err) {
+    console.error('[pedido] erro ao chamar OMIE →', err.faultstring || err.message, err);
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message });
+  }
+});
+
+
+// ─── Proxy manual para ObterEstoqueProduto ───
+app.post('/api/omie/estoque/resumo', express.json(), async (req, res) => {
+  console.log('[server][estoque/resumo] req.body.param:', req.body.param);
+  try {
+    const data = await omieCall(
+      'https://app.omie.com.br/api/v1/estoque/resumo/',
+      {
+        call:       'ObterEstoqueProduto',
+        app_key:    OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param:      req.body.param
+      }
+    );
+    console.log('[server][estoque/resumo] OMIE respondeu:', data);
+    return res.json(data);
+  } catch (err) {
+    console.error('[server][estoque/resumo] ERRO →', err);
+    return res
+      .status(err.status || 500)
+      .json({ error: err.faultstring || err.message });
+  }
+});
+
+
+// server.js (ou onde você centraliza as rotas OMIE)
+
+// Rota para servir de proxy à chamada de PosicaoEstoque do OMIE
+app.post('/api/omie/estoque/consulta', express.json(), async (req, res) => {
+  console.log('[estoque/consulta] req.body →', JSON.stringify(req.body, null, 2));
+  try {
+    const omieResponse = await fetch('https://app.omie.com.br/api/v1/estoque/consulta/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
     });
-  });
-}
-
-
-// ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
-const PV_REGS_PER_PAGE = 200;
-const PRODUTOS_REGS_PER_PAGE = 500; // alinhar com uso via cURL/teste e reduzir chamadas
-
-async function omiePedidosListarPagina(pagina, filtros = {}) {
-  const app_key = process.env.OMIE_APP_KEY || OMIE_APP_KEY;
-  const app_secret = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
-  const payload = {
-    call: 'ListarPedidos',
-    app_key,
-    app_secret,
-    param: [{
-      pagina,
-      registros_por_pagina: PV_REGS_PER_PAGE,
-      ...(filtros.data_de  ? { data_previsao_de:  toOmieDate(filtros.data_de) }  : {}),
-      ...(filtros.data_ate ? { data_previsao_ate: toOmieDate(filtros.data_ate) } : {}),
-      ...(filtros.etapa    ? { etapa: String(filtros.etapa) }                     : {}) // <- AQUI
-    }]
-  };
-  return omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload);
-}
-
-async function omieProdutosListarPagina(pagina, filtros = {}) {
-  const app_key = process.env.OMIE_APP_KEY || OMIE_APP_KEY;
-  const app_secret = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
-  
-  // Log de depuração: confirma se as credenciais estão presentes
-  if (!app_key || !app_secret) {
-    console.error('[omieProdutosListarPagina] Credenciais ausentes:', { app_key: !!app_key, app_secret: !!app_secret });
-    throw new Error('OMIE_APP_KEY ou OMIE_APP_SECRET ausentes');
+    const text = await omieResponse.text();
+    console.log('[estoque/consulta] OMIE responded status', omieResponse.status, 'body:', text);
+    if (!omieResponse.ok) {
+      return res.status(omieResponse.status).send(text);
+    }
+    const json = JSON.parse(text);
+    return res.json(json);
+  } catch (err) {
+    console.error('[estoque/consulta] Erro ao chamar OMIE:', err);
+    // devolve o erro para o cliente para depuração
+    return res.status(err.status || 500).json({
+      error: err.faultstring || err.message,
+      stack: err.stack
+    });
   }
-  
-  const payload = {
-    call: 'ListarProdutos',
-    app_key,
-    app_secret,
-    param: [{
-      pagina,
-      registros_por_pagina: PRODUTOS_REGS_PER_PAGE,
-      apenas_importado_api: "N",
-      filtrar_apenas_omiepdv: "N"
-    }]
-  };
-  console.log('[omieProdutosListarPagina] Requisição iniciada:', { pagina, registros: PRODUTOS_REGS_PER_PAGE });
-  console.log('[omieProdutosListarPagina] Payload param:', payload.param[0]);
-  return omiePost('https://app.omie.com.br/api/v1/geral/produtos/', payload);
-}
+});
 
-// Consulta um único produto na Omie por codigo (texto) ou codigo_produto (numérico)
-async function omieProdutosConsultar({ codigo = null, codigo_produto = null }) {
-  const app_key = process.env.OMIE_APP_KEY || OMIE_APP_KEY;
-  const app_secret = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
-  if (!app_key || !app_secret) throw new Error('OMIE_APP_KEY/SECRET ausentes');
-  const param = [{}];
-  if (codigo_produto) {
-    // garantir numérico
-    param[0].codigo_produto = Number(codigo_produto);
-  } else if (codigo) {
-    param[0].codigo = String(codigo);
-  } else {
-    throw new Error('Forneça codigo ou codigo_produto');
+// server.js (dentro do seu IIFE, após as outras rotas OMIE)
+app.post(
+  '/api/omie/contatos-incluir',
+  express.json(),
+  async (req, res) => {
+    const usersFile = path.join(__dirname, 'data', 'users.json');
+
+    // 0) carrega lista local de usuários
+    let users = [];
+    try {
+      users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
+    } catch (e) {
+      // se falhar ao ler, considere vazio
+      users = [];
+    }
+
+    // 1) extrai o username que vai ser criado
+    const newUsername = req.body.identificacao.cCodInt;
+
+    // 2) verifica duplicidade local
+    if (users.some(u => u.username.toLowerCase() === newUsername.toLowerCase())) {
+      return res
+        .status(400)
+        .json({ error: `Já existe um usuário com o nome "${newUsername}".` });
+    }
+
+    try {
+      // 3) chama o OMIE para incluir o contato
+      const omieResult = await omieCall(
+        'https://app.omie.com.br/api/v1/crm/contatos/',
+        {
+          call:       'IncluirContato',
+          app_key:    OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param:      [ req.body ]
+        }
+      );
+
+      // 4) só se OMIE aprovou, insere no users.json
+      const newId = users.length
+        ? Math.max(...users.map(u => u.id)) + 1
+        : 1;
+
+      const plainPwd    = '123';
+      const passwordHash = bcrypt.hashSync(plainPwd, 10);
+
+      const { cNome, cSobrenome } = req.body.identificacao;
+      const fullName = `${cNome} ${cSobrenome || ''}`.trim();
+      const msn = [
+        `Seja bem vindo ao SIGFT (Sistema Integrado de Gestão FromTherm) ${fullName}, seja bem vindo.`
+      ];
+
+      users.push({
+        id:           newId,
+        username:     newUsername,
+        passwordHash,
+        roles:        [],
+        msn
+      });
+
+      fs.writeFileSync(usersFile, JSON.stringify(users, null, 2), 'utf8');
+
+      // 5) retorna sucesso
+      return res.json(omieResult);
+
+    } catch (err) {
+      console.error('[contatos-incluir] erro →', err);
+      return res
+        .status(err.status || 500)
+        .json({ error: err.faultstring || err.message });
+    }
   }
-  const payload = { call: 'ConsultarProduto', app_key, app_secret, param };
-  return omiePost('https://app.omie.com.br/api/v1/geral/produtos/', payload, 15000);
-}
+);
 
 // logo depois das outras rotas /api/omie/*
 app.post(
@@ -3371,6 +4607,9 @@ app.post(
   }
 );
 
+// PCP (estrutura a partir do SQL) — manter só um app.use para evitar execução duplicada
+app.use('/api/pcp', pcpEstruturaRoutes);
+
 
   app.post('/api/omie/familias', async (req, res) => {
     try {
@@ -3486,63 +4725,379 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
   // ——————————————————————————————
   // 3.4) Rotas de “malha” (estrutura de produto)
   // ——————————————————————————————
-  app.post('/api/malha', async (req, res) => {
-    try {
-      const result = await require('./routes/helpers/malhaEstrutura')(req.body);
-      res.json(result);
-    } catch (err) {
-      if (err.message.includes('Client-103') || err.message.includes('não encontrado')) {
-        return res.json({ itens: [] });
-      }
-      res.status(err.status || 500).json({ error: err.message });
-    }
-  });
+// app.post('/api/malha', async (req, res) => {
+//   try {
+//     const result = await require('./routes/helpers/malhaEstrutura')(req.body);
+//     res.json(result);
+//   } catch (err) {
+//     if (err.message.includes('Client-103') || err.message.includes('não encontrado')) {
+//       return res.json({ itens: [] });
+//     }
+//     res.status(err.status || 500).json({ error: err.message });
+//   }
+// });
 
-  app.post('/api/omie/malha', async (req, res) => {
-    try {
-      const data = await omieCall(
-        'https://app.omie.com.br/api/v1/geral/malha/',
-        {
-          call:       req.body.call,
-          app_key:    OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param:      req.body.param
-        }
-      );
-      res.json(data);
-    } catch (err) {
-      res.status(err.status || 500).json({ error: err.message });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/omie/malha → AGORA VEM DO SQL (sem Omie)
+// Aceita tanto cCodigo (código do produto) quanto intProduto.idProduto.
+// Monta um payload "tipo Omie" simplificado para o front engolir sem mudança.
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/omie/malha', express.json(), async (req, res) => {
+  try {
+    const param = (Array.isArray(req.body?.param) && req.body.param[0]) || {};
+    const cCodigo = param?.cCodigo || null;
+    const idProduto = param?.intProduto?.idProduto || param?.idProduto || null;
+
+    // 1) Descobrir código se vier só idProduto
+    let codigo = cCodigo;
+    let ident = { idProduto: null, codProduto: null, descrProduto: null, unidProduto: null };
+
+    if (!codigo && idProduto) {
+      const { rows } = await dbQuery(`
+        SELECT codigo AS cod, descricao AS descr, unidade AS un, codigo_produto AS id
+        FROM public.produtos_omie
+        WHERE codigo_produto = $1
+        LIMIT 1;
+      `, [idProduto]);
+      if (!rows.length) return res.json({ ident: null, itens: [], source: 'sql' });
+      codigo = rows[0].cod;
+      ident = { idProduto: rows[0].id, codProduto: codigo, descrProduto: rows[0].descr, unidProduto: rows[0].un };
     }
-  });
+
+    // 2) Se vier com código, preencher ident
+    if (codigo && !ident.codProduto) {
+      const { rows } = await dbQuery(`
+        SELECT codigo_produto AS id, codigo AS cod, descricao AS descr, unidade AS un
+        FROM public.produtos_omie
+        WHERE codigo = $1
+        LIMIT 1;
+      `, [codigo]);
+      if (rows.length) {
+        ident = { idProduto: rows[0].id, codProduto: rows[0].cod, descrProduto: rows[0].descr, unidProduto: rows[0].un };
+      } else {
+        ident = { idProduto: null, codProduto: codigo, descrProduto: null, unidProduto: null };
+      }
+    }
+
+    if (!codigo) {
+      res.set('Cache-Control', 'no-store');
+      return res.json({ ident, itens: [], source: 'sql' });
+    }
+
+    // 3) Buscar estrutura no SQL, tentando views mais novas → antigas → tabelas
+    const lookupMatrix = [
+      {
+        tag: 'view_v3',
+        sql: `
+          SELECT comp_codigo, comp_descricao, comp_unid, comp_qtd, comp_operacao, comp_destino, custo_real
+          FROM public.vw_estrutura_para_front_v3
+          WHERE pai_cod_produto = $1 OR CAST(pai_cod_produto AS TEXT) = $1
+          ORDER BY comp_descricao NULLS LAST, comp_codigo
+        `,
+        map: (r) => ({
+          cod_item: r.comp_codigo,
+          desc_item: r.comp_descricao,
+          unid_item: r.comp_unid,
+          quantidade: r.comp_qtd,
+          operacao: r.comp_operacao || r.comp_destino || null,
+          custo_real: r.custo_real ?? null,
+        }),
+      },
+      {
+        tag: 'view_v2',
+        sql: `
+          SELECT comp_codigo, comp_descricao, comp_unid, comp_qtd, comp_operacao, custo_real
+          FROM public.vw_estrutura_para_front_v2
+          WHERE pai_cod_produto = $1 OR CAST(pai_cod_produto AS TEXT) = $1
+          ORDER BY comp_descricao NULLS LAST, comp_codigo
+        `,
+        map: (r) => ({
+          cod_item: r.comp_codigo,
+          desc_item: r.comp_descricao,
+          unid_item: r.comp_unid,
+          quantidade: r.comp_qtd,
+          operacao: r.comp_operacao || null,
+          custo_real: r.custo_real ?? null,
+        }),
+      },
+      {
+        tag: 'view_v1',
+        sql: `
+          SELECT comp_codigo, comp_descricao, comp_unid, comp_qtd, comp_operacao, custo_real
+          FROM public.vw_estrutura_para_front
+          WHERE pai_cod_produto = $1 OR CAST(pai_cod_produto AS TEXT) = $1
+          ORDER BY comp_descricao NULLS LAST, comp_codigo
+        `,
+        map: (r) => ({
+          cod_item: r.comp_codigo,
+          desc_item: r.comp_descricao,
+          unid_item: r.comp_unid,
+          quantidade: r.comp_qtd,
+          operacao: r.comp_operacao || null,
+          custo_real: r.custo_real ?? null,
+        }),
+      },
+      {
+        tag: 'tabelas',
+        sql: `
+          SELECT
+            COALESCE(i.cod_prod_malha, (i.id_prod_malha)::text, i.int_prod_malha) AS comp_codigo,
+            i.descr_prod_malha                                                   AS comp_descricao,
+            i.unid_prod_malha                                                    AS comp_unid,
+            i.quant_prod_malha                                                   AS comp_qtd,
+            NULLIF(COALESCE(i.operacao, i.comp_operacao, i.obs_prod_malha), '')  AS comp_operacao,
+            i.custo_real                                                         AS custo_real,
+            i.int_prod_malha                                                     AS int_prod_malha,
+            i.int_malha                                                          AS int_malha
+          FROM public.omie_estrutura_item i
+          JOIN public.omie_estrutura e ON e.id = i.parent_id
+          WHERE e.cod_produto = $1 OR e.cod_produto::text = $1
+          ORDER BY i.descr_prod_malha NULLS LAST, comp_codigo
+        `,
+        map: (r) => ({
+          cod_item: r.comp_codigo,
+          desc_item: r.comp_descricao,
+          unid_item: r.comp_unid,
+          quantidade: r.comp_qtd,
+          operacao: r.comp_operacao || null,
+          custo_real: r.custo_real ?? null,
+          int_prod_malha: r.int_prod_malha || null,
+          int_malha: r.int_malha || null,
+        }),
+      },
+    ];
+
+    let itensSql = [];
+    for (const attempt of lookupMatrix) {
+      try {
+        const { rows } = await dbQuery(attempt.sql, [codigo]);
+        if (rows?.length) {
+          itensSql = rows.map(attempt.map);
+          break;
+        }
+      } catch (e) {
+        // tenta próxima opção
+      }
+    }
+
+    // 4) Montar payload compatível (simplificado) com o que o front já consome
+    const payload = {
+      ident,
+      itens: itensSql
+        .filter(r => r.cod_item != null)
+        .map((r, i) => {
+          const codigoItem = r.cod_item != null ? String(r.cod_item) : null;
+          const descricaoItem = r.desc_item != null ? String(r.desc_item) : null;
+          const unidadeItem = r.unid_item ? String(r.unid_item) : 'UN';
+          const quantidadeRaw = r.quantidade;
+          const quantidadeNum = quantidadeRaw == null ? null : Number(quantidadeRaw);
+        const operacao = r.operacao || null;
+        const custoReal = r.custo_real != null ? Number(r.custo_real) : null;
+        const intProdMalha = r.int_prod_malha ? String(r.int_prod_malha) : null;
+        const intMalha = r.int_malha ? String(r.int_malha) : null;
+
+        return {
+          pos: i + 1,
+          codigo: codigoItem,
+          descricao: descricaoItem,
+          unidade: unidadeItem,
+          quantidade: quantidadeNum,
+          operacao,
+          codProdMalha: codigoItem,
+          descrProdMalha: descricaoItem,
+          unidProdMalha: unidadeItem,
+          quantProdMalha: quantidadeNum,
+          compOperacao: operacao,
+          custoReal,
+          intProdMalha,
+          intMalha
+        };
+      }),
+      source: 'sql'
+    };
+
+    // nada de Omie aqui, então nenhum [omieCall] vai aparecer
+    res.set('Cache-Control', 'no-store');
+    return res.json(payload);
+  } catch (err) {
+    console.error('[server][malha/sql] erro:', err);
+    return res.status(500).json({ error: 'Falha ao consultar estrutura (SQL).' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Proxy direto para OMIE (geral/malha) SOMENTE para chamadas específicas.
+// NÃO usa SQL; serve para ConsultarEstrutura / ExcluirEstrutura / AlterarEstrutura / IncluirEstrutura.
+// Front chama: POST /api/omie/malha/call  { call, param: [ {...} ] }
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/api/omie/malha/call', express.json(), async (req, res) => {
+  try {
+    const { call, param } = req.body || {};
+    if (!call || !Array.isArray(param)) {
+      return res.status(400).json({ ok:false, error: 'Envie { call, param }' });
+    }
+
+    // 🔴 AGORA permitimos também AlterarEstrutura e IncluirEstrutura
+    const ALLOW = new Set(['ConsultarEstrutura', 'ExcluirEstrutura', 'AlterarEstrutura', 'IncluirEstrutura']);
+    if (!ALLOW.has(call)) {
+      return res.status(400).json({ ok:false, error: `Método não permitido: ${call}` });
+    }
+
+    const omieCall = require('./utils/omieCall');
+    const payload = {
+      call,
+      app_key   : process.env.OMIE_APP_KEY,
+      app_secret: process.env.OMIE_APP_SECRET,
+      param
+    };
+
+    const json = await omieCall('https://app.omie.com.br/api/v1/geral/malha/', payload);
+
+    // OMIE pode retornar { faultstring, faultcode } em 200; preserve isso
+    if (json?.faultstring) {
+      return res.status(400).json(json);
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(json);
+  } catch (err) {
+    console.error('[server][omie/malha/call][ERR]', err);
+    return res.status(err.status || 500).json({ ok:false, error: err.message || 'Falha ao chamar OMIE' });
+  }
+});
+
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+// Resolve o ID OMIE do produto (para usar como idProdMalha / idProduto)
+// usando as fontes na ORDEM especificada pelo usuário:
+//
+//  1) public.produtos_omie
+//       - código → codigo_produto
+//       - codigo_produto_integracao → codigo_produto
+//  2) public.omie_estrutura
+//       - int_produto | cod_produto → id_produto
+//  3) public.omie_malha_cab
+//       - produto_codigo → produto_id
+//  4) public.omie_estoque_posicao
+//       - codigo → omie_prod_id
+//
+// Retorno: { ok:true, codigo, codigo_produto, origem }
+//
+// OBS: não dá 500 se não achar; retorna 404 com mensagem clara.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/sql/produto-id/:codigo', async (req, res) => {
+  const { codigo } = req.params;
+  const client = await pool.connect();
+
+  try {
+    // 1) produtos_omie
+    {
+      const r = await client.query(`
+        SELECT codigo::text AS codigo,
+               codigo_produto::bigint AS id,
+               'public.produtos_omie(codigo→codigo_produto)' AS origem
+        FROM public.produtos_omie
+        WHERE codigo = $1
+        UNION ALL
+        SELECT codigo_produto_integracao::text AS codigo,
+               codigo_produto::bigint AS id,
+               'public.produtos_omie(codigo_produto_integracao→codigo_produto)' AS origem
+        FROM public.produtos_omie
+        WHERE codigo_produto_integracao = $1
+        LIMIT 1;
+      `, [codigo]);
+
+      if (r.rowCount) {
+        const row = r.rows[0];
+        return res.json({ ok: true, codigo: row.codigo, codigo_produto: Number(row.id), origem: row.origem });
+      }
+    }
+
+    // 2) omie_estrutura (int_produto | cod_produto → id_produto)
+    {
+      const r = await client.query(`
+        SELECT int_produto::text AS codigo, id_produto::bigint AS id,
+               'public.omie_estrutura(int_produto→id_produto)' AS origem
+        FROM public.omie_estrutura
+        WHERE int_produto = $1
+        UNION ALL
+        SELECT cod_produto::text AS codigo, id_produto::bigint AS id,
+               'public.omie_estrutura(cod_produto→id_produto)' AS origem
+        FROM public.omie_estrutura
+        WHERE cod_produto = $1
+        LIMIT 1;
+      `, [codigo]);
+
+      if (r.rowCount) {
+        const row = r.rows[0];
+        return res.json({ ok: true, codigo: row.codigo, codigo_produto: Number(row.id), origem: row.origem });
+      }
+    }
+
+    // 3) omie_malha_cab (produto_codigo → produto_id)
+    {
+      const r = await client.query(`
+        SELECT produto_codigo::text AS codigo, produto_id::bigint AS id,
+               'public.omie_malha_cab(produto_codigo→produto_id)' AS origem
+        FROM public.omie_malha_cab
+        WHERE produto_codigo = $1
+        LIMIT 1;
+      `, [codigo]);
+
+      if (r.rowCount) {
+        const row = r.rows[0];
+        return res.json({ ok: true, codigo: row.codigo, codigo_produto: Number(row.id), origem: row.origem });
+      }
+    }
+
+    // 4) omie_estoque_posicao (codigo → omie_prod_id)
+    {
+      const r = await client.query(`
+        SELECT codigo::text AS codigo, omie_prod_id::bigint AS id,
+               'public.omie_estoque_posicao(codigo→omie_prod_id)' AS origem
+        FROM public.omie_estoque_posicao
+        WHERE codigo = $1
+        LIMIT 1;
+      `, [codigo]);
+
+      if (r.rowCount) {
+        const row = r.rows[0];
+        return res.json({ ok: true, codigo: row.codigo, codigo_produto: Number(row.id), origem: row.origem });
+      }
+    }
+
+    // nada encontrado
+    return res.status(404).json({
+      ok: false,
+      error: `ID não encontrado para "${codigo}" nas tabelas mapeadas.`
+    });
+  } catch (err) {
+    console.error('[SQL][produto-id][ERR]', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao procurar ID do produto no SQL.' });
+  } finally {
+    client.release();
+  }
+});
+
 
 
 // dentro do seu IIFE, logo após:
 //   app.post('/api/omie/malha', …)
 // e antes de: app.use('/api/malha/consultar', malhaConsultar);
-app.post(
-  '/api/omie/estrutura',
-  express.json(),
-  async (req, res) => {
-    try {
-      // chama o OMIE /geral/malha/ com call=ConsultarEstrutura
-      const data = await omieCall(
-        'https://app.omie.com.br/api/v1/geral/malha/',
-        {
-          call:       'ConsultarEstrutura',
-          app_key:    OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param:      req.body.param
-        }
-      );
-      return res.json(data);
-    } catch (err) {
-      console.error('[estrutura] erro →', err.faultstring || err.message);
-      return res
-        .status(err.status || 500)
-        .json({ error: err.faultstring || err.message });
-    }
-  }
-);
+// app.post('/api/omie/estrutura', express.json(), async (req, res) => {
+//   try {
+//     const data = await omieCall(
+//       'https://app.omie.com.br/api/v1/geral/malha/',
+//       { call: 'ConsultarEstrutura', app_key: OMIE_APP_KEY, app_secret: OMIE_APP_SECRET, param: req.body.param }
+//     );
+//     return res.json(data);
+//   } catch (err) {
+//     console.error('[estrutura] erro →', err.faultstring || err.message);
+//     return res.status(err.status || 500).json({ error: err.faultstring || err.message });
+//   }
+// });
+
 
 
 
@@ -3840,8 +5395,20 @@ if (conteudo?.endsWith('_7E')) {
 });
 
 app.get('/api/preparacao/listar', async (req, res) => {
+  const normalizarStatus = (valor) => {
+    const t = String(valor ?? '').trim().toLowerCase();
+    if (!t) return null;
+    if (t === 'a produzir' || t === 'fila de produção' || t === 'fila de producao') return 'A Produzir';
+    if (t === 'produzindo' || t === 'em produção' || t === 'em producao') return 'Produzindo';
+    if (t === 'teste 1' || t === 'teste1') return 'teste 1';
+    if (t === 'teste final' || t === 'testefinal') return 'teste final';
+    if (t === 'produzido') return 'Produzido';
+    if (t === 'concluido' || t === 'concluído' || t === '60' || t === '80') return 'concluido';
+    return null;
+  };
+
   try {
-    // garante a tabela de overlay
+    // garante a tabela de overlay (legado ainda utilizado em outros fluxos)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS public.op_status_overlay (
         op         text PRIMARY KEY,
@@ -3850,30 +5417,37 @@ app.get('/api/preparacao/listar', async (req, res) => {
       )
     `);
 
-    // status_raw = overlay → op_status → view
     const { rows } = await pool.query(`
-      WITH src AS (
+      WITH ranked AS (
         SELECT
-          v.op,
-          v.c_cod_int_prod AS produto_codigo,
-          COALESCE(ov.status, os.status, v.kanban_coluna) AS status_raw
-        FROM public.kanban_preparacao_view v
-        LEFT JOIN public.op_status_overlay ov ON ov.op = v.op
-        LEFT JOIN public.op_status        os ON os.op = v.op
+          TRIM(UPPER(e.numero_op))        AS numero_op,
+          TRIM(UPPER(e.codigo_produto))   AS codigo_produto,
+          NULLIF(TRIM(e.etapa), '')       AS etapa,
+          e.data_impressao,
+          e.data_criacao,
+          e.id,
+          ROW_NUMBER() OVER (
+            PARTITION BY TRIM(UPPER(e.numero_op)), TRIM(UPPER(e.codigo_produto))
+            ORDER BY
+              COALESCE(e.data_impressao, e.data_criacao) DESC NULLS LAST,
+              e.id DESC
+          ) AS rn
+  FROM "OrdemProducao".tab_op e
+        WHERE UPPER(e.local_impressao) IN (
+          'QUADRO ELÉTRICO',
+          'QUADRO ELETRICO'
+        )
       )
-      SELECT DISTINCT
-        op,
-        produto_codigo,
-        CASE
-          WHEN lower(status_raw) IN ('a produzir','fila de produção','fila de producao')      THEN 'A Produzir'
-          WHEN lower(status_raw) IN ('produzindo','em produção','em producao','30')           THEN 'Produzindo'
-          WHEN lower(status_raw) IN ('teste 1','teste1')                                       THEN 'teste 1'
-          WHEN lower(status_raw) IN ('teste final','testefinal')                               THEN 'teste final'
-          WHEN lower(status_raw) IN ('concluido','concluído','60','80')                        THEN 'concluido'
-          ELSE status_raw
-        END AS status
-      FROM src
-      ORDER BY status, op
+      SELECT
+        r.numero_op,
+        r.codigo_produto,
+        r.etapa,
+        r.data_impressao,
+        ov.status AS overlay_status
+      FROM ranked r
+      LEFT JOIN public.op_status_overlay ov ON ov.op = r.numero_op
+      WHERE r.rn = 1
+      ORDER BY r.numero_op
     `);
 
     const data = {
@@ -3881,12 +5455,55 @@ app.get('/api/preparacao/listar', async (req, res) => {
       'Produzindo':  [],
       'teste 1':     [],
       'teste final': [],
-      'concluido':   []
+      'Produzido':   []
     };
 
-    for (const r of rows) {
-      if (!data[r.status]) data[r.status] = [];
-      data[r.status].push({ op: r.op, produto_codigo: r.produto_codigo });
+    for (const row of rows) {
+      const op = row.numero_op;
+      const produtoCodigo = row.codigo_produto;
+      if (!op || !produtoCodigo) continue;
+
+      let status = normalizarStatus(row.overlay_status);
+      const etapaNorm = normalizarStatus(row.etapa);
+
+      if (!status) {
+        status = etapaNorm;
+      }
+
+      if (!status && (!row.etapa || row.etapa === '') && row.data_impressao) {
+        status = 'A Produzir';
+      }
+
+      if (!status) continue;
+
+      if (status === 'A Produzir') {
+        // Requisito: etapa vazia e data_impressao preenchida
+        if (row.data_impressao && (!row.etapa || row.etapa === '')) {
+          data['A Produzir'].push({ op, produto_codigo: produtoCodigo });
+        }
+        continue;
+      }
+
+      if (status === 'Produzindo') {
+        data['Produzindo'].push({ op, produto_codigo: produtoCodigo });
+        continue;
+      }
+
+      if (status === 'Produzido') {
+        data['Produzido'].push({ op, produto_codigo: produtoCodigo });
+        continue;
+      }
+
+      if (status === 'concluido') {
+        if (etapaNorm === 'Produzido') {
+          data['Produzido'].push({ op, produto_codigo: produtoCodigo });
+        }
+        continue;
+      }
+
+      if (data[status]) {
+        data[status].push({ op, produto_codigo: produtoCodigo });
+      }
     }
 
     res.json({ mode: 'pg', data });
@@ -3896,7 +5513,361 @@ app.get('/api/preparacao/listar', async (req, res) => {
   }
 });
 
+app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
+  const opBruta       = String(req.body?.op || '').trim();
+  const produtoCodigo = String(req.body?.produtoCodigo || '').trim();
 
+  if (!opBruta || !produtoCodigo) {
+    return res.status(400).json({ ok: false, error: 'Parâmetros op e produtoCodigo obrigatórios.' });
+  }
+
+  const opUpper = opBruta.toUpperCase();
+  const versaoMatch = opUpper.match(/-V(\d+)(C\d+)?$/);
+  const versaoNumero = versaoMatch ? Number.parseInt(versaoMatch[1], 10) : null;
+  const sufixoCustom = versaoMatch && versaoMatch[2] ? versaoMatch[2].toUpperCase() : null;
+
+  const client = await pool.connect();
+  try {
+    const normalizadoCodigo = produtoCodigo.trim();
+
+    const { rows: cabRows } = await client.query(
+      `
+        SELECT id, COALESCE(versao,1) AS versao, cod_produto
+          FROM public.omie_estrutura
+         WHERE TRIM(UPPER(cod_produto)) = TRIM(UPPER($1))
+         ORDER BY versao DESC, updated_at DESC NULLS LAST, id DESC
+      `,
+      [normalizadoCodigo]
+    );
+
+    const parentIdBase = cabRows?.[0]?.id || null;
+    let cabSelecionada = null;
+    if (versaoNumero != null) {
+      cabSelecionada = cabRows.find(r => Number(r.versao) === versaoNumero) || null;
+    }
+    if (!cabSelecionada && cabRows.length) {
+      cabSelecionada = cabRows[0];
+    }
+
+    let itens = [];
+    let origem = null;
+    let versaoUtilizada = cabSelecionada ? Number(cabSelecionada.versao || versaoNumero || 1) : (versaoNumero || 1);
+
+    if (cabSelecionada) {
+      const { rows } = await client.query(
+        `
+          SELECT
+            id,
+            parent_id,
+            cod_prod_malha,
+            descr_prod_malha,
+            quant_prod_malha,
+            unid_prod_malha,
+            operacao,
+            perc_perda_prod_malha
+          FROM public.omie_estrutura_item
+          WHERE parent_id = $1
+          ORDER BY cod_prod_malha, descr_prod_malha
+        `,
+        [cabSelecionada.id]
+      );
+      itens = rows;
+      origem = 'omie_estrutura_item';
+    }
+
+    if ((!itens || itens.length === 0) && parentIdBase && versaoNumero != null) {
+      const { rows } = await client.query(
+        `
+          SELECT
+            id,
+            parent_id,
+            cod_prod_malha,
+            descr_prod_malha,
+            quant_prod_malha,
+            unid_prod_malha,
+            operacao,
+            perc_perda_prod_malha
+          FROM public.omie_estrutura_item_versao
+          WHERE parent_id = $1
+            AND versao = $2
+          ORDER BY cod_prod_malha, descr_prod_malha
+        `,
+        [parentIdBase, versaoNumero]
+      );
+      if (rows && rows.length) {
+        itens = rows;
+        origem = 'omie_estrutura_item_versao';
+        versaoUtilizada = versaoNumero;
+      }
+    }
+
+    if (!itens || itens.length === 0) {
+      return res.json({
+        ok: true,
+        itens: [],
+        meta: {
+          versao: versaoUtilizada,
+          custom_suffix: sufixoCustom,
+          origem: null,
+          personalizacoes: [],
+          produto_codigo: normalizadoCodigo
+        }
+      });
+    }
+
+    const estruturaBase = itens.map(row => {
+      const codigoBase = (row.cod_prod_malha || '').trim();
+      return {
+        codigo_original: codigoBase,
+        codigo: codigoBase,
+        descricao: (row.descr_prod_malha || '').trim(),
+        unidade: (row.unid_prod_malha || '').trim(),
+        quantidade: Number(row.quant_prod_malha || 0),
+        operacao: (row.operacao || '').trim(),
+        perc_perda: Number(row.perc_perda_prod_malha || 0),
+        customizado: false,
+        personalizacao_id: null,
+        substituido_por: null,
+        quantidade_personalizada: null
+      };
+    });
+
+    let personalizacaoIds = [];
+    if (sufixoCustom) {
+      const { rows: persRows } = await client.query(
+        `
+        SELECT id
+          FROM public.pcp_personalizacao
+         WHERE TRIM(UPPER(numero_referencia)) = TRIM(UPPER($1))
+         ORDER BY id
+        `,
+        [opUpper]
+      );
+      personalizacaoIds = persRows.map(r => Number(r.id));
+      if (personalizacaoIds.length) {
+        const { rows: itensPers } = await client.query(
+          `
+            SELECT
+              personalizacao_id,
+              codigo_original,
+              codigo_trocado,
+              descricao_original,
+              descricao_trocada,
+              quantidade
+            FROM public.pcp_personalizacao_item
+            WHERE personalizacao_id = ANY($1::bigint[])
+          `,
+          [personalizacaoIds]
+        );
+
+        const normalizaCodigo = (val) => (val || '').trim().toUpperCase();
+        itensPers.forEach(pi => {
+          const originalKey = normalizaCodigo(pi.codigo_original);
+          if (!originalKey) return;
+          const idx = estruturaBase.findIndex(item => normalizaCodigo(item.codigo_original) === originalKey);
+          if (idx >= 0) {
+            const alvo = estruturaBase[idx];
+            const codigoNovo = (pi.codigo_trocado || '').trim();
+            const descricaoNova = (pi.descricao_trocada || '').trim();
+            alvo.customizado = true;
+            alvo.personalizacao_id = Number(pi.personalizacao_id);
+            alvo.substituido_por = codigoNovo || null;
+            if (codigoNovo) alvo.codigo = codigoNovo;
+            if (descricaoNova) alvo.descricao = descricaoNova;
+            if (pi.quantidade != null) {
+              const qtdPersonalizada = Number(pi.quantidade);
+              if (!Number.isNaN(qtdPersonalizada)) {
+                alvo.quantidade_personalizada = qtdPersonalizada;
+                alvo.quantidade = qtdPersonalizada;
+              }
+            }
+          } else {
+            const codigoNovo = (pi.codigo_trocado || '').trim();
+            estruturaBase.push({
+              codigo_original: (pi.codigo_original || '').trim(),
+              codigo: codigoNovo || (pi.codigo_original || '').trim(),
+              descricao: (pi.descricao_trocada || pi.descricao_original || '').trim(),
+              unidade: '',
+              quantidade: pi.quantidade != null ? Number(pi.quantidade) : 0,
+              operacao: '',
+              perc_perda: 0,
+              customizado: true,
+              personalizacao_id: Number(pi.personalizacao_id),
+              substituido_por: codigoNovo || null,
+              quantidade_personalizada: pi.quantidade != null ? Number(pi.quantidade) : null
+            });
+          }
+        });
+      }
+    }
+
+    res.json({
+      ok: true,
+      itens: estruturaBase,
+      meta: {
+        versao: versaoUtilizada,
+        custom_suffix: sufixoCustom,
+        origem,
+        personalizacoes: personalizacaoIds,
+        produto_codigo: normalizadoCodigo
+      }
+    });
+  } catch (err) {
+    console.error('[preparacao][estrutura_por_op] erro:', err);
+    res.status(500).json({ ok: false, error: 'Falha ao montar estrutura do produto.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/etiquetas/op/:op/etapa', express.json(), async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  const etapa = String(req.body?.etapa || '').trim();
+  const produtoCodigoRaw = req.body?.produto_codigo;
+  const produtoCodigo = produtoCodigoRaw ? String(produtoCodigoRaw).trim().toUpperCase() : null;
+
+  if (!op || !etapa) {
+    return res.status(400).json({ ok: false, error: 'Informe OP e etapa.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+    `SELECT DISTINCT TRIM(UPPER(codigo_produto)) AS codigo_produto
+      FROM "OrdemProducao".tab_op
+        WHERE TRIM(UPPER(numero_op)) = $1` ,
+      [op]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, reason: 'op_nao_encontrada' });
+    }
+
+    if (produtoCodigo) {
+      const hasMatch = rows.some(r => (r.codigo_produto || '') === produtoCodigo);
+      if (!hasMatch) {
+        return res.status(409).json({ ok: false, reason: 'produto_mismatch' });
+      }
+    }
+
+    const params = produtoCodigo ? [etapa, op, produtoCodigo] : [etapa, op];
+    const sql = produtoCodigo
+      ? `UPDATE "OrdemProducao".tab_op
+            SET etapa = $1
+          WHERE TRIM(UPPER(numero_op)) = $2
+            AND TRIM(UPPER(codigo_produto)) = $3`
+      : `UPDATE "OrdemProducao".tab_op
+            SET etapa = $1
+          WHERE TRIM(UPPER(numero_op)) = $2`;
+
+    const up = await client.query(sql, params);
+    return res.json({ ok: true, updated: up.rowCount });
+  } catch (err) {
+    console.error('[etiquetas][set etapa]', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao atualizar etapa.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/etiquetas/op/:op/reativar', express.json(), async (req, res) => {
+  const op = String(req.params.op || '').trim().toUpperCase();
+  const produtoCodigoRaw = req.body?.produto_codigo;
+  const produtoCodigo = produtoCodigoRaw ? String(produtoCodigoRaw).trim().toUpperCase() : null;
+
+  if (!op) {
+    return res.status(400).json({ ok: false, error: 'Informe a OP.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+    `SELECT DISTINCT TRIM(UPPER(codigo_produto)) AS codigo_produto
+      FROM "OrdemProducao".tab_op
+        WHERE TRIM(UPPER(numero_op)) = $1`,
+      [op]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, reason: 'op_nao_encontrada' });
+    }
+
+    if (produtoCodigo) {
+      const hasMatch = rows.some(r => (r.codigo_produto || '') === produtoCodigo);
+      if (!hasMatch) {
+        return res.status(409).json({ ok: false, reason: 'produto_mismatch' });
+      }
+    }
+
+    const sql = produtoCodigo
+  ? `UPDATE "OrdemProducao".tab_op
+            SET etapa = NULL,
+                data_impressao = NULL,
+                impressa = FALSE
+          WHERE TRIM(UPPER(numero_op)) = $1
+            AND TRIM(UPPER(codigo_produto)) = $2`
+  : `UPDATE "OrdemProducao".tab_op
+            SET etapa = NULL,
+                data_impressao = NULL,
+                impressa = FALSE
+          WHERE TRIM(UPPER(numero_op)) = $1`;
+
+    const params = produtoCodigo ? [op, produtoCodigo] : [op];
+    const up = await client.query(sql, params);
+    return res.json({ ok: true, updated: up.rowCount });
+  } catch (err) {
+    console.error('[etiquetas][reativar]', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao reativar OP.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/etiquetas/op/etapas', express.json(), async (req, res) => {
+  let ops = req.body?.ops;
+  if (typeof ops === 'string') ops = [ops];
+  if (!Array.isArray(ops)) ops = [];
+
+  const wanted = [...new Set(ops.map(op => String(op || '').trim().toUpperCase()).filter(Boolean))];
+  if (!wanted.length) {
+    return res.json({ ok: true, data: {} });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+      WITH ranked AS (
+        SELECT
+          TRIM(UPPER(numero_op)) AS numero_op,
+          etapa,
+          ROW_NUMBER() OVER (
+            PARTITION BY TRIM(UPPER(numero_op))
+            ORDER BY (etapa IS NULL) ASC,
+                     data_impressao DESC NULLS LAST,
+                     data_criacao  DESC NULLS LAST,
+                     id DESC
+          ) AS rn
+  FROM "OrdemProducao".tab_op
+        WHERE TRIM(UPPER(numero_op)) = ANY($1)
+      )
+      SELECT numero_op, etapa
+        FROM ranked
+       WHERE rn = 1
+      `,
+      [wanted]
+    );
+
+    const map = {};
+    rows.forEach(r => {
+      map[r.numero_op] = r.etapa != null ? String(r.etapa).trim() : null;
+    });
+
+    return res.json({ ok: true, data: map });
+  } catch (err) {
+    console.error('[etiquetas][etapas]', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao consultar etapas.' });
+  }
+});
 
 
 // Comercial: lista itens por coluna a partir do Postgres
@@ -3917,9 +5888,9 @@ app.get('/api/kanban/comercial/listar', async (req, res) => {
     `);
 
     const data = {
-      'Pedido aprovado'     : [],
-      'Separação logística' : [],
-      'Fila de produção'    : []
+      'Pedido aprovado'    : [],
+      'Aguardando prazo'   : [],
+      'Fila de produção'   : []
     };
 
     for (const r of rows) {
@@ -4003,34 +5974,131 @@ ensureOverlayTable()
   .catch(err => console.warn('[db] overlay: falha ao garantir tabela:', err?.message || err));
 
 
+// ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
+const PV_REGS_PER_PAGE = 200;
+
+async function omiePedidosListarPagina(pagina, filtros = {}) {
+  const payload = {
+    call: 'ListarPedidos',
+    app_key: process.env.OMIE_APP_KEY,
+    app_secret: process.env.OMIE_APP_SECRET,
+    param: [{
+      pagina,
+      registros_por_pagina: PV_REGS_PER_PAGE,
+      ...(filtros.data_de  ? { data_previsao_de:  toOmieDate(filtros.data_de) }  : {}),
+      ...(filtros.data_ate ? { data_previsao_ate: toOmieDate(filtros.data_ate) } : {}),
+      ...(filtros.etapa    ? { etapa: String(filtros.etapa) }                     : {}) // <- AQUI
+    }]
+  };
+  return omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload);
+}
+
+
 // ====== COMERCIAL: leitura do Kanban (somente "Pedido aprovado" = etapa 80)
 app.get('/api/comercial/pedidos/kanban', async (req, res) => {
   try {
-// substitua a query da rota /api/comercial/pedidos/kanban por esta:
-const r = await pool.query(`
-  SELECT
-    p.codigo_pedido,
-    p.numero_pedido,
-    p.numero_pedido_cliente,
-    p.codigo_cliente,
-    p.etapa,
-    p.data_previsao,                                -- date “cru”
-    to_char(p.data_previsao, 'DD/MM/YYYY') AS data_previsao_br, -- pronto p/ tela
-    p.valor_total_pedido,
-    i.seq,
-    i.codigo        AS produto_codigo_txt,
-    i.descricao     AS produto_descricao,
-    i.quantidade,
-    i.unidade
-  FROM public.pedidos_venda p
-  LEFT JOIN public.pedidos_venda_itens i
-    ON i.codigo_pedido = p.codigo_pedido
-  WHERE p.etapa = '80'
-  ORDER BY p.data_previsao NULLS LAST, p.codigo_pedido DESC, i.seq ASC
-  LIMIT 500
-`);
-return res.json({ ok:true, colunas: { "Pedido aprovado": r.rows } });
+    const [aprovados, aguardando, fila, excluidos] = await Promise.all([
+      pool.query(`
+        SELECT
+          i.codigo_pedido,
+          i.codigo            AS produto_codigo,
+          i.descricao         AS produto_descricao,
+          i.quantidade,
+          i.unidade,
+          p.numero_pedido,
+          p.numero_pedido_cliente,
+          p.codigo_cliente,
+          p.data_previsao,
+          to_char(p.data_previsao, 'DD/MM/YYYY') AS data_previsao_br
+        FROM public.pedidos_venda_itens i
+        JOIN public.pedidos_venda p
+          ON p.codigo_pedido = i.codigo_pedido
+        WHERE p.etapa = '80'
+        ORDER BY
+          upper(i.codigo) ASC NULLS LAST,
+          p.data_previsao ASC NULLS LAST,
+          p.numero_pedido ASC
+        LIMIT 2000
+      `),
+      pool.query(`
+        SELECT
+          id,
+          numero_op,
+          codigo_produto,
+          tipo_etiqueta,
+          local_impressao,
+          data_criacao,
+          data_impressao,
+          impressa,
+          usuario_criacao,
+          etapa
+  FROM "OrdemProducao".tab_op
+        WHERE tipo_etiqueta = 'Aguardando prazo'
+          AND (impressa IS DISTINCT FROM TRUE)
+          AND data_impressao IS NULL
+          AND (etapa IS NULL OR lower(etapa) NOT IN ('excluido','excluído'))
+        ORDER BY
+          upper(local_impressao) ASC NULLS LAST,
+          upper(codigo_produto)  ASC NULLS LAST,
+          data_criacao           ASC,
+          id                     ASC
+        LIMIT 2000
+      `),
+      pool.query(`
+        SELECT
+          id,
+          numero_op,
+          codigo_produto,
+          tipo_etiqueta,
+          local_impressao,
+          data_criacao,
+          data_impressao,
+          impressa,
+          usuario_criacao,
+          etapa
+  FROM "OrdemProducao".tab_op
+        WHERE tipo_etiqueta = 'Aguardando prazo'
+          AND data_impressao IS NOT NULL
+          AND (etapa IS NULL OR lower(etapa) NOT IN ('excluido','excluído'))
+        ORDER BY
+          data_impressao ASC,
+          upper(local_impressao) ASC NULLS LAST,
+          upper(codigo_produto)  ASC NULLS LAST,
+          id ASC
+        LIMIT 2000
+      `),
+      pool.query(`
+        SELECT
+          id,
+          numero_op,
+          codigo_produto,
+          tipo_etiqueta,
+          local_impressao,
+          data_criacao,
+          data_impressao,
+          impressa,
+          usuario_criacao,
+          etapa
+  FROM "OrdemProducao".tab_op
+        WHERE tipo_etiqueta = 'Aguardando prazo'
+          AND lower(COALESCE(etapa, '')) IN ('excluido','excluído')
+        ORDER BY
+          upper(local_impressao) ASC NULLS LAST,
+          upper(codigo_produto)  ASC NULLS LAST,
+          id ASC
+        LIMIT 2000
+      `)
+    ]);
 
+    return res.json({
+      ok: true,
+      colunas: {
+        'Pedido aprovado'  : aprovados.rows,
+        'Aguardando prazo': aguardando.rows,
+        'Fila de produção': fila.rows,
+        'Excluido': excluidos.rows
+      }
+    });
   } catch (e) {
     console.error('[kanban comercial etapa 80] erro:', e);
     return res.status(500).json({ ok:false, error: String(e?.message||e) });
@@ -4284,9 +6352,6 @@ const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
-  if (IAPP_INSECURE) {
-    console.warn('[IAPP] Atenção: IAPP_INSECURE=true — validação TLS desabilitada para chamadas IAPP (apenas desenvolvimento).');
-  }
 });
 
 // DEBUG: sanity check do webhook (GET simples)
@@ -4574,488 +6639,6 @@ app.post('/api/admin/sync/pcp/estruturas', express.json(), async (req, res) => {
   }
 });
 
-// Log simples em arquivo para acompanhar o processo no VS Code
-const syncLogFile = path.join(__dirname, 'data', 'omie_sync.log');
-function appendSyncLog(line) {
-  try {
-    const dir = path.dirname(syncLogFile);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const msg = `[${new Date().toISOString()}] ${line}`;
-    fs.appendFileSync(syncLogFile, msg + "\n", 'utf8');
-    // também loga no terminal (PM2) para acompanhar em tempo real
-    try { console.log('[omie-sync]', line); } catch {}
-  } catch (e) {
-    console.warn('[omie-sync log] falha ao gravar log:', e?.message || e);
-  }
-}
-
-async function doSyncProdutosOmie(options = {}) {
-  const { max_paginas = 999, filtros = {}, filter = null } = options;
-  if (!isDbEnabled) {
-    throw new Error('Banco de dados não configurado.');
-  }
-  const appKey = process.env.OMIE_APP_KEY || OMIE_APP_KEY;
-  const appSec = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
-  if (!appKey || !appSec) {
-    appendSyncLog('Falha: OMIE_APP_KEY/OMIE_APP_SECRET ausentes (nem env nem config.server.js).');
-    throw new Error('OMIE_APP_KEY/OMIE_APP_SECRET não configurados no servidor.');
-  }
-  appendSyncLog('Iniciando sincronização de produtos (manual/agendada)');
-  let pagina = 1;
-  let totalPaginas = 1;
-  let totalRegistros = 0;
-  let processados = 0;
-  const limitePaginas = Number(max_paginas) > 0 ? Number(max_paginas) : 999;
-
-  // Se houver filtro por coluna, determine o conjunto de códigos a processar
-  let allowedCodes = null;
-  if (filter && filter.column && Array.isArray(filter.values) && filter.values.length) {
-    const col = String(filter.column).toLowerCase();
-    const allowedCols = new Set([
-      'tipoitem','descricao_familia','origem_mercadoria','marca','modelo','importado_api','market_place','inativo','bloqueado','produto_lote','produto_variacao'
-    ]);
-    if (!allowedCols.has(col)) {
-      throw new Error(`Coluna de filtro não permitida: ${col}`);
-    }
-    const values = filter.values.filter(v => v != null).map(v => String(v));
-    if (values.length) {
-      const q = `SELECT codigo_produto FROM public.produtos_omie WHERE ${col} = ANY($1)`;
-      const r = await dbQuery(q, [values]);
-      allowedCodes = new Set(r.rows.map(x => String(x.codigo_produto)));
-      appendSyncLog(`Filtro ativo: coluna=${col}, valores=${values.length}, codigos=${allowedCodes.size}`);
-    }
-  }
-
-  while (pagina <= totalPaginas && pagina <= limitePaginas) {
-    appendSyncLog(`Baixando página ${pagina} (limite=${limitePaginas})`);
-    
-    // Rate limit: ~3 req/s → espera mínima de 333ms entre requisições
-    if (pagina > 1) {
-      await new Promise(r => setTimeout(r, 350));
-    }
-    
-    let lote;
-    try {
-      lote = await withRetry(() => omieProdutosListarPagina(pagina, filtros));
-      appendSyncLog(`Página ${pagina} recebida: pagina=${lote?.pagina ?? '?'}, registros=${lote?.registros ?? '?'}, total_de_paginas=${lote?.total_de_paginas ?? '?'}`);
-    } catch (err) {
-      appendSyncLog(`Erro ao baixar página ${pagina}: ${err?.message || err}`);
-      throw err;
-    }
-    pagina += 1;
-
-    totalPaginas = Number(lote?.total_de_paginas ?? lote?.nTotPaginas ?? lote?.totPaginas ?? totalPaginas);
-    totalRegistros = Number(lote?.total_de_registros ?? lote?.nTotRegistros ?? totalRegistros);
-
-    let produtos = Array.isArray(lote?.produto_servico_cadastro)
-      ? lote.produto_servico_cadastro
-      : (lote?.produto_servico_cadastro ? [lote.produto_servico_cadastro] : []);
-
-    if (allowedCodes) {
-      produtos = produtos.filter(p => {
-        const cod = p?.codigo_produto ?? p?.codigo ?? p?.cCodigo ?? null;
-        return cod != null && allowedCodes.has(String(cod));
-      });
-    }
-
-    appendSyncLog(`Página processada: produtos=${produtos.length}`);
-
-    if (produtos.length) {
-      const wrapper = { produto_servico_cadastro: produtos };
-      appendSyncLog(`Iniciando upsert no SQL: itens=${produtos.length}`);
-      try {
-        const { rows } = await dbQuery('SELECT public.omie_import_listarprodutos($1::jsonb) AS qtd', [wrapper]);
-        const inc = Number(rows?.[0]?.qtd || 0);
-        processados += inc;
-        appendSyncLog(`Upsert realizados: +${inc} (acumulado ${processados})`);
-      } catch (e) {
-        appendSyncLog(`Falha no upsert SQL: ${e?.message || e}`);
-        throw e;
-      }
-    } else {
-      appendSyncLog('Nenhum produto na página após filtros.');
-    }
-
-    if (!totalPaginas || totalPaginas < 1) {
-      totalPaginas = pagina - 1;
-    }
-  }
-
-  const result = {
-    ok: true,
-    paginas_processadas: pagina - 1,
-    total_paginas: totalPaginas,
-    total_registros: totalRegistros,
-    produtos_processados: processados
-  };
-  appendSyncLog(`Concluída sincronização: paginas=${result.paginas_processadas}, registros=${result.total_registros}, processados=${result.produtos_processados}`);
-  return result;
-}
-
-app.post('/api/admin/sync/produtos-omie', express.json(), async (req, res) => {
-  if (!isDbEnabled) {
-    return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-  }
-
-  const { max_paginas = 999, apenas_importado_api = false, apenas_omiepdv = false, filter } = req.body || {};
-  const filtros = {
-    apenas_importado_api,
-    apenas_omiepdv
-  };
-
-  // Logs detalhados desde o clique do botão
-  console.log('[sync/produtos-omie] requisição recebida:', { max_paginas, filtros, filter });
-  appendSyncLog(`Requisição recebida no endpoint: max_paginas=${max_paginas}, filtros=${JSON.stringify(filtros)}, filter=${JSON.stringify(filter)}`);
-
-  // Executa em background e responde imediatamente
-  setImmediate(async () => {
-    try {
-      appendSyncLog('Iniciando tarefa em background para sincronização de produtos Omie…');
-
-      // Usar método direto (evita problemas com child process + PM2)
-  const result = await doSyncProdutosOmie({ max_paginas: Math.min(Number(max_paginas) || 1, 999), filtros, filter });
-  appendSyncLog(`Sincronização finalizada com sucesso: total processado=${result?.total_upserts ?? result?.produtos_processados ?? 0}`);
-      try {
-        await pool.query(`UPDATE public.scheduled_task SET last_run_at = now(), last_ok = $1, last_summary = $2, updated_at = now() WHERE key = 'produtos-omie'`, [true, JSON.stringify(result)]);
-      } catch {}
-    } catch (err) {
-      console.error('[sync/produtos-omie]', err);
-      try { appendSyncLog(`Falha na sincronização: ${String(err?.message || err)}`); } catch {}
-      try {
-        await pool.query(`UPDATE public.scheduled_task SET last_run_at = now(), last_ok = $1, last_summary = $2, updated_at = now() WHERE key = 'produtos-omie'`, [false, String(err?.message || err)]);
-      } catch {}
-    }
-  });
-
-  res.status(202).json({ ok:true, started:true, message:'Sincronização iniciada. Acompanhe os logs e o histórico.' });
-});
-
-// Configuração de agendamento (GET/POST)
-app.get('/api/admin/schedule/produtos-omie', async (req, res) => {
-  try {
-    const conf = await getProdutosOmieSchedule();
-    return res.json({ ok: true, ...conf });
-  } catch (e) {
-    console.error('[GET schedule/produtos-omie]', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-app.post('/api/admin/schedule/produtos-omie', express.json(), async (req, res) => {
-  try {
-    if (!isDbEnabled) return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-    const { time, enabled = true, filter_column = null, filter_values = [] } = req.body || {};
-    const t = parseHHMM(time || '');
-    if (!t) return res.status(400).json({ ok:false, error:'Formato de horário inválido. Use HH:MM (00–23:59).' });
-
-    await pool.query(
-      `INSERT INTO public.scheduled_task(key, time, enabled, filter_column, filter_values, updated_at)
-       VALUES ('produtos-omie', $1, $2, $3, $4, now())
-       ON CONFLICT (key) DO UPDATE SET time = EXCLUDED.time, enabled = EXCLUDED.enabled, filter_column = EXCLUDED.filter_column, filter_values = EXCLUDED.filter_values, updated_at = now()`,
-      [time, enabled === true, filter_column, Array.isArray(filter_values) ? filter_values : []]
-    );
-
-    // reprograma o timer atual
-    await scheduleProdutosOmieJobFromDb();
-    const conf = await getProdutosOmieSchedule();
-    return res.json({ ok:true, ...conf });
-  } catch (e) {
-    console.error('[POST schedule/produtos-omie]', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Lista de colunas permitidas para filtro
-const PRODUTOS_OMIE_ALLOWED_FILTER_COLUMNS = [
-  { key: 'tipoitem', label: 'Tipo de Item' },
-  { key: 'descricao_familia', label: 'Família (descrição)' },
-  { key: 'origem_mercadoria', label: 'Origem da Mercadoria' },
-  { key: 'marca', label: 'Marca' },
-  { key: 'modelo', label: 'Modelo' },
-  { key: 'importado_api', label: 'Importado via API (S/N)' },
-  { key: 'market_place', label: 'Market Place (S/N)' },
-  { key: 'inativo', label: 'Inativo (S/N)' },
-  { key: 'bloqueado', label: 'Bloqueado (S/N)' },
-  { key: 'produto_lote', label: 'Produto por Lote (S/N)' },
-  { key: 'produto_variacao', label: 'Produto com Variação (S/N)' }
-];
-
-app.get('/api/admin/schedule/produtos-omie/columns', async (req, res) => {
-  return res.json({ ok:true, columns: PRODUTOS_OMIE_ALLOWED_FILTER_COLUMNS });
-});
-
-app.get('/api/admin/schedule/produtos-omie/column-values', async (req, res) => {
-  try {
-    if (!isDbEnabled) return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-    const col = String(req.query.column || '').toLowerCase();
-    const allowed = new Set(PRODUTOS_OMIE_ALLOWED_FILTER_COLUMNS.map(c => c.key));
-    if (!allowed.has(col)) return res.status(400).json({ ok:false, error:'Coluna não permitida' });
-    const q = `SELECT DISTINCT ${col} AS v FROM public.produtos_omie WHERE ${col} IS NOT NULL ORDER BY ${col} LIMIT 500`;
-    const { rows } = await dbQuery(q, []);
-    const values = rows.map(r => r.v).filter(v => v !== null).map(v => String(v));
-    return res.json({ ok:true, column: col, values });
-  } catch (e) {
-    console.error('[GET column-values]', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Objetivo: Listar uma página específica de produtos da Omie (ListarProdutos)
-// e opcionalmente filtrar um item pelo codigo (texto) ou codigo_produto (numérico).
-// Uso: GET /api/admin/produtos-omie/listar-pagina?pagina=5&codigo=03.MP.N.62025
-app.get('/api/admin/produtos-omie/listar-pagina', async (req, res) => {
-  try {
-    const pagina = Math.max(1, parseInt(String(req.query.pagina || '1'), 10) || 1);
-    const codigo = req.query.codigo ? String(req.query.codigo).trim() : null;
-    const codigoProduto = req.query.codigo_produto ? String(req.query.codigo_produto).trim() : null;
-
-    // Chama a Omie para a página solicitada (registros_por_pagina = 500 por padrão no código)
-    const lote = await omieProdutosListarPagina(pagina, {});
-    const arr = Array.isArray(lote?.produto_servico_cadastro)
-      ? lote.produto_servico_cadastro
-      : (lote?.produto_servico_cadastro ? [lote.produto_servico_cadastro] : []);
-
-    let itens = arr;
-    if (codigo) {
-      itens = itens.filter(p => String(p?.codigo || '').trim() === codigo);
-    }
-    if (codigoProduto) {
-      itens = itens.filter(p => String(p?.codigo_produto || '') === String(codigoProduto));
-    }
-
-    return res.json({ ok:true, pagina: lote?.pagina, total_de_paginas: lote?.total_de_paginas, total_de_registros: lote?.total_de_registros, itens });
-  } catch (e) {
-    console.error('[GET /api/admin/produtos-omie/listar-pagina] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Objetivo: Expor um endpoint simples para checar rapidamente se um produto específico
-// (identificado por codigo_produto) está atualizado no banco, permitindo validação
-// pós-sincronização sem precisar abrir o banco manualmente.
-// Uso: GET /api/admin/produtos-omie/check?codigo=03.MP.N.62025
-// Retorna: { ok:true, produto: { codigo_produto, descricao, descricao_familia, ... } } ou 404 se não encontrado
-app.get('/api/admin/produtos-omie/check', async (req, res) => {
-  try {
-    if (!isDbEnabled) {
-      return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-    }
-    const codigoText = (req.query.codigo ? String(req.query.codigo) : '').trim();
-    const codigoProdRaw = (req.query.codigo_produto ? String(req.query.codigo_produto) : '').trim();
-
-    let rows;
-    if (codigoProdRaw) {
-      // Busca por codigo_produto (bigint)
-      const codigoProd = BigInt(codigoProdRaw);
-      const q = `
-        SELECT codigo_produto, codigo, descricao, descricao_familia, tipoitem, origem_mercadoria, marca, modelo,
-               importado_api, market_place, inativo, bloqueado, produto_lote, produto_variacao, updated_at
-          FROM public.produtos_omie
-         WHERE codigo_produto = $1
-         LIMIT 1`;
-      ({ rows } = await dbQuery(q, [codigoProd.toString()]));
-    } else if (codigoText) {
-      // Busca por codigo (texto como '03.MP.N.62025')
-      const q = `
-        SELECT codigo_produto, codigo, descricao, descricao_familia, tipoitem, origem_mercadoria, marca, modelo,
-               importado_api, market_place, inativo, bloqueado, produto_lote, produto_variacao, updated_at
-          FROM public.produtos_omie
-         WHERE codigo = $1
-         LIMIT 1`;
-      ({ rows } = await dbQuery(q, [codigoText]));
-    } else {
-      return res.status(400).json({ ok:false, error:'Forneça ?codigo (texto) ou ?codigo_produto (numérico).' });
-    }
-    if (!rows.length) {
-      return res.status(404).json({ ok:false, error:'Produto não encontrado.' });
-    }
-    return res.json({ ok:true, produto: rows[0] });
-  } catch (e) {
-    console.error('[GET /api/admin/produtos-omie/check] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Objetivo: Comparar o estado do produto na Omie (via ConsultarProduto)
-// versus o que está persistido no Postgres, retornando ambos e um diff simples.
-// Uso: GET /api/admin/produtos-omie/compare?codigo=03.MP.N.62025
-//      ou  /api/admin/produtos-omie/compare?codigo_produto=10516614657
-app.get('/api/admin/produtos-omie/compare', async (req, res) => {
-  try {
-    if (!isDbEnabled) return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-    const codigoText = (req.query.codigo ? String(req.query.codigo) : '').trim();
-    const codigoProdRaw = (req.query.codigo_produto ? String(req.query.codigo_produto) : '').trim();
-    if (!codigoText && !codigoProdRaw) {
-      return res.status(400).json({ ok:false, error:'Informe ?codigo (texto) ou ?codigo_produto (numérico).' });
-    }
-
-    // 1) Consultar na Omie
-    const omie = await omieProdutosConsultar({
-      codigo: codigoText || null,
-      codigo_produto: codigoProdRaw || null
-    });
-
-    // Normalizar objeto Omie esperado
-    const omieItem = omie?.produto_servico_cadastro || omie; // dependendo do formato
-    const omieOut = {
-      codigo_produto: omieItem?.codigo_produto ?? omieItem?.codigo ?? null,
-      codigo: omieItem?.codigo ?? null,
-      descricao: omieItem?.descricao ?? null,
-      descricao_familia: omieItem?.descricao_familia ?? omieItem?.familia?.descricao ?? null,
-      tipoitem: omieItem?.tipoitem ?? null,
-      ncm: omieItem?.ncm ?? null,
-      marca: omieItem?.marca ?? null,
-      modelo: omieItem?.modelo ?? null,
-      inativo: omieItem?.inativo ?? null,
-      bloqueado: omieItem?.bloqueado ?? null,
-      importado_api: omieItem?.importado_api ?? null
-    };
-
-    // 2) Buscar no Postgres
-    let dbRows;
-    if (codigoProdRaw || (omieOut.codigo_produto && String(omieOut.codigo_produto).match(/^\d+$/))) {
-      const id = String(codigoProdRaw || omieOut.codigo_produto);
-      const q = `SELECT codigo_produto::text AS codigo_produto, codigo, descricao, descricao_familia, tipoitem, ncm, marca, modelo, inativo, bloqueado, importado_api
-                   FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`;
-      ({ rows: dbRows } = await dbQuery(q, [id]));
-    } else if (codigoText || omieOut.codigo) {
-      const code = codigoText || omieOut.codigo;
-      const q = `SELECT codigo_produto::text AS codigo_produto, codigo, descricao, descricao_familia, tipoitem, ncm, marca, modelo, inativo, bloqueado, importado_api
-                   FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`;
-      ({ rows: dbRows } = await dbQuery(q, [code]));
-    } else {
-      dbRows = [];
-    }
-
-    const dbOut = dbRows?.[0] || null;
-
-    // 3) Diff simples
-    const keys = ['codigo_produto','codigo','descricao','descricao_familia','tipoitem','ncm','marca','modelo','inativo','bloqueado','importado_api'];
-    const diff = [];
-    for (const k of keys) {
-      const a = omieOut?.[k] != null ? String(omieOut[k]).trim() : null;
-      const b = dbOut?.[k] != null ? String(dbOut[k]).trim() : null;
-      if (a !== b) diff.push({ campo: k, omie: a, db: b });
-    }
-
-    return res.json({ ok:true, codigo: codigoText || codigoProdRaw, omie: omieOut, db: dbOut, diff });
-  } catch (e) {
-    console.error('[GET /api/admin/produtos-omie/compare] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// IAPP: proxy para consultar ordens de produção por ID
-// GET /api/iapp/ordens-producao/busca/:id → chama GET /manufatura/ordens-producao/busca/{id}
-app.get('/api/iapp/ordens-producao/busca/:id', async (req, res) => {
-  try {
-    const id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ ok:false, error:'Parâmetro :id é obrigatório.' });
-    if (!IAPP_TOKEN || !IAPP_SECRET) {
-      return res.status(503).json({ ok:false, error:'Credenciais IAPP ausentes.' });
-    }
-  const domain = String(req.query.domain || req.query.dominio || IAPP_DOMAIN || '').trim();
-    let path = `/manufatura/ordens-producao/busca/${encodeURIComponent(id)}`;
-    const hdrs = { Referer: 'http://localhost:5001' };
-    const data = await iappGetHttp(path, 15000, hdrs);
-    return res.json({ ok:true, id, data });
-  } catch (e) {
-    console.error('[IAPP busca OP] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// IAPP: proxy para listar ordens de produção
-// GET /api/iapp/ordens-producao/lista
-// → chama GET /manufatura/ordens-producao/lista?offset=0 (offset é obrigatório)
-app.get('/api/iapp/ordens-producao/lista', async (req, res) => {
-  try {
-    if (!IAPP_TOKEN || !IAPP_SECRET) {
-      return res.status(503).json({ ok:false, error:'Credenciais IAPP ausentes.' });
-    }
-    // A API IAPP exige o parâmetro offset obrigatoriamente
-    // offset=0 retorna desde o início
-    const offset = parseInt(req.query.offset || '0', 10);
-    const path = `/manufatura/ordens-producao/lista?offset=${offset}`;
-    const hdrs = { Referer: 'http://localhost:5001' };
-    const data = await iappGetHttp(path, 15000, hdrs);
-    return res.json({ ok:true, data });
-  } catch (e) {
-    console.error('[IAPP lista OP] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// IAPP: proxy para consultar ordens por identificação (preferido)
-// GET /api/iapp/ordens-producao/busca-por-identificacao/:identificacao
-// → chama GET /manufatura/ordens-producao/busca?identificacao={valor}
-app.get('/api/iapp/ordens-producao/busca-por-identificacao/:identificacao', async (req, res) => {
-  try {
-    const identificacao = String(req.params.identificacao || '').trim();
-    if (!identificacao) return res.status(400).json({ ok:false, error:'Parâmetro :identificacao é obrigatório.' });
-    if (!IAPP_TOKEN || !IAPP_SECRET) {
-      return res.status(503).json({ ok:false, error:'Credenciais IAPP ausentes.' });
-    }
-    const domain = String(req.query.domain || req.query.dominio || IAPP_DOMAIN || '').trim();
-    let path = `/manufatura/ordens-producao/busca?identificacao=${encodeURIComponent(identificacao)}`;
-    const hdrs = { Referer: 'http://localhost:5001' };
-    const data = await iappGetHttp(path, 15000, hdrs);
-    return res.json({ ok:true, identificacao, data });
-  } catch (e) {
-    console.error('[IAPP busca OP por identificacao] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Objetivo: Reprocessar (upsert) um único produto no Postgres puxando dados frescos da Omie
-// via ConsultarProduto. Não altera schemas, só reaplica a função de importação.
-// Uso: POST /api/admin/produtos-omie/upsert-one?codigo=... ou ?codigo_produto=...
-app.post('/api/admin/produtos-omie/upsert-one', async (req, res) => {
-  try {
-    if (!isDbEnabled) return res.status(503).json({ ok:false, error:'Banco de dados não configurado.' });
-    const codigoText = (req.query.codigo ? String(req.query.codigo) : '').trim();
-    const codigoProdRaw = (req.query.codigo_produto ? String(req.query.codigo_produto) : '').trim();
-    if (!codigoText && !codigoProdRaw) {
-      return res.status(400).json({ ok:false, error:'Informe ?codigo (texto) ou ?codigo_produto (numérico).' });
-    }
-    const omie = await omieProdutosConsultar({ codigo: codigoText || null, codigo_produto: codigoProdRaw || null });
-    const item = omie?.produto_servico_cadastro || omie;
-    if (!item || (!item.codigo && !item.codigo_produto)) {
-      return res.status(404).json({ ok:false, error:'Produto não encontrado na Omie.' });
-    }
-    const wrapper = { produto_servico_cadastro: [ item ] };
-    const { rows } = await dbQuery('SELECT public.omie_import_listarprodutos($1::jsonb) AS qtd', [wrapper]);
-    const qtd = Number(rows?.[0]?.qtd || 0);
-    return res.json({ ok:true, upserts:qtd });
-  } catch (e) {
-    console.error('[POST /api/admin/produtos-omie/upsert-one] erro →', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-// Últimos logs do processo de sincronização (para UI)
-app.get('/api/admin/schedule/produtos-omie/logs', async (req, res) => {
-  try {
-    const maxLines = Math.min(Math.max(parseInt(req.query.lines || '200', 10) || 200, 1), 1000);
-    try {
-      const st = fs.statSync(syncLogFile);
-      const txt = fs.readFileSync(syncLogFile, 'utf8');
-      const parts = txt.split(/\r?\n/);
-      const lines = parts.slice(Math.max(0, parts.length - maxLines));
-      return res.json({ ok:true, lines, size: st.size, mtime: st.mtime.toISOString() });
-    } catch (e) {
-      if (e && e.code === 'ENOENT') {
-        return res.json({ ok:true, lines: [], size: 0, mtime: null });
-      }
-      throw e;
-    }
-  } catch (e) {
-    console.error('[GET logs produtos-omie]', e);
-    return res.status(500).json({ ok:false, error: String(e?.message || e) });
-  }
-});
-
-
 // ---------- UI: leitura da estrutura (SQL) ----------
 app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
   try {
@@ -5074,6 +6657,10 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
           cab.produto_id            AS pai_id,
           cab.produto_codigo        AS pai_codigo,
           cab.produto_descricao     AS pai_descricao,
+          cab.produto_unidade       AS pai_unidade,
+          COALESCE(oe.descr_produto, po.descricao) AS pai_descr_omie,
+          COALESCE(oe.id_produto, po.codigo_produto::BIGINT) AS pai_id_omie,
+          COALESCE(oe.unidade, po.unidade)          AS pai_unidade_omie,
           it.item_prod_id           AS comp_id,
           it.item_codigo            AS comp_codigo,
           it.item_descricao         AS comp_descricao,
@@ -5084,6 +6671,14 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
           (it.quantidade * (1 + COALESCE(it.perc_perda,0)/100.0))::NUMERIC(18,6) AS comp_qtd_bruta
         FROM omie_malha_item it
         JOIN omie_malha_cab  cab ON cab.produto_id = it.produto_id
+        LEFT JOIN public.produtos_omie po ON TRIM(UPPER(po.codigo)) = TRIM(UPPER(cab.produto_codigo))
+        LEFT JOIN LATERAL (
+          SELECT descr_produto, id_produto, unidade
+          FROM omie_estrutura
+          WHERE CAST(int_produto AS BIGINT) = cab.produto_id
+          ORDER BY id_produto
+          LIMIT 1
+        ) oe ON TRUE
         WHERE ${where}
         ORDER BY it.item_codigo
       `, param)).rows;
@@ -5100,6 +6695,9 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
       pai_id         : Number(r.pai_id) || null,
       pai_codigo     : r.pai_codigo || '',
       pai_descricao  : r.pai_descricao || '',
+      pai_descr_omie : r.pai_descr_omie || '',
+      pai_id_omie    : r.pai_id_omie ? Number(r.pai_id_omie) : null,
+      pai_unid       : r.pai_unidade_omie || r.pai_unidade || '',
       comp_id        : r.comp_id || null,
       comp_codigo    : r.comp_codigo || '',
       comp_descricao : r.comp_descricao || '',
@@ -5116,6 +6714,189 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
     res.status(500).json({ ok:false, error:String(err.message||err) });
   }
 });
+
+// [PCP] Mapa de Qtd prod por código (conta OPs abertas/ativas ligadas ao produto)
+// Espera body: { codigos: ["03.PP.N.10923", "04.PP.N.51006", ...] }
+// Retorna: { "03.PP.N.10923": 1, "04.PP.N.51006": 0, ... }
+app.post('/api/pcp/qtd_prod', express.json(), async (req, res) => {
+  const codigos = Array.isArray(req.body?.codigos) ? req.body.codigos.map(String) : [];
+  if (!codigos.length) return res.json({});
+
+  const client = await pool.connect();
+  try {
+    // Ajuste as colunas/etapas conforme seu schema real:
+    // c_cod_int_prod: código do produto
+    // c_etapa 20/40: estados de produção (ex.: "A Produzir" / "Produzindo")
+    const sql = `
+      WITH alvo AS (SELECT UNNEST($1::text[]) AS cod)
+      SELECT a.cod,
+             COALESCE((
+               SELECT COUNT(*)
+               FROM public.kanban_preparacao_view k
+               JOIN public.op_info oi ON oi.n_cod_op = k.n_cod_op
+               WHERE k.c_cod_int_prod::text = a.cod
+                 AND oi.c_etapa IN ('20','40')
+             ), 0) AS qtd_prod
+      FROM alvo a
+    `;
+    const { rows } = await client.query(sql, [codigos]);
+    const out = {};
+    for (const r of rows) out[r.cod] = Number(r.qtd_prod) || 0;
+    res.json(out);
+  } catch (err) {
+    console.error('[pcp/qtd_prod] erro:', err);
+    res.status(500).json({ error: 'Falha ao calcular qtd_prod' });
+  } finally {
+    client.release();
+  }
+});
+// [Estrutura] Meta (versao / modificador) por cod_produto ou parentId
+// Uso: GET /api/estrutura/meta?cod_produto=XXX  (ou ?cod=XXX)  ou  ?parentId=123
+app.get('/api/estrutura/meta', async (req, res) => {
+  const { cod_produto, cod, parentId } = req.query || {};
+  const client = await pool.connect();
+  try {
+    let row = null;
+
+    if (parentId) {
+      const r = await client.query(
+        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+           FROM public.omie_estrutura
+          WHERE id = $1
+          LIMIT 1`,
+        [parentId]
+      );
+      row = r?.rows?.[0] || null;
+    } else if (cod_produto || cod) {
+      const c = String(cod_produto || cod).trim();
+
+      // 1ª tentativa: match exato com TRIM/UPPER
+      const r1 = await client.query(
+        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+           FROM public.omie_estrutura
+          WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1))
+          ORDER BY updated_at DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [c]
+      );
+      row = r1?.rows?.[0] || null;
+
+      // 2ª tentativa: prefixo (quando o código vem com sufixo)
+      if (!row) {
+        const r2 = await client.query(
+          `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+             FROM public.omie_estrutura
+            WHERE TRIM(cod_produto) ILIKE TRIM($1) || '%'
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+            LIMIT 1`,
+          [c]
+        );
+        row = r2?.rows?.[0] || null;
+      }
+    } else {
+      return res.status(400).json({ error: 'Informe cod_produto/cod ou parentId' });
+    }
+
+    if (!row) return res.status(404).json({ error: 'Estrutura não encontrada' });
+
+    if (!row.modificador || !String(row.modificador).trim()) row.modificador = null;
+
+    return res.json(row);
+  } catch (e) {
+    console.error('[GET /api/estrutura/meta] erro:', e);
+    return res.status(500).json({ error: 'Erro interno' });
+  } finally {
+    client.release();
+  }
+});
+
+
+// === PCP: substituir estrutura (IMPORT CSV) usando pai_codigo ===
+app.post('/api/pcp/estrutura/replace', express.json({ limit: '8mb' }), async (req, res) => {
+  // defensivo: se veio HTML por engano (proxy/404), não tente parsear como JSON
+  const ct = req.headers['content-type'] || '';
+  if (!ct.includes('application/json')) {
+    const raw = (req.rawBody || '').toString();
+    const snippet = raw.slice(0, 200);
+    console.error('[IMPORT][BOM] Conteúdo não-JSON recebido na rota:', { ct, snippet });
+    return res.status(415).json({ ok:false, error:'Content-Type inválido. Envie application/json.' });
+  }
+
+  // helper: número com vírgula, vazio vira null
+  const parseNumber = (v) => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'number') return v;
+    const s = String(v).trim().replace(/\./g, '').replace(',', '.');
+    if (s === '' || s.toUpperCase() === 'NULL') return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // helper: normaliza linhas no formato do CSV "Listagem dos Materiais (B.O.M.)"
+  function mapFromBOMRows(bomRows = []) {
+    return bomRows.map(r => {
+      const comp_descricao = (r['Identificação do Produto'] ?? '').toString().trim();
+      const comp_codigo    = (r['Descrição do Produto'] ?? '').toString().trim();
+      const comp_qtd       = parseNumber(r['Qtde Prevista']);
+      const comp_unid      = (r['Unidade'] ?? '').toString().trim() || null;
+      return { comp_codigo, comp_descricao, comp_qtd, comp_unid };
+    }).filter(x => x.comp_codigo); // descarta linhas sem código
+  }
+
+  try {
+    const { pai_codigo, itens, bom } = req.body || {};
+    if (!pai_codigo || typeof pai_codigo !== 'string' || !pai_codigo.trim()) {
+      return res.status(400).json({ ok:false, error:'Informe pai_codigo (string).' });
+    }
+
+    // aceita ou itens normalizados, ou linhas do CSV (bom)
+    let rows = Array.isArray(itens) ? itens : Array.isArray(bom) ? mapFromBOMRows(bom) : [];
+    if (!rows.length) {
+      return res.status(400).json({ ok:false, error:'Nenhum item para importar. Envie "itens" ou "bom".' });
+    }
+
+    // saneamento final
+    rows = rows.map(r => ({
+      comp_codigo:    (r.comp_codigo ?? '').toString().trim(),
+      comp_descricao: (r.comp_descricao ?? '').toString().trim() || null,
+      comp_qtd:       parseNumber(r.comp_qtd) ?? 0,
+      comp_unid:      (r.comp_unid ?? '').toString().trim() || null,
+    })).filter(r => r.comp_codigo);
+
+    // nome da tabela base da estrutura (ajuste aqui se seu nome é outro)
+    const TABLE = process.env.PCP_ESTRUTURA_TABLE || 'pcp_estrutura';
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // apaga estrutura atual desse pai
+      await client.query(`DELETE FROM ${TABLE} WHERE pai_codigo = $1`, [pai_codigo]);
+
+      // insere a nova estrutura
+      const text = `
+        INSERT INTO ${TABLE} (pai_codigo, comp_codigo, comp_descricao, comp_qtd, comp_unid)
+        VALUES ($1, $2, $3, $4, $5)
+      `;
+      for (const r of rows) {
+        await client.query(text, [pai_codigo, r.comp_codigo, r.comp_descricao, r.comp_qtd, r.comp_unid]);
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok:true, pai_codigo, inseridos: rows.length });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      console.error('[IMPORT][BOM][SQL][ERR]', e);
+      return res.status(500).json({ ok:false, error: e.message || 'Falha ao gravar estrutura' });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[IMPORT][BOM][FATAL]', err);
+    return res.status(500).json({ ok:false, error:'Erro inesperado no import' });
+  }
+});
+
 
 // --- SQL helper: saldos por local para uma lista de códigos ---
 app.post('/api/armazem/saldos_duplos', express.json(), async (req, res) => {
@@ -5149,104 +6930,26 @@ const sql = `
   }
 });
 
-
-const { PRE2024_COLUMNS, mapPre2024Rows } = require('./src/pre2024');
-
-app.post('/api/iapp/historico-pre2024/sync', upload.single('file'), async (req, res) => {
-  console.info('[pre2024-sync] início da sincronização');
-  if (!req.file) {
-    console.warn('[pre2024-sync] nenhuma planilha anexada ao request');
-    return res.status(400).json({ ok:false, error:'Nenhum arquivo anexado.' });
-  }
-
+// === DEBUG: lista as rotas que o Express enxerga ===========================
+app.get('/api/_where', (req, res) => {
   try {
-    console.info('[pre2024-sync] arquivo recebido', {
-      nome: req.file.originalname,
-      mimetype: req.file.mimetype,
-      tamanho_bytes: req.file.size
-    });
-    const workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
-    // Sempre usa a aba 'PEDIDOS'
-    const sheet = workbook.Sheets['PEDIDOS'];
-    if (!sheet) {
-      console.warn('[pre2024-sync] aba "PEDIDOS" não encontrada');
-      return res.status(400).json({ ok:false, error:'A planilha precisa conter a aba "PEDIDOS".' });
-    }
-
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { range: 1, defval: null });
-    const mappedRows = mapPre2024Rows(rawRows);
-
-    console.info('[pre2024-sync] linhas lidas', {
-      total_sheet: rawRows.length,
-      validas: mappedRows.length
-    });
-
-    if (!mappedRows.length) {
-      console.warn('[pre2024-sync] nenhuma linha válida após mapeamento — abortando');
-      return res.status(400).json({ ok:false, error:'Nenhuma linha válida encontrada na planilha.' });
-    }
-
-    const client = await pool.connect();
-    let inserted = 0;
-    let updated = 0;
-    try {
-      await client.query('BEGIN');
-      let processed = 0;
-      for (const row of mappedRows) {
-        const keyParams = [row.pedido, row.modelo, row.ano, row.data_entrada_pedido];
-        const deleteRes = await client.query(
-          `DELETE FROM public.historico_pre2024
-             WHERE pedido = $1
-               AND COALESCE(modelo, '') = COALESCE($2, '')
-               AND COALESCE(ano::text, '') = COALESCE($3::text, '')
-               AND ((data_entrada_pedido = $4) OR (data_entrada_pedido IS NULL AND $4 IS NULL))`,
-          keyParams
-        );
-
-        const insertValues = PRE2024_COLUMNS.map(col => row[col] ?? null);
-        const placeholders = PRE2024_COLUMNS.map((_, idx) => `$${idx + 1}`).join(', ');
-        await client.query(
-          `INSERT INTO public.historico_pre2024 (${PRE2024_COLUMNS.join(', ')}) VALUES (${placeholders})`,
-          insertValues
-        );
-
-        if (deleteRes.rowCount) updated += 1;
-        else inserted += 1;
-        processed += 1;
-
-        if (processed <= 5) {
-          console.debug('[pre2024-sync] linha processada', {
-            pedido: row.pedido,
-            modelo: row.modelo,
-            ano: row.ano,
-            data_entrada_pedido: row.data_entrada_pedido,
-            foi_atualizacao: deleteRes.rowCount > 0
-          });
-        }
+    const routes = [];
+    app._router.stack.forEach((m) => {
+      if (m.route && m.route.path) {
+        const methods = Object.keys(m.route.methods).join(',').toUpperCase();
+        routes.push({ path: m.route.path, methods });
+      } else if (m.name === 'router' && m.handle?.stack) {
+        m.handle.stack.forEach((h) => {
+          if (h.route && h.route.path) {
+            const methods = Object.keys(h.route.methods).join(',').toUpperCase();
+            routes.push({ path: (m.regexp?.toString() || '') + h.route.path, methods });
+          }
+        });
       }
-      await client.query('COMMIT');
-      console.info('[pre2024-sync] transação concluída', {
-        inseridas: inserted,
-        atualizadas: updated,
-        total_processadas: mappedRows.length
-      });
-    } catch (err) {
-      await client.query('ROLLBACK');
-      console.error('[pre2024-sync] erro durante transação, rollback executado');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    res.json({
-      ok: true,
-      processed: mappedRows.length,
-      inserted,
-      updated,
-      sheetName: 'PEDIDOS'
     });
-  } catch (err) {
-    console.error('[pre2024-sync] erro inesperado', err);
-    res.status(500).json({ ok:false, error: err?.message || 'Erro ao processar planilha.' });
+    res.json({ file: __filename, routes });
+  } catch (e) {
+    res.status(500).json({ error: String(e?.message || e) });
   }
 });
+// ==========================================================================

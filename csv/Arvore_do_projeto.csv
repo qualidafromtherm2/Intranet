@@ -43,7 +43,14 @@ vamos entender como funciona primeiro p vc se localizar no que precisa mexer:
 
 "Para baixar o SQL do render:"
 "Dump completo (estrutura + dados)"
-==
+PGPASSWORD='amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho' \
+pg_dump \
+  -h dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com \
+  -p 5432 \
+  -U intranet_db_yd0w_user \
+  --no-owner --no-privileges --encoding=UTF8 \
+  intranet_db_yd0w \
+  > intranet_db_yd0w_dump.sql
 
 "Só a estrutura (schema, sem os dados)"
 PGPASSWORD='amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho' \
