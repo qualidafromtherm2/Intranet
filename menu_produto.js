@@ -563,6 +563,7 @@ let transferenciaLista  = [];          // itens adicionados à transferência
 let transferLocais      = [];          // locais de estoque disponíveis
 const TRANSFER_DEFAULT_ORIGEM  = '10408201806';
 const TRANSFER_DEFAULT_DESTINO = '10564345392';
+let almoxLocalAtual     = TRANSFER_DEFAULT_ORIGEM;
 
 // === PATCH GLOBAL DO FETCH (garante cookie da sessão em TODAS as requests) ===
 (function hardenFetchCredentials(){
@@ -595,8 +596,10 @@ function renderAlmoxTable(arr) {
     tr.dataset.descricao = p.descricao || '';
     tr.dataset.min       = fmtBR.format(p.min);
     tr.dataset.fisico    = fmtBR.format(p.fisico);
-    tr.dataset.saldo     = fmtBR.format(p.saldo);
-    tr.dataset.cmc       = fmtBR.format(p.cmc);
+  tr.dataset.saldo     = fmtBR.format(p.saldo);
+  tr.dataset.cmc       = fmtBR.format(p.cmc);
+  tr.dataset.codOmie   = p.codOmie || '';
+  tr.dataset.origem    = p.origem || almoxLocalAtual || '';
     tr.innerHTML = `
       <td>${p.codigo}</td>
       <td>${p.descricao}</td>
@@ -2981,7 +2984,7 @@ else if (nome === 'producao') {
   if (!prodCsvLoaded) await loadProdTipoCSV();
 }
 else if (nome === 'transferencia') {
-  renderTransferenciaLista();
+  window.renderTransferenciaLista?.();
   carregarLocaisEstoque();
 }
 
@@ -3385,7 +3388,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     almoxTbody.addEventListener('click', onAlmoxRowClick);
     almoxTbody.__transferBound = true;
   }
-  renderTransferenciaLista();
+  window.renderTransferenciaLista?.();
 
   const transferTbody = document.getElementById('transferenciaTbody');
   if (transferTbody && !transferTbody.__transferBound) {
@@ -3430,8 +3433,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!transferenciaLista.length) return;
       const valor = sanitizeQtd(transferQtdBulk.value, null);
       if (valor === null) return;
-      transferenciaLista.forEach(item => { item.qtd = valor; });
-      renderTransferenciaLista();
+  transferenciaLista.forEach(item => { item.qtd = valor; });
+  window.renderTransferenciaLista?.();
       transferQtdBulk.value = formatQtdInput(valor);
     };
     transferQtdBulk.addEventListener('input', aplicarQtdBulk);
@@ -3451,7 +3454,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         item.selecionado = selecionarTudo;
         item.qtd = sanitizeQtd(item.qtd);
       });
-      renderTransferenciaLista();
+      window.renderTransferenciaLista?.();
     });
   }
 
@@ -5178,6 +5181,44 @@ function escapeHtml(str) {
   }[c]));
 }
 
+function truncateText(str, maxLength = 25) {
+  const texto = String(str ?? '');
+  if (texto.length <= maxLength) return texto;
+  if (maxLength <= 3) return texto.slice(0, maxLength);
+  return `${texto.slice(0, maxLength - 3)}...`;
+}
+
+function getSelectedOrigemLocal() {
+  const sel = document.getElementById('transferOrigem');
+  const valor = sel && sel.value ? String(sel.value).trim() : '';
+  return valor || TRANSFER_DEFAULT_ORIGEM;
+}
+
+function atualizarItensTransferenciaDoAlmox() {
+  if (!transferenciaLista.length) return;
+  const origemAtual = almoxLocalAtual || getSelectedOrigemLocal();
+  transferenciaLista = transferenciaLista.map(item => {
+    const dados = almoxAllDados.find(d => d.codigo === item.codigo);
+    if (!dados) {
+      return {
+        ...item,
+        codOmie: '',
+        origem: origemAtual
+      };
+    }
+    return {
+      ...item,
+      min: normalizaNumeroParaBR(dados.min),
+      fisico: normalizaNumeroParaBR(dados.fisico),
+      saldo: normalizaNumeroParaBR(dados.saldo),
+      cmc: normalizaNumeroParaBR(dados.cmc),
+      codOmie: dados.codOmie ? String(dados.codOmie).trim() : '',
+      origem: origemAtual
+    };
+  });
+  window.renderTransferenciaLista?.();
+}
+
 function sanitizeQtd(value, fallback = 1) {
   if (value === null || value === undefined || value === '') return fallback;
   const num = parseFloat(String(value).replace(',', '.'));
@@ -5221,7 +5262,7 @@ function renderTransferenciaLista() {
   if (!transferenciaLista.length) {
     const tr = document.createElement('tr');
     tr.className = 'transferencia-placeholder';
-    tr.innerHTML = '<td colspan="6">Nenhum item selecionado para transferência.</td>';
+    tr.innerHTML = '<td colspan="7">Nenhum item selecionado para transferência.</td>';
     tbody.appendChild(tr);
     updateTransferControlsState();
     return;
@@ -5230,24 +5271,30 @@ function renderTransferenciaLista() {
   transferenciaLista.forEach(item => {
     const checked = item.selecionado !== false;
     item.qtd = sanitizeQtd(item.qtd);
+    const descricaoCompleta = item.descricao || '';
+    const descricaoCurta = truncateText(descricaoCompleta, 25);
+    const codigoSeguro = escapeHtml(item.codigo || '');
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="sel">
         <input type="checkbox"
                class="transfer-check"
-               data-codigo="${item.codigo}"
+               data-codigo="${codigoSeguro}"
                ${checked ? 'checked' : ''}>
       </td>
-      <td>${item.codigo}</td>
-      <td>${item.descricao}</td>
-      <td class="qtd-cell"><input type="number" min="0" step="0.01" value="${formatQtdInput(item.qtd)}" data-codigo="${item.codigo}" class="transfer-qtd"></td>
-      <td class="num">${item.fisico}</td>
-      <td class="num">${item.saldo}</td>`;
+      <td>${codigoSeguro}</td>
+      <td class="desc-cell" title="${escapeHtml(descricaoCompleta)}">${escapeHtml(descricaoCurta)}</td>
+      <td>${escapeHtml(item.codOmie || '')}</td>
+      <td class="qtd-cell"><input type="number" min="0" step="0.01" value="${formatQtdInput(item.qtd)}" data-codigo="${codigoSeguro}" class="transfer-qtd"></td>
+      <td class="num">${escapeHtml(String(item.fisico ?? '0'))}</td>
+      <td class="num">${escapeHtml(String(item.saldo ?? '0'))}</td>`;
     tbody.appendChild(tr);
   });
 
   updateTransferControlsState();
 }
+
+window.renderTransferenciaLista = renderTransferenciaLista;
 
 function adicionarItemTransferencia(item) {
   if (!item) return;
@@ -5279,7 +5326,7 @@ function adicionarItemTransferencia(item) {
     transferenciaLista.push(normalizado);
     transferenciaItem = normalizado;
   }
-  renderTransferenciaLista();
+  window.renderTransferenciaLista?.();
 }
 
 function onAlmoxRowClick(ev) {
