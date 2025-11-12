@@ -43,7 +43,7 @@ const upload = multer({
 router.get('/ping',     (_req, res) => res.json({ ok: true, where: 'produtosFotos' }));
 router.get('/db-ping',  async (_req, res) => {
   try {
-    const r = await pool.query('select 1 as ok');
+    const r = await dbQuery('select 1 as ok');
     res.json({ db: 'up', row: r.rows[0] });
   } catch (e) {
     res.status(500).json({ db: 'down', error: String(e.message || e) });
@@ -58,6 +58,12 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
 
     const codigoNum = await resolveCodigoProduto(req.params.codigo);
     const pos       = Number(req.query.pos ?? 0);
+    const nomeFoto      = String(req.body?.nome_foto ?? '').trim();
+    const descricaoFoto = String(req.body?.descricao_foto ?? '').trim();
+
+    if (!nomeFoto || !descricaoFoto) {
+      return res.status(400).json({ error: 'Informe nome_foto e descricao_foto.' });
+    }
 
     const ext      = mime.extension(req.file.mimetype) || 'bin';
     const fileName = `${uuidv4()}.${ext}`;
@@ -78,16 +84,26 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
     const publicUrl = data.publicUrl;
 
     // Upsert no Postgres
-    await pool.query(
-      `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-       VALUES ($1, $2, $3, $4)
+    await dbQuery(
+      `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key, nome_foto, descricao_foto)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (codigo_produto, pos)
        DO UPDATE SET url_imagem = EXCLUDED.url_imagem,
-                     path_key   = EXCLUDED.path_key`,
-      [codigoNum, pos, publicUrl, pathKey]
+                     path_key   = EXCLUDED.path_key,
+                     nome_foto = EXCLUDED.nome_foto,
+                     descricao_foto = EXCLUDED.descricao_foto`,
+      [codigoNum, pos, publicUrl, pathKey, nomeFoto, descricaoFoto]
     );
 
-    res.json({ ok: true, codigo: codigoNum, pos, pathKey, url: publicUrl });
+    res.json({
+      ok: true,
+      codigo: codigoNum,
+      pos,
+      pathKey,
+      url: publicUrl,
+      nome: nomeFoto,
+      descricao: descricaoFoto
+    });
   } catch (err) {
     console.error('[upload foto]', err);
     res.status(err.status || 500).json({ error: 'Falha no upload', detail: String(err.message || err) });
@@ -102,7 +118,7 @@ router.delete('/:codigo/fotos/:pos?', async (req, res) => {
     const pos       = Number(req.params.pos ?? 0);
 
     // Busca o path_key para tentar remover do storage
-    const r = await pool.query(
+    const r = await dbQuery(
       `SELECT path_key
          FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1 AND pos = $2`,
@@ -117,7 +133,7 @@ router.delete('/:codigo/fotos/:pos?', async (req, res) => {
     }
 
     // Remove a linha do banco (mesmo que não tenha path_key)
-    await pool.query(
+    await dbQuery(
       `DELETE FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1 AND pos = $2`,
       [codigoNum, pos]
@@ -137,7 +153,7 @@ router.get('/:codigo/fotos', async (req, res) => {
     const codigoNum = await resolveCodigoProduto(req.params.codigo);
 
     const q = await dbQuery(
-      `SELECT pos, url_imagem, path_key
+      `SELECT pos, url_imagem, path_key, nome_foto, descricao_foto
          FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1
         ORDER BY pos`,

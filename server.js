@@ -1,3 +1,6 @@
+// ...existing code...
+
+// ...existing code...
 // server.js
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
@@ -36,6 +39,26 @@ if (!globalThis.fetch) {
 const safeFetch = (...args) => globalThis.fetch(...args);
 global.safeFetch = (...args) => globalThis.fetch(...args);
 const app = express();
+// Busca o maior código sequencial para produtos_omie
+// Objetivo: Retornar o maior código existente para montar o próximo código sequencial
+app.get('/api/produtos_omie/max_codigo', async (req, res) => {
+  const { base } = req.query;
+  if (!base || typeof base !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Base do código obrigatória' });
+  }
+  const client = await pool.connect();
+  try {
+    const query = `SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1 ORDER BY codigo DESC LIMIT 1`;
+    const likePattern = base + '%';
+    const result = await client.query(query, [likePattern]);
+    const maxCodigo = result.rows[0]?.codigo || null;
+    res.json({ ok: true, maxCodigo });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    client.release();
+  }
+});
 // ===== Ingestão inicial de OPs (Omie → Postgres) ============================
 const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
@@ -61,6 +84,12 @@ app.get('/__ping', (req, res) => {
   res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
 });
 
+// Rota stub para mensagens do usuário (evita 404 no front)
+// Objetivo: evitar erro 404 no login.js enquanto a funcionalidade real não está implementada
+app.get('/api/users/me/messages', (req, res) => {
+  res.json({ count: 0, messages: [] });
+});
+
 
 app.use(session({
   name: 'sid',
@@ -78,6 +107,9 @@ app.use(session({
 
 app.use('/api/nav', require('./routes/nav'));
 app.use('/api/colaboradores', require('./routes/colaboradores'));
+app.use('/api/ri', require('./routes/ri'));
+app.use('/api/pir', require('./routes/pir'));
+app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -1843,6 +1875,8 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
 
 // outros requires de rotas...
 const produtosFotosRouter = require('./routes/produtosFotos'); // <-- ADICIONE ESTA LINHA
+const produtosAnexosRouter = require('./routes/produtosAnexos');
+const transferenciasRouter = require('./routes/transferencias');
 
 //app.use(require('express').json({ limit: '5mb' }));
 
@@ -1850,6 +1884,8 @@ app.use('/api/produtos', produtosRouter);
 
 // adiciona o router das fotos no MESMO prefixo:
 app.use('/api/produtos', produtosFotosRouter);
+app.use('/api/produtos', produtosAnexosRouter);
+app.use('/api/transferencias', transferenciasRouter);
 
 // [API][produto/descricao] — retorna descr_produto a partir de int_produto (id) OU cod_produto (code)
 app.get('/api/produto/descricao', async (req, res) => {
@@ -2409,16 +2445,19 @@ app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Campos obrigatórios: numero_op, codigo_produto, conteudo_zpl' });
     }
 
+    const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
+
     const sql = `
       INSERT INTO "OrdemProducao".tab_op
-        (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+        (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
       VALUES
-        ($1,$2,$3,$4,$5,$6,$7)
+        ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING id, data_criacao
     `;
     const params = [
       String(numero_op),
       String(codigo_produto),
+      codigoProdutoId,
       String(tipo_etiqueta),
       String(local_impressao),
       String(conteudo_zpl),
@@ -2784,6 +2823,35 @@ async function obterDescricaoProduto(client, codigo) {
   return null;
 }
 
+// Resolve o ID Omie (codigo_produto) associado a um código alfanumérico.
+async function obterCodigoProdutoId(pg, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+
+  try {
+    const { rows } = await pg.query(
+      `
+        SELECT codigo_produto
+          FROM public.produtos_omie
+         WHERE TRIM(UPPER(codigo)) = TRIM(UPPER($1))
+            OR TRIM(UPPER(codigo_produto_integracao::text)) = TRIM(UPPER($1))
+         ORDER BY codigo_produto ASC
+         LIMIT 1
+      `,
+      [cod]
+    );
+
+    const raw = rows?.[0]?.codigo_produto;
+    if (raw == null) return null;
+
+    const id = Number(raw);
+    return Number.isFinite(id) ? id : null;
+  } catch (err) {
+    console.warn('[pcp][codigo_produto_id] falha ao obter ID:', err?.message || err);
+    return null;
+  }
+}
+
 async function obterVersaoEstrutura(client, codigo) {
   const cod = String(codigo || '').trim();
   if (!cod) return null;
@@ -2803,6 +2871,33 @@ async function obterVersaoEstrutura(client, codigo) {
     return Number.isFinite(num) && num > 0 ? num : null;
   } catch (err) {
     console.warn('[pcp][etiqueta] falha ao buscar versao estrutura:', err?.message || err);
+    return null;
+  }
+}
+
+// Busca o "local de produção" preferencial a partir da tabela public.omie_estrutura,
+// usando SEMPRE o Código OMIE (id_produto) como chave de localização.
+// - Primeiro resolve id_produto via public.produtos_omie (obterCodigoProdutoId)
+// - Depois lê public.omie_estrutura."local_produção" por id_produto
+// - Retorna string ou null se não houver valor
+async function obterLocalProducaoPorCodigo(client, codigo) {
+  const cod = String(codigo || '').trim();
+  if (!cod) return null;
+  try {
+    const id = await obterCodigoProdutoId(client, cod);
+    if (!id) return null;
+    const { rows } = await client.query(
+      `SELECT "local_produção" AS local
+         FROM public.omie_estrutura
+        WHERE id_produto = $1
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        LIMIT 1`,
+      [id]
+    );
+    const v = rows?.[0]?.local;
+    return v && String(v).trim() ? String(v).trim() : null;
+  } catch (err) {
+    console.warn('[pcp][etiqueta] falha ao buscar local_produção por código/ID:', err?.message || err);
     return null;
   }
 }
@@ -2906,6 +3001,7 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
   try {
     const {
       codigo_produto,
+      codigo_produto_id,
       usuario_criacao,
       observacoes,
       ns,
@@ -2965,10 +3061,15 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
 
       const insertSql = `
   INSERT INTO "OrdemProducao".tab_op
-          (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+          (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
         RETURNING id, data_criacao
       `;
+
+      // Usa codigo_produto_id fornecido pelo frontend, ou faz lookup se não fornecido
+      const codigoProdutoIdPai = (codigo_produto_id !== null && codigo_produto_id !== undefined)
+        ? codigo_produto_id
+        : await obterCodigoProdutoId(client, codigo);
 
       ({ personalizacaoId, sufixoCustom } = await registrarPersonalizacao(client, {
         codigoPai: codigo,
@@ -2988,11 +3089,15 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
           produtoDet
         });
 
+        // Determina local de impressão do PAI priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+        const localImpressaoPai = await obterLocalProducaoPorCodigo(client, codigo) || 'Montagem';
+
         const paramsPai = [
           numeroCompleto,
           codigo,
+          codigoProdutoIdPai,
           'Aguardando prazo',
-          'Montagem',
+          localImpressaoPai,
           zplPai,
           usuario,
           obs
@@ -3018,12 +3123,18 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
           ? Math.max(1, Math.round(qtdRaw))
           : 1;
 
-        const operacao = await obterOperacaoPorCodigo(client, codigoPP);
+    const operacao = await obterOperacaoPorCodigo(client, codigoPP);
+    // Usa codigo_produto_id fornecido pelo frontend para cada item PP, ou faz lookup
+    const codigoProdutoIdPP = (raw?.codigo_produto_id !== null && raw?.codigo_produto_id !== undefined)
+      ? raw.codigo_produto_id
+      : await obterCodigoProdutoId(client, codigoPP);
         let descricaoPP = String(raw?.descricao || '').trim();
         if (!descricaoPP) {
           descricaoPP = await obterDescricaoProduto(client, codigoPP) || 'SEM DESCRIÇÃO';
         }
-        const localImpressao = operacao || 'Montagem';
+  // Determina local de impressão do ITEM (PP) priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+  const localPreferencial = await obterLocalProducaoPorCodigo(client, codigoPP);
+  const localImpressao = localPreferencial || operacao || 'Montagem';
         const versaoPP = await obterVersaoEstrutura(client, codigoPP) || 1;
         const sufixoPP = `-v${versaoPP}`;
         const geradosOps = [];
@@ -3037,6 +3148,7 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
           const paramsPP = [
             numeroOpsSeq,
             codigoPP,
+            codigoProdutoIdPP,
             'Aguardando prazo',
             localImpressao,
             zplPP,
@@ -3096,6 +3208,7 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
   try {
     const {
       codigo_produto,
+      codigo_produto_id,
       quantidade,
       descricao: descricaoInicial,
       usuario_criacao,
@@ -3131,7 +3244,9 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
       await client.query('BEGIN');
   await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
 
-      const localImpressao = await obterOperacaoPorCodigo(client, codigo) || 'Montagem';
+  // Determina local de impressão priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+  const localPreferencial = await obterLocalProducaoPorCodigo(client, codigo);
+  const localImpressao = localPreferencial || (await obterOperacaoPorCodigo(client, codigo)) || 'Montagem';
       let descricao = String(descricaoInicial || '').trim();
       if (!descricao) {
         descricao = await obterDescricaoProduto(client, codigo) || 'SEM DESCRIÇÃO';
@@ -3148,10 +3263,15 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
 
       const insertSql = `
   INSERT INTO "OrdemProducao".tab_op
-          (numero_op, codigo_produto, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+          (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
         RETURNING id, data_criacao
       `;
+
+      // Usa codigo_produto_id fornecido pelo frontend, ou faz lookup se não fornecido
+      const codigoProdutoId = (codigo_produto_id !== null && codigo_produto_id !== undefined)
+        ? codigo_produto_id
+        : await obterCodigoProdutoId(client, codigo);
 
       const registros = [];
       for (let i = 0; i < qtdInt; i++) {
@@ -3162,6 +3282,7 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
         const params = [
           numeroCompleto,
           codigo,
+          codigoProdutoId,
           'Aguardando prazo',
           localImpressao,
           zpl,
@@ -3463,16 +3584,19 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
       ? conteudo_zpl
       : gerarEtiquetaPP({ codMP: codigo_produto, op: numero_op, descricao: '' });
 
+    const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
+
     const sql = `
       INSERT INTO "OrdemProducao".tab_op
-        (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
-         conteudo_zpl, impressa, usuario_criacao, observacoes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao,
+           conteudo_zpl, impressa, usuario_criacao, observacoes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING id, data_criacao
     `;
     const params = [
       numero_op,
       codigo_produto,
+      codigoProdutoId,
       tipo_etiqueta,
       local_impressao,
       zpl,
@@ -3721,16 +3845,19 @@ async function salvarEtiquetaOP(pool, {
 
   const conteudo_zpl = buildZPL({ numero_op, codigo_produto });
 
+  const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
+
   const sql = `
     INSERT INTO "OrdemProducao".tab_op
-      (numero_op, codigo_produto, tipo_etiqueta, local_impressao,
+      (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao,
        conteudo_zpl, impressa, usuario_criacao, observacoes)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     RETURNING id, data_criacao
   `;
   const params = [
     numero_op,
     codigo_produto,
+    codigoProdutoId,
     tipo_etiqueta,
     local_impressao,
     conteudo_zpl,
@@ -3807,36 +3934,44 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
     const rawLocal = req.query.local ?? req.body?.local;
     const local = String(rawLocal ?? '').trim() || ALMOX_LOCAL_PADRAO;
 
+    // Usa apenas a tabela principal de posições do Omie, filtrando pelo local informado.
     const { rows } = await pool.query(`
-      SELECT
-        v.local,
-        v.produto_codigo     AS codigo,
-        v.produto_descricao  AS descricao,
-        v.estoque_minimo     AS min,
-        v.fisico,
-        v.reservado,
-        v.saldo,
-        v.cmc,
-        pos.omie_prod_id     AS cod_omie,
-        pos.local_codigo     AS origem_local
-      FROM v_almoxarifado_grid v
-  LEFT JOIN public.omie_estoque_posicao pos
-     ON pos.codigo = v.produto_codigo
-    AND pos.local_codigo::text = $1::text
-      WHERE v.local = $1
-      ORDER BY v.produto_codigo
+      SELECT DISTINCT ON (COALESCE(p.omie_prod_id::text, p.codigo))
+        p.codigo,
+        p.descricao,
+        p.estoque_minimo,
+        p.fisico,
+        p.reservado,
+        p.saldo,
+        p.cmc,
+        p.omie_prod_id,
+        p.cod_int,
+        p.data_posicao,
+        p.ingested_at,
+        po.codigo_familia,
+        po.descricao_familia
+      FROM public.omie_estoque_posicao p
+      LEFT JOIN public.produtos_omie po
+        ON po.codigo_produto = p.omie_prod_id
+      WHERE p.local_codigo = $1
+        AND COALESCE(p.saldo, 0) != 0
+      ORDER BY COALESCE(p.omie_prod_id::text, p.codigo), p.data_posicao DESC, p.ingested_at DESC, p.id DESC
     `, [local]);
 
     const dados = rows.map(r => ({
       codigo   : r.codigo || '',
       descricao: r.descricao || '',
-      min      : Number(r.min)       || 0,
-      fisico   : Number(r.fisico)    || 0,
-      reservado: Number(r.reservado) || 0,
-      saldo    : Number(r.saldo)     || 0,
-      cmc      : Number(r.cmc)       || 0,
-      codOmie  : r.cod_omie != null ? String(r.cod_omie) : '',
+      min      : Number(r.estoque_minimo) || 0,
+      fisico   : Number(r.fisico)        || 0,
+      reservado: Number(r.reservado)     || 0,
+      saldo    : Number(r.saldo)         || 0,
+      cmc      : Number(r.cmc)           || 0,
+      codOmie  : r.omie_prod_id != null ? String(r.omie_prod_id) : (r.cod_int || ''),
       origem   : local,
+      dataPosicao: r.data_posicao,
+      atualizadoEm: r.ingested_at,
+      familiaCodigo: r.codigo_familia != null ? String(r.codigo_familia) : '',
+      familiaNome: r.descricao_familia || '',
     }));
 
     res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
@@ -4257,27 +4392,137 @@ app.post('/api/armazem/producao', express.json(), async (req, res) => {
         fisico,
         reservado,
         saldo,
-        cmc
+        cmc,
+        familia_codigo     AS "familiaCodigo",
+        familia_descricao  AS "familiaNome"
       FROM v_almoxarifado_grid_atual
       WHERE local = $1
-        AND COALESCE(saldo,0) > 0
+        AND COALESCE(saldo,0) != 0
       ORDER BY codigo
     `, [local]);
 
     const dados = rows.map(r => ({
-      codigo   : r.codigo || '',
-      descricao: r.descricao || '',
-      min      : Number(r.min)       || 0,
-      fisico   : Number(r.fisico)    || 0,
-      reservado: Number(r.reservado) || 0,
-      saldo    : Number(r.saldo)     || 0,
-      cmc      : Number(r.cmc)       || 0,
+      codigo       : r.codigo || '',
+      descricao    : r.descricao || '',
+      min          : Number(r.min)       || 0,
+      fisico       : Number(r.fisico)    || 0,
+      reservado    : Number(r.reservado) || 0,
+      saldo        : Number(r.saldo)     || 0,
+      cmc          : Number(r.cmc)       || 0,
+      familiaCodigo: r.familiaCodigo || '',
+      familiaNome  : r.familiaNome || '',
     }));
 
     res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
   } catch (err) {
     console.error('[armazem/producao SQL]', err);
     res.status(500).json({ ok:false, error:String(err.message || err) });
+  }
+});
+
+// Endpoint para buscar todas as OPs da tabela OrdemProducao.tab_op (agora com data_impressao)
+app.post('/api/ops/all', express.json(), async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        numero_op,
+        codigo_produto,
+        codigo_produto_id,
+        tipo_etiqueta,
+        local_impressao,
+        impressa,
+        data_criacao,
+        data_impressao,
+        etapa,
+        observacoes,
+        usuario_criacao
+      FROM "OrdemProducao".tab_op
+      WHERE COALESCE(TRIM(UPPER(etapa)),'') <> 'EXCLUIDO'
+      ORDER BY data_criacao DESC
+    `);
+
+    const ops = rows.map(r => ({
+      id: r.id,
+      numero_op: r.numero_op || '',
+      codigo_produto: r.codigo_produto || '',
+      local_impressao: r.local_impressao || '',
+      tipo_etiqueta: r.tipo_etiqueta || '',
+      impressa: !!r.impressa,
+      data_criacao: r.data_criacao,
+      data_impressao: r.data_impressao || null,
+      etapa: r.etapa || null,
+      observacoes: r.observacoes || '',
+      usuario_criacao: r.usuario_criacao || '',
+      // Status baseado em data_impressao: vazio = aguardando, preenchido = fila
+      status: r.data_impressao ? 'fila' : 'aguardando',
+      quantidade: 1
+    }));
+
+    res.json({ ok: true, ops });
+  } catch (err) {
+    console.error('[/api/ops/all] Erro:', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// Endpoint para atualizar o prazo de uma OP
+app.post('/api/ops/atualizar-prazo', express.json(), async (req, res) => {
+  try {
+    const { opId, prazo } = req.body;
+    
+    if (!opId) {
+      return res.status(400).json({ success: false, error: 'ID da OP não informado' });
+    }
+    
+    // Atualiza o campo de observações com o prazo (ou crie um campo específico se necessário)
+    const { rowCount } = await pool.query(`
+      UPDATE "OrdemProducao".tab_op
+      SET observacoes = COALESCE(observacoes, '') || ' | Prazo: ' || $2
+      WHERE id = $1
+    `, [opId, prazo]);
+    
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'OP não encontrada' });
+    }
+    
+    res.json({ success: true, message: 'Prazo atualizado com sucesso' });
+  } catch (err) {
+    console.error('[/api/ops/atualizar-prazo] Erro:', err);
+    res.status(500).json({ success: false, error: String(err.message || err) });
+  }
+});
+
+// Endpoint para atualizar data_impressao de uma OP (guia Preparação)
+app.post('/api/ops/atualizar-data-impressao', express.json(), async (req, res) => {
+  try {
+    const { id, numero_op, data_impressao } = req.body;
+    
+    if (!id && !numero_op) {
+      return res.status(400).json({ success: false, error: 'ID ou número da OP não informado' });
+    }
+    
+    if (!data_impressao) {
+      return res.status(400).json({ success: false, error: 'Data de impressão não informada' });
+    }
+    
+    const whereClause = id ? 'id = $1' : 'numero_op = $1';
+    const whereValue = id || numero_op;
+    
+    const { rowCount } = await pool.query(`
+      UPDATE "OrdemProducao".tab_op
+      SET data_impressao = $2
+      WHERE ${whereClause}
+    `, [whereValue, data_impressao]);
+    
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'OP não encontrada' });
+    }
+    
+    res.json({ success: true, message: 'Data de impressão atualizada com sucesso' });
+  } catch (err) {
+    console.error('[/api/ops/atualizar-data-impressao] Erro:', err);
+    res.status(500).json({ success: false, error: String(err.message || err) });
   }
 });
 
@@ -4625,6 +4870,99 @@ app.use('/api/pcp', pcpEstruturaRoutes);
       res.json(data);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  // Lista famílias persistidas (cria tabela se não existir e sincroniza se vazia)
+  app.get('/api/familia/list', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
+      await client.query(`CREATE TABLE IF NOT EXISTS configuracoes.familia (
+        id integer GENERATED BY DEFAULT AS IDENTITY,
+        codigo text PRIMARY KEY,
+        nome_familia text NOT NULL,
+        tipo text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`);
+
+      const sel = await client.query('SELECT id, codigo, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
+      let rows = sel.rows || [];
+
+      if (!rows.length) {
+        // busca na Omie e persiste
+        const data = await omieCall(
+          'https://app.omie.com.br/api/v1/geral/familias/',
+          {
+            call: 'PesquisarFamilias',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{ pagina:1, registros_por_pagina:50 }]
+          }
+        );
+        const fams = Array.isArray(data?.famCadastro) ? data.famCadastro : [];
+        if (fams.length) {
+          for (const f of fams) {
+            const codigo = f?.codigo != null ? String(f.codigo) : null;
+            const nome   = f?.nomeFamilia || null;
+            if (!codigo || !nome) continue;
+            await client.query(
+              `INSERT INTO configuracoes.familia(codigo, nome_familia)
+               VALUES ($1, $2)
+               ON CONFLICT (codigo) DO UPDATE SET nome_familia=EXCLUDED.nome_familia, updated_at=now()`,
+              [codigo, nome]
+            );
+          }
+          const sel2 = await client.query('SELECT id, codigo, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
+          rows = sel2.rows || [];
+        }
+      }
+      await client.query('COMMIT');
+      res.json({ ok:true, familias: rows });
+    } catch(e){
+      await client.query('ROLLBACK').catch(()=>{});
+      res.status(500).json({ ok:false, error: e.message || String(e) });
+    } finally { client.release(); }
+  });
+
+  // Atualiza o ID de uma família específica
+  app.patch('/api/familia/:codigo/id', express.json(), async (req, res) => {
+    const { codigo } = req.params;
+    const { id } = req.body;
+    if (!codigo) return res.status(400).json({ ok:false, error:'Código obrigatório' });
+    const newId = parseInt(id, 10);
+    if (!Number.isInteger(newId) || newId < 1) {
+      return res.status(400).json({ ok:false, error:'ID inválido (deve ser inteiro > 0)' });
+    }
+    try {
+      const result = await pool.query(
+        `UPDATE configuracoes.familia SET id=$1, updated_at=now() WHERE codigo=$2 RETURNING id, codigo, nome_familia, tipo`,
+        [newId, codigo]
+      );
+      if (!result.rowCount) return res.status(404).json({ ok:false, error:'Família não encontrada' });
+      res.json({ ok:true, familia: result.rows[0] });
+    } catch(e){
+      res.status(500).json({ ok:false, error: e.message || String(e) });
+    }
+  });
+
+  // Atualiza o Tipo de uma família específica
+  app.patch('/api/familia/:codigo/tipo', express.json(), async (req, res) => {
+    const { codigo } = req.params;
+    const { tipo } = req.body;
+    if (!codigo) return res.status(400).json({ ok:false, error:'Código obrigatório' });
+    const tipoStr = tipo != null ? String(tipo).trim() : '';
+    try {
+      const result = await pool.query(
+        `UPDATE configuracoes.familia SET tipo=$1, updated_at=now() WHERE codigo=$2 RETURNING id, codigo, nome_familia, tipo`,
+        [tipoStr || null, codigo]
+      );
+      if (!result.rowCount) return res.status(404).json({ ok:false, error:'Família não encontrada' });
+      res.json({ ok:true, familia: result.rows[0] });
+    } catch(e){
+      res.status(500).json({ ok:false, error: e.message || String(e) });
     }
   });
 
@@ -6760,7 +7098,8 @@ app.get('/api/estrutura/meta', async (req, res) => {
 
     if (parentId) {
       const r = await client.query(
-        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
+                "local_produção" AS local_producao
            FROM public.omie_estrutura
           WHERE id = $1
           LIMIT 1`,
@@ -6772,7 +7111,8 @@ app.get('/api/estrutura/meta', async (req, res) => {
 
       // 1ª tentativa: match exato com TRIM/UPPER
       const r1 = await client.query(
-        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+        `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
+                "local_produção" AS local_producao
            FROM public.omie_estrutura
           WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1))
           ORDER BY updated_at DESC NULLS LAST, id DESC
@@ -6784,7 +7124,8 @@ app.get('/api/estrutura/meta', async (req, res) => {
       // 2ª tentativa: prefixo (quando o código vem com sufixo)
       if (!row) {
         const r2 = await client.query(
-          `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador
+          `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
+                  "local_produção" AS local_producao
              FROM public.omie_estrutura
             WHERE TRIM(cod_produto) ILIKE TRIM($1) || '%'
             ORDER BY updated_at DESC NULLS LAST, id DESC

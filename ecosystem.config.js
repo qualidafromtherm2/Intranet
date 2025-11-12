@@ -14,9 +14,7 @@ module.exports = {
 {
   name: 'intranet_api',
   script: './server.js',
-  watch: true,
-  ignore_watch: ['etiquetas', 'logs', 'node_modules'],
-  watch_delay: 500,
+  watch: false,
   env: { PORT: 5001 },
   env_pg: { PORT: 5001 }   // se você usa o profile "pg"
 }
