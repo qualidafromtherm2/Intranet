@@ -571,36 +571,37 @@ export function renderKanbanDesdeJSON(itemsKanban) {
         const localLabel = item.local_impressao_label || item.local_impressao || 'Sem local';
         const grupos = Array.isArray(item.grupos) ? item.grupos : [];
         const gruposHtml = grupos.map(grupo => {
-          const opsHtml = grupo.ops.map(op => `<div class="kanban-op-line">${op.numero_op || op}</div>`).join('');
+          const opsHtml = grupo.ops.map(op => `<div class=\"kanban-op-line\">${op.numero_op || op}</div>`).join('');
           const safeLocal = escapeAttr(localLabel);
           const safeCodigo = escapeAttr(grupo.codigo || '');
           const firstPedido = Array.isArray(grupo.pedidos) && grupo.pedidos.length
             ? grupo.pedidos[0].numero_pedido || ''
             : '';
           const pedidoAttr = firstPedido
-            ? ` data-pedido="${escapeAttr(firstPedido)}"`
+            ? ` data-pedido=\"${escapeAttr(firstPedido)}\"`
             : '';
+          // Botões com seletores originais para disparar modais/calendário
+          const botoesHtml = `
+            <div class=\"kanban-card-actions\" style=\"display:flex; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.1);\">
+              <button class=\"btn-kanban kanban-modal-trigger\" title=\"Definir prazo\" data-codigo=\"${safeCodigo}\" data-local=\"${safeLocal}\" data-coluna=\"${escapeAttr(columnName)}\">
+                <i class=\"far fa-calendar-alt\"></i> Definir prazo
+              </button>
+            </div>
+          `;
           return `
-            <div class="kanban-code-block">
-              <div class="kanban-code-header">
+            <div class=\"kanban-code-block\">
+              <div class=\"kanban-code-header\">
                 <span>${grupo.codigo || 'Sem código'}</span>
-                <span class="kanban-code-count">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+                <span class=\"kanban-code-count\">Qtd ${grupo.quantidade || grupo.ops.length}</span>
               </div>
-              <div class="kanban-op-list">${opsHtml}</div>
-              <div class="kanban-code-actions">
-                <div class="kanban-modal-trigger" data-codigo="${safeCodigo}" data-local="${safeLocal}" data-coluna="${escapeAttr(columnName)}">
-                  ${columnName === 'Fila de produção' ? 'Redefinir prazos' : 'Definir prazos'}
-                </div>
-                <button type="button" class="kanban-stock-trigger" data-codigo="${safeCodigo}"${pedidoAttr}>
-                  Consultar estoque
-                </button>
-              </div>
+              <div class=\"kanban-op-list\">${opsHtml}</div>
+              ${botoesHtml}
             </div>
           `;
         }).join('');
 
         li.innerHTML = `
-          <div class="kanban-card-meta">${localLabel}</div>
+          <div class=\"kanban-card-meta\">${localLabel}</div>
           ${gruposHtml}
         `;
         li.dataset.opsCount = grupos.reduce((acc, g) => acc + (g.quantidade || g.ops?.length || 0), 0);
@@ -614,11 +615,7 @@ export function renderKanbanDesdeJSON(itemsKanban) {
           const opsHtml = grupo.ops.map(op => {
             const display = formatDateDisplay(op.data_impressao, op.etapa);
             return `
-              <div class="kanban-op-line">
-                <span>${op.numero_op || op}</span>
-                <span class="kanban-op-date">${display}</span>
-              </div>
-            `;
+              <div class=\"kanban-op-line\">\n                <span>${op.numero_op || op}</span>\n                <span class=\"kanban-op-date\">${display}</span>\n              </div>\n            `;
           }).join('');
           const safeLocal = escapeAttr(localLabel);
           const safeCodigo = escapeAttr(grupo.codigo || '');
@@ -626,29 +623,30 @@ export function renderKanbanDesdeJSON(itemsKanban) {
             ? grupo.pedidos[0].numero_pedido || ''
             : '';
           const pedidoAttr = firstPedido
-            ? ` data-pedido="${escapeAttr(firstPedido)}"`
+            ? ` data-pedido=\"${escapeAttr(firstPedido)}\"`
             : '';
+          // Botões com seletores originais para disparar modais/calendário
+          const botoesHtml = `
+            <div class=\"kanban-card-actions\" style=\"display:flex; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(0,0,0,0.1);\">
+              <button class=\"btn-kanban kanban-modal-trigger\" title=\"Redefinir prazo\" data-codigo=\"${safeCodigo}\" data-local=\"${safeLocal}\" data-coluna=\"${escapeAttr(columnName)}\">
+                <i class=\"fas fa-calendar-alt\"></i> Redefinir prazo
+              </button>
+            </div>
+          `;
           return `
-            <div class="kanban-code-block">
-              <div class="kanban-code-header">
+            <div class=\"kanban-code-block\">
+              <div class=\"kanban-code-header\">
                 <span>${grupo.codigo || 'Sem código'}</span>
-                <span class="kanban-code-count">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+                <span class=\"kanban-code-count\">Qtd ${grupo.quantidade || grupo.ops.length}</span>
               </div>
-              <div class="kanban-op-list">${opsHtml}</div>
-              <div class="kanban-code-actions">
-                <div class="kanban-modal-trigger" data-codigo="${safeCodigo}" data-local="${safeLocal}" data-coluna="${escapeAttr(columnName)}">
-                  ${columnName === 'Fila de produção' ? 'Redefinir prazos' : 'Definir prazos'}
-                </div>
-                <button type="button" class="kanban-stock-trigger" data-codigo="${safeCodigo}"${pedidoAttr}>
-                  Consultar estoque
-                </button>
-              </div>
+              <div class=\"kanban-op-list\">${opsHtml}</div>
+              ${botoesHtml}
             </div>
           `;
         }).join('');
 
         li.innerHTML = `
-          <div class="kanban-card-meta">${localLabel}</div>
+          <div class=\"kanban-card-meta\">${localLabel}</div>
           ${gruposHtml}
         `;
         li.dataset.opsCount = grupos.reduce((acc, g) => acc + (g.quantidade || g.ops?.length || 0), 0);
@@ -687,7 +685,8 @@ export function renderKanbanDesdeJSON(itemsKanban) {
   });
 }
 
-export async function openPcpForCodigo({ codigo, pedido, descricao } = {}) {
+export async function openPcpForCodigo({ codigo, pedido, descricao, versao, customizacao, op } = {}) {
+  console.log('[openPcpForCodigo] Recebido:', { codigo, pedido, descricao, versao, customizacao, op });
   const cleanCodigo = String(codigo || '').trim();
   if (!cleanCodigo) return;
 
@@ -710,6 +709,22 @@ export async function openPcpForCodigo({ codigo, pedido, descricao } = {}) {
 
   window.pcpCodigoAtual = cleanCodigo;
   window.pcpPedidoAtual = numeroPedido || null;
+
+  // Armazena contexto de OP (se vier) para o carregamento da estrutura
+  try {
+    const ctx = {};
+    if (versao != null && String(versao).trim() !== '') ctx.versao = String(versao).trim();
+    if (customizacao != null && String(customizacao).trim() !== '') ctx.customizacao = String(customizacao).trim();
+    if (op != null && String(op).trim() !== '') ctx.op = String(op).trim();
+    if (Object.keys(ctx).length) {
+      window.pcpContext = ctx; // usado por fetchEstruturaPCP_SQL
+      console.log('[openPcpForCodigo] window.pcpContext definido:', JSON.stringify(ctx));
+    } else {
+      // se não há contexto explícito, limpa para evitar reaproveitar antigo
+      window.pcpContext = undefined;
+      console.log('[openPcpForCodigo] window.pcpContext limpo (sem contexto)');
+    }
+  } catch {}
 
   const col = document.getElementById('coluna-pcp-aprovado')?.closest('.kanban-column');
   const inp = col?.querySelector('.add-search');

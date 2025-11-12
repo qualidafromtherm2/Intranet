@@ -1122,6 +1122,27 @@ if (typeof window.loadFotos === 'function') {
   window.loadFotos(codigo);
 }
 
+  // atualiza a aba RI com os dados do produto
+  if (dados.codigo_produto) {
+    window.produtoRIAtual = {
+      codigo: codigo,
+      id_omie: dados.codigo_produto
+    };
+    // Se a função de carregar RI estiver disponível, chama
+    if (typeof window.carregarItensRI === 'function') {
+      window.carregarItensRI(dados.codigo_produto);
+    }
+
+    // atualiza a aba PIR com os dados do produto
+    window.produtoPIRAtual = {
+      codigo: codigo,
+      id_omie: dados.codigo_produto
+    };
+    if (typeof window.carregarItensPIR === 'function') {
+      window.carregarItensPIR(dados.codigo_produto);
+    }
+  }
+
 }
 
 // 1.1) Helper que chama o seu endpoint de atualização
