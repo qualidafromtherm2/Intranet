@@ -337,6 +337,13 @@
   }
 
   function openUploadModal({ codigo, onSuccess }) {
+    // Verifica se já existe um modal aberto e remove
+    const existingOverlay = document.querySelector('.anexo-upload-overlay');
+    if (existingOverlay) {
+      console.warn('[produto anexos] Modal já existe, removendo...');
+      existingOverlay.remove();
+    }
+    
     let selectedFile = null;
 
     const overlay = document.createElement('div');
@@ -379,9 +386,39 @@
     const cancelBtn = modal.querySelector('.anexo-upload-cancel');
     const saveBtn = modal.querySelector('.anexo-upload-save');
 
+    let modalClosed = false; // Flag para evitar múltiplas chamadas
+
     function close() {
-      document.body.removeChild(overlay);
-      document.removeEventListener('keydown', onKeyDown);
+      if (modalClosed) {
+        console.log('[produto anexos] close() já foi chamado, ignorando...');
+        return;
+      }
+      
+      console.log('[produto anexos] Executando close()...');
+      modalClosed = true;
+      
+      try {
+        // Remove listener de teclado
+        document.removeEventListener('keydown', onKeyDown);
+        console.log('[produto anexos] Listener de teclado removido');
+        
+        // Remove o overlay específico
+        if (overlay && document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+          console.log('[produto anexos] Overlay específico removido do DOM');
+        } else {
+          console.warn('[produto anexos] Overlay específico não encontrado no DOM');
+        }
+        
+        // Remove TODOS os overlays restantes (garantia adicional)
+        const allOverlays = document.querySelectorAll('.anexo-upload-overlay');
+        if (allOverlays.length > 0) {
+          console.log(`[produto anexos] Removendo ${allOverlays.length} overlay(s) adicional(is)...`);
+          allOverlays.forEach(o => o.remove());
+        }
+      } catch (err) {
+        console.error('[produto anexos] erro ao fechar modal', err);
+      }
     }
 
     function updateSaveState() {
@@ -417,26 +454,56 @@
     nomeInput.addEventListener('input', updateSaveState);
     descInput.addEventListener('input', updateSaveState);
 
-    cancelBtn.addEventListener('click', () => close());
-
-    overlay.addEventListener('click', (ev) => {
-      if (ev.target === overlay) close();
+    // Botão Cancelar: previne propagação e fecha modal
+    cancelBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      console.log('[produto anexos] Botão Cancelar clicado');
+      close();
     });
 
-    saveBtn.addEventListener('click', async () => {
+    // Clique fora do modal (no overlay) fecha
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) {
+        console.log('[produto anexos] Clique fora do modal detectado');
+        close();
+      }
+    });
+
+    // Impede propagação de clicks dentro do modal
+    modal.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+    });
+
+    // Botão Salvar: previne propagação, faz upload e fecha
+    saveBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
       if (saveBtn.disabled) return;
+      
+      console.log('[produto anexos] Iniciando upload...');
+      
       try {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Salvando...';
+        
+        console.log('[produto anexos] Enviando arquivo para servidor...');
         await uploadAnexo(codigo, {
           file: selectedFile,
           nome: nomeInput.value.trim(),
           descricao: descInput.value.trim(),
         });
+        
+        console.log('[produto anexos] Upload concluído, fechando modal...');
+        // Fecha modal imediatamente
         close();
+        
+        console.log('[produto anexos] Recarregando lista de anexos...');
+        // Recarrega a lista de anexos
         if (typeof onSuccess === 'function') {
           await onSuccess();
         }
+        console.log('[produto anexos] Processo completo!');
       } catch (err) {
         console.error('[produto anexos] falha upload', err);
         alert('Falha ao enviar o anexo.');

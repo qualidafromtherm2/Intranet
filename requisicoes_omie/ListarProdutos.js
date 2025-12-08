@@ -116,9 +116,11 @@ async function preloadFromDB() {
 
 /* --------------------- RENDER ---------------------------------------- */
 function attachOpenHandlers(ul) {
-  ul.querySelectorAll('.abrir-button').forEach(btn => {
-    btn.onclick = () => {
-      const codigo = btn.dataset.codigo;
+  // Torna cada <li> clicável ao invés de ter botão "Abrir"
+  ul.querySelectorAll('li[data-codigo]').forEach(li => {
+    li.style.cursor = 'pointer';
+    li.onclick = () => {
+      const codigo = li.dataset.codigo;
 
       // mostra a aba "Dados do produto" e esconde as outras
       document.querySelector('.main-header')?.style?.setProperty('display', 'flex');
@@ -138,13 +140,9 @@ function attachOpenHandlers(ul) {
 
 function renderList(ul, produtos) {
   ul.innerHTML = produtos.map(p => `
-    <li>
+    <li data-codigo="${p.codigo ?? ''}" style="cursor: pointer;" class="product-list-item">
       <span class="products">${p.codigo ?? ''}</span>
       <span class="status">${p.descricao ?? ''}</span>
-      <div class="button-wrapper">
-        <button class="content-button status-button open abrir-button"
-                data-codigo="${p.codigo}">Abrir</button>
-      </div>
     </li>`).join('');
   attachOpenHandlers(ul);
 }
@@ -271,19 +269,16 @@ window.__forceListaRefresh = async function () {
     const ul   = document.getElementById('listaProdutosList');
     if (ul) {
       ul.innerHTML = itens.map(p => `
-        <li>
-          <span class="products">${p.codigo}</span>
-          <span class="status">${p.descricao}</span>
-          <div class="button-wrapper">
-            <button class="content-button status-button open abrir-button"
-                    data-codigo="${p.codigo}">Abrir</button>
-          </div>
+        <li data-codigo="${p.codigo ?? ''}" style="cursor: pointer;" class="product-list-item">
+          <span class="products">${p.codigo ?? ''}</span>
+          <span class="status">${p.descricao ?? ''}</span>
         </li>`).join('');
 
-      // reatacha os handlers dos botões "Abrir"
-      ul.querySelectorAll('.abrir-button').forEach(btn => {
-        btn.onclick = () => {
-          const codigo = btn.dataset.codigo;
+      // reatacha os handlers - agora cada <li> é clicável
+      ul.querySelectorAll('li[data-codigo]').forEach(li => {
+        li.style.cursor = 'pointer';
+        li.onclick = () => {
+          const codigo = li.dataset.codigo;
           document.querySelector('.main-header')?.style && (document.querySelector('.main-header').style.display = 'flex');
           document.querySelectorAll('.main-header-link')
                   .forEach(l => l.classList.remove('is-active'));

@@ -49,18 +49,35 @@ function ensurePane(root){
 
   const st = document.createElement('style');
   st.textContent = `
-    .colab-grid{display:grid;grid-template-columns:1fr 80px 160px 240px 140px;gap:8px}
-    .colab-grid .th{font-weight:600;opacity:.9;padding:8px 10px}
-    .colab-grid .td{padding:8px 10px;border-radius:8px;background:var(--ds-card,rgba(255,255,255,.04))}
-    .colab-grid .btn-acao{justify-self:end}
-    .colab-grid .td-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}
-    .colab-grid .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#d7defe;cursor:pointer;font-size:0;padding:0;line-height:0;transition:background .15s ease,border-color .15s ease,transform .15s ease,color .15s ease}
-    .colab-grid .btn-icon:hover{background:rgba(77,128,255,.18);border-color:rgba(96,148,255,.55);color:#f5f7ff;transform:translateY(-1px)}
-    .colab-grid .btn-icon:focus-visible{outline:2px solid rgba(95,142,255,.8);outline-offset:2px}
-    .colab-grid .btn-icon svg{display:block;width:18px;height:18px;pointer-events:none}
-    .colab-grid .btn-icon svg *,
-    .colab-grid .btn-icon svg path{fill:currentColor!important;stroke:none!important}
-    @media(max-width:1100px){.colab-grid{grid-template-columns:1fr 70px 130px 200px 120px}}
+    /* Grid da lista em estilo tabela, mais limpo e profissional (escopado) */
+    #dadosColaboradores .colab-grid{display:grid;grid-template-columns:1.2fr 90px 180px 1.8fr 140px;gap:0;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,20,28,.6);box-shadow:0 8px 26px rgba(0,0,0,.2)}
+    #dadosColaboradores .colab-grid .th,#dadosColaboradores .colab-grid .td{padding:12px 14px}
+    #dadosColaboradores .colab-grid .th{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:12px;color:#a8b3d4;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.08)}
+    #dadosColaboradores .colab-grid .td{border-bottom:1px solid rgba(255,255,255,.06);background:transparent}
+    #dadosColaboradores .colab-grid .td:nth-child(5n+2),
+    #dadosColaboradores .colab-grid .td:nth-child(5n+3){text-align:center;color:#e5eaff}
+    #dadosColaboradores .colab-grid .btn-acao{justify-self:end}
+    #dadosColaboradores .colab-grid .td-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+    #dadosColaboradores .colab-grid .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#d7defe;cursor:pointer;font-size:0;padding:0;line-height:0;transition:background .15s ease,border-color .15s ease,transform .15s ease,color .15s ease}
+    #dadosColaboradores .colab-grid .btn-icon:hover{background:rgba(77,128,255,.18);border-color:rgba(96,148,255,.55);color:#f5f7ff;transform:translateY(-1px)}
+    #dadosColaboradores .colab-grid .btn-icon:focus-visible{outline:2px solid rgba(95,142,255,.8);outline-offset:2px}
+    #dadosColaboradores .colab-grid .btn-icon svg{display:block;width:18px;height:18px;pointer-events:none}
+    #dadosColaboradores .colab-grid .btn-icon svg *,
+    #dadosColaboradores .colab-grid .btn-icon svg path{fill:currentColor!important;stroke:none!important}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading{position:relative}
+  .loading::after{content:'';position:absolute;right:-6px;top:-6px;width:14px;height:14px;border:2px solid rgba(255,255,255,.6);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+  @media(max-width:1100px){#dadosColaboradores .colab-grid{grid-template-columns:1fr 70px 130px 1.4fr 110px}}
+
+    /* Toolbar: filtro e botão recarregar */
+    #dadosColaboradores .title-wrapper{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+    #dadosColaboradores .title-wrapper .side-by-side{display:flex;gap:8px;align-items:center}
+    #colabFilter{min-width:320px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(17,20,28,.6);color:#e8ecff}
+    #colabFilter::placeholder{color:#93a0c2;opacity:.8}
+
+    /* Chips de Permissões de Produto */
+    .perm-chips{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+    .perm-chip{background:rgba(84,120,255,.16);border:1px solid rgba(120,150,255,.25);padding:3px 8px;border-radius:999px;font-size:12px;color:#e6eaff}
 
     .colab-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.54);backdrop-filter:saturate(120%) blur(2px);z-index:9998;display:flex;align-items:center;justify-content:center}
     .colab-modal{width:min(920px,94vw);max-height:88vh;overflow:auto;background:#151923;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.5)}
@@ -89,7 +106,15 @@ function ensurePane(root){
   pane.appendChild(st);
 
   pane.querySelector('#btnRecarregarColab')
-      .addEventListener('click', () => carregarLista(pane));
+      .addEventListener('click', async (ev) => {
+        const b = ev.currentTarget;
+        b.classList.add('loading');
+        b.disabled = true;
+        const prev = b.textContent;
+        b.textContent = 'Carregando…';
+        try { await carregarLista(pane); }
+        finally { b.disabled = false; b.classList.remove('loading'); b.textContent = prev; }
+      });
   pane.querySelector('#colabFilter')
       .addEventListener('input', () => aplicarFiltro(pane));
 
@@ -108,7 +133,20 @@ function renderLinhas(pane, lista){
     const opsText = Array.isArray(u.operacoes) && u.operacoes.length
       ? u.operacoes.map(op => op?.label || op?.operacao || op?.name || '').filter(Boolean).join(', ')
       : '';
-    const c4 = mk('div','td', [u.funcao || '—', opsText].filter(Boolean).join(' • '));
+    const c4 = mk('div','td');
+    const funcOpsLbl = [u.funcao || '—', opsText].filter(Boolean).join(' • ');
+    c4.appendChild(mk('div', '', funcOpsLbl));
+
+    // Chips de Permissões de Produto
+    const perms = Array.isArray(u.produto_permissoes) ? u.produto_permissoes : [];
+    if (perms.length) {
+      const chips = mk('div','perm-chips');
+      perms.forEach(p => {
+        const chip = mk('span','perm-chip', p?.nome || p?.codigo || '');
+        chips.appendChild(chip);
+      });
+      c4.appendChild(chips);
+    }
 const c5 = mk('div','td td-actions');
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -149,15 +187,20 @@ const makeIconBtn = (title, kind) => {
 
 // Detalhes (ícone lápis)
 const btnDet = makeIconBtn('Detalhes', 'pencil');
-btnDet.addEventListener('click', () => abrirDetalhes(u));
+btnDet.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.classList.add('loading'); b.disabled = true;
+  try { await abrirDetalhes(u); }
+  finally { b.disabled = false; b.classList.remove('loading'); }
+});
 c5.appendChild(btnDet);
 
 // Excluir (ícone lixeira)
 const btnDel = makeIconBtn('Excluir', 'trash');
-btnDel.addEventListener('click', async () => {
+btnDel.addEventListener('click', async (ev) => {
   const ok = confirm(`Excluir o usuário "${u.username}" (ID ${u.id})? Esta ação não pode ser desfeita.`);
   if (!ok) return;
   try {
+    const b = ev.currentTarget; b.classList.add('loading'); b.disabled = true;
     const r = await fetch(`/api/colaboradores/${encodeURIComponent(u.id)}`, {
       method: 'DELETE',
       credentials: 'include'
@@ -169,6 +212,8 @@ btnDel.addEventListener('click', async () => {
     await carregarLista(pane); // recarrega a lista
   } catch (e) {
     alert('Não foi possível excluir: ' + (e.message || e));
+  } finally {
+    const b = ev.currentTarget; b.disabled = false; b.classList.remove('loading');
   }
 });
 c5.appendChild(btnDel);
@@ -222,7 +267,8 @@ async function carregarLista(pane){
     operacao: x.operacao || x.profile?.operacao || '',
     operacao_id: x.operacao_id != null ? Number(x.operacao_id) :
                  (x.profile?.operacao_id != null ? Number(x.profile.operacao_id) : null),
-    operacoes: normalizeOperacoes(x.operacoes ?? x.profile?.operacoes)
+    operacoes: normalizeOperacoes(x.operacoes ?? x.profile?.operacoes),
+    produto_permissoes: Array.isArray(x.produto_permissoes) ? x.produto_permissoes : []
   }));
   renderLinhas(pane, lista);
 }
@@ -308,10 +354,10 @@ async function abrirDetalhes(u){
 
   // clique no "Resetar senha" → POST /api/users/:id/password/reset
 const btnReset = modal.querySelector('.js-reset-pass');
-btnReset?.addEventListener('click', async () => {
+btnReset?.addEventListener('click', async (ev) => {
   const id = String(user.id);
-  btnReset.disabled = true;
-  btnReset.textContent = 'Resetando...';
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
+  const prev = b.textContent; b.textContent = 'Resetando…';
   try {
     const r = await fetch(`/api/users/${encodeURIComponent(id)}/password/reset`, {
       method: 'POST',
@@ -326,8 +372,9 @@ btnReset?.addEventListener('click', async () => {
   } catch (e) {
     alert('Falha ao redefinir a senha: ' + (e.message || e));
   } finally {
-    btnReset.textContent = 'Resetar senha';
-    btnReset.disabled = false;
+    b.textContent = prev;
+    b.disabled = false;
+    b.classList.remove('loading');
   }
 });
 
@@ -337,7 +384,8 @@ btnReset?.addEventListener('click', async () => {
   modal.querySelectorAll('.js-close').forEach(b => b.addEventListener('click', () => closeModal(modal)));
 
   // 👉 NOVO: abre o editor moderno de permissões (aquele com “Menu lateral / Menu superior”)
-modal.querySelector('.js-open-perm').addEventListener('click', async () => {
+modal.querySelector('.js-open-perm').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
 
   try {
     if (window.syncNavNodes) await window.syncNavNodes();
@@ -346,11 +394,16 @@ modal.querySelector('.js-open-perm').addEventListener('click', async () => {
   }
   try { await window.syncNavNodes?.(); } catch (e) { console.warn('[perm-sync]', e); }
 
-  await showPermissoes(String(user.id), user.username);
+  try {
+    await showPermissoes(String(user.id), user.username);
+  } finally {
+    b.disabled = false; b.classList.remove('loading');
+  }
 });
 
 // abrir o modal de edição reaproveitando o modal global
-modal.querySelector('.js-edit')?.addEventListener('click', async () => {
+modal.querySelector('.js-edit')?.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
   try {
     // passamos os dados por NOME (funcao/setor) + roles; o menu_produto.js resolve os IDs
     const payload = {
@@ -361,7 +414,10 @@ modal.querySelector('.js-edit')?.addEventListener('click', async () => {
       setor:  setor  || '',
       operacao: operacao || '',
       operacao_id: operacaoId,
-      operacoes
+      operacoes,
+      produto_permissoes: Array.isArray(profile.produto_permissoes)
+        ? profile.produto_permissoes
+        : (Array.isArray(u.produto_permissoes) ? u.produto_permissoes : [])
     };
     // exposto no menu_produto.js
     if (window.openColabEdit) {
@@ -373,6 +429,8 @@ modal.querySelector('.js-edit')?.addEventListener('click', async () => {
   } catch (e) {
     console.warn('[editar usuário]', e);
     alert('Falha ao abrir editor.');
+  } finally {
+    b.disabled = false; b.classList.remove('loading');
   }
 });
 

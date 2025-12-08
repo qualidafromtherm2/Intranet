@@ -86,12 +86,31 @@ async function syncUserOperacoes(client, userId, operacaoIds) {
   ));
   await client.query('DELETE FROM public.auth_user_operacao WHERE user_id = $1', [userId]);
   if (!ids.length) return;
-    const values = ids.map((_, idx) => `($1, $${idx + 2})`).join(',');
-    await client.query(
-      `INSERT INTO public.auth_user_operacao (user_id, operacao_id)
-       VALUES ${values}
-       ON CONFLICT (user_id, operacao_id) DO NOTHING`,
-      [userId, ...ids]
+  const values = ids.map((_, idx) => `($1, $${idx + 2})`).join(',');
+  await client.query(
+    `INSERT INTO public.auth_user_operacao (user_id, operacao_id)
+     VALUES ${values}
+     ON CONFLICT (user_id, operacao_id) DO NOTHING`,
+    [userId, ...ids]
+  );
+}
+
+// Sincroniza permissões de produto (produto_permissao_codigos)
+// Remove todas as antigas para o usuário e insere o conjunto novo, ignorando duplicatas.
+async function syncUserProdutoPermissoes(client, userId, codigos) {
+  const codes = Array.from(new Set(
+    (codigos || [])
+      .map(c => (c == null ? '' : String(c).trim()))
+      .filter(c => c.length > 0)
+  ));
+  await client.query('DELETE FROM public.auth_user_produto_permissao WHERE user_id = $1', [userId]);
+  if (!codes.length) return;
+  const values = codes.map((_, idx) => `($1, $${idx + 2})`).join(',');
+  await client.query(
+    `INSERT INTO public.auth_user_produto_permissao (user_id, permissao_codigo)
+     VALUES ${values}
+     ON CONFLICT (user_id, permissao_codigo) DO NOTHING`,
+    [userId, ...codes]
   );
 }
 
@@ -215,6 +234,19 @@ router.post('/', async (req, res) => {
       .filter(id => id.length > 0)
   ));
   const operacao_id = operacao_ids.length ? operacao_ids[0] : null;
+
+  // Pegar permissões de produto
+  const rawProdPermCodigos = Array.isArray(req.body?.produto_permissao_codigos)
+    ? req.body.produto_permissao_codigos
+    : [];
+  const produto_permissao_codigos = Array.from(new Set(
+    rawProdPermCodigos
+      .map(codigo => (codigo == null ? '' : String(codigo).trim()))
+      .filter(codigo => codigo.length > 0)
+  ));
+
+  try { console.log('[POST /api/colaboradores] produto_permissao_codigos=', produto_permissao_codigos); } catch {}
+
   // força senha provisória apenas na criação
 const senhaProvisoria = '123';
 
@@ -230,6 +262,8 @@ const q = await cx.query(
   'SELECT * FROM public.auth_create_user($1, $2, $3::text[])',
   [username.trim(), senhaProvisoria, roles]
 );
+
+// (removido: função duplicada syncUserProdutoPermissoes — agora definida no escopo superior)
 
         userRow = q.rows?.[0];
       } catch (e) {
@@ -256,7 +290,15 @@ SELECT * FROM upsert;
       await upsertUserProfile(cx, userRow.id, { funcao_id, setor_id, operacao_id });
       await syncUserOperacoes(cx, userRow.id, operacao_ids);
 
-      // 3) retorna o básico
+  // 3) vincula permissões de produto
+  try { console.log('[POST sync] user=', userRow.id, 'perms=', produto_permissao_codigos); } catch {}
+  await syncUserProdutoPermissoes(cx, userRow.id, produto_permissao_codigos);
+  try {
+    const check = await cx.query('SELECT array_agg(permissao_codigo) arr FROM public.auth_user_produto_permissao WHERE user_id=$1', [userRow.id]);
+    console.log('[POST sync check]', check.rows?.[0]?.arr || null);
+  } catch(e){ console.warn('[POST sync check ERR]', e.message); }
+
+  // 4) retorna o básico
       return { id: userRow.id, username: userRow.username, roles: userRow.roles };
     });
 
@@ -276,6 +318,7 @@ SELECT * FROM upsert;
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { username, funcao_id, setor_id, roles } = req.body || {};
+  try { console.log('[PUT /api/colaboradores/:id] RAW BODY', req.body); } catch {}
   const bodyOperacaoId = req.body?.operacao_id;
   const rawOperIds = Array.isArray(req.body?.operacao_ids)
     ? req.body.operacao_ids
@@ -286,6 +329,19 @@ router.put('/:id', async (req, res) => {
       .filter(id => id.length > 0)
   ));
   const operacao_id = operacao_ids && operacao_ids.length ? operacao_ids[0] : (bodyOperacaoId != null ? String(bodyOperacaoId).trim() || null : null);
+
+  // Extrai produto_permissao_codigos
+  const rawProdPermCodigos = Array.isArray(req.body?.produto_permissao_codigos)
+    ? req.body.produto_permissao_codigos
+    : undefined;
+  const produto_permissao_codigos = rawProdPermCodigos === undefined ? undefined : Array.from(new Set(
+    rawProdPermCodigos
+      .map(codigo => (codigo == null ? '' : String(codigo).trim()))
+      .filter(codigo => codigo.length > 0)
+  ));
+  if (produto_permissao_codigos !== undefined) {
+    try { console.log('[PUT /api/colaboradores/:id] produto_permissao_codigos=', produto_permissao_codigos); } catch {}
+  }
 
   try {
     await withTx(async (cx) => {
@@ -330,6 +386,15 @@ router.put('/:id', async (req, res) => {
       await upsertUserProfile(cx, id, { funcao_id, setor_id, operacao_id });
       if (operacao_ids !== undefined) {
         await syncUserOperacoes(cx, id, operacao_ids);
+      }
+      // sincroniza permissões de produto SEM depender de mudança em operações
+      if (produto_permissao_codigos !== undefined) {
+        try { console.log('[PUT sync] user=', id, 'perms=', produto_permissao_codigos); } catch {}
+        await syncUserProdutoPermissoes(cx, id, produto_permissao_codigos);
+        try {
+          const check = await cx.query('SELECT array_agg(permissao_codigo) arr FROM public.auth_user_produto_permissao WHERE user_id=$1', [id]);
+          console.log('[PUT sync check]', check.rows?.[0]?.arr || null);
+        } catch(e){ console.warn('[PUT sync check ERR]', e.message); }
       }
     });
 
@@ -411,6 +476,23 @@ router.put('/api/users/update-password-by-username', express.json(), async (req,
     return res.status(500).json({ ok:false, error:'Erro interno' });
   } finally {
     client.release();
+  }
+});
+
+// ========== Endpoints de Permissões de Produto ==========
+
+// GET /api/colaboradores/produto-permissoes - Lista todas as permissões de produto disponíveis
+router.get('/produto-permissoes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT codigo, nome 
+      FROM produto_permissao 
+      ORDER BY nome
+    `);
+    res.json(rows);
+  } catch (e) {
+    console.error('[produto-permissoes] erro:', e);
+    res.status(500).json({ error: 'Erro ao buscar permissões de produto' });
   }
 });
 

@@ -586,16 +586,22 @@ export function renderKanbanDesdeJSON(itemsKanban) {
               <button class=\"btn-kanban kanban-modal-trigger\" title=\"Definir prazo\" data-codigo=\"${safeCodigo}\" data-local=\"${safeLocal}\" data-coluna=\"${escapeAttr(columnName)}\">
                 <i class=\"far fa-calendar-alt\"></i> Definir prazo
               </button>
+              <button class=\"btn-kanban kanban-stock-trigger\" title=\"Consultar estoque\" data-codigo=\"${safeCodigo}\"${pedidoAttr}>
+                <i class=\"fas fa-boxes\"></i> Estoque
+              </button>
             </div>
           `;
           return `
-            <div class=\"kanban-code-block\">
-              <div class=\"kanban-code-header\">
+            <div class=\"kanban-code-block kanban-code-block-collapsed\">
+              <div class=\"kanban-code-header\" style=\"cursor:pointer;\">
                 <span>${grupo.codigo || 'Sem código'}</span>
                 <span class=\"kanban-code-count\">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+                <i class=\"fas fa-chevron-down kanban-toggle-icon\"></i>
               </div>
-              <div class=\"kanban-op-list\">${opsHtml}</div>
-              ${botoesHtml}
+              <div class=\"kanban-op-list\" style=\"display:none;\">${opsHtml}</div>
+              <div class=\"kanban-card-actions-wrapper\" style=\"display:none;\">
+                ${botoesHtml}
+              </div>
             </div>
           `;
         }).join('');
@@ -608,6 +614,46 @@ export function renderKanbanDesdeJSON(itemsKanban) {
         li.dataset.localImpressao = item.local_impressao || localLabel.toUpperCase();
         li.setAttribute('draggable', 'false');
         li.classList.add('kanban-card-local');
+        
+        // Adiciona eventos de expandir/recolher
+        setTimeout(() => {
+          li.querySelectorAll('.kanban-code-header').forEach(header => {
+            header.addEventListener('click', (ev) => {
+              if (ev.target.closest('.btn-kanban')) return;
+              
+              const block = header.closest('.kanban-code-block');
+              const wasCollapsed = block.classList.contains('kanban-code-block-collapsed');
+              
+              // Recolhe todos os outros blocos do mesmo card
+              li.querySelectorAll('.kanban-code-block').forEach(b => {
+                b.classList.add('kanban-code-block-collapsed');
+                const opList = b.querySelector('.kanban-op-list');
+                const actions = b.querySelector('.kanban-card-actions-wrapper');
+                const icon = b.querySelector('.kanban-toggle-icon');
+                if (opList) opList.style.display = 'none';
+                if (actions) actions.style.display = 'none';
+                if (icon) {
+                  icon.classList.remove('fa-chevron-up');
+                  icon.classList.add('fa-chevron-down');
+                }
+              });
+              
+              // Expande o bloco clicado se estava recolhido
+              if (wasCollapsed) {
+                block.classList.remove('kanban-code-block-collapsed');
+                const opList = block.querySelector('.kanban-op-list');
+                const actions = block.querySelector('.kanban-card-actions-wrapper');
+                const icon = block.querySelector('.kanban-toggle-icon');
+                if (opList) opList.style.display = 'block';
+                if (actions) actions.style.display = 'block';
+                if (icon) {
+                  icon.classList.remove('fa-chevron-down');
+                  icon.classList.add('fa-chevron-up');
+                }
+              }
+            });
+          });
+        }, 0);
       } else if (columnName === 'Fila de produção') {
         const localLabel = item.local_impressao_label || item.local_impressao || 'Sem local';
         const grupos = Array.isArray(item.grupos) ? item.grupos : [];
@@ -631,16 +677,22 @@ export function renderKanbanDesdeJSON(itemsKanban) {
               <button class=\"btn-kanban kanban-modal-trigger\" title=\"Redefinir prazo\" data-codigo=\"${safeCodigo}\" data-local=\"${safeLocal}\" data-coluna=\"${escapeAttr(columnName)}\">
                 <i class=\"fas fa-calendar-alt\"></i> Redefinir prazo
               </button>
+              <button class=\"btn-kanban kanban-stock-trigger\" title=\"Consultar estoque\" data-codigo=\"${safeCodigo}\"${pedidoAttr}>
+                <i class=\"fas fa-boxes\"></i> Estoque
+              </button>
             </div>
           `;
           return `
-            <div class=\"kanban-code-block\">
-              <div class=\"kanban-code-header\">
+            <div class=\"kanban-code-block kanban-code-block-collapsed\">
+              <div class=\"kanban-code-header\" style=\"cursor:pointer;\">
                 <span>${grupo.codigo || 'Sem código'}</span>
                 <span class=\"kanban-code-count\">Qtd ${grupo.quantidade || grupo.ops.length}</span>
+                <i class=\"fas fa-chevron-down kanban-toggle-icon\"></i>
               </div>
-              <div class=\"kanban-op-list\">${opsHtml}</div>
-              ${botoesHtml}
+              <div class=\"kanban-op-list\" style=\"display:none;\">${opsHtml}</div>
+              <div class=\"kanban-card-actions-wrapper\" style=\"display:none;\">
+                ${botoesHtml}
+              </div>
             </div>
           `;
         }).join('');
@@ -653,6 +705,46 @@ export function renderKanbanDesdeJSON(itemsKanban) {
         li.dataset.localImpressao = item.local_impressao || localLabel.toUpperCase();
         li.setAttribute('draggable', 'false');
         li.classList.add('kanban-card-local', 'kanban-card-production');
+        
+        // Adiciona eventos de expandir/recolher
+        setTimeout(() => {
+          li.querySelectorAll('.kanban-code-header').forEach(header => {
+            header.addEventListener('click', (ev) => {
+              if (ev.target.closest('.btn-kanban')) return;
+              
+              const block = header.closest('.kanban-code-block');
+              const wasCollapsed = block.classList.contains('kanban-code-block-collapsed');
+              
+              // Recolhe todos os outros blocos do mesmo card
+              li.querySelectorAll('.kanban-code-block').forEach(b => {
+                b.classList.add('kanban-code-block-collapsed');
+                const opList = b.querySelector('.kanban-op-list');
+                const actions = b.querySelector('.kanban-card-actions-wrapper');
+                const icon = b.querySelector('.kanban-toggle-icon');
+                if (opList) opList.style.display = 'none';
+                if (actions) actions.style.display = 'none';
+                if (icon) {
+                  icon.classList.remove('fa-chevron-up');
+                  icon.classList.add('fa-chevron-down');
+                }
+              });
+              
+              // Expande o bloco clicado se estava recolhido
+              if (wasCollapsed) {
+                block.classList.remove('kanban-code-block-collapsed');
+                const opList = block.querySelector('.kanban-op-list');
+                const actions = block.querySelector('.kanban-card-actions-wrapper');
+                const icon = block.querySelector('.kanban-toggle-icon');
+                if (opList) opList.style.display = 'block';
+                if (actions) actions.style.display = 'block';
+                if (icon) {
+                  icon.classList.remove('fa-chevron-down');
+                  icon.classList.add('fa-chevron-up');
+                }
+              }
+            });
+          });
+        }, 0);
       } else if (columnName === 'Pedido aprovado') {
         const desc = item.descricao || '';
         const pedidosHtml = (item.pedidos || []).map(p => `

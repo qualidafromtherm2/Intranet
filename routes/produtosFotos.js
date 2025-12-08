@@ -3,6 +3,7 @@ const express = require('express');
 const router  = express.Router();
 
 const { dbQuery } = require('../src/db'); // usa DATABASE_URL com SSL quando em produção
+const { registrarModificacao } = require('../utils/auditoria');
 
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
@@ -95,6 +96,27 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
       [codigoNum, pos, publicUrl, pathKey, nomeFoto, descricaoFoto]
     );
 
+    // Auditoria: foto adicionada/atualizada
+    try {
+      const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
+      let codigoTexto = null;
+      try {
+        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        codigoTexto = r.rows?.[0]?.codigo || null;
+      } catch {}
+      await registrarModificacao({
+        codigo_omie: codigoTexto || String(codigoNum),
+        codigo_texto: codigoTexto || null,
+        codigo_produto: codigoNum,
+        tipo_acao: 'PRODUTO_FOTO_ADD',
+        usuario: usuarioAudit,
+        origem: 'API',
+        detalhes: `pos=${pos}; nome=${nomeFoto}; path=${pathKey}`
+      });
+    } catch (e) {
+      console.warn('[auditoria][produtos/fotos:add] falhou ao registrar:', e?.message || e);
+    }
+
     res.json({
       ok: true,
       codigo: codigoNum,
@@ -138,6 +160,27 @@ router.delete('/:codigo/fotos/:pos?', async (req, res) => {
         WHERE codigo_produto = $1 AND pos = $2`,
       [codigoNum, pos]
     );
+
+    // Auditoria: foto removida
+    try {
+      const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
+      let codigoTexto = null;
+      try {
+        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        codigoTexto = r.rows?.[0]?.codigo || null;
+      } catch {}
+      await registrarModificacao({
+        codigo_omie: codigoTexto || String(codigoNum),
+        codigo_texto: codigoTexto || null,
+        codigo_produto: codigoNum,
+        tipo_acao: 'PRODUTO_FOTO_REMOVE',
+        usuario: usuarioAudit,
+        origem: 'API',
+        detalhes: `pos=${pos}; path=${pathKey || ''}`
+      });
+    } catch (e) {
+      console.warn('[auditoria][produtos/fotos:del] falhou ao registrar:', e?.message || e);
+    }
 
     res.json({ ok: true, codigo: codigoNum, pos, removed: pathKey });
   } catch (err) {

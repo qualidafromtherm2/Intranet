@@ -113,6 +113,24 @@ button.ghost { background: transparent; border: 1px solid rgba(255,255,255,.7); 
 .btn-text { vertical-align: middle; }
 .spinner { display: none; vertical-align: middle; margin-left: 8px; }
 
+/* checkbox "Lembrar-me" com tamanho normal */
+#rememberMe {
+  width: auto !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin-right: 6px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+label[for="rememberMe"],
+label:has(#rememberMe) {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
 /* título do formulário */
 .form-title { color: #2b2b2b; margin-bottom: 8px; text-align: center; }
 .form-sub { color: #666; margin-bottom: 16px; text-align: center; }

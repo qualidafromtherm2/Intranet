@@ -372,4 +372,17 @@ router.post('/debug/broadcast', (req, res) => {
   }
 });
 
+// ============================================================================
+// GET /api/produtos/familias - Lista famílias da tabela configuracoes.familia
+// ============================================================================
+router.get('/familias', async (req, res) => {
+  try {
+    const result = await dbQuery('SELECT id, codigo, nome_familia FROM configuracoes.familia ORDER BY nome_familia');
+    res.json(result.rows || []);
+  } catch (e) {
+    console.error('[GET /api/produtos/familias]', e);
+    res.status(500).json({ error: 'Erro ao buscar famílias' });
+  }
+});
+
 module.exports = router;

@@ -58,7 +58,7 @@
       let info = {
         slotIndex: i,
         posReal: i,
-        url: '../img/logo.png',
+        url: 'img/Produto/Foto_carrocel.png',
         nome: '',
         descricao: '',
         pathKey: null,
@@ -70,7 +70,7 @@
         info = {
           ...info,
           posReal: i,
-          url: data.url || '../img/logo.png',
+          url: data.url || 'img/Produto/Foto_carrocel.png',
           nome: data.nome,
           descricao: data.descricao,
           pathKey: data.pathKey,
@@ -81,7 +81,7 @@
         info = {
           ...info,
           posReal: i + 1,
-          url: data.url || '../img/logo.png',
+          url: data.url || 'img/Produto/Foto_carrocel.png',
           nome: data.nome,
           descricao: data.descricao,
           pathKey: data.pathKey,
@@ -139,12 +139,12 @@
     LABELS.forEach((label, i) => {
       const slot = slots[i] || {
         posReal: i,
-        url: '../img/logo.png',
+        url: 'img/Produto/Foto_carrocel.png',
         nome: '',
         descricao: '',
         hasFoto: false
       };
-      const bgUrl = slot.hasFoto ? slot.url : '../img/logo.png';
+      const bgUrl = slot.hasFoto ? slot.url : 'img/Produto/Foto_carrocel.png';
       const posReal = slot.posReal;
       const titulo = slot.nome || label;
       const detalhe = slot.descricao || (slot.hasFoto ? '' : 'Sem descrição');
