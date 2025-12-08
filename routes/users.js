@@ -148,37 +148,55 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
     : ", NULL::text AS operacao, NULL::bigint AS operacao_id";
 
   const useOperList = hasOperLink && operCols;
-  const operListJoin = useOperList
-    ? ` LEFT JOIN public.auth_user_operacao uo ON uo.user_id = u.id
-        LEFT JOIN public.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text`
-    : '';
-  const operListLabelExpr = useOperList ? `op_list."${operCols.label}"::text` : 'NULL::text';
+  // Usar subconsulta LATERAL para evitar produto cartesiano entre operações e permissões
   const operListSelect = useOperList
     ? `,
-       COALESCE(
+       (SELECT COALESCE(
          json_agg(
            json_build_object(
              'id', uo.operacao_id::text,
-             'label', COALESCE(${operListLabelExpr}, uo.operacao_id::text)
+             'label', COALESCE(op_list."${operCols.label}"::text, uo.operacao_id::text)
            )
-           ORDER BY COALESCE(${operListLabelExpr}, uo.operacao_id::text)
-         ) FILTER (WHERE uo.operacao_id IS NOT NULL),
+           ORDER BY COALESCE(op_list."${operCols.label}"::text, uo.operacao_id::text)
+         ),
          '[]'::json
+       )
+       FROM public.auth_user_operacao uo
+       LEFT JOIN public.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text
+       WHERE uo.user_id = u.id
        ) AS operacoes`
     : `,
        '[]'::json AS operacoes`;
   const extraGroup = useOper ? `, ${operLabelExpr}, up.operacao_id` : '';
+
+  // Adicionar permissões de produto usando subconsulta LATERAL
+  const prodPermSelect = `,
+    (SELECT COALESCE(
+      json_agg(
+        json_build_object(
+          'codigo', upp.permissao_codigo,
+          'nome', pp.nome
+        )
+        ORDER BY pp.nome
+      ),
+      '[]'::json
+    )
+    FROM public.auth_user_produto_permissao upp
+    LEFT JOIN public.produto_permissao pp ON pp.codigo = upp.permissao_codigo
+    WHERE upp.user_id = u.id
+    ) AS produto_permissoes`;
+
   const q = `
     SELECT u.id::text AS id, u.username::text AS username, u.roles,
            s.name AS setor, f.name AS funcao
            ${operSelect}
            ${operListSelect}
+           ${prodPermSelect}
       FROM public.auth_user u
       LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
       LEFT JOIN public.auth_sector s ON s.id = up.sector_id
       LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
       ${operJoin}
-      ${operListJoin}
      GROUP BY u.id, u.username, u.roles, s.name, f.name${extraGroup}
      ORDER BY u.username`;
   const { rows } = await pool.query(q);
@@ -187,7 +205,8 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
     setor: r.setor || null, funcao: r.funcao || null,
     operacao: r.operacao || null,
     operacao_id: r.operacao_id != null ? Number(r.operacao_id) : null,
-    operacoes: Array.isArray(r.operacoes) ? r.operacoes : []
+  operacoes: Array.isArray(r.operacoes) ? r.operacoes : [],
+  produto_permissoes: Array.isArray(r.produto_permissoes) ? r.produto_permissoes : []
   })));
 });
 
@@ -247,6 +266,17 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
      LIMIT 1`;
   const { rows } = await pool.query(q, [uid]);
   const r = rows[0];
+
+  // Buscar permissões de produto
+  const { rows: permRows } = await pool.query(
+    `SELECT pp.codigo, pp.nome
+     FROM public.auth_user_produto_permissao upp
+     JOIN public.produto_permissao pp ON pp.codigo = upp.permissao_codigo
+     WHERE upp.user_id = $1
+     ORDER BY pp.nome`,
+    [uid]
+  );
+
   res.json({
     user:    { id: r.id, username: r.username, roles: r.roles || [] },
     profile: {
@@ -254,7 +284,8 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
       funcao: r.funcao || null,
       operacao: r.operacao || null,
       operacao_id: r.operacao_id != null ? Number(r.operacao_id) : null,
-      operacoes: Array.isArray(r.operacoes) ? r.operacoes : []
+  operacoes: Array.isArray(r.operacoes) ? r.operacoes : [],
+  produto_permissoes: permRows
     }
   });
 });
@@ -331,6 +362,17 @@ router.put('/:id', requireLogin, manageOnly, async (req, res) => {
     await pool.query('UPDATE public.auth_user SET roles=$1 WHERE id=$2', [roles, uid]);
   }
   res.json({ ok: true });
+});
+
+/* ----------------- 6) Endpoint para contagem de mensagens ----------------- */
+router.get('/me/messages', requireLogin, async (req, res) => {
+  try {
+    // Por enquanto retorna sempre 0, você pode implementar a lógica real depois
+    res.json({ count: 0 });
+  } catch (e) {
+    console.error('[GET /me/messages] erro:', e);
+    res.status(500).json({ error: 'Erro ao buscar mensagens' });
+  }
 });
 
 module.exports = router;

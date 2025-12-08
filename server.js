@@ -1,6 +1,3 @@
-// ...existing code...
-
-// ...existing code...
 // server.js
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
@@ -39,26 +36,8 @@ if (!globalThis.fetch) {
 const safeFetch = (...args) => globalThis.fetch(...args);
 global.safeFetch = (...args) => globalThis.fetch(...args);
 const app = express();
-// Busca o maior código sequencial para produtos_omie
-// Objetivo: Retornar o maior código existente para montar o próximo código sequencial
-app.get('/api/produtos_omie/max_codigo', async (req, res) => {
-  const { base } = req.query;
-  if (!base || typeof base !== 'string') {
-    return res.status(400).json({ ok: false, error: 'Base do código obrigatória' });
-  }
-  const client = await pool.connect();
-  try {
-    const query = `SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1 ORDER BY codigo DESC LIMIT 1`;
-    const likePattern = base + '%';
-    const result = await client.query(query, [likePattern]);
-    const maxCodigo = result.rows[0]?.codigo || null;
-    res.json({ ok: true, maxCodigo });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  } finally {
-    client.release();
-  }
-});
+// Flag de debug para chat (silencia logs em produção por padrão)
+const CHAT_DEBUG = process.env.CHAT_DEBUG === '1' || process.env.NODE_ENV === 'development';
 // ===== Ingestão inicial de OPs (Omie → Postgres) ============================
 const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
 
@@ -69,6 +48,8 @@ const sseClients = new Set();
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
 const isProd = process.env.NODE_ENV === 'production';
 const callOmieDedup = require('./utils/callOmieDedup');
+// Helper para registrar histórico de modificações de produto
+const { registrarModificacao } = require('./utils/auditoria');
 const LOCAIS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
 const locaisEstoqueCache = { at: 0, data: [], fonte: 'omie' };
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
@@ -82,12 +63,6 @@ app.use('/pst_prep_eletrica',
 // === DEBUG BOOT / VIDA ======================================================
 app.get('/__ping', (req, res) => {
   res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
-});
-
-// Rota stub para mensagens do usuário (evita 404 no front)
-// Objetivo: evitar erro 404 no login.js enquanto a funcionalidade real não está implementada
-app.get('/api/users/me/messages', (req, res) => {
-  res.json({ count: 0, messages: [] });
 });
 
 
@@ -110,6 +85,7 @@ app.use('/api/colaboradores', require('./routes/colaboradores'));
 app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
+app.use('/api/registros', require('./routes/registros'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -545,6 +521,8 @@ app.get('/api/users/:id/permissions', async (req,res)=>{
 const etqConfigPath = path.join(__dirname, 'csv', 'Configuração_etq_caracteristicas.csv');
 const { dbQuery, isDbEnabled } = require('./src/db');   // nosso módulo do Passo 1
 const produtosRouter = require('./routes/produtos');
+const engenhariaRouter = require('./routes/engenharia')(pool);
+const comprasRouter = require('./routes/compras')(pool);
 // helper central: só usa DB se houver pool E a requisição não for local
  function shouldUseDb(req) {
    if (process.env.FORCE_DB === '1') return true; // força Postgres mesmo em localhost
@@ -616,6 +594,7 @@ const omieCall      = require('./utils/omieCall');
 const bcrypt = require('bcrypt');
 const INACTIVE_HASH = '$2b$10$ltPcvabuKvEU6Uj1FBUmi.ME4YjVq/dhGh4Z3PpEyNlphjjXCDkTG';   // ← seu HASH_INATIVO aqui
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const CHAT_FILE  = path.join(__dirname, 'data', 'chat.json');
 const {
   OMIE_APP_KEY,
   OMIE_APP_SECRET,
@@ -724,6 +703,404 @@ app.post('/api/produtos/busca', async (req, res) => {
     res.status(500).json({ error: 'Falha na busca' });
   }
 });
+
+// === Engenharia: listar produtos "Em criação" com contagem de Check-Proj ===
+// Retorna JSON { itens: [{ codigo, descricao, check_concluidas, check_total, check_percentual }] }
+app.get('/api/engenharia/em-criacao', async (req, res) => {
+  try {
+    // Busca produtos "Em criação" com suas atividades de engenharia (Check-Proj)
+    const sql = `
+      WITH produtos_eng AS (
+        SELECT 
+          codigo::text AS codigo, 
+          descricao::text AS descricao,
+          codigo_familia::text AS familia
+        FROM public.produtos_omie
+        WHERE descricao ILIKE 'Em criação%' 
+        ORDER BY codigo ASC
+        LIMIT 1000
+      ),
+      stats_check AS (
+        -- Atividades da família
+        SELECT 
+          pe.codigo,
+          COUNT(af.id) AS total_atividades,
+          COUNT(CASE WHEN s.concluido = true OR s.nao_aplicavel = true THEN 1 END) AS concluidas
+        FROM produtos_eng pe
+        LEFT JOIN engenharia.atividades_familia af 
+          ON af.familia_codigo = pe.familia AND af.ativo = true
+        LEFT JOIN engenharia.atividades_produto_status s
+          ON s.atividade_id = af.id AND s.produto_codigo = pe.codigo
+        GROUP BY pe.codigo
+        
+        UNION ALL
+        
+        -- Atividades específicas do produto
+        SELECT 
+          ap.produto_codigo AS codigo,
+          COUNT(ap.id) AS total_atividades,
+          COUNT(CASE WHEN aps.concluido = true OR aps.nao_aplicavel = true THEN 1 END) AS concluidas
+        FROM engenharia.atividades_produto ap
+        LEFT JOIN engenharia.atividades_produto_status_especificas aps
+          ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+        WHERE ap.ativo = true
+        GROUP BY ap.produto_codigo
+      ),
+      stats_agregadas AS (
+        SELECT 
+          codigo,
+          SUM(total_atividades) AS total_atividades,
+          SUM(concluidas) AS concluidas
+        FROM stats_check
+        GROUP BY codigo
+      )
+      SELECT 
+        pe.codigo,
+        pe.descricao,
+        pe.familia,
+        COALESCE(sa.concluidas, 0)::int AS eng_concluidas,
+        COALESCE(sa.total_atividades, 0)::int AS eng_total,
+        CASE 
+          WHEN COALESCE(sa.total_atividades, 0) = 0 THEN 0
+          ELSE ROUND((COALESCE(sa.concluidas, 0)::decimal / sa.total_atividades) * 100)
+        END AS eng_percentual
+      FROM produtos_eng pe
+      LEFT JOIN stats_agregadas sa ON sa.codigo = pe.codigo
+      ORDER BY pe.codigo ASC;
+    `;
+    const { rows: produtos } = await pool.query(sql);
+    
+    // Para cada produto, calcular completude (gráfico circular)
+    const resultado = [];
+    for (const produto of produtos) {
+      try {
+        // Busca dados completos do produto via API interna
+        const detalhesResp = await fetch(`http://localhost:5001/api/produtos/detalhe?codigo=${encodeURIComponent(produto.codigo)}`);
+        if (!detalhesResp.ok) {
+          resultado.push({
+            codigo: produto.codigo,
+            descricao: produto.descricao,
+            completude_concluidas: 0,
+            completude_total: 0,
+            completude_percentual: 0,
+            eng_concluidas: produto.eng_concluidas,
+            eng_total: produto.eng_total,
+            eng_percentual: produto.eng_percentual
+          });
+          continue;
+        }
+        
+        const dados = await detalhesResp.json();
+        
+        // Busca campos obrigatórios da família
+        const camposQuery = `
+          SELECT cg.chave
+          FROM configuracoes.familia_campos_obrigatorios fco
+          INNER JOIN configuracoes.campos_guias cg ON cg.chave = fco.campo_chave
+          WHERE fco.familia_codigo = $1 AND fco.obrigatorio = true
+        `;
+        const { rows: campos } = await pool.query(camposQuery, [produto.familia]);
+        
+        const totalCampos = campos.length;
+        let camposPreenchidos = 0;
+        
+        // Verifica cada campo obrigatório
+        campos.forEach(campo => {
+          const chave = campo.chave;
+          // Busca valor no objeto dados (suporta chaves aninhadas)
+          const valor = chave.split('.').reduce((o, k) => o?.[k], dados);
+          // Considera preenchido se não for null, undefined, string vazia
+          if (valor !== null && valor !== undefined && String(valor).trim() !== '') {
+            camposPreenchidos++;
+          }
+        });
+        
+        const percentual = totalCampos > 0 ? Math.round((camposPreenchidos / totalCampos) * 100) : 0;
+        
+        resultado.push({
+          codigo: produto.codigo,
+          descricao: produto.descricao,
+          completude_concluidas: camposPreenchidos,
+          completude_total: totalCampos,
+          completude_percentual: percentual,
+          eng_concluidas: produto.eng_concluidas,
+          eng_total: produto.eng_total,
+          eng_percentual: produto.eng_percentual
+        });
+      } catch (err) {
+        console.error(`[API] Erro ao processar produto ${produto.codigo}:`, err);
+        resultado.push({
+          codigo: produto.codigo,
+          descricao: produto.descricao,
+          completude_concluidas: 0,
+          completude_total: 0,
+          completude_percentual: 0,
+          eng_concluidas: produto.eng_concluidas,
+          eng_total: produto.eng_total,
+          eng_percentual: produto.eng_percentual
+        });
+      }
+    }
+    
+    res.json({ itens: resultado });
+  } catch (err) {
+    console.error('[API] /api/engenharia/em-criacao erro:', err);
+    res.status(500).json({ error: 'Falha ao listar produtos em criação' });
+  }
+});
+
+// === Busca total de registros da Omie para gerar código sequencial ===========
+app.get('/api/produtos/total-omie', async (req, res) => {
+  try {
+    const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ error: 'Credenciais Omie não configuradas' });
+    }
+
+    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ListarProdutosResumido',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina: 1,
+          registros_por_pagina: 1,
+          apenas_importado_api: 'N',
+          filtrar_apenas_omiepdv: 'N'
+        }]
+      })
+    });
+
+    if (!omieResp.ok) {
+      const errText = await omieResp.text();
+      console.error('[API] /api/produtos/total-omie erro Omie:', omieResp.status, errText);
+      return res.status(omieResp.status).json({ error: 'Erro ao buscar total de produtos da Omie' });
+    }
+
+    const omieData = await omieResp.json();
+    const totalRegistros = omieData.total_de_registros || 0;
+
+    console.log('[API] /api/produtos/total-omie → total:', totalRegistros);
+    res.json({ total_de_registros: totalRegistros });
+  } catch (err) {
+    console.error('[API] /api/produtos/total-omie erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar total de produtos' });
+  }
+});
+
+// === Listar unidades do banco de dados =============================================
+app.get('/api/produtos/unidades', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, unidade AS codigo, descricao FROM configuracoes.unidade ORDER BY unidade ASC'
+    );
+
+    const unidades = result.rows || [];
+
+    console.log('[API] /api/produtos/unidades → total:', unidades.length);
+    res.json({ unidade_cadastro: unidades });
+  } catch (err) {
+    console.error('[API] /api/produtos/unidades erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar unidades' });
+  }
+});
+
+// === Incluir produto na Omie =============================================
+app.post('/api/produtos/incluir-omie', async (req, res) => {
+  try {
+    const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ error: 'Credenciais Omie não configuradas' });
+    }
+
+    const { codigo_produto_integracao, codigo, descricao, unidade } = req.body;
+
+    if (!codigo_produto_integracao || !codigo || !descricao || !unidade) {
+      return res.status(400).json({ error: 'Parâmetros obrigatórios faltando' });
+    }
+
+    console.log('[API] /api/produtos/incluir-omie recebido:', {
+      codigo_produto_integracao,
+      codigo,
+      descricao,
+      unidade
+    });
+
+    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'IncluirProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          codigo_produto_integracao,
+          codigo,
+          descricao,
+          ncm: '0000.00.00',
+          unidade
+        }]
+      })
+    });
+
+    if (!omieResp.ok) {
+      const errText = await omieResp.text();
+      console.error('[API] /api/produtos/incluir-omie erro Omie:', omieResp.status, errText);
+      return res.status(omieResp.status).json({ error: 'Erro ao incluir produto na Omie' });
+    }
+
+    const omieData = await omieResp.json();
+    
+    console.log('[API] /api/produtos/incluir-omie → sucesso:', omieData);
+    res.json(omieData);
+  } catch (err) {
+    console.error('[API] /api/produtos/incluir-omie erro:', err);
+    res.status(500).json({ error: 'Falha ao incluir produto' });
+  }
+});
+
+// === Consultar produto na Omie =============================================
+app.get('/api/produtos/consultar-omie/:codigoProduto', async (req, res) => {
+  try {
+    const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ error: 'Credenciais Omie não configuradas' });
+    }
+
+    const codigoProduto = req.params.codigoProduto;
+
+    if (!codigoProduto) {
+      return res.status(400).json({ error: 'codigo_produto é obrigatório' });
+    }
+
+    console.log('[API] /api/produtos/consultar-omie → buscando:', codigoProduto);
+
+    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{ codigo_produto: parseInt(codigoProduto) }]
+      })
+    });
+
+    if (!omieResp.ok) {
+      const errText = await omieResp.text();
+      console.error('[API] /api/produtos/consultar-omie erro Omie:', omieResp.status, errText);
+      return res.status(omieResp.status).json({ error: 'Produto não encontrado ou erro na Omie', encontrado: false });
+    }
+
+    const omieData = await omieResp.json();
+    
+    console.log('[API] /api/produtos/consultar-omie → encontrado:', omieData.codigo_produto);
+    
+    // Sincroniza produto para o PostgreSQL
+    try {
+      await sincronizarProdutoParaPostgres(omieData);
+      console.log('[API] Produto sincronizado para PostgreSQL:', omieData.codigo);
+    } catch (syncErr) {
+      console.error('[API] Erro ao sincronizar produto:', syncErr);
+      // Não falha a requisição se a sincronização der erro
+    }
+    
+    res.json({ ...omieData, encontrado: true });
+  } catch (err) {
+    console.error('[API] /api/produtos/consultar-omie erro:', err);
+    res.json({ error: 'Falha ao consultar produto', encontrado: false });
+  }
+});
+
+// === Função auxiliar para sincronizar produto da Omie para PostgreSQL ===
+async function sincronizarProdutoParaPostgres(produto) {
+  // Função para converter data DD/MM/YYYY para YYYY-MM-DD
+  const converterData = (dataStr) => {
+    if (!dataStr || typeof dataStr !== 'string') return null;
+    const partes = dataStr.split('/');
+    if (partes.length !== 3) return null;
+    return `${partes[2]}-${partes[1]}-${partes[0]}`; // YYYY-MM-DD
+  };
+  
+  const sql = `
+    INSERT INTO public.produtos_omie (
+      codigo_produto, codigo_produto_integracao, codigo, descricao, descricao_familia, unidade,
+      tipoitem, ncm, cfop, origem_mercadoria, cest, aliquota_ibpt,
+      marca, modelo, descr_detalhada, obs_internas, inativo, bloqueado,
+      bloquear_exclusao, quantidade_estoque, valor_unitario,
+      dalt, halt, dinc, hinc, ualt, uinc, codigo_familia, codint_familia
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+      $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
+    )
+    ON CONFLICT (codigo_produto) DO UPDATE SET
+      codigo_produto_integracao = EXCLUDED.codigo_produto_integracao,
+      codigo = EXCLUDED.codigo,
+      descricao = EXCLUDED.descricao,
+      descricao_familia = EXCLUDED.descricao_familia,
+      unidade = EXCLUDED.unidade,
+      tipoitem = EXCLUDED.tipoitem,
+      ncm = EXCLUDED.ncm,
+      cfop = EXCLUDED.cfop,
+      origem_mercadoria = EXCLUDED.origem_mercadoria,
+      cest = EXCLUDED.cest,
+      aliquota_ibpt = EXCLUDED.aliquota_ibpt,
+      marca = EXCLUDED.marca,
+      modelo = EXCLUDED.modelo,
+      descr_detalhada = EXCLUDED.descr_detalhada,
+      obs_internas = EXCLUDED.obs_internas,
+      inativo = EXCLUDED.inativo,
+      bloqueado = EXCLUDED.bloqueado,
+      bloquear_exclusao = EXCLUDED.bloquear_exclusao,
+      quantidade_estoque = EXCLUDED.quantidade_estoque,
+      valor_unitario = EXCLUDED.valor_unitario,
+      dalt = EXCLUDED.dalt,
+      halt = EXCLUDED.halt,
+      ualt = EXCLUDED.ualt
+  `;
+  
+  const valores = [
+    produto.codigo_produto || null,
+    produto.codigo_produto_integracao || produto.codigo || null,
+    produto.codigo || null,
+    produto.descricao || null,
+    produto.descricao_familia || null,
+    produto.unidade || null,
+    produto.tipoItem || null,
+    produto.ncm || null,
+    produto.cfop || null,
+    produto.origem || null,
+    produto.cest || null,
+    produto.aliquota_ibpt || null,
+    produto.marca || null,
+    produto.modelo || null,
+    produto.descr_detalhada || null,
+    produto.obs_internas || null,
+    produto.inativo === 'S' ? 'S' : 'N',
+    produto.bloqueado === 'S' ? 'S' : 'N',
+    produto.bloquear_exclusao === 'S' ? 'S' : 'N',
+    produto.quantidade_estoque || 0,
+    produto.valor_unitario || 0,
+    converterData(produto.info?.dAlt),
+    produto.info?.hAlt || null,
+    converterData(produto.info?.dInc),
+    produto.info?.hInc || null,
+    produto.info?.uAlt || null,
+    produto.info?.uInc || null,
+    produto.codigo_familia || null,
+    produto.codInt_familia || null
+  ];
+  
+  await pool.query(sql, valores);
+}
 
 
 
@@ -1886,6 +2263,8 @@ app.use('/api/produtos', produtosRouter);
 app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
+app.use('/api/engenharia', engenhariaRouter);
+app.use('/api/compras', comprasRouter);
 
 // [API][produto/descricao] — retorna descr_produto a partir de int_produto (id) OU cod_produto (code)
 app.get('/api/produto/descricao', async (req, res) => {
@@ -3078,7 +3457,8 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
         customizacoes
       }));
 
-      const opsGerados = [];
+  const opsGerados = [];
+  let localImpressaoPaiLog = null;
       for (let i = 0; i < quantidadePai; i++) {
         const { numero_op: numeroBase } = await gerarProximoNumeroOP(client, 'OP');
         const numeroCompleto = `${numeroBase}${sufixoPai}${sufixoCustom}`;
@@ -3090,7 +3470,8 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
         });
 
         // Determina local de impressão do PAI priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
-        const localImpressaoPai = await obterLocalProducaoPorCodigo(client, codigo) || 'Montagem';
+  const localImpressaoPai = await obterLocalProducaoPorCodigo(client, codigo) || 'Montagem';
+  if (!localImpressaoPaiLog) localImpressaoPaiLog = localImpressaoPai;
 
         const paramsPai = [
           numeroCompleto,
@@ -3166,6 +3547,7 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
 
         ppResultados.push({
           codigo: codigoPP,
+          codigo_produto_id: codigoProdutoIdPP,
           local_impressao: localImpressao,
           quantidade: qtdInt,
           versao: versaoPP,
@@ -3181,6 +3563,41 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
       }
 
       await client.query('COMMIT');
+
+      // Auditoria: abertura de OP(s) do produto pai
+      try {
+        const usuarioAudit = (usuario && String(usuario).trim()) || userFromReq(req);
+        if (opsGerados.length) {
+          const nums = opsGerados.map(o => o.numero_op).filter(Boolean).join(', ');
+          await registrarModificacao({
+            codigo_omie: codigo, // compat
+            codigo_texto: codigo,
+            codigo_produto: codigoProdutoId,
+            tipo_acao: 'ABERTURA_OP',
+            usuario: usuarioAudit,
+            origem: 'API',
+            detalhes: `OP(s): ${nums}; versao=v${versaoPai}${sufixoCustom ? ' ' + sufixoCustom : ''}; local=${localImpressaoPaiLog || ''}`
+          });
+        }
+        // Auditoria: abertura de OP(s) para cada PP
+        if (Array.isArray(ppResultados) && ppResultados.length) {
+          for (const pp of ppResultados) {
+            const nums = (pp.registros || []).map(r => r.numero_op).filter(Boolean).join(', ');
+            if (!nums) continue;
+            await registrarModificacao({
+              codigo_omie: pp.codigo, // compat
+              codigo_texto: pp.codigo,
+              codigo_produto: pp.codigo_produto_id,
+              tipo_acao: 'ABERTURA_OP',
+              usuario: usuarioAudit,
+              origem: 'API',
+              detalhes: `OP(s): ${nums}; versao=v${pp.versao}; local=${pp.local_impressao}`
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[auditoria][etiquetas/pai] falhou ao registrar:', e?.message || e);
+      }
 
       return res.json({
         ok: true,
@@ -3306,6 +3723,26 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
       }
 
       await client.query('COMMIT');
+
+      // Auditoria: abertura de OP(s) PP
+      try {
+        const usuarioAudit = (usuario && String(usuario).trim()) || userFromReq(req);
+        if (Array.isArray(registros) && registros.length) {
+          const nums = registros.map(r => r.numero_op).filter(Boolean).join(', ');
+          await registrarModificacao({
+            codigo_omie: codigo, // compat
+            codigo_texto: codigo,
+            codigo_produto: codigoProdutoId,
+            tipo_acao: 'ABERTURA_OP',
+            usuario: usuarioAudit,
+            origem: 'API',
+            detalhes: `OP(s): ${nums}; versao=v${versaoPP}; local=${localImpressao}`
+          });
+        }
+      } catch (e) {
+        console.warn('[auditoria][etiquetas/pp] falhou ao registrar:', e?.message || e);
+      }
+
       return res.json({
         ok: true,
         codigo_produto: codigo,
@@ -3395,6 +3832,46 @@ app.post('/api/etiquetas/aguardando/confirmar', express.json(), async (req, res)
       }
 
       await client.query('COMMIT');
+
+      // Auditoria: atualização de data_impressao por OP
+      try {
+        const usuarioAudit = userFromReq(req);
+        if (Array.isArray(atualizados) && atualizados.length) {
+          // Mapa OP -> data
+          const itensArr = Array.isArray(itens) ? itens : [];
+          const dataMap = new Map();
+          for (const it of itensArr) {
+            const n = String(it?.numero_op || '').trim();
+            if (!n) continue;
+            const d = toTimestampString(it?.data_impressao);
+            dataMap.set(n, d);
+          }
+          // Busca códigos de produto para as OPs
+          const { rows: mapRows } = await pool.query(
+            'SELECT numero_op, codigo_produto_id, codigo_produto FROM "OrdemProducao".tab_op WHERE numero_op = ANY($1)',
+            [atualizados]
+          );
+          for (const r of mapRows) {
+            const op = r.numero_op;
+            const codId = r.codigo_produto_id;
+            const codTxt = r.codigo_produto;
+            const d  = dataMap.get(op) || null;
+            if (!codId && !codTxt) continue;
+            await registrarModificacao({
+              codigo_omie: codTxt || String(codId || ''),
+              codigo_texto: codTxt || null,
+              codigo_produto: codId || null,
+              tipo_acao: 'OP_DATA_IMPRESSAO',
+              usuario: usuarioAudit,
+              origem: 'API',
+              detalhes: `OP ${op} -> ${d || 'null'}`
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[auditoria][aguardando/confirmar] falhou ao registrar:', e?.message || e);
+      }
+
       return res.json({ ok: true, atualizados });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -4787,6 +5264,246 @@ app.post(
   app.use('/api/etiquetas', etiquetasRouter);   // ⬅️  NOVO
   app.use('/api/users', require('./routes/users'));
 
+  // ——————————————————————————————
+  // 3.3) Chat simples (arquivo JSON)
+  // ——————————————————————————————
+  function loadChatMessages() {
+    try {
+      if (!fs.existsSync(CHAT_FILE)) return [];
+      const raw = fs.readFileSync(CHAT_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.warn('[chat] falha ao ler chat.json:', e?.message || e);
+      return [];
+    }
+  }
+  function saveChatMessages(msgs) {
+    try {
+      fs.writeFileSync(CHAT_FILE, JSON.stringify(msgs, null, 2), 'utf8');
+      return true;
+    } catch (e) {
+      console.warn('[chat] falha ao gravar chat.json:', e?.message || e);
+      return false;
+    }
+  }
+
+  // Lista usuários (id e username) – usa users.json/BD já existente
+  // ============================================================================
+  // ROTAS DE CHAT - Sistema de mensagens interno
+  // ============================================================================
+  
+  // Lista usuários ativos disponíveis para chat (exclui o próprio usuário logado)
+  app.get('/api/chat/users', ensureLoggedIn, async (req, res) => {
+    try {
+      const currentUserId = req.session.user.id;
+      if (CHAT_DEBUG) console.log('[CHAT API] Buscando usuários para user ID:', currentUserId);
+      let users = [];
+      
+      if (isDbEnabled) {
+        try {
+          if (CHAT_DEBUG) console.log('[CHAT API] Consultando banco de dados...');
+          // Usa função SQL que filtra usuários ativos e retorna contagem de não lidas
+          const { rows } = await pool.query(
+            'SELECT * FROM get_active_chat_users($1)',
+            [currentUserId]
+          );
+          if (CHAT_DEBUG) console.log('[CHAT API] Usuários retornados do SQL:', rows.length);
+          users = rows.map(r => ({
+            id: String(r.id),
+            username: r.username,
+            email: r.email,
+            unreadCount: parseInt(r.unread_count || 0)
+          }));
+        } catch (err) {
+          console.error('[CHAT] Erro ao buscar usuários ativos:', err);
+        }
+      }
+      
+      // Fallback para users.json se DB falhar ou não estiver disponível
+      if (!users.length) {
+        if (CHAT_DEBUG) console.log('[CHAT API] Usando fallback users.json');
+        const raw = fs.readFileSync(USERS_FILE, 'utf8');
+        const arr = JSON.parse(raw);
+        users = (arr || [])
+          .filter(u => String(u.id) !== String(currentUserId))
+          .map(u => ({ 
+            id: String(u.id), 
+            username: u.username,
+            unreadCount: 0 
+          }));
+      }
+      
+      if (CHAT_DEBUG) console.log('[CHAT API] Total de usuários a retornar:', users.length);
+      res.json({ users });
+    } catch (e) {
+      console.error('[CHAT] Erro ao carregar usuários:', e);
+      res.status(500).json({ error: 'Falha ao carregar usuários' });
+    }
+  });
+
+  // Obter conversa entre usuário logado e outro usuário
+  app.get('/api/chat/conversation', ensureLoggedIn, async (req, res) => {
+    try {
+      const me = req.session.user.id;
+      const other = req.query.userId;
+      
+      if (!other) {
+        return res.status(400).json({ error: 'userId obrigatório' });
+      }
+      
+      let messages = [];
+      
+      if (isDbEnabled) {
+        try {
+          // Usa função SQL para obter histórico da conversa
+          const { rows } = await pool.query(
+            'SELECT * FROM get_conversation($1, $2, 100)',
+            [me, other]
+          );
+          
+          messages = rows.map(r => ({
+            id: String(r.id),
+            from: String(r.from_user_id),
+            to: String(r.to_user_id),
+            text: r.message_text,
+            timestamp: r.created_at,
+            read: r.is_read
+          }));
+          
+          // Marca mensagens como lidas quando abre a conversa
+          await pool.query(
+            'SELECT mark_messages_as_read($1, $2)',
+            [me, other]
+          );
+          
+        } catch (err) {
+          console.error('[CHAT] Erro ao buscar conversa:', err);
+        }
+      }
+      
+      // Fallback para arquivo JSON
+      if (!messages.length && !isDbEnabled) {
+        const all = loadChatMessages();
+        messages = all
+          .filter(m => (m.from === String(me) && m.to === String(other)) || 
+                       (m.from === String(other) && m.to === String(me)))
+          .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+      }
+      
+      res.json({ messages });
+    } catch (e) {
+      console.error('[CHAT] Erro ao carregar conversa:', e);
+      res.status(500).json({ error: 'Falha ao carregar conversa' });
+    }
+  });
+
+  // Enviar nova mensagem
+  app.post('/api/chat/send', ensureLoggedIn, express.json(), async (req, res) => {
+    try {
+      const me = req.session.user.id;
+      const { to, text } = req.body || {};
+      const content = String(text || '').trim();
+      
+      if (!to || !content) {
+        return res.status(400).json({ error: 'Parâmetros inválidos' });
+      }
+      
+      let message = null;
+      
+      if (isDbEnabled) {
+        try {
+          // Usa função SQL para enviar mensagem (valida usuários ativos automaticamente)
+          const { rows } = await pool.query(
+            'SELECT send_chat_message($1, $2, $3) as message_id',
+            [me, to, content]
+          );
+          
+          const messageId = rows[0].message_id;
+          
+          // Busca a mensagem recém criada para retornar
+          const { rows: msgRows } = await pool.query(
+            'SELECT * FROM chat_messages WHERE id = $1',
+            [messageId]
+          );
+          
+          if (msgRows.length > 0) {
+            const r = msgRows[0];
+            message = {
+              id: String(r.id),
+              from: String(r.from_user_id),
+              to: String(r.to_user_id),
+              text: r.message_text,
+              timestamp: r.created_at,
+              read: r.is_read
+            };
+          }
+          
+        } catch (err) {
+          console.error('[CHAT] Erro ao enviar mensagem:', err);
+          // Se erro SQL for de validação, retorna erro específico
+          if (err.message) {
+            return res.status(400).json({ error: err.message });
+          }
+        }
+      }
+      
+      // Fallback para arquivo JSON
+      if (!message && !isDbEnabled) {
+        const all = loadChatMessages();
+        message = {
+          id: String(Date.now()),
+          from: String(me),
+          to: String(to),
+          text: content,
+          timestamp: new Date().toISOString(),
+          read: false
+        };
+        all.push(message);
+        saveChatMessages(all);
+      }
+      
+      if (message) {
+        res.json({ ok: true, message });
+      } else {
+        res.status(500).json({ error: 'Falha ao enviar mensagem' });
+      }
+      
+    } catch (e) {
+      console.error('[CHAT] Erro ao enviar mensagem:', e);
+      res.status(500).json({ error: 'Falha ao enviar mensagem' });
+    }
+  });
+
+  // Contar mensagens não lidas (para badge de notificação)
+  app.get('/api/chat/unread-count', ensureLoggedIn, async (req, res) => {
+    try {
+      const userId = req.session.user.id;
+      let count = 0;
+      
+      if (isDbEnabled) {
+        try {
+          const { rows } = await pool.query(
+            'SELECT count_unread_messages($1) as count',
+            [userId]
+          );
+          count = parseInt(rows[0].count || 0);
+        } catch (err) {
+          console.error('[CHAT] Erro ao contar não lidas:', err);
+        }
+      } else {
+        // Fallback para arquivo JSON
+        const all = loadChatMessages();
+        count = all.filter(m => m.to === String(userId) && !m.read).length;
+      }
+      
+      res.json({ count });
+    } catch (e) {
+      console.error('[CHAT] Erro ao contar mensagens não lidas:', e);
+      res.status(500).json({ error: 'Falha ao contar mensagens' });
+    }
+  });
+
   app.use('/api/omie/estoque',       estoqueRouter);
   // app.use('/api/omie/estoque/resumo',estoqueResumoRouter);
 
@@ -4855,6 +5572,206 @@ app.post(
 // PCP (estrutura a partir do SQL) — manter só um app.use para evitar execução duplicada
 app.use('/api/pcp', pcpEstruturaRoutes);
 
+// ===== Endpoints de configuração de campos obrigatórios =====
+
+// GET: Lista todos os campos cadastrados
+app.get('/api/config/campos-produto', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.campos_guias (
+        id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        guia text NOT NULL,
+        chave text NOT NULL,
+        rotulo text,
+        habilitado boolean DEFAULT false,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now(),
+        UNIQUE(guia, chave)
+      )
+    `);
+
+    const result = await client.query(`
+      SELECT id, guia, chave, rotulo, habilitado
+      FROM configuracoes.campos_guias
+      ORDER BY guia, rotulo NULLS LAST, chave
+    `);
+
+    res.json({ ok: true, campos: result.rows });
+  } catch (e) {
+    console.error('[GET /api/config/campos-produto] erro:', e);
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  } finally {
+    client.release();
+  }
+});
+
+// POST: Escaneia e salva novos campos (não sobrescreve existentes)
+app.post('/api/config/campos-produto/scan', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const campos = req.body.campos || [];
+    
+    if (!campos.length) {
+      return res.json({ ok: true, novos: 0 });
+    }
+
+    await client.query('BEGIN');
+    
+    await client.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.campos_guias (
+        id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        guia text NOT NULL,
+        chave text NOT NULL,
+        rotulo text,
+        habilitado boolean DEFAULT false,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now(),
+        UNIQUE(guia, chave)
+      )
+    `);
+
+    let novos = 0;
+    
+    for (const campo of campos) {
+      const result = await client.query(`
+        INSERT INTO configuracoes.campos_guias (guia, chave, rotulo, habilitado)
+        VALUES ($1, $2, $3, false)
+        ON CONFLICT (guia, chave) DO UPDATE
+        SET rotulo = EXCLUDED.rotulo,
+            updated_at = now()
+        RETURNING (xmax = 0) AS inserted
+      `, [campo.guia, campo.chave, campo.rotulo]);
+      
+      if (result.rows[0]?.inserted) {
+        novos++;
+      }
+    }
+    
+    await client.query('COMMIT');
+    res.json({ ok: true, novos, total: campos.length });
+    
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[POST /api/config/campos-produto/scan] erro:', e);
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  } finally {
+    client.release();
+  }
+});
+
+// POST: Atualiza o estado habilitado dos campos
+app.post('/api/config/campos-produto', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const updates = req.body.updates || [];
+    
+    if (!updates.length) {
+      return res.json({ ok: true });
+    }
+
+    await client.query('BEGIN');
+    
+    for (const upd of updates) {
+      await client.query(`
+        UPDATE configuracoes.campos_guias
+        SET habilitado = $1, updated_at = now()
+        WHERE id = $2
+      `, [upd.habilitado, upd.id]);
+    }
+    
+    await client.query('COMMIT');
+    res.json({ ok: true });
+    
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[POST /api/config/campos-produto] erro:', e);
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  } finally {
+    client.release();
+  }
+});
+
+// GET: Busca configuração de campos obrigatórios de uma família
+app.get('/api/config/familia-campos/:familiaCodigo', async (req, res) => {
+  try {
+    const { familiaCodigo } = req.params;
+    
+    // Busca todos os campos disponíveis
+    const camposResult = await pool.query(`
+      SELECT id, guia, chave, rotulo, habilitado
+      FROM configuracoes.campos_guias
+      ORDER BY guia, rotulo
+    `);
+    
+    // Busca campos marcados como obrigatórios para esta família
+    const obrigatoriosResult = await pool.query(`
+      SELECT campo_chave
+      FROM configuracoes.familia_campos_obrigatorios
+      WHERE familia_codigo = $1 AND obrigatorio = true
+    `, [familiaCodigo]);
+    
+    const obrigatorios = new Set(obrigatoriosResult.rows.map(r => r.campo_chave));
+    
+    // Adiciona flag 'obrigatorio' em cada campo
+    const campos = camposResult.rows.map(c => ({
+      ...c,
+      obrigatorio: obrigatorios.has(c.chave)
+    }));
+    
+    res.json(campos);
+  } catch (e) {
+    console.error('[GET /api/config/familia-campos] erro:', e);
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// POST: Salva configuração de campos obrigatórios para uma família
+app.post('/api/config/familia-campos', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { familiaCodigo, camposObrigatorios } = req.body;
+    
+    if (!familiaCodigo) {
+      return res.status(400).json({ error: 'familiaCodigo é obrigatório' });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Remove configuração anterior desta família
+    await client.query(`
+      DELETE FROM configuracoes.familia_campos_obrigatorios
+      WHERE familia_codigo = $1
+    `, [familiaCodigo]);
+    
+    // Insere novos campos obrigatórios
+    if (Array.isArray(camposObrigatorios) && camposObrigatorios.length > 0) {
+      const values = camposObrigatorios
+        .map((chave, idx) => `($1, $${idx + 2}, true)`)
+        .join(',');
+      
+      const params = [familiaCodigo, ...camposObrigatorios];
+      
+      await client.query(`
+        INSERT INTO configuracoes.familia_campos_obrigatorios (familia_codigo, campo_chave, obrigatorio)
+        VALUES ${values}
+      `, params);
+    }
+    
+    await client.query('COMMIT');
+    res.json({ ok: true, campos: camposObrigatorios.length });
+    
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[POST /api/config/familia-campos] erro:', e);
+    res.status(500).json({ error: e.message || String(e) });
+  } finally {
+    client.release();;
+  }
+});
+
 
   app.post('/api/omie/familias', async (req, res) => {
     try {
@@ -4880,15 +5797,14 @@ app.use('/api/pcp', pcpEstruturaRoutes);
       await client.query('BEGIN');
       await client.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
       await client.query(`CREATE TABLE IF NOT EXISTS configuracoes.familia (
-        id integer GENERATED BY DEFAULT AS IDENTITY,
-        codigo text PRIMARY KEY,
+        cod text PRIMARY KEY,
         nome_familia text NOT NULL,
         tipo text,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       )`);
 
-      const sel = await client.query('SELECT id, codigo, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
+      const sel = await client.query('SELECT cod, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
       let rows = sel.rows || [];
 
       if (!rows.length) {
@@ -4909,13 +5825,13 @@ app.use('/api/pcp', pcpEstruturaRoutes);
             const nome   = f?.nomeFamilia || null;
             if (!codigo || !nome) continue;
             await client.query(
-              `INSERT INTO configuracoes.familia(codigo, nome_familia)
+              `INSERT INTO configuracoes.familia(cod, nome_familia)
                VALUES ($1, $2)
-               ON CONFLICT (codigo) DO UPDATE SET nome_familia=EXCLUDED.nome_familia, updated_at=now()`,
+               ON CONFLICT (cod) DO UPDATE SET nome_familia=EXCLUDED.nome_familia, updated_at=now()`,
               [codigo, nome]
             );
           }
-          const sel2 = await client.query('SELECT id, codigo, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
+          const sel2 = await client.query('SELECT cod, nome_familia, tipo FROM configuracoes.familia ORDER BY nome_familia ASC');
           rows = sel2.rows || [];
         }
       }
@@ -4927,24 +5843,56 @@ app.use('/api/pcp', pcpEstruturaRoutes);
     } finally { client.release(); }
   });
 
-  // Atualiza o ID de uma família específica
-  app.patch('/api/familia/:codigo/id', express.json(), async (req, res) => {
+  // Atualiza o código de uma família específica
+  app.patch('/api/familia/:codigo/cod', express.json(), async (req, res) => {
     const { codigo } = req.params;
-    const { id } = req.body;
-    if (!codigo) return res.status(400).json({ ok:false, error:'Código obrigatório' });
-    const newId = parseInt(id, 10);
-    if (!Number.isInteger(newId) || newId < 1) {
-      return res.status(400).json({ ok:false, error:'ID inválido (deve ser inteiro > 0)' });
-    }
+    const { newCod } = req.body;
+    if (!codigo) return res.status(400).json({ ok:false, error:'Código original obrigatório' });
+    if (!newCod) return res.status(400).json({ ok:false, error:'Novo código obrigatório' });
+    
+    const client = await pool.connect();
     try {
-      const result = await pool.query(
-        `UPDATE configuracoes.familia SET id=$1, updated_at=now() WHERE codigo=$2 RETURNING id, codigo, nome_familia, tipo`,
-        [newId, codigo]
+      await client.query('BEGIN');
+      
+      // Verifica se o novo código já existe
+      const check = await client.query(
+        `SELECT cod FROM configuracoes.familia WHERE cod = $1`,
+        [newCod]
       );
-      if (!result.rowCount) return res.status(404).json({ ok:false, error:'Família não encontrada' });
-      res.json({ ok:true, familia: result.rows[0] });
+      
+      if (check.rowCount > 0 && newCod !== codigo) {
+        throw new Error('Código já existe');
+      }
+      
+      // Atualiza o código (como é chave primária, precisa criar novo registro e deletar o antigo)
+      const oldData = await client.query(
+        `SELECT nome_familia, tipo, created_at FROM configuracoes.familia WHERE cod = $1`,
+        [codigo]
+      );
+      
+      if (!oldData.rowCount) {
+        throw new Error('Família não encontrada');
+      }
+      
+      const { nome_familia, tipo, created_at } = oldData.rows[0];
+      
+      // Deleta o antigo
+      await client.query(`DELETE FROM configuracoes.familia WHERE cod = $1`, [codigo]);
+      
+      // Insere com novo código
+      await client.query(
+        `INSERT INTO configuracoes.familia (cod, nome_familia, tipo, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, now())`,
+        [newCod, nome_familia, tipo, created_at]
+      );
+      
+      await client.query('COMMIT');
+      res.json({ ok:true });
     } catch(e){
+      await client.query('ROLLBACK').catch(()=>{});
       res.status(500).json({ ok:false, error: e.message || String(e) });
+    } finally {
+      client.release();
     }
   });
 
@@ -4956,7 +5904,7 @@ app.use('/api/pcp', pcpEstruturaRoutes);
     const tipoStr = tipo != null ? String(tipo).trim() : '';
     try {
       const result = await pool.query(
-        `UPDATE configuracoes.familia SET tipo=$1, updated_at=now() WHERE codigo=$2 RETURNING id, codigo, nome_familia, tipo`,
+        `UPDATE configuracoes.familia SET tipo=$1, updated_at=now() WHERE cod=$2 RETURNING cod, nome_familia, tipo`,
         [tipoStr || null, codigo]
       );
       if (!result.rowCount) return res.status(404).json({ ok:false, error:'Família não encontrada' });
@@ -5036,6 +5984,118 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           param:      [req.body.produto_servico_cadastro]
         }
       );
+        // Auditoria: alteração de cadastro do produto (Omie) - TODOS os campos
+        try {
+          const usuarioAudit = userFromReq(req);
+          const payload = req.body?.produto_servico_cadastro || {};
+          const codigoTxt  = String(payload?.codigo || payload?.cod_int || '').trim();
+        
+          let produtoAntes = null, codigoId = null;
+          if (codigoTxt) {
+            try {
+              const q = await pool.query(
+                `SELECT * FROM public.produtos_omie
+                  WHERE codigo = $1 OR codigo_produto_integracao = $1
+                  LIMIT 1`,
+                [codigoTxt]
+              );
+              if (q.rowCount) {
+                produtoAntes = q.rows[0];
+                codigoId = produtoAntes.codigo_produto || null;
+              }
+            } catch {}
+          }
+
+          // Mapeamento de campos do payload para nomes amigáveis
+          const campoLabels = {
+            codigo: 'Código',
+            descricao: 'Descrição',
+            descricao_familia: 'Descrição família',
+            codigo_familia: 'Código família',
+            unidade: 'Unidade',
+            tipoItem: 'Tipo item',
+            marca: 'Marca',
+            modelo: 'Modelo',
+            descr_detalhada: 'Descrição detalhada',
+            obs_internas: 'Obs internas',
+            ncm: 'NCM',
+            cfop: 'CFOP',
+            origem: 'Origem mercadoria',
+            cest: 'CEST',
+            aliquota_ibpt: 'Alíquota IBPT',
+            inativo: 'Inativo',
+            bloqueado: 'Bloqueado',
+            bloquear_exclusao: 'Bloquear exclusão',
+            valor_unitario: 'Valor unitário',
+            peso_bruto: 'Peso bruto',
+            peso_liq: 'Peso líquido',
+            altura: 'Altura',
+            largura: 'Largura',
+            profundidade: 'Profundidade',
+            dias_crossdocking: 'Dias crossdocking',
+            dias_garantia: 'Dias garantia',
+            exibir_descricao_pedido: 'Exibir descrição no pedido',
+            exibir_descricao_nfe: 'Exibir descrição na NF-e'
+          };
+
+          // Mapeamento de campos do DB para campos do payload (alguns têm nomes diferentes)
+          const dbParaPayload = {
+            tipoitem: 'tipoItem',
+            origem_mercadoria: 'origem'
+          };
+
+          // Detecta campos alterados
+          const camposAlterados = [];
+          if (produtoAntes) {
+            Object.keys(payload).forEach(key => {
+              if (key === 'codigo') return; // código é o identificador, não mudança
+            
+              const dbKey = Object.keys(dbParaPayload).find(k => dbParaPayload[k] === key) || key;
+              const valorAntes = produtoAntes[dbKey];
+              const valorDepois = payload[key];
+            
+              // Normaliza valores para comparação (null, undefined, '' são equivalentes)
+              const antesNorm = (valorAntes === null || valorAntes === undefined || valorAntes === '') ? null : String(valorAntes).trim();
+              const depoisNorm = (valorDepois === null || valorDepois === undefined || valorDepois === '') ? null : String(valorDepois).trim();
+            
+              if (antesNorm !== depoisNorm) {
+                const label = campoLabels[key] || key;
+                camposAlterados.push({
+                  campo: label,
+                  antes: antesNorm || '(vazio)',
+                  depois: depoisNorm || '(vazio)'
+                });
+              }
+            });
+          }
+
+          // Só registra se houver alterações detectadas
+          if (camposAlterados.length > 0 && (codigoTxt || codigoId)) {
+            const listaCampos = camposAlterados.map(c => c.campo).join(', ');
+            const detalhesLinhas = ['Origem: OMIE', `Campos: ${listaCampos}`, ''];
+          
+            camposAlterados.forEach(c => {
+              detalhesLinhas.push(`${c.campo}:`);
+              detalhesLinhas.push(`  antes: ${c.antes}`);
+              detalhesLinhas.push(`  depois: ${c.depois}`);
+              detalhesLinhas.push('');
+            });
+          
+            const detalhes = detalhesLinhas.join('\n');
+
+            await registrarModificacao({
+              codigo_omie: codigoTxt || String(codigoId || ''),
+              codigo_texto: codigoTxt || null,
+              codigo_produto: codigoId || null,
+              tipo_acao: 'ALTERACAO_CADASTRO',
+              usuario: usuarioAudit,
+              origem: 'OMIE',
+              detalhes
+            });
+          }
+        } catch (e) {
+          console.warn('[auditoria][produtos/alterar] falhou ao registrar:', e?.message || e);
+        }
       res.json(data);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
@@ -5053,6 +6113,40 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           param:      req.body.param
         }
       );
+      // Auditoria: alteração de característica do produto (Omie)
+      try {
+        const usuarioAudit = userFromReq(req);
+        // Procura campo cod_int/codigo dentro do primeiro param
+        const p0 = Array.isArray(req.body?.param) ? req.body.param[0] : (req.body?.param || {});
+        const codigoTxt = String(p0?.cod_int || p0?.codigo || '').trim();
+        let codigoId = null;
+        if (codigoTxt) {
+          try {
+            const q = await pool.query(
+              `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 OR codigo_produto_integracao = $1 LIMIT 1`,
+              [codigoTxt]
+            );
+            codigoId = q.rows?.[0]?.codigo_produto || null;
+          } catch {}
+        }
+        const detalhes = Object.keys(p0 || {})
+          .filter(k => k !== 'cod_int' && k !== 'codigo')
+          .slice(0,30)
+          .join(', ');
+        if (codigoTxt || codigoId) {
+          await registrarModificacao({
+            codigo_omie: codigoTxt || String(codigoId || ''),
+            codigo_texto: codigoTxt || null,
+            codigo_produto: codigoId || null,
+            tipo_acao: 'ALTERACAO_CARACTERISTICA',
+            usuario: usuarioAudit,
+            origem: 'OMIE',
+            detalhes: `Campos: ${detalhes}`
+          });
+        }
+      } catch (e) {
+        console.warn('[auditoria][prodcaract/alterar] falhou ao registrar:', e?.message || e);
+      }
       res.json(data);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
@@ -5616,10 +6710,12 @@ app.get('/api/viacep/:cep', async (req, res) => {
 
 // ——— Helpers de carimbo de usuário/data ————————————————
 function userFromReq(req) {
-  // tente extrair do seu objeto de sessão; ajuste se o seu auth usar outro nome/campo
-  return (req.session?.user?.fullName)
-      || (req.session?.user?.username)
-      || 'Not-user';
+  // Extrai usuário da sessão ou do header enviado pelo front (#userNameDisplay)
+  const fromSession = (req.session?.user?.fullName)
+                  || (req.session?.user?.username)
+                  || (req.session?.user?.login);
+  const fromHeader = String(req.headers?.['x-user'] || '').trim();
+  return (fromSession && String(fromSession).trim()) || (fromHeader || 'sistema');
 }
 function stampNowBR() {
   const d = new Date();
@@ -5647,15 +6743,6 @@ app.use(express.static(path.join(__dirname), {
   }
 }));
 
-
-
-app.get('/preparacao_eletrica.html', (req, res) => {
-  if (!req.session || !req.session.user) {
-    // redireciona para a home (que tem o login visível)
-    return res.redirect('/menu_produto.html#login-required');
-  }
-  return res.sendFile(path.join(__dirname, 'preparacao_eletrica.html'));
-});
 
 // ────────────────────────────────────────────
 // 5) Só para rotas HTML do seu SPA, devolva o index
@@ -6685,6 +7772,112 @@ app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (re
   // ——————————————————————————————
   // 5) Inicia o servidor
   // ——————————————————————————————
+
+// === ATIVIDADES ESPECÍFICAS DO PRODUTO (Check-Proj) ===
+// Criar nova atividade específica para um produto
+app.post('/api/engenharia/atividade-produto', express.json(), async (req, res) => {
+  try {
+    const { produto_codigo, descricao, observacoes } = req.body;
+    
+    if (!produto_codigo || !descricao) {
+      return res.status(400).json({ error: 'produto_codigo e descricao são obrigatórios' });
+    }
+    
+    const insertQuery = `
+      INSERT INTO engenharia.atividades_produto 
+        (produto_codigo, descricao, observacoes, ativo, criado_em)
+      VALUES ($1, $2, $3, true, NOW())
+      RETURNING id, produto_codigo, descricao, observacoes, ativo, criado_em
+    `;
+    
+    const { rows } = await pool.query(insertQuery, [produto_codigo, descricao, observacoes || null]);
+    
+    console.log(`[API] Nova atividade criada para produto ${produto_codigo}: ${descricao}`);
+    res.json({ success: true, atividade: rows[0] });
+  } catch (err) {
+    console.error('[API] /api/engenharia/atividade-produto erro:', err);
+    res.status(500).json({ error: 'Falha ao criar atividade do produto' });
+  }
+});
+
+// Listar atividades específicas de um produto
+app.get('/api/engenharia/atividades-produto/:codigo', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    
+    const query = `
+      SELECT 
+        ap.id,
+        ap.produto_codigo,
+        ap.descricao AS nome,
+        ap.observacoes,
+        ap.ativo,
+        ap.criado_em,
+        COALESCE(aps.concluido, false) AS concluido,
+        COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
+        COALESCE(aps.observacao_status, '') AS observacao_status,
+        aps.atualizado_em
+      FROM engenharia.atividades_produto ap
+      LEFT JOIN engenharia.atividades_produto_status_especificas aps
+        ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+      WHERE ap.produto_codigo = $1 AND ap.ativo = true
+      ORDER BY ap.criado_em DESC
+    `;
+    
+    const { rows } = await pool.query(query, [codigo]);
+    res.json({ atividades: rows });
+  } catch (err) {
+    console.error('[API] /api/engenharia/atividades-produto erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar atividades do produto' });
+  }
+});
+
+// Salvar status das atividades específicas do produto (em massa)
+app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async (req, res) => {
+  try {
+    const { produto_codigo, itens } = req.body;
+    
+    if (!produto_codigo || !Array.isArray(itens)) {
+      return res.status(400).json({ error: 'produto_codigo e itens são obrigatórios' });
+    }
+    
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const item of itens) {
+        const { atividade_produto_id, concluido, nao_aplicavel, observacao } = item;
+        
+        await client.query(`
+          INSERT INTO engenharia.atividades_produto_status_especificas 
+            (atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao_status, atualizado_em)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          ON CONFLICT (atividade_produto_id, produto_codigo)
+          DO UPDATE SET
+            concluido = EXCLUDED.concluido,
+            nao_aplicavel = EXCLUDED.nao_aplicavel,
+            observacao_status = EXCLUDED.observacao_status,
+            atualizado_em = NOW()
+        `, [atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao || '']);
+      }
+      
+      await client.query('COMMIT');
+      
+      console.log(`[API] Status de ${itens.length} atividade(s) específica(s) salvo para produto ${produto_codigo}`);
+      res.json({ success: true });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[API] /api/engenharia/atividade-produto-status/bulk erro:', err);
+    res.status(500).json({ error: 'Falha ao salvar status das atividades específicas' });
+  }
+});
+
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {

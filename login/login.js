@@ -92,6 +92,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1) Pega o container onde injetaremos o HTML do login
   const overlay = document.getElementById('authOverlay');
+  
+  // ⚡ OTIMIZAÇÃO: Habilita o botão profile-icon IMEDIATAMENTE
+  const profileArea = document.getElementById('profile-icon');
+  if (profileArea && !profileArea.__loginBound) {
+    profileArea.__loginBound = true;
+    profileArea.style.cursor = 'pointer';
+    profileArea.addEventListener('click', () => {
+      overlay.classList.add('is-active');
+    });
+    // Disponibiliza globalmente para outros módulos
+    window.openLoginModal = () => overlay.classList.add('is-active');
+  }
 
   // 2) Carrega e injeta o HTML do formulário
   const html = await fetch('login/login.html', { credentials: 'include' }).then(r => r.text());
@@ -391,9 +403,11 @@ btnVoltarLogin?.addEventListener('click', () => {
 });
 
 
-  // abre modal ao clicar no ícone de perfil
-  profileArea?.addEventListener('click', () => overlay.classList.add('is-active'));
-  window.openLoginModal = () => overlay.classList.add('is-active');
+  // abre modal ao clicar no ícone de perfil (já foi configurado no DOMContentLoaded)
+  // Apenas garante que a função global existe
+  if (!window.openLoginModal) {
+    window.openLoginModal = () => overlay.classList.add('is-active');
+  }
 
   // fechar modal
   closeBtn?.addEventListener('click', () => overlay.classList.remove('is-active'));
@@ -654,7 +668,15 @@ function ativarInicioAposLogin() {
   try { history.replaceState(null, '', '#inicio'); } catch {}
 }
 
+// Atualiza contador de mensagens - só executa se usuário estiver logado
 async function updateMessageCount() {
+  // Verifica se está logado antes de fazer requisição
+  if (!window.__sessionUser) {
+    const badge = document.querySelector('.notification-number');
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+  
   const badge = document.querySelector('.notification-number');
   if (!badge) return;
 
@@ -675,48 +697,22 @@ async function updateMessageCount() {
 }
 
 async function openNotificacoes() {
-
-  const ul = document.getElementById('listaNotificacoes');
-
-  const res = await fetch(`${API_BASE}/api/users/me/messages`, { credentials: 'include' });
-  if (!res.ok) {
-    ul.innerHTML = '<li>Erro ao carregar mensagens.</li>';
+  // Verifica se está logado antes de abrir notificações
+  if (!window.__sessionUser) {
+    console.warn('[openNotificacoes] Usuário não logado - ignorando abertura');
     return;
   }
-  const { messages } = await res.json();
-
-  ul.innerHTML = messages.length
-  ? messages.map((m, i) => `
-      <li data-idx="${i}" data-raw="${encodeURIComponent(m)}">
-        <span>${m}</span>
-        <div class="button-wrapper">
-          <button class="content-button status-button btn-reset">
-            Reset
-          </button>
-          <button class="content-button status-button btn-del">
-            Excluir
-          </button>
-        </div>
-      </li>`).join('')
-  : '<li>Nenhuma notificação.</li>';
-
-
-  const showTab = window.showMainTab || function(id){
-    document.querySelectorAll('.tab-pane')
-            .forEach(p => p.style.display = (p.id === id ? 'block' : 'none'));
-  };
-
-  // destaca o link principal da aba
-  const link = document.getElementById('menu-notificacoes');
-  if (link) {
-    document.querySelectorAll('.header .header-menu > .menu-link')
-            .forEach(a => a.classList.remove('is-active'));
-    link.classList.add('is-active');
+  
+  console.warn('[openNotificacoes] Função DESABILITADA - usando chat ao invés de notificações');
+  
+  // Se o chat existe, redireciona para ele
+  if (typeof window.openChat === 'function') {
+    window.openChat();
+    return;
   }
-
-  showTab('notificacoes');
-    
-  updateMessageCount();
+  
+  // Se não existe, apenas loga o erro sem tentar acessar elementos inexistentes
+  console.error('[openNotificacoes] Sistema de chat não disponível');
 }
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 
@@ -749,12 +745,21 @@ function bindNotificationBell() {
 
   bell.addEventListener('click', (e) => {
     e.stopPropagation(); // evita interações colaterais (ex.: abrir login)
+    e.preventDefault();
     try {
+      // Chama o chat se existir (prioridade para sistema novo)
+      if (typeof window.openChat === 'function') {
+        window.openChat();
+        return;
+      }
+      
+      // Fallback para notificações antigas (se o chat não carregou)
+      console.warn('[bindNotificationBell] openChat não disponível, usando fallback');
       if (typeof window.openNotificacoes === 'function') {
         window.openNotificacoes();
       }
     } catch (err) {
-      console.warn('[bindNotificationBell] falha ao abrir notificações', err);
+      console.error('[bindNotificationBell] erro ao abrir chat/notificações', err);
     }
   });
 

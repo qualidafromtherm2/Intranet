@@ -112,15 +112,30 @@ router.get('/status', (req, res) => {
   res.json({ loggedIn: false });
 });
 
+// GET /auth/permissoes - retorna permissões de produto do usuário logado
+router.get('/permissoes', async (req, res) => {
+  try {
+    if (!req.session.user?.id) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+    const userId = req.session.user.id;
+    const { rows } = await pool.query(
+      `SELECT array_agg(permissao_codigo) AS codigos
+       FROM public.auth_user_produto_permissao
+       WHERE user_id = $1`,
+      [userId]
+    );
+    const permissoes = rows[0]?.codigos || [];
+    res.json({ permissoes });
+  } catch (err) {
+    console.error('[auth/permissoes]', err);
+    res.status(500).json({ error: 'Erro ao buscar permissões' });
+  }
+});
 
 router.post('/logout', (req, res) => {
   try { req.session.destroy(() => res.json({ ok: true })); }
   catch { res.json({ ok: true }); }
-});
-
-router.get('/status', (req, res) => {
-  if (req.session.user) return res.json({ loggedIn: true, user: req.session.user });
-  res.json({ loggedIn: false });
 });
 
 module.exports = router;

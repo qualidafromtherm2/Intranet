@@ -1,3 +1,118 @@
+.chat-user-unread {
+  background: #10b981;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 12px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  display: inline-block;
+  min-width: 22px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(16,185,129,0.15);
+}
+/* ====== CHAT WHATSAPP STYLE ====== */
+.chat-messages {
+  padding: 24px 16px 12px 16px;
+  background: #222d35;
+  min-height: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  min-width: 80px;
+  padding: 8px 14px 6px 14px;
+  border-radius: 16px;
+  position: relative;
+  font-size: 15px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  margin-bottom: 2px;
+}
+.chat-message-sent {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.chat-message-received {
+  align-self: flex-start;
+  background: #2a3942;
+  color: #e0e0e0;
+  border-bottom-left-radius: 4px;
+}
+.chat-message-text {
+  word-break: break-word;
+  margin-bottom: 2px;
+}
+.chat-message-time {
+  font-size: 12px;
+  color: #b0b0b0;
+  text-align: right;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-message-visto {
+  color: #4fc3f7;
+  font-size: 15px;
+  margin-left: 2px;
+}
+.chat-user-item.is-active {
+  background: #10b98122;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.chat-user-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #222d35;
+  transition: background 0.2s;
+}
+.chat-user-item:hover {
+  background: #05966922;
+}
+.chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px 0 0 0;
+}
+#chatText {
+  flex: 1;
+  border-radius: 8px;
+  border: none;
+  padding: 10px 12px;
+  font-size: 15px;
+  background: #2a3942;
+  color: #fff;
+}
+#chatText:disabled {
+  background: #222d35;
+  color: #888;
+}
+#chatSend {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+#chatSend:disabled {
+  background: #222d35;
+  color: #888;
+  cursor: not-allowed;
+}
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@200;300;400;500;600;700&display=swap");
 * {
   outline: none;
@@ -219,15 +334,15 @@ body.light-mode .video-bg:before {
   }
 }
 
-.search-bar {
+.search-bar {                /* sempre visível */
+  flex: 1 1 260px;          /* cresce até 100%, mas parte de 260  */
+  min-width: 0;             /* permite encolher em telas bem pequenas */
   height: 40px;
   display: flex;
-  width: 100%;
-  max-width: 400px;
   padding-left: 16px;
   border-radius: 4px;
 }
-.search-bar input {
+.search-bar input {          /* continua igual */
   width: 100%;
   height: 100%;
   border: none;
@@ -238,11 +353,20 @@ body.light-mode .video-bg:before {
   font-weight: 500;
   padding: 0 20px 0 40px;
   box-shadow: 0 0 0 2px rgba(134, 140, 160, 0.02);
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
+background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56.966 56.966' fill='%23717790c7'%3e%3cpath d='M55.146 51.887L41.588 37.786A22.926 22.926 0 0046.984 23c0-12.682-10.318-23-23-23s-23 10.318-23 23 10.318 23 23 23c4.761 0 9.298-1.436 13.177-4.162l13.661 14.208c.571.593 1.339.92 2.162.92.779 0 1.518-.297 2.079-.837a3.004 3.004 0 00.083-4.242zM23.984 6c9.374 0 17 7.626 17 17s-7.626 17-17 17-17-7.626-17-17 7.626-17 17-17z'/%3e%3c/svg%3e");
   background-size: 14px;
   background-repeat: no-repeat;
   background-position: 16px 48%;
   color: var(--theme-color);
+}
+
+.search-bar.active {           /* estado aberto (classe vem do JS) */
+max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
+
+}
+
+.search-bar.active input {     /* o próprio <input> ganha foco */
+  cursor: text;
 }
 .search-bar input::-moz-placeholder {
   font-family: var(--body-font);
@@ -264,12 +388,22 @@ body.light-mode .video-bg:before {
 }
 
 .header-profile {
+  margin-left: auto;         /* empurra p/ borda direita           */
   display: flex;
   align-items: center;
-  padding: 0 16px 0 40px;
-  margin-left: auto;
-  flex-shrink: 0;
+  gap: 16px;                 /* distância igual entre os ícones    */
+  padding-left: 40px;        /* mesmo recuo que o campo de busca   */
+  flex: 0 0 200px;
+  flex-shrink: 0;            /* ❸ NUNCA encolha              */
+
 }
+
+.header-menu{
+  display:flex;
+  flex: 0 1 auto;          /* deixa o menu encolher         */
+  overflow:hidden;         /* esconde links que não cabem   */
+}
+
 .header-profile svg {
   width: 22px;
   color: #f9fafb;
@@ -334,12 +468,77 @@ body.light-mode .video-bg:before {
 }
 
 .left-side {
-  flex-basis: 240px;
+  flex-basis: 60px;
   border-right: 1px solid var(--border-color);
-  padding: 26px;
-  overflow: auto;
+  padding: 16px;
+  overflow: visible;
   flex-shrink: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
+
+.sidebar-hamburger {
+  background: var(--primary-color);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 20px;
+  position: relative;
+  z-index: 1001;
+}
+
+.sidebar-hamburger:hover {
+  background: #2563eb;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.sidebar-hamburger.active {
+  background: #1d4ed8;
+}
+
+.sidebar-content {
+  position: absolute;
+  left: 76px;
+  top: 16px;
+  width: 240px;
+  max-height: calc(100vh - 120px);
+  background: rgba(30, 30, 30, 0.98);
+  border: 2px solid var(--card-border-color);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  overflow-y: auto;
+  transition: all 0.3s ease;
+}
+
+.light-mode .sidebar-content {
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.sidebar-content.collapsed {
+  display: none;
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.sidebar-content:not(.collapsed) {
+  display: block;
+  opacity: 1;
+  transform: translateX(0);
+}
+
 @media screen and (max-width: 945px) {
   .left-side {
     display: none;
@@ -393,25 +592,76 @@ body.light-mode .video-bg:before {
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border-color);
-  height: 58px;
+  height: 56px;              /* barra mais compacta */
+  padding: 0 12px;           /* leve respiro lateral */
   flex-shrink: 0;
+  gap: 8px;                  /* espaço entre "+ Novo" e guias */
+}
+.main-header { overflow: visible; }
+
+/* Garante afastamento do header principal e evita que as labels fiquem "sob" ele */
+#produtoTabs > .main-header {
+  margin-top: 8px;
+  padding-top: 2px;
+  position: relative;
+  z-index: 1;
 }
 .main-header .header-menu {
-  margin-left: 150px;
+  margin-left: 0;            /* encosta nas bordas do container */
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;            /* ocupa o restante da linha */
+  min-width: 0;              /* permite encolher para overflow-x */
+  overflow-x: auto;          /* mantém em uma linha com rolagem */
+  white-space: nowrap;       /* impede quebra das guias */
+  gap: 0;                    /* guias controlam o próprio padding */
+  -webkit-overflow-scrolling: touch;
 }
 @media screen and (max-width: 1055px) {
   .main-header .header-menu {
-    margin: auto;
+    margin: 0;
+  }
+  .main-header {
+    height: auto;
+    min-height: 58px;
+    padding: 8px 0;
   }
 }
 .main-header .header-menu a {
-  padding: 20px 24px;
+  display: inline-flex;
+  align-items: center;
+  height: 40px;              /* mesma altura visual do botão */
+  line-height: 40px;
+  padding: 0 16px;           /* padding horizontal apenas */
+}
+
+/* Estilo para o botão Novo */
+.btn-novo-produto {
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 40px;               /* igual às guias */
+  padding: 0 16px;            /* alinha baseline com tabs */
+}
+
+@media screen and (max-width: 768px) {
+  .btn-novo-produto {
+    margin-left: 10px !important;
+    margin-right: 5px !important;
+    font-size: 14px;
+    padding: 6px 12px;
+  }
+  .main-header .header-menu a {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
 }
 
 .main-container {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  /* evita que o conteúdo interno force largura além do disponível */
+  min-width: 0;
 }
 
 .menu-link-main {
@@ -433,16 +683,18 @@ body.light-mode .video-bg:before {
   height: 100%;
   overflow: auto;
   background-color: var(--theme-bg-color);
+  /* permite que filhos em flex/grids não estourem a largura */
+  min-width: 0;
 }
 @media screen and (max-width: 510px) {
   .content-wrapper {
-    padding: 20px;
+    margin: 0;
   }
 }
 .content-wrapper-header {
+  width: 100%;
   display: flex;
   align-items: center;
-  width: 100%;
   justify-content: space-between;
   background-image: url("https://www.transparenttextures.com/patterns/cubes.png"), linear-gradient(to right top, #cf4af3, #e73bd7, #f631bc, #fd31a2, #ff3a8b, #ff4b78, #ff5e68, #ff705c, #ff8c51, #ffaa49, #ffc848, #ffe652);
   border-radius: 14px;
@@ -516,6 +768,38 @@ body.light-mode .video-bg:before {
   white-space: nowrap;
 }
 
+/* === Botões consistentes (RI/PIR e afins) === */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color .15s ease, border-color .15s ease, filter .15s ease, transform .05s ease;
+}
+.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn:active   { transform: translateY(0.5px); }
+
+.btn-primary { background: #3a6df0; color: #fff; }
+.btn-primary:hover { filter: brightness(1.05); }
+
+.btn-danger  { background: #e74c3c; color: #fff; }
+.btn-danger:hover  { filter: brightness(1.05); }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--theme-color);
+  border-color: var(--button-inactive);
+}
+.btn-secondary:hover {
+  border-color: #fff;
+  color: #fff;
+}
+
 /* --- foto do produto ----------------------------------------------------- */
 .content-wrapper-img{
   max-height:180px;       /* escolha a altura que caiba bem no card          */
@@ -534,6 +818,8 @@ body.light-mode .video-bg:before {
   margin-top: 30px;
   display: flex;
   flex-direction: column;
+  /* impede estourar em layouts flex */
+  min-width: 0;
 }
 .content-section-title {
   color: var(--content-title-color);
@@ -581,6 +867,8 @@ body.light-mode .video-bg:before {
   margin-right: 16px;
   flex-shrink: 0;
 }
+/* Override: não aplicar margem nem largura gigante nos ícones de ação da PCP */
+#listaPecasPCPList .acao svg { margin:0 !important; width:16px; height:16px; }
 
 .products {
   display: flex;
@@ -634,6 +922,11 @@ body.light-mode .video-bg:before {
 .status-button:not(.open):hover {
   color: #fff;
   border-color: #fff;
+}
+
+.icon-btn.status-button,
+.produce-btn.status-button {
+  padding: 0 !important;
 }
 
 .content-button:not(.open):hover {
@@ -858,14 +1151,11 @@ body.light-mode .video-bg:before {
 }
 @media screen and (max-width: 1110px) {
   .app-card {
-    width: calc(50% - 20px);
-  }
-  .app-card:last-child {
-    margin-top: 20px;
+    margin-left: 6px !important;
+    margin-right: 4px !important;
+    font-size: 14px;
     margin-left: 0px;
   }
-}
-@media screen and (max-width: 565px) {
   .app-card {
     width: calc(100% - 20px);
     margin-top: 20px;
@@ -970,6 +1260,29 @@ body.light-mode .video-bg:before {
 }
 
 /* ————————————————————————————————
+   Lista de produtos - Linhas clicáveis (sem botão Abrir)
+   ———————————————————————————————— */
+.product-list-item {
+  cursor: pointer !important;
+  transition: all 0.2s ease;
+}
+
+.product-list-item:hover {
+  background-color: var(--theme-bg-color) !important;
+  transform: translateX(4px);
+}
+
+.product-list-item:active {
+  transform: translateX(2px);
+  background-color: var(--button-bg) !important;
+}
+
+/* Remove o button-wrapper se ainda existir */
+.product-list-item .button-wrapper {
+  display: none;
+}
+
+/* ————————————————————————————————
    Destacar e reposicionar o código do produto
    ———————————————————————————————— */
   
@@ -995,11 +1308,13 @@ body.light-mode .video-bg:before {
 
 /* novo logo no lugar das bolinhas */
 .menu-logo {
-  width: 100px;           /* mesma largura da bolinha original */
-  height: 15px;          /* mesma altura */
-  object-fit: cover;     /* garante proporção */
-  margin-right: 195px;   /* mantém o espaçamento para a direita */
-  flex-shrink: 0;        /* não deixa encolher */
+  width: 120px;           /* aumenta largura para melhor proporção */
+  height: 60px;           /* aumenta altura para não cortar a logo */
+  object-fit: contain;    /* mostra a imagem inteira, sem cortar */
+  margin-right: 195px;    /* mantém o espaçamento para a direita */
+  flex-shrink: 0;         /* não deixa encolher */
+  background: transparent;
+  display: block;
 }
 
 .detail-input {
@@ -1469,17 +1784,19 @@ body .options .option:nth-child(5) {
 body .options .option:nth-child(6) {
   --defaultBackground:#AC92EC;
 }
+/* ativa: cresce com base fixa → garante expansão igual em qualquer posição */
+/* ativa: garante base de largura para realmente expandir */
 body .options .option.active {
-  flex-grow: 10000;
+  flex: 1 1 600px;      /* <<< base explícita; você já tem max-width:600px logo abaixo */
   transform: scale(1);
   max-width: 600px;
   margin: 0px;
   border-radius: 40px;
   background-size: auto 100%;
-  /*&:active {
-     transform:scale(0.9);
-  }*/
+  /* &:active { transform: scale(0.9); } */
 }
+
+
 body .options .option.active .shadow {
   box-shadow: inset 0 -120px 120px -120px black, inset 0 -120px 120px -100px black;
 }
@@ -1491,10 +1808,12 @@ body .options .option.active .label .info > div {
   left: 0px;
   opacity: 1;
 }
+/* não-ativas: estreitas e elásticas */
 body .options .option:not(.active) {
-  flex-grow: 1;
+  flex: 1 1 60px;       /* <<< base estreita estável (antes só flex-grow) */
   border-radius: 30px;
 }
+
 body .options .option:not(.active) .shadow {
   bottom: -40px;
   box-shadow: inset 0 -120px 0px -120px black, inset 0 -120px 0px -100px black;
@@ -1555,17 +1874,21 @@ body .options .option .label .info .sub {
 }
 /* === Carousel Foto: ocupar 100% da largura interna da faixa azul === */
 #listaFotos .options {
-  /* remover limites de largura */
+    display: flex;
+  align-items: stretch;
+  gap: 10px;          /* opcional: espaçamento entre cartões */
+  
   min-width: 0 !important;
   max-width: none !important;
-  /* ocupar toda a largura do container pai */
   width: 100% !important;
-  /* (opcional) centralizar, caso o pai tenha padding */
   margin: 0 auto;
-  /* manter altura e overflow */
   height: 400px;
   overflow: hidden;
 }
+/* Escopo específico da guia Fotos (se desejar isolar o comportamento) */
+#listaFotos .options .option.active     { flex: 1 1 600px; }
+#listaFotos .options .option:not(.active) { flex: 1 1 60px; }
+
 
 .foto-modal-overlay {
   position: fixed;
@@ -1586,6 +1909,15 @@ body .options .option .label .info .sub {
    Bloco completo e autossuficiente
    ──────────────────────────────────────────────────────────────── */
 
+   /* — Descrição: reticências + tooltip nativo (title) e sem “invadir” QTD — */
+#estruturaProduto #malha .desc{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;           /* permite a coluna encolher no grid */
+  cursor: help;           /* indica que há texto completo no title */
+}
+
 /* — container da lista — */
 #estruturaProduto .content-section ul#malha{
   display:block;               /* força UL a bloco */
@@ -1597,16 +1929,49 @@ body .options .option .label .info .sub {
   overflow-x:auto;             /* scroll horiz. se apertar */
 }
 
+/* — cabeçalho de grupo por Operação — */
+#estruturaProduto .content-section ul#malha li.category-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  padding:10px 18px;
+  margin-top:14px;
+  border-radius:12px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+#estruturaProduto .content-section ul#malha li.category-header .left{
+  font-weight:600;
+  letter-spacing:.2px;
+}
+#estruturaProduto .content-section ul#malha li.category-header .badge{
+  font-weight:500;
+  opacity:.75;
+  margin-left:.25rem;
+}
+#estruturaProduto .content-section ul#malha li.category-header .right .btn{
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,0.1);
+  background: transparent;
+  cursor:pointer;
+}
+#estruturaProduto .content-section ul#malha li.category-header .right .btn:hover{
+  filter:brightness(1.1);
+}
+
 /* — cabeçalho fixo (6 colunas) — */
 #estruturaProduto .content-section ul#malha li.header-row{
   display:grid;
   grid-template-columns:
       120px                       /* Código   */
-      minmax(220px,1fr)           /* Descrição*/
+      minmax(0,1fr)           /* Descrição*/
       60px                        /* QTD      */
       70px                        /* Unidade  */
       90px                        /* Custo    */
-      80px;                       /* Editar   */
+      120px;                       /* Editar   */
   column-gap:1rem;
   align-items:center;
   padding:8px 18px;
@@ -1623,11 +1988,30 @@ body .options .option .label .info .sub {
 /* — linhas de dados (mesma grade) — */
 #estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row){
   display:grid;
-  grid-template-columns:
-      120px minmax(220px,1fr) 60px 70px 90px 80px;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
   column-gap:1rem;
   align-items:center;
   padding:8px 18px;
+}
+
+
+/* 2ª coluna (Descrição) — a célula pode encolher de verdade */
+#estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > div:nth-child(2){
+  min-width: 0;           /* crítico para grid item poder encolher */
+  overflow: hidden;
+}
+
+/* conteúdo da descrição com “…” e tooltip nativo via title */
+#estruturaProduto .content-section ul#malha li:not(.category-header):not(.header-row) > div.desc{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* cabeçalho: evita que o <th>/<div> 2 também “trave” o grid */
+#estruturaProduto .content-section ul#malha li.header-row > div:nth-child(2){
+  min-width: 0;
 }
 
 /* — células alinhadas — */
@@ -1648,11 +2032,17 @@ body .options .option .label .info .sub {
 
 /* — remove pontinho verde e recuos na descrição — */
 #estruturaProduto #malha .status-circle{ display:none; }
+/* Descrição (2ª coluna) — uma linha com “…” e sem invadir QTD */
 #estruturaProduto #malha .status{
   display:block;
   margin:0; padding:0;
-  white-space:normal;            /* quebra linha se precisar */
+  min-width: 0;              /* permite encolher dentro do grid */
+  overflow: hidden;          /* corta o excedente */
+  text-overflow: ellipsis;   /* mostra “…” */
+  white-space: nowrap;       /* 1 linha */
+  cursor: help;              /* indica tooltip nativo (title) */
 }
+
 #estruturaProduto #malha .status-text{ margin-left:0; }
 
 /* — centraliza valores numéricos — */
@@ -1682,9 +2072,184 @@ body .options .option .label .info .sub {
   background: var(--border-color);   /* linha divisória fina       */
 }
 
+/* === Estrutura de produto: fallback sem .content-section === */
+#estruturaProduto ul#malha {
+  display: block;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto; /* scroll horizontal se apertar */
+}
+
+/* Cabeçalho (6 colunas) */
+#estruturaProduto ul#malha li.header-row{
+  display: grid;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+  position: sticky; top: 0; z-index: 2;
+  text-align: center;
+}
+#estruturaProduto ul#malha li.header-row > div:nth-child(1),
+#estruturaProduto ul#malha li.header-row > div:nth-child(2){
+  text-align: left; /* Código e Descrição à esquerda */
+  min-width: 0;
+}
+
+/* Linhas de dados (mesma grade do cabeçalho) */
+#estruturaProduto ul#malha li:not(.category-header):not(.header-row){
+  display: grid;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+}
+
+/* 2ª coluna pode encolher de verdade */
+#estruturaProduto ul#malha li > div:nth-child(2){ min-width: 0; }
+
+/* Texto da descrição: “…” + tooltip nativo (title) */
+#estruturaProduto ul#malha li > div.desc,
+#estruturaProduto ul#malha li > div.status{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  cursor: help;
+}
+
+/* Centraliza numéricos e o botão Editar (compatível com seu tema) */
+#estruturaProduto #malha .qtd,
+#estruturaProduto #malha .unidade,
+#estruturaProduto #malha .custo-real { text-align: center; }
+
+#estruturaProduto #malha .button-wrapper{
+  display: flex; justify-content: center;
+}
+
 /* ──────────────────────────────────────────────────
    Layout de Lista de Peças idêntico à Estrutura de produto
    ────────────────────────────────────────────────── */
+
+   /* ===== PCP: Ações + sub-estrutura (reaproveita o look da guia "Estrutura de produto") ===== */
+
+/* botões de ação na última coluna */
+/* PCP – célula de ações (linhas): alinhada à ESQUERDA */
+#listaPecasPCPList .acoes{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start; /* <- era flex-end */
+  gap:8px;
+}
+/* PCP – força alinhamento à esquerda em todos os contextos da lista */
+#listaPecasPCPList.grid-pecas li.data-row .acao,
+#listaPecasPCPList.grid-pecas li.data-row .acoes{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start !important;
+  gap:8px;
+}
+
+/* PCP – título da coluna “Ação” alinhado à ESQUERDA */
+#listaPecasPCPList .header-row .acao,
+#listaPecasPCPList .header-row .acoes,
+#listaPecasPCPList .header-row > *:last-child{
+  justify-self:start !important;
+  text-align:left !important;
+}
+
+/* PCP — Centralizar o título da coluna "Ação" no cabeçalho */
+#listaPecasPCPList.grid-pecas .header-row { 
+  /* garante que o header use a mesma malha */
+  display: grid;
+  grid-template-columns: var(--pcp-grid);
+}
+
+/* todos os cabeçalhos viram flex para controle fino de alinhamento */
+#listaPecasPCPList.grid-pecas .header-row > * {
+  display: flex;
+  align-items: center;
+}
+
+/* célula "Ação" (última) centralizada */
+#listaPecasPCPList.grid-pecas .header-row > *:last-child {
+  justify-content: center !important;  /* centra conteúdo */
+  text-align: center !important;       /* texto central */
+  justify-self: stretch !important;    /* evita travar à direita por regras antigas */
+  padding-right: 0 !important;         /* remove empurrão à direita, se houver */
+}
+
+/* PCP – evita centralização herdada de outras áreas */
+.data-row .acao{ justify-content:flex-start; }
+
+#listaPecasPCPList .icon-btn{
+  width:28px; height:28px;
+  display:inline-flex; align-items:center; justify-content:center;
+  border-radius:8px; border:1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.06);
+  color:#fff; cursor:pointer;
+  transition: transform .08s ease, background .12s ease, border-color .12s ease;
+}
+#listaPecasPCPList .icon-btn:hover{ background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.16); transform: translateY(-1px); }
+#listaPecasPCPList .icon-btn:active{ transform: translateY(0); }
+#listaPecasPCPList .icon-btn .i{ width:18px; height:18px; display:block; }
+#listaPecasPCPList .icon-btn svg, 
+#listaPecasPCPList .icon-btn svg *{ stroke: currentColor; fill: none; }
+
+/* linha “sub-estrutura” logo abaixo da peça clicada */
+#listaPecasPCPList li.sub-estrutura-row{ padding: 0; }
+#listaPecasPCPList li.sub-estrutura-row > .sub-estrutura{
+  grid-column: 1 / -1;
+  margin: 8px 0 10px;
+  padding: 8px 10px 12px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+}
+#listaPecasPCPList li.sub-estrutura-row .sub-title{
+  font-weight: 600; margin: 0 0 6px; opacity: .9;
+}
+
+/* grid interna (simplificada — mesma vibe da guia Estrutura) */
+#listaPecasPCPList li.sub-estrutura-row ul.malha-sub{
+  list-style: none; margin: 0; padding: 0;
+}
+/* Grid das linhas da sub-estrutura: Cod | Desc | Un | Qtd | Custo | Ações */
+#listaPecasPCPList li.sub-estrutura-row ul.malha-sub li{
+  display: grid;
+  grid-template-columns: 140px minmax(260px,0.75fr) 70px 80px 90px minmax(168px,0.35fr);
+  column-gap: 12px;
+  align-items: center;
+  padding: 6px 12px;
+}
+
+#listaPecasPCPList li.sub-estrutura-row ul.malha-sub li .desc{
+  min-width: 0;                 /* habilita ellipsis na grid */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#listaPecasPCPList li.sub-estrutura-row ul.malha-sub li .acao{
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: 168px;
+}
+
+#listaPecasPCPList li.sub-estrutura-row ul.malha-sub li .acao .icon-btn{
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+}
+
+
+
    #listaPecasTab .content-section ul#listaPecasList {
     display: block;
     list-style: none;
@@ -2105,7 +2670,9 @@ body .options .option .label .info .sub {
   stroke-width: 0.5em;
 }
 
-#svgEst #barEst { stroke: #ff9f1e; }
+#svgEst #barEst {
+  stroke: #ff9f1e;
+}
 
 #estoqueSpinner:after {
   content: attr(data-pct) "%";
@@ -2603,6 +3170,15 @@ ul#comprasList li ,
 .btn-reset  { background-color: var(--success-color); }
 .btn-del    { background-color: var(--danger-color);  }
 
+/* Timeline de registros - permite scroll vertical */
+#listaRegistros {
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 10px; /* evita corte de sombras no scroll */
+  padding-bottom: 20px; /* garante espaço após o último item */
+}
+
 /* =========  BLOCO DE INFORMAÇÕES DO COLABORADOR  ========== */
 #loggedInContainer{
   padding: 18px 12px;          /* espaçamento interno */
@@ -2812,7 +3388,7 @@ ul#comprasList li ,
 #colabDetails #backToList {
   position: absolute;
   top: 16px;
-  right: 24px;  /* afaste da borda direita conforme precisar */
+  right: 24px;  /* afasta da borda direita conforme precisar */
   margin: 0;
 }
 /* garante que o container continue com position:relative */
@@ -2964,6 +3540,7 @@ ul#comprasList li ,
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
   color: #fff;
+  max-height: 78vh;
 }
 /* ─── Cabeçalho sticky ─── */
 .kanban-header {
@@ -2985,6 +3562,7 @@ ul#comprasList li ,
   margin: 0;
   padding: 6px;
   list-style: none;
+  max-height: calc(78vh - 56px);
 }
 
 /* ─── Barra de scroll interna ─── */
@@ -2996,8 +3574,150 @@ ul#comprasList li ,
   border-radius: 3px;
 }
 #coluna-comercial {
-  max-height: 680px; /* Ajuste este valor conforme necessário */
-  overflow-y: auto; /* Garantir que a barra de rolagem apareça quando o conteúdo exceder o max-height */
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+#coluna-comercial .kanban-card {
+  min-height: auto;
+  padding: 8px 10px;
+  background: linear-gradient(145deg, rgba(99,102,241,0.18), rgba(129,140,248,0.1));
+  border: 1px solid rgba(129,140,248,0.35);
+  box-shadow: 0 8px 18px rgba(59,67,140,0.35);
+}
+
+#coluna-comercial .kanban-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(59,67,140,0.45);
+}
+
+#coluna-comercial .kanban-card .kanban-card-meta {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #c4c6ff;
+  margin-bottom: 6px;
+}
+
+.kanban-card .kanban-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.kanban-card .kanban-code-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  background: rgba(129, 140, 248, 0.25);
+  color: #ede9fe;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+#coluna-comercial .kanban-card .kanban-code-header {
+  color: #f8fafc;
+}
+
+#coluna-comercial .kanban-card .kanban-code-count {
+  background: rgba(129, 140, 248, 0.25);
+  color: #ede9fe;
+}
+
+#coluna-pcp-op .kanban-card .kanban-code-header {
+  color: #ecfeff;
+}
+
+#coluna-pcp-op .kanban-card .kanban-code-count {
+  background: rgba(56, 189, 248, 0.18);
+  color: #cffafe;
+}
+
+#coluna-comercial .kanban-card .kanban-op-list {
+  margin-top: 6px;
+  padding-left: 8px;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: #dbeafe;
+}
+
+#coluna-comercial .kanban-card .kanban-op-line + .kanban-op-line {
+  margin-top: 4px;
+}
+
+/* ─── Botões dos cards do kanban ─── */
+.kanban-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn-kanban {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(59, 130, 246, 0.6);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-kanban:hover {
+  background: rgba(59, 130, 246, 0.8);
+  border-color: rgba(96, 165, 250, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+}
+
+.btn-kanban:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.btn-kanban i {
+  font-size: 0.85rem;
+}
+
+.btn-definir-prazo,
+.btn-redefinir-prazo {
+  background: rgba(168, 85, 247, 0.6);
+  border-color: rgba(192, 132, 252, 0.4);
+}
+
+.btn-definir-prazo:hover,
+.btn-redefinir-prazo:hover {
+  background: rgba(168, 85, 247, 0.8);
+  border-color: rgba(192, 132, 252, 0.6);
+  box-shadow: 0 4px 8px rgba(168, 85, 247, 0.3);
+}
+
+.btn-consultar-estoque {
+  background: rgba(34, 197, 94, 0.6);
+  border-color: rgba(74, 222, 128, 0.4);
+}
+
+.btn-consultar-estoque:hover {
+  background: rgba(34, 197, 94, 0.8);
+  border-color: rgba(74, 222, 128, 0.6);
+  box-shadow: 0 4px 8px rgba(34, 197, 94, 0.3);
 }
 
 
@@ -3141,6 +3861,469 @@ ul#comprasList li ,
 .kanban-card {
   position: relative;
   min-height: 50px; /* Garante espaço para o spinner */
+  cursor: pointer;
+}
+
+#coluna-pcp-aprovado .kanban-card {
+  min-height: auto;
+  padding: 8px 10px;
+  background: linear-gradient(145deg, rgba(37,99,235,0.18), rgba(129,140,248,0.08));
+  border: 1px solid rgba(96,165,250,0.35);
+  box-shadow: 0 8px 18px rgba(15,23,42,0.35);
+}
+
+#coluna-pcp-aprovado .kanban-card.kanban-card-local {
+  border-radius: 14px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#coluna-pcp-aprovado .kanban-card.kanban-card-local:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(30,64,175,0.35);
+}
+
+#coluna-pcp-op .kanban-card {
+  min-height: auto;
+  padding: 8px 10px;
+  background: linear-gradient(145deg, rgba(16,185,129,0.18), rgba(45,212,191,0.08));
+  border: 1px solid rgba(52,211,153,0.35);
+  box-shadow: 0 8px 18px rgba(15,118,110,0.35);
+}
+
+#coluna-pcp-op .kanban-card.kanban-card-production:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(6,95,70,0.35);
+}
+
+#coluna-pcp-op .kanban-card .kanban-op-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#coluna-pcp-op .kanban-card .kanban-op-date {
+  font-size: 0.75rem;
+  color: #99f6e4;
+  margin-left: 8px;
+}
+
+.kanban-modal-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(15,23,42,0.7);
+  backdrop-filter:blur(6px);
+  z-index:9999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:2rem;
+}
+
+.kanban-modal{
+  background:#0f172a;
+  border-radius:18px;
+  width:min(720px, 90vw);
+  max-height:80vh;
+  overflow:hidden;
+  border:1px solid rgba(148,163,184,0.3);
+  box-shadow:0 25px 60px rgba(15,23,42,0.6);
+  display:flex;
+  flex-direction:column;
+}
+
+.kanban-modal header{
+  padding:24px;
+  border-bottom:1px solid rgba(148,163,184,0.2);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.kanban-modal header h2{
+  margin:0;
+  font-size:1.3rem;
+  color:#e2e8f0;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+}
+
+.kanban-modal header span{
+  color:#38bdf8;
+  font-size:0.9rem;
+}
+
+.kanban-modal .close-btn{
+  background:none;
+  border:none;
+  color:#94a3b8;
+  font-size:1.6rem;
+  cursor:pointer;
+  transition:color .2s ease;
+}
+
+.kanban-modal .close-btn:hover{
+  color:#f1f5f9;
+}
+
+.kanban-modal-body{
+  padding:24px;
+  overflow-y:auto;
+}
+
+.kanban-modal-body .modal-code-block{
+  background:rgba(15,118,110,0.12);
+  border:1px solid rgba(45,212,191,0.25);
+  border-radius:14px;
+  padding:18px;
+  margin-bottom:18px;
+}
+
+.modal-code-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:12px;
+  color:#99f6e4;
+  font-weight:600;
+  letter-spacing:0.05em;
+}
+
+.modal-orders{
+  margin-bottom:16px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.modal-orders label{
+  font-size:0.8rem;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:#a5f3fc;
+}
+
+.modal-orders select{
+  background:rgba(15,23,42,0.65);
+  border:1px solid rgba(148,163,184,0.4);
+  color:#f8fafc;
+  border-radius:10px;
+  padding:8px 10px;
+  font-size:0.85rem;
+  min-height:110px;
+}
+
+.modal-orders select option{
+  padding:4px 0;
+}
+
+.op-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  background:rgba(248,250,252,0.06);
+  border-radius:10px;
+  padding:10px 14px;
+  margin-top:8px;
+}
+
+.op-row strong{
+  color:#e2e8f0;
+  font-family:'JetBrains Mono', monospace;
+}
+
+.op-row input[type=\"date\"]{
+  background:#020617;
+  border:1px solid rgba(148,163,184,0.35);
+  color:#f1f5f9;
+  border-radius:8px;
+  padding:6px 10px;
+  font-size:0.85rem;
+  width:140px;
+}
+
+.op-row input[type=\"time\"]{
+  background:#020617;
+  border:1px solid rgba(148,163,184,0.35);
+  color:#f1f5f9;
+  border-radius:8px;
+  padding:6px 10px;
+  font-size:0.85rem;
+  width:110px;
+}
+
+.op-inputs{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+.op-row .op-excluir{
+  background:none;
+  border:none;
+  color:#f87171;
+  cursor:pointer;
+  padding:6px;
+  border-radius:999px;
+  transition:background 0.2s ease, transform 0.2s ease;
+}
+
+.op-row .op-excluir:hover{
+  background:rgba(248,113,113,0.18);
+  transform:translateY(-1px);
+}
+
+.op-row .op-excluir:disabled{
+  opacity:0.55;
+  cursor:default;
+  transform:none;
+}
+
+/* Botão editar, visual semelhante ao excluir porém em azul */
+.op-row .op-editar{
+  background:none;
+  border:none;
+  color:#60a5fa;
+  cursor:pointer;
+  padding:6px;
+  border-radius:999px;
+  transition:background 0.2s ease, transform 0.2s ease;
+}
+
+.op-row .op-editar:hover{
+  background:rgba(96,165,250,0.18);
+  transform:translateY(-1px);
+}
+
+.op-row .op-editar:disabled{
+  opacity:0.55;
+  cursor:default;
+  transform:none;
+}
+
+.excluded-op-line{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:8px 10px;
+  background:rgba(248,250,252,0.05);
+  border-radius:10px;
+  margin-top:6px;
+}
+
+.excluded-op-info{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.op-reativar{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:rgba(34,197,94,0.18);
+  border:1px solid rgba(34,197,94,0.4);
+  color:#bbf7d0;
+  padding:6px 12px;
+  border-radius:999px;
+  cursor:pointer;
+  font-size:0.75rem;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  transition:background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.op-reativar i{
+  font-size:0.85rem;
+}
+
+.op-reativar:hover{
+  background:rgba(34,197,94,0.28);
+  transform:translateY(-1px);
+  box-shadow:0 8px 20px rgba(34,197,94,0.25);
+}
+
+.op-reativar:disabled{
+  opacity:0.55;
+  cursor:default;
+  transform:none;
+  box-shadow:none;
+}
+
+.kanban-header .kanban-icon-btn{
+  background:none;
+  border:none;
+  color:#cbd5f5;
+  cursor:pointer;
+  padding:4px 6px;
+  border-radius:999px;
+  transition:background 0.2s ease, color 0.2s ease;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.kanban-header .kanban-icon-btn:hover{
+  background:rgba(248,250,252,0.08);
+  color:#facc15;
+}
+
+.kanban-modal footer{
+  padding:20px 24px;
+  border-top:1px solid rgba(148,163,184,0.2);
+  display:flex;
+  justify-content:flex-end;
+  gap:14px;
+}
+
+.kanban-modal footer button{
+  border:none;
+  border-radius:999px;
+  padding:10px 22px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  cursor:pointer;
+  transition:transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.modal-secondary{
+  background:rgba(100,116,139,0.2);
+  color:#cbd5f5;
+}
+
+.modal-secondary:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(148,163,184,0.25);
+}
+
+.modal-primary{
+  background:linear-gradient(135deg,#0ea5e9,#22d3ee);
+  color:#0f172a;
+}
+
+.modal-primary:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 25px rgba(14,165,233,0.35);
+}
+#coluna-pcp-aprovado .kanban-card .kanban-op-list {
+  margin-top: 6px;
+  padding-left: 8px;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: #cbd5f5;
+}
+
+#coluna-pcp-aprovado .kanban-card .kanban-card-meta {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #38bdf8;
+  margin-bottom: 6px;
+}
+
+#coluna-pcp-op .kanban-card .kanban-card-meta {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5eead4;
+  margin-bottom: 6px;
+}
+
+#coluna-pcp-op .kanban-card .kanban-op-list {
+  margin-top: 6px;
+  padding-left: 8px;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  color: #bff0ff;
+}
+
+#coluna-pcp-aprovado .kanban-card .kanban-op-line + .kanban-op-line {
+  margin-top: 2px;
+}
+
+.kanban-card .kanban-modal-trigger {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(248, 250, 252, 0.14);
+  color: #e0f2fe;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.kanban-card .kanban-modal-trigger:hover {
+  background: rgba(248, 250, 252, 0.24);
+  transform: translateY(-1px);
+}
+
+.kanban-code-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kanban-code-actions .kanban-modal-trigger {
+  margin-top: 0;
+}
+
+.kanban-stock-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.2);
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.kanban-stock-trigger:hover {
+  background: rgba(148, 163, 184, 0.3);
+  transform: translateY(-1px);
+}
+#coluna-pcp-aprovado .kanban-card .kanban-code-block + .kanban-code-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.35);
+}
+#coluna-pcp-op .kanban-card .kanban-code-block + .kanban-code-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(56, 189, 248, 0.35);
+}
+
+#coluna-pcp-aprovado .kanban-card .kanban-code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+#coluna-pcp-aprovado .kanban-card .kanban-code-count {
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* ─── Marcador de pedido duplicado ─── */
@@ -3281,3 +4464,3066 @@ li.duplicado::after{
     font-size: 0.9rem;
   }
 }
+
+
+/* ===== Estilo unificado para todos os ícones em header-profile ===== */
+/* ===== Header – Ícones do perfil ===== */
+.header-profile{
+  margin-left:auto;          /* cola tudo na direita do header           */
+  display:flex;
+  align-items:center;
+  gap:16px;                  /* distância IGUAL entre todos os filhos   */
+  padding-left:40px;         /* recuo igual ao campo de busca (opcional)*/
+}
+
+/* sinos / impressora / nuvem */
+.header-profile i,
+.header-profile svg{
+  font-size:1.4rem;          /* mesmo “tamanho visual”                   */
+  color:#f9fafb;
+  cursor:pointer;
+  transition:transform .2s,color .2s;
+}
+.header-profile i:hover,
+.header-profile svg:hover{
+  transform:scale(1.1);
+  color:var(--theme-color);
+}
+
+/* badge azul do sino */
+.notification{
+  position:relative;
+}
+.notification-number{
+  position:absolute;
+  top:-6px;right:-6px;
+  width:16px;height:16px;
+  background:#3a6df0;color:#fff;
+  border-radius:50%;font-size:10px;
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* foto do usuário */
+.profile-img{
+  width:32px;height:32px;
+  border-radius:50%;
+  object-fit:cover;
+  border:2px solid var(--theme-color);
+  /* *** REMOVA o “margin-left:22px;” que estava duplicado *** */
+}
+.profile-img { cursor: pointer; }
+
+
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999}
+.modal.is-active{display:flex;justify-content:center;align-items:center}
+.modal-content{background:#fff;border-radius:8px;padding:1.5rem;max-height:80vh;
+               overflow:auto;width:min(92vw,500px);box-shadow:0 6px 18px #0003}
+.close-modal{cursor:pointer;font-size:1.3rem;float:right;margin-left:auto}
+.etiquetas-list li{display:flex;justify-content:space-between;align-items:center;
+                   padding:.35rem 0;border-bottom:1px solid #ddd}
+.btn-print{padding:.25rem .7rem;font-size:.9rem}
+
+#etiquetasModal.is-active{
+  visibility: visible;
+  opacity: 1;
+}
+
+#etiquetasModal .btn-print{
+  padding:4px 12px;
+  background:#3a6df0;
+  color:#fff;
+  border:none;
+  border-radius:20px;
+  cursor:pointer;
+}
+/* === 1. Modal de ETIQUETAS =============================== */
+.modal-content,
+.etiquetas-list li,
+.etiquetas-list li span       { color:#333; }   /* texto cinza-escuro */
+.etiquetas-list .btn-print    { color:#fff; background:#3a6df0; }
+.etiquetas-list .btn-print:hover { filter:brightness(1.1); }
+
+/* === 2. Formulário de LOGIN =============================== */
+.auth-popup form,
+.auth-popup form h1,
+.auth-popup form label,
+.auth-popup form span         { color:#333; }
+
+.auth-popup form input        { color:#333; }
+.auth-popup form input::placeholder { color:#777; }   /* placeholder cinza */
+
+/* 1. Esconde por padrão */
+.kanban-column.empty .placeholder {
+  display: none;
+}
+
+/* 2. Mostra em dragover, sem animação piscante */
+.kanban-column.empty.dragover .placeholder {
+  display: block;
+  animation: none !important;       /* remove qualquer keyframe ligado */
+  opacity: 1 !important;            /* força opacidade total */
+  border: 2px dashed #ccc;          /* estilo estático de guia */
+}
+/* espaço extra e placeholder estático */
+.kanban-column.drop-expand {
+  padding-bottom: 60px;              /* altura reservada */
+  transition: padding-bottom .2s ease;
+}
+.kanban-column.drop-expand .placeholder {
+  display: block;                    /* força exibição */
+  height: 50px;                      /* ajuste à altura do cartão */
+  margin: 5px 0;
+  border: 2px dashed #888;           /* guia visual */
+  opacity: 1 !important;
+  animation: none !important;
+}
+/* escondido por padrão */
+.kanban-column .placeholder {
+  display: none;
+}
+
+/* styling para o cartão de loading */
+.kanban-card.loading {
+  position: relative;
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* a “barra” de progresso */
+.loading-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: #eee;
+  overflow: hidden;
+}
+.loading-bar .progress {
+  width: 0;
+  height: 100%;
+  background: #0b75c9;
+  animation: loading-anim 1.2s linear infinite;
+}
+@keyframes loading-anim {
+  0%   { width: 0; }
+  50%  { width: 100%; }
+  100% { width: 0; }
+}
+/* ícone de “+” junto ao título */
+.kanban-header .add-btn {
+  margin-left: 8px;
+  cursor: pointer;
+  color: #fff;
+  transition: color .2s;
+}
+.kanban-header .add-btn:hover {
+  color: #0b75c9;
+}
+
+/* container de pesquisa oculto por padrão */
+.kanban-header .add-container {
+  display: none;
+  padding: 8px;
+  background: rgba(255,255,255,0.1);
+}
+.kanban-column.search-expand .kanban-header .add-container {
+  display: block;
+}
+
+/* estilo do input */
+.kanban-header .add-search {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+/* container de resultados */
+.add-results {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  z-index: 10;
+  position: relative;
+}
+
+/* cada item */
+.add-results .result-item {
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.add-results .result-item:hover {
+  background: #f0f0f0;
+}
+
+/* mensagem de erro no listbox */
+.add-results .error {
+  color: red;
+  padding: 6px 8px;
+}
+/* ========= Estilo escuro para o listbox de resultados ========= */
+.add-results {
+  background-color: #1F1F23;    /* fundo escuro */
+  border: 1px solid #3A3A3C;    /* borda sutil */
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+
+/* Ajuste da cor padrão do texto */
+.add-results,
+.add-results .result-item {
+  color: #E0E0E0;               /* texto claro */
+  font-size: 0.9rem;
+}
+
+/* Cada item de resultado */
+.add-results .result-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color .15s;
+}
+
+/* Hover / foco */
+.add-results .result-item:hover,
+.add-results .result-item:focus {
+  background-color: #2A2A2E;    /* leve realce */
+}
+
+/* Caso de erro */
+.add-results .error {
+  color: #FF6B6B;               /* vermelho suave */
+  padding: 6px 12px;
+}
+
+/* Scrollbar escura (Firefox) */
+.add-results {
+  scrollbar-color: #555 #1F1F23;
+}
+
+/* Scrollbar escura (Webkit) */
+.add-results::-webkit-scrollbar {
+  width: 8px;
+}
+.add-results::-webkit-scrollbar-thumb {
+  background-color: #555;
+  border-radius: 4px;
+}
+.add-results::-webkit-scrollbar-track {
+  background-color: #1F1F23;
+}
+/* ──────────────────────────────────────────────────
+   Layout de Lista de Peças idêntico à Estrutura de produto
+   ────────────────────────────────────────────────── */
+#listaPecasPCP .content-section ul#listaPecasPCPList {
+  display: block;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li.header-row {
+  display: grid;
+  grid-template-columns: var(--pcp-grid);
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(16,18,27,0.92);
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: bold;
+  text-align: center;
+}
+#listaPecasPCP .content-section ul#listaPecasPCPList li.header-row div:nth-child(-n+2) {
+  text-align: left;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li:not(.category-header):not(.header-row) {
+  display: grid;
+  grid-template-columns: var(--pcp-grid);
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 18px;
+}
+
+#listaPecasPCP .content-section ul#listaPecasPCPList li.category-header {
+  display: block;
+  background: rgba(144,119,119,0.41);
+  font-size: 1.1em;
+  padding: 8px 18px;
+  cursor: default;
+}
+
+/* remove pontinho e recuo na descrição */
+#listaPecasPCP #listaPecasPCPList .status-circle { display: none; }
+#listaPecasPCP #listaPecasPCPList .status {
+  display: block;
+  margin: 0;
+  padding: 0;
+  white-space: normal;
+}
+
+#listaPecasPCP #listaPecasPCPList .status-text {
+  margin-left: 0;
+  word-break: break-word;
+}
+
+#listaPecasPCP #listaPecasPCPList .qtd,
+#listaPecasPCP #listaPecasPCPList .unidade,
+#listaPecasPCP #listaPecasPCPList .valor {
+  text-align: center;
+}
+
+#listaPecasPCP #listaPecasPCPList .button-wrapper {
+  width: auto;
+  display: flex;
+  justify-content: center;
+}
+
+#listaPecasPCP #listaPecasPCPList .products,
+#listaPecasPCP #listaPecasPCPList .status {
+  width: auto;
+  margin-left: 0;
+}
+
+#listaPecasPCP #listaPecasPCPList .button-wrapper .status-button {
+  padding: 6px 18px;
+}
+
+/* ─── Botão ⋯ ───────────────────────────────────── */
+.more-btn{
+  font-size:24px;
+  color:var(--theme-color);  /* branco/lilás do tema */
+  background:none;
+  border:none;
+  cursor:pointer;
+  display:none;      /*   ←  começa escondido   */
+}
+.more-menu.open{ display:flex; }
+
+.more-btn:hover{
+  color:var(--theme-color);
+}
+/* ─── Dropdown oculto ───────────────────────────── */
+.more-menu{
+  position:absolute;
+  top:58px;                 /* logo abaixo do cabeçalho de 58 px */
+  right:30px;               /* mesmo padding do header */
+  display:none;
+  flex-direction:column;
+  min-width:160px;
+  background:var(--dropdown-bg);
+  border:1px solid var(--border-color);
+  border-radius:4px;
+  z-index:100;
+}
+.more-menu a{
+  padding:10px 16px;
+  color:var(--theme-color);
+  text-decoration:none;
+  white-space:nowrap;
+}
+.more-menu a:hover{
+  background:var(--dropdown-hover);
+}
+.more-menu.open{display:flex;}
+.header{position:relative;}     /* referência para o dropdown */
+
+.header {
+  display: flex;
+  align-items: center;
+  padding: 0 30px;
+  gap: 0;                 /* já tinha boa parte disso no seu CSS */
+}
+
+/* nav que pode “estourar” */
+.header-menu {
+  flex: 1 1 auto;
+  display: flex;
+  overflow: hidden;       /* corta o que não couber */
+}
+
+/* botão ⋯ */
+.more-btn {
+  flex: 0 0 auto;
+  font-size: 24px;
+  padding: 20px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--inactive-color);
+  display: none;          /* aparece só quando houver abas ocultas */
+}
+
+/* dropdown */
+.more-menu {
+  position: absolute;
+  top: 58px;              /* logo abaixo da faixa */
+  right: 30px;
+  display: none;
+  flex-direction: column;
+  min-width: 160px;
+  background: var(--dropdown-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  z-index: 100;
+}
+.more-menu a {
+  padding: 10px 16px;
+  color: var(--theme-color);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.more-menu a:hover { background: var(--dropdown-hover); }
+.more-menu.open   { display: flex; }
+/* valor de estoque em cinza claro para não poluir */
+#listaPecasPCPList .est {
+  color: var(--inactive-color);
+  font-size: 0.9em;
+}
+
+
+
+/* ----- lista de peças PCP ----- */
+#listaPecasPCPList li {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .2rem .4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#listaPecasPCPList .cod   { font-weight: 600; min-width: 8rem; }
+#listaPecasPCPList .desc  { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+#listaPecasPCPList .qtd,
+#listaPecasPCPList .est   { margin-left: .5rem; flex-shrink: 0; }
+
+
+/* estoque crítico */
+#listaPecasPCPList .est.low {
+  color: #e74c3c;          /* vermelho */
+  font-weight: 600;
+}
+#listaPecasPCPList li .unit {
+  color: #9fa3ad;          /* cinza claro */
+  margin-left: 2px;
+}
+
+.code-bar .prod-code{
+  color:#d0d0d0;          /* ajuste para combinar com seu tema dark */
+}
+.code-bar .plus-btn{
+  border:none;
+  background:none;
+  color:#8cf;             /* cor de destaque – mude à vontade          */
+  font-size:1.1rem;
+  cursor:pointer;
+  line-height:1;
+  padding:0 .25rem;
+}
+.code-bar .plus-btn:hover{
+  transform:scale(1.2);
+}
+/* faz o wrapper quebrar linha */
+#listaPecasPCP .title-wrapper{
+  display: flex;
+  flex-wrap: wrap;      /* ← permite nova linha */
+  align-items: center;
+  gap: .5rem;
+}
+
+/* ocupa a linha inteira */
+.code-bar{
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+#pcp-code-bar input[type="text"]{
+  flex:1;
+  min-width:220px;
+  padding:8px 12px;
+  border-radius:8px;
+  border:1px solid rgba(148,163,184,0.3);
+  background: rgba(15,23,42,0.55);
+  color:#f8fafc;
+}
+#pcp-code-bar input[type="text"]:focus{
+  outline:none;
+  border-color: rgba(94,234,212,0.55);
+  background: rgba(15,23,42,0.85);
+}
+
+/* botão de limpar filtros da lista PCP */
+.clear-btn{
+  margin-left: 8px;
+  padding: 4px 10px;
+  font-size: 0.9rem;
+  background:#444;
+  color:#fff;
+  border:1px solid #555;
+  border-radius:4px;
+  cursor:pointer;
+}
+.clear-btn:hover{
+  background:#666;
+}
+/* linha dos filtros */
+#listaPecasPCP .title-wrapper,
+#listaPecasPCP .desc-wrapper{
+  display:flex;
+  align-items:center;
+}
+
+/* garante pequena folga entre campos */
+#listaPecasPCP .title-wrapper > *:not(:last-child){
+  margin-right:8px;
+}
+
+/* campo de texto ocupa todo o espaço que sobrar */
+#descFilterPCP{
+  flex:1 1 auto;
+}
+
+/* botão-ícone “Limpar” */
+.clear-icon{
+  flex:0 0 auto;
+  background:transparent;
+  border:none;
+  font-size:1.4rem;     /* maior que o texto dos inputs */
+  line-height:1;
+  color:#bbb;
+  cursor:pointer;
+}
+.clear-icon:hover{
+  color:#fff;
+}
+/* ——— Código no topo da guia “Dados do produto” ——— */
+#productTitle {
+  text-transform: uppercase;
+}
+/* cartão que acabou de ser criado na coluna Aguardando prazo */
+.flash-new {
+  background: #235c23 !important;   /* verde escuro */
+  color: #fff;                      /* texto branco p/ contraste */
+  transition: background 0.8s ease;
+}
+
+
+/* ——— Tabelas do módulo Armazéns ——— */
+table.tabela {
+  width: 100%;
+  border-collapse: collapse;      /* cola linhas -> some o “pulo” */
+  border-spacing: 0;
+  color: #eee;
+  font-size: 0.9rem;
+}
+
+table.tabela thead {
+  background: #222;
+  text-transform: uppercase;
+}
+
+table.tabela th,
+table.tabela td {
+  padding: 6px 8px;
+  border: 1px solid #444;         /* linhas discretas */
+}
+
+/* Colunas ordenáveis */
+table.tabela th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+table.tabela th.sortable:hover {
+  background: #333;
+}
+
+table.tabela th.sortable i {
+  margin-left: 4px;
+  font-size: 0.85em;
+  opacity: 0.5;
+}
+
+table.tabela th.sortable.sort-asc i,
+table.tabela th.sortable.sort-desc i {
+  opacity: 1;
+}
+
+table.tabela th.sortable.sort-asc i::before {
+  content: '\f0de';  /* fa-sort-up */
+}
+
+table.tabela th.sortable.sort-desc i::before {
+  content: '\f0dd';  /* fa-sort-down */
+}
+
+table.tabela tbody tr:nth-child(even) { background: #2a2a2a; }
+table.tabela tbody tr:hover       { background: #333; }
+
+table.tabela td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;  /* algarismos alinhados */
+}
+
+/* ——— Paginação ——— */
+.almox-pager {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;    /* centraliza */
+  font-size: 0.9rem;
+}
+
+.almox-pager .btn.tiny {
+  padding: 2px 6px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #eee;
+  cursor: pointer;
+}
+
+/* ——— Área rolável em ambas as direções ——— */
+.almox-wrapper {
+  max-height: 60vh;          /* rolagem vertical               */
+  overflow-y: auto;
+  overflow-x: auto;          /* rolagem horizontal se precisar */
+  margin-bottom: 8px;
+}
+
+/* ——— Larguras fixas e reticências ——— */
+.almox-wrapper table {
+  table-layout: fixed;   /* força as larguras abaixo */
+  width: 100%;
+}
+
+.almox-wrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #222; /* reforça cor quando estiver fixo */
+}
+
+.almox-wrapper tbody tr {
+  cursor: pointer;
+}
+.almox-wrapper tbody tr:active {
+  background: #3a3a3a;
+}
+
+/* 1ª coluna – Código */
+.almox-wrapper td:nth-child(1),
+.almox-wrapper th:nth-child(1) {
+  width: 120px;          /* ~⅔ da largura anterior */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 2ª coluna – Descrição (reticências) */
+.almox-wrapper td:nth-child(2),
+.almox-wrapper th:nth-child(2) {
+  width: 360px;          /* ajuste conforme seu layout */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Demais colunas numéricas — largura enxuta */
+.almox-wrapper td:nth-child(n+3),
+.almox-wrapper th:nth-child(n+3) {
+  width: 100px;   /* estava 80px */
+}
+
+/* Ajuste fino de larguras ----------------------------------- */
+.almox-wrapper th:nth-child(1),
+.almox-wrapper td:nth-child(1) { width: 120px; }  /* CÓDIGO      */
+.almox-wrapper th:nth-child(2),
+.almox-wrapper td:nth-child(2) { width: 320px; }  /* DESCRIÇÃO   */
+.almox-wrapper th:nth-child(n+3),
+.almox-wrapper td:nth-child(n+3) { width: 100px; } /* numéricas   */
+
+/* ——— campo de busca ——— */
+.search-box {
+  margin-left: 12px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: #eee;
+  border-radius: 4px;
+  width: 220px;
+}
+.search-box::placeholder { color:#777; }
+
+/* ——— total CMC (à direita do campo de busca) ——— */
+.cmc-total {
+  margin-left: 16px;
+  font-size: 0.85rem;
+  color: #bbb;
+  white-space: nowrap;
+}
+
+
+.producao-wrapper {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+/* usa as mesmas larguras */
+.producao-wrapper table         { table-layout: fixed; width:100%; }
+.producao-wrapper td:nth-child(1),
+.producao-wrapper th:nth-child(1){ width:110px; white-space:nowrap; overflow:hidden;text-overflow:ellipsis; }
+.producao-wrapper td:nth-child(2),
+.producao-wrapper th:nth-child(2){ width:320px; white-space:nowrap; overflow:hidden;text-overflow:ellipsis; }
+.producao-wrapper td:nth-child(n+3),
+.producao-wrapper th:nth-child(n+3){ width:95px; }
+
+
+
+/* — filtro por tipo — */
+.filter-icon {
+  margin-left: 10px;
+  background: transparent;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+}
+.filter-icon:hover { color: #fff; }
+
+.filter-panel {
+  position: absolute;
+  z-index: 10;
+  background: #1b1b1b;
+  border: 1px solid #444;
+  padding: 8px 10px;
+  border-radius: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.6);
+  min-width: 220px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-panel.is-open {
+  display: flex;
+}
+
+.filter-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .85rem;
+  margin: 4px 0;
+  color: #eee;
+}
+.filter-panel label span {
+  flex: 1;
+  line-height: 1.2;
+}
+.filter-panel input[type="checkbox"] {
+  accent-color: #3fa7ff;   /* azul */
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.almox-filter-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 4px 2px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.almox-select-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(63, 167, 255, 0.14);
+  color: #d9ecff;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.almox-select-toggle:hover {
+  background: rgba(63, 167, 255, 0.26);
+  color: #ffffff;
+}
+
+.almox-select-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #3fa7ff;
+}
+
+.almox-toggle-text {
+  white-space: nowrap;
+}
+
+.filter-panel .almox-filter-option {
+  margin: 2px 0;
+}
+
+.transferencia-wrapper {
+  margin-top: 12px;
+}
+
+.transferencia-wrapper .transferencia-placeholder {
+  text-align: center;
+  color: #aaa;
+}
+
+.transferencia-table tbody tr {
+  cursor: default;
+}
+
+.transferencia-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.transferencia-search {
+  position: relative;
+  max-width: 480px;
+  flex: 1 1 320px;
+}
+
+.transferencia-search .search-box {
+  margin-left: 0;
+  width: 100%;
+}
+
+/* Dropdown de busca (mesmo visual do kanban) */
+.transfer-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  display: none;
+  background: #141414;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.45);
+  padding: 0;
+}
+
+.transfer-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: transparent;
+}
+
+.transfer-search-results li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  color: #fff;
+  font-size: 0.9rem;
+}
+.transfer-search-results li:last-child { border-bottom: none; }
+.transfer-search-results li:hover      { background: #1f1f1f; }
+
+.transfer-search-results li.info,
+.transfer-search-results li.no-results {
+  justify-content: center;
+  font-style: italic;
+  cursor: default;
+  background: #1a1a1a;
+  color: #d0d4dc;
+}
+.transfer-search-results li.error {
+  justify-content: center;
+  font-style: italic;
+  cursor: default;
+  background: #2a0f15;
+  color: #ffb4b4;
+}
+
+.transfer-search-results li span.codigo {
+  flex: 0 0 140px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-search-results li span.descricao {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transferencia-locais {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, auto));
+  gap: 12px 16px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.transferencia-locais label {
+  font-size: 0.85rem;
+  color: #ddd;
+}
+.transferencia-locais .origem-group,
+.transferencia-locais .destino-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.destino-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.destino-inline .icon-btn {
+  width: 28px;
+  height: 24px;
+}
+
+.destino-inline .icon-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.destino-inline .icon-btn i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+}
+
+.transfer-select {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #eee;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 200px;
+  cursor: pointer;
+}
+
+.transfer-select:focus {
+  outline: 1px solid #3fa7ff;
+}
+
+.transferencia-table th.sel-col {
+  width: 32px;
+}
+
+.transferencia-table td.sel input[type="checkbox"] {
+  transform: scale(0.85);
+  cursor: pointer;
+  accent-color: #3fa7ff;
+}
+
+.transferencia-table td.qtd-cell {
+  text-align: center;
+}
+
+.transferencia-table td.qtd-cell input.transfer-qtd {
+  width: 70px;
+  padding: 2px 4px;
+  background: #121212;
+  border: 1px solid #333;
+  color: #eee;
+  border-radius: 4px;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.transferencia-table td.qtd-cell input.transfer-qtd:focus {
+  outline: 1px solid #3fa7ff;
+}
+
+.transferencia-table td.qtd-cell input.transfer-qtd::-webkit-outer-spin-button,
+.transferencia-table td.qtd-cell input.transfer-qtd::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.transferencia-table td:nth-child(2),
+.transferencia-table th:nth-child(2) {
+  width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transferencia-table td:nth-child(3),
+.transferencia-table th:nth-child(3) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transferencia-table th.desc-col,
+.transferencia-table td.desc-cell {
+  width: 25ch;
+  max-width: 25ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transferencia-table td.sel {
+  text-align: center;
+}
+
+
+/* --- Painel Início --- */
+.inicio-grid{
+  /* layout anterior em flex podia forçar largura em alguns cenários */
+  /* usamos grid responsivo que quebra automaticamente */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.inicio-btn{
+  min-width:220px;
+  flex:1 1 220px;
+  padding:18px 24px;
+  border-radius:10px;
+  font-size:16px;
+  background:var(--theme-bg-color);
+  color:var(--theme-color);
+  border:1px solid var(--border-color);
+  cursor:pointer;
+  transition:.25s;
+}
+.inicio-btn:hover{background:var(--hover-menu-bg);}
+/* mantém o comportamento original */
+.header .header-menu > .menu-link:hover {
+  cursor: pointer;          /* 👈 força a mãozinha */
+}
+
+.iniciar-prod-btn{ margin-bottom:1rem; }
+
+/* --- Carrossel Semanal (Página Início) --- */
+#paginaInicio .content-wrapper {
+  /* garante que o conteúdo role internamente sem “estourar” o app */
+  overflow: auto;
+}
+
+.semana-carousel-container {
+  position: relative;
+  overflow: hidden;     /* importante: limita a faixa visível */
+  width: 100%;
+}
+
+.semana-carousel {
+  display: flex;
+  gap: 12px;
+  will-change: transform;
+}
+
+.semana-day-card {
+  flex: 0 0 162px; /* largura usada nos cálculos do JS */
+  background: var(--content-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--theme-color);
+}
+
+.semana-day-card.center {
+  outline: 1px solid #3a6df0;
+  outline-offset: 0;
+}
+
+.semana-day-card.hoje {
+  box-shadow: 0 0 0 2px rgba(58,109,240,0.25) inset;
+}
+
+.semana-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.semana-day-date {
+  font-weight: 700;
+}
+
+.semana-day-dow {
+  font-size: 12px;
+  color: var(--inactive-color);
+}
+
+.semana-day-badge {
+  background: rgba(58,109,240,0.15);
+  color: #9db6ff;
+  border: 1px solid rgba(58,109,240,0.3);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.semana-produtos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px; /* evita crescer indefinidamente */
+  overflow: hidden;  /* mantém tudo dentro do card */
+}
+
+.semana-produto-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-height: 22px;
+}
+
+.semana-empty {
+  color: var(--inactive-color);
+  font-size: 12px;
+}
+
+/* status icons cores */
+.status-excluido { color: #ef4444; }
+.status-produzindo { color: #f59e0b; }
+.status-produzido { color: #10b981; }
+.status-aguardando, .status-novo { color: #93c5fd; }
+
+
+  /* Força 8 colunas só para a lista do PCP */
+  /* já está usando grid de 8 colunas; garantimos e alinham-se as células */
+  #listaPecasPCPList.grid-pecas li {
+  display: grid;
+  /*                cod   desc  unid  qtd   perda qtdb   qpro   qalm   acao   */
+  grid-template-columns: 140px 1fr  80px  80px  110px  90px   90px   110px !important;
+  gap: 8px;
+  align-items: center;
+  }
+  #listaPecasPCPList .unid,
+  #listaPecasPCPList .qtd,
+  #listaPecasPCPList .perda,
+  #listaPecasPCPList .qtdb,
+  #listaPecasPCPList .qtdpro,
+  #listaPecasPCPList .qtdalm { text-align: center; }
+
+  /* desc: elipse no grid; tooltip mostra o texto completo */
+  #listaPecasPCPList .desc {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* tooltip flutuante */
+  .pcp-tip {
+    position: fixed;
+    z-index: 9999;
+    max-width: 60ch;
+    pointer-events: none;
+    background: rgba(18,18,20,0.98);
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    font-size: 12.5px;
+    line-height: 1.35;
+    transform: translate(-50%, calc(-100% - 10px));
+    opacity: 0;
+    transition: opacity .08s ease-out;
+  }
+  .pcp-tip.show { opacity: 1; }
+
+  /* ——— Login sempre no topo ——— */
+.overlay-app {
+  position: fixed;
+  inset: 0;                 /* top/right/bottom/left:0 */
+  z-index: 12000 !important;/* acima de qualquer modal/tabela/tooltip */
+  pointer-events: all;
+}
+
+.overlay-app.is-active {    /* já existia, reforço para interação */
+  visibility: visible;
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* o conteúdo do popup também ganha uma camada própria */
+.overlay-app .auth-popup {
+  position: relative;
+  z-index: 12001;           /* acima do backdrop */
+}
+
+/* ==== Colaboradores (escopo local) ==== */
+.colab-pane .colab-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.colab-pane .row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr 140px; /* ID | Usuário | Papéis | Ações */
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2e39;
+}
+
+.colab-pane .row.header-row {
+  font-weight: 600;
+  color: #cfd3dc;
+  background: #1f2430;
+}
+
+.colab-pane .row:last-child { border-bottom: none; }
+.colab-pane .col.acoes { justify-self: end; }
+.colab-pane .loading, .colab-pane .error { padding: 16px; }
+
+/* Adicione ao seu CSS */
+.spinner {
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+
+.user-badge .is-ghost {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* Grupo guardado por login: estilo básico pra quando está desabilitado */
+.auth-group .auth-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: auto; /* mantemos para capturar o clique e mostrar dica */
+  filter: grayscale(0.2);
+}
+
+/* micro feedback ao tentar clicar deslogado */
+.auth-group .auth-bump {
+  transform: translateY(-1px);
+}
+
+/* se quiser ainda mais claro, quando hover */
+.auth-group .auth-disabled:hover {
+  transform: none;
+}
+
+/* PCP – compactar filtros */
+#codeFilterPCP,
+#descFilterPCP {
+  flex: none !important;
+  height: 24px !important;
+  padding: 2px 6px !important;
+  font-size: 12px !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 4px !important;
+}
+
+/* PCP: destaque quando Qtd > Arm Pro */
+.pcp-warn {
+  color: #d32f2f;    /* vermelho material-ish */
+  font-weight: 700;  /* deixa mais evidente */
+}
+.pcp-warn input {
+  color: #d32f2f;
+  font-weight: 700;
+}
+
+/* larguras específicas */
+#codeFilterPCP { width: 120px !important; }
+#descFilterPCP { width: 200px !important; }
+
+/* Botões ícone na coluna Ação */
+/* Botões ícone na coluna Ação */
+.icon-btn, .produce-btn {
+  position: relative;                 /* para centralizar o SVG */
+  display: inline-block;
+  width: 28px;
+  height: 24px;
+  padding: 0 !important;
+  line-height: 0;
+  text-align: center;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color);
+  background: #1f2937;
+  cursor: pointer;
+  transition: transform .08s ease, background .15s ease;
+}
+.icon-btn:hover, .produce-btn:hover { transform: translateY(-1px); background:#111827; }
+.icon-btn:active, .produce-btn:active { transform: translateY(0); }
+
+.icon-btn svg, .produce-btn svg {
+  position: absolute;                 /* centrado matemático */
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  display: block;
+  margin: 0 !important;               /* mata qualquer margem herdada */
+}
+
+.produce-btn { border-color:#2563eb; }
+.produce-btn svg { fill:#facc15; }     /* amarelo produção */
+
+
+/* feedback opcional quando aciona produzir */
+.blink-success { animation: blinkSuccess .6s ease 2; }
+@keyframes blinkSuccess {
+  0%,100% { background: transparent; }
+  50%     { background: rgba(34,197,94,0.15); }
+}
+
+/* Coluna Ação: centralizar os botões-ícone */
+.data-row .acao {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 84px;
+}
+
+
+.icon-btn, .produce-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  padding: 0 !important;
+  line-height: 0;
+  text-align: center;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color);
+  background: #1f2937;
+  cursor: pointer;
+  transition: transform .08s ease, background .15s ease;
+}
+.icon-btn svg, .produce-btn svg { display:block; margin:0; }
+.produce-btn { border-color:#2563eb; }
+.produce-btn svg { fill:#facc15; } /* amarelo produção */
+
+/* Botão-ícone inline, usado em títulos de seção (ex.: Estrutura de produto) */
+.icon-inline-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:32px; height:32px;
+  border:1px solid #ddd; border-radius:8px;
+  background:#f8f9fa; cursor:pointer;
+  transition:background .15s,border-color .15s,transform .04s;
+}
+.icon-inline-btn:hover{ background:#eef2ff; border-color:#c7d2fe; }
+.icon-inline-btn:active{ transform:translateY(1px); }
+.icon-inline-btn svg{ display:block; }
+
+/* Botão-ícone ao lado do título "Estrutura de produto" */
+.icon-inline-btn{
+  background: transparent;           /* nada de quadrado branco */
+  border: none;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--theme-color);         /* ícone acompanha o tema */
+  line-height: 1;
+  cursor: pointer;
+  transition: background .2s, opacity .2s;
+}
+.icon-inline-btn:hover { background: var(--hover-menu-bg); }
+.icon-inline-btn:focus { outline: 2px solid var(--border-color); outline-offset: 2px; }
+
+/* garante que o svg use a cor do texto */
+.icon-inline-btn svg{
+  width: 18px; height: 18px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* contraste em modo claro */
+.light-mode .icon-inline-btn { color: #333; }
+
+/* Ajuste para conter a descrição */
+.desc {
+  overflow: hidden;           /* esconde o que ultrapassar */
+  text-overflow: ellipsis;   /* mostra reticências */
+  white-space: nowrap;       /* impede quebra de linha */
+  min-width: 0;              /* permite que o texto seja truncado */
+  max-width: 100%;           /* não ultrapassa a largura da coluna */
+  padding-right: 10px;       /* mantém espaço da próxima coluna */
+}
+
+/* — Ações (trocar, expandir, abrir) — */
+#estruturaProduto #malha .acoes{
+  display:flex; justify-content:center; align-items:center; gap:8px;
+}
+
+#estruturaProduto #malha .icon-btn{
+  width:28px; height:28px;
+  display:inline-flex; align-items:center; justify-content:center;
+  border-radius:8px; border:1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.06);
+  cursor:pointer;
+  transition: transform .08s ease, background .12s ease, border-color .12s ease;
+    color: #fff;                             /* <- ícone branco */
+  background: rgba(255,255,255,.06);       /* mantém o fundo atual */
+  border: 1px solid rgba(255,255,255,.10); /* borda sutil */
+}
+/* Força os SVGs das ações a usarem a cor do botão (branco) */
+#estruturaProduto #malha .icon-btn svg,
+#estruturaProduto #malha .icon-btn svg *{
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+
+#estruturaProduto #malha .icon-btn:hover{
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.16);
+  transform: translateY(-1px);
+}
+
+#estruturaProduto #malha .icon-btn:active{
+  transform: translateY(0);
+}
+
+#estruturaProduto #malha .icon-btn .i{
+  width:18px; height:18px; display:block;
+}
+
+/* mantém alinhamento das colunas numéricas */
+#estruturaProduto #malha .qtd,
+#estruturaProduto #malha .unidade,
+#estruturaProduto #malha .custo-real{ text-align:center; }
+
+/* ===== Sub-estrutura (linha expandida) ===== */
+#estruturaProduto #malha li.sub-estrutura-row{ padding: 0; }
+#estruturaProduto #malha li.sub-estrutura-row > .sub-estrutura{
+  grid-column: 1 / -1;               /* ocupa todas as colunas da linha principal */
+  margin: 8px 0 10px;
+  padding: 8px 10px 12px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+}
+#estruturaProduto #malha li.sub-estrutura-row .sub-title{
+  font-weight: 600; margin: 0 0 6px; opacity: .9;
+}
+
+/* grade da lista interna (mesmo layout da principal) */
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub{
+  list-style: none; margin: 0; padding: 0;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li{
+  display: grid;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px;
+  column-gap: 1rem;
+  align-items: center;
+  padding: 6px 12px;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li > div:nth-child(2){
+  min-width: 0;                      /* permite ellipsis na 2ª coluna */
+}
+#estruturaProduto #malha li.sub-estrutura-row .desc{
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-right: 10px;
+}
+#estruturaProduto #malha li.sub-estrutura-row .acoes{
+  display: flex; gap: 8px; justify-content: flex-end; align-items: center;
+}
+/* herda ícones brancos do botão principal */
+#estruturaProduto #malha .icon-btn svg,
+#estruturaProduto #malha .icon-btn svg *{
+  stroke: currentColor; fill: none;
+}
+
+
+
+/* ===== Sub-estrutura (sem cabeçalho, mesma grade, cor diferente) ===== */
+#estruturaProduto #malha li.sub-estrutura-row{ padding: 0; }
+#estruturaProduto #malha li.sub-estrutura-row > .sub-estrutura{
+  grid-column: 1 / -1;
+  margin: 8px 0 10px;
+  padding: 6px 8px 10px;
+  background: rgba(255,255,255,.035);      /* cor diferente */
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub{
+  list-style: none; margin: 0; padding: 0;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li{
+  display: grid;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px; /* igual principal */
+  column-gap: 1rem;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(255,255,255,.02);       /* linhas com leve contraste */
+  border-radius: 8px;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li + li{
+  margin-top: 6px;
+}
+#estruturaProduto #malha li.sub-estrutura-row ul.malha-sub li > div:nth-child(2){
+  min-width: 0;
+}
+#estruturaProduto #malha li.sub-estrutura-row .desc{
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-right: 10px;
+}
+#estruturaProduto #malha li.sub-estrutura-row .acoes{
+  display: flex; gap: 8px; justify-content: flex-end; align-items: center;
+}
+
+
+/* garante ícones brancos */
+#estruturaProduto #malha .icon-btn svg,
+#estruturaProduto #malha .icon-btn svg *{
+  stroke: currentColor;
+  fill: none;
+}
+
+/* — Linhas filhas: mesma grade, outra cor — */
+
+/* === Sub-estrutura: cabeçalho do grupo (linha inteira) ================== */
+/* Deixa muito claro que essas linhas pertencem ao item clicado */
+#estruturaProduto #malha li.child-group-header{
+  display: grid;
+  grid-template-columns: 1fr;        /* ocupa toda a linha */
+  padding: 6px 18px 2px;
+  margin-top: 8px;
+}
+#estruturaProduto #malha li.child-group-header .child-group-title{
+  display: flex; align-items: center; gap: 8px;
+  font-size: .92rem; font-weight: 600; letter-spacing: .2px;
+  color: #cfe3ff;                     /* título azulado */
+  text-transform: none;
+}
+#estruturaProduto #malha li.child-group-header .child-group-title .pip{
+  width: 10px; height: 10px; border-radius: 50%;
+  background: rgba(59,130,246,.9);    /* bolinha azul */
+  box-shadow: 0 0 0 4px rgba(59,130,246,.18); /* aura */
+}
+
+/* === Sub-estrutura: bloco visual contínuo =============================== */
+/* já existe o .child-row; aqui intensificamos a borda “em bloco” e o recuo */
+#estruturaProduto #malha li.child-row{
+  position: relative;
+  background: rgba(59,130,246,.08);                 /* azul claro */
+  /* barra de conexão à esquerda para “nidar” visualmente */
+  border-left: 4px solid rgba(59,130,246,.45);
+  padding-left: 14px;                                /* compensa a barra */
+  box-shadow:
+    inset -2px 0 0 rgba(59,130,246,.30);            /* lateral direita sutil */
+}
+#estruturaProduto #malha li.child-row.child-first{
+  border-top-left-radius: 10px; border-top-right-radius: 10px;
+  box-shadow:
+    inset -2px 0 0 rgba(59,130,246,.30),
+    inset 0 2px 0 rgba(59,130,246,.45);
+}
+#estruturaProduto #malha li.child-row.child-last{
+  border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;
+  margin-bottom: 10px;
+  box-shadow:
+    inset -2px 0 0 rgba(59,130,246,.30),
+    inset 0 -2px 0 rgba(59,130,246,.45);
+}
+/* espaço suave entre as linhas internas sem quebrar a moldura */
+#estruturaProduto #malha li.child-row + li.child-row{ margin-top: 4px; }
+
+/* Ícones dentro da sub-lista ligeiramente “desbotados” para não disputar com o título */
+#estruturaProduto #malha li.child-row .icon-btn{ opacity: .9 }
+#estruturaProduto #malha li.child-row .icon-btn:hover{ opacity: 1 }
+
+/* (opcional) sublinha a descrição só dentro das child-row quando hover */
+#estruturaProduto #malha li.child-row:hover .desc{
+  text-decoration: underline; text-decoration-color: rgba(59,130,246,.6);
+}
+
+#estruturaProduto #malha li.child-row{
+  background: rgba(59,130,246,.08);        /* azul claro discreto */
+  border-radius: 0;                         /* o raio vem no primeiro/último */
+  /* laterais do bloco (contínuas) */
+  box-shadow:
+    inset 2px 0 0 rgba(59,130,246,.45),     /* borda esquerda do grupo */
+    inset -2px 0 0 rgba(59,130,246,.45);    /* borda direita do grupo */
+}
+
+/* primeira do grupo: ativa topo + cantos */
+#estruturaProduto #malha li.child-row.child-first{
+  margin-top: 8px;                          /* “margem” superior do bloco */
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  box-shadow:
+    inset 2px 0 0 rgba(59,130,246,.45),
+    inset -2px 0 0 rgba(59,130,246,.45),
+    inset 0 2px 0 rgba(59,130,246,.45);     /* linha do topo */
+}
+
+/* última do grupo: ativa fundo + cantos */
+#estruturaProduto #malha li.child-row.child-last{
+  margin-bottom: 10px;                      /* “margem” inferior do bloco */
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+  box-shadow:
+    inset 2px 0 0 rgba(59,130,246,.45),
+    inset -2px 0 0 rgba(59,130,246,.45),
+    inset 0 -2px 0 rgba(59,130,246,.45);    /* linha de base */
+}
+
+/* leve respiro entre as linhas internas, sem quebrar a moldura */
+#estruturaProduto #malha li.child-row + li.child-row{
+  margin-top: 4px;
+}
+
+
+/* ícones sempre brancos */
+#estruturaProduto #malha .icon-btn svg,
+#estruturaProduto #malha .icon-btn svg *{
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+/* Estrutura: escondido por padrão; o JS exibe quando houver filhos */
+#estruturaProduto #malha .icon-btn[data-action="estrutura"]{
+  display: none;
+}
+
+/* ===== Editor de Troca (inline, 1 campo) ===== */
+#estruturaProduto #malha li.swap-row{
+  display: grid;
+  grid-template-columns: 120px minmax(0,1fr) 60px 70px 90px 120px; /* igual à tabela */
+  column-gap: 1rem;
+  align-items: start;
+  padding: 8px 12px;
+  background: rgba(234,179,8,.08); /* âmbar sutil p/ “modo edição” */
+  border-radius: 10px;
+  box-shadow:
+    inset 2px 0 0 rgba(234,179,8,.35),
+    inset -2px 0 0 rgba(234,179,8,.35),
+    inset 0 2px 0 rgba(234,179,8,.35),
+    inset 0 -2px 0 rgba(234,179,8,.35);
+  margin: 6px 0 8px;
+}
+
+#estruturaProduto #malha .swap-label{ font-size:12px; opacity:.8; margin-bottom:4px; display:block; }
+#estruturaProduto #malha .swap-input{
+  width:100%; height:32px;
+  border-radius:8px; border:1px solid rgba(255,255,255,.15);
+  background: rgba(255,255,255,.06); color:#fff; padding:6px 10px; outline:none;
+}
+#estruturaProduto #malha .swap-input:focus{
+  border-color: rgba(234,179,8,.65); background: rgba(255,255,255,.10);
+}
+
+#estruturaProduto #malha .swap-actions{ display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+#estruturaProduto #malha .swap-btn{
+  height:32px; padding:0 10px; border-radius:8px; cursor:pointer;
+  border:1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.08); color:#fff;
+}
+#estruturaProduto #malha .swap-btn:hover{ background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.22); }
+
+/* Resultados ocupam a linha inteira abaixo */
+#estruturaProduto #malha .swap-results{ grid-column: 1 / -1; margin-top: 8px; max-height: 260px; overflow:auto;
+  background: rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.12); border-radius: 10px; }
+#estruturaProduto #malha .swap-results ul{ list-style:none; margin:0; padding:6px; }
+#estruturaProduto #malha .swap-results li{
+  padding:8px 10px; border-radius:8px; cursor:pointer;
+  display:grid; grid-template-columns: 140px minmax(0,1fr); column-gap: 12px; align-items:center;
+}
+#estruturaProduto #malha .swap-results li:hover{ background: rgba(234,179,8,.20); }
+#estruturaProduto #malha .swap-results .codigo{ font-weight:600; opacity:.95; }
+#estruturaProduto #malha .swap-results .descricao{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+
+/* Destaque do termo digitado */
+#estruturaProduto #malha mark.hi{ background: rgba(234,179,8,.6); color:#111; padding:0 .08em; border-radius:3px; }
+
+
+#estruturaProduto #malha .qtd,
+#estruturaProduto #malha .unidade,
+#estruturaProduto #malha .custo-real { text-align: center; }
+/* Operação fica padrão (esquerda); se quiser nomear classe: */
+#estruturaProduto #malha .operacao { text-align:left; }
+
+/* Spinner da aba "Estrutura de produto" (independente) */
+#estruturaSpinner{
+  display:none;           /* visível só durante import/atualizações */
+  width:18px; height:18px;
+  align-items:center;
+  margin-left:.5rem;
+}
+#estruturaSpinner svg{ width:100%; height:100%; display:block; }
+@keyframes estrutura-rot { to { transform: rotate(360deg); } }
+#estruturaSpinner .estrutura-spin{
+  transform-origin:50% 50%;
+  animation: estrutura-rot .8s linear infinite;
+  stroke: currentColor; stroke-width:4; fill:none; stroke-linecap:round;
+  stroke-dasharray: 90; stroke-dashoffset: 60;
+}
+
+/* Spinner da aba "Estrutura de produto" — mesmo visual do Kanban */
+#estruturaSpinner{
+  display: none;            /* fica oculto por padrão */
+  align-items: center;
+  gap: 6px;
+}
+
+#estruturaSpinner .kanban-spinner{
+  display: inline-block !important; /* sobrepõe regra global do Kanban */
+  font-size: 16px;                  /* mesmo tamanho usado no Kanban */
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+}
+
+/* ======================================================================
+   PCP – Lista de peças (guia PCP)
+   PATCH V3 — garante visibilidade da coluna "Ação":
+   - Ajusta a malha para caber sem cortar (larguras mais compactas);
+   - Ativa overflow-x:auto no UL da PCP quando em modo grid-pecas;
+   - Mantém tudo escopado à PCP sem afetar outras áreas.
+   Layout: Código | Descrição | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação
+   ====================================================================== */
+
+/* PCP – grade padrão: Código | Descrição | Unid | Qtd | Qtd prod | Arm Pro | Almox | Ação */
+#listaPecasPCPList {
+  /* Usamos uma variável para compartilhar o mesmo grid entre header e linhas */
+  --pcp-grid: 150px                /* Código (mais largo p/ evitar truncar demais) */
+               minmax(160px,0.65fr)/* Descrição (reduz um pouco para abrir espaço ao código) */
+               60px                /* Unid */
+               60px                /* Qtd */
+               70px                /* Qtd prod */
+               60px                /* Arm Pro */
+               60px                /* Arm Alm */
+               minmax(160px,0.25fr);/* Ação: ícones com folga */
+}
+
+#listaPecasPCPList.grid-pecas {
+  width: 100%;
+  overflow-x: auto; /* segurança em telas muito estreitas */
+}
+
+/* Cabeçalho e linhas de dados usam a mesma malha */
+#listaPecasPCPList .header-row,
+#listaPecasPCPList li.data-row {
+  display: grid;
+  grid-template-columns: var(--pcp-grid);
+  column-gap: 12px;
+  align-items: center;
+}
+
+/* MUITO IMPORTANTE: permitir encolhimento da célula em grids */
+#listaPecasPCPList .desc {
+  min-width: 0;                 /* sem isto, a descrição empurra e corta os botões */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Ajuste da célula de ações para não encolher demais */
+/* PCP — célula de ações alinhada à ESQUERDA e na ordem LTR */
+#listaPecasPCPList .acao {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* antes: flex-end */
+  gap: 8px;
+  min-width: 200px;            /* ajuste que você já vinha usando */
+  overflow: visible;
+}
+
+/* override seguro só na PCP */
+#listaPecasPCPList.grid-pecas .acao { justify-content: flex-start !important; }
+
+/* PCP — título da coluna Ação alinhado à esquerda */
+#listaPecasPCPList .header-row > *:last-child {
+  text-align: left;
+  justify-content: flex-start;
+}
+
+
+/* Botões não devem “shrinkar” dentro do flex */
+#listaPecasPCPList .acao .icon-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 6px;
+}
+
+
+
+#listaPecasPCPList.grid-pecas li {
+  display: grid !important;
+  white-space: normal !important;
+  grid-template-columns: var(--pcp-grid) !important;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 18px;
+  box-sizing: border-box;
+}
+
+/* Cabeçalho fixo com a mesma grade */
+#listaPecasPCPList.grid-pecas li.header-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(16,18,27,0.92);
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: bold;
+  text-align: center;
+}
+#listaPecasPCPList.grid-pecas li.header-row > .cod,
+#listaPecasPCPList.grid-pecas li.header-row > .desc {
+  text-align: left;
+}
+
+/* Descrição com elipse */
+#listaPecasPCPList.grid-pecas .desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+#listaPecasPCPList .cod {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+  overflow:hidden;
+}
+#listaPecasPCPList .cod > span {
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+#listaPecasPCPList .cod .pp-select-item{
+  flex:1;
+  min-width:0;
+}
+
+/* Números centralizados e tabulares */
+#listaPecasPCPList.grid-pecas .unid,
+#listaPecasPCPList.grid-pecas .qtd,
+#listaPecasPCPList.grid-pecas .qtdprod,
+#listaPecasPCPList.grid-pecas .qtdpro,
+#listaPecasPCPList.grid-pecas .qtdalm {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ação centralizada sem quebra e com largura mínima coerente */
+#listaPecasPCPList.grid-pecas .acao {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  min-width: 80px;   /* segurança extra para não "sumir" ao encolher a grade */
+  overflow: hidden;
+}
+#listaPecasPCPList.grid-pecas .acao svg {
+  width: 16px;
+  height: 16px;
+  margin: 0 !important;
+}
+
+
+/* ── PCP: sub-estrutura (abre logo abaixo da linha) ─────────────────── */
+#listaPecasPCPList .pcp-subestrutura { padding: 0; }
+#listaPecasPCPList .pcp-subestrutura > .sub-wrap{
+  grid-column: 1 / -1;
+  margin: 8px 0 10px;
+  padding: 8px 12px 10px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-title{
+  font-weight: 600; margin: 0 0 6px; opacity: .9;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid{
+  list-style: none; margin: 0; padding: 0;
+  overflow-x: auto;
+}
+/* Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação */
+/* Grid da sub-estrutura: Cod | Desc | Unid | Qtd | Qtd prod | Qtd Pro | Qtd Alm | Ação */
+#listaPecasPCPList .pcp-subestrutura .sub-grid .child-row,
+/* Header da sub-estrutura */
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header{
+  display: grid;
+  grid-template-columns: var(--pcp-grid, 130px minmax(200px,0.75fr) 50px 50px 52px 50px 50px minmax(150px,0.25fr));
+  column-gap: 12px;
+  align-items: center;
+  padding: 6px 18px;
+  width: 100%;
+  min-width: 850px; /* mantém espaço mínimo p/ coluna de ação; ativa scroll horizontal quando necessário */
+  border-radius: 8px;
+}
+
+#listaPecasPCPList .pcp-subestrutura .sub-grid .child-row{
+  background: rgba(16,18,27,0.58);
+  border: 1px solid rgba(255,255,255,.10);
+  font-weight: 500;
+}
+
+
+/* Header da sub-estrutura */
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header{
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 6px 0 4px;
+  background: rgba(16,18,27,0.6);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  font-weight: 600;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .cod,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .desc{
+  text-align: left;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .unid,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .qtd,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .qtdprod,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .qtdpro,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .qtdalm,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .acao{
+  text-align: center;
+}
+
+#listaPecasPCPList .pcp-subestrutura .sub-grid .desc{
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .unid,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .qtd,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .qtdprod,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .qtdpro,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .qtdalm{
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .acao{
+  display:flex; justify-content:center; align-items:center;
+  gap:6px; white-space:nowrap; min-width:0; max-width:100%;
+  overflow:hidden; padding:0 6px;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .acao svg{ width:16px; height:16px; margin:0 !important; }
+#listaPecasPCPList .pcp-subestrutura .sub-grid .acao .icon-btn{
+  flex:0 0 36px;
+}
+
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header > *{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .cod,
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header .desc{
+  justify-content:flex-start;
+}
+
+/* ── PCP: agrupamento visual para itens de preparação (códigos PP) ─────────────────── */
+#listaPecasPCPList.grid-pecas li.pcp-pp-group,
+#listaPecasPCPList.grid-pecas li.pcp-section-divider{
+  display: block !important;
+  grid-template-columns: none !important;
+  gap: 0 !important;
+  padding: 0 !important;
+}
+#listaPecasPCPList .pcp-pp-group{ list-style:none; }
+#listaPecasPCPList .pcp-section-divider{ list-style:none; }
+
+#listaPecasPCPList .pcp-pp-card{
+  margin: 12px 0 10px;
+  padding: 12px 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(34,197,94,0.28);
+  background: rgba(34,197,94,0.08);
+  box-shadow: inset 0 0 0 1px rgba(34,197,94,0.12);
+}
+
+#listaPecasPCPList .pcp-pp-card-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 0 18px 10px;
+  font-size: .85rem;
+}
+#listaPecasPCPList .pcp-pp-master{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color: rgba(187,247,208,0.85);
+  font-size:.85rem;
+  letter-spacing:.02em;
+  cursor: pointer;
+}
+
+#listaPecasPCPList .pcp-pp-master input,
+#listaPecasPCPList .pcp-pp-card-list .pp-select-checkbox,
+#listaPecasPCPList .pcp-parent-row .pp-select-checkbox{
+  width: 18px;
+  height: 18px;
+  accent-color: #22c55e;
+  cursor: pointer;
+}
+
+#listaPecasPCPList .pcp-pp-card-title{
+  font-weight: 600;
+  color: #22c55e;
+}
+
+#listaPecasPCPList .pcp-pp-card-actions{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+#listaPecasPCPList .pcp-pp-card-count{
+  font-size: .72rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(34,197,94,0.22);
+  color: rgba(240,253,244,0.9);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+
+#listaPecasPCPList .pcp-pp-card-produce{
+  flex:0 0 auto;
+}
+
+#listaPecasPCPList .pcp-pp-card-list{
+  list-style:none;
+  margin: 0;
+  padding: 0 0 8px;
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+}
+
+#listaPecasPCPList .pcp-pp-card-list li.data-row{
+  border-radius: 10px;
+  border: 1px solid rgba(34,197,94,0.28);
+  background: rgba(34,197,94,0.12);
+}
+
+#listaPecasPCPList .pcp-pp-card-list .pp-subitem-row{
+  border-radius: 8px;
+  border: 1px dashed rgba(34,197,94,0.2);
+  background: rgba(13,148,136,0.15);
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+#listaPecasPCPList .pcp-pp-card-list .pp-subitem-row .cod{
+  position: relative;
+  padding-left: 16px;
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+#listaPecasPCPList .pcp-pp-card-list .pp-subitem-row .cod::before{
+  content: '↳';
+  position: absolute;
+  left: 0;
+  color: rgba(34,197,94,0.85);
+}
+#listaPecasPCPList .pcp-pp-card-list .pp-subitem-row .cod .pp-select-item{
+  margin-left: 8px;
+}
+
+#listaPecasPCPList .pcp-pp-card-list .pp-select-item,
+#listaPecasPCPList .pcp-parent-row .pp-select-item{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  cursor: pointer;
+}
+#listaPecasPCPList .pcp-pp-card-list .pp-select-item span,
+#listaPecasPCPList .pcp-parent-row .pp-select-item span{
+  flex:1;
+  color: inherit;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+#listaPecasPCPList .pcp-pp-card-list .pp-select-item input,
+#listaPecasPCPList .pcp-parent-row .pp-select-item input{
+  flex:0 0 auto;
+  width:16px;
+  height:16px;
+}
+
+#listaPecasPCPList .pcp-parent-row{
+  margin: 10px 0 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(59,130,246,0.38);
+  background: rgba(37,99,235,0.18);
+  box-shadow: inset 0 0 0 1px rgba(37,99,235,0.25);
+}
+#listaPecasPCPList .pcp-parent-row .cod .pp-select-item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  cursor: pointer;
+}
+#listaPecasPCPList .pcp-parent-row .cod .pp-select-item span{
+  flex:1;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+#listaPecasPCPList .pcp-parent-id{ display:none; }
+#listaPecasPCPList .pcp-parent-row .qtd,
+#listaPecasPCPList .pp-row .qtd{
+  display:flex;
+  align-items:center;
+}
+#listaPecasPCPList .pcp-parent-factor,
+#listaPecasPCPList .pp-qtd-input{
+  width:100%;
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid rgba(96,165,250,0.55);
+  background: rgba(15,23,42,0.75);
+  color:#f8fafc;
+  font-size:0.95rem;
+  outline:none;
+  transition: border-color .12s ease, background .12s ease;
+  text-align:right;
+  font-variant-numeric: tabular-nums;
+}
+#listaPecasPCPList .pcp-parent-factor,
+#listaPecasPCPList .pp-qtd-input{
+  appearance: textfield;
+  -webkit-appearance: textfield;
+  -moz-appearance: textfield;
+}
+#listaPecasPCPList .pcp-parent-factor::-webkit-outer-spin-button,
+#listaPecasPCPList .pcp-parent-factor::-webkit-inner-spin-button,
+#listaPecasPCPList .pp-qtd-input::-webkit-outer-spin-button,
+#listaPecasPCPList .pp-qtd-input::-webkit-inner-spin-button{
+  -webkit-appearance: none;
+  margin: 0;
+}
+#listaPecasPCPList .pp-row .pp-qtd-input{
+  border-color: rgba(34,197,94,0.55);
+  background: rgba(6,78,59,0.45);
+}
+#listaPecasPCPList .pcp-parent-factor:focus,
+#listaPecasPCPList .pp-qtd-input:focus{
+  border-color: rgba(125,211,252,0.85);
+  background: rgba(15,23,42,0.95);
+}
+#listaPecasPCPList .pp-row .pp-qtd-input:focus{
+  border-color: rgba(34,197,94,0.8);
+  background: rgba(6,78,59,0.6);
+}
+
+#listaPecasPCPList .pcp-parent-row .acao.parent-actions{
+  display:flex;
+  justify-content:flex-start;
+  align-items:center;
+  gap:8px;
+}
+
+#listaPecasPCPList .pcp-section-divider{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 18px 6px;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: rgba(226,232,240,0.65);
+}
+#listaPecasPCPList .pcp-section-divider span{
+  flex:0 0 auto;
+}
+#listaPecasPCPList .pcp-section-divider::after{
+  content:'';
+  display:block;
+  flex:1;
+  height:1px;
+  background: rgba(148,163,184,0.25);
+}
+
+
+
+
+/* ============================= FIM DO PATCH PCP V3 ============================= */
+
+/* ======================================================================
+   PCP — destaque visual para itens com PP + esconder botão Produzir
+   (Use estas classes no HTML/JS já implementado)
+   - Adicione a classe `is-pp` no elemento do código (ex.: <div class="cod is-pp">)
+     ou na linha inteira com `pp` (ex.: <li class="data-row pp">).
+   - Para itens que NÃO possuem PP, coloque a classe `no-pp` na linha.
+   ====================================================================== */
+:root{ --pp-green:#22c55e; } /* verde */
+
+#listaPecasPCPList .cod.is-pp,
+#listaPecasPCPList li.pp .cod,
+#listaPecasPCPList .pp-code,
+#listaPecasPCPList .pcp-subestrutura .cod.is-pp,
+#listaPecasPCPList .pcp-subestrutura .child-row.pp .cod{
+  color: var(--pp-green) !important;
+  font-weight: 600;
+}
+
+/* Esconde o botão Produzir em itens sem PP */
+#listaPecasPCPList li.no-pp .produce-btn,
+#listaPecasPCPList .pcp-subestrutura .child-row.no-pp .produce-btn{
+  display: none !important;
+}
+
+/* Ação: pequena folga extra para caber o novo botão “Trocar” */
+#listaPecasPCPList.grid-pecas .acao{
+  min-width: 112px;  /* era 80px; espaço p/ +1 ícone */
+  gap: 8px;
+}
+
+/* Sub-estrutura: cabeçalho já incluído; apenas reforço de contraste */
+#listaPecasPCPList .pcp-subestrutura .sub-grid .sub-header{
+  background: rgba(16,18,27,0.72);
+  border: 1px solid rgba(255,255,255,.14);
+}
+/* Códigos PP em verde (vence regras mais específicas do tema) */
+#listaPecasPCPList li.data-row .cod.pp,
+#listaPecasPCPList .pcp-subestrutura .child-row .cod.pp {
+  color: #22c55e !important;
+  font-weight: 600 !important;
+}
+
+/* ── Painel "Trocar produto" (PCP + Estrutura de produto) ─────────────────── */
+#listaPecasPCPList li.pcp-troca,
+#estruturaProduto #malha li.pcp-troca { padding: 0; }
+
+#listaPecasPCPList li.pcp-troca > .troca-wrap,
+#estruturaProduto #malha li.pcp-troca > .troca-wrap{
+  grid-column: 1 / -1;
+  margin: 8px 0 10px;
+  padding: 10px 12px 12px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px;
+}
+
+#listaPecasPCPList .troca-title,
+#estruturaProduto #malha .troca-title{ font-weight: 600; margin-bottom: 8px; opacity: .95; }
+
+#listaPecasPCPList .troca-input-row,
+#estruturaProduto #malha .troca-input-row{ margin-bottom: 8px; }
+
+#listaPecasPCPList .troca-input,
+#estruturaProduto #malha .troca-input{
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.15); background: rgba(0,0,0,.25);
+  color: #fff; outline: none;
+}
+#listaPecasPCPList .troca-input:focus,
+#estruturaProduto #malha .troca-input:focus{ border-color: rgba(255,255,255,.28); }
+
+/* Lista de resultados (com espaçamento) */
+#listaPecasPCPList .troca-results,
+#estruturaProduto #malha .troca-results{
+  list-style: none; margin: 6px 0 0; padding: 2px 2px 2px 0;
+  max-height: 280px; overflow: auto;
+  display: grid;
+  grid-auto-rows: minmax(36px, auto);
+  row-gap: 6px;
+}
+#listaPecasPCPList .troca-results > li,
+#estruturaProduto #malha .troca-results > li{
+  display: grid;
+  grid-template-columns: 160px minmax(240px,1fr) minmax(120px,auto);
+  column-gap: 1rem;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+}
+#listaPecasPCPList .troca-results > li:hover,
+#estruturaProduto #malha .troca-results > li:hover{ background: rgba(255,255,255,.08); cursor: pointer; }
+#listaPecasPCPList .troca-results > li.selected,
+#estruturaProduto #malha .troca-results > li.selected{ outline: 2px solid rgba(255,255,255,.15); }
+
+#listaPecasPCPList .troca-results .desc,
+#estruturaProduto #malha .troca-results .desc{
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+
+#listaPecasPCPList .troca-results .loading,
+#listaPecasPCPList .troca-results .nores,
+#listaPecasPCPList .troca-results .error,
+#estruturaProduto #malha .troca-results .loading,
+#estruturaProduto #malha .troca-results .nores,
+#estruturaProduto #malha .troca-results .error{
+  grid-column: 1 / -1; background: none; border: 0; padding: 4px 2px; border-radius: 0; opacity: .8;
+}
+
+/* PP em verde também nos resultados */
+#listaPecasPCPList .troca-results .cod.pp,
+#estruturaProduto #malha .troca-results .cod.pp{ color:#22c55e; font-weight:600; }
+
+#listaPecasPCPList .troca-results .src,
+#estruturaProduto #malha .troca-results .src{
+  justify-self: end; opacity: .6; font-size: 12px; white-space: nowrap;
+}
+
+
+/* ============================================================
+   PCP — FIX DEFINITIVO: ícones cortados dentro dos botões
+   Escopo: APENAS na lista PCP (grid-pecas), sem afetar o resto.
+   — Resolve conflitos de:
+     • tamanhos divergentes de .icon-btn/.produce-btn
+     • svg posicionado como absolute (cortava/ desalinhava)
+     • overflow:hidden em ancestrais
+   ============================================================ */
+
+/* Nunca corte conteúdo das linhas/cabeçalho/coluna Ação na PCP */
+#listaPecasPCPList.grid-pecas li,
+#listaPecasPCPList.grid-pecas .header-row,
+#listaPecasPCPList.grid-pecas .acao {
+  overflow: visible !important;
+  min-height: 38px;              /* garante altura mínima confortável */
+}
+
+/* Botões da coluna Ação: tamanho fixo, centrados por flex */
+#listaPecasPCPList.grid-pecas .acao .icon-btn,
+#listaPecasPCPList.grid-pecas .acao .produce-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+
+  border-radius: 10px !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;   /* não aparar o SVG */
+}
+
+/* Ícones dentro dos botões: blocados e sem absolute (para não “cortar”) */
+#listaPecasPCPList.grid-pecas .acao .icon-btn svg,
+#listaPecasPCPList.grid-pecas .acao .produce-btn svg {
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+
+  position: static !important;    /* sobrepõe qualquer absolute herdado */
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+}
+
+
+
+/* ============================================================
+   PCP — ICON CLIP FIX v3 (prioridade alta, não-invasivo)
+   - Garante caixa 40x40 nos botões de Ação
+   - Reduz e centraliza QUALQUER tipo de ícone (svg, i.fa, pseudo ::before, texto)
+   - Remove clipping por overflow/clip/mask em ancestrais
+   - Mantém impacto restrito à PCP
+   ============================================================ */
+
+/* Nunca cortar conteúdo na PCP */
+#listaPecasPCPList.grid-pecas,
+#listaPecasPCPList.grid-pecas * {
+  clip: auto !important;
+  clip-path: none !important;
+  -webkit-clip-path: none !important;
+  mask: none !important;
+  -webkit-mask: none !important;
+}
+
+#listaPecasPCPList.grid-pecas .header-row,
+#listaPecasPCPList.grid-pecas li,
+#listaPecasPCPList.grid-pecas .acao {
+  overflow: visible !important;
+}
+
+#listaPecasPCPList.grid-pecas .acao {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  min-width: 200px !important;
+}
+
+/* Caixa do botão — 40x40, centro perfeito, nada de corte */
+#listaPecasPCPList.grid-pecas .acao .icon-btn,
+#listaPecasPCPList.grid-pecas .acao .produce-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 40px !important;
+  height: 40px !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  border-radius: 12px !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+}
+
+/* Zera fontes do botão para que conteúdo interno controle o tamanho */
+#listaPecasPCPList.grid-pecas .acao .icon-btn,
+#listaPecasPCPList.grid-pecas .acao .produce-btn {
+  font-size: 0 !important;
+}
+
+/* Quaisquer filhos do botão (svg, i, .fa, span, pseudo) centralizados e menores que a caixa */
+#listaPecasPCPList.grid-pecas .acao .icon-btn > *,
+#listaPecasPCPList.grid-pecas .acao .produce-btn > * {
+  display: block !important;
+  max-width: 22px !important;
+  max-height: 22px !important;
+  width: 22px !important;
+  height: 22px !important;
+  margin: 0 !important;
+  transform: translateZ(0) scale(0.9) !important;
+  transform-origin: 50% 50% !important;
+  line-height: 1 !important;
+  overflow: visible !important;
+}
+
+/* Suporte explícito a Font Awesome / ícones por texto */
+#listaPecasPCPList.grid-pecas .acao .icon-btn i,
+#listaPecasPCPList.grid-pecas .acao .icon-btn .fa,
+#listaPecasPCPList.grid-pecas .acao .produce-btn i,
+#listaPecasPCPList.grid-pecas .acao .produce-btn .fa,
+#listaPecasPCPList.grid-pecas .acao .icon-btn::before,
+#listaPecasPCPList.grid-pecas .acao .produce-btn::before {
+  font-size: 18px !important;
+  line-height: 1 !important;
+  width: 22px !important;
+  height: 22px !important;
+  text-align: center !important;
+}
+
+/* SVG com traço não deve “estourar” */
+#listaPecasPCPList.grid-pecas .acao .icon-btn svg,
+#listaPecasPCPList.grid-pecas .acao .produce-btn svg {
+  width: 22px !important;
+  height: 22px !important;
+  overflow: visible !important;
+  stroke: currentColor;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Evita que cliques no ícone falhem por conta do scale */
+#listaPecasPCPList.grid-pecas .acao .icon-btn > *,
+#listaPecasPCPList.grid-pecas .acao .produce-btn > * {
+  pointer-events: none !important;
+}
+
+/* Descrição realmente encolhe */
+#listaPecasPCPList.grid-pecas .desc {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+}
+
+/* PCP: desliga pseudo-ícones herdados e garante caixa dos botões */
+#listaPecasPCPList.grid-pecas .acao .status-button::before,
+#listaPecasPCPList.grid-pecas .acao .status-button::after,
+#listaPecasPCPList.grid-pecas .acao .icon-btn::before,
+#listaPecasPCPList.grid-pecas .acao .produce-btn::before {
+  content: none !important;     /* remove “o  ‹” etc. */
+}
+
+#listaPecasPCPList.grid-pecas .acao .icon-btn,
+#listaPecasPCPList.grid-pecas .acao .produce-btn,
+#listaPecasPCPList.grid-pecas .acao .status-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  border-radius: 12px !important;
+  overflow: visible !important;
+}
+
+#listaPecasPCPList.grid-pecas .acao .icon-btn svg,
+#listaPecasPCPList.grid-pecas .acao .produce-btn svg,
+#listaPecasPCPList.grid-pecas .acao .status-button svg {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+}
+
+/* === PCP • Painel de troca de produto (UI apenas) === */
+.pcp-troca .troca-wrap{
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-color, #3b82f6);
+  background: var(--panel, rgba(255,255,255,0.04)); /* mantém tema escuro */
+  color: var(--fg, #e5e7eb);                         /* texto claro no tema escuro */
+  border-radius: 8px;
+}
+
+.pcp-troca .troca-title{
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.pcp-troca .troca-input{
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #374151);
+  border-radius: 6px;
+  background: var(--input-bg, rgba(0,0,0,.25));
+  color: var(--fg, #e5e7eb);
+  outline: none;
+}
+
+.pcp-troca .troca-results{
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--border, #374151);
+  border-radius: 6px;
+  background: var(--panel, rgba(0,0,0,.25)); /* NÃO usar branco no tema escuro */
+}
+
+.pcp-troca .troca-results li{
+  padding: 8px 10px;
+  color: var(--fg, #e5e7eb);
+}
+
+.pcp-troca .troca-results li.info{
+  opacity: .75;
+}
+
+.pcp-troca .troca-results li.error{
+  color: #ffb4b4;
+}
+
+.pcp-troca .troca-item{
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.pcp-troca .troca-item:last-child{ border-bottom: 0; }
+
+.pcp-troca .troca-item:hover{
+  background: rgba(255,255,255,.06);
+}
+
+.pcp-troca .troca-item .cod{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: nowrap;
+}
+.pcp-troca .troca-item .desc{
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Badge "trocado" dentro da célula de Descrição, sem deslocar colunas */
+.swap-pill{
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+  line-height: 1;
+  opacity: .8;
+  vertical-align: middle;
+}
+
+/* PCP — descrição de item trocado: amarelo, sem selo */
+.data-row .desc.desc-trocado,
+.pcp-subestrutura .desc.desc-trocado{
+  color: #facc15;         /* amarelo legível no tema escuro */
+  font-weight: 600;       /* leve ênfase */
+}
+
+/* caso ainda exista algum .swap-pill no DOM antigo, esconder */
+.swap-pill{ display: none !important; }
+
+/* ============================================================
+   FIM DO PATCH ICON CLIP FIX v3
+   ============================================================ */
+
+.transfer-select option.is-inactive {
+  color: #888;
+}
+
+
+.transfer-qtd-bulk {
+  width: 70px;
+  padding: 2px 4px;
+  background: #121212;
+  border: 1px solid #333;
+  color: #eee;
+  border-radius: 4px;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.transfer-qtd-bulk:focus {
+  outline: 1px solid #3fa7ff;
+}
+
+.transfer-qtd-bulk::-webkit-outer-spin-button,
+.transfer-qtd-bulk::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ============================================================
+   NAVIGATION CARDS SYSTEM - Grid de Navegação Moderna
+   ============================================================ */
+
+.nav-hamburger {
+  background: var(--primary-color);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 20px;
+}
+
+.nav-hamburger:hover {
+  background: #2563eb;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.nav-hamburger.active {
+  background: #1d4ed8;
+}
+
+.product-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 140px);
+  gap: 16px;
+  width: auto;
+  padding: 0;
+  background: rgba(30, 30, 30, 0.98) !important; /* Fundo quase opaco para dark mode */
+  backdrop-filter: blur(10px);
+}
+
+.light-mode .product-nav-grid {
+  background: rgba(255, 255, 255, 0.98) !important; /* Fundo quase opaco para light mode */
+}
+
+.product-nav-grid.collapsed {
+  display: none;
+}
+
+.nav-card {
+  background: var(--modal-bg-color);
+  border: 2px solid var(--card-border-color);
+  border-radius: 12px;
+  padding: 20px 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  border-color: var(--primary-color);
+}
+
+.nav-card.active {
+  border-color: var(--primary-color);
+  background: linear-gradient(135deg, 
+    rgba(59, 130, 246, 0.05) 0%, 
+    rgba(37, 99, 235, 0.08) 100%);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.nav-card.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--primary-color);
+}
+
+.nav-card-action {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(37, 99, 235, 0.15) 100%);
+}
+
+.nav-card-action:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.2) 100%);
+  border-color: var(--primary-color);
+}
+
+.nav-card-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+}
+
+.nav-card:hover .nav-card-icon {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.nav-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--content-title-color);
+  text-align: center;
+  line-height: 1.3;
+  transition: color 0.3s ease;
+}
+
+.nav-card.active .nav-card-title {
+  color: var(--primary-color);
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .product-nav-grid {
+    grid-template-columns: repeat(2, 120px);
+    gap: 12px;
+  }
+  
+  .nav-card {
+    padding: 16px 12px;
+  }
+  
+  .nav-card-icon {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+  
+  .nav-card-title {
+    font-size: 12px;
+  }
+}
+
+@media (min-width: 1400px) {
+  .product-nav-grid {
+    grid-template-columns: repeat(4, 140px);
+  }
+}
+
+/* ============================================================
+   TAB HEADERS - Sistema de Cabeçalhos Padronizados
+   ============================================================ */
+
+/* Container principal do cabeçalho da tab */
+.tab-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+/* Ícone do cabeçalho */
+.tab-header-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tab-header-icon i {
+  color: #fff;
+  font-size: 18px;
+}
+
+/* Ícone pequeno (para estrutura) */
+.tab-header-icon.small {
+  width: 36px;
+  height: 36px;
+}
+
+.tab-header-icon.small i {
+  font-size: 16px;
+}
+
+/* Conteúdo textual */
+.tab-header-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tab-header-title {
+  margin: 0 0 4px 0;
+  color: var(--content-title-color);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.tab-header-subtitle {
+  margin: 0;
+  color: var(--inactive-color);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Cards de seção com gradiente sutil */
+.tab-section-card {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(0, 0, 0, 0.02) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Variantes de cor por tema */
+.tab-header-icon.theme-purple {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  box-shadow: 0 4px 12px rgba(109, 40, 217, 0.35);
+}
+
+.tab-header-icon.theme-cyan {
+  background: linear-gradient(135deg, #06b6d4 0%, #0ea5e9 100%);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.35);
+}
+
+.tab-header-icon.theme-blue {
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
+}
+
+.tab-header-icon.theme-indigo {
+  background: linear-gradient(135deg, #818cf8 0%, #4f46e5 100%);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+}
+
+.tab-header-icon.theme-green {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+}
+
+.tab-header-icon.theme-amber {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+}
+
+.tab-header-icon.theme-sky {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+}
+
+.tab-header-icon.theme-emerald {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
+}
+
+/* Botões de ação padronizados */
+.tab-action-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--body-font);
+  font-size: 14px;
+}
+
+.tab-action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.tab-action-btn:active {
+  transform: translateY(0);
+}
+
+.tab-action-btn.btn-primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.tab-action-btn.btn-success {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+/* Cards de conteúdo com gradientes sutis por tema */
+.tab-section-card.theme-purple {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(139, 92, 246, 0.04) 100%);
+}
+
+.tab-section-card.theme-cyan {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(6, 182, 212, 0.04) 100%);
+}
+
+.tab-section-card.theme-blue {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(59, 130, 246, 0.04) 100%);
+}
+
+.tab-section-card.theme-indigo {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(99, 102, 241, 0.04) 100%);
+}
+
+.tab-section-card.theme-green {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(16, 185, 129, 0.04) 100%);
+}
+
+.tab-section-card.theme-amber {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(245, 158, 11, 0.04) 100%);
+}
+
+.tab-section-card.theme-emerald {
+  background: linear-gradient(135deg, var(--content-bg) 0%, rgba(34, 197, 94, 0.04) 100%);
+}
+
+/* Modo claro - ajustes de cor */
+.light-mode .tab-header-title {
+  color: var(--theme-color);
+}
+
+.light-mode .tab-section-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* ========================================
+   Kanban Card - Expandir/Recolher
+   ======================================== */
+
+.kanban-card-collapsed .kanban-op-list,
+.kanban-card-collapsed .kanban-card-actions-wrapper {
+  display: none !important;
+}
+
+.kanban-code-header {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.kanban-code-header:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+}
+
+.kanban-toggle-icon {
+  margin-left: auto;
+  transition: transform 0.3s ease;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.kanban-code-location {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+}
+
+.kanban-op-list {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  animation: expandDown 0.3s ease;
+}
+
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.kanban-card-actions-wrapper {
+  animation: expandDown 0.3s ease;
+}
+

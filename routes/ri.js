@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbQuery } = require('../src/db');
+const { registrarModificacao } = require('../utils/auditoria');
 
 // Listar operações disponíveis
 router.get('/operacoes', async (req, res) => {
@@ -79,7 +80,18 @@ router.post('/', async (req, res) => {
       [id_omie, codigo, item_verificado, o_que_verificar, local_verificacao, prioridade, foto_url || null]
     );
     
-    res.status(201).json(result.rows[0]);
+    const novo = result.rows[0];
+    // registra auditoria (menção/alteração relacionada ao produto)
+    try {
+      await registrarModificacao({
+        codigo_omie: String(novo.id_omie),
+        tipo_acao: 'RI_CREATE',
+        usuario: (req.session?.user?.username || req.session?.user?.login || 'sistema'),
+        detalhes: `RI criado para produto ${novo.codigo}: ${novo.item_verificado}`,
+        origem: 'API'
+      });
+    } catch {}
+    res.status(201).json(novo);
   } catch (error) {
     console.error('Erro ao criar item RI:', error);
     res.status(500).json({ error: 'Erro ao criar item RI' });
@@ -113,7 +125,17 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Item não encontrado' });
     }
     
-    res.json(result.rows[0]);
+    const atualizado = result.rows[0];
+    try {
+      await registrarModificacao({
+        codigo_omie: String(atualizado.id_omie),
+        tipo_acao: 'RI_UPDATE',
+        usuario: (req.session?.user?.username || req.session?.user?.login || 'sistema'),
+        detalhes: `RI atualizado no produto ${atualizado.codigo}: ${atualizado.item_verificado}`,
+        origem: 'API'
+      });
+    } catch {}
+    res.json(atualizado);
   } catch (error) {
     console.error('Erro ao atualizar item RI:', error);
     res.status(500).json({ error: 'Erro ao atualizar item RI' });
@@ -134,6 +156,16 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Item não encontrado' });
     }
     
+    const excluido = result.rows[0];
+    try {
+      await registrarModificacao({
+        codigo_omie: String(excluido.id_omie),
+        tipo_acao: 'RI_DELETE',
+        usuario: (req.session?.user?.username || req.session?.user?.login || 'sistema'),
+        detalhes: `RI excluído do produto ${excluido.codigo}: ${excluido.item_verificado}`,
+        origem: 'API'
+      });
+    } catch {}
     res.json({ message: 'Item excluído com sucesso' });
   } catch (error) {
     console.error('Erro ao excluir item RI:', error);

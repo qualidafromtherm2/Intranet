@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
 
 const { dbQuery } = require('../src/db');
+const { registrarModificacao } = require('../utils/auditoria');
 const supabase = require('../utils/supabase');
 
 const BUCKET = process.env.SUPABASE_BUCKET || 'produtos';
@@ -113,6 +114,27 @@ router.post('/:codigo/anexos', upload.single('arquivo'), async (req, res) => {
       ]
     );
 
+    // Auditoria: anexo adicionado
+    try {
+      const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
+      let codigoTexto = null;
+      try {
+        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        codigoTexto = r.rows?.[0]?.codigo || null;
+      } catch {}
+      await registrarModificacao({
+        codigo_omie: codigoTexto || String(codigoNum),
+        codigo_texto: codigoTexto || null,
+        codigo_produto: codigoNum,
+        tipo_acao: 'PRODUTO_ANEXO_ADD',
+        usuario: usuarioAudit,
+        origem: 'API',
+        detalhes: `nome=${nome}; path=${pathKey}; size=${Number(req.file.size) || 0}`
+      });
+    } catch (e) {
+      console.warn('[auditoria][produtos/anexos:add] falhou ao registrar:', e?.message || e);
+    }
+
     res.json({ ok: true, codigo: codigoNum, anexo: insert.rows[0] });
   } catch (err) {
     console.error('[upload anexo produto]', err);
@@ -145,6 +167,27 @@ router.delete('/:codigo/anexos/:id', async (req, res) => {
       if (storageErr) {
         console.warn('[delete anexo produto] falha ao remover do storage', storageErr);
       }
+    }
+
+    // Auditoria: anexo removido
+    try {
+      const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
+      let codigoTexto = null;
+      try {
+        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        codigoTexto = r.rows?.[0]?.codigo || null;
+      } catch {}
+      await registrarModificacao({
+        codigo_omie: codigoTexto || String(codigoNum),
+        codigo_texto: codigoTexto || null,
+        codigo_produto: codigoNum,
+        tipo_acao: 'PRODUTO_ANEXO_REMOVE',
+        usuario: usuarioAudit,
+        origem: 'API',
+        detalhes: `id=${id}; path=${pathKey || ''}`
+      });
+    } catch (e) {
+      console.warn('[auditoria][produtos/anexos:del] falhou ao registrar:', e?.message || e);
     }
 
     res.json({ ok: true, codigo: codigoNum, id });
