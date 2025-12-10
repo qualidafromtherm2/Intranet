@@ -918,11 +918,11 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
     
     // Busca campos obrigatórios da família
     const camposQuery = `
-      SELECT cg.chave, cg.nome_exibicao
+      SELECT cg.chave, cg.rotulo
       FROM configuracoes.familia_campos_obrigatorios fco
       INNER JOIN configuracoes.campos_guias cg ON cg.chave = fco.campo_chave
       WHERE fco.familia_codigo = $1 AND fco.obrigatorio = true
-      ORDER BY cg.nome_exibicao
+      ORDER BY cg.rotulo
     `;
     const { rows: campos } = await pool.query(camposQuery, [familia]);
     
@@ -938,13 +938,13 @@ app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
       if (preenchido) {
         camposPreenchidos.push({
           chave: campo.chave,
-          nome: campo.nome_exibicao,
+          nome: campo.rotulo,
           valor: String(valor)
         });
       } else {
         camposPendentes.push({
           chave: campo.chave,
-          nome: campo.nome_exibicao
+          nome: campo.rotulo
         });
       }
     });
@@ -994,14 +994,14 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
         ap.id,
         ap.descricao AS nome_atividade,
         ap.observacoes AS descricao_atividade,
-        COALESCE(aps.concluido, false) AS concluido,
-        COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
-        aps.observacao_status AS observacao,
-        aps.data_conclusao,
+        COALESCE(s.concluido, false) AS concluido,
+        COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
+        s.observacao,
+        s.data_conclusao,
         'produto' AS origem
       FROM engenharia.atividades_produto ap
-      LEFT JOIN engenharia.atividades_produto_status_especificas aps
-        ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+      LEFT JOIN engenharia.atividades_produto_status s
+        ON s.atividade_id = ap.id AND s.produto_codigo = $1
       WHERE ap.produto_codigo = $1 AND ap.ativo = true
       ORDER BY ap.criado_em DESC
     `;
@@ -1056,14 +1056,14 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
         ap.id,
         ap.descricao AS nome_atividade,
         ap.observacoes AS descricao_atividade,
-        COALESCE(aps.concluido, false) AS concluido,
-        COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
-        aps.observacao_status AS observacao,
-        aps.data_conclusao,
+        COALESCE(s.concluido, false) AS concluido,
+        COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
+        s.observacao,
+        s.data_conclusao,
         'produto' AS origem
       FROM compras.atividades_produto ap
-      LEFT JOIN compras.atividades_produto_status_especificas aps
-        ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+      LEFT JOIN compras.atividades_produto_status s
+        ON s.atividade_id = ap.id AND s.produto_codigo = $1
       WHERE ap.produto_codigo = $1 AND ap.ativo = true
       ORDER BY ap.criado_em DESC
     `;
