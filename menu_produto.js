@@ -11582,7 +11582,7 @@ async function toggleExpandEngenharia(btn) {
           ${data.pendentes.length > 0 ? `
             <div style="margin-bottom:16px;">
               <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#dc2626;">Pendentes (${data.pendentes.length}):</p>
-              <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;white-space:normal;">
                 ${data.pendentes.map(t => `
                   <li style="margin-bottom:8px;">
                     <div>
@@ -11598,7 +11598,7 @@ async function toggleExpandEngenharia(btn) {
           ${data.concluidas.length > 0 ? `
             <div>
               <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#16a34a;">Concluídas (${data.concluidas.length}):</p>
-              <ul style="margin:0;padding-left:20px;font-size:12px;color:#6b7280;">
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#6b7280;white-space:normal;">
                 ${data.concluidas.map(t => `
                   <li style="margin-bottom:6px;">
                     <strong>${t.nome_atividade}</strong>
