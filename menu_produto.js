@@ -11652,6 +11652,8 @@ async function toggleExpandCompras(btn) {
     if (!resp.ok) throw new Error('Falha ao buscar detalhes');
     const data = await resp.json();
     
+    console.log('[Compras Debug]', data);
+    
     const expandRow = document.createElement('tr');
     expandRow.classList.add('expand-row', 'expand-row-compras');
     expandRow.innerHTML = `
@@ -11663,12 +11665,10 @@ async function toggleExpandCompras(btn) {
               <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#dc2626;">Pendentes (${data.pendentes.length}):</p>
               <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
                 ${data.pendentes.map(t => `
-                  <li style="margin-bottom:8px;">
-                    <div>
-                      <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
-                      ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
-                    </div>
-                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;padding-left:0;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
+                  <li style="margin-bottom:12px;line-height:1.5;">
+                    <strong style="display:block;margin-bottom:4px;line-height:1.3;">${t.nome_atividade}</strong>
+                    ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:2px 6px;border-radius:4px;font-size:10px;display:inline-block;margin-bottom:4px;">ESPECÍFICA</span><br>' : ''}
+                    ${t.descricao_atividade ? `<span style="color:#6b7280;font-size:11px;display:block;line-height:1.4;padding-top:4px;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
               </ul>
