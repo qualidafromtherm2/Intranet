@@ -11465,6 +11465,21 @@ window.openProdutoPorCodigo = async function openProdutoPorCodigo(codigo) {
 };
 
 // ========== Engenharia: carregar produtos "Em criação" =====================
+// Função auxiliar para fechar todas as linhas expandidas
+function closeAllExpandRows() {
+  const tbody = document.querySelector('#tabelaEngenhariaEmCriacao tbody');
+  if (!tbody) return;
+  
+  const allExpandRows = tbody.querySelectorAll('.expand-row');
+  allExpandRows.forEach(row => row.remove());
+  
+  const allChevrons = tbody.querySelectorAll('.fa-chevron-up');
+  allChevrons.forEach(icon => {
+    icon.classList.remove('fa-chevron-up');
+    icon.classList.add('fa-chevron-down');
+  });
+}
+
 // Funções auxiliares para expandir/recolher detalhes
 async function toggleExpandCadastro(btn) {
   const codigo = btn.dataset.codigo;
@@ -11480,11 +11495,8 @@ async function toggleExpandCadastro(btn) {
     return;
   }
   
-  // Fecha outras expansões desta linha
-  const siblings = tr.nextElementSibling;
-  if (siblings && siblings.classList.contains('expand-row')) {
-    siblings.remove();
-  }
+  // Fecha todas as outras expansões
+  closeAllExpandRows();
   
   // Busca dados
   try {
@@ -11550,6 +11562,9 @@ async function toggleExpandEngenharia(btn) {
     return;
   }
   
+  // Fecha todas as outras expansões
+  closeAllExpandRows();
+  
   try {
     btn.disabled = true;
     icon.classList.add('fa-spin');
@@ -11572,7 +11587,7 @@ async function toggleExpandEngenharia(btn) {
                   <li style="margin-bottom:4px;">
                     <strong>${t.nome_atividade}</strong>
                     ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
-                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;">${t.descricao_atividade}</span>` : ''}
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;margin-top:2px;display:block;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
               </ul>
@@ -11624,6 +11639,9 @@ async function toggleExpandCompras(btn) {
     return;
   }
   
+  // Fecha todas as outras expansões
+  closeAllExpandRows();
+  
   try {
     btn.disabled = true;
     icon.classList.add('fa-spin');
@@ -11646,7 +11664,7 @@ async function toggleExpandCompras(btn) {
                   <li style="margin-bottom:4px;">
                     <strong>${t.nome_atividade}</strong>
                     ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
-                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;">${t.descricao_atividade}</span>` : ''}
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;margin-top:2px;display:block;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
               </ul>
