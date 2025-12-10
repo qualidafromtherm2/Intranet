@@ -11467,7 +11467,7 @@ window.openProdutoPorCodigo = async function openProdutoPorCodigo(codigo) {
 // ========== Engenharia: carregar produtos "Em criação" =====================
 // Função auxiliar para fechar todas as linhas expandidas
 function closeAllExpandRows() {
-  const tbody = document.querySelector('#tabelaEngenhariaEmCriacao tbody');
+  const tbody = document.querySelector('#engTbody');
   if (!tbody) return;
   
   const allExpandRows = tbody.querySelectorAll('.expand-row');
