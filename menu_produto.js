@@ -11585,11 +11585,11 @@ async function toggleExpandEngenharia(btn) {
               <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
                 ${data.pendentes.map(t => `
                   <li style="margin-bottom:8px;">
-                    <div style="margin-bottom:2px;">
-                      <strong>${t.nome_atividade}</strong>
-                      ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    <div>
+                      <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
+                      ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
                     </div>
-                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
+                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;padding-left:0;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
                   </li>
                 `).join('')}
               </ul>
@@ -11664,11 +11664,11 @@ async function toggleExpandCompras(btn) {
               <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
                 ${data.pendentes.map(t => `
                   <li style="margin-bottom:8px;">
-                    <div style="margin-bottom:2px;">
-                      <strong>${t.nome_atividade}</strong>
-                      ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    <div>
+                      <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
+                      ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
                     </div>
-                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
+                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;padding-left:0;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
                   </li>
                 `).join('')}
               </ul>
