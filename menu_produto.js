@@ -8841,25 +8841,40 @@ btnCache.addEventListener('click', async e => {
       computeAndRenderProgress([]);
       return;
     }
+    
     atividades.forEach((a, idx) => {
       const card = document.createElement('div');
       card.className = 'check-compras-item';
-      card.style.cssText = 'border:2px solid var(--border-color); border-radius:10px; padding:12px; background:var(--content-bg); display:flex; gap:12px; align-items:flex-start;';
+      
+      // Define cor da borda: laranja para atividades específicas, cinza para da família
+      const borderColor = a.origem === 'produto' ? '#f59e0b' : 'var(--border-color)';
+      card.style.cssText = `border:2px solid ${borderColor}; border-radius:10px; padding:12px; background:var(--content-bg); display:flex; gap:12px; align-items:flex-start;`;
+      
+      // Nome da atividade (usa nome_atividade para família, nome para produto)
+      const nomeAtividade = a.nome_atividade || a.nome || 'Sem nome';
+      const descricaoAtividade = a.descricao_atividade || a.observacoes || '';
+      
+      // Badge "ESPECÍFICA" para atividades do produto
+      const badgeEspecifica = a.origem === 'produto' 
+        ? '<span style="background:#f59e0b; color:#fff; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; margin-left:8px;">ESPECÍFICA</span>'
+        : '';
+      
       card.innerHTML = `
         <input type="checkbox" class="chk-concluido" ${a.concluido ? 'checked' : ''} style="width:18px; height:18px; margin-top:3px; accent-color:#f59e0b;"/>
         <div style="flex:1; min-width:0;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
               <span style="background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:600;">#${idx+1}</span>
-              <strong style="color: var(--content-title-color); font-size:15px;">${a.nome_atividade}</strong>
+              <strong style="color: var(--content-title-color); font-size:15px;">${nomeAtividade}</strong>
+              ${badgeEspecifica}
             </div>
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color: var(--inactive-color);">
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color: var(--inactive-color); white-space:nowrap;">
               <input type="checkbox" class="chk-na" ${a.nao_aplicavel ? 'checked' : ''} style="accent-color:#f59e0b; width:16px; height:16px;"/> Não se aplica
             </label>
           </div>
-          <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${a.descricao_atividade || '<em>Sem descrição</em>'}</div>
+          <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${descricaoAtividade || '<em>Sem descrição</em>'}</div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-            <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
+            <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao || a.observacao_status || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
             <span class="status-data" style="font-size:12px; color:${a.concluido ? '#b45309' : 'var(--inactive-color)'};">
               ${a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : ''}
             </span>
@@ -8870,6 +8885,7 @@ btnCache.addEventListener('click', async e => {
       const chkNa = card.querySelector('.chk-na');
       const inpObs = card.querySelector('.inp-obs');
       const statusData = card.querySelector('.status-data');
+      
       const updateLocal = () => {
         a.concluido = chk.checked;
         a.nao_aplicavel = chkNa.checked;
@@ -8879,12 +8895,16 @@ btnCache.addEventListener('click', async e => {
         statusData.textContent = a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : '';
         computeAndRenderProgress(atividades);
       };
+      
       chk.addEventListener('change', updateLocal);
       chkNa.addEventListener('change', updateLocal);
       inpObs.addEventListener('change', updateLocal);
-      card.dataset.atividadeId = a.id;
+      
+      card.dataset.atividadeId = a.atividade_id || a.id;
+      card.dataset.origem = a.origem;
       root.appendChild(card);
     });
+    
     computeAndRenderProgress(atividades);
   }
 
@@ -8900,14 +8920,36 @@ btnCache.addEventListener('click', async e => {
     if (loadingEl()) loadingEl().style.display = 'block';
     if (infoEl()) { infoEl().style.display = 'none'; infoEl().textContent = ''; }
     try {
-      const url = `${API_BASE}/api/compras/produto-atividades?codigo=${encodeURIComponent(codigo)}&familia=${encodeURIComponent(familia)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Falha ao carregar checklist (compras)');
-      const atividades = await res.json();
-      renderLista(atividades);
+      // Busca atividades da família
+      const urlFamilia = `${API_BASE}/api/compras/produto-atividades?codigo=${encodeURIComponent(codigo)}&familia=${encodeURIComponent(familia)}`;
+      const resFamilia = await fetch(urlFamilia);
+      if (!resFamilia.ok) throw new Error('Falha ao carregar checklist da família');
+      const atividadesFamilia = await resFamilia.json();
+      
+      // Busca atividades específicas do produto
+      const urlProduto = `${API_BASE}/api/compras/atividades-produto/${encodeURIComponent(codigo)}`;
+      const resProduto = await fetch(urlProduto);
+      let atividadesProduto = [];
+      if (resProduto.ok) {
+        const data = await resProduto.json();
+        atividadesProduto = data.atividades || [];
+      }
+      
+      // Mescla as atividades: da família + específicas do produto
+      // Marca as atividades específicas com um flag para diferenciar visualmente
+      const atividadesMescladas = [
+        ...atividadesFamilia.map(a => ({ ...a, origem: 'familia' })),
+        ...atividadesProduto.map(a => ({ ...a, atividade_id: null, atividade_produto_id: a.id, origem: 'produto' }))
+      ];
+      
+      renderLista(atividadesMescladas);
+      
       if (infoEl()) {
+        const totalFamilia = atividadesFamilia.length;
+        const totalProduto = atividadesProduto.length;
+        const total = totalFamilia + totalProduto;
         infoEl().style.display = 'block';
-        infoEl().innerHTML = `<strong>${atividades.length}</strong> atividade(s) vinculadas à família <strong>${familia}</strong> para o produto <strong>${codigo}</strong>.`;
+        infoEl().innerHTML = `<strong>${total}</strong> atividade(s): <strong>${totalFamilia}</strong> da família + <strong>${totalProduto}</strong> específica(s) do produto <strong>${codigo}</strong>.`;
       }
     } catch (e) {
       console.error('[Check-Compras] Erro:', e);
@@ -8922,19 +8964,54 @@ btnCache.addEventListener('click', async e => {
     const produtoIdOmie = window.currentProdutoIdOmie || null;
     const items = Array.from((listaEl()||document.createElement('div')).querySelectorAll('.check-compras-item'));
     if (!items.length || !codigo) return;
-    const payload = items.map(card => ({
-      atividade_id: Number(card.dataset.atividadeId),
-      concluido: card.querySelector('.chk-concluido')?.checked || false,
-      nao_aplicavel: card.querySelector('.chk-na')?.checked || false,
-      observacao: card.querySelector('.inp-obs')?.value || ''
-    }));
+
+    // Separar atividades da família e específicas do produto
+    const atividadesFamilia = [];
+    const atividadesProduto = [];
+    
+    items.forEach(card => {
+      const origem = card.dataset.origem;
+      const data = {
+        concluido: card.querySelector('.chk-concluido')?.checked || false,
+        nao_aplicavel: card.querySelector('.chk-na')?.checked || false,
+        observacao: card.querySelector('.inp-obs')?.value || ''
+      };
+      
+      if (origem === 'produto') {
+        atividadesProduto.push({
+          atividade_produto_id: Number(card.dataset.atividadeId),
+          ...data
+        });
+      } else {
+        atividadesFamilia.push({
+          atividade_id: Number(card.dataset.atividadeId),
+          ...data
+        });
+      }
+    });
+
     try {
-      const res = await fetch(`${API_BASE}/api/compras/produto-status/bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ produto_codigo: codigo, produto_id_omie: produtoIdOmie, itens: payload })
-      });
-      if (!res.ok) throw new Error('Falha ao salvar');
+      // Salvar atividades da família
+      if (atividadesFamilia.length > 0) {
+        const res = await fetch(`${API_BASE}/api/compras/produto-status/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ produto_codigo: codigo, produto_id_omie: produtoIdOmie, itens: atividadesFamilia })
+        });
+        if (!res.ok) throw new Error('Falha ao salvar atividades da família');
+      }
+      
+      // Salvar atividades específicas do produto
+      if (atividadesProduto.length > 0) {
+        const res = await fetch(`${API_BASE}/api/compras/atividade-produto-status/bulk`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ produto_codigo: codigo, itens: atividadesProduto })
+        });
+        if (!res.ok) throw new Error('Falha ao salvar atividades específicas');
+      }
+      
+      // reload to reflect timestamps
       await loadCheckCompras();
       alert('Checklist de compras salvo com sucesso.');
     } catch (e) {
@@ -8949,6 +9026,97 @@ btnCache.addEventListener('click', async e => {
   window.addEventListener('produto-carregado', () => {
     const active = document.querySelector('#produtoTabs .main-header .nav-card.active[data-target="checkComprasTab"]');
     if (active) loadCheckCompras();
+  });
+  
+  // === MODAL: Nova Tarefa de Compras do Produto ===
+  const modal = document.getElementById('modalNovaTarefaCompras');
+  const btnNovaTarefa = document.getElementById('checkComprasNovaTarefaBtn');
+  const btnFechar = document.getElementById('modalNovaTarefaComprasFechar');
+  const btnCancelar = document.getElementById('modalNovaTarefaComprasCancelar');
+  const btnSalvar = document.getElementById('modalNovaTarefaComprasSalvar');
+  const inputDescricao = document.getElementById('novaTarefaComprasDescricao');
+  const inputObs = document.getElementById('novaTarefaComprasObs');
+  
+  function abrirModal() {
+    if (!window.currentProdutoCodigo) {
+      alert('Nenhum produto selecionado');
+      return;
+    }
+    if (inputDescricao) inputDescricao.value = '';
+    if (inputObs) inputObs.value = '';
+    if (modal) modal.style.display = 'flex';
+  }
+  
+  function fecharModal() {
+    if (modal) modal.style.display = 'none';
+  }
+  
+  async function salvarNovaTarefa() {
+    const descricao = inputDescricao?.value.trim();
+    const observacoes = inputObs?.value.trim();
+    
+    if (!descricao) {
+      alert('Por favor, informe a descrição da tarefa');
+      return;
+    }
+    
+    if (!window.currentProdutoCodigo) {
+      alert('Nenhum produto selecionado');
+      return;
+    }
+    
+    try {
+      btnSalvar.disabled = true;
+      btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+      
+      const resp = await fetch('/api/compras/atividade-produto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          produto_codigo: window.currentProdutoCodigo,
+          descricao,
+          observacoes
+        })
+      });
+      
+      if (!resp.ok) throw new Error('Erro ao criar atividade');
+      
+      const data = await resp.json();
+      console.log('[CheckCompras] Nova atividade criada:', data);
+      
+      fecharModal();
+      
+      // Recarrega a lista para mostrar a nova atividade
+      loadCheckCompras();
+      
+      alert('Tarefa criada com sucesso!');
+    } catch (err) {
+      console.error('[CheckCompras] Erro ao salvar tarefa:', err);
+      alert('Erro ao salvar tarefa. Tente novamente.');
+    } finally {
+      btnSalvar.disabled = false;
+      btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Adicionar';
+    }
+  }
+  
+  if (btnNovaTarefa) btnNovaTarefa.addEventListener('click', abrirModal);
+  if (btnFechar) btnFechar.addEventListener('click', fecharModal);
+  if (btnCancelar) btnCancelar.addEventListener('click', fecharModal);
+  if (btnSalvar) btnSalvar.addEventListener('click', salvarNovaTarefa);
+  
+  // Fechar modal ao clicar fora
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModal();
+    });
+  }
+  
+  // Fechar modal com ESC
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+      fecharModal();
+    }
   });
 })();
 
