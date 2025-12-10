@@ -708,7 +708,7 @@ app.post('/api/produtos/busca', async (req, res) => {
 // Retorna JSON { itens: [{ codigo, descricao, check_concluidas, check_total, check_percentual }] }
 app.get('/api/engenharia/em-criacao', async (req, res) => {
   try {
-    // Busca produtos "Em criação" com suas atividades de engenharia (Check-Proj)
+    // Busca produtos "Em criação" com suas atividades de engenharia (Check-Proj) e compras
     const sql = `
       WITH produtos_eng AS (
         SELECT 
@@ -720,8 +720,8 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         ORDER BY codigo ASC
         LIMIT 1000
       ),
-      stats_check AS (
-        -- Atividades da família
+      stats_check_eng AS (
+        -- Atividades de engenharia da família
         SELECT 
           pe.codigo,
           COUNT(af.id) AS total_atividades,
@@ -735,7 +735,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         
         UNION ALL
         
-        -- Atividades específicas do produto
+        -- Atividades de engenharia específicas do produto
         SELECT 
           ap.produto_codigo AS codigo,
           COUNT(ap.id) AS total_atividades,
@@ -746,26 +746,67 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
         WHERE ap.ativo = true
         GROUP BY ap.produto_codigo
       ),
-      stats_agregadas AS (
+      stats_check_compras AS (
+        -- Atividades de compras da família
+        SELECT 
+          pe.codigo,
+          COUNT(af.id) AS total_atividades,
+          COUNT(CASE WHEN s.concluido = true OR s.nao_aplicavel = true THEN 1 END) AS concluidas
+        FROM produtos_eng pe
+        LEFT JOIN compras.atividades_familia af 
+          ON af.familia_codigo = pe.familia AND af.ativo = true
+        LEFT JOIN compras.atividades_produto_status s
+          ON s.atividade_id = af.id AND s.produto_codigo = pe.codigo
+        GROUP BY pe.codigo
+        
+        UNION ALL
+        
+        -- Atividades de compras específicas do produto
+        SELECT 
+          ap.produto_codigo AS codigo,
+          COUNT(ap.id) AS total_atividades,
+          COUNT(CASE WHEN aps.concluido = true OR aps.nao_aplicavel = true THEN 1 END) AS concluidas
+        FROM compras.atividades_produto ap
+        LEFT JOIN compras.atividades_produto_status_especificas aps
+          ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+        WHERE ap.ativo = true
+        GROUP BY ap.produto_codigo
+      ),
+      stats_agregadas_eng AS (
         SELECT 
           codigo,
           SUM(total_atividades) AS total_atividades,
           SUM(concluidas) AS concluidas
-        FROM stats_check
+        FROM stats_check_eng
+        GROUP BY codigo
+      ),
+      stats_agregadas_compras AS (
+        SELECT 
+          codigo,
+          SUM(total_atividades) AS total_atividades,
+          SUM(concluidas) AS concluidas
+        FROM stats_check_compras
         GROUP BY codigo
       )
       SELECT 
         pe.codigo,
         pe.descricao,
         pe.familia,
-        COALESCE(sa.concluidas, 0)::int AS eng_concluidas,
-        COALESCE(sa.total_atividades, 0)::int AS eng_total,
+        COALESCE(sae.concluidas, 0)::int AS eng_concluidas,
+        COALESCE(sae.total_atividades, 0)::int AS eng_total,
         CASE 
-          WHEN COALESCE(sa.total_atividades, 0) = 0 THEN 0
-          ELSE ROUND((COALESCE(sa.concluidas, 0)::decimal / sa.total_atividades) * 100)
-        END AS eng_percentual
+          WHEN COALESCE(sae.total_atividades, 0) = 0 THEN 0
+          ELSE ROUND((COALESCE(sae.concluidas, 0)::decimal / sae.total_atividades) * 100)
+        END AS eng_percentual,
+        COALESCE(sac.concluidas, 0)::int AS compras_concluidas,
+        COALESCE(sac.total_atividades, 0)::int AS compras_total,
+        CASE 
+          WHEN COALESCE(sac.total_atividades, 0) = 0 THEN 0
+          ELSE ROUND((COALESCE(sac.concluidas, 0)::decimal / sac.total_atividades) * 100)
+        END AS compras_percentual
       FROM produtos_eng pe
-      LEFT JOIN stats_agregadas sa ON sa.codigo = pe.codigo
+      LEFT JOIN stats_agregadas_eng sae ON sae.codigo = pe.codigo
+      LEFT JOIN stats_agregadas_compras sac ON sac.codigo = pe.codigo
       ORDER BY pe.codigo ASC;
     `;
     const { rows: produtos } = await pool.query(sql);
@@ -785,7 +826,10 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
             completude_percentual: 0,
             eng_concluidas: produto.eng_concluidas,
             eng_total: produto.eng_total,
-            eng_percentual: produto.eng_percentual
+            eng_percentual: produto.eng_percentual,
+            compras_concluidas: produto.compras_concluidas,
+            compras_total: produto.compras_total,
+            compras_percentual: produto.compras_percentual
           });
           continue;
         }
@@ -825,7 +869,10 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
           completude_percentual: percentual,
           eng_concluidas: produto.eng_concluidas,
           eng_total: produto.eng_total,
-          eng_percentual: produto.eng_percentual
+          eng_percentual: produto.eng_percentual,
+          compras_concluidas: produto.compras_concluidas,
+          compras_total: produto.compras_total,
+          compras_percentual: produto.compras_percentual
         });
       } catch (err) {
         console.error(`[API] Erro ao processar produto ${produto.codigo}:`, err);
@@ -837,7 +884,10 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
           completude_percentual: 0,
           eng_concluidas: produto.eng_concluidas,
           eng_total: produto.eng_total,
-          eng_percentual: produto.eng_percentual
+          eng_percentual: produto.eng_percentual,
+          compras_concluidas: produto.compras_concluidas,
+          compras_total: produto.compras_total,
+          compras_percentual: produto.compras_percentual
         });
       }
     }
