@@ -11471,13 +11471,13 @@ async function loadEngenhariaLista() {
   if (!tbody) return;
   try {
     if (spinner) spinner.style.display = 'block';
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:20px 12px;text-align:center;color:#6b7280;">Carregando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:20px 12px;text-align:center;color:#6b7280;">Carregando...</td></tr>';
     const resp = await fetch('/api/engenharia/em-criacao', { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha ao buscar lista');
     const data = await resp.json();
     const itens = Array.isArray(data.itens) ? data.itens : [];
     if (!itens.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="padding:28px 12px;text-align:center;color:#6b7280;">Nenhum produto em criação encontrado.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="padding:28px 12px;text-align:center;color:#6b7280;">Nenhum produto em criação encontrado.</td></tr>';
       return;
     }
     tbody.innerHTML = '';
@@ -11497,6 +11497,11 @@ async function loadEngenhariaLista() {
       const pctEng = Number(p.eng_percentual) || 0;
       const totalEng = Number(p.eng_total) || 0;
       const concluidasEng = Number(p.eng_concluidas) || 0;
+      
+      // BARRA DE PROGRESSO (COMPRAS): Usa dados de COMPRAS (atividades Check-Compras)
+      const pctCompras = Number(p.compras_percentual) || 0;
+      const totalCompras = Number(p.compras_total) || 0;
+      const concluidasCompras = Number(p.compras_concluidas) || 0;
       
       // Cor do círculo baseada na completude
       let corCirculo = '#dc2626'; // vermelho
@@ -11524,6 +11529,20 @@ async function loadEngenhariaLista() {
       } else if (pctEng >= 40) {
         corBarra = '#f59e0b'; // amarelo
         corTextoBarra = '#d97706';
+      }
+      
+      // Cor da barra de compras
+      let corBarraCompras = '#dc2626'; // vermelho
+      let corTextoBarraCompras = '#dc2626';
+      if (pctCompras === 100) {
+        corBarraCompras = '#16a34a'; // verde escuro
+        corTextoBarraCompras = '#16a34a';
+      } else if (pctCompras >= 70) {
+        corBarraCompras = '#22c55e'; // verde claro
+        corTextoBarraCompras = '#16a34a';
+      } else if (pctCompras >= 40) {
+        corBarraCompras = '#f59e0b'; // amarelo
+        corTextoBarraCompras = '#d97706';
       }
       
       // Cálculo do stroke-dashoffset para o círculo (circunferência = 2πr = 125.6 para r=20)
@@ -11556,17 +11575,28 @@ async function loadEngenhariaLista() {
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
       
+      // HTML da coluna COMPRAS (barra de progresso)
+      const comprasHtml = totalCompras > 0 ? `
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;background:#e5e7eb;height:8px;border-radius:4px;overflow:hidden;" title="Check-Compras: ${concluidasCompras}/${totalCompras} atividades (${pctCompras}%)">
+            <div style="width:${pctCompras}%;height:100%;background:${corBarraCompras};transition:width 0.3s;"></div>
+          </div>
+          <span style="font-size:12px;font-weight:600;color:${corTextoBarraCompras};min-width:70px;text-align:right;">${concluidasCompras}/${totalCompras} (${pctCompras}%)</span>
+        </div>
+      ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
+      
       tr.innerHTML = `
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;white-space:nowrap;">${p.codigo}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;">${p.descricao}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);text-align:center;">${cadastroHtml}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);">${tarefasHtml}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);">${comprasHtml}</td>
       `;
       tbody.appendChild(tr);
     });
   } catch (err) {
     console.error('[Engenharia] Erro ao carregar lista:', err);
-    tbody.innerHTML = '<tr><td colspan="4" style="padding:28px 12px;text-align:center;color:#dc2626;">Erro ao carregar lista.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="padding:28px 12px;text-align:center;color:#dc2626;">Erro ao carregar lista.</td></tr>';
   } finally {
     if (spinner) spinner.style.display = 'none';
   }
