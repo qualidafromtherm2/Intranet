@@ -11670,7 +11670,7 @@ async function toggleExpandCompras(btn) {
                       <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
                       ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
                     </div>
-                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;padding-left:0;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;display:block;margin-top:2px;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
               </ul>
