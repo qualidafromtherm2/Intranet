@@ -899,6 +899,188 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
   }
 });
 
+// Endpoint para detalhes de cadastro (campos pendentes)
+app.get('/api/engenharia/produto-cadastro/:codigo', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    
+    // Busca dados completos do produto
+    const detalhesResp = await fetch(`http://localhost:5001/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`);
+    if (!detalhesResp.ok) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+    const dados = await detalhesResp.json();
+    const familia = dados.codigo_familia;
+    
+    if (!familia) {
+      return res.json({ campos_pendentes: [], campos_preenchidos: [] });
+    }
+    
+    // Busca campos obrigatórios da família
+    const camposQuery = `
+      SELECT cg.chave, cg.nome_exibicao
+      FROM configuracoes.familia_campos_obrigatorios fco
+      INNER JOIN configuracoes.campos_guias cg ON cg.chave = fco.campo_chave
+      WHERE fco.familia_codigo = $1 AND fco.obrigatorio = true
+      ORDER BY cg.nome_exibicao
+    `;
+    const { rows: campos } = await pool.query(camposQuery, [familia]);
+    
+    const camposPendentes = [];
+    const camposPreenchidos = [];
+    
+    // Verifica cada campo obrigatório
+    campos.forEach(campo => {
+      const chave = campo.chave;
+      const valor = chave.split('.').reduce((o, k) => o?.[k], dados);
+      const preenchido = valor !== null && valor !== undefined && String(valor).trim() !== '';
+      
+      if (preenchido) {
+        camposPreenchidos.push({
+          chave: campo.chave,
+          nome: campo.nome_exibicao,
+          valor: String(valor)
+        });
+      } else {
+        camposPendentes.push({
+          chave: campo.chave,
+          nome: campo.nome_exibicao
+        });
+      }
+    });
+    
+    res.json({ campos_pendentes: camposPendentes, campos_preenchidos: camposPreenchidos });
+  } catch (err) {
+    console.error('[API] /api/engenharia/produto-cadastro erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar detalhes do cadastro' });
+  }
+});
+
+// Endpoint para detalhes de engenharia (tarefas)
+app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    
+    // Busca produto para pegar a família
+    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie WHERE codigo = $1`;
+    const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
+    
+    if (!produto) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+    
+    // Busca atividades da família
+    const atividadesFamiliaQuery = `
+      SELECT 
+        af.id,
+        af.nome_atividade,
+        af.descricao_atividade,
+        COALESCE(s.concluido, false) AS concluido,
+        COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
+        s.observacao,
+        s.data_conclusao,
+        'familia' AS origem
+      FROM engenharia.atividades_familia af
+      LEFT JOIN engenharia.atividades_produto_status s
+        ON s.atividade_id = af.id AND s.produto_codigo = $1
+      WHERE af.familia_codigo = $2 AND af.ativo = true
+      ORDER BY af.ordem ASC, af.created_at ASC
+    `;
+    const { rows: atividadesFamilia } = await pool.query(atividadesFamiliaQuery, [codigo, produto.codigo_familia]);
+    
+    // Busca atividades específicas do produto
+    const atividadesProdutoQuery = `
+      SELECT 
+        ap.id,
+        ap.descricao AS nome_atividade,
+        ap.observacoes AS descricao_atividade,
+        COALESCE(aps.concluido, false) AS concluido,
+        COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
+        aps.observacao_status AS observacao,
+        aps.data_conclusao,
+        'produto' AS origem
+      FROM engenharia.atividades_produto ap
+      LEFT JOIN engenharia.atividades_produto_status_especificas aps
+        ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+      WHERE ap.produto_codigo = $1 AND ap.ativo = true
+      ORDER BY ap.criado_em DESC
+    `;
+    const { rows: atividadesProduto } = await pool.query(atividadesProdutoQuery, [codigo]);
+    
+    const todasAtividades = [...atividadesFamilia, ...atividadesProduto];
+    const concluidas = todasAtividades.filter(a => a.concluido || a.nao_aplicavel);
+    const pendentes = todasAtividades.filter(a => !a.concluido && !a.nao_aplicavel);
+    
+    res.json({ concluidas, pendentes, total: todasAtividades.length });
+  } catch (err) {
+    console.error('[API] /api/engenharia/produto-tarefas erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar tarefas de engenharia' });
+  }
+});
+
+// Endpoint para detalhes de compras (tarefas)
+app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    
+    // Busca produto para pegar a família
+    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie WHERE codigo = $1`;
+    const { rows: [produto] } = await pool.query(produtoQuery, [codigo]);
+    
+    if (!produto) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+    
+    // Busca atividades da família
+    const atividadesFamiliaQuery = `
+      SELECT 
+        af.id,
+        af.nome_atividade,
+        af.descricao_atividade,
+        COALESCE(s.concluido, false) AS concluido,
+        COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
+        s.observacao,
+        s.data_conclusao,
+        'familia' AS origem
+      FROM compras.atividades_familia af
+      LEFT JOIN compras.atividades_produto_status s
+        ON s.atividade_id = af.id AND s.produto_codigo = $1
+      WHERE af.familia_codigo = $2 AND af.ativo = true
+      ORDER BY af.ordem ASC, af.created_at ASC
+    `;
+    const { rows: atividadesFamilia } = await pool.query(atividadesFamiliaQuery, [codigo, produto.codigo_familia]);
+    
+    // Busca atividades específicas do produto
+    const atividadesProdutoQuery = `
+      SELECT 
+        ap.id,
+        ap.descricao AS nome_atividade,
+        ap.observacoes AS descricao_atividade,
+        COALESCE(aps.concluido, false) AS concluido,
+        COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
+        aps.observacao_status AS observacao,
+        aps.data_conclusao,
+        'produto' AS origem
+      FROM compras.atividades_produto ap
+      LEFT JOIN compras.atividades_produto_status_especificas aps
+        ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+      WHERE ap.produto_codigo = $1 AND ap.ativo = true
+      ORDER BY ap.criado_em DESC
+    `;
+    const { rows: atividadesProduto } = await pool.query(atividadesProdutoQuery, [codigo]);
+    
+    const todasAtividades = [...atividadesFamilia, ...atividadesProduto];
+    const concluidas = todasAtividades.filter(a => a.concluido || a.nao_aplicavel);
+    const pendentes = todasAtividades.filter(a => !a.concluido && !a.nao_aplicavel);
+    
+    res.json({ concluidas, pendentes, total: todasAtividades.length });
+  } catch (err) {
+    console.error('[API] /api/engenharia/produto-compras erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar tarefas de compras' });
+  }
+});
+
+
 // === Busca total de registros da Omie para gerar código sequencial ===========
 app.get('/api/produtos/total-omie', async (req, res) => {
   try {

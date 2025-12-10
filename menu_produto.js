@@ -11465,6 +11465,226 @@ window.openProdutoPorCodigo = async function openProdutoPorCodigo(codigo) {
 };
 
 // ========== Engenharia: carregar produtos "Em criação" =====================
+// Funções auxiliares para expandir/recolher detalhes
+async function toggleExpandCadastro(btn) {
+  const codigo = btn.dataset.codigo;
+  const tr = btn.closest('tr');
+  const existingRow = tr.nextElementSibling;
+  const icon = btn.querySelector('i');
+  
+  // Se já existe uma linha expandida, remove
+  if (existingRow && existingRow.classList.contains('expand-row-cadastro')) {
+    existingRow.remove();
+    icon.classList.remove('fa-chevron-up');
+    icon.classList.add('fa-chevron-down');
+    return;
+  }
+  
+  // Fecha outras expansões desta linha
+  const siblings = tr.nextElementSibling;
+  if (siblings && siblings.classList.contains('expand-row')) {
+    siblings.remove();
+  }
+  
+  // Busca dados
+  try {
+    btn.disabled = true;
+    icon.classList.add('fa-spin');
+    
+    const resp = await fetch(`/api/engenharia/produto-cadastro/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha ao buscar detalhes');
+    const data = await resp.json();
+    
+    // Cria linha expandida
+    const expandRow = document.createElement('tr');
+    expandRow.classList.add('expand-row', 'expand-row-cadastro');
+    expandRow.innerHTML = `
+      <td colspan="5" style="padding:0;border-bottom:1px solid var(--border-color);background:#f9fafb;">
+        <div style="padding:16px 24px;">
+          <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1f2937;">Campos do Cadastro</h4>
+          ${data.campos_pendentes.length > 0 ? `
+            <div style="margin-bottom:16px;">
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#dc2626;">Pendentes (${data.campos_pendentes.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#dc2626;">
+                ${data.campos_pendentes.map(c => `<li>${c.nome}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.campos_preenchidos.length > 0 ? `
+            <div>
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#16a34a;">Preenchidos (${data.campos_preenchidos.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#6b7280;">
+                ${data.campos_preenchidos.map(c => `<li>${c.nome}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.campos_pendentes.length === 0 && data.campos_preenchidos.length === 0 ? `
+            <p style="margin:0;font-size:12px;color:#9ca3af;">Nenhum campo obrigatório configurado para esta família.</p>
+          ` : ''}
+        </div>
+      </td>
+    `;
+    
+    tr.parentNode.insertBefore(expandRow, tr.nextSibling);
+    icon.classList.remove('fa-chevron-down', 'fa-spin');
+    icon.classList.add('fa-chevron-up');
+  } catch (err) {
+    console.error('[Expandir Cadastro] Erro:', err);
+    alert('Erro ao carregar detalhes do cadastro');
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('fa-spin');
+  }
+}
+
+async function toggleExpandEngenharia(btn) {
+  const codigo = btn.dataset.codigo;
+  const tr = btn.closest('tr');
+  const existingRow = tr.nextElementSibling;
+  const icon = btn.querySelector('i');
+  
+  if (existingRow && existingRow.classList.contains('expand-row-engenharia')) {
+    existingRow.remove();
+    icon.classList.remove('fa-chevron-up');
+    icon.classList.add('fa-chevron-down');
+    return;
+  }
+  
+  try {
+    btn.disabled = true;
+    icon.classList.add('fa-spin');
+    
+    const resp = await fetch(`/api/engenharia/produto-tarefas/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha ao buscar detalhes');
+    const data = await resp.json();
+    
+    const expandRow = document.createElement('tr');
+    expandRow.classList.add('expand-row', 'expand-row-engenharia');
+    expandRow.innerHTML = `
+      <td colspan="5" style="padding:0;border-bottom:1px solid var(--border-color);background:#f9fafb;">
+        <div style="padding:16px 24px;">
+          <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1f2937;">Tarefas de Engenharia (${data.total})</h4>
+          ${data.pendentes.length > 0 ? `
+            <div style="margin-bottom:16px;">
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#dc2626;">Pendentes (${data.pendentes.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
+                ${data.pendentes.map(t => `
+                  <li style="margin-bottom:4px;">
+                    <strong>${t.nome_atividade}</strong>
+                    ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;">${t.descricao_atividade}</span>` : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.concluidas.length > 0 ? `
+            <div>
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#16a34a;">Concluídas (${data.concluidas.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#6b7280;">
+                ${data.concluidas.map(t => `
+                  <li style="margin-bottom:4px;">
+                    <strong>${t.nome_atividade}</strong>
+                    ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    ${t.nao_aplicavel ? '<span style="color:#f59e0b;font-size:11px;"> (Não se aplica)</span>' : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.total === 0 ? `
+            <p style="margin:0;font-size:12px;color:#9ca3af;">Nenhuma atividade configurada.</p>
+          ` : ''}
+        </div>
+      </td>
+    `;
+    
+    tr.parentNode.insertBefore(expandRow, tr.nextSibling);
+    icon.classList.remove('fa-chevron-down', 'fa-spin');
+    icon.classList.add('fa-chevron-up');
+  } catch (err) {
+    console.error('[Expandir Engenharia] Erro:', err);
+    alert('Erro ao carregar tarefas de engenharia');
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('fa-spin');
+  }
+}
+
+async function toggleExpandCompras(btn) {
+  const codigo = btn.dataset.codigo;
+  const tr = btn.closest('tr');
+  const existingRow = tr.nextElementSibling;
+  const icon = btn.querySelector('i');
+  
+  if (existingRow && existingRow.classList.contains('expand-row-compras')) {
+    existingRow.remove();
+    icon.classList.remove('fa-chevron-up');
+    icon.classList.add('fa-chevron-down');
+    return;
+  }
+  
+  try {
+    btn.disabled = true;
+    icon.classList.add('fa-spin');
+    
+    const resp = await fetch(`/api/engenharia/produto-compras/${encodeURIComponent(codigo)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha ao buscar detalhes');
+    const data = await resp.json();
+    
+    const expandRow = document.createElement('tr');
+    expandRow.classList.add('expand-row', 'expand-row-compras');
+    expandRow.innerHTML = `
+      <td colspan="5" style="padding:0;border-bottom:1px solid var(--border-color);background:#f9fafb;">
+        <div style="padding:16px 24px;">
+          <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:600;color:#1f2937;">Tarefas de Compras (${data.total})</h4>
+          ${data.pendentes.length > 0 ? `
+            <div style="margin-bottom:16px;">
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#dc2626;">Pendentes (${data.pendentes.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;">
+                ${data.pendentes.map(t => `
+                  <li style="margin-bottom:4px;">
+                    <strong>${t.nome_atividade}</strong>
+                    ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;">${t.descricao_atividade}</span>` : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.concluidas.length > 0 ? `
+            <div>
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#16a34a;">Concluídas (${data.concluidas.length}):</p>
+              <ul style="margin:0;padding-left:20px;font-size:12px;color:#6b7280;">
+                ${data.concluidas.map(t => `
+                  <li style="margin-bottom:4px;">
+                    <strong>${t.nome_atividade}</strong>
+                    ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
+                    ${t.nao_aplicavel ? '<span style="color:#f59e0b;font-size:11px;"> (Não se aplica)</span>' : ''}
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+          ` : ''}
+          ${data.total === 0 ? `
+            <p style="margin:0;font-size:12px;color:#9ca3af;">Nenhuma atividade configurada.</p>
+          ` : ''}
+        </div>
+      </td>
+    `;
+    
+    tr.parentNode.insertBefore(expandRow, tr.nextSibling);
+    icon.classList.remove('fa-chevron-down', 'fa-spin');
+    icon.classList.add('fa-chevron-up');
+  } catch (err) {
+    console.error('[Expandir Compras] Erro:', err);
+    alert('Erro ao carregar tarefas de compras');
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('fa-spin');
+  }
+}
+
 async function loadEngenhariaLista() {
   const tbody = document.getElementById('engTbody');
   const spinner = document.getElementById('engSpinner');
@@ -11483,10 +11703,7 @@ async function loadEngenhariaLista() {
     tbody.innerHTML = '';
     itens.forEach(p => {
       const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
-      tr.addEventListener('click', () => {
-        if (p.codigo) window.openProdutoPorCodigo(p.codigo);
-      });
+      tr.dataset.codigo = p.codigo;
       
       // GRÁFICO CIRCULAR (CADASTRO): Usa dados de COMPLETUDE (campos obrigatórios)
       const pctCompletude = Number(p.completude_percentual) || 0;
@@ -11549,9 +11766,9 @@ async function loadEngenhariaLista() {
       const circumference = 125.6;
       const offset = circumference - (pctCompletude / 100) * circumference;
       
-      // HTML da coluna CADASTRO (gráfico circular)
+      // HTML da coluna CADASTRO (gráfico circular + botão expandir)
       const cadastroHtml = totalCompletude > 0 ? `
-        <div style="display:flex;justify-content:center;align-items:center;">
+        <div style="display:flex;justify-content:center;align-items:center;gap:8px;">
           <svg width="50" height="50" viewBox="0 0 50 50" title="Completude: ${concluidasCompletude}/${totalCompletude} campos (${pctCompletude}%)">
             <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" stroke-width="4"/>
             <circle cx="25" cy="25" r="20" fill="none" 
@@ -11562,38 +11779,80 @@ async function loadEngenhariaLista() {
             <text x="25" y="29" text-anchor="middle" 
                   font-size="11" font-weight="bold" fill="${corTextoCirculo}">${pctCompletude}%</text>
           </svg>
+          <button class="btn-expand-cadastro" data-codigo="${p.codigo}" style="background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;" title="Expandir detalhes">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">-</span>';
       
-      // HTML da coluna TAREFAS (barra de progresso)
+      // HTML da coluna ENGENHARIA (barra de progresso + botão expandir)
       const tarefasHtml = totalEng > 0 ? `
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="flex:1;background:#e5e7eb;height:8px;border-radius:4px;overflow:hidden;" title="Check-Proj: ${concluidasEng}/${totalEng} atividades (${pctEng}%)">
             <div style="width:${pctEng}%;height:100%;background:${corBarra};transition:width 0.3s;"></div>
           </div>
           <span style="font-size:12px;font-weight:600;color:${corTextoBarra};min-width:70px;text-align:right;">${concluidasEng}/${totalEng} (${pctEng}%)</span>
+          <button class="btn-expand-engenharia" data-codigo="${p.codigo}" style="background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;" title="Expandir detalhes">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
       
-      // HTML da coluna COMPRAS (barra de progresso)
+      // HTML da coluna COMPRAS (barra de progresso + botão expandir)
       const comprasHtml = totalCompras > 0 ? `
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="flex:1;background:#e5e7eb;height:8px;border-radius:4px;overflow:hidden;" title="Check-Compras: ${concluidasCompras}/${totalCompras} atividades (${pctCompras}%)">
             <div style="width:${pctCompras}%;height:100%;background:${corBarraCompras};transition:width 0.3s;"></div>
           </div>
           <span style="font-size:12px;font-weight:600;color:${corTextoBarraCompras};min-width:70px;text-align:right;">${concluidasCompras}/${totalCompras} (${pctCompras}%)</span>
+          <button class="btn-expand-compras" data-codigo="${p.codigo}" style="background:none;border:none;cursor:pointer;padding:4px;color:#6b7280;font-size:16px;" title="Expandir detalhes">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
         </div>
       ` : '<span style="font-size:12px;color:#9ca3af;">Sem atividades</span>';
       
       tr.innerHTML = `
-        <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;white-space:nowrap;">${p.codigo}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;">${p.descricao}</td>
+        <td class="td-clickable" data-codigo="${p.codigo}" style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;white-space:nowrap;cursor:pointer;">${p.codigo}</td>
+        <td class="td-clickable" data-codigo="${p.codigo}" style="padding:8px 12px;border-bottom:1px solid var(--border-color);font-size:13px;cursor:pointer;">${p.descricao}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);text-align:center;">${cadastroHtml}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);">${tarefasHtml}</td>
         <td style="padding:8px 12px;border-bottom:1px solid var(--border-color);">${comprasHtml}</td>
       `;
+      tr.dataset.codigo = p.codigo;
       tbody.appendChild(tr);
     });
+    
+    // Event handlers para células clicáveis (código e descrição)
+    tbody.querySelectorAll('.td-clickable').forEach(td => {
+      td.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const codigo = td.dataset.codigo;
+        if (codigo) window.openProdutoPorCodigo(codigo);
+      });
+    });
+    
+    // Event handlers para botões de expandir
+    tbody.querySelectorAll('.btn-expand-cadastro').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleExpandCadastro(btn);
+      });
+    });
+    
+    tbody.querySelectorAll('.btn-expand-engenharia').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleExpandEngenharia(btn);
+      });
+    });
+    
+    tbody.querySelectorAll('.btn-expand-compras').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleExpandCompras(btn);
+      });
+    });
+    
   } catch (err) {
     console.error('[Engenharia] Erro ao carregar lista:', err);
     tbody.innerHTML = '<tr><td colspan="5" style="padding:28px 12px;text-align:center;color:#dc2626;">Erro ao carregar lista.</td></tr>';
