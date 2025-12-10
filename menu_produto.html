@@ -1158,9 +1158,14 @@
                     <h3 style="margin:0 0 4px 0; color: var(--content-title-color); font-size: 19px; font-weight: 600;">Check-Compras</h3>
                     <p style="margin:0; color: var(--inactive-color); font-size: 13px;">Checklist das atividades de compras deste produto, baseadas na família.</p>
                   </div>
-                  <button id="checkComprasSalvarBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-save"></i> Salvar
-                  </button>
+                  <div style="display:flex; gap:8px;">
+                    <button id="checkComprasNovaTarefaBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                      <i class="fa-solid fa-plus"></i> Nova Tarefa
+                    </button>
+                    <button id="checkComprasSalvarBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                      <i class="fa-solid fa-save"></i> Salvar
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Progresso -->
@@ -3227,6 +3232,45 @@ function attachDropZone(ul) {
         Cancelar
       </button>
       <button id="modalNovaTarefaSalvar" style="padding:10px 20px; background:linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border:none; border-radius:8px; color:white; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
+        <i class="fa-solid fa-check"></i> Adicionar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="modalNovaTarefaCompras" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); z-index:9999; align-items:center; justify-content:center;">
+  <div style="background:var(--app-bg); border-radius:16px; padding:24px; width:90%; max-width:500px; box-shadow:0 20px 60px rgba(0,0,0,0.5); border:1px solid var(--border-color);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <h3 style="margin:0; color:var(--content-title-color); font-size:18px; font-weight:600;">
+        <i class="fa-solid fa-plus-circle" style="color:#f59e0b; margin-right:8px;"></i>
+        Nova Tarefa de Compras
+      </h3>
+      <button id="modalNovaTarefaComprasFechar" style="background:none; border:none; color:var(--inactive-color); cursor:pointer; font-size:20px; padding:4px 8px;">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+    
+    <div style="margin-bottom:16px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Descrição da Tarefa <span style="color:#dc2626;">*</span>
+      </label>
+      <input type="text" id="novaTarefaComprasDescricao" placeholder="Ex: Solicitar cotação de fornecedores" 
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color);">
+    </div>
+    
+    <div style="margin-bottom:20px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Observações (opcional)
+      </label>
+      <textarea id="novaTarefaComprasObs" placeholder="Detalhes adicionais sobre a tarefa..." rows="3"
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color); resize:vertical;"></textarea>
+    </div>
+    
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button id="modalNovaTarefaComprasCancelar" style="padding:10px 20px; background:var(--content-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--content-title-color); font-weight:600; cursor:pointer;">
+        Cancelar
+      </button>
+      <button id="modalNovaTarefaComprasSalvar" style="padding:10px 20px; background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border:none; border-radius:8px; color:white; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
         <i class="fa-solid fa-check"></i> Adicionar
       </button>
     </div>

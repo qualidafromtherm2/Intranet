@@ -113,5 +113,106 @@ module.exports = (pool) => {
     }
   });
 
+  // Criar atividade específica de um produto
+  router.post('/atividade-produto', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { produto_codigo, descricao, observacoes } = req.body;
+      
+      if (!produto_codigo || !descricao) {
+        return res.status(400).json({ error: 'produto_codigo e descricao são obrigatórios' });
+      }
+      
+      const { rows } = await client.query(`
+        INSERT INTO compras.atividades_produto 
+          (produto_codigo, descricao, observacoes, ativo, criado_em)
+        VALUES ($1, $2, $3, true, NOW())
+        RETURNING id, produto_codigo, descricao, observacoes, ativo, criado_em
+      `, [produto_codigo, descricao, observacoes || null]);
+      
+      console.log(`[Compras] Nova atividade criada para produto ${produto_codigo}: ${descricao}`);
+      res.json({ success: true, atividade: rows[0] });
+    } catch (e) {
+      console.error('[POST /api/compras/atividade-produto] erro:', e);
+      res.status(500).json({ error: 'Falha ao criar atividade do produto' });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Listar atividades específicas de um produto
+  router.get('/atividades-produto/:codigo', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { codigo } = req.params;
+      
+      const { rows } = await client.query(`
+        SELECT 
+          ap.id,
+          ap.produto_codigo,
+          ap.descricao AS nome,
+          ap.observacoes,
+          ap.ativo,
+          ap.criado_em,
+          COALESCE(aps.concluido, false) AS concluido,
+          COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
+          COALESCE(aps.observacao_status, '') AS observacao_status,
+          aps.atualizado_em
+        FROM compras.atividades_produto ap
+        LEFT JOIN compras.atividades_produto_status_especificas aps
+          ON aps.atividade_produto_id = ap.id AND aps.produto_codigo = ap.produto_codigo
+        WHERE ap.produto_codigo = $1 AND ap.ativo = true
+        ORDER BY ap.criado_em DESC
+      `, [codigo]);
+      
+      res.json({ atividades: rows });
+    } catch (e) {
+      console.error('[GET /api/compras/atividades-produto] erro:', e);
+      res.status(500).json({ error: 'Falha ao buscar atividades do produto' });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Salvar status das atividades específicas do produto em bulk
+  router.post('/atividade-produto-status/bulk', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { produto_codigo, itens } = req.body || {};
+      if (!produto_codigo || !Array.isArray(itens)) {
+        return res.status(400).json({ error: 'produto_codigo e itens são obrigatórios' });
+      }
+      
+      await client.query('BEGIN');
+      
+      for (const it of itens) {
+        const { atividade_produto_id, concluido, nao_aplicavel, observacao } = it;
+        const data_conclusao = concluido ? new Date() : null;
+        
+        await client.query(`
+          INSERT INTO compras.atividades_produto_status_especificas
+            (produto_codigo, atividade_produto_id, concluido, nao_aplicavel, observacao_status, data_conclusao)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (produto_codigo, atividade_produto_id)
+          DO UPDATE SET
+            concluido = EXCLUDED.concluido,
+            nao_aplicavel = EXCLUDED.nao_aplicavel,
+            observacao_status = EXCLUDED.observacao_status,
+            data_conclusao = EXCLUDED.data_conclusao,
+            atualizado_em = NOW()
+        `, [produto_codigo, atividade_produto_id, !!concluido, !!nao_aplicavel, observacao || '', data_conclusao]);
+      }
+      
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch (e) {
+      await (async () => { try { await client.query('ROLLBACK'); } catch(_){} })();
+      console.error('[POST /api/compras/atividade-produto-status/bulk] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
   return router;
 };
