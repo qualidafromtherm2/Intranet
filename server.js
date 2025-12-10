@@ -1080,6 +1080,18 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
   }
 });
 
+// Endpoint: usuários ativos (auth_user)
+app.get('/api/usuarios/ativos', async (req, res) => {
+  try {
+    const query = `SELECT username FROM public.auth_user WHERE is_active = true ORDER BY username ASC`;
+    const { rows } = await pool.query(query);
+    res.json({ usuarios: rows });
+  } catch (err) {
+    console.error('[API] /api/usuarios/ativos erro:', err);
+    res.status(500).json({ error: 'Falha ao listar usuários ativos' });
+  }
+});
+
 
 // === Busca total de registros da Omie para gerar código sequencial ===========
 app.get('/api/produtos/total-omie', async (req, res) => {

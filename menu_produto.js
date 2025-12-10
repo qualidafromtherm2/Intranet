@@ -8510,6 +8510,24 @@ btnCache.addEventListener('click', async e => {
 })();
 
 // ===== CHECK-PROJ (Checklist de Engenharia por Produto) =====
+(async function initUsuariosResponsaveis() {
+  // cache simples para usuários ativos
+  window.getUsuariosAtivos = async () => {
+    if (window._usuariosAtivosCache) return window._usuariosAtivosCache;
+    try {
+      const res = await fetch('/api/usuarios/ativos');
+      if (!res.ok) throw new Error('Falha ao carregar usuários');
+      const data = await res.json();
+      window._usuariosAtivosCache = data.usuarios || [];
+      return window._usuariosAtivosCache;
+    } catch (e) {
+      console.error('[Usuarios Ativos] Erro:', e);
+      window._usuariosAtivosCache = [];
+      return [];
+    }
+  };
+})();
+
 (function initCheckProj() {
   const listaEl = () => document.getElementById('checkProjLista');
   const loadingEl = () => document.getElementById('checkProjLoading');
@@ -8525,7 +8543,9 @@ btnCache.addEventListener('click', async e => {
     if (progressText()) progressText().textContent = `${done}/${total} concluídas (${pct}%)`;
   }
 
-  function renderLista(atividades) {
+  async function renderLista(atividades) {
+    const usuarios = await (window.getUsuariosAtivos ? window.getUsuariosAtivos() : Promise.resolve([]));
+    const optionsUsuarios = ['<option value="">Responsável</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
     const root = listaEl();
     if (!root) return;
     root.innerHTML = '';
@@ -8566,7 +8586,10 @@ btnCache.addEventListener('click', async e => {
             </label>
           </div>
           <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${descricaoAtividade || '<em>Sem descrição</em>'}</div>
-          <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="sel-resp" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
+              ${optionsUsuarios}
+            </select>
             <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao_status || a.observacao || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
             <span class="status-data" style="font-size:12px; color:${a.concluido ? '#16a34a' : 'var(--inactive-color)'};">
               ${a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : ''}
@@ -8636,7 +8659,7 @@ btnCache.addEventListener('click', async e => {
         ...atividadesProduto.map(a => ({ ...a, atividade_id: null, atividade_produto_id: a.id, origem: 'produto' }))
       ];
       
-      renderLista(atividadesMescladas);
+      await renderLista(atividadesMescladas);
       
       if (infoEl()) {
         const totalFamilia = atividadesFamilia.length;
@@ -8832,7 +8855,9 @@ btnCache.addEventListener('click', async e => {
     if (progressText()) progressText().textContent = `${done}/${total} concluídas (${pct}%)`;
   }
 
-  function renderLista(atividades) {
+  async function renderLista(atividades) {
+    const usuarios = await (window.getUsuariosAtivos ? window.getUsuariosAtivos() : Promise.resolve([]));
+    const optionsUsuarios = ['<option value="">Responsável</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
     const root = listaEl();
     if (!root) return;
     root.innerHTML = '';
@@ -8873,7 +8898,10 @@ btnCache.addEventListener('click', async e => {
             </label>
           </div>
           <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${descricaoAtividade || '<em>Sem descrição</em>'}</div>
-          <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="sel-resp" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
+              ${optionsUsuarios}
+            </select>
             <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao || a.observacao_status || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
             <span class="status-data" style="font-size:12px; color:${a.concluido ? '#b45309' : 'var(--inactive-color)'};">
               ${a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : ''}
@@ -8942,7 +8970,7 @@ btnCache.addEventListener('click', async e => {
         ...atividadesProduto.map(a => ({ ...a, atividade_id: null, atividade_produto_id: a.id, origem: 'produto' }))
       ];
       
-      renderLista(atividadesMescladas);
+      await renderLista(atividadesMescladas);
       
       if (infoEl()) {
         const totalFamilia = atividadesFamilia.length;
