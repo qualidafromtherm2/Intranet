@@ -87,11 +87,14 @@ router.get('/detalhe', async (req, res) => {
         p.modelo,
         p.descr_detalhada,
         p.obs_internas,
+        p.visivel_principal,
+        p.tipo_compra,
         p.inativo,
         p.bloqueado,
         p.bloquear_exclusao,
         p.quantidade_estoque,
         p.valor_unitario,
+        p.preco_definido,
         p.dalt, p.halt, p.dinc, p.hinc, p.ualt, p.uinc,
         p.codigo_familia,
         p.codint_familia
@@ -132,6 +135,8 @@ router.get('/detalhe', async (req, res) => {
       modelo:            r.modelo,
       descr_detalhada:   r.descr_detalhada,
       obs_internas:      r.obs_internas,
+      visivel_principal: r.visivel_principal,
+      tipo_compra:       r.tipo_compra,
 
       // — Cadastro —
       bloqueado:          r.bloqueado,
@@ -150,6 +155,7 @@ router.get('/detalhe', async (req, res) => {
       // — Outras infos úteis ao banner e editors —
       quantidade_estoque: r.quantidade_estoque,
       valor_unitario:     r.valor_unitario,
+      preco_definido:     r.preco_definido,
       info: {
         uAlt: r.ualt, dAlt: r.dalt, hAlt: r.halt,
         uInc: r.uinc, dInc: r.dinc, hInc: r.hinc
@@ -165,6 +171,80 @@ router.get('/detalhe', async (req, res) => {
   } catch (err) {
     console.error('[produtos/detalhe] erro →', err);
     return res.status(500).json({ error: 'Falha ao consultar detalhes do produto (SQL).' });
+  }
+});
+
+// ============================================================================
+// POST /api/produtos/locais
+// Atualiza campos que existem só no Postgres (não enviados à Omie).
+// Espera body: { codigo, visivel_principal, tipo_compra }
+// ============================================================================
+router.post('/locais', async (req, res) => {
+  try {
+    const codigo = String(req.body?.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ error: 'codigo é obrigatório' });
+
+      const setClauses = [];
+      const values = [codigo];
+
+      // Normaliza visivel_principal para boolean ou null (só aplica se veio no body)
+      if (req.body.hasOwnProperty('visivel_principal')) {
+        const vpRaw = req.body?.visivel_principal;
+        const vpNorm =
+          vpRaw === true || String(vpRaw).trim().toUpperCase() === 'S' || String(vpRaw).trim().toUpperCase() === 'SIM'
+            ? true
+            : (vpRaw === false || String(vpRaw).trim().toUpperCase() === 'N' || String(vpRaw).trim().toUpperCase() === 'NAO' || String(vpRaw).trim().toUpperCase() === 'NÃO'
+                ? false
+                : null);
+        setClauses.push(`visivel_principal = $${values.length + 1}`);
+        values.push(vpNorm);
+      }
+
+      // Normaliza tipo_compra para valores conhecidos ou null (só aplica se veio no body)
+      if (req.body.hasOwnProperty('tipo_compra')) {
+        const tipoRaw = String(req.body?.tipo_compra || '').trim().toUpperCase();
+        const tipoAllowed = new Set(['AUTOMATICA', 'SEMIAUTOMATICA', 'MANUAL']);
+        const tipoNorm = tipoAllowed.has(tipoRaw) ? tipoRaw : null;
+        setClauses.push(`tipo_compra = $${values.length + 1}`);
+        values.push(tipoNorm);
+      }
+
+      // Normaliza preco_definido (moeda) para numeric ou null (só aplica se veio no body)
+      if (req.body.hasOwnProperty('preco_definido')) {
+        const precoRaw = req.body?.preco_definido;
+        const num = Number(String(precoRaw).replace(',', '.'));
+        const precoNorm = Number.isFinite(num) ? num : null;
+        setClauses.push(`preco_definido = $${values.length + 1}`);
+        values.push(precoNorm);
+      }
+
+      if (!setClauses.length) {
+        return res.status(400).json({ error: 'Nenhum campo enviado para atualização.' });
+      }
+
+      setClauses.push("ualt = COALESCE(ualt, 'portal')");
+      setClauses.push('dalt = COALESCE(dalt, NOW()::date)');
+      setClauses.push('halt = COALESCE(halt, NOW()::time)');
+
+      const { rows } = await dbQuery(
+        `UPDATE public.produtos_omie
+           SET ${setClauses.join(', ')}
+         WHERE codigo = $1
+         RETURNING codigo_produto, visivel_principal, tipo_compra;`,
+        values
+      );
+
+    if (!rows.length) return res.status(404).json({ error: 'Produto não encontrado no Postgres.' });
+
+    res.json({
+      ok: true,
+      codigo_produto: rows[0].codigo_produto,
+      visivel_principal: rows[0].visivel_principal,
+      tipo_compra: rows[0].tipo_compra
+    });
+  } catch (err) {
+    console.error('[produtos/locais] erro →', err);
+    res.status(500).json({ error: 'Falha ao atualizar campos locais.' });
   }
 });
 

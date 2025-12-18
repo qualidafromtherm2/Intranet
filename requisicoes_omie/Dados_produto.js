@@ -6,6 +6,9 @@ import {
   attachEditor,
   attachSelectEditor,
   attachTipoItemEditor,
+  attachVisivelPrincipalEditor,
+  attachTipoCompraEditor,
+  attachPrecoDefinidoEditor,
   ensureSaveAllBtn
 } from './editar_produto.js';
 
@@ -561,7 +564,10 @@ camposCompras.forEach(f => {
     { key: 'marca',             label: 'Marca'             },
     { key: 'modelo',            label: 'Modelo'            },
     { key: 'descr_detalhada',   label: 'Descrição detalhada'},
-    { key: 'obs_internas',      label: 'Obs internas'      }
+    { key: 'obs_internas',      label: 'Obs internas'      },
+    { key: 'visivel_principal', label: 'Visível como principal?' },
+    { key: 'tipo_compra',       label: 'Tipo de compra' },
+    { key: 'preco_definido',    label: 'Preço definido' }
   ];
 
   // === garante que o carrossel use SEMPRE o código numérico ===
@@ -577,9 +583,27 @@ try {
   ulDetalhes.innerHTML = '';
   camposDetalhes.forEach(f => {
     const raw = f.key.split('.').reduce((o,k)=>o?.[k], dados) ?? '';
-    const val = (f.key === 'valor_unitario' && raw !== '')
-      ? Number(raw).toLocaleString('pt-BR',{ style:'currency',currency:'BRL' })
-      : raw;
+    let val = raw;
+    if (f.key === 'valor_unitario' && raw !== '') {
+      val = Number(raw).toLocaleString('pt-BR',{ style:'currency',currency:'BRL' });
+    } else if (f.key === 'preco_definido' && raw !== '') {
+      const num = Number(String(raw).replace(',', '.'));
+      val = Number.isFinite(num)
+        ? num.toLocaleString('pt-BR',{ style:'currency',currency:'BRL' })
+        : raw;
+    } else if (f.key === 'visivel_principal') {
+      const norm = String(raw).trim().toUpperCase();
+      val = norm === 'S' || norm === 'SIM' || raw === true ? 'Sim'
+        : (norm === 'N' || norm === 'NAO' || norm === 'NÃO' || raw === false ? 'Não' : '');
+    } else if (f.key === 'tipo_compra') {
+      const map = {
+        'AUTOMATICA': 'Automática',
+        'SEMIAUTOMATICA': 'Semiautomática',
+        'MANUAL': 'Manual'
+      };
+      const norm = String(raw).trim().toUpperCase();
+      val = map[norm] || raw;
+    }
     const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
     const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
     const li = document.createElement('li');
@@ -595,6 +619,9 @@ try {
     if (canEdit) {
       if (f.key === 'descricao_familia') attachSelectEditor(li, f, raw);
       else if (f.key === 'tipoItem') attachTipoItemEditor(li, f, raw);
+      else if (f.key === 'visivel_principal') attachVisivelPrincipalEditor(li, f, raw);
+      else if (f.key === 'tipo_compra') attachTipoCompraEditor(li, f, raw);
+      else if (f.key === 'preco_definido') attachPrecoDefinidoEditor(li, f, raw);
       else attachEditor(li, f);
     }
   });

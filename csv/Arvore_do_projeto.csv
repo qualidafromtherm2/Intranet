@@ -24,6 +24,10 @@ pm2 restart intranet_api
 pm2 logs intranet_api
 
 
+"para rodar o SITE AT"
+cd ~/Projetos/intranet/Site_AT
+PORT=3000 npm start   # ou 3000 se estiver livre
+
 Metodo de orientação (para que a Omie me guie no modo padrão):"
 Segue meu projeto em .zip, ele esta inteiro para vc consultar.
 ao longo de nossas modificações, consulte ele para entender como meu projeto funcniona.

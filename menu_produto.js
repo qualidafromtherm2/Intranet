@@ -1222,8 +1222,13 @@ function renderAlmoxTable(arr) {
   tbody.innerHTML = '';
 
   let somaCMC = 0;
+  let somaPrecoDef = 0;
   arr.forEach(p => {
-    somaCMC += parseFloat(p.cmc);  // acumula total
+    const cmcNum   = Number(p.cmc)   || 0;
+    const fisicoNum = Number(p.fisico) || 0;
+    somaCMC += cmcNum * fisicoNum;  // acumula total ponderado pelo físico
+    const precoDefNum = p.preco_definido != null ? Number(p.preco_definido) : 0;
+    somaPrecoDef += precoDefNum * fisicoNum;
 
     const tr = document.createElement('tr');
     tr.dataset.codigo    = p.codigo || '';
@@ -1232,6 +1237,7 @@ function renderAlmoxTable(arr) {
     tr.dataset.fisico    = fmtBR.format(p.fisico);
   tr.dataset.saldo     = fmtBR.format(p.saldo);
   tr.dataset.cmc       = fmtBR.format(p.cmc);
+  tr.dataset.precoDefinido = p.preco_definido != null ? fmtBR.format(p.preco_definido) : '';
   tr.dataset.codOmie   = p.codOmie || '';
   tr.dataset.origem    = p.origem || almoxLocalAtual || '';
   tr.dataset.familiaCodigo = p.familiaCodigo || '';
@@ -1242,7 +1248,8 @@ function renderAlmoxTable(arr) {
       <td class="num">${fmtBR.format(p.min)}</td>
       <td class="num">${fmtBR.format(p.fisico)}</td>
       <td class="num">${fmtBR.format(p.saldo)}</td>
-      <td class="num">R$ ${fmtBR.format(p.cmc)}</td>`;
+      <td class="num">R$ ${fmtBR.format(p.cmc)}</td>
+      <td class="num">${p.preco_definido != null ? 'R$ ' + fmtBR.format(p.preco_definido) : ''}</td>`;
     tbody.appendChild(tr);
   });
 
@@ -1252,6 +1259,10 @@ function renderAlmoxTable(arr) {
   /* total CMC */
   document.getElementById('almoxCmcTotal').textContent =
     `Total CMC: R$ ${fmtBR.format(somaCMC)}`;
+  const precoDefEl = document.getElementById('almoxPrecoDefTotal');
+  if (precoDefEl) {
+    precoDefEl.textContent = `Total Vlr definido: R$ ${fmtBR.format(somaPrecoDef)}`;
+  }
 }
 
 // Controle de botões que exigem login
@@ -1329,7 +1340,7 @@ function aplicarFiltroAlmox() {
       let valB = b[almoxSortField];
       
       // Converte para número se o campo for numérico
-      if (['min', 'fisico', 'saldo', 'cmc'].includes(almoxSortField)) {
+      if (['min', 'fisico', 'saldo', 'cmc', 'preco_definido'].includes(almoxSortField)) {
         valA = parseFloat(valA) || 0;
         valB = parseFloat(valB) || 0;
       } else {
@@ -4239,7 +4250,7 @@ let almoxDataLoaded = false;
 /* ====================================================== */
 async function carregarAlmoxarifado() {
   const tbody = document.querySelector('#tbl-almoxarifado tbody');
-  tbody.innerHTML = '<tr><td colspan="6">⏳ Carregando…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7">⏳ Carregando…</td></tr>';
 
   try {
     const resp = await fetch('/api/armazem/almoxarifado', {
@@ -4266,7 +4277,7 @@ async function carregarAlmoxarifado() {
     document.getElementById('almoxPageInfo').textContent = '1 / 1';
   } catch (err) {
     console.error(err);
-    tbody.innerHTML = '<tr><td colspan="6">⚠️ Erro ao carregar dados</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7">⚠️ Erro ao carregar dados</td></tr>';
   }
 }
 
@@ -4832,8 +4843,322 @@ document.getElementById('menu-solicitacao-transferencia')?.addEventListener('cli
   await window.openSolicitacoesTransferencia?.();
 });
 
+document.getElementById('menu-recebimento')?.addEventListener('click', async e => {
+  e.preventDefault();
+  showMainTab('recebimentoPane');
+  await loadComprasRecebimento();
+});
+
+// SAC: abre painel de solicitação de envio e permite anexar até 2 arquivos
+const sacMenuLink = document.getElementById('menu-sac-solicitacao-envio');
+if (sacMenuLink) {
+  sacMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    sacMenuLink.classList.add('is-active');
+    showMainTab('sacSolicitacaoEnvioPane');
+  });
+}
+
+const sacAttachEtiquetaBtn = document.getElementById('sacAttachEtiquetaBtn');
+const sacAttachDeclaracaoBtn = document.getElementById('sacAttachDeclaracaoBtn');
+const sacFileInputEtiqueta = document.getElementById('sacFileInputEtiqueta');
+const sacFileInputDeclaracao = document.getElementById('sacFileInputDeclaracao');
+const sacFileInfoEtiqueta = document.getElementById('sacFileInfoEtiqueta');
+const sacFileInfoDeclaracao = document.getElementById('sacFileInfoDeclaracao');
+const sacSendBtn = document.getElementById('sacSendBtn');
+const sacEnvioStatus = document.getElementById('sacEnvioStatus');
+const sacObservacao = document.getElementById('sacObservacao');
+const sacRefreshBtn = document.getElementById('sacRefreshBtn');
+const sacTabelaBody = document.getElementById('sacTabelaBody');
+const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
+const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaTabelaBodyPane');
+const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
+const sacStatusOptions = ['Pendente', 'Aguardando correios', 'Enviado', 'Finalizado'];
+// Preenche status de rastreio nas células com data-rastreio
+async function preencherStatusRastreio(container) {
+  if (!container) return;
+  const spans = container.querySelectorAll('[data-rastreio]');
+  spans.forEach(async (el) => {
+    const codigoRaw = (el.getAttribute('data-rastreio') || '').trim();
+    const codigo = codigoRaw.replace(/\s+/g, '').toUpperCase();
+    if (!codigo || !/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(codigo)) {
+      return; // não é código válido de rastreio
+    }
+    el.textContent = 'Consultando...';
+    try {
+      const resp = await fetch(`/api/sac/rastreio/${encodeURIComponent(codigo)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || `Falha ao consultar (${resp.status})`);
+      const partes = [];
+      if (data.status) partes.push(data.status);
+      if (data.detalhe) partes.push(data.detalhe);
+      const local = [data.local, data.cidade, data.uf].filter(Boolean).join(' - ');
+      if (local) partes.push(local);
+      if (data.quando) partes.push(new Date(data.quando).toLocaleString('pt-BR'));
+      el.textContent = partes.length ? partes.join(' | ') : 'Sem atualização';
+    } catch (err) {
+      console.error('[SAC] erro rastreio', err);
+      el.textContent = err?.message || 'Erro ao consultar';
+    }
+  });
+}
+
+
+const normalizeSacStatus = (val) => {
+  const status = String(val || '').trim();
+  const found = sacStatusOptions.find(opt => opt.toLowerCase() === status.toLowerCase());
+  return found || sacStatusOptions[0];
+};
+
+const formatFile = (f) => `${f.name} (${Math.round(f.size / 1024)} KB)`;
+
+if (sacAttachEtiquetaBtn && sacFileInputEtiqueta) {
+  sacAttachEtiquetaBtn.addEventListener('click', () => {
+    sacFileInputEtiqueta.value = '';
+    sacFileInputEtiqueta.click();
+  });
+  sacFileInputEtiqueta.addEventListener('change', () => {
+    const f = sacFileInputEtiqueta.files?.[0];
+    if (f) {
+      const name = f.name.toLowerCase();
+      if (!name.includes('etiqueta')) {
+        alert('Selecione o arquivo de ETIQUETA (nome deve conter "etiqueta").');
+        sacFileInputEtiqueta.value = '';
+        sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
+        return;
+      }
+    }
+    sacFileInfoEtiqueta.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
+  });
+}
+
+if (sacAttachDeclaracaoBtn && sacFileInputDeclaracao) {
+  sacAttachDeclaracaoBtn.addEventListener('click', () => {
+    sacFileInputDeclaracao.value = '';
+    sacFileInputDeclaracao.click();
+  });
+  sacFileInputDeclaracao.addEventListener('change', () => {
+    const f = sacFileInputDeclaracao.files?.[0];
+    if (f) {
+      const name = f.name.toLowerCase();
+      if (!name.startsWith('declaracao') && !name.includes('declaracao')) {
+        alert('Selecione o arquivo de DECLARAÇÃO (nome deve começar ou conter "declaracao").');
+        sacFileInputDeclaracao.value = '';
+        sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
+        return;
+      }
+    }
+    sacFileInfoDeclaracao.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
+  });
+}
+
+if (sacSendBtn) {
+  sacSendBtn.addEventListener('click', async () => {
+    const userName = document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+    const observacao = sacObservacao?.value?.trim() || '';
+    const etiqueta = sacFileInputEtiqueta?.files?.[0] || null;
+    const declaracao = sacFileInputDeclaracao?.files?.[0] || null;
+
+    const setStatus = (text, isError = false) => {
+      if (!sacEnvioStatus) return;
+      sacEnvioStatus.style.display = text ? 'inline' : 'none';
+      sacEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+      sacEnvioStatus.textContent = text || '';
+    };
+
+    if (!userName) {
+      alert('Usuário não identificado. Faça login novamente.');
+      return;
+    }
+
+    if (!etiqueta || !declaracao) {
+      alert('Selecione exatamente 2 arquivos: Etiqueta e Declaração de conteúdo.');
+      return;
+    }
+
+    sacSendBtn.disabled = true;
+    setStatus('Enviando...', false);
+
+    try {
+      const formData = new FormData();
+      formData.append('usuario', userName);
+      formData.append('observacao', observacao);
+      formData.append('anexos', etiqueta);
+      formData.append('anexos', declaracao);
+
+      const resp = await fetch('/api/sac/solicitacoes', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      const ok = resp.ok && data.ok !== false;
+      if (ok) {
+        setStatus('Solicitação registrada.', false);
+        if (sacFileInputEtiqueta) sacFileInputEtiqueta.value = '';
+        if (sacFileInputDeclaracao) sacFileInputDeclaracao.value = '';
+        if (sacFileInfoEtiqueta) sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
+        if (sacFileInfoDeclaracao) sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
+        sacObservacao.value = '';
+        try { await carregarSacSolicitacoes(); } catch {}
+      } else {
+        setStatus(data.error || 'Falha ao registrar.', true);
+      }
+    } catch (err) {
+      console.error('[SAC] erro ao registrar envio', err);
+      setStatus(err?.message || 'Erro ao registrar.', true);
+    } finally {
+      sacSendBtn.disabled = false;
+    }
+  });
+}
+
+async function carregarSacSolicitacoes(targetBody) {
+  const bodyEl = targetBody || sacTabelaBody;
+  if (!bodyEl) return;
+  bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  try {
+    const resp = await fetch('/api/sac/solicitacoes');
+    const data = await resp.json();
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+    const rows = data.rows || [];
+    if (!rows.length) {
+      bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>';
+      return;
+    }
+    bodyEl.innerHTML = rows.map(r => {
+      const dataFmt = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '—';
+      const obs = r.observacao || '—';
+      const status = normalizeSacStatus(r.status);
+      const etiqueta = r.etiqueta_url || r.etiqueta || '';
+      const declaracao = r.declaracao_url || r.declaracao || '';
+      const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
+      const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
+      const isRastreio = /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(identClean);
+      const isFinalizado = status.toLowerCase() === 'finalizado';
+      const rastStatus = r.rastreio_status ? String(r.rastreio_status).trim() : '';
+      const rastQuando = r.rastreio_quando ? new Date(r.rastreio_quando).toLocaleString('pt-BR') : '';
+      const finalizadoEm = r.finalizado_em ? new Date(r.finalizado_em).toLocaleString('pt-BR') : '';
+      const rastStatusDisplay = isFinalizado ? (rastStatus || 'Objeto entregue ao destinatário') : rastStatus;
+      const rastQuandoDisplay = isFinalizado ? (finalizadoEm || rastQuando) : rastQuando;
+      const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
+      const conteudo = r.conteudo || '—';
+      const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
+      const buttons = [
+        etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
+        declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
+      ].filter(Boolean).join(' ');
+      const statusSelect = `
+        <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
+          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === status ? 'selected' : ''}>${opt}</option>`).join('')}
+        </select>`;
+      return `
+        <tr>
+          <td>${r.id}</td>
+          <td>${dataFmt}</td>
+          <td style="max-width:280px;">${obs}</td>
+          <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+          <td style="max-width:260px;">${conteudo}</td>
+          <td>${statusSelect}</td>
+          <td>${buttons || '—'}</td>
+        </tr>`;
+    }).join('');
+    preencherStatusRastreio(bodyEl);
+  } catch (err) {
+    console.error('[SAC] erro ao carregar tabela', err);
+    bodyEl.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
+  }
+}
+
+sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody));
+envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane));
+
+// Carrega registros ao abrir o painel SAC
+if (sacMenuLink) {
+  sacMenuLink.addEventListener('click', () => {
+    setTimeout(() => { carregarSacSolicitacoes(sacTabelaBody); }, 50);
+  }, { once: true });
+}
+
+if (envioMercadoriaMenu) {
+  envioMercadoriaMenu.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    envioMercadoriaMenu.classList.add('is-active');
+    showMainTab('envioMercadoriaPane');
+    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane);
+  });
+}
+
+// Impressão dos anexos (etiqueta/declaração) a partir dos botões da tabela
+function setupPrintButtons(container) {
+  if (!container) return;
+  container.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.btn-print-etiqueta, .btn-print-declaracao');
+    if (!btn) return;
+    ev.preventDefault();
+    const url = btn.getAttribute('data-print-url');
+    if (!url) return;
+    try {
+      const w = window.open(url, '_blank');
+      if (!w) return;
+      setTimeout(() => {
+        try { w.focus(); } catch {}
+        try { w.print(); } catch {}
+      }, 800);
+    } catch (err) {
+      console.error('[SAC] erro ao abrir para impressão', err);
+    }
+  });
+}
+
+setupPrintButtons(sacTabelaBody);
+setupPrintButtons(envioMercadoriaTabelaBodyPane);
+
+// Persistência de status diretamente pela tabela
+document.addEventListener('focusin', (ev) => {
+  const sel = ev.target.closest('.sac-status-select');
+  if (sel) sel.dataset.prev = sel.value;
+});
+
+document.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('.sac-status-select');
+  if (!sel) return;
+
+  const id = sel.getAttribute('data-id');
+  if (!id) return;
+
+  const novoStatus = normalizeSacStatus(sel.value);
+  const anterior = sel.dataset.prev || sel.value;
+
+  sel.disabled = true;
+  sel.value = novoStatus;
+
+  try {
+    const resp = await fetch(`/api/sac/solicitacoes/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: novoStatus })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao atualizar');
+    sel.dataset.prev = novoStatus;
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar status', err);
+    alert('Não foi possível atualizar o status. ' + (err?.message || ''));
+    sel.value = anterior;
+  } finally {
+    sel.disabled = false;
+  }
+});
+
 document.getElementById('solicitacoesTransferRefresh')?.addEventListener('click', () => {
   carregarSolicitacoesTransferencias(true);
+});
+
+document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
+  await loadComprasRecebimento();
 });
 
 // Ao abrir "Cadastro de colaboradores", mostra a aba e injeta o botão "+"
@@ -8546,6 +8871,12 @@ btnCache.addEventListener('click', async e => {
   async function renderLista(atividades) {
     const usuarios = await (window.getUsuariosAtivos ? window.getUsuariosAtivos() : Promise.resolve([]));
     const optionsUsuarios = ['<option value="">Responsável</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
+    const optionsAutores = ['<option value="">Autor</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
+    const formatDateInput = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    };
     const root = listaEl();
     if (!root) return;
     root.innerHTML = '';
@@ -8566,6 +8897,9 @@ btnCache.addEventListener('click', async e => {
       // Nome da atividade (usa nome_atividade para família, nome para produto)
       const nomeAtividade = a.nome_atividade || a.nome || 'Sem nome';
       const descricaoAtividade = a.descricao_atividade || a.observacoes || '';
+      const prazoDisplay = formatDateInput(a.prazo);
+      const autorDisplay = a.autor || '-';
+      const respDisplay = a.responsavel || '-';
       
       // Badge "ESPECÍFICA" para atividades do produto
       const badgeEspecifica = a.origem === 'produto' 
@@ -8585,11 +8919,22 @@ btnCache.addEventListener('click', async e => {
               <input type="checkbox" class="chk-na" ${a.nao_aplicavel ? 'checked' : ''} style="accent-color:#f59e0b; width:16px; height:16px;"/> Não se aplica
             </label>
           </div>
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:10px; font-size:12px; color:#1f2937;">
+            <span style="background:#ecfdf3; color:#065f46; padding:4px 8px; border-radius:6px;">Autor: <strong>${autorDisplay}</strong></span>
+            <span style="background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px;">Responsável: <strong>${respDisplay}</strong></span>
+            <span style="background:#fff7ed; color:#9a3412; padding:4px 8px; border-radius:6px;">Prazo: <strong>${prazoDisplay || '-'}</strong></span>
+          </div>
           <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${descricaoAtividade || '<em>Sem descrição</em>'}</div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="sel-autor" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
+              ${optionsAutores}
+            </select>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <select class="sel-resp" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
               ${optionsUsuarios}
             </select>
+            <input type="date" class="inp-prazo" value="${formatDateInput(a.prazo)}" style="padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
             <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao_status || a.observacao || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
             <span class="status-data" style="font-size:12px; color:${a.concluido ? '#16a34a' : 'var(--inactive-color)'};">
               ${a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : ''}
@@ -8603,12 +8948,21 @@ btnCache.addEventListener('click', async e => {
       const chkNa = card.querySelector('.chk-na');
       const inpObs = card.querySelector('.inp-obs');
       const statusData = card.querySelector('.status-data');
+      const selResp = card.querySelector('.sel-resp');
+      const selAutor = card.querySelector('.sel-autor');
+      const inpPrazo = card.querySelector('.inp-prazo');
+
+      if (selResp) selResp.value = a.responsavel || '';
+      if (selAutor) selAutor.value = a.autor || '';
 
       const updateLocal = () => {
         a.concluido = chk.checked;
         a.nao_aplicavel = chkNa.checked;
         a.observacao = inpObs.value;
         a.data_conclusao = a.concluido ? (a.data_conclusao || new Date().toISOString()) : null;
+        a.responsavel = selResp?.value || null;
+        a.autor = selAutor?.value || null;
+        a.prazo = inpPrazo?.value ? inpPrazo.value : null;
         statusData.style.color = a.concluido ? '#16a34a' : 'var(--inactive-color)';
         statusData.textContent = a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : '';
         computeAndRenderProgress(atividades);
@@ -8616,6 +8970,9 @@ btnCache.addEventListener('click', async e => {
       chk.addEventListener('change', updateLocal);
       chkNa.addEventListener('change', updateLocal);
       inpObs.addEventListener('change', updateLocal);
+      selResp?.addEventListener('change', updateLocal);
+      selAutor?.addEventListener('change', updateLocal);
+      inpPrazo?.addEventListener('change', updateLocal);
 
       card.dataset.atividadeId = a.atividade_id || a.id;
       card.dataset.origem = a.origem;
@@ -8691,7 +9048,10 @@ btnCache.addEventListener('click', async e => {
       const data = {
         concluido: card.querySelector('.chk-concluido')?.checked || false,
         nao_aplicavel: card.querySelector('.chk-na')?.checked || false,
-        observacao: card.querySelector('.inp-obs')?.value || ''
+        observacao: card.querySelector('.inp-obs')?.value || '',
+        responsavel: card.querySelector('.sel-resp')?.value || null,
+        autor: card.querySelector('.sel-autor')?.value || null,
+        prazo: card.querySelector('.inp-prazo')?.value || null
       };
       
       if (origem === 'produto') {
@@ -8858,6 +9218,12 @@ btnCache.addEventListener('click', async e => {
   async function renderLista(atividades) {
     const usuarios = await (window.getUsuariosAtivos ? window.getUsuariosAtivos() : Promise.resolve([]));
     const optionsUsuarios = ['<option value="">Responsável</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
+    const optionsAutores = ['<option value="">Autor</option>', ...usuarios.map(u => `<option value="${u.username}">${u.username}</option>`)].join('');
+    const formatDateInput = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
+      return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+    };
     const root = listaEl();
     if (!root) return;
     root.innerHTML = '';
@@ -8878,6 +9244,9 @@ btnCache.addEventListener('click', async e => {
       // Nome da atividade (usa nome_atividade para família, nome para produto)
       const nomeAtividade = a.nome_atividade || a.nome || 'Sem nome';
       const descricaoAtividade = a.descricao_atividade || a.observacoes || '';
+      const prazoDisplay = formatDateInput(a.prazo);
+      const autorDisplay = a.autor || '-';
+      const respDisplay = a.responsavel || '-';
       
       // Badge "ESPECÍFICA" para atividades do produto
       const badgeEspecifica = a.origem === 'produto' 
@@ -8897,11 +9266,22 @@ btnCache.addEventListener('click', async e => {
               <input type="checkbox" class="chk-na" ${a.nao_aplicavel ? 'checked' : ''} style="accent-color:#f59e0b; width:16px; height:16px;"/> Não se aplica
             </label>
           </div>
+          <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:10px; font-size:12px; color:#1f2937;">
+            <span style="background:#ecfdf3; color:#065f46; padding:4px 8px; border-radius:6px;">Autor: <strong>${autorDisplay}</strong></span>
+            <span style="background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px;">Responsável: <strong>${respDisplay}</strong></span>
+            <span style="background:#fff7ed; color:#9a3412; padding:4px 8px; border-radius:6px;">Prazo: <strong>${prazoDisplay || '-'}</strong></span>
+          </div>
           <div style="margin-top:6px; color: var(--inactive-color); font-size:13px;">${descricaoAtividade || '<em>Sem descrição</em>'}</div>
           <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select class="sel-autor" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
+              ${optionsAutores}
+            </select>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <select class="sel-resp" style="min-width:180px; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
               ${optionsUsuarios}
             </select>
+            <input type="date" class="inp-prazo" value="${formatDateInput(a.prazo)}" style="padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;">
             <input type="text" class="inp-obs" placeholder="Observação (opcional)" value="${(a.observacao || a.observacao_status || '').replaceAll('"','&quot;')}" style="flex:1; padding:8px 10px; border:2px solid var(--border-color); border-radius:8px; background:#fff; color:#1f2937; font-size:13px;"/>
             <span class="status-data" style="font-size:12px; color:${a.concluido ? '#b45309' : 'var(--inactive-color)'};">
               ${a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : ''}
@@ -8913,12 +9293,21 @@ btnCache.addEventListener('click', async e => {
       const chkNa = card.querySelector('.chk-na');
       const inpObs = card.querySelector('.inp-obs');
       const statusData = card.querySelector('.status-data');
+      const selResp = card.querySelector('.sel-resp');
+      const selAutor = card.querySelector('.sel-autor');
+      const inpPrazo = card.querySelector('.inp-prazo');
+
+      if (selResp) selResp.value = a.responsavel || '';
+      if (selAutor) selAutor.value = a.autor || '';
       
       const updateLocal = () => {
         a.concluido = chk.checked;
         a.nao_aplicavel = chkNa.checked;
         a.observacao = inpObs.value;
         a.data_conclusao = a.concluido ? (a.data_conclusao || new Date().toISOString()) : null;
+        a.responsavel = selResp?.value || null;
+        a.autor = selAutor?.value || null;
+        a.prazo = inpPrazo?.value ? inpPrazo.value : null;
         statusData.style.color = a.concluido ? '#b45309' : 'var(--inactive-color)';
         statusData.textContent = a.concluido && a.data_conclusao ? new Date(a.data_conclusao).toLocaleString('pt-BR') : '';
         computeAndRenderProgress(atividades);
@@ -8927,6 +9316,9 @@ btnCache.addEventListener('click', async e => {
       chk.addEventListener('change', updateLocal);
       chkNa.addEventListener('change', updateLocal);
       inpObs.addEventListener('change', updateLocal);
+      selResp?.addEventListener('change', updateLocal);
+      selAutor?.addEventListener('change', updateLocal);
+      inpPrazo?.addEventListener('change', updateLocal);
       
       card.dataset.atividadeId = a.atividade_id || a.id;
       card.dataset.origem = a.origem;
@@ -9002,7 +9394,10 @@ btnCache.addEventListener('click', async e => {
       const data = {
         concluido: card.querySelector('.chk-concluido')?.checked || false,
         nao_aplicavel: card.querySelector('.chk-na')?.checked || false,
-        observacao: card.querySelector('.inp-obs')?.value || ''
+        observacao: card.querySelector('.inp-obs')?.value || '',
+        responsavel: card.querySelector('.sel-resp')?.value || null,
+        autor: card.querySelector('.sel-autor')?.value || null,
+        prazo: card.querySelector('.inp-prazo')?.value || null
       };
       
       if (origem === 'produto') {
@@ -9804,6 +10199,9 @@ headerLinks.forEach(link => {
     } else if (link.id === 'menu-registros') {
       if (window.openRegistros) window.openRegistros();
       
+    } else if (link.id === 'menu-compras') {
+      openComprasTab();
+      
     } else if (link.id === 'menu-inicio') {
 
   /* 1) fecha Kanban e Armazéns, se abertos */
@@ -9839,6 +10237,32 @@ if (mh) mh.style.display = 'none';
   });
 });
 
+// Eventos específicos da aba Compras
+function initComprasUI() {
+  document.getElementById('comprasForm')?.addEventListener('submit', submitComprasSolicitacao);
+  document.getElementById('comprasRefreshBtn')?.addEventListener('click', e => {
+    e.preventDefault();
+    loadComprasSolicitacoes();
+  });
+  attachComprasAutocomplete();
+  console.log('[COMPRAS] initComprasUI -> autocomplete e eventos registrados');
+
+  // Carrega usuários ativos para “Quem vai receber?”
+  fetch('/api/users/ativos', { credentials: 'include' })
+    .then(r => r.ok ? r.json() : { users: [] })
+    .then(data => {
+      comprasActiveUsers = Array.isArray(data.users) ? data.users : [];
+      loadMinhasSolicitacoes();
+    })
+    .catch(err => console.warn('[COMPRAS] Falha ao carregar usuários ativos', err));
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initComprasUI);
+} else {
+  initComprasUI();
+}
+
 /* dentro do MESMO callback que já existe */
 const bell       = document.getElementById('bell-icon');
 const printBtn   = document.getElementById('print-icon');
@@ -9846,6 +10270,7 @@ const cloudBtn   = document.getElementById('cloud-icon');
 const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
 const listaEtiq       = document.getElementById('listaEtiquetas');
+const cartBtn    = document.getElementById('cart-icon');
 
   /* –– SINO –– */
   bell?.addEventListener('click', e => {
@@ -9854,6 +10279,12 @@ const listaEtiq       = document.getElementById('listaEtiquetas');
     if (window.openChat) return window.openChat();
     // fallback (se ainda não carregou lógica do chat)
     document.getElementById('chatPane').style.display = 'block';
+  });
+
+  /* –– CARRINHO / COMPRAS –– */
+  cartBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    openComprasFormTab();
   });
 // ——— Função para abrir painel de registros de modificações de produto ———
 window.openRegistros = async function() {
@@ -11439,6 +11870,537 @@ window.setPCPProdutoCodigo?.(codigo);   // 'codigo' é o do item clicado na Come
 const header   = document.getElementById('appHeader');   // <div class="header">
 const menu     = document.getElementById('mainMenu');    // <nav …>
 
+// ---------- COMPRAS: helpers para painel de solicitações ----------
+function openComprasTab() {
+  try {
+    const comprasPane = document.getElementById('comprasPane');
+    if (!comprasPane) return;
+
+    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim() || window.__sessionUser?.username || '';
+    if (!currentUser) {
+      console.warn('[COMPRAS] Usuário não logado, ocultando painel.');
+      comprasPane.style.display = 'none';
+      return;
+    }
+
+    window.clearMainContainer?.();
+    try { hideKanban(); } catch {}
+    try { hideArmazem(); } catch {}
+
+    document.getElementById('produtoTabs')?.setAttribute('style', 'display:none');
+    document.getElementById('kanbanTabs')?.setAttribute('style', 'display:none');
+    document.getElementById('armazemTabs')?.setAttribute('style', 'display:none');
+
+    document.querySelectorAll('.header .header-menu > .menu-link')
+      .forEach(a => a.classList.remove('is-active'));
+    document.getElementById('menu-compras')?.classList.add('is-active');
+
+    window.showOnlyInMain?.(comprasPane);
+    loadComprasSolicitacoes();
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao abrir painel:', err);
+  }
+}
+
+function openComprasFormTab() {
+  try {
+    const formPane = document.getElementById('comprasFormPane');
+    if (!formPane) return;
+
+    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim() || window.__sessionUser?.username || '';
+    if (!currentUser) {
+      console.warn('[COMPRAS] Usuário não logado, ocultando formulário.');
+      formPane.style.display = 'none';
+      return;
+    }
+
+
+    window.clearMainContainer?.();
+    try { hideKanban(); } catch {}
+    try { hideArmazem(); } catch {}
+
+    document.getElementById('produtoTabs')?.setAttribute('style', 'display:none');
+    document.getElementById('kanbanTabs')?.setAttribute('style', 'display:none');
+    document.getElementById('armazemTabs')?.setAttribute('style', 'display:none');
+
+    document.querySelectorAll('.header .header-menu > .menu-link')
+      .forEach(a => a.classList.remove('is-active'));
+
+    window.showOnlyInMain?.(formPane);
+    document.getElementById('comprasCodigo')?.focus();
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao abrir formulário:', err);
+  }
+}
+
+// Helpers para formatar código e detectar links (quando o usuário digita um URL)
+function isProvavelUrl(valor) {
+  if (!valor) return false;
+  const t = String(valor).trim();
+  return /^https?:\/\//i.test(t) || /^www\./i.test(t);
+}
+
+function abreviarUrl(urlStr) {
+  try {
+    const url = new URL(urlStr.startsWith('http') ? urlStr : `http://${urlStr}`);
+    const base = `${url.hostname}${url.pathname}`.replace(/\/$/, '') || url.hostname;
+    if (base.length <= 32) return base;
+    return `${base.slice(0, 18)}...${base.slice(-10)}`;
+  } catch (_) {
+    const t = String(urlStr);
+    return t.length > 32 ? `${t.slice(0, 18)}...${t.slice(-10)}` : t;
+  }
+}
+
+function formatarCodigoParaLista(codigo) {
+  const texto = String(codigo || '').trim();
+  const ehLink = isProvavelUrl(texto);
+  if (!ehLink) {
+    return { html: escapeHtml(texto) || '-', descricaoVazia: false };
+  }
+
+  const href = texto.startsWith('http') ? texto : `http://${texto}`;
+  const label = escapeHtml(abreviarUrl(texto));
+  const seguro = encodeURI(href);
+  const title = escapeHtml(texto);
+  return {
+    html: `<a href="${seguro}" target="_blank" rel="noopener noreferrer" title="${title}">${label}</a>`,
+    descricaoVazia: true
+  };
+}
+
+async function loadComprasSolicitacoes() {
+  const tbody = document.getElementById('comprasTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  try {
+    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const lista = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    if (!lista.length) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada.</td></tr>';
+      return;
+    }
+    const statusOptions = [
+      'aguardando aprovação',
+      'aguardando compra',
+      'compra realizada',
+      'aguardando liberação',
+      'compra cancelada',
+      'recebido'
+    ];
+
+    const fmtInputDate = (iso) => {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().slice(0, 10);
+      } catch (_) {
+        return '';
+      }
+    };
+
+    tbody.innerHTML = lista.map(item => {
+      const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+      const criado = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-';
+      const previsaoValue = fmtInputDate(item.prazo_estipulado);
+      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
+      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
+      const obs = item.observacao ? escapeHtml(item.observacao) : '-';
+      return `
+        <tr>
+          <td>${item.id}</td>
+          <td>${codigoFmt.html}</td>
+          <td>${descricao}</td>
+          <td>${item.quantidade ?? '-'}</td>
+          <td>${item.solicitante || '-'}</td>
+          <td>${prazo}</td>
+          <td>
+            <input type="date" data-id="${item.id}" data-field="prazo_estipulado" value="${previsaoValue}" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;" />
+          </td>
+          <td>
+            <select data-id="${item.id}" data-field="status" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;">
+              ${statusOptions.map(opt => `<option value="${opt}" ${ (item.status || 'aguardando aprovação') === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+            </select>
+          </td>
+              <td>${obs}</td>
+          <td>${criado}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Listeners para atualizar status e previsão
+    const selects = tbody.querySelectorAll('select[data-field="status"]');
+    selects.forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const id = sel.dataset.id;
+        await updateSolicitacaoCompras(id, { status: sel.value });
+      });
+    });
+
+    const dates = tbody.querySelectorAll('input[data-field="prazo_estipulado"]');
+    dates.forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const id = inp.dataset.id;
+        await updateSolicitacaoCompras(id, { prazo_estipulado: inp.value || null });
+      });
+    });
+  } catch (err) {
+    console.error('[COMPRAS] Falha ao listar:', err);
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar solicitações.</td></tr>';
+  }
+}
+
+async function loadComprasRecebimento() {
+  const tbody = document.getElementById('recebimentoTbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  try {
+    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const lista = (Array.isArray(data.solicitacoes) ? data.solicitacoes : [])
+      .filter(item => (item.status || '').toLowerCase() === 'compra realizada');
+
+    if (!lista.length) {
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada com status "compra realizada".</td></tr>';
+      return;
+    }
+
+    const fmtInputDate = (iso) => {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().slice(0, 10);
+      } catch (_) {
+        return '';
+      }
+    };
+
+    tbody.innerHTML = lista.map(item => {
+      const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+      const criado = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-';
+      const previsao = fmtInputDate(item.prazo_estipulado);
+      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
+      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
+      const obs = item.observacao ? escapeHtml(item.observacao) : '-';
+      const quem = item.quem_recebe ? escapeHtml(item.quem_recebe) : '-';
+      return `
+        <tr>
+          <td>${item.id}</td>
+          <td>${codigoFmt.html}</td>
+          <td>${descricao}</td>
+          <td>${item.quantidade ?? '-'}</td>
+          <td>${item.solicitante || '-'}</td>
+          <td>${prazo}</td>
+          <td>${previsao ? new Date(previsao).toLocaleDateString('pt-BR') : ''}</td>
+          <td>${quem}</td>
+          <td>${escapeHtml(item.status || '-')}</td>
+          <td>${obs}</td>
+          <td>${criado}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('[recebimento] carregar', err);
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Erro ao carregar dados.</td></tr>';
+  }
+}
+
+async function loadMinhasSolicitacoes() {
+  const tbody = document.getElementById('comprasMinhasTbody');
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  if (!tbody || !wrapper) return;
+  if (!currentUser) {
+    wrapper.style.display = 'none';
+    return;
+  }
+  wrapper.style.display = 'block';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  try {
+    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const lista = (Array.isArray(data.solicitacoes) ? data.solicitacoes : []).filter(it => (it.solicitante || '').trim() === currentUser);
+    if (!lista.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação sua.</td></tr>';
+      return;
+    }
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const optionsRecebedor = (selected) => {
+      const opts = comprasActiveUsers.map(u => `<option value="${u}" ${selected === u ? 'selected' : ''}>${u}</option>`).join('');
+      return `<option value="">Selecione</option>${opts}`;
+    };
+
+    tbody.innerHTML = lista.map(item => {
+      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
+      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
+      return `
+      <tr>
+        <td>${item.id}</td>
+        <td>${codigoFmt.html}</td>
+        <td>${descricao}</td>
+        <td>${item.quantidade ?? '-'}</td>
+        <td>${fmtDate(item.prazo_solicitado)}</td>
+        <td>${fmtDate(item.prazo_estipulado)}</td>
+        <td>${item.status || 'aguardando aprovação'}</td>
+        <td>
+          <select data-id="${item.id}" data-field="quem_recebe" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;min-width:140px;">
+            ${optionsRecebedor(item.quem_recebe || '')}
+          </select>
+        </td>
+        <td>${item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-'}</td>
+      </tr>
+    `;
+    }).join('');
+
+    const selects = tbody.querySelectorAll('select[data-field="quem_recebe"]');
+    selects.forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const id = sel.dataset.id;
+        await updateSolicitacaoCompras(id, { quem_recebe: sel.value || null });
+      });
+    });
+  } catch (err) {
+    console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar suas solicitações.</td></tr>';
+  }
+}
+
+async function updateSolicitacaoCompras(id, payload) {
+  if (!id) return;
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('Falha ao atualizar');
+    await loadComprasSolicitacoes();
+    await loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('[COMPRAS] Falha ao atualizar solicitação', err);
+  }
+}
+
+async function submitComprasSolicitacao(ev) {
+  ev?.preventDefault();
+  const formStatus = document.getElementById('comprasFormStatus');
+  const codigo = document.getElementById('comprasCodigo')?.value.trim();
+  const descricaoSelecionada = document.getElementById('comprasDescricaoSelecionada')?.value || null;
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim() || window.__sessionUser?.username || '';
+  if (!codigo) {
+    if (formStatus) {
+      formStatus.style.display = 'block';
+      formStatus.style.background = '#fee2e2';
+      formStatus.style.border = '1px solid #fca5a5';
+      formStatus.textContent = 'Informe o código do produto.';
+    }
+    return;
+  }
+
+  const payload = {
+    produto_codigo: codigo,
+    produto_descricao: descricaoSelecionada,
+    quantidade: document.getElementById('comprasQuantidade')?.value || null,
+    responsavel: currentUser || null,
+    observacao: document.getElementById('comprasObservacao')?.value || null,
+    prazo_solicitado: document.getElementById('comprasPrazoSolicitado')?.value || null,
+    prazo_estipulado: null,
+    solicitante: currentUser || null
+  };
+
+  try {
+    const btn = document.getElementById('comprasSubmit');
+    if (btn) btn.disabled = true;
+    const resp = await fetch('/api/engenharia/solicitacao-compras', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error('Não foi possível salvar a solicitação');
+    const data = await resp.json();
+
+    if (formStatus) {
+      formStatus.style.display = 'block';
+      formStatus.style.background = '#dcfce7';
+      formStatus.style.border = '1px solid #86efac';
+      formStatus.style.color = '#166534';
+      formStatus.textContent = `Solicitação registrada (ID ${data.id || ''}).`;
+    }
+
+    document.getElementById('comprasCodigo').value = '';
+    document.getElementById('comprasDescricaoSelecionada').value = '';
+    document.getElementById('comprasQuantidade').value = '';
+    document.getElementById('comprasPrazoSolicitado').value = '';
+    document.getElementById('comprasObservacao').value = '';
+    document.getElementById('comprasCodigo').focus();
+
+    await loadComprasSolicitacoes();
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao enviar:', err);
+    if (formStatus) {
+      formStatus.style.display = 'block';
+      formStatus.style.background = '#fee2e2';
+      formStatus.style.border = '1px solid #fca5a5';
+      formStatus.textContent = 'Erro ao salvar a solicitação.';
+    }
+  } finally {
+    const btn = document.getElementById('comprasSubmit');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Autocomplete de código/descrição usando /api/produtos/busca (produtos_omie)
+let comprasSearchTimeout = null;
+let comprasActiveUsers = [];
+async function buscarSugestoesCompras(term) {
+  const statusEl = document.getElementById('comprasBuscaStatus');
+  console.log('[COMPRAS] buscarSugestoesCompras → termo:', term);
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.style.color = '#9ca3af';
+    statusEl.textContent = 'Buscando...';
+  }
+  try {
+    const resp = await fetch('/api/produtos/busca', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ q: term })
+    });
+    if (!resp.ok) {
+      if (statusEl) {
+        statusEl.style.color = '#ef4444';
+        statusEl.textContent = 'Erro ao buscar sugestões.';
+      }
+      console.warn('[COMPRAS] buscarSugestoesCompras → resposta não OK:', resp.status, resp.statusText);
+      return [];
+    }
+    const data = await resp.json();
+    const itens = Array.isArray(data.itens) ? data.itens : [];
+    if (statusEl) {
+      statusEl.style.color = '#9ca3af';
+      statusEl.textContent = itens.length ? `${itens.length} resultado(s)` : 'Nenhum resultado';
+    }
+    console.log(`[COMPRAS] buscarSugestoesCompras → recebidos ${itens.length} itens`, itens.slice(0, 3));
+    return itens;
+  } catch {
+    if (statusEl) {
+      statusEl.style.color = '#ef4444';
+      statusEl.textContent = 'Falha ao buscar sugestões.';
+    }
+    console.error('[COMPRAS] buscarSugestoesCompras → erro fetch', err);
+    return [];
+  }
+}
+
+function attachComprasAutocomplete() {
+  const input = document.getElementById('comprasCodigo');
+  const list = document.getElementById('comprasCodigoSugestoes');
+  const statusEl = document.getElementById('comprasBuscaStatus');
+  const hiddenDesc = document.getElementById('comprasDescricaoSelecionada');
+  if (!input || !list) return;
+
+  input.addEventListener('input', () => {
+    const term = input.value.trim();
+    if (hiddenDesc) hiddenDesc.value = '';
+    if (comprasSearchTimeout) clearTimeout(comprasSearchTimeout);
+    if (term.length < 2) {
+      list.style.display = 'none';
+      list.innerHTML = '';
+      if (statusEl) {
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#9ca3af';
+        statusEl.textContent = 'Digite pelo menos 2 caracteres';
+      }
+      return;
+    }
+    comprasSearchTimeout = setTimeout(async () => {
+      const itens = await buscarSugestoesCompras(term);
+      if (!itens.length) {
+        list.innerHTML = `<li style="padding:6px 10px;color:var(--inactive-color);">Nenhum resultado</li>`;
+        list.style.display = 'block';
+        list.style.maxHeight = '220px';
+        list.style.height = 'auto';
+        return;
+      }
+      list.innerHTML = itens.map(it => `
+        <li data-codigo="${it.codigo}" data-descricao="${(it.descricao || '').replace(/"/g, '&quot;')}" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border-color);color:#f5f5f5;line-height:1.1;">
+          <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.codigo}</div>
+          <div style="font-size:12px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || ''}</div>
+        </li>
+      `).join('');
+      list.style.display = 'block';
+      list.style.maxHeight = '220px';
+      list.style.height = 'auto';
+      list.querySelectorAll('li').forEach(li => {
+        li.addEventListener('click', () => {
+          input.value = li.dataset.codigo || '';
+          const hiddenDesc = document.getElementById('comprasDescricaoSelecionada');
+          if (hiddenDesc) hiddenDesc.value = li.dataset.descricao || '';
+          list.style.display = 'none';
+          list.innerHTML = '';
+          input.focus();
+        });
+        li.addEventListener('mouseenter', () => { li.style.background = '#1f2937'; });
+        li.addEventListener('mouseleave', () => { li.style.background = 'transparent'; });
+      });
+    }, 220);
+  });
+
+  document.addEventListener('click', e => {
+    if (!list.contains(e.target) && e.target !== input) {
+      list.style.display = 'none';
+    }
+  });
+
+  input.addEventListener('focus', () => {
+    if (list.innerHTML.trim()) {
+      list.style.display = 'block';
+    }
+  });
+
+  // Força primeira busca se já houver valor pré-carregado
+  if (input.value && input.value.trim().length >= 2) {
+    buscarSugestoesCompras(input.value.trim()).then(itens => {
+      if (!itens.length) return;
+      list.innerHTML = itens.map(it => `
+        <li data-codigo="${it.codigo}" data-descricao="${(it.descricao || '').replace(/"/g, '&quot;')}" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border-color);line-height:1.1;">
+          <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.codigo}</div>
+          <div style="font-size:12px;color:var(--inactive-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || ''}</div>
+        </li>
+      `).join('');
+      list.style.display = 'block';
+      list.style.maxHeight = '220px';
+      list.style.height = 'auto';
+      list.querySelectorAll('li').forEach(li => {
+        li.addEventListener('click', () => {
+          input.value = li.dataset.codigo || '';
+          const hiddenDesc = document.getElementById('comprasDescricaoSelecionada');
+          if (hiddenDesc) hiddenDesc.value = li.dataset.descricao || '';
+          list.style.display = 'none';
+          list.innerHTML = '';
+          input.focus();
+        });
+      });
+    });
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (window.inicializarImportacaoCaracteristicas)
        window.inicializarImportacaoCaracteristicas();
@@ -11617,7 +12579,12 @@ async function toggleExpandEngenharia(btn) {
                       <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
                       ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
                     </div>
-                    ${t.descricao_atividade ? `<div style="color:#6b7280;font-size:11px;padding-left:0;margin-top:4px;">${t.descricao_atividade}</div>` : ''}
+                    <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px; font-size:11px; color:#111827;">
+                      <span style="background:#ecfdf3; color:#065f46; padding:2px 6px; border-radius:6px;">Autor: <strong>${t.autor || '-'}</strong></span>
+                      <span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:6px;">Resp.: <strong>${t.responsavel || '-'}</strong></span>
+                      <span style="background:#fff7ed; color:#9a3412; padding:2px 6px; border-radius:6px;">Prazo: <strong>${t.prazo ? new Date(t.prazo).toLocaleDateString('pt-BR') : '-'}</strong></span>
+                    </div>
+                    ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;display:block;margin-top:2px;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
               </ul>
@@ -11632,6 +12599,11 @@ async function toggleExpandEngenharia(btn) {
                     <strong>${t.nome_atividade}</strong>
                     ${t.origem === 'produto' ? '<span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
                     ${t.nao_aplicavel ? '<span style="color:#f59e0b;font-size:11px;"> (Não se aplica)</span>' : ''}
+                    <div style="margin-top:3px; display:flex; flex-wrap:wrap; gap:6px; font-size:11px; color:#111827;">
+                      <span style="background:#ecfdf3; color:#065f46; padding:2px 6px; border-radius:6px;">Autor: <strong>${t.autor || '-'}</strong></span>
+                      <span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:6px;">Resp.: <strong>${t.responsavel || '-'}</strong></span>
+                      <span style="background:#fff7ed; color:#9a3412; padding:2px 6px; border-radius:6px;">Prazo: <strong>${t.prazo ? new Date(t.prazo).toLocaleDateString('pt-BR') : '-'}</strong></span>
+                    </div>
                   </li>
                 `).join('')}
               </ul>
@@ -11698,6 +12670,11 @@ async function toggleExpandCompras(btn) {
                       <strong style="display:block;margin-bottom:2px;">${t.nome_atividade}</strong>
                       ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;">ESPECÍFICA</span>' : ''}
                     </div>
+                    <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px; font-size:11px; color:#111827;">
+                      <span style="background:#ecfdf3; color:#065f46; padding:2px 6px; border-radius:6px;">Autor: <strong>${t.autor || '-'}</strong></span>
+                      <span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:6px;">Resp.: <strong>${t.responsavel || '-'}</strong></span>
+                      <span style="background:#fff7ed; color:#9a3412; padding:2px 6px; border-radius:6px;">Prazo: <strong>${t.prazo ? new Date(t.prazo).toLocaleDateString('pt-BR') : '-'}</strong></span>
+                    </div>
                     ${t.descricao_atividade ? `<br><span style="color:#6b7280;font-size:11px;display:block;margin-top:2px;">${t.descricao_atividade}</span>` : ''}
                   </li>
                 `).join('')}
@@ -11713,6 +12690,11 @@ async function toggleExpandCompras(btn) {
                     <strong>${t.nome_atividade}</strong>
                     ${t.origem === 'produto' ? '<span style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ESPECÍFICA</span>' : ''}
                     ${t.nao_aplicavel ? '<span style="color:#f59e0b;font-size:11px;"> (Não se aplica)</span>' : ''}
+                    <div style="margin-top:3px; display:flex; flex-wrap:wrap; gap:6px; font-size:11px; color:#111827;">
+                      <span style="background:#ecfdf3; color:#065f46; padding:2px 6px; border-radius:6px;">Autor: <strong>${t.autor || '-'}</strong></span>
+                      <span style="background:#eff6ff; color:#1d4ed8; padding:2px 6px; border-radius:6px;">Resp.: <strong>${t.responsavel || '-'}</strong></span>
+                      <span style="background:#fff7ed; color:#9a3412; padding:2px 6px; border-radius:6px;">Prazo: <strong>${t.prazo ? new Date(t.prazo).toLocaleDateString('pt-BR') : '-'}</strong></span>
+                    </div>
                   </li>
                 `).join('')}
               </ul>
@@ -14803,24 +15785,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
             }
           }
 
-          // Trigger especial para Anexos (reforça handler btnNovoAnexo)
-          if (targetId === 'listaAnexos') {
-            const btn = document.getElementById('btnNovoAnexo');
-            if (btn && !btn.dataset.handlerAttached) {
-              btn.dataset.handlerAttached = 'true';
-              btn.addEventListener('click', () => {
-                const codigo = window.codigoSelecionado || 
-                              document.getElementById('productTitle')?.textContent?.trim() || '';
-                if (!codigo) {
-                  alert('Selecione um produto antes de adicionar anexos.');
-                  return;
-                }
-                // Força disparo do evento de click do script anexo
-                const evClick = new MouseEvent('click', { bubbles: true, cancelable: true });
-                btn.dispatchEvent(evClick);
-              });
-            }
-          }
+          // Trigger especial para Anexos: nenhuma ação extra aqui; o script produto_anexo.js já anexa o handler do botão.
         }
 
         // Fecha o menu após selecionar

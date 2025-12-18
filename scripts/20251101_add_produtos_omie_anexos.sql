@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS public.produtos_omie_anexos (
     path_key        TEXT   NOT NULL,
     tamanho_bytes   BIGINT,
     content_type    TEXT,
+    visivel_producao BOOLEAN NOT NULL DEFAULT TRUE,
+    visivel_assistencia_tecnica BOOLEAN NOT NULL DEFAULT TRUE,
+    ativo           BOOLEAN NOT NULL DEFAULT TRUE,
     criado_em       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

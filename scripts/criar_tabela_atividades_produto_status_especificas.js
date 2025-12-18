@@ -20,6 +20,9 @@ async function criarTabela() {
         concluido BOOLEAN DEFAULT false,
         nao_aplicavel BOOLEAN DEFAULT false,
         observacao_status TEXT,
+        responsavel_username TEXT,
+        autor_username TEXT,
+        prazo TIMESTAMP,
         atualizado_em TIMESTAMP DEFAULT NOW(),
         UNIQUE(atividade_produto_id, produto_codigo)
       );
