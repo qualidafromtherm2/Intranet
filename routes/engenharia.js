@@ -100,7 +100,10 @@ module.exports = (pool) => {
           s.concluido,
           s.nao_aplicavel,
           s.observacao,
-          s.data_conclusao
+          s.data_conclusao,
+          s.responsavel_username AS responsavel,
+          s.autor_username AS autor,
+          s.prazo
         FROM engenharia.atividades_familia af
         LEFT JOIN engenharia.atividades_produto_status s
           ON s.atividade_id = af.id AND s.produto_codigo = $1
@@ -128,20 +131,35 @@ module.exports = (pool) => {
       }
       await client.query('BEGIN');
       for (const it of itens) {
-        const { atividade_id, concluido, nao_aplicavel, observacao } = it;
+        const { atividade_id, concluido, nao_aplicavel, observacao, responsavel, autor, prazo } = it;
         const data_conclusao = concluido ? new Date() : null;
+        const prazoDate = prazo ? new Date(prazo) : null;
         await client.query(`
           INSERT INTO engenharia.atividades_produto_status
-            (produto_codigo, produto_id_omie, atividade_id, concluido, nao_aplicavel, observacao, data_conclusao)
-          VALUES ($1,$2,$3,$4,$5,$6,$7)
+            (produto_codigo, produto_id_omie, atividade_id, concluido, nao_aplicavel, observacao, data_conclusao, responsavel_username, autor_username, prazo)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
           ON CONFLICT (produto_codigo, atividade_id)
           DO UPDATE SET
             concluido = EXCLUDED.concluido,
             nao_aplicavel = EXCLUDED.nao_aplicavel,
             observacao = EXCLUDED.observacao,
             data_conclusao = EXCLUDED.data_conclusao,
+            responsavel_username = EXCLUDED.responsavel_username,
+            autor_username = EXCLUDED.autor_username,
+            prazo = EXCLUDED.prazo,
             updated_at = NOW();
-        `, [produto_codigo, produto_id_omie || null, atividade_id, !!concluido, !!nao_aplicavel, observacao || '', data_conclusao]);
+        `, [
+          produto_codigo,
+          produto_id_omie || null,
+          atividade_id,
+          !!concluido,
+          !!nao_aplicavel,
+          observacao || '',
+          data_conclusao,
+          responsavel || null,
+          autor || null,
+          prazoDate
+        ]);
       }
       await client.query('COMMIT');
       res.json({ ok: true });

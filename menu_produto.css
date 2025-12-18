@@ -297,9 +297,13 @@ body.light-mode .video-bg:before {
 .header-menu {
   display: flex;
   align-items: center;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  justify-content: flex-start;
 }
 .header-menu a {
-  padding: 20px 30px;
+  padding: 16px 20px;
   text-decoration: none;
   color: var(--inactive-color);
   border-bottom: 2px solid transparent;
@@ -313,6 +317,11 @@ body.light-mode .video-bg:before {
 .header-menu a.is-active, .header-menu a:hover {
   color: var(--theme-color);
   border-bottom: 2px solid var(--theme-color);
+}
+
+/* badge do usuário fica após o menu; margem garante respiro visual */
+.user-badge {
+  margin-left: 12px;
 }
 
 .notify {
@@ -1888,6 +1897,24 @@ body .options .option .label .info .sub {
 /* Escopo específico da guia Fotos (se desejar isolar o comportamento) */
 #listaFotos .options .option.active     { flex: 1 1 600px; }
 #listaFotos .options .option:not(.active) { flex: 1 1 60px; }
+
+/* Modal de gestão de fotos */
+.foto-gestao-modal { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; }
+.foto-gestao-modal .fg-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+.foto-gestao-modal .fg-content { position: relative; background: #0f172a; color: #e5e7eb; width: min(900px, 96%); max-height: 80vh; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); }
+.foto-gestao-modal .fg-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.08); }
+.foto-gestao-modal .fg-header h3 { margin: 0; font-size: 16px; }
+.foto-gestao-modal .fg-close { background: none; border: none; color: #e5e7eb; font-size: 18px; cursor: pointer; padding: 6px 10px; }
+.foto-gestao-modal .fg-body { padding: 12px 18px; overflow-y: auto; }
+.fg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.fg-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.fg-card img { width: 100%; height: 160px; object-fit: contain; background: #0b1224; border-radius: 8px; }
+.fg-meta { display: flex; justify-content: space-between; font-size: 12px; color: #9ca3af; }
+.fg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fg-actions button { border: none; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-weight: 600; font-size: 12px; }
+.fg-actions .primary { background: #10b981; color: #0b0f1a; }
+.fg-actions .secondary { background: #111827; color: #e5e7eb; border: 1px solid rgba(255,255,255,0.12); }
+.fg-actions .danger { background: #b91c1c; color: #fef2f2; }
 
 
 .foto-modal-overlay {

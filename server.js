@@ -86,6 +86,7 @@ app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/registros', require('./routes/registros'));
+app.use('/api/sac', require('./routes/sacEnvios'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -658,10 +659,14 @@ async function withRetry(fn, tries = 3) {
 
 // === Busca de produtos SOMENTE em public.produtos_omie =======================
 // Espera { q } e retorna { itens: [{ codigo, descricao, fontes: ['public.produtos_omie'] }] }
-app.post('/api/produtos/busca', async (req, res) => {
+app.post('/api/produtos/busca', express.json(), async (req, res) => {
   try {
+    console.log('\n[API] /api/produtos/busca -> recebido body:', req.body);
     const q = String(req.body?.q || '').trim();
-    if (q.length < 2) return res.json({ itens: [] });
+    if (q.length < 2) {
+      console.log('[API] /api/produtos/busca -> termo curto, ignorando. q="' + q + '"');
+      return res.json({ itens: [] });
+    }
 
     // Ajuste o schema abaixo se não for "public"
     const schemaTable = 'public.produtos_omie';
@@ -685,6 +690,7 @@ app.post('/api/produtos/busca', async (req, res) => {
     `;
 
     const term = `%${q}%`;
+    console.log('[API] /api/produtos/busca -> executando SQL com term =', term);
     const { rows } = await pool.query(sql, [term]);
 
     // Log (até 20 itens)
@@ -699,7 +705,7 @@ app.post('/api/produtos/busca', async (req, res) => {
 
     res.json({ itens: rows || [] });
   } catch (err) {
-    console.error('[API] /api/produtos/busca erro:', err);
+    console.error('[API] /api/produtos/busca erro:', err, 'body:', req.body);
     res.status(500).json({ error: 'Falha na busca' });
   }
 });
@@ -979,6 +985,9 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
         COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
         s.observacao,
         s.data_conclusao,
+        s.responsavel_username AS responsavel,
+        s.autor_username AS autor,
+        s.prazo,
         'familia' AS origem
       FROM engenharia.atividades_familia af
       LEFT JOIN engenharia.atividades_produto_status s
@@ -996,12 +1005,15 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
         ap.observacoes AS descricao_atividade,
         COALESCE(s.concluido, false) AS concluido,
         COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
-        s.observacao,
-        s.data_conclusao,
+        s.observacao_status AS observacao,
+        s.atualizado_em AS data_conclusao,
+        s.responsavel_username AS responsavel,
+        s.autor_username AS autor,
+        s.prazo,
         'produto' AS origem
       FROM engenharia.atividades_produto ap
-      LEFT JOIN engenharia.atividades_produto_status s
-        ON s.atividade_id = ap.id AND s.produto_codigo = $1
+      LEFT JOIN engenharia.atividades_produto_status_especificas s
+        ON s.atividade_produto_id = ap.id AND s.produto_codigo = $1
       WHERE ap.produto_codigo = $1 AND ap.ativo = true
       ORDER BY ap.criado_em DESC
     `;
@@ -1041,6 +1053,9 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
         COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
         s.observacao,
         s.data_conclusao,
+        s.responsavel_username AS responsavel,
+        s.autor_username AS autor,
+        s.prazo,
         'familia' AS origem
       FROM compras.atividades_familia af
       LEFT JOIN compras.atividades_produto_status s
@@ -1058,12 +1073,15 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
         ap.observacoes AS descricao_atividade,
         COALESCE(s.concluido, false) AS concluido,
         COALESCE(s.nao_aplicavel, false) AS nao_aplicavel,
-        s.observacao,
+        s.observacao_status AS observacao,
         s.data_conclusao,
+        s.responsavel_username AS responsavel,
+        s.autor_username AS autor,
+        s.prazo,
         'produto' AS origem
       FROM compras.atividades_produto ap
-      LEFT JOIN compras.atividades_produto_status s
-        ON s.atividade_id = ap.id AND s.produto_codigo = $1
+      LEFT JOIN compras.atividades_produto_status_especificas s
+        ON s.atividade_produto_id = ap.id AND s.produto_codigo = $1
       WHERE ap.produto_codigo = $1 AND ap.ativo = true
       ORDER BY ap.criado_em DESC
     `;
@@ -1261,6 +1279,218 @@ app.get('/api/produtos/consultar-omie/:codigoProduto', async (req, res) => {
   } catch (err) {
     console.error('[API] /api/produtos/consultar-omie erro:', err);
     res.json({ error: 'Falha ao consultar produto', encontrado: false });
+  }
+});
+
+// ============================================================================
+// Solicitação de Compras: criar e listar
+// ============================================================================
+
+// Cria schema/tabela e insere solicitação de compras
+app.post('/api/engenharia/solicitacao-compras', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      produto_codigo,
+      produto_descricao,
+      quantidade,
+      responsavel,
+      observacao,
+      prazo_solicitado,
+      prazo_estipulado,
+      solicitante
+    } = req.body || {};
+
+    if (!produto_codigo) return res.status(400).json({ error: 'produto_codigo é obrigatório' });
+
+    await client.query('BEGIN');
+    await client.query('CREATE SCHEMA IF NOT EXISTS compras');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS compras.solicitacao_compras (
+        id SERIAL PRIMARY KEY,
+        produto_codigo TEXT NOT NULL,
+        produto_descricao TEXT,
+        quantidade NUMERIC,
+        responsavel TEXT,
+        observacao TEXT,
+        prazo_solicitado DATE,
+        prazo_estipulado DATE,
+        quem_recebe TEXT,
+        solicitante TEXT,
+        status TEXT DEFAULT 'aguardando aprovação',
+        criado_em TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'aguardando aprovação';`);
+    await client.query(`ALTER TABLE compras.solicitacao_compras ALTER COLUMN status SET DEFAULT 'aguardando aprovação';`);
+    await client.query(`UPDATE compras.solicitacao_compras SET status = 'aguardando aprovação' WHERE status IS NULL;`);
+    await client.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS quem_recebe TEXT;`);
+
+    const insertSql = `
+      INSERT INTO compras.solicitacao_compras
+        (produto_codigo, produto_descricao, quantidade, responsavel, observacao, prazo_solicitado, prazo_estipulado, quem_recebe, solicitante)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id;
+    `;
+    const { rows } = await client.query(insertSql, [
+      produto_codigo,
+      produto_descricao || null,
+      quantidade || null,
+      (responsavel || solicitante || null),
+      observacao || null,
+      prazo_solicitado || null,
+      prazo_estipulado || null,
+      null,
+      solicitante || null
+    ]);
+
+    await client.query('COMMIT');
+    res.json({ success: true, id: rows[0]?.id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[API] /api/engenharia/solicitacao-compras erro:', err);
+    res.status(500).json({ error: 'Falha ao salvar solicitação' });
+  } finally {
+    client.release();
+  }
+});
+
+// Lista todas as solicitações de compras
+app.get('/api/compras/solicitacoes', async (_req, res) => {
+  try {
+    await pool.query('CREATE SCHEMA IF NOT EXISTS compras');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.solicitacao_compras (
+        id SERIAL PRIMARY KEY,
+        produto_codigo TEXT NOT NULL,
+        produto_descricao TEXT,
+        quantidade NUMERIC,
+        responsavel TEXT,
+        observacao TEXT,
+        prazo_solicitado DATE,
+        prazo_estipulado DATE,
+        quem_recebe TEXT,
+        solicitante TEXT,
+        status TEXT DEFAULT 'aguardando aprovação',
+        criado_em TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await pool.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'aguardando aprovação';`);
+    await pool.query(`ALTER TABLE compras.solicitacao_compras ALTER COLUMN status SET DEFAULT 'aguardando aprovação';`);
+    await pool.query(`UPDATE compras.solicitacao_compras SET status = 'aguardando aprovação' WHERE status IS NULL;`);
+    await pool.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS quem_recebe TEXT;`);
+    await pool.query(`ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS quem_recebe TEXT;`);
+
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        responsavel,
+        observacao,
+        prazo_solicitado,
+        prazo_estipulado,
+        quem_recebe,
+        solicitante,
+        status,
+        criado_em
+      FROM compras.solicitacao_compras
+      ORDER BY criado_em DESC, id DESC;
+    `);
+
+    res.json({ solicitacoes: rows });
+  } catch (err) {
+    console.error('[API] /api/compras/solicitacoes erro:', err);
+    res.status(500).json({ error: 'Falha ao listar solicitações de compras' });
+  }
+});
+
+// Atualiza status ou previsão de chegada de uma solicitação
+app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    const { status, prazo_estipulado, quem_recebe } = req.body || {};
+    const allowedStatus = [
+      'aguardando aprovação',
+      'aguardando compra',
+      'compra realizada',
+      'aguardando liberação',
+      'compra cancelada',
+      'recebido'
+    ];
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (status) {
+      if (!allowedStatus.includes(status)) {
+        return res.status(400).json({ error: 'Status inválido' });
+      }
+      fields.push(`status = $${idx++}`);
+      values.push(status);
+    }
+
+    if (typeof prazo_estipulado !== 'undefined') {
+      fields.push(`prazo_estipulado = $${idx++}`);
+      values.push(prazo_estipulado || null);
+    }
+
+    if (typeof quem_recebe !== 'undefined') {
+      fields.push(`quem_recebe = $${idx++}`);
+      values.push(quem_recebe || null);
+    }
+
+    if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
+
+    await client.query('CREATE SCHEMA IF NOT EXISTS compras');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS compras.solicitacao_compras (
+        id SERIAL PRIMARY KEY,
+        produto_codigo TEXT NOT NULL,
+        produto_descricao TEXT,
+        quantidade NUMERIC,
+        responsavel TEXT,
+        observacao TEXT,
+        prazo_solicitado DATE,
+        prazo_estipulado DATE,
+        solicitante TEXT,
+        status TEXT DEFAULT 'aguardando aprovação',
+        criado_em TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    const sql = `UPDATE compras.solicitacao_compras SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *;`;
+    values.push(id);
+    const { rowCount, rows } = await client.query(sql, values);
+    if (!rowCount) return res.status(404).json({ error: 'Registro não encontrado' });
+
+    res.json({ success: true, solicitacao: rows[0] });
+  } catch (err) {
+    console.error('[API] PUT /api/compras/solicitacoes/:id erro:', err);
+    res.status(500).json({ error: 'Falha ao atualizar solicitação' });
+  } finally {
+    client.release();
+  }
+});
+
+// Lista usuários ativos (para “Quem vai receber?”)
+app.get('/api/users/ativos', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT username
+      FROM public.auth_user
+      WHERE is_active = TRUE
+      ORDER BY username ASC;
+    `);
+    res.json({ users: rows.map(r => r.username) });
+  } catch (err) {
+    console.error('[API] /api/users/ativos erro:', err);
+    res.status(500).json({ error: 'Falha ao listar usuários ativos' });
   }
 });
 
@@ -3331,6 +3561,32 @@ async function gerarProximoNumeroOP(client, prefix = 'OP') {
   };
 }
 
+async function registrarAnexosOp(client, numeroOp, codigoProdutoId) {
+  if (!numeroOp || !codigoProdutoId) return;
+  await client.query(
+    `INSERT INTO "OrdemProducao".tab_op_anexos (numero_op, id_anexo)
+       SELECT $1, id
+         FROM public.produtos_omie_anexos
+        WHERE codigo_produto = $2
+          AND ativo IS TRUE`,
+    [numeroOp, codigoProdutoId]
+  );
+}
+
+// Registra imagens da OP a partir das imagens ativas do produto
+async function registrarImagensOp(client, numeroOp, codigoProdutoId) {
+  if (!numeroOp || !codigoProdutoId) return;
+  await client.query(
+    `INSERT INTO "OrdemProducao".tab_op_imagens (numero_op, id_imagem, visivel_producao, visivel_assistencia_tecnica)
+       SELECT $1, id, visivel_producao, visivel_assistencia_tecnica
+         FROM public.produtos_omie_imagens
+        WHERE codigo_produto = $2
+          AND ativo IS TRUE
+          AND COALESCE(visivel_assistencia_tecnica, true) = true`,
+    [numeroOp, codigoProdutoId]
+  );
+}
+
 function gerarEtiquetaPPZPL({ codMP, op, descricao = '' }) {
   const DPI = 203;
   const DOTS_PER_MM = DPI / 25.4;
@@ -3729,6 +3985,8 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
         ];
 
         const { rows: rowPai } = await client.query(insertSql, paramsPai);
+        await registrarAnexosOp(client, numeroCompleto, codigoProdutoIdPai);
+        await registrarImagensOp(client, numeroCompleto, codigoProdutoIdPai);
         opsGerados.push({
           numero_op: numeroCompleto,
           id: rowPai?.[0]?.id || null,
@@ -3782,6 +4040,8 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
           ];
 
           const { rows: rowPP } = await client.query(insertSql, paramsPP);
+          await registrarAnexosOp(client, numeroOpsSeq, codigoProdutoIdPP);
+          await registrarImagensOp(client, numeroOpsSeq, codigoProdutoIdPP);
           geradosOps.push({
             numero_op: numeroOpsSeq,
             id: rowPP?.[0]?.id || null,
@@ -3952,6 +4212,8 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
         ];
 
         const { rows } = await client.query(insertSql, params);
+        await registrarAnexosOp(client, numeroCompleto, codigoProdutoId);
+        await registrarImagensOp(client, numeroCompleto, codigoProdutoId);
         registros.push({
           numero_op: numeroCompleto,
           id: rows?.[0]?.id || null,
@@ -4670,7 +4932,8 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
         p.data_posicao,
         p.ingested_at,
         po.codigo_familia,
-        po.descricao_familia
+        po.descricao_familia,
+        po.preco_definido
       FROM public.omie_estoque_posicao p
       LEFT JOIN public.produtos_omie po
         ON po.codigo_produto = p.omie_prod_id
@@ -4693,6 +4956,7 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
       atualizadoEm: r.ingested_at,
       familiaCodigo: r.codigo_familia != null ? String(r.codigo_familia) : '',
       familiaNome: r.descricao_familia || '',
+      preco_definido: r.preco_definido != null ? Number(r.preco_definido) : null,
     }));
 
     res.json({ ok:true, local, pagina:1, totalPaginas:1, dados });
@@ -8060,6 +8324,9 @@ app.get('/api/engenharia/atividades-produto/:codigo', async (req, res) => {
         COALESCE(aps.concluido, false) AS concluido,
         COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
         COALESCE(aps.observacao_status, '') AS observacao_status,
+        aps.responsavel_username AS responsavel,
+        aps.autor_username AS autor,
+        aps.prazo,
         aps.atualizado_em
       FROM engenharia.atividades_produto ap
       LEFT JOIN engenharia.atividades_produto_status_especificas aps
@@ -8091,19 +8358,32 @@ app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async 
       await client.query('BEGIN');
       
       for (const item of itens) {
-        const { atividade_produto_id, concluido, nao_aplicavel, observacao } = item;
+        const { atividade_produto_id, concluido, nao_aplicavel, observacao, responsavel, autor, prazo } = item;
+        const prazoDate = prazo ? new Date(prazo) : null;
         
         await client.query(`
           INSERT INTO engenharia.atividades_produto_status_especificas 
-            (atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao_status, atualizado_em)
-          VALUES ($1, $2, $3, $4, $5, NOW())
+            (atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao_status, atualizado_em, responsavel_username, autor_username, prazo)
+          VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
           ON CONFLICT (atividade_produto_id, produto_codigo)
           DO UPDATE SET
             concluido = EXCLUDED.concluido,
             nao_aplicavel = EXCLUDED.nao_aplicavel,
             observacao_status = EXCLUDED.observacao_status,
-            atualizado_em = NOW()
-        `, [atividade_produto_id, produto_codigo, concluido, nao_aplicavel, observacao || '']);
+            atualizado_em = NOW(),
+            responsavel_username = EXCLUDED.responsavel_username,
+            autor_username = EXCLUDED.autor_username,
+            prazo = EXCLUDED.prazo
+        `, [
+          atividade_produto_id,
+          produto_codigo,
+          concluido,
+          nao_aplicavel,
+          observacao || '',
+          responsavel || null,
+          autor || null,
+          prazoDate
+        ]);
       }
       
       await client.query('COMMIT');

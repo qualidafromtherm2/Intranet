@@ -66,8 +66,11 @@ module.exports = (pool) => {
       const { codigo, familia } = req.query || {};
       if (!codigo || !familia) return res.status(400).json({ error: 'codigo e familia são obrigatórios' });
       const { rows } = await client.query(`
-        SELECT af.id, af.nome_atividade, af.descricao_atividade,
-               s.concluido, s.nao_aplicavel, s.observacao, s.data_conclusao
+         SELECT af.id, af.nome_atividade, af.descricao_atividade,
+           s.concluido, s.nao_aplicavel, s.observacao, s.data_conclusao,
+           s.responsavel_username AS responsavel,
+           s.autor_username AS autor,
+           s.prazo
         FROM compras.atividades_familia af
         LEFT JOIN compras.atividades_produto_status s
           ON s.atividade_id = af.id AND s.produto_codigo = $1
@@ -91,16 +94,32 @@ module.exports = (pool) => {
       if (!produto_codigo || !Array.isArray(itens)) return res.status(400).json({ error: 'produto_codigo e itens são obrigatórios' });
       await client.query('BEGIN');
       for (const it of itens) {
-        const { atividade_id, concluido, nao_aplicavel, observacao } = it;
+        const { atividade_id, concluido, nao_aplicavel, observacao, responsavel, autor, prazo } = it;
         const data_conclusao = concluido ? new Date() : null;
+        const prazoDate = prazo ? new Date(prazo) : null;
         await client.query(`
           INSERT INTO compras.atividades_produto_status
-            (produto_codigo, produto_id_omie, atividade_id, concluido, nao_aplicavel, observacao, data_conclusao)
-          VALUES ($1,$2,$3,$4,$5,$6,$7)
+            (produto_codigo, produto_id_omie, atividade_id, concluido, nao_aplicavel, observacao, data_conclusao, responsavel_username, autor_username, prazo)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
           ON CONFLICT (produto_codigo, atividade_id)
           DO UPDATE SET concluido=EXCLUDED.concluido, nao_aplicavel=EXCLUDED.nao_aplicavel,
-                        observacao=EXCLUDED.observacao, data_conclusao=EXCLUDED.data_conclusao, updated_at=NOW();
-        `, [produto_codigo, produto_id_omie || null, atividade_id, !!concluido, !!nao_aplicavel, observacao || '', data_conclusao]);
+                        observacao=EXCLUDED.observacao, data_conclusao=EXCLUDED.data_conclusao,
+                        responsavel_username = EXCLUDED.responsavel_username,
+                        autor_username = EXCLUDED.autor_username,
+                        prazo = EXCLUDED.prazo,
+                        updated_at=NOW();
+        `, [
+          produto_codigo,
+          produto_id_omie || null,
+          atividade_id,
+          !!concluido,
+          !!nao_aplicavel,
+          observacao || '',
+          data_conclusao,
+          responsavel || null,
+          autor || null,
+          prazoDate
+        ]);
       }
       await client.query('COMMIT');
       res.json({ ok: true });
@@ -157,6 +176,9 @@ module.exports = (pool) => {
           COALESCE(aps.concluido, false) AS concluido,
           COALESCE(aps.nao_aplicavel, false) AS nao_aplicavel,
           COALESCE(aps.observacao_status, '') AS observacao_status,
+          aps.responsavel_username AS responsavel,
+          aps.autor_username AS autor,
+          aps.prazo,
           aps.atualizado_em
         FROM compras.atividades_produto ap
         LEFT JOIN compras.atividades_produto_status_especificas aps
@@ -186,21 +208,35 @@ module.exports = (pool) => {
       await client.query('BEGIN');
       
       for (const it of itens) {
-        const { atividade_produto_id, concluido, nao_aplicavel, observacao } = it;
+        const { atividade_produto_id, concluido, nao_aplicavel, observacao, responsavel, autor, prazo } = it;
         const data_conclusao = concluido ? new Date() : null;
+        const prazoDate = prazo ? new Date(prazo) : null;
         
         await client.query(`
           INSERT INTO compras.atividades_produto_status_especificas
-            (produto_codigo, atividade_produto_id, concluido, nao_aplicavel, observacao_status, data_conclusao)
-          VALUES ($1, $2, $3, $4, $5, $6)
+            (produto_codigo, atividade_produto_id, concluido, nao_aplicavel, observacao_status, data_conclusao, responsavel_username, autor_username, prazo)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (produto_codigo, atividade_produto_id)
           DO UPDATE SET
             concluido = EXCLUDED.concluido,
             nao_aplicavel = EXCLUDED.nao_aplicavel,
             observacao_status = EXCLUDED.observacao_status,
             data_conclusao = EXCLUDED.data_conclusao,
+            responsavel_username = EXCLUDED.responsavel_username,
+            autor_username = EXCLUDED.autor_username,
+            prazo = EXCLUDED.prazo,
             atualizado_em = NOW()
-        `, [produto_codigo, atividade_produto_id, !!concluido, !!nao_aplicavel, observacao || '', data_conclusao]);
+        `, [
+          produto_codigo,
+          atividade_produto_id,
+          !!concluido,
+          !!nao_aplicavel,
+          observacao || '',
+          data_conclusao,
+          responsavel || null,
+          autor || null,
+          prazoDate
+        ]);
       }
       
       await client.query('COMMIT');

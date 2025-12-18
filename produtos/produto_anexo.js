@@ -2,6 +2,7 @@
   const TAB_ID = 'listaAnexos';
   const LIST_ID = 'listaAnexosConteudo';
   const BUTTON_ID = 'btnNovoAnexo';
+  const TOGGLE_BUTTON_ID = 'btnToggleAnexos';
 
   const $ = (sel, ctx = document) => ctx.querySelector(sel);
 
@@ -13,8 +14,8 @@
     return rawTitle || rawHidden || '';
   }
 
-  async function fetchAnexos(codigo) {
-    const url = `/api/produtos/${encodeURIComponent(codigo)}/anexos`;
+  async function fetchAnexos(codigo, { includeInactive = false } = {}) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/anexos${includeInactive ? '?include_inactive=1' : ''}`;
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) {
       const text = await res.text();
@@ -47,6 +48,20 @@
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || 'Falha ao excluir anexo');
+    }
+    return res.json();
+  }
+
+  async function updateVisibilidade(codigo, id, payload) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/anexos/${encodeURIComponent(id)}/visibilidade`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || 'Falha ao atualizar visibilidade');
     }
     return res.json();
   }
@@ -97,6 +112,7 @@
     }
 
     const items = anexos.map((item) => {
+      const isActive = item.ativo !== false;
       const nome = escapeHtml(item.nome_anexo || item.nome || item.titulo || 'Sem nome');
       const descRaw = item.descricao_anexo || item.descricao || '';
       const desc = escapeHtml(descRaw || 'Sem descrição');
@@ -107,22 +123,37 @@
       if (quando) metaParts.push(quando);
       const meta = metaParts.join(' • ');
       const url = escapeHtml(item.url_anexo || item.url || '');
+      const statusBadge = isActive ? '' : '<span class="anexo-status">Inativo</span>';
+      const visProd = item.visivel_producao !== false;
+      const visAst = item.visivel_assistencia_tecnica !== false;
+      const toggleProd = `<label class="anexo-toggle"><input type="checkbox" class="vis-toggle" data-kind="producao" data-id="${item.id}" ${visProd ? 'checked' : ''}><span>Produção</span></label>`;
+      const toggleAst = `<label class="anexo-toggle"><input type="checkbox" class="vis-toggle" data-kind="assistencia" data-id="${item.id}" ${visAst ? 'checked' : ''}><span>Assistência</span></label>`;
+      const actionDelete = isActive
+        ? `<button type="button" class="anexo-btn danger delete" data-id="${item.id}">
+              <i class="fa-solid fa-eye-slash"></i>
+              <span>Desativar</span>
+            </button>`
+        : '<span class="anexo-status-pill">Oculto</span>';
       return `
-        <li class="content-list-item anexo-item" data-id="${item.id}" data-url="${url}">
+        <li class="content-list-item anexo-item${isActive ? '' : ' inativo'}" data-id="${item.id}" data-url="${url}" data-ativo="${isActive}">
           <div class="anexo-info">
-            <div class="anexo-name">${nome}</div>
+            <div class="anexo-title-row">
+              <div class="anexo-name">${nome}</div>
+              ${statusBadge}
+            </div>
             <div class="anexo-desc">${desc}</div>
             ${meta ? `<div class="anexo-meta">${meta}</div>` : ''}
+            <div class="anexo-visibility">
+              ${toggleProd}
+              ${toggleAst}
+            </div>
           </div>
           <div class="anexo-actions">
             <button type="button" class="anexo-btn open" data-url="${url}" ${url ? '' : 'disabled'}>
               <i class="fa-solid fa-arrow-up-right-from-square"></i>
               <span>Abrir</span>
             </button>
-            <button type="button" class="anexo-btn danger delete" data-id="${item.id}">
-              <i class="fa-solid fa-trash"></i>
-              <span>Excluir</span>
-            </button>
+            ${actionDelete}
           </div>
         </li>`;
     });
@@ -158,13 +189,62 @@
         flex-direction:column;
         gap:4px;
       }
+      .anexo-title-row{
+        display:flex;
+        align-items:center;
+        gap:10px;
+      }
       .anexo-name{
         font-weight:600;
         color:#f3f4f6;
       }
+      .anexo-status{
+        display:inline-flex;
+        align-items:center;
+        padding:2px 8px;
+        border-radius:999px;
+        font-size:0.75rem;
+        font-weight:700;
+        background:rgba(239,68,68,0.18);
+        color:#fca5a5;
+        border:1px solid rgba(248,113,113,0.45);
+      }
+      .anexo-status-pill{
+        display:inline-flex;
+        align-items:center;
+        padding:6px 10px;
+        border-radius:10px;
+        background:rgba(148,163,184,0.15);
+        color:#cbd5e1;
+        font-weight:600;
+        font-size:0.85rem;
+      }
       .anexo-desc{
         color:#cbd5f5;
         font-size:0.9rem;
+      }
+      .anexo-visibility{
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+        margin-top:4px;
+      }
+      .anexo-toggle{
+        display:inline-flex;
+        align-items:center;
+        gap:6px;
+        padding:4px 10px;
+        border-radius:8px;
+        background:rgba(59,130,246,0.08);
+        border:1px solid rgba(59,130,246,0.25);
+        color:#dbeafe;
+        font-weight:600;
+        font-size:0.85rem;
+      }
+      .anexo-toggle input{
+        accent-color:#3b82f6;
+        width:16px;
+        height:16px;
       }
       .anexo-meta{
         font-size:0.8rem;
@@ -200,6 +280,14 @@
       }
       .anexo-btn.danger:hover{
         background:#b91c1c;
+      }
+      .anexo-item.inativo{
+        background:rgba(148,163,184,0.06);
+        border:1px dashed rgba(148,163,184,0.35);
+      }
+      #${TOGGLE_BUTTON_ID}.active{
+        background:linear-gradient(135deg,#f59e0b 0%, #d97706 100%);
+        color:#0b1220;
       }
       .anexo-upload-overlay{
         position:fixed;
@@ -311,6 +399,7 @@
   }
 
   let currentLoadToken = 0;
+  let showInactive = false;
 
   async function reloadAnexos() {
     const list = document.getElementById(LIST_ID);
@@ -326,7 +415,7 @@
     list.innerHTML = '<li class="content-list-item loading"><i class="fa-solid fa-spinner fa-spin"></i><span style="margin-left:8px;">Carregando anexos…</span></li>';
 
     try {
-      const anexos = await fetchAnexos(codigo);
+      const anexos = await fetchAnexos(codigo, { includeInactive: showInactive });
       if (token !== currentLoadToken) return; // carregamento obsoleto
       renderList(anexos);
     } catch (err) {
@@ -522,6 +611,30 @@
     if (!list) return;
 
     list.addEventListener('click', async (ev) => {
+      const toggle = ev.target.closest('.vis-toggle');
+      if (toggle) {
+        ev.stopPropagation();
+        const id = toggle.dataset.id;
+        const kind = toggle.dataset.kind;
+        const codigo = getCodigoAtual();
+        if (!id || !codigo || !kind) return;
+        const payload = {};
+        const checked = toggle.checked;
+        if (kind === 'producao') payload.visivel_producao = checked;
+        if (kind === 'assistencia') payload.visivel_assistencia_tecnica = checked;
+        toggle.disabled = true;
+        try {
+          await updateVisibilidade(codigo, id, payload);
+        } catch (err) {
+          console.error('[produto anexos] falha visibilidade', err);
+          alert('Falha ao atualizar visibilidade.');
+          toggle.checked = !checked;
+        } finally {
+          toggle.disabled = false;
+        }
+        return;
+      }
+
       const openBtn = ev.target.closest('.anexo-btn.open');
       if (openBtn) {
         const url = openBtn.dataset.url;
@@ -534,7 +647,7 @@
         const id = deleteBtn.dataset.id;
         const codigo = getCodigoAtual();
         if (!id || !codigo) return;
-        if (!confirm('Confirma exclusão deste anexo?')) return;
+        if (!confirm('Confirma desativação deste anexo? Ele ficará oculto, mas preservado.')) return;
         deleteBtn.disabled = true;
         try {
           await deleteAnexo(codigo, id);
@@ -579,6 +692,25 @@
           return;
         }
         openUploadModal({ codigo, onSuccess: reloadAnexos });
+      });
+    }
+
+    const toggleBtn = document.getElementById(TOGGLE_BUTTON_ID);
+    if (toggleBtn) {
+      const syncToggle = () => {
+        toggleBtn.classList.toggle('active', showInactive);
+        const icon = toggleBtn.querySelector('i');
+        const label = toggleBtn.querySelector('.btn-label') || toggleBtn;
+        if (icon) icon.className = showInactive ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        if (label) label.textContent = showInactive ? 'Ocultar excluídos' : 'Exibir excluídos';
+      };
+
+      syncToggle();
+
+      toggleBtn.addEventListener('click', () => {
+        showInactive = !showInactive;
+        syncToggle();
+        reloadAnexos();
       });
     }
   });

@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS compras.atividades_produto_status_especificas (
   nao_aplicavel BOOLEAN DEFAULT false,
   observacao_status TEXT,
   data_conclusao TIMESTAMP,
+  responsavel_username TEXT,
+  autor_username TEXT,
+  prazo TIMESTAMP,
   criado_em TIMESTAMP DEFAULT NOW(),
   atualizado_em TIMESTAMP DEFAULT NOW(),
   UNIQUE(produto_codigo, atividade_produto_id)

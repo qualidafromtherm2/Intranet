@@ -99,6 +99,7 @@
     return slots;
   }
 
+  // Upload de foto em uma posição específica
   async function uploadFoto(codigo, posReal, { file, nome, descricao }) {
     const form = new FormData();
     form.append('foto', file);
@@ -110,6 +111,7 @@
     return r.json();
   }
 
+  // Inativa (delete lógico) a foto de uma posição
   async function deleteFoto(codigo, posReal) {
     const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(posReal)}`;
     const r = await fetch(url, { method: 'DELETE' });
@@ -117,7 +119,51 @@
     return r.json();
   }
 
-  // ---------- UI ----------
+  // Gestão (ativas e inativas)
+  async function getFotosAll(codigo) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos?all=1`;
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    return Array.isArray(j.fotos) ? j.fotos : [];
+  }
+
+  async function ativarFoto(codigo, pos, id) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(pos)}/ativar`;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function inativarFoto(codigo, pos, id) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(pos)}/inativar`;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function atualizarVisibilidade(codigo, id, { vp, vat }) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(id)}/visibilidade`;
+    const body = {};
+    if (typeof vp === 'boolean') body.visivel_producao = vp;
+    if (typeof vat === 'boolean') body.visivel_assistencia_tecnica = vat;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
   const LABELS = [
     'Foto do produto',
     'Foto Característica visual',
@@ -126,6 +172,120 @@
     'Foto 5',
     'Foto 6'
   ];
+
+  // Modal de gestão (ativas e inativas)
+  function renderGestaoModal(fotos) {
+    const modal = document.getElementById('modalGerenciarFotos');
+    const body = document.getElementById('fgBody');
+    if (!modal || !body) return;
+
+    const grouped = new Map();
+    fotos.forEach((f) => {
+      const p = Number(f.pos);
+      if (!grouped.has(p)) grouped.set(p, []);
+      grouped.get(p).push(f);
+    });
+
+    const blocks = [];
+    const sortedPos = Array.from(grouped.keys()).sort((a, b) => a - b);
+    sortedPos.forEach((p) => {
+      const items = grouped.get(p) || [];
+      items.sort((a, b) => Number(b.id) - Number(a.id));
+      const cards = items
+        .map((f) => {
+          const ativo = f.ativo === true || String(f.ativo).toLowerCase() === 'true';
+          const url = f.url_imagem || 'img/Produto/Foto_carrocel.png';
+          const nome = f.nome_foto || `Pos ${p}`;
+          const desc = f.descricao_foto || '';
+          const visProd = f.visivel_producao !== false;
+          const visAt   = f.visivel_assistencia_tecnica !== false;
+          return `
+            <div class="fg-card" data-id="${f.id}" data-pos="${p}" data-ativo="${ativo ? '1' : '0'}">
+              <img src="${url}" alt="Foto pos ${p}" />
+              <div class="fg-meta"><span>Pos: ${p}</span><span>${ativo ? 'Ativa' : 'Inativa'}</span></div>
+              <div class="fg-text"><strong>${nome}</strong><br><small>${desc}</small></div>
+              <div class="fg-visibility">
+                <label><input type="checkbox" data-action="toggle-vis" data-target="vp" ${visProd ? 'checked' : ''}> Produção</label>
+                <label><input type="checkbox" data-action="toggle-vis" data-target="vat" ${visAt ? 'checked' : ''}> Assist. técnica</label>
+              </div>
+              <div class="fg-actions">
+                ${ativo
+                  ? '<button class="secondary" data-action="inativar">Desativar</button>'
+                  : '<button class="primary" data-action="ativar">Ativar</button>'}
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+      blocks.push(`<div><h4 style=\"margin:6px 0; color:#cbd5e1;\">Posição ${p}</h4><div class=\"fg-grid\">${cards}</div></div>`);
+    });
+
+    body.innerHTML = blocks.length ? blocks.join('') : '<p style="color:#cbd5e1;">Nenhuma foto cadastrada.</p>';
+
+    body.querySelectorAll('.fg-card').forEach((card) => {
+      card.addEventListener('click', async (ev) => {
+        const actionBtn = ev.target.closest('button[data-action]');
+        if (!actionBtn) return;
+        const id = Number(card.dataset.id);
+        const pos = Number(card.dataset.pos);
+        const codigo = getCodigoAtual();
+        try {
+          if (actionBtn.dataset.action === 'ativar') {
+            await ativarFoto(codigo, pos, id);
+          } else {
+            await inativarFoto(codigo, pos, id);
+          }
+          await reloadAndRender();
+          await openGestaoModal();
+        } catch (e) {
+          console.error('Erro ao alternar foto', e);
+          alert('Falha ao alternar status da foto.');
+        }
+      });
+    });
+
+    body.querySelectorAll('input[data-action="toggle-vis"]').forEach((input) => {
+      input.addEventListener('change', async (ev) => {
+        ev.stopPropagation();
+        const card = ev.currentTarget.closest('.fg-card');
+        if (!card) return;
+        const id = Number(card.dataset.id);
+        const codigo = getCodigoAtual();
+        const target = ev.currentTarget.dataset.target;
+        const checked = ev.currentTarget.checked;
+        try {
+          if (target === 'vp') {
+            await atualizarVisibilidade(codigo, id, { vp: checked, vat: undefined });
+          } else {
+            await atualizarVisibilidade(codigo, id, { vp: undefined, vat: checked });
+          }
+        } catch (e) {
+          console.error('Erro ao alterar visibilidade', e);
+          alert('Falha ao alterar visibilidade.');
+          ev.currentTarget.checked = !checked;
+        }
+      });
+    });
+  }
+
+  async function openGestaoModal() {
+    const modal = document.getElementById('modalGerenciarFotos');
+    const closeBtn = modal?.querySelector('.fg-close');
+    if (!modal) return;
+    const codigo = getCodigoAtual();
+    try {
+      const all = await getFotosAll(codigo);
+      renderGestaoModal(all);
+    } catch (e) {
+      console.error('Erro ao carregar fotos (todas)', e);
+      alert('Falha ao carregar fotos (ativas e inativas).');
+      return;
+    }
+    modal.style.display = 'flex';
+    const close = () => { modal.style.display = 'none'; };
+    modal.querySelector('.fg-overlay')?.addEventListener('click', close);
+    closeBtn?.addEventListener('click', close, { once: true });
+  }
 
   function renderCarousel(slots) {
     const pane = document.getElementById('listaFotos');
@@ -539,6 +699,25 @@
       .foto-upload-save:not(:disabled):hover{
         background:#268459;
       }
+      .fg-visibility{
+        display:flex;
+        gap:10px;
+        align-items:center;
+        margin:6px 0;
+        color:#d1d9e6;
+        font-size:0.85rem;
+      }
+      .fg-visibility label{
+        display:flex;
+        gap:6px;
+        align-items:center;
+        font-size:0.85rem;
+        line-height:1.2;
+      }
+      .fg-visibility input[type="checkbox"]{
+        width:16px;
+        height:16px;
+      }
     `;
     document.head.appendChild(s);
   })();
@@ -578,6 +757,14 @@
       if (getComputedStyle(fotosPane).display !== 'none') {
         reloadAndRender();
       }
+    }
+
+    const btnGestao = document.getElementById('btnGerenciarFotos');
+    if (btnGestao) {
+      btnGestao.addEventListener('click', () => {
+        if (isCoolingDown()) return;
+        openGestaoModal();
+      });
     }
   }
 
