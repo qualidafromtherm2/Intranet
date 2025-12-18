@@ -4874,7 +4874,7 @@ const sacTabelaBody = document.getElementById('sacTabelaBody');
 const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
 const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaTabelaBodyPane');
 const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
-const sacStatusOptions = ['Pendente', 'Aguardando correios', 'Enviado', 'Finalizado'];
+const sacStatusOptions = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
 // Preenche status de rastreio nas células com data-rastreio
 async function preencherStatusRastreio(container) {
   if (!container) return;
@@ -5014,15 +5014,30 @@ if (sacSendBtn) {
   });
 }
 
-async function carregarSacSolicitacoes(targetBody) {
+async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly = false } = {}) {
   const bodyEl = targetBody || sacTabelaBody;
   if (!bodyEl) return;
-  bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  if (!titleOnly) {
+    bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  }
   try {
-    const resp = await fetch('/api/sac/solicitacoes');
+    const url = hideDone ? '/api/sac/solicitacoes?hideDone=1' : '/api/sac/solicitacoes';
+    const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
     const rows = data.rows || [];
+
+    // Atualiza badge no título da aba com quantidade filtrada (Enviado/Finalizado ocultos)
+    // mesmo que a aba ativa seja outra.
+    if (hideDone) {
+      const baseTitle = 'Produtos';
+      const pendentes = rows.filter(r => normalizeSacStatus(r.status) === 'Pendente');
+      const count = pendentes.length;
+      document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
+    }
+
+    if (titleOnly) return; // já atualizou o título, não altera a tabela
+
     if (!rows.length) {
       bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>';
       return;
@@ -5071,13 +5086,13 @@ async function carregarSacSolicitacoes(targetBody) {
   }
 }
 
-sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody));
-envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane));
+sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false }));
+envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true }));
 
 // Carrega registros ao abrir o painel SAC
 if (sacMenuLink) {
   sacMenuLink.addEventListener('click', () => {
-    setTimeout(() => { carregarSacSolicitacoes(sacTabelaBody); }, 50);
+    setTimeout(() => { carregarSacSolicitacoes(sacTabelaBody, { hideDone: false }); }, 50);
   }, { once: true });
 }
 
@@ -5087,9 +5102,67 @@ if (envioMercadoriaMenu) {
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     envioMercadoriaMenu.classList.add('is-active');
     showMainTab('envioMercadoriaPane');
-    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane);
+    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true });
   });
 }
+
+// Atualiza o contador na guia mesmo fora do painel (apenas logística)
+let envioBadgeTimer = null;
+let envioBadgeVisibilityBound = false;
+
+function _rolesDoUsuario() {
+  const rawRoles = window.userRoles ?? window.__sessionUser?.roles ?? [];
+  if (Array.isArray(rawRoles)) return rawRoles;
+  return String(rawRoles || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function _atualizarTituloEnvio() {
+  if (!envioMercadoriaTabelaBodyPane) return;
+  carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, titleOnly: true });
+}
+
+function _pararBadgeEnvio() {
+  if (envioBadgeTimer) {
+    clearInterval(envioBadgeTimer);
+    envioBadgeTimer = null;
+  }
+  document.title = 'Produtos';
+}
+
+function garantirBadgeEnvioParaLogistica() {
+  if (!envioMercadoriaTabelaBodyPane) return;
+
+  const userRoles = _rolesDoUsuario();
+  const setorNome = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '').toLowerCase();
+  const isLogistica =
+    userRoles.some(r => String(r || '').toLowerCase() === 'logistica') ||
+    setorNome.includes('logist');
+
+  if (!isLogistica) {
+    _pararBadgeEnvio();
+    return;
+  }
+
+  // evita múltiplos timers
+  if (!envioBadgeTimer) {
+    const PING_INTERVAL_MS = 15000;
+    envioBadgeTimer = setInterval(_atualizarTituloEnvio, PING_INTERVAL_MS);
+    setTimeout(_atualizarTituloEnvio, 200);
+  }
+
+  if (!envioBadgeVisibilityBound) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') _atualizarTituloEnvio();
+    });
+    envioBadgeVisibilityBound = true;
+  }
+}
+
+// roda no carregamento e quando a sessão mudar
+garantirBadgeEnvioParaLogistica();
 
 // Impressão dos anexos (etiqueta/declaração) a partir dos botões da tabela
 function setupPrintButtons(container) {
@@ -5144,6 +5217,12 @@ document.addEventListener('change', async (ev) => {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao atualizar');
     sel.dataset.prev = novoStatus;
+
+    // Se mudou para Enviado ou Finalizado, remove a linha da tabela imediatamente
+    if (['Enviado', 'Finalizado'].includes(novoStatus)) {
+      const row = sel.closest('tr');
+      if (row) row.remove();
+    }
   } catch (err) {
     console.error('[SAC] erro ao atualizar status', err);
     alert('Não foi possível atualizar o status. ' + (err?.message || ''));
@@ -13810,6 +13889,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // reapply quando login/logout ou permissões mudarem
 window.addEventListener('auth:changed', ensureAuthVisibility);
+window.addEventListener('auth:changed', garantirBadgeEnvioParaLogistica);
 
 // após login/logout, sincroniza nós (se logado)
 window.addEventListener('auth:changed', async () => {

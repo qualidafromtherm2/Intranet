@@ -10,7 +10,7 @@ const supabase = require('../utils/supabase');
 
 const router = express.Router();
 
-const STATUS_LIST = ['Pendente', 'Aguardando correios', 'Enviado', 'Finalizado'];
+const STATUS_LIST = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
 
 const TRACK_USER = process.env.TRACK_USER || 'guest';
 const TRACK_TOKEN = process.env.TRACK_TOKEN || 'guest';
@@ -299,11 +299,18 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   }
 });
 
-router.get('/solicitacoes', async (_req, res) => {
+router.get('/solicitacoes', async (req, res) => {
   try {
+    const hideDone = String(req.query?.hideDone || '').toLowerCase() === 'true' || req.query?.hideDone === '1';
+
+    const whereClause = hideDone
+      ? "WHERE COALESCE(status, '') NOT IN ('Enviado', 'Finalizado')"
+      : '';
+
     const r = await pool.query(
       `SELECT id, created_at, usuario, observacao, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em
          FROM envios.solicitacoes
+        ${whereClause}
         ORDER BY id DESC
         LIMIT 200`
     );

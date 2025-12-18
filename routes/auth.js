@@ -10,6 +10,23 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+async function carregarExtrasDoUsuario(userId) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.name AS setor_nome
+         FROM public.auth_user_profile up
+         LEFT JOIN public.auth_sector s ON s.id = up.sector_id
+        WHERE up.user_id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    return { setor: rows[0]?.setor_nome || null };
+  } catch (e) {
+    console.warn('[auth] não foi possível carregar setor do usuário', e.message);
+    return { setor: null };
+  }
+}
+
 // routes/auth.js (SQL only) — login completo
 router.post('/login', async (req, res) => {
   try {
@@ -31,12 +48,14 @@ router.post('/login', async (req, res) => {
 
     const u = rows[0]; // tem id, username, roles
     // evita fixation: gera um novo id de sessão
+    const extras = await carregarExtrasDoUsuario(u.id);
     req.session.regenerate(err => {
       if (err) return res.status(500).json({ error: 'Falha na sessão' });
       req.session.user = {
         id: String(u.id),                 // << id numérico correto
         username: u.username,
-        roles: u.roles
+        roles: u.roles,
+        setor: extras.setor
       };
       req.session.save(() => res.json({ ok: true, user: req.session.user }));
     });
@@ -108,8 +127,17 @@ router.post('/first-password', async (req, res) => {
 
 
 router.get('/status', (req, res) => {
-  if (req.session.user) return res.json({ loggedIn: true, user: req.session.user });
-  res.json({ loggedIn: false });
+  const finish = (user) => res.json({ loggedIn: !!user, user: user || null });
+
+  if (!req.session.user) return finish(null);
+
+  carregarExtrasDoUsuario(req.session.user.id)
+    .then(extras => {
+      const merged = { ...req.session.user, ...extras };
+      req.session.user = merged;
+      finish(merged);
+    })
+    .catch(() => finish(req.session.user));
 });
 
 // GET /auth/permissoes - retorna permissões de produto do usuário logado
