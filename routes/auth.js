@@ -46,20 +46,96 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST /first-password
+// Troca a senha inicial ("123") por uma nova e inicia a sessão.
+router.post('/first-password', async (req, res) => {
+  try {
+    const { username, newPassword } = req.body || {};
+    if (!username || !newPassword) {
+      return res.status(400).json({ ok: false, error: 'Parâmetros inválidos' });
+    }
+
+    // 1) Busca o usuário na auth_user (o teu backend usa esse schema)
+    const sel = await pool.query(
+      `SELECT id, username, password_hash
+         FROM public.auth_user
+        WHERE username = $1 OR id::text = $1
+        LIMIT 1`,
+      [username]
+    );
+    if (sel.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+    }
+    const u = sel.rows[0];
+
+    // 2) Permite trocar somente se a senha atual ainda for "123"
+    //    (compara o hash atual com "123")
+    const chk = await pool.query(
+      `SELECT (password_hash = crypt('123', password_hash)) AS is123
+         FROM public.auth_user
+        WHERE id = $1`,
+      [u.id]
+    );
+    const is123 = !!chk.rows[0]?.is123;
+    if (!is123) {
+      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+
+    // 3) Atualiza para a nova senha (hash via pgcrypto/bcrypt no Postgres)
+    await pool.query(
+      `UPDATE public.auth_user
+          SET password_hash = crypt($1, gen_salt('bf')), updated_at = now()
+        WHERE id = $2`,
+      [newPassword, u.id]
+    );
+
+    // 4) Cria a sessão (mesmo modelo do /login)
+    const usernameOut = u.username || String(u.id);
+    req.session.regenerate(err => {
+      if (err) return res.status(500).json({ ok: false, error: 'Falha na sessão' });
+      req.session.user = {
+        id: String(u.id),
+        username: usernameOut,
+        roles: [] // ajuste se você usa perfis
+      };
+      req.session.save(() => res.json({ ok: true, user: req.session.user }));
+    });
+  } catch (e) {
+    console.error('[auth/first-password]', e);
+    return res.status(500).json({ ok: false, error: 'Erro interno' });
+  }
+});
+
+
 router.get('/status', (req, res) => {
   if (req.session.user) return res.json({ loggedIn: true, user: req.session.user });
   res.json({ loggedIn: false });
 });
 
+// GET /auth/permissoes - retorna permissões de produto do usuário logado
+router.get('/permissoes', async (req, res) => {
+  try {
+    if (!req.session.user?.id) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+    const userId = req.session.user.id;
+    const { rows } = await pool.query(
+      `SELECT array_agg(permissao_codigo) AS codigos
+       FROM public.auth_user_produto_permissao
+       WHERE user_id = $1`,
+      [userId]
+    );
+    const permissoes = rows[0]?.codigos || [];
+    res.json({ permissoes });
+  } catch (err) {
+    console.error('[auth/permissoes]', err);
+    res.status(500).json({ error: 'Erro ao buscar permissões' });
+  }
+});
 
 router.post('/logout', (req, res) => {
   try { req.session.destroy(() => res.json({ ok: true })); }
   catch { res.json({ ok: true }); }
-});
-
-router.get('/status', (req, res) => {
-  if (req.session.user) return res.json({ loggedIn: true, user: req.session.user });
-  res.json({ loggedIn: false });
 });
 
 module.exports = router;

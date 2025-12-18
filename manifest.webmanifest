@@ -1,7 +1,7 @@
 {
   "name": "Fromtherm Intranet",
   "short_name": "Intranet",
-  "start_url": "/preparacao_eletrica.html?source=pwa",
+  "start_url": "/menu_produto.html?source=pwa",
   "scope": "/",
   "display": "standalone",
   "display_override": ["fullscreen", "standalone"],

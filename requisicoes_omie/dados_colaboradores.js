@@ -49,11 +49,35 @@ function ensurePane(root){
 
   const st = document.createElement('style');
   st.textContent = `
-    .colab-grid{display:grid;grid-template-columns:1fr 80px 160px 240px 140px;gap:8px}
-    .colab-grid .th{font-weight:600;opacity:.9;padding:8px 10px}
-    .colab-grid .td{padding:8px 10px;border-radius:8px;background:var(--ds-card,rgba(255,255,255,.04))}
-    .colab-grid .btn-acao{justify-self:end}
-    @media(max-width:1100px){.colab-grid{grid-template-columns:1fr 70px 130px 200px 120px}}
+    /* Grid da lista em estilo tabela, mais limpo e profissional (escopado) */
+    #dadosColaboradores .colab-grid{display:grid;grid-template-columns:1.2fr 90px 180px 1.8fr 140px;gap:0;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,20,28,.6);box-shadow:0 8px 26px rgba(0,0,0,.2)}
+    #dadosColaboradores .colab-grid .th,#dadosColaboradores .colab-grid .td{padding:12px 14px}
+    #dadosColaboradores .colab-grid .th{font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:12px;color:#a8b3d4;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.08)}
+    #dadosColaboradores .colab-grid .td{border-bottom:1px solid rgba(255,255,255,.06);background:transparent}
+    #dadosColaboradores .colab-grid .td:nth-child(5n+2),
+    #dadosColaboradores .colab-grid .td:nth-child(5n+3){text-align:center;color:#e5eaff}
+    #dadosColaboradores .colab-grid .btn-acao{justify-self:end}
+    #dadosColaboradores .colab-grid .td-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}
+    #dadosColaboradores .colab-grid .btn-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:#d7defe;cursor:pointer;font-size:0;padding:0;line-height:0;transition:background .15s ease,border-color .15s ease,transform .15s ease,color .15s ease}
+    #dadosColaboradores .colab-grid .btn-icon:hover{background:rgba(77,128,255,.18);border-color:rgba(96,148,255,.55);color:#f5f7ff;transform:translateY(-1px)}
+    #dadosColaboradores .colab-grid .btn-icon:focus-visible{outline:2px solid rgba(95,142,255,.8);outline-offset:2px}
+    #dadosColaboradores .colab-grid .btn-icon svg{display:block;width:18px;height:18px;pointer-events:none}
+    #dadosColaboradores .colab-grid .btn-icon svg *,
+    #dadosColaboradores .colab-grid .btn-icon svg path{fill:currentColor!important;stroke:none!important}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .loading{position:relative}
+  .loading::after{content:'';position:absolute;right:-6px;top:-6px;width:14px;height:14px;border:2px solid rgba(255,255,255,.6);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+  @media(max-width:1100px){#dadosColaboradores .colab-grid{grid-template-columns:1fr 70px 130px 1.4fr 110px}}
+
+    /* Toolbar: filtro e botão recarregar */
+    #dadosColaboradores .title-wrapper{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+    #dadosColaboradores .title-wrapper .side-by-side{display:flex;gap:8px;align-items:center}
+    #colabFilter{min-width:320px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(17,20,28,.6);color:#e8ecff}
+    #colabFilter::placeholder{color:#93a0c2;opacity:.8}
+
+    /* Chips de Permissões de Produto */
+    .perm-chips{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+    .perm-chip{background:rgba(84,120,255,.16);border:1px solid rgba(120,150,255,.25);padding:3px 8px;border-radius:999px;font-size:12px;color:#e6eaff}
 
     .colab-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.54);backdrop-filter:saturate(120%) blur(2px);z-index:9998;display:flex;align-items:center;justify-content:center}
     .colab-modal{width:min(920px,94vw);max-height:88vh;overflow:auto;background:#151923;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 80px rgba(0,0,0,.5)}
@@ -82,7 +106,15 @@ function ensurePane(root){
   pane.appendChild(st);
 
   pane.querySelector('#btnRecarregarColab')
-      .addEventListener('click', () => carregarLista(pane));
+      .addEventListener('click', async (ev) => {
+        const b = ev.currentTarget;
+        b.classList.add('loading');
+        b.disabled = true;
+        const prev = b.textContent;
+        b.textContent = 'Carregando…';
+        try { await carregarLista(pane); }
+        finally { b.disabled = false; b.classList.remove('loading'); b.textContent = prev; }
+      });
   pane.querySelector('#colabFilter')
       .addEventListener('input', () => aplicarFiltro(pane));
 
@@ -98,12 +130,96 @@ function renderLinhas(pane, lista){
     const c1 = mk('div','td', u.username);
     const c2 = mk('div','td', String(u.id));
     const c3 = mk('div','td', u.setor  || '—');
-    const c4 = mk('div','td', u.funcao || '—');
-    const c5 = mk('div','td');
-    const b  = mk('button','content-button status-button btn-acao','Detalhes');
-    b.addEventListener('click', () => abrirDetalhes(u));
-    c5.appendChild(b);
-    grid.append(c1,c2,c3,c4,c5);
+    const opsText = Array.isArray(u.operacoes) && u.operacoes.length
+      ? u.operacoes.map(op => op?.label || op?.operacao || op?.name || '').filter(Boolean).join(', ')
+      : '';
+    const c4 = mk('div','td');
+    const funcOpsLbl = [u.funcao || '—', opsText].filter(Boolean).join(' • ');
+    c4.appendChild(mk('div', '', funcOpsLbl));
+
+    // Chips de Permissões de Produto
+    const perms = Array.isArray(u.produto_permissoes) ? u.produto_permissoes : [];
+    if (perms.length) {
+      const chips = mk('div','perm-chips');
+      perms.forEach(p => {
+        const chip = mk('span','perm-chip', p?.nome || p?.codigo || '');
+        chips.appendChild(chip);
+      });
+      c4.appendChild(chips);
+    }
+const c5 = mk('div','td td-actions');
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const makeSvgIcon = (paths) => {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  svg.setAttribute('aria-hidden', 'true');
+  paths.forEach(cfg => {
+    const path = document.createElementNS(SVG_NS, 'path');
+    Object.entries(cfg).forEach(([k,v]) => path.setAttribute(k, v));
+    svg.appendChild(path);
+  });
+  return svg;
+};
+
+const iconFactories = {
+  pencil: () => makeSvgIcon([
+    { d: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z' },
+    { d: 'M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z' }
+  ]),
+  trash: () => makeSvgIcon([
+    { d: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12z' },
+    { d: 'M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z' }
+  ])
+};
+
+// botão ícone (reutilizável)
+const makeIconBtn = (title, kind) => {
+  const b = mk('button',`btn-icon icon-${kind}`);
+  b.type = 'button';
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  b.appendChild(iconFactories[kind]());
+  return b;
+};
+
+// Detalhes (ícone lápis)
+const btnDet = makeIconBtn('Detalhes', 'pencil');
+btnDet.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.classList.add('loading'); b.disabled = true;
+  try { await abrirDetalhes(u); }
+  finally { b.disabled = false; b.classList.remove('loading'); }
+});
+c5.appendChild(btnDet);
+
+// Excluir (ícone lixeira)
+const btnDel = makeIconBtn('Excluir', 'trash');
+btnDel.addEventListener('click', async (ev) => {
+  const ok = confirm(`Excluir o usuário "${u.username}" (ID ${u.id})? Esta ação não pode ser desfeita.`);
+  if (!ok) return;
+  try {
+    const b = ev.currentTarget; b.classList.add('loading'); b.disabled = true;
+    const r = await fetch(`/api/colaboradores/${encodeURIComponent(u.id)}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      throw new Error(err.error || `Falha (HTTP ${r.status})`);
+    }
+    await carregarLista(pane); // recarrega a lista
+  } catch (e) {
+    alert('Não foi possível excluir: ' + (e.message || e));
+  } finally {
+    const b = ev.currentTarget; b.disabled = false; b.classList.remove('loading');
+  }
+});
+c5.appendChild(btnDel);
+
+grid.append(c1,c2,c3,c4,c5);
+
   });
 
   pane._raw = lista;
@@ -121,6 +237,19 @@ function aplicarFiltro(pane){
   }
 }
 
+function normalizeOperacoes(val){
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string'){
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
+}
+
 /* ============ API ============ */
 async function carregarLista(pane){
   const res = await fetch('/api/users', { credentials:'include' });
@@ -134,7 +263,12 @@ async function carregarLista(pane){
     username: x.username,
     roles: Array.isArray(x.roles) ? x.roles : [],
     setor:  x.setor  || x.profile?.setor  || '',
-    funcao: x.funcao || x.profile?.funcao || ''
+    funcao: x.funcao || x.profile?.funcao || '',
+    operacao: x.operacao || x.profile?.operacao || '',
+    operacao_id: x.operacao_id != null ? Number(x.operacao_id) :
+                 (x.profile?.operacao_id != null ? Number(x.profile.operacao_id) : null),
+    operacoes: normalizeOperacoes(x.operacoes ?? x.profile?.operacoes),
+    produto_permissoes: Array.isArray(x.produto_permissoes) ? x.produto_permissoes : []
   }));
   renderLinhas(pane, lista);
 }
@@ -165,6 +299,10 @@ async function abrirDetalhes(u){
   const roles   = user.roles || [];
   const setor   = profile.setor  || u.setor  || '';
   const funcao  = profile.funcao || u.funcao || '';
+  const operacao = profile.operacao || u.operacao || '';
+  const operacaoIdRaw = profile.operacao_id ?? u.operacao_id ?? null;
+  const operacaoId = operacaoIdRaw != null ? Number(operacaoIdRaw) : null;
+  const operacoes = normalizeOperacoes(profile.operacoes ?? u.operacoes);
 
   const html = `
     <div class="colab-modal" role="dialog" aria-modal="true">
@@ -181,12 +319,25 @@ async function abrirDetalhes(u){
         </div>
         <div class="row"><label>Setor</label><div>${setor || '—'}</div></div>
         <div class="row"><label>Função</label><div>${funcao || '—'}</div></div>
+        <div class="row"><label>Operações</label>
+          <div class="pill" style="flex-wrap:wrap;gap:6px;">
+            ${
+              operacoes.length
+                ? operacoes.map(op => `<span class="badge">${op.label || op.operacao || op.name || op.id}</span>`).join(' ')
+                : (operacao ? `<span class="badge">${operacao}</span>` : '—')
+            }
+          </div>
+        </div>
 
         <div class="sep"></div>
 
-        <div class="row" style="grid-column:1/-1">
-          <button class="btn primary js-open-perm">Permissões</button>
-        </div>
+<div class="row" style="grid-column:1/-1; display:flex; gap:8px; align-items:center">
+  <button class="btn primary js-open-perm">Permissões</button>
+  <button class="btn js-edit">Editar</button>
+  <button class="btn danger js-reset-pass" title="Redefinir a senha deste usuário para 123">Resetar senha</button>
+</div>
+
+
 
         <!-- o editor não é mais renderizado aqui; usamos showPermissoes() -->
         <div class="perm-list" style="display:none"></div>
@@ -200,22 +351,89 @@ async function abrirDetalhes(u){
   `;
 
   const modal = showModal(html);
+
+  // clique no "Resetar senha" → POST /api/users/:id/password/reset
+const btnReset = modal.querySelector('.js-reset-pass');
+btnReset?.addEventListener('click', async (ev) => {
+  const id = String(user.id);
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
+  const prev = b.textContent; b.textContent = 'Resetando…';
+  try {
+    const r = await fetch(`/api/users/${encodeURIComponent(id)}/password/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!r.ok) {
+      const err = await r.text().catch(()=> '');
+      throw new Error(`HTTP ${r.status} ${err || ''}`.trim());
+    }
+    alert('Senha redefinida para 123. No próximo login, o usuário deverá alterar a senha.');
+  } catch (e) {
+    alert('Falha ao redefinir a senha: ' + (e.message || e));
+  } finally {
+    b.textContent = prev;
+    b.disabled = false;
+    b.classList.remove('loading');
+  }
+});
+
+
+
+
   modal.querySelectorAll('.js-close').forEach(b => b.addEventListener('click', () => closeModal(modal)));
 
   // 👉 NOVO: abre o editor moderno de permissões (aquele com “Menu lateral / Menu superior”)
-  modal.querySelector('.js-open-perm').addEventListener('click', async () => {
-    try {
-      // garante que os nós atuais do DOM já estejam no SQL antes de abrir
-      if (window.syncNavNodes) await window.syncNavNodes();
-    } catch (e) {
-      console.warn('[perm-sync]', e);
-    }
+modal.querySelector('.js-open-perm').addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
 
-    try { await window.syncNavNodes?.(); } catch (e) { console.warn('[perm-sync]', e); }
+  try {
+    if (window.syncNavNodes) await window.syncNavNodes();
+  } catch (e) {
+    console.warn('[perm-sync]', e);
+  }
+  try { await window.syncNavNodes?.(); } catch (e) { console.warn('[perm-sync]', e); }
 
+  try {
     await showPermissoes(String(user.id), user.username);
+  } finally {
+    b.disabled = false; b.classList.remove('loading');
+  }
+});
 
-  });
+// abrir o modal de edição reaproveitando o modal global
+modal.querySelector('.js-edit')?.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget; b.disabled = true; b.classList.add('loading');
+  try {
+    // passamos os dados por NOME (funcao/setor) + roles; o menu_produto.js resolve os IDs
+    const payload = {
+      id: user.id,
+      username: user.username,
+      roles: Array.isArray(user.roles) ? user.roles : [],
+      funcao: funcao || '',  // nomes já extraídos acima
+      setor:  setor  || '',
+      operacao: operacao || '',
+      operacao_id: operacaoId,
+      operacoes,
+      produto_permissoes: Array.isArray(profile.produto_permissoes)
+        ? profile.produto_permissoes
+        : (Array.isArray(u.produto_permissoes) ? u.produto_permissoes : [])
+    };
+    // exposto no menu_produto.js
+    if (window.openColabEdit) {
+      await window.openColabEdit(payload);
+      closeModal(modal); // fecha o "Detalhes", já que o de edição abre por cima
+    } else {
+      alert('Editor não disponível nesta página.');
+    }
+  } catch (e) {
+    console.warn('[editar usuário]', e);
+    alert('Falha ao abrir editor.');
+  } finally {
+    b.disabled = false; b.classList.remove('loading');
+  }
+});
+
 }
 
 
@@ -258,6 +476,41 @@ export function initDadosColaboradoresUI(){
   window.openColaboradores = doOpen; // debug
 }
 export const openColaboradores = doOpen;
+
+const ensurePermStyles = (() => {
+  let injected = false;
+  return () => {
+    if (injected) return;
+    injected = true;
+    const css = document.createElement('style');
+    css.id = 'colabPermStyles';
+    css.textContent = `
+      .colab-perm-modal{position:fixed;inset:0;padding:24px;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center}
+      .colab-perm-box{width:min(920px,95vw);max-height:88vh;overflow:auto;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 18px 60px rgba(0,0,0,.55);padding:18px 20px;display:flex;flex-direction:column}
+      .colab-perm-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+      .colab-perm-title{margin:0;font-size:18px;font-weight:600;flex:1;color:#f5f7ff}
+      .colab-perm-body{flex:1;overflow:auto;padding-right:4px}
+      .colab-perm-section{margin:18px 0 6px}
+      .colab-perm-section:first-child{margin-top:0}
+      .colab-perm-section-title{opacity:.8;font-weight:600;margin-bottom:10px;text-transform:uppercase;font-size:13px;letter-spacing:.04em}
+      .colab-perm-item{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;color:#dae0ff;transition:background .15s ease}
+      .colab-perm-item:hover{background:rgba(84,120,255,.12)}
+      .colab-perm-item[data-depth="0"]{font-weight:600}
+      .colab-perm-item input[type="checkbox"]{width:18px;height:18px;margin:0;flex:0 0 auto;appearance:auto;border-radius:4px;accent-color:#506dff}
+      .colab-perm-text{flex:1;line-height:1.35}
+      .colab-perm-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+      .colab-perm-btn{padding:9px 18px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:#e8ecff;font-weight:600;cursor:pointer;transition:filter .15s ease,background .15s ease,border-color .15s ease}
+      .colab-perm-btn.primary{background:#2f66ff;border-color:#2f66ff;color:#fff}
+      .colab-perm-btn:hover{filter:brightness(1.05)}
+      .colab-perm-btn:focus-visible{outline:2px solid rgba(95,142,255,.9);outline-offset:2px}
+      @media(max-width:640px){
+        .colab-perm-modal{padding:12px}
+        .colab-perm-box{padding:16px}
+      }
+    `;
+    document.head.appendChild(css);
+  };
+})();
 
 function renderPermissoes(nodes, currentMap) {
   // nodes: array vindo de /permissions/tree
@@ -339,31 +592,30 @@ function renderPermissoes(nodes, currentMap) {
 
 // ====== Permissões: abre rápido e sincroniza em paralelo ======
 async function showPermissoes(userId, username) {
+  ensurePermStyles();
   // 1) Abre o modal imediatamente (skeleton)
   if (!window.__permModalEl) {
     window.__permModalEl = document.createElement('div');
-    window.__permModalEl.className = 'perm-modal';
-    Object.assign(window.__permModalEl.style, {
-      position:'fixed', inset:'0', background:'rgba(0,0,0,.5)',
-      display:'flex', alignItems:'center', justifyContent:'center', zIndex: 9999
-    });
+    window.__permModalEl.className = 'colab-perm-modal';
     document.body.appendChild(window.__permModalEl);
   }
   const $ = window.__permModalEl;
   $.innerHTML = `
-    <div style="width:min(900px,95vw);max-height:90vh;overflow:auto;background:#1f2430;border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.4)">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <h3 style="margin:0;flex:1">Permissões de <span style="opacity:.8">${username}</span></h3>
-        <button id="permClose" class="content-button status-button">Fechar</button>
+    <div class="colab-perm-box" role="dialog" aria-modal="true">
+      <div class="colab-perm-head">
+        <h3 class="colab-perm-title">Permissões de <span style="opacity:.7;font-weight:500">${username}</span></h3>
+        <button id="permClose" class="colab-perm-btn">Fechar</button>
       </div>
-      <div id="permBody">
-        <div style="padding:24px 8px;opacity:.7">Carregando permissões…</div>
+      <div id="permBody" class="colab-perm-body">
+        <div style="padding:24px 8px;opacity:.7;text-align:center">Carregando permissões…</div>
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button id="permSalvar" class="content-button status-button">Salvar alterações</button>
+      <div class="colab-perm-footer">
+        <button id="permSalvar" class="colab-perm-btn primary">Salvar alterações</button>
       </div>
     </div>`;
   $.style.display = 'flex';
+
+  $.onclick = ev => { if (ev.target === $) $.style.display = 'none'; };
 
   const btnFechar = $.querySelector('#permClose');
   btnFechar.onclick = () => ($.style.display='none');
@@ -388,38 +640,65 @@ async function showPermissoes(userId, username) {
   const byPos = { side: [], top: [] };
   for (const n of (tree.nodes || [])) byPos[n.pos]?.push(n);
 
-  function renderGroup(title, arr) {
-    if (!arr.length) return '';
-    // Ordena por parent->sort->label
-    arr.sort((a,b)=> (a.parent_id||0)-(b.parent_id||0) || a.sort-b.sort || a.label.localeCompare(b.label,'pt'));
-    // Agrupa por parent_id
-    const groups = new Map();
-    arr.forEach(n => {
-      const pid = n.parent_id || 0;
-      if (!groups.has(pid)) groups.set(pid, []);
-      groups.get(pid).push(n);
+  function buildTree(arr){
+    const map = new Map();
+    const roots = [];
+    arr.forEach(item => {
+      map.set(item.id, { ...item, children: [] });
     });
-    let html = `<div style="margin:18px 0 10px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
-                  <div style="opacity:.8;margin-bottom:8px;font-weight:600">${title}</div>`;
-    for (const [pid, items] of groups.entries()) {
-      // cabeçalho do pai (se houver)
-      const parent = arr.find(x => x.id === pid);
-      if (pid && parent) {
-        html += `<div style="margin:6px 0 4px;opacity:.7">${parent.label}</div>`;
+    map.forEach(node => {
+      if (node.parent_id && map.has(node.parent_id)) {
+        map.get(node.parent_id).children.push(node);
+      } else {
+        roots.push(node);
       }
-      for (const it of items) {
-        const disabled = false; // habilitados por padrão
-        html += `<label style="display:flex;gap:8px;align-items:center;padding:6px 4px">
-                   <input type="checkbox" class="perm-cb" data-node="${it.id}" ${it.allowed ? 'checked':''} ${disabled?'disabled':''}>
-                   <span>${it.label}</span>
-                 </label>`;
-      }
-    }
-    html += `</div>`;
-    return html;
+    });
+    const sortFn = (a,b)=> ((a.sort ?? 0) - (b.sort ?? 0)) || (a.label||'').localeCompare(b.label||'', 'pt');
+    const sortTree = nodes => {
+      nodes.sort(sortFn);
+      nodes.forEach(n => sortTree(n.children));
+    };
+    sortTree(roots);
+    return roots;
   }
 
-  body.innerHTML = renderGroup('Menu lateral', byPos.side) + renderGroup('Menu superior', byPos.top);
+  function renderSection(title, nodes){
+    if (!nodes.length) return;
+    const section = document.createElement('section');
+    section.className = 'colab-perm-section';
+    const header = document.createElement('div');
+    header.className = 'colab-perm-section-title';
+    header.textContent = title;
+    section.appendChild(header);
+
+    const renderNode = (node, depth=0) => {
+      const row = document.createElement('label');
+      row.className = 'colab-perm-item';
+      row.dataset.depth = String(depth);
+      if (depth > 0) row.style.marginLeft = `${depth * 16}px`;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'perm-cb';
+      cb.dataset.node = String(node.id);
+      cb.checked = !!node.allowed;
+
+      const span = document.createElement('span');
+      span.className = 'colab-perm-text';
+      span.textContent = node.label;
+
+      row.append(cb, span);
+      section.appendChild(row);
+      node.children.forEach(child => renderNode(child, depth + 1));
+    };
+
+    nodes.forEach(n => renderNode(n, 0));
+    body.appendChild(section);
+  }
+
+  body.innerHTML = '';
+  renderSection('Menu lateral', buildTree(byPos.side));
+  renderSection('Menu superior', buildTree(byPos.top));
 
   // 5) Salvar
   $.querySelector('#permSalvar').onclick = async () => {
@@ -443,4 +722,3 @@ async function showPermissoes(userId, username) {
     window.dispatchEvent(new Event('auth:changed')); // reavalia visibilidade
   };
 }
-

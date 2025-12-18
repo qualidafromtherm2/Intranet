@@ -6,6 +6,9 @@ import {
   attachEditor,
   attachSelectEditor,
   attachTipoItemEditor,
+  attachVisivelPrincipalEditor,
+  attachTipoCompraEditor,
+  attachPrecoDefinidoEditor,
   ensureSaveAllBtn
 } from './editar_produto.js';
 
@@ -17,6 +20,25 @@ const API_BASE =
 
     
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
+
+// --- Controle de permissões de produto ---
+let userPermissoes = [];
+let camposObrigatoriosVazios = []; // Armazena campos obrigatórios não preenchidos
+
+async function loadUserPermissoes() {
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/permissoes`, { credentials: 'include' });
+    if (resp.ok) {
+      const data = await resp.json();
+      userPermissoes = data.permissoes || [];
+    }
+  } catch (e) {
+    console.warn('[Dados_produto] Erro ao carregar permissões:', e);
+  }
+}
+function hasPermissao(codigo) {
+  return userPermissoes.includes(codigo);
+}
 
 // — campos da aba PDV —
 const camposPDV = [
@@ -37,6 +59,142 @@ const camposCompras = [
   { key: 'nCMC',               label: 'CMC'            },
   { key: 'nPrecoUltComp',      label: 'Última compra'  }  // novo campo
 ];
+
+/* ----------------- Cálculo de completude do produto ----------------- */
+async function calcularCompletude(dados) {
+  // Busca o CÓDIGO da família do produto (não o nome!)
+  const familiaCodigo = dados.codigo_familia;
+  
+  if (!familiaCodigo) {
+    console.warn('[Completude] Produto sem código de família definido');
+    return { porcentagem: 0, camposPreenchidos: 0, totalCampos: 0, camposObrigatoriosVazios: [] };
+  }
+  
+  try {
+    // Busca campos obrigatórios da família
+    const res = await fetch(`${API_BASE}/api/config/familia-campos/${encodeURIComponent(familiaCodigo)}`);
+    if (!res.ok) {
+      throw new Error('Erro ao buscar campos obrigatórios da família');
+    }
+    
+    const camposConfig = await res.json();
+    
+    // Filtra apenas os campos marcados como obrigatórios
+    const camposObrigatorios = camposConfig.filter(c => c.obrigatorio === true);
+    
+    if (camposObrigatorios.length === 0) {
+      console.warn('[Completude] Nenhum campo obrigatório configurado para a família:', dados.descricao_familia || familiaCodigo);
+      return { porcentagem: 0, camposPreenchidos: 0, totalCampos: 0, camposObrigatoriosVazios: [] };
+    }
+    
+    let totalCampos = camposObrigatorios.length;
+    let camposPreenchidos = 0;
+    let camposObrigatoriosVazios = [];
+    
+    // Verifica cada campo obrigatório
+    camposObrigatorios.forEach(campo => {
+      const chave = campo.chave;
+      
+      // Busca o valor no objeto dados (suporta chaves aninhadas como 'info.caracteristicas')
+      const valor = chave.split('.').reduce((o, k) => o?.[k], dados);
+      
+      // Considera preenchido se não for null, undefined, string vazia ou apenas espaços
+      if (valor !== null && valor !== undefined && String(valor).trim() !== '') {
+        camposPreenchidos++;
+      } else {
+        // Armazena campos vazios para marcar em vermelho
+        camposObrigatoriosVazios.push(chave);
+      }
+    });
+    
+    const porcentagem = totalCampos > 0 ? Math.round((camposPreenchidos / totalCampos) * 100) : 0;
+    
+    console.log(`[Completude] Família: ${dados.descricao_familia} (${familiaCodigo}) | ${camposPreenchidos}/${totalCampos} campos obrigatórios (${porcentagem}%)`);
+    if (camposObrigatoriosVazios.length > 0) {
+      console.log(`[Completude] Campos obrigatórios vazios:`, camposObrigatoriosVazios);
+    }
+    
+    return {
+      porcentagem,
+      camposPreenchidos,
+      totalCampos,
+      camposObrigatoriosVazios
+    };
+    
+  } catch (error) {
+    console.error('[Completude] Erro ao calcular completude:', error);
+    return { porcentagem: 0, camposPreenchidos: 0, totalCampos: 0, camposObrigatoriosVazios: [] };
+  }
+}
+
+
+function atualizarCirculoCompletude(porcentagem) {
+  const circulo = document.getElementById('completudeProgress');
+  const texto = document.getElementById('completudeText');
+  
+  if (!circulo || !texto) return;
+  
+  // Circunferência do círculo: 2 * PI * raio = 2 * 3.14159 * 20 ≈ 125.6
+  const circunferencia = 125.6;
+  const offset = circunferencia - (porcentagem / 100) * circunferencia;
+  
+  circulo.style.strokeDashoffset = offset;
+  texto.textContent = `${porcentagem}%`;
+  
+  // Muda cor baseado na porcentagem
+  if (porcentagem >= 80) {
+    circulo.setAttribute('stroke', '#10b981'); // verde
+  } else if (porcentagem >= 50) {
+    circulo.setAttribute('stroke', '#f59e0b'); // amarelo
+  } else {
+    circulo.setAttribute('stroke', '#ef4444'); // vermelho
+  }
+}
+
+// Marca guias que possuem campos obrigatórios vazios
+function marcarGuiasComCamposObrigatorios(camposVazios) {
+  // Mapeia campos para suas guias
+  const camposPorGuia = {
+    detalhesTab: ['descricao_familia', 'unidade', 'tipoItem', 'marca', 'modelo', 'descr_detalhada', 'obs_internas'],
+    cadastroTab: ['bloqueado', 'bloquear_exclusao', 'inativo'],
+    financeiroTab: ['ncm', 'cfop', 'origem_imposto', 'cest', 'aliquota_ibpt'],
+    logisticaTab: ['ean'],
+    pdv: ['valor_unitario', 'peso_liq', 'peso_bruto', 'altura', 'largura', 'profundidade', 'dias_garantia', 'dias_crossdocking', 'lead_time'],
+    compras: ['estoque_minimo', 'nCMC', 'nPrecoUltComp']
+  };
+  
+  // Limpa marcações anteriores
+  const allLinks = document.querySelectorAll('#produtoTabs .main-header-link');
+  allLinks.forEach(link => {
+    link.style.color = '';
+    link.style.fontWeight = '';
+    const badge = link.querySelector('.badge-obrigatorio');
+    if (badge) badge.remove();
+  });
+  
+  // Verifica cada guia
+  Object.keys(camposPorGuia).forEach(guiaId => {
+    const camposDaGuia = camposPorGuia[guiaId];
+    const temCampoVazio = camposVazios.some(campo => camposDaGuia.includes(campo));
+    
+    if (temCampoVazio) {
+      const link = document.querySelector(`#produtoTabs .main-header-link[data-subtarget="${guiaId}"]`);
+      if (link) {
+        link.style.color = '#ef4444';
+        link.style.fontWeight = '600';
+        
+        // Adiciona badge de alerta
+        if (!link.querySelector('.badge-obrigatorio')) {
+          const badge = document.createElement('span');
+          badge.className = 'badge-obrigatorio';
+          badge.innerHTML = ' ⚠️';
+          badge.style.fontSize = '12px';
+          link.appendChild(badge);
+        }
+      }
+    }
+  });
+}
 
 /* ----------------- 1) Carrega mapa de categorias (CSV) -------------- */
 let tipoList = [];
@@ -106,6 +264,12 @@ let itens = [];
 /* ----------------- 3) Função principal ------------------------------ */
 export async function loadDadosProduto(codigo) {
   setCurrentCodigo(codigo);
+  // Expõe referência global do código do produto atual para outras abas (ex.: Check-Proj)
+  window.currentProdutoCodigo = codigo;
+  
+  // Carrega permissões do usuário logado antes de renderizar
+  await loadUserPermissoes();
+  
   const nonEditableKeys = new Set([
     'info.uAlt','info.dAlt','info.hAlt',
     'info.uInc','info.dInc','info.hInc',
@@ -115,24 +279,45 @@ export async function loadDadosProduto(codigo) {
 
   // 3.1) Título e categorias
   document.getElementById('productTitle').textContent = codigo;
+  
+  // Armazena código globalmente para facilitar acesso
+  window.codigoSelecionado = codigo;
+  
   await loadTipoMap();
 
-  // 3.2) Consulta dados do produto
-  const resProd = await fetch(`${API_BASE}/api/omie/produtos`, {
-    method: 'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      call:    'ConsultarProduto',
-      app_key: OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param:   [{ codigo }]
-    })
-  });
-  if (!resProd.ok) {
-    console.error('Falha ao consultar produto', resProd.status);
-    return;
-  }
-  const dados = await resProd.json();
+// [SQL] Busca dados do produto direto do Postgres
+const resProd = await fetch(`${API_BASE}/api/produtos/detalhe?codigo=${encodeURIComponent(codigo)}`);
+if (!resProd.ok) {
+  console.error('Falha ao buscar produto no Postgres', resProd.status);
+  return;
+}
+const dados = await resProd.json();
+
+// Armazena Código OMIE e descrição globalmente
+window.codigoOmieSelecionado = dados?.codigo_produto || null;
+window.descricaoSelecionada = dados?.descricao || '';
+
+// Atualiza o cabeçalho com as informações do produto
+const headerInfo = document.getElementById('productHeaderInfo');
+const headerCodigo = document.getElementById('headerCodigo');
+const headerCodigoOmie = document.getElementById('headerCodigoOmie');
+const headerDescricao = document.getElementById('headerDescricao');
+
+if (headerInfo && headerCodigo && headerCodigoOmie && headerDescricao) {
+  headerCodigo.textContent = codigo;
+  headerCodigoOmie.textContent = window.codigoOmieSelecionado || 'N/A';
+  headerDescricao.textContent = window.descricaoSelecionada || '';
+  headerDescricao.title = window.descricaoSelecionada || ''; // Tooltip com descrição completa
+  headerInfo.style.display = 'flex';
+}
+
+// Disponibiliza metadados globais úteis a outras guias
+try {
+  window.currentProdutoFamilia = dados?.codigo_familia || '';
+  // Caso o backend comece a retornar o ID OMIE, já deixamos preparado
+  window.currentProdutoIdOmie = dados?.id_produto || null;
+} catch(_) { /* noop */ }
+
 
   // 3.3) Buscar e normalizar resumo de estoque
   const hoje = new Date();
@@ -190,17 +375,19 @@ camposCompras.forEach(f => {
       ? (raw !== '' ? Number(raw).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '')
       : raw;
 
+  const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+  const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
   const li = document.createElement('li');
   li.innerHTML = `
-    <div class="products">${f.label}</div>
-    <div class="status-text">${display}</div>
-    ${!nonEditableKeys.has(f.key)
+    <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+    <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${display || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+    ${canEdit
       ? `<div class="button-wrapper"><button class="content-button edit-button">Editar</button></div>`
       : ''
     }
   `;
   ulCompras.appendChild(li);
-  if (!nonEditableKeys.has(f.key)) attachEditor(li, f);
+  if (canEdit) attachEditor(li, f);
 });
 
 
@@ -212,26 +399,162 @@ camposCompras.forEach(f => {
     const display = (f.key === 'valor_unitario' && raw !== '')
       ? Number(raw).toLocaleString('pt-BR',{ style:'currency',currency:'BRL' })
       : raw;
+    const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+    const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
     const li = document.createElement('li');
     li.innerHTML = `
-      <div class="products">${f.label}</div>
-      <div class="status-text">${display}</div>
-      ${!nonEditableKeys.has(f.key)
+      <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+      <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${display || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+      ${canEdit
         ? `<div class="button-wrapper"><button class="content-button edit-button">Editar</button></div>`
         : ''
       }
     `;
     ulPDV.appendChild(li);
-    if (!nonEditableKeys.has(f.key)) attachEditor(li, f);
+    if (canEdit) attachEditor(li, f);
   });
 
   // 3.6) Banner
-  document.getElementById('productDesc').textContent = dados.descricao || '';
+  const descEl = document.getElementById('productDesc');
+  descEl.textContent = dados.descricao || '';
+  
+  // Torna descrição editável se usuário tem permissão alterar_nome
+  if (hasPermissao('alterar_nome')) {
+    descEl.style.cursor = 'pointer';
+    descEl.title = 'Clique para editar a descrição';
+    
+    descEl.addEventListener('click', async function enableEdit() {
+      const oldText = descEl.textContent;
+      descEl.contentEditable = 'true';
+      descEl.style.outline = '2px solid #10b981';
+      descEl.style.padding = '4px';
+      descEl.focus();
+      
+      // Seleciona todo o texto
+      const range = document.createRange();
+      range.selectNodeContents(descEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      
+      async function saveEdit() {
+        const newText = descEl.textContent.trim();
+        descEl.contentEditable = 'false';
+        descEl.style.outline = '';
+        descEl.style.padding = '';
+        
+        if (newText && newText !== oldText) {
+          try {
+            const resp = await fetch(`${API_BASE}/api/produtos/editar`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                codigo: codigo,
+                campo: 'descricao',
+                valor: newText
+              })
+            });
+            
+            if (resp.ok) {
+              descEl.textContent = newText;
+              console.log('[productDesc] Descrição atualizada com sucesso');
+            } else {
+              descEl.textContent = oldText;
+              alert('Erro ao salvar descrição');
+            }
+          } catch (e) {
+            console.error('[productDesc] Erro:', e);
+            descEl.textContent = oldText;
+            alert('Erro ao salvar descrição');
+          }
+        } else if (!newText) {
+          descEl.textContent = oldText;
+        }
+      }
+      
+      function cancelEdit(e) {
+        if (e.key === 'Escape') {
+          descEl.textContent = oldText;
+          descEl.contentEditable = 'false';
+          descEl.style.outline = '';
+          descEl.style.padding = '';
+          descEl.removeEventListener('keydown', cancelEdit);
+          descEl.removeEventListener('blur', saveEdit);
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          saveEdit();
+          descEl.removeEventListener('keydown', cancelEdit);
+          descEl.removeEventListener('blur', saveEdit);
+        }
+      }
+      
+      descEl.addEventListener('keydown', cancelEdit);
+      descEl.addEventListener('blur', saveEdit, { once: true });
+      descEl.removeEventListener('click', enableEdit);
+    }, { once: true });
+  }
+  
   const imgEl = document.getElementById('productImg');
   imgEl.src = Array.isArray(dados.imagens) && dados.imagens[0]?.url_imagem
     ? dados.imagens[0].url_imagem
     : '../img/logo.png';
   imgEl.alt = dados.descricao || 'Produto';
+
+  // Calcular e atualizar círculo de completude
+  const completude = await calcularCompletude(dados);
+  camposObrigatoriosVazios = completude.camposObrigatoriosVazios || []; // Armazena globalmente
+  atualizarCirculoCompletude(completude.porcentagem);
+  console.log(`[Completude] ${completude.camposPreenchidos}/${completude.totalCampos} campos (${completude.porcentagem}%)`);
+  
+  // Debug: Log dos campos vazios
+  if (camposObrigatoriosVazios.length > 0) {
+    console.log('[Debug] Campos obrigatórios vazios:', camposObrigatoriosVazios);
+  }
+  
+  // Marcar guias com campos obrigatórios vazios
+  marcarGuiasComCamposObrigatorios(camposObrigatoriosVazios);
+
+  // Re-renderizar a guia Compras para aplicar marcação dos obrigatórios
+  try {
+    const ulComprasRerender = document.getElementById('comprasList');
+    if (ulComprasRerender) {
+      ulComprasRerender.innerHTML = '';
+      camposCompras.forEach(f => {
+        let raw;
+        if (f.key === 'estoque_minimo') {
+          raw = resumoEstoque.nEstoqueMinimo ?? '';
+        } else if (f.key === 'nCMC') {
+          raw = resumoEstoque.nCMC ?? '';
+        } else if (f.key === 'nPrecoUltComp') {
+          raw = resumoEstoque.nPrecoUltComp ?? '';
+        } else {
+          raw = f.key.split('.').reduce((o, k) => o?.[k], dados) ?? '';
+        }
+
+        const display =
+          (f.key === 'nCMC' || f.key === 'nPrecoUltComp')
+            ? (raw !== '' ? Number(raw).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '')
+            : raw;
+
+        const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+        const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+          <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${display || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+          ${canEdit
+            ? `<div class=\"button-wrapper\"><button class=\"content-button edit-button\">Editar</button></div>`
+            : ''
+          }
+        `;
+        ulComprasRerender.appendChild(li);
+        if (canEdit) attachEditor(li, f);
+      });
+    }
+  } catch(e) {
+    console.warn('[Compras] Falha ao re-renderizar com marcação obrigatória:', e);
+  }
 
   // 3.7) Popula Detalhes do produto
   const camposDetalhes = [
@@ -241,7 +564,10 @@ camposCompras.forEach(f => {
     { key: 'marca',             label: 'Marca'             },
     { key: 'modelo',            label: 'Modelo'            },
     { key: 'descr_detalhada',   label: 'Descrição detalhada'},
-    { key: 'obs_internas',      label: 'Obs internas'      }
+    { key: 'obs_internas',      label: 'Obs internas'      },
+    { key: 'visivel_principal', label: 'Visível como principal?' },
+    { key: 'tipo_compra',       label: 'Tipo de compra' },
+    { key: 'preco_definido',    label: 'Preço definido' }
   ];
 
   // === garante que o carrossel use SEMPRE o código numérico ===
@@ -257,23 +583,45 @@ try {
   ulDetalhes.innerHTML = '';
   camposDetalhes.forEach(f => {
     const raw = f.key.split('.').reduce((o,k)=>o?.[k], dados) ?? '';
-    const val = (f.key === 'valor_unitario' && raw !== '')
-      ? Number(raw).toLocaleString('pt-BR',{ style:'currency',currency:'BRL' })
-      : raw;
-    const isEditable = !nonEditableKeys.has(f.key);
+    let val = raw;
+    if (f.key === 'valor_unitario' && raw !== '') {
+      val = Number(raw).toLocaleString('pt-BR',{ style:'currency',currency:'BRL' });
+    } else if (f.key === 'preco_definido' && raw !== '') {
+      const num = Number(String(raw).replace(',', '.'));
+      val = Number.isFinite(num)
+        ? num.toLocaleString('pt-BR',{ style:'currency',currency:'BRL' })
+        : raw;
+    } else if (f.key === 'visivel_principal') {
+      const norm = String(raw).trim().toUpperCase();
+      val = norm === 'S' || norm === 'SIM' || raw === true ? 'Sim'
+        : (norm === 'N' || norm === 'NAO' || norm === 'NÃO' || raw === false ? 'Não' : '');
+    } else if (f.key === 'tipo_compra') {
+      const map = {
+        'AUTOMATICA': 'Automática',
+        'SEMIAUTOMATICA': 'Semiautomática',
+        'MANUAL': 'Manual'
+      };
+      const norm = String(raw).trim().toUpperCase();
+      val = map[norm] || raw;
+    }
+    const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+    const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
     const li = document.createElement('li');
     li.innerHTML = `
-      <div class="products">${f.label}</div>
-      <div class="status-text">${val}</div>
-      ${isEditable
+      <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+      <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${val || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+      ${canEdit
         ? `<div class="button-wrapper"><button class="content-button edit-button">Editar</button></div>`
         : ''
       }
     `;
     ulDetalhes.appendChild(li);
-    if (isEditable) {
+    if (canEdit) {
       if (f.key === 'descricao_familia') attachSelectEditor(li, f, raw);
       else if (f.key === 'tipoItem') attachTipoItemEditor(li, f, raw);
+      else if (f.key === 'visivel_principal') attachVisivelPrincipalEditor(li, f, raw);
+      else if (f.key === 'tipo_compra') attachTipoCompraEditor(li, f, raw);
+      else if (f.key === 'preco_definido') attachPrecoDefinidoEditor(li, f, raw);
       else attachEditor(li, f);
     }
   });
@@ -298,17 +646,19 @@ try {
   ulCadastro.innerHTML = '';
   camposCadastro.forEach(f => {
     const raw = f.key.split('.').reduce((o,k) => o?.[k], dados) ?? '';
+    const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+    const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
     const li = document.createElement('li');
     li.innerHTML = `
-      <div class="products">${f.label}</div>
-      <div class="status-text">${raw}</div>
-      ${!nonEditableKeys.has(f.key)
+      <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+      <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${raw || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+      ${canEdit
         ? `<div class="button-wrapper"><button class="content-button edit-button">Editar</button></div>`
         : ''
       }
     `;
     ulCadastro.appendChild(li);
-    if (!nonEditableKeys.has(f.key)) attachEditor(li, f);
+    if (canEdit) attachEditor(li, f);
   });
 
   // 3.9) Popula Financeiro
@@ -323,17 +673,19 @@ try {
   ulFin.innerHTML = '';
   camposFinanceiro.forEach(f => {
     const raw = f.key.split('.').reduce((o,k) => o?.[k], dados) ?? '';
+    const canEdit = hasPermissao('alterar_dados') && !nonEditableKeys.has(f.key);
+    const isObrigatorioVazio = camposObrigatoriosVazios.includes(f.key);
     const li = document.createElement('li');
     li.innerHTML = `
-      <div class="products">${f.label}</div>
-      <div class="status-text">${raw}</div>
-      ${!nonEditableKeys.has(f.key)
+      <div class="products" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${f.label}${isObrigatorioVazio ? ' ⚠️' : ''}</div>
+      <div class="status-text" style="${isObrigatorioVazio ? 'color: #ef4444; font-weight: 600;' : ''}">${raw || (isObrigatorioVazio ? '(Obrigatório)' : '')}</div>
+      ${canEdit
         ? `<div class="button-wrapper"><button class="content-button edit-button">Editar</button></div>`
         : ''
       }
     `;
     ulFin.appendChild(li);
-    if (!nonEditableKeys.has(f.key)) attachEditor(li, f);
+    if (canEdit) attachEditor(li, f);
   });
 
     // 3.10) Popula Logística
@@ -865,11 +1217,16 @@ if (!caracUl._deleteListenerAttached) {
 
 /* ----------------- 5) Estrutura de produto (malha) ---------------- */
 try {
-  const r = await fetch(`${API_BASE}/api/malha`, {
-    method : 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body   : JSON.stringify({ intProduto: codigo })
-  });
+// agora usamos a rota que você já colocou no SQL
+const r = await fetch(`${API_BASE}/api/omie/malha`, {
+  method : 'POST',
+  headers: { 'Content-Type':'application/json' },
+  body   : JSON.stringify({
+    // o handler SQL que você criou aceita `param[0].cCodigo`
+    param: [{ cCodigo: codigo }]
+  })
+});
+
 
   const j = await r.json();
 
@@ -1124,6 +1481,37 @@ function showLineMsg(li, text, ok = true) {
 if (typeof window.loadFotos === 'function') {
   window.loadFotos(codigo);
 }
+
+  // atualiza a aba RI com os dados do produto
+  if (dados.codigo_produto) {
+    window.produtoRIAtual = {
+      codigo: codigo,
+      id_omie: dados.codigo_produto
+    };
+    // Se a função de carregar RI estiver disponível, chama
+    if (typeof window.carregarItensRI === 'function') {
+      window.carregarItensRI(dados.codigo_produto);
+    }
+
+    // atualiza a aba PIR com os dados do produto
+    window.produtoPIRAtual = {
+      codigo: codigo,
+      id_omie: dados.codigo_produto
+    };
+    if (typeof window.carregarItensPIR === 'function') {
+      window.carregarItensPIR(dados.codigo_produto);
+    }
+  }
+
+  // Dispara evento global indicando que o produto foi carregado (usado por outras abas)
+  try {
+    window.dispatchEvent(new CustomEvent('produto-carregado', {
+      detail: {
+        codigo,
+        familia: window.currentProdutoFamilia || ''
+      }
+    }));
+  } catch(_) { /* noop */ }
 
 }
 

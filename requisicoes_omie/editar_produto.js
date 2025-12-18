@@ -218,7 +218,6 @@ await fetch(`${API_BASE}/api/omie/estoque/ajuste/`, {
     }]
   })
 });
-
           // sucesso: limpa qualquer marcação de “editado”
           newDiv.classList.remove('edited');
         } catch (err) {
@@ -389,3 +388,172 @@ export function attachTipoItemEditor(li, f, currentValue) {
       ensureSaveAllBtn();
     });
   }
+
+// Editor para campo booleano visivel_principal (salva apenas no Postgres)
+export function attachVisivelPrincipalEditor(li, f, currentValue) {
+  const btn = li.querySelector('.edit-button');
+  let originalValue = (String(currentValue || '').trim().toUpperCase() === 'S') ? 'S' : 'N';
+
+  btn.addEventListener('click', async () => {
+    const isEditing = btn.textContent.trim() === 'Editar';
+    const container = li.querySelector('.status-text') || li.querySelector('input.detail-input') || li.querySelector('select.detail-select');
+
+    if (isEditing) {
+      const select = document.createElement('select');
+      select.className = 'detail-select';
+      ['S','N'].forEach(val => {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = val === 'S' ? 'Sim' : 'Não';
+        if (val === originalValue) opt.selected = true;
+        select.appendChild(opt);
+      });
+      container.replaceWith(select);
+      btn.textContent = 'Concluído';
+      select.focus();
+      if (saveAllBtn) saveAllBtn.style.display = 'none';
+      return;
+    }
+
+    const select = li.querySelector('select.detail-select');
+    const novoValor = select?.value || 'N';
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/produtos/locais`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: currentCodigo, visivel_principal: novoValor })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text';
+      newDiv.textContent = novoValor === 'S' ? 'Sim' : 'Não';
+      select.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+      originalValue = novoValor;
+    } catch (err) {
+      console.error('✖ Falha ao salvar visivel_principal:', err);
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text edited';
+      newDiv.textContent = '(erro ao salvar)';
+      select.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+    }
+    ensureSaveAllBtn();
+  });
+}
+
+// Editor para campo tipo_compra (Automatica / Semiautomatica / Manual)
+export function attachTipoCompraEditor(li, f, currentValue) {
+  const btn = li.querySelector('.edit-button');
+  const options = [
+    { value: 'AUTOMATICA', label: 'Automática' },
+    { value: 'SEMIAUTOMATICA', label: 'Semiautomática' },
+    { value: 'MANUAL', label: 'Manual' }
+  ];
+  let originalValue = String(currentValue || '').trim().toUpperCase();
+
+  btn.addEventListener('click', async () => {
+    const isEditing = btn.textContent.trim() === 'Editar';
+    const container = li.querySelector('.status-text') || li.querySelector('input.detail-input') || li.querySelector('select.detail-select');
+
+    if (isEditing) {
+      const select = document.createElement('select');
+      select.className = 'detail-select';
+      options.forEach(optCfg => {
+        const opt = document.createElement('option');
+        opt.value = optCfg.value;
+        opt.textContent = optCfg.label;
+        if (optCfg.value === originalValue) opt.selected = true;
+        select.appendChild(opt);
+      });
+      container.replaceWith(select);
+      btn.textContent = 'Concluído';
+      select.focus();
+      if (saveAllBtn) saveAllBtn.style.display = 'none';
+      return;
+    }
+
+    const select = li.querySelector('select.detail-select');
+    const novoValor = select?.value || '';
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/produtos/locais`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: currentCodigo, tipo_compra: novoValor })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const chosen = options.find(o => o.value === novoValor);
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text';
+      newDiv.textContent = chosen?.label || novoValor || '';
+      select.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+      originalValue = novoValor;
+    } catch (err) {
+      console.error('✖ Falha ao salvar tipo_compra:', err);
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text edited';
+      newDiv.textContent = '(erro ao salvar)';
+      select.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+    }
+    ensureSaveAllBtn();
+  });
+}
+
+// Editor para campo preco_definido (salva apenas no Postgres)
+export function attachPrecoDefinidoEditor(li, f, currentValue) {
+  const btn = li.querySelector('.edit-button');
+  let originalValue = currentValue ?? '';
+
+  btn.addEventListener('click', async () => {
+    const isEditing = btn.textContent.trim() === 'Editar';
+    const container = li.querySelector('.status-text') || li.querySelector('input.detail-input') || li.querySelector('select.detail-select');
+
+    if (isEditing) {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.01';
+      input.className = 'detail-input';
+      input.value = originalValue || '';
+      container.replaceWith(input);
+      btn.textContent = 'Concluído';
+      input.focus();
+      if (saveAllBtn) saveAllBtn.style.display = 'none';
+      return;
+    }
+
+    const input = li.querySelector('input.detail-input');
+    const novoValor = input?.value ?? '';
+    const num = Number(String(novoValor).replace(',', '.'));
+    const bodyVal = Number.isFinite(num) ? num : null;
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/produtos/locais`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: currentCodigo, preco_definido: bodyVal })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const numVal = Number.isFinite(num) ? num : null;
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text';
+      newDiv.textContent = numVal != null
+        ? numVal.toLocaleString('pt-BR', { style:'currency', currency:'BRL' })
+        : '';
+      input.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+      originalValue = numVal != null ? numVal : '';
+    } catch (err) {
+      console.error('✖ Falha ao salvar preco_definido:', err);
+      const newDiv = document.createElement('div');
+      newDiv.className = 'status-text edited';
+      newDiv.textContent = '(erro ao salvar)';
+      input.replaceWith(newDiv);
+      btn.textContent = 'Editar';
+    }
+    ensureSaveAllBtn();
+  });
+}
