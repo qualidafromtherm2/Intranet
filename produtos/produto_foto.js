@@ -38,46 +38,80 @@
     return Array.isArray(j.fotos) ? j.fotos : [];
   }
 
-  // Mapeia lista do DB em 6 slots e guarda o pos real para cada índice
+  // Mapeia lista do DB em 6 slots, preservando metadados e a posição real do registro
   function mapToSlots(fotos) {
-    // fotos: [{ pos, url_imagem }]
     const byPos = new Map();
-    (fotos || []).forEach(f => {
+    (fotos || []).forEach((f) => {
       const p = Number(f.pos);
-      if (!Number.isNaN(p)) byPos.set(p, String(f.url_imagem || ''));
+      if (Number.isNaN(p)) return;
+      byPos.set(p, {
+        url: String(f.url_imagem || ''),
+        nome: String(f.nome_foto || ''),
+        descricao: String(f.descricao_foto || ''),
+        pathKey: f.path_key || null,
+        posReal: p
+      });
     });
 
-    const urls  = new Array(6).fill('../img/logo.png');
-    const posOf = new Array(6).fill(null);
-
+    const slots = [];
     for (let i = 0; i < 6; i++) {
-      // 1ª preferência: pos = i (0..5)
+      let info = {
+        slotIndex: i,
+        posReal: i,
+        url: 'img/Produto/Foto_carrocel.png',
+        nome: '',
+        descricao: '',
+        pathKey: null,
+        hasFoto: false
+      };
+
       if (byPos.has(i)) {
-        urls[i]  = byPos.get(i) || '../img/logo.png';
-        posOf[i] = i;
-        continue;
+        const data = byPos.get(i);
+        info = {
+          ...info,
+          posReal: i,
+          url: data.url || 'img/Produto/Foto_carrocel.png',
+          nome: data.nome,
+          descricao: data.descricao,
+          pathKey: data.pathKey,
+          hasFoto: !!data.url
+        };
+      } else if (byPos.has(i + 1)) {
+        const data = byPos.get(i + 1);
+        info = {
+          ...info,
+          posReal: i + 1,
+          url: data.url || 'img/Produto/Foto_carrocel.png',
+          nome: data.nome,
+          descricao: data.descricao,
+          pathKey: data.pathKey,
+          hasFoto: !!data.url
+        };
       }
-      // 2ª preferência: legado pos = i+1 (1..6)
-      if (byPos.has(i + 1)) {
-        urls[i]  = byPos.get(i + 1) || '../img/logo.png';
-        posOf[i] = i + 1;
-        continue;
+
+      // Normaliza flag hasFoto (ignora logo placeholder)
+      if (info.hasFoto && info.url.endsWith('logo.png')) {
+        info.hasFoto = false;
       }
-      // vazio -> placeholder; se inserir, gravaremos em i
-      posOf[i] = i;
+
+      slots.push(info);
     }
-    return { urls, posOf };
+    return slots;
   }
 
-  async function uploadFoto(codigo, posReal, file) {
+  // Upload de foto em uma posição específica
+  async function uploadFoto(codigo, posReal, { file, nome, descricao }) {
     const form = new FormData();
-    form.append('foto', file); // nome do campo aceito pela rota nova
+    form.append('foto', file);
+    form.append('nome_foto', nome);
+    form.append('descricao_foto', descricao);
     const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos?pos=${encodeURIComponent(posReal)}`;
     const r = await fetch(url, { method: 'POST', body: form });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
 
+  // Inativa (delete lógico) a foto de uma posição
   async function deleteFoto(codigo, posReal) {
     const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(posReal)}`;
     const r = await fetch(url, { method: 'DELETE' });
@@ -85,7 +119,51 @@
     return r.json();
   }
 
-  // ---------- UI ----------
+  // Gestão (ativas e inativas)
+  async function getFotosAll(codigo) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos?all=1`;
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    return Array.isArray(j.fotos) ? j.fotos : [];
+  }
+
+  async function ativarFoto(codigo, pos, id) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(pos)}/ativar`;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function inativarFoto(codigo, pos, id) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(pos)}/inativar`;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  async function atualizarVisibilidade(codigo, id, { vp, vat }) {
+    const url = `/api/produtos/${encodeURIComponent(codigo)}/fotos/${encodeURIComponent(id)}/visibilidade`;
+    const body = {};
+    if (typeof vp === 'boolean') body.visivel_producao = vp;
+    if (typeof vat === 'boolean') body.visivel_assistencia_tecnica = vat;
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
   const LABELS = [
     'Foto do produto',
     'Foto Característica visual',
@@ -95,7 +173,121 @@
     'Foto 6'
   ];
 
-  function renderCarousel(urls, posOf) {
+  // Modal de gestão (ativas e inativas)
+  function renderGestaoModal(fotos) {
+    const modal = document.getElementById('modalGerenciarFotos');
+    const body = document.getElementById('fgBody');
+    if (!modal || !body) return;
+
+    const grouped = new Map();
+    fotos.forEach((f) => {
+      const p = Number(f.pos);
+      if (!grouped.has(p)) grouped.set(p, []);
+      grouped.get(p).push(f);
+    });
+
+    const blocks = [];
+    const sortedPos = Array.from(grouped.keys()).sort((a, b) => a - b);
+    sortedPos.forEach((p) => {
+      const items = grouped.get(p) || [];
+      items.sort((a, b) => Number(b.id) - Number(a.id));
+      const cards = items
+        .map((f) => {
+          const ativo = f.ativo === true || String(f.ativo).toLowerCase() === 'true';
+          const url = f.url_imagem || 'img/Produto/Foto_carrocel.png';
+          const nome = f.nome_foto || `Pos ${p}`;
+          const desc = f.descricao_foto || '';
+          const visProd = f.visivel_producao !== false;
+          const visAt   = f.visivel_assistencia_tecnica !== false;
+          return `
+            <div class="fg-card" data-id="${f.id}" data-pos="${p}" data-ativo="${ativo ? '1' : '0'}">
+              <img src="${url}" alt="Foto pos ${p}" />
+              <div class="fg-meta"><span>Pos: ${p}</span><span>${ativo ? 'Ativa' : 'Inativa'}</span></div>
+              <div class="fg-text"><strong>${nome}</strong><br><small>${desc}</small></div>
+              <div class="fg-visibility">
+                <label><input type="checkbox" data-action="toggle-vis" data-target="vp" ${visProd ? 'checked' : ''}> Produção</label>
+                <label><input type="checkbox" data-action="toggle-vis" data-target="vat" ${visAt ? 'checked' : ''}> Assist. técnica</label>
+              </div>
+              <div class="fg-actions">
+                ${ativo
+                  ? '<button class="secondary" data-action="inativar">Desativar</button>'
+                  : '<button class="primary" data-action="ativar">Ativar</button>'}
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+      blocks.push(`<div><h4 style=\"margin:6px 0; color:#cbd5e1;\">Posição ${p}</h4><div class=\"fg-grid\">${cards}</div></div>`);
+    });
+
+    body.innerHTML = blocks.length ? blocks.join('') : '<p style="color:#cbd5e1;">Nenhuma foto cadastrada.</p>';
+
+    body.querySelectorAll('.fg-card').forEach((card) => {
+      card.addEventListener('click', async (ev) => {
+        const actionBtn = ev.target.closest('button[data-action]');
+        if (!actionBtn) return;
+        const id = Number(card.dataset.id);
+        const pos = Number(card.dataset.pos);
+        const codigo = getCodigoAtual();
+        try {
+          if (actionBtn.dataset.action === 'ativar') {
+            await ativarFoto(codigo, pos, id);
+          } else {
+            await inativarFoto(codigo, pos, id);
+          }
+          await reloadAndRender();
+          await openGestaoModal();
+        } catch (e) {
+          console.error('Erro ao alternar foto', e);
+          alert('Falha ao alternar status da foto.');
+        }
+      });
+    });
+
+    body.querySelectorAll('input[data-action="toggle-vis"]').forEach((input) => {
+      input.addEventListener('change', async (ev) => {
+        ev.stopPropagation();
+        const card = ev.currentTarget.closest('.fg-card');
+        if (!card) return;
+        const id = Number(card.dataset.id);
+        const codigo = getCodigoAtual();
+        const target = ev.currentTarget.dataset.target;
+        const checked = ev.currentTarget.checked;
+        try {
+          if (target === 'vp') {
+            await atualizarVisibilidade(codigo, id, { vp: checked, vat: undefined });
+          } else {
+            await atualizarVisibilidade(codigo, id, { vp: undefined, vat: checked });
+          }
+        } catch (e) {
+          console.error('Erro ao alterar visibilidade', e);
+          alert('Falha ao alterar visibilidade.');
+          ev.currentTarget.checked = !checked;
+        }
+      });
+    });
+  }
+
+  async function openGestaoModal() {
+    const modal = document.getElementById('modalGerenciarFotos');
+    const closeBtn = modal?.querySelector('.fg-close');
+    if (!modal) return;
+    const codigo = getCodigoAtual();
+    try {
+      const all = await getFotosAll(codigo);
+      renderGestaoModal(all);
+    } catch (e) {
+      console.error('Erro ao carregar fotos (todas)', e);
+      alert('Falha ao carregar fotos (ativas e inativas).');
+      return;
+    }
+    modal.style.display = 'flex';
+    const close = () => { modal.style.display = 'none'; };
+    modal.querySelector('.fg-overlay')?.addEventListener('click', close);
+    closeBtn?.addEventListener('click', close, { once: true });
+  }
+
+  function renderCarousel(slots) {
     const pane = document.getElementById('listaFotos');
     if (!pane) return;
     const container = pane.querySelector('.options');
@@ -105,22 +297,33 @@
     const codigo = getCodigoAtual();
 
     LABELS.forEach((label, i) => {
-      const url    = urls[i] || '../img/logo.png';
-      const posReal = posOf[i]; // pos real no DB para esse slot
+      const slot = slots[i] || {
+        posReal: i,
+        url: 'img/Produto/Foto_carrocel.png',
+        nome: '',
+        descricao: '',
+        hasFoto: false
+      };
+      const bgUrl = slot.hasFoto ? slot.url : 'img/Produto/Foto_carrocel.png';
+      const posReal = slot.posReal;
+      const titulo = slot.nome || label;
+      const detalhe = slot.descricao || (slot.hasFoto ? '' : 'Sem descrição');
 
       // bloco .option conforme seu CSS
       const div = document.createElement('div');
       div.className = 'option' + (i === 0 ? ' active' : '');
-      div.style.setProperty('--optionBackground', `url(${url})`);
+      div.style.setProperty('--optionBackground', `url(${bgUrl})`);
       div.dataset.index = String(i);
+      div.dataset.posReal = String(posReal);
+      div.dataset.hasFoto = slot.hasFoto ? '1' : '0';
 
       div.innerHTML = `
         <div class="shadow"></div>
         <div class="label">
           <div class="icon"><i class="fas fa-camera"></i></div>
           <div class="info">
-            <div class="main">${label}</div>
-            <div class="sub"></div>
+            <div class="main">${titulo}</div>
+            <div class="sub">${detalhe}</div>
           </div>
         </div>
       `;
@@ -131,46 +334,21 @@
         const wasActive = div.classList.contains('active');
         container.querySelectorAll('.option').forEach(o => o.classList.remove('active'));
         div.classList.add('active');
-        if (wasActive && url && !url.endsWith('logo.png')) openModal(url);
+        if (wasActive && slot.hasFoto) openModal(slot);
       });
 
-      // input de arquivo escondido
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      fileInput.style.display = 'none';
-      div.appendChild(fileInput);
-
-      // ícone câmera -> abre seletor
+      // ícone câmera -> abre modal de upload
       div.querySelector('.icon').addEventListener('click', (ev) => {
         ev.stopPropagation();
         if (isCoolingDown()) return;
-        fileInput.click();
-      });
-
-      // upload
-      fileInput.addEventListener('change', async () => {
-        if (isCoolingDown()) return;
-        const file = fileInput.files && fileInput.files[0];
-        if (!file) return;
-
-        // preview imediato no card
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          div.style.setProperty('--optionBackground', `url(${ev.target.result})`);
-          container.querySelectorAll('.option').forEach(o => o.classList.remove('active'));
-          div.classList.add('active');
-        };
-        reader.readAsDataURL(file);
-
-        try {
-          await uploadFoto(codigo, posReal, file);
-          await reloadAndRender(); // pega URL pública definitiva
-          tryStartCooldown();
-        } catch (e) {
-          console.error('Falha no upload', e);
-          alert('Falha no upload da foto.');
-        }
+        openUploadModal({
+          codigo,
+          slot,
+          onSuccess: async () => {
+            await reloadAndRender();
+            tryStartCooldown();
+          }
+        });
       });
 
       // botão lixeira (só aparece quando ativo)
@@ -181,6 +359,10 @@
       del.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         if (isCoolingDown()) return;
+        if (!slot.hasFoto) {
+          alert('Não há foto para excluir neste slot.');
+          return;
+        }
         if (!confirm('Excluir esta foto do slot atual?')) return;
         try {
           await deleteFoto(codigo, posReal);
@@ -198,17 +380,165 @@
   }
 
   // Modal simples
-  function openModal(src) {
+  function openModal(slot) {
     const overlay = document.createElement('div');
     overlay.className = 'foto-modal-overlay';
     const wrap = document.createElement('div');
     wrap.className = 'foto-modal-content';
     const img = document.createElement('img');
-    img.src = src;
+    img.src = slot.url;
     wrap.appendChild(img);
+    if (slot.nome || slot.descricao) {
+      const caption = document.createElement('div');
+      caption.className = 'foto-modal-caption';
+      caption.innerHTML = `
+        ${slot.nome ? `<strong>${slot.nome}</strong>` : ''}
+        ${slot.descricao ? `<p>${slot.descricao}</p>` : ''}
+      `;
+      wrap.appendChild(caption);
+    }
     overlay.appendChild(wrap);
     overlay.addEventListener('click', () => document.body.removeChild(overlay));
     document.body.appendChild(overlay);
+  }
+
+  function openUploadModal({ codigo, slot, onSuccess }) {
+    let previewUrl = null;
+    let selectedFile = null;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'foto-upload-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'foto-upload-modal';
+    modal.innerHTML = `
+      <h2>Adicionar foto</h2>
+      <div class="foto-upload-field">
+        <label for="fotoNome">Nome da foto</label>
+        <input id="fotoNome" type="text" maxlength="120" placeholder="Ex.: Vista frontal" />
+      </div>
+      <div class="foto-upload-field">
+        <label for="fotoDescricao">Descrição</label>
+        <textarea id="fotoDescricao" rows="3" placeholder="Detalhe o que esta imagem mostra"></textarea>
+      </div>
+      <div class="foto-upload-field">
+        <label>Arquivo</label>
+        <div class="foto-upload-file">
+          <button type="button" class="foto-upload-select">Selecionar imagem</button>
+          <span class="foto-upload-filename">Nenhum arquivo selecionado</span>
+          <input type="file" accept="image/*" class="foto-upload-input" />
+        </div>
+      </div>
+      <div class="foto-upload-preview">
+        <img alt="Pré-visualização" />
+      </div>
+      <div class="foto-upload-actions">
+        <button type="button" class="foto-upload-cancel">Cancelar</button>
+        <button type="button" class="foto-upload-save" disabled>Salvar</button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const nomeInput = modal.querySelector('#fotoNome');
+    const descInput = modal.querySelector('#fotoDescricao');
+    const fileInput = modal.querySelector('.foto-upload-input');
+    const selectBtn = modal.querySelector('.foto-upload-select');
+    const fileNameSpan = modal.querySelector('.foto-upload-filename');
+    const previewImg = modal.querySelector('.foto-upload-preview img');
+    const cancelBtn = modal.querySelector('.foto-upload-cancel');
+    const saveBtn = modal.querySelector('.foto-upload-save');
+
+    if (slot?.nome) nomeInput.value = slot.nome;
+    if (slot?.descricao) descInput.value = slot.descricao;
+
+    const close = () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+      }
+      document.body.removeChild(overlay);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+
+    const updateSaveState = () => {
+      const nomeOk = nomeInput.value.trim().length > 0;
+      const descOk = descInput.value.trim().length > 0;
+      const fileOk = selectedFile instanceof File;
+      saveBtn.disabled = !(nomeOk && descOk && fileOk);
+    };
+
+    const onKeyDown = (ev) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        close();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+
+    selectBtn.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+      }
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      if (selectedFile) {
+        previewUrl = URL.createObjectURL(selectedFile);
+        previewImg.src = previewUrl;
+        previewImg.classList.add('is-visible');
+        fileNameSpan.textContent = selectedFile.name;
+      } else {
+        previewImg.src = '';
+        previewImg.classList.remove('is-visible');
+        fileNameSpan.textContent = 'Nenhum arquivo selecionado';
+      }
+      updateSaveState();
+    });
+
+    nomeInput.addEventListener('input', updateSaveState);
+    descInput.addEventListener('input', updateSaveState);
+
+    cancelBtn.addEventListener('click', () => {
+      close();
+    });
+
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) close();
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      if (saveBtn.disabled) return;
+      try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Salvando...';
+
+        await uploadFoto(codigo, slot.posReal, {
+          file: selectedFile,
+          nome: nomeInput.value.trim(),
+          descricao: descInput.value.trim()
+        });
+
+        close();
+        if (typeof onSuccess === 'function') {
+          await onSuccess();
+        }
+      } catch (err) {
+        console.error('Falha no upload', err);
+        alert('Falha no upload da foto.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Salvar';
+        updateSaveState();
+      }
+    });
+
+    nomeInput.focus();
+    updateSaveState();
   }
 
   // Estilos mínimos (não alteram seu layout do carrossel)
@@ -225,6 +555,22 @@
         max-width:90vw; max-height:90vh; border-radius:8px;
         box-shadow:0 10px 30px rgba(0,0,0,.35);
       }
+      .foto-modal-caption{
+        margin-top:16px;
+        text-align:center;
+        color:#eee;
+        font-family:inherit;
+      }
+      .foto-modal-caption strong{
+        display:block;
+        font-size:1.1rem;
+        margin-bottom:6px;
+      }
+      .foto-modal-caption p{
+        margin:0;
+        font-size:.9rem;
+        color:#ccc;
+      }
       .option .delete-icon{
         position:absolute; bottom:10px; right:10px; width:30px; height:30px;
         border-radius:50%; display:none; align-items:center; justify-content:center;
@@ -232,6 +578,146 @@
       }
       .option.active .delete-icon{ display:flex; }
       .option .delete-icon:hover{ background:#c00; color:#fff; }
+      .foto-upload-overlay{
+        position:fixed; inset:0; background:rgba(0,0,0,.78);
+        display:flex; align-items:center; justify-content:center; z-index:10000;
+      }
+      .foto-upload-modal{
+        width:min(420px,90vw);
+        background:#1f1f1f;
+        border-radius:12px;
+        padding:24px;
+        box-shadow:0 18px 48px rgba(0,0,0,.45);
+        display:flex;
+        flex-direction:column;
+        gap:14px;
+        color:#f5f5f5;
+        font-family:inherit;
+      }
+      .foto-upload-modal h2{
+        margin:0;
+        font-size:1.25rem;
+        font-weight:600;
+        text-align:left;
+      }
+      .foto-upload-field{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+      }
+      .foto-upload-field label{
+        font-size:.85rem;
+        color:#d0d0d0;
+      }
+      .foto-upload-field input,
+      .foto-upload-field textarea{
+        background:#2b2b2b;
+        border:1px solid #3a3a3a;
+        border-radius:6px;
+        padding:10px 12px;
+        color:#f2f2f2;
+        font-family:inherit;
+        font-size:.9rem;
+        resize:vertical;
+      }
+      .foto-upload-file{
+        display:flex;
+        align-items:center;
+        gap:10px;
+      }
+      .foto-upload-select{
+        background:#2d76ff;
+        color:#fff;
+        border:none;
+        border-radius:6px;
+        padding:8px 14px;
+        font-weight:600;
+        cursor:pointer;
+        transition:background .2s;
+      }
+      .foto-upload-select:hover{
+        background:#205bce;
+      }
+      .foto-upload-filename{
+        font-size:.8rem;
+        color:#bbb;
+        flex:1;
+        min-height:1.4em;
+      }
+      .foto-upload-input{ display:none; }
+      .foto-upload-preview{
+        width:100%;
+        min-height:140px;
+        border:1px dashed #3a3a3a;
+        border-radius:8px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:#262626;
+        overflow:hidden;
+      }
+      .foto-upload-preview img{
+        max-width:100%;
+        max-height:200px;
+        opacity:0;
+        transition:opacity .2s;
+      }
+      .foto-upload-preview img.is-visible{
+        opacity:1;
+      }
+      .foto-upload-actions{
+        display:flex;
+        justify-content:flex-end;
+        gap:10px;
+      }
+      .foto-upload-actions button{
+        border:none;
+        border-radius:6px;
+        padding:9px 18px;
+        font-weight:600;
+        cursor:pointer;
+        transition:background .2s, color .2s;
+      }
+      .foto-upload-cancel{
+        background:transparent;
+        color:#bbb;
+        border:1px solid #3a3a3a;
+      }
+      .foto-upload-cancel:hover{
+        color:#fff;
+        border-color:#4a4a4a;
+      }
+      .foto-upload-save{
+        background:#30a46c;
+        color:#fff;
+      }
+      .foto-upload-save:disabled{
+        background:#2f2f2f;
+        color:#777;
+        cursor:not-allowed;
+      }
+      .foto-upload-save:not(:disabled):hover{
+        background:#268459;
+      }
+      .fg-visibility{
+        display:flex;
+        gap:10px;
+        align-items:center;
+        margin:6px 0;
+        color:#d1d9e6;
+        font-size:0.85rem;
+      }
+      .fg-visibility label{
+        display:flex;
+        gap:6px;
+        align-items:center;
+        font-size:0.85rem;
+        line-height:1.2;
+      }
+      .fg-visibility input[type="checkbox"]{
+        width:16px;
+        height:16px;
+      }
     `;
     document.head.appendChild(s);
   })();
@@ -241,8 +727,8 @@
     const codigo = getCodigoAtual();
     if (!codigo) return;
     const raw   = await getFotosRaw(codigo);
-    const { urls, posOf } = mapToSlots(raw);
-    renderCarousel(urls, posOf);
+    const slots = mapToSlots(raw);
+    renderCarousel(slots);
   }
 
   function whenFotosTabOpensLoad() {
@@ -271,6 +757,14 @@
       if (getComputedStyle(fotosPane).display !== 'none') {
         reloadAndRender();
       }
+    }
+
+    const btnGestao = document.getElementById('btnGerenciarFotos');
+    if (btnGestao) {
+      btnGestao.addEventListener('click', () => {
+        if (isCoolingDown()) return;
+        openGestaoModal();
+      });
     }
   }
 

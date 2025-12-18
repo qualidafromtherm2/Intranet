@@ -14,11 +14,15 @@ module.exports = {
 {
   name: 'intranet_api',
   script: './server.js',
-  watch: true,
-  ignore_watch: ['etiquetas', 'logs', 'node_modules'],
-  watch_delay: 500,
-  env: { PORT: 5001 },
-  env_pg: { PORT: 5001 }   // se você usa o profile "pg"
+  watch: false,
+  env: {
+    PORT: 5001,
+    TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6'
+  },
+  env_pg: {
+    PORT: 5001,
+    TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6'
+  }   // se você usa o profile "pg"
 }
 
   ]

@@ -91,8 +91,8 @@ async function tick() {
     // Seleciona UMA (ou algumas) etiqueta(s) pendente(s) dessa área, com lock para evitar corrida:
     const sel = await client.query(
       `
-      SELECT id, numero_op, codigo_produto, conteudo_zpl
-      FROM etiquetas_impressas
+  SELECT id, numero_op, codigo_produto, conteudo_zpl
+  FROM "OrdemProducao".tab_op
       WHERE impressa = FALSE
         AND local_impressao = $1
       ORDER BY id ASC
@@ -121,7 +121,7 @@ async function tick() {
 
         // Marca como impressa
         await client.query(
-          `UPDATE etiquetas_impressas
+          `UPDATE "OrdemProducao".tab_op
              SET impressa = TRUE,
                  data_impressao = NOW()
            WHERE id = $1`,

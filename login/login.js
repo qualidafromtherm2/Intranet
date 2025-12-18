@@ -4,13 +4,106 @@ import config from '../config.client.js';
 // opção A (recomendada): sempre a mesma origem
 const API_BASE = '';
 
-    
+// === HELPERS GLOBAIS: ficam visíveis para qualquer handler/IIFE ===
+window.goToInicio = window.goToInicio || function () {
+  // 1) Se existir função de roteamento do app:
+  if (typeof window.navigateTo === 'function') { try { window.navigateTo('inicio'); return; } catch {} }
+  if (typeof window.goInicio === 'function')    { try { window.goInicio();         return; } catch {} }
+
+  // 2) Simula clique em "Início"
+  const btnInicio =
+    document.querySelector('[data-nav-key="side:inicio"]') ||
+    document.querySelector('#nav-inicio, #btn-inicio') ||
+    document.querySelector('a[href$="#inicio"], a[href*="#home"]');
+  if (btnInicio) { btnInicio.click(); }
+
+  // 3) Fecha modais/drawers/overlays
+  document.querySelectorAll('.modal.open,.modal.show,.drawer.open,.offcanvas.show,.overlay.open')
+    .forEach(el => { el.classList.remove('open','show'); el.style.display = 'none'; });
+
+  document.querySelectorAll('[data-open="true"]').forEach(el => el.setAttribute('data-open','false'));
+
+  // 4) Reativa a aba/painel default
+  const defaultTab    = document.querySelector('[data-tab][data-default="true"]') || document.querySelector('[data-tab]');
+  const allTabs       = document.querySelectorAll('[data-tab]');
+  const allTabPanels  = document.querySelectorAll('[data-tab-panel]');
+  const defaultPanel  = document.querySelector('[data-tab-panel][data-default="true"]') || allTabPanels[0];
+
+  if (allTabs.length && defaultTab) {
+    allTabs.forEach(t => t.classList.remove('active'));
+    defaultTab.classList.add('active');
+  }
+  if (allTabPanels.length) {
+    allTabPanels.forEach(p => p.style.display = 'none');
+    if (defaultPanel) defaultPanel.style.display = '';
+  }
+
+  // 5) Fallback duro de URL
+  if (!location.pathname.endsWith('/menu_produto.html')) {
+    location.href = '/menu_produto.html#';
+  } else {
+    if (!location.hash || location.hash === '#login' || location.hash === '#!login') {
+      location.hash = '#';
+    }
+  }
+};
+
+window.enforceLoggedOutHome = function () {
+  try {
+    // Fecha modais/drawers/overlays
+    document.querySelectorAll('.modal.open,.modal.show,.drawer.open,.offcanvas.show,.overlay.open')
+      .forEach(el => { el.classList.remove('open','show'); el.style.display = 'none'; });
+
+    document.querySelectorAll('[data-open="true"]').forEach(el => el.setAttribute('data-open','false'));
+
+    // Desmarca itens de menu e marca "Início"
+    document.querySelectorAll('.header .header-menu > .menu-link')
+      .forEach(a => a.classList.remove('is-active'));
+    (document.getElementById('menu-inicio')
+      || document.querySelector('#nav-inicio,#btn-inicio,[data-nav-key="side:inicio"]'))
+      ?.classList.add('is-active');
+
+    // Esconde todas as abas/painéis e mostra só a Home (#paginaInicio), se existir
+    const home  = document.getElementById('paginaInicio');
+    const panes = document.querySelectorAll('[data-tab-panel], .tab-pane');
+    if (panes.length) {
+      panes.forEach(p => {
+        const mostrar = (home && p === home);
+        p.style.display = mostrar ? 'block' : 'none';
+        p.classList.toggle('active', mostrar);
+      });
+    }
+
+    // Normaliza hash para evitar “voltar” para rota protegida
+    try { history.replaceState(null, '', '#inicio'); } catch {}
+  } catch (e) {
+    console.warn('[enforceLoggedOutHome] fallback', e);
+  }
+
+  // Por fim, aciona a navegação de "Início"
+  window.goToInicio();
+};
+
+
+
 document.addEventListener('DOMContentLoaded', async () => {
   // base da API (se não existir API_BASE, usa vazio e chama no mesmo origin)
   const BASE = typeof window.API_BASE === 'string' ? window.API_BASE : '';
 
   // 1) Pega o container onde injetaremos o HTML do login
   const overlay = document.getElementById('authOverlay');
+  
+  // ⚡ OTIMIZAÇÃO: Habilita o botão profile-icon IMEDIATAMENTE
+  const profileArea = document.getElementById('profile-icon');
+  if (profileArea && !profileArea.__loginBound) {
+    profileArea.__loginBound = true;
+    profileArea.style.cursor = 'pointer';
+    profileArea.addEventListener('click', () => {
+      overlay.classList.add('is-active');
+    });
+    // Disponibiliza globalmente para outros módulos
+    window.openLoginModal = () => overlay.classList.add('is-active');
+  }
 
   // 2) Carrega e injeta o HTML do formulário
   const html = await fetch('login/login.html', { credentials: 'include' }).then(r => r.text());
@@ -109,15 +202,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.__sessionUser = st.loggedIn ? st.user : null;
 
   const savedPass = localStorage.getItem('password');
-
-  if (st.loggedIn && savedPass && savedPass !== '123') {
+if (st.loggedIn && st.user) {
     form.style.display = 'none';
     try { await updateMessageCount?.(); } catch {}
     await loadUserInfo(st.user.id);
     moverDadosParaDireita();
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
-    nomeUsuarioSpan.textContent = st.user.id;
+    nomeUsuarioSpan.textContent = st.user.nome || st.user.username || st.user.id || '';
   } else {
     divNotLogged.style.display = 'block';
     divLogged.style.display    = 'none';
@@ -136,40 +228,154 @@ document.addEventListener('DOMContentLoaded', async () => {
   );
 
   // 10) Logout
-  const btnLogout = overlay.querySelector('#btnLogout');
-  if (btnLogout) {
-    btnLogout.addEventListener('click', async () => {
-      try {
-        await fetch(`${BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' });
-      } catch {}
-      // limpa localStorage (caso "lembrar-me")
-      localStorage.removeItem('user');
-      localStorage.removeItem('password');
+const btnLogout1 = overlay.querySelector('#btnLogout');
+const btnLogout2 = overlay.querySelector('#btnOverlayLogout');
 
-      // volta a exibir o form e esconder o painel de boas-vindas
-      form.style.display            = '';
-      loggedContainer && (loggedContainer.style.display = 'none');
-      divNotLogged.style.display    = 'block';
-      divLogged.style.display       = 'none';
-      moverDadosParaEsquerda();
+// login/login.js — substituir a função inteira
+// --- Helper: leva para a página inicial e fecha tudo que estiver aberto ---
+function goToInicio() {
+  // 1) Se existir alguma função global do seu app pra ir ao início, use
+  if (typeof window.goInicio === 'function') { try { window.goInicio(); return; } catch {} }
+  if (typeof window.navigateTo === 'function') { try { window.navigateTo('inicio'); return; } catch {} }
 
-      window.__sessionUser = null;
-      window.dispatchEvent(new Event('auth:changed'));
+  // 2) Tenta clicar em um botão/link "Início" do menu lateral/topo
+  const btnInicio =
+    document.querySelector('[data-nav-key="side:inicio"]') ||
+    document.querySelector('#nav-inicio, #btn-inicio') ||
+    document.querySelector('a[href$="#inicio"], a[href*="#home"]');
+  if (btnInicio) { btnInicio.click(); }
 
-      overlay.querySelector('#container')?.classList.remove('right-panel-active');
-    });
+  // 3) Fecha modais, drawers, overlays, e desmarca abas ativas
+  document.querySelectorAll('.modal.open,.modal.show,.drawer.open,.offcanvas.show,.overlay.open')
+    .forEach(el => { el.classList.remove('open','show'); el.style.display = 'none'; });
+
+  // Fecha quaisquer elementos com [data-open="true"]
+  document.querySelectorAll('[data-open="true"]').forEach(el => el.setAttribute('data-open', 'false'));
+
+  // Fecha abas deixando só a primeira (ou a que tiver [data-default])
+  const defaultTab = document.querySelector('[data-tab][data-default="true"]') || document.querySelector('[data-tab]');
+  if (defaultTab) {
+    const allTabs = document.querySelectorAll('[data-tab]');
+    allTabs.forEach(t => t.classList.remove('active'));
+    defaultTab.classList.add('active');
+  }
+  const allTabPanels = document.querySelectorAll('[data-tab-panel]');
+  const defaultPanel = document.querySelector('[data-tab-panel][data-default="true"]') || allTabPanels[0];
+  if (allTabPanels.length) {
+    allTabPanels.forEach(p => p.style.display = 'none');
+    if (defaultPanel) defaultPanel.style.display = '';
   }
 
-  // mesmo handler para o botão do painel direito (se existir)
-  const btnOverlayLogout = overlay.querySelector('#btnOverlayLogout');
-  if (btnOverlayLogout) {
-    btnOverlayLogout.addEventListener('click', (e) => {
-      e.preventDefault();
-      btnLogout?.click();
-    });
+  // 4) Como fallback final, força navegação para a home do app
+  //    (ajuste se sua rota inicial for diferente)
+  if (!location.pathname.endsWith('/menu_produto.html')) {
+    location.href = '/menu_produto.html#';
+  } else {
+    // Se já está em menu_produto, garante o hash "início"
+    if (!location.hash || location.hash === '#login' || location.hash === '#!login') {
+      location.hash = '#';
+    }
+  }
+}
+
+// Força estado "deslogado" + navega pra Início, em qualquer lugar do app
+// === Fecha tudo e garante "Início" visível mesmo sem auth ===
+function enforceLoggedOutHome() {
+  try {
+    // Fecha modais/drawers/overlays comuns
+    document.querySelectorAll('.modal.open,.modal.show,.drawer.open,.offcanvas.show,.overlay.open')
+      .forEach(el => { el.classList.remove('open','show'); el.style.display = 'none'; });
+
+    // Qualquer componente com "data-open"
+    document.querySelectorAll('[data-open="true"]').forEach(el => el.setAttribute('data-open','false'));
+
+    // Desmarca itens ativos de menu e marca "Início", se existir
+    document.querySelectorAll('.header .header-menu > .menu-link')
+      .forEach(a => a.classList.remove('is-active'));
+    (document.getElementById('menu-inicio')
+      || document.querySelector('#nav-inicio,#btn-inicio,[data-nav-key="side:inicio"]'))
+      ?.classList.add('is-active');
+
+    // Esconde todas as abas/painéis e mostra apenas a Home (#paginaInicio) se existir
+    const home = document.getElementById('paginaInicio');
+    const panes = document.querySelectorAll('[data-tab-panel], .tab-pane');
+    if (panes.length) {
+      panes.forEach(p => {
+        const mostrar = (home && p === home);
+        p.style.display = mostrar ? 'block' : 'none';
+        p.classList.toggle('active', mostrar);
+      });
+    }
+
+    // Normaliza a URL/hash para "Início" (evita voltar à rota protegida)
+    try { history.replaceState(null, '', '#inicio'); } catch {}
+  } catch (e) {
+    console.warn('[enforceLoggedOutHome] fallback', e);
   }
 
-  // força todo mundo (menus, botões, abas) a reavaliar visibilidade
+  // Aciona o mesmo comportamento do botão "Início"
+  goToInicio();
+}
+
+
+// --- Substituir a função inteira ---
+function bindLogout(btn) {
+  if (!btn) return;
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await fetch(`${BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+    } catch {}
+
+    // limpa credenciais locais
+    try { localStorage.removeItem('user'); localStorage.removeItem('password'); } catch {}
+
+    // === Reset visual do overlay de login ===
+    form.style.display = '';
+    if (loggedContainer) loggedContainer.style.display = 'none';
+    divNotLogged.style.display = 'block';
+    divLogged.style.display = 'none';
+    moverDadosParaEsquerda();
+
+    // garante que o botão "Entrar" esteja normal (sem spinner e habilitado)
+    const btnEntrar = overlay.querySelector('#btnEntrar');
+    if (btnEntrar) {
+      btnEntrar.disabled = false;
+      const btnText = btnEntrar.querySelector('.btn-text');
+      const spinner  = btnEntrar.querySelector('.spinner');
+      if (btnText) btnText.style.display = '';
+      if (spinner) spinner.style.display = 'none';
+    }
+
+    // limpa e habilita campos
+    const usr = overlay.querySelector('#signInEmail');
+    const pwd = overlay.querySelector('#signInPassword');
+    const chk = overlay.querySelector('#rememberMe');
+    if (usr) { usr.readOnly = false; usr.value = ''; }
+    if (pwd) { pwd.readOnly = false; pwd.value = ''; }
+    if (chk) { chk.checked = false; }
+
+    // estado global + evento
+    window.__sessionUser = null;
+    window.dispatchEvent(new Event('auth:changed'));
+
+    // remove classe do painel
+    overlay.querySelector('#container')?.classList.remove('right-panel-active');
+
+    // **Força HOME e fecha tudo**
+    enforceLoggedOutHome();
+  });
+}
+
+
+
+
+bindLogout(btnLogout1);
+bindLogout(btnLogout2);
+
+
+  // [removed] overlay logout duplicate handler
+// força todo mundo (menus, botões, abas) a reavaliar visibilidade
   window.dispatchEvent(new Event('auth:changed'));
 });
 
@@ -190,10 +396,18 @@ function bindAuthModal(
   const closeBtn    = overlay.querySelector('.close-auth');
   const formSignIn  = overlay.querySelector('#formSignIn');
   const container   = overlay.querySelector('#container');
+  const btnVoltarLogin = overlay.querySelector('#btnVoltarLogin');
+btnVoltarLogin?.addEventListener('click', () => {
+  container?.classList.remove('right-panel-active');
+  overlay.querySelector('#signInPassword')?.focus();
+});
 
-  // abre modal ao clicar no ícone de perfil
-  profileArea?.addEventListener('click', () => overlay.classList.add('is-active'));
-  window.openLoginModal = () => overlay.classList.add('is-active');
+
+  // abre modal ao clicar no ícone de perfil (já foi configurado no DOMContentLoaded)
+  // Apenas garante que a função global existe
+  if (!window.openLoginModal) {
+    window.openLoginModal = () => overlay.classList.add('is-active');
+  }
 
   // fechar modal
   closeBtn?.addEventListener('click', () => overlay.classList.remove('is-active'));
@@ -246,6 +460,28 @@ formSignIn?.addEventListener('submit', async (e) => {
     return;
   }
 
+  // === CURTO-CIRCUITO: senha inicial "123" abre o painel de nova senha ===
+  if (password === '123') {
+    window.__pendingResetUsername = username; // guardamos quem vai trocar
+    overlay.querySelector('#container')?.classList.add('right-panel-active'); // efeito CodePen
+    const hint = overlay.querySelector('#changePassHint');
+    if (hint) hint.textContent = `Usuário: ${username}`;
+    // foco no campo nova senha
+    setTimeout(() => overlay.querySelector('#newPassword')?.focus(), 0);
+    return; // não tenta logar com 123
+  }
+
+  // --- INÍCIO: Mostra spinner e oculta texto ---
+  const btnEntrar = overlay.querySelector('#btnEntrar');
+  if (btnEntrar) {
+    btnEntrar.disabled = true;
+    const btnText = btnEntrar.querySelector('.btn-text');
+    const spinner = btnEntrar.querySelector('.spinner');
+    if (btnText) btnText.style.display = 'none';
+    if (spinner) spinner.style.display = 'inline-block';
+  }
+  // --- FIM: Mostra spinner e oculta texto ---
+
   try {
     const resp = await fetch('/api/auth/login', {
       method: 'POST',
@@ -257,6 +493,14 @@ formSignIn?.addEventListener('submit', async (e) => {
 
     if (!resp.ok || !data.ok) {
       alert(data.error || 'Usuário ou senha inválidos');
+      // --- Reabilita botão e restaura texto/spinner ---
+      if (btnEntrar) {
+        btnEntrar.disabled = false;
+        const btnText = btnEntrar.querySelector('.btn-text');
+        const spinner = btnEntrar.querySelector('.spinner');
+        if (btnText) btnText.style.display = '';
+        if (spinner) spinner.style.display = 'none';
+      }
       return;
     }
 
@@ -269,23 +513,17 @@ formSignIn?.addEventListener('submit', async (e) => {
       localStorage.removeItem('password');
     }
 
-    // guarda o usuário de sessão para os outros módulos
     window.__sessionUser = data.user;
 
-// depois que o login deu ok e __sessionUser foi definido:
-try {
-  // sincroniza mapa de botões/menus com o SQL (agora com cookie já setado)
-  if (typeof window.syncNavNodes === 'function') {
-    await window.syncNavNodes();   // se não estiver logado, retorna false sem erro
-  }
-} catch (e) {
-  console.warn('[login] syncNavNodes falhou', e);
-}
+    try {
+      if (typeof window.syncNavNodes === 'function') {
+        await window.syncNavNodes();
+      }
+    } catch (e) {
+      console.warn('[login] syncNavNodes falhou', e);
+    }
 
-// avisa todo mundo pra reavaliar a UI por permissões/menus
-window.dispatchEvent(new Event('auth:changed'));
-
-    // 👉 NOVO: sincroniza os nós de navegação com o SQL **antes** de avisar a UI
+    window.dispatchEvent(new Event('auth:changed'));
     try { await window.syncNavNodes?.(); } catch (e) { console.warn('[nav-sync pós-login]', e); }
 
     // fecha modal + ajusta painéis
@@ -295,49 +533,111 @@ window.dispatchEvent(new Event('auth:changed'));
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
     if (nomeUsuarioSpan) {
-      nomeUsuarioSpan.textContent = data.user.username || data.user.id || username;
+      nomeUsuarioSpan.textContent = data.user.nome || data.user.username || data.user.id || username;
     }
     if (typeof moverDadosParaDireita === 'function') moverDadosParaDireita();
+    if (formSignIn) formSignIn.style.display = 'none';
 
-    // avisa a aplicação (menus, abas e botões com permissão se atualizam)
     window.dispatchEvent(new Event('auth:changed'));
+    // --- O spinner some junto com o modal, não precisa restaurar aqui ---
   } catch (err) {
     console.error('[login] falha', err);
     alert('Falha no login. Tente novamente.');
+    // --- Reabilita botão e restaura texto/spinner ---
+    if (btnEntrar) {
+      btnEntrar.disabled = false;
+      const btnText = btnEntrar.querySelector('.btn-text');
+      const spinner = btnEntrar.querySelector('.spinner');
+      if (btnText) btnText.style.display = '';
+      if (spinner) spinner.style.display = 'none';
+    }
   }
 });
 
 
+
   // === SUBMIT: criar/alterar senha inicial ===
-  const formCriar = overlay.querySelector('#formCriarConta');
-  formCriar?.addEventListener('submit', async e => {
-    e.preventDefault();
-    const newPass     = overlay.querySelector('#newPassword')?.value.trim();
-    const confirmPass = overlay.querySelector('#confirmPassword')?.value.trim();
-    if (!newPass || newPass !== confirmPass) return alert('As senhas não conferem');
+const formCriar = overlay.querySelector('#formCriarConta');
+formCriar?.addEventListener('submit', async (e) => {
+  e.preventDefault();
 
-    // 1) grava nova senha
-    const ok = await fetch(`/api/users/${loggedUserId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type':'application/json' },
+  const username    = (window.__pendingResetUsername || overlay.querySelector('#signInEmail')?.value || '').trim();
+  const newPass     = overlay.querySelector('#newPassword')?.value.trim();
+  const confirmPass = overlay.querySelector('#confirmPassword')?.value.trim();
+
+  if (!username) return alert('Usuário não identificado.');
+  if (!newPass || newPass !== confirmPass) return alert('As senhas não conferem');
+
+  const btn = overlay.querySelector('#btnCriarConta');
+  if (btn) {
+    btn.disabled = true;
+    const t = btn.querySelector('.btn-text');
+    const s = btn.querySelector('.spinner');
+    if (t) t.style.display = 'none';
+    if (s) s.style.display = 'inline-block';
+  }
+
+  try {
+    // 1) Troca a senha inicial (rota pública controlada)
+    const up = await fetch('/api/auth/first-password', {
+      method: 'POST',
       credentials: 'include',
-      body: JSON.stringify({ password: newPass })
-    }).then(r => r.ok);
-    if (!ok) return alert('Erro ao atualizar a senha');
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, newPassword: newPass })
+    });
+    const upJs = await up.json().catch(() => ({}));
+    if (!up.ok || upJs?.ok === false) {
+      throw new Error(upJs.error || 'Erro ao atualizar a senha');
+    }
 
-    // 2) encerra sessão temporária
-    await fetch('/api/auth/logout', { method:'POST', credentials:'include' });
+    // 2) Auto-login com a nova senha
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: username, senha: newPass })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao entrar com a nova senha');
 
-    // 3) volta para o painel de login
-    container?.classList.remove('right-panel-active');
-    overlay.querySelector('.sign-up-container')?.style && (overlay.querySelector('.sign-up-container').style.display = 'none');
-    overlay.querySelector('.sign-in-container')?.style && (overlay.querySelector('.sign-in-container').style.display = 'block');
-    const passField = overlay.querySelector('#signInPassword');
-    if (passField) { passField.value = ''; passField.focus(); }
+    // 3) Estado/UX
+    localStorage.setItem('user', username);
+    localStorage.setItem('password', newPass);
+    window.__sessionUser = data.user;
+    try { await window.syncNavNodes?.(); } catch {}
+    window.dispatchEvent(new Event('auth:changed'));
 
-    localStorage.removeItem('password');
-    alert('Senha alterada! Entre novamente com seu usuário e a nova senha.');
-  });
+    overlay.querySelector('#container')?.classList.remove('right-panel-active'); // volta pro painel de login
+    overlay.classList.remove('is-active'); // fecha modal
+
+    const divNotLogged = overlay.querySelector('#overlayNotLoggedIn');
+    const divLogged    = overlay.querySelector('#overlayLoggedIn');
+    const nomeUsuario  = overlay.querySelector('#nomeUsuarioOverlay');
+    if (divNotLogged && divLogged) {
+      divNotLogged.style.display = 'none';
+      divLogged.style.display    = 'block';
+    }
+    if (nomeUsuario) nomeUsuario.textContent = data.user?.nome || data.user?.username || username;
+
+    overlay.querySelector('#formSignIn')?.reset();
+    window.__pendingResetUsername = null;
+
+  } catch (err) {
+    console.error('[nova-senha]', err);
+    alert(err.message || 'Falha ao trocar senha.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      const t = btn.querySelector('.btn-text');
+      const s = btn.querySelector('.spinner');
+      if (t) t.style.display = '';
+      if (s) s.style.display = 'none';
+    }
+  }
+});
+
+
+
 }
 
 
@@ -368,7 +668,15 @@ function ativarInicioAposLogin() {
   try { history.replaceState(null, '', '#inicio'); } catch {}
 }
 
+// Atualiza contador de mensagens - só executa se usuário estiver logado
 async function updateMessageCount() {
+  // Verifica se está logado antes de fazer requisição
+  if (!window.__sessionUser) {
+    const badge = document.querySelector('.notification-number');
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+  
   const badge = document.querySelector('.notification-number');
   if (!badge) return;
 
@@ -389,69 +697,46 @@ async function updateMessageCount() {
 }
 
 async function openNotificacoes() {
-
-  const ul = document.getElementById('listaNotificacoes');
-
-  const res = await fetch(`${API_BASE}/api/users/me/messages`, { credentials: 'include' });
-  if (!res.ok) {
-    ul.innerHTML = '<li>Erro ao carregar mensagens.</li>';
+  // Verifica se está logado antes de abrir notificações
+  if (!window.__sessionUser) {
+    console.warn('[openNotificacoes] Usuário não logado - ignorando abertura');
     return;
   }
-  const { messages } = await res.json();
-
-  ul.innerHTML = messages.length
-  ? messages.map((m, i) => `
-      <li data-idx="${i}" data-raw="${encodeURIComponent(m)}">
-        <span>${m}</span>
-        <div class="button-wrapper">
-          <button class="content-button status-button btn-reset">
-            Reset
-          </button>
-          <button class="content-button status-button btn-del">
-            Excluir
-          </button>
-        </div>
-      </li>`).join('')
-  : '<li>Nenhuma notificação.</li>';
-
-
-  const showTab = window.showMainTab || function(id){
-    document.querySelectorAll('.tab-pane')
-            .forEach(p => p.style.display = (p.id === id ? 'block' : 'none'));
-  };
-
-  // destaca o link principal da aba
-  const link = document.getElementById('menu-notificacoes');
-  if (link) {
-    document.querySelectorAll('.header .header-menu > .menu-link')
-            .forEach(a => a.classList.remove('is-active'));
-    link.classList.add('is-active');
+  
+  console.warn('[openNotificacoes] Função DESABILITADA - usando chat ao invés de notificações');
+  
+  // Se o chat existe, redireciona para ele
+  if (typeof window.openChat === 'function') {
+    window.openChat();
+    return;
   }
-
-  showTab('notificacoes');
-    
-  updateMessageCount();
+  
+  // Se não existe, apenas loga o erro sem tentar acessar elementos inexistentes
+  console.error('[openNotificacoes] Sistema de chat não disponível');
 }
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 
-// LOGOUT — ADICIONE ESTE BLOCO (mapeia #btn-logout ou qualquer [data-logout])
+// LOGOUT (header/side): usa helpers globais
 (function bindLogoutButton(){
-  function handler(btn){
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      try {
-        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-      } catch {}
-      window.__sessionUser = null;
-      window.dispatchEvent(new Event('auth:changed'));
-    });
-  }
   const tryBind = () => {
     const btn = document.querySelector('#btn-logout, [data-logout]');
-    if (btn) handler(btn);
+    if (!btn || btn.__logoutBound) return;
+    btn.__logoutBound = true;
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+      try { localStorage.removeItem('user'); localStorage.removeItem('password'); } catch {}
+      window.__sessionUser = null;
+      window.dispatchEvent(new Event('auth:changed'));
+      // <- agora existe no escopo global:
+      window.enforceLoggedOutHome();
+    });
   };
   document.addEventListener('DOMContentLoaded', tryBind);
+  new MutationObserver(tryBind).observe(document.documentElement, { childList: true, subtree: true });
 })();
+
+
 
 
 function bindNotificationBell() {
@@ -460,12 +745,21 @@ function bindNotificationBell() {
 
   bell.addEventListener('click', (e) => {
     e.stopPropagation(); // evita interações colaterais (ex.: abrir login)
+    e.preventDefault();
     try {
+      // Chama o chat se existir (prioridade para sistema novo)
+      if (typeof window.openChat === 'function') {
+        window.openChat();
+        return;
+      }
+      
+      // Fallback para notificações antigas (se o chat não carregou)
+      console.warn('[bindNotificationBell] openChat não disponível, usando fallback');
       if (typeof window.openNotificacoes === 'function') {
         window.openNotificacoes();
       }
     } catch (err) {
-      console.warn('[bindNotificationBell] falha ao abrir notificações', err);
+      console.error('[bindNotificationBell] erro ao abrir chat/notificações', err);
     }
   });
 
@@ -540,6 +834,14 @@ function bindNotificationsUI() {
   try { bindNotificationBell(); } catch (e) { console.warn('[bindNotificationsUI] bell', e); }
   try { bindNotificacoesListClicks(); } catch (e) { console.warn('[bindNotificationsUI] list', e); }
 }
+
+// Se perder sessão em qualquer ponto, garante HOME
+window.addEventListener('auth:changed', () => {
+  if (!window.__sessionUser) window.enforceLoggedOutHome();
+});
+
+
+
 
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 

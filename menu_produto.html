@@ -47,46 +47,43 @@
      data-nav-label="Produto"
      data-nav-selector="#menu-produto">Produto</a>
 
-  <a id="menu-qualidade"
-     class="menu-link" href="#"
-     data-nav-key="top:qualidade"
-     data-nav-pos="top"
-     data-nav-label="Qualidade"
-     data-nav-selector="#menu-qualidade">Qualidade</a>
+  <a id="menu-engenharia"
+    class="menu-link" href="#"
+    data-target="engenhariaPane"
+    data-nav-key="top:engenharia"
+    data-nav-pos="top"
+    data-nav-label="Engenharia"
+    data-nav-selector="#menu-engenharia">Engenharia</a>
 
-  <a id="menu-acessos"
-     class="menu-link" href="#"
-     data-nav-key="top:acessos"
-     data-nav-pos="top"
-     data-nav-label="Acessos"
-     data-nav-selector="#menu-acessos">Acessos</a>
+  <a id="menu-registros"
+  class="menu-link" href="#"
+  data-nav-key="top:registros"
+  data-nav-pos="top"
+  data-nav-label="Registros"
+  data-nav-selector="#menu-registros">Registros</a>
 
-  <a id="menu-notificacoes"
+  <a id="menu-compras"
      class="menu-link" href="#"
-     data-nav-key="top:notificacoes"
+     data-target="comprasPane"
+     data-nav-key="top:compras"
      data-nav-pos="top"
-     data-nav-label="Notificações"
-     data-nav-selector="#menu-notificacoes">Notificações</a>
+     data-nav-label="Compras"
+     data-nav-selector="#menu-compras">Compras</a>
 </nav>
 
-
-  <!-- Botão …  (fica invisível até o JS precisar dele) -->
-<button id="moreBtn" class="more-btn" aria-label="Mais opções">
-  <!-- era: <i class="fa-solid fa-ellipsis-h"></i> -->
-  <i class="fa-solid fa-ellipsis"></i>
-</button>
-
   <!-- Campo de busca -->
-  <div class="search-bar" id="searchBar">
-    <input type="text" placeholder="Pesquisar produto" />
-  </div>
+<div class="user-badge">
+  <span id="userNameDisplay" class="user-name">Usuário</span>
+</div>
+
 
   <!-- Ícones da direita -->
   <div class="header-profile">
     <div class="notification">
       <span class="notification-number">5</span>
-      <i class="fa-solid fa-bell"></i>
+      <i id="bell-icon" class="fa-solid fa-bell" title="Mensagens"></i>
     </div>
+    <i id="cart-icon" class="fa-solid fa-cart-shopping" title="Solicitação de compras"></i>
     <i class="fa-solid fa-print"></i>
     <i class="fa-solid fa-cloud"></i>
     <img id="profile-icon" class="profile-img"
@@ -102,7 +99,16 @@
 
     <div class="wrapper">
       <!-- Menu lateral -->
-      <div class="left-side">
+  <div class="left-side">
+        
+        <!-- Botão Hambúrguer do Menu Lateral -->
+        <button class="sidebar-hamburger" id="sidebarHamburger" title="Menu lateral">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+
+        <!-- Container do menu lateral (inicialmente colapsado) -->
+        <div class="sidebar-content collapsed" id="sidebarContent">
+
 <div class="side-wrapper">
   <div class="side-title"
        data-nav-key="side:produtos"
@@ -117,21 +123,19 @@
        data-nav-pos="side"
        data-nav-label="Lista de produtos"
        data-nav-selector="#btn-omie-list1">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;flex-shrink:0;">
-        <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-      </svg>
+      <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
       Lista de produtos
     </a>
 
     <a href="#"
-       id="btn-omie-list"
-       data-nav-key="side:produtos:constr2"
+       id="btn-definicoes"
+       data-nav-key="side:produtos:definicoes"
        data-nav-parent="side:produtos"
        data-nav-pos="side"
-       data-nav-label="em construção 2"
-       data-nav-selector="#btn-omie-list">
-      <svg viewBox="0 0 512 512"></svg>
-      em construção 2
+       data-nav-label="Definições"
+       data-nav-selector="#btn-definicoes">
+      <i class="fa-solid fa-gears" style="margin-right:8px;"></i>
+      Definições
     </a>
 
     <a href="#"
@@ -139,9 +143,8 @@
        data-nav-parent="side:produtos"
        data-nav-pos="side"
        data-nav-label="em construção 3">
-      <svg viewBox="0 0 488.932 488.932" fill="currentColor"></svg>
+      <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
       em construção 3
-      <span class="notification-number updates">3</span>
     </a>
   </div>
 </div>
@@ -154,33 +157,37 @@
 
   <div class="side-menu">
 
-    <a href="#"
-       id="btn-colaboradores"
-       class="side-menu-item"
-       data-colab="colab"
-       data-nav="colaboradores"
-       data-nav-key="side:rh:cad-colab"
-       data-nav-parent="side:rh"
-       data-nav-pos="side"
-       data-nav-label="Cadastro de colaboradores"
-       data-nav-selector="#btn-colaboradores">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px; flex-shrink:0;">
-        <path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/>
-      </svg>
-      Cadastro de colaboradores
-    </a>
+   <a href="#"
+     id="btn-colaboradores"
+     class="side-menu-item"
+     data-colab="colab"
+     data-nav="colaboradores"
+     data-nav-key="side:rh:cad-colab"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="Cadastro de colaboradores"
+     data-nav-selector="#btn-colaboradores">
+    <i class="fa-solid fa-users" style="margin-right:8px;"></i>
+    Cadastro de colaboradores
+   </a>
 
-    <a href="#" class="menu-link"
-       data-nav-key="side:rh:aniversariantes"
-       data-nav-parent="side:rh"
-       data-nav-pos="side"
-       data-nav-label="Aniversariantes">Aniversariantes</a>
+   <a href="#" class="menu-link"
+     data-nav-key="side:rh:aniversariantes"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="Aniversariantes">
+    <i class="fa-solid fa-cake-candles" style="margin-right:8px;"></i>
+    Aniversariantes
+   </a>
 
-    <a href="#"
-       data-nav-key="side:rh:constr18"
-       data-nav-parent="side:rh"
-       data-nav-pos="side"
-       data-nav-label="… em construção 18 …">… em construção 18 …</a>
+   <a href="#"
+     data-nav-key="side:rh:constr18"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="… em construção 18 …">
+    <i class="fa-solid fa-user-gear" style="margin-right:8px;"></i>
+    … em construção 18 …
+   </a>
   </div>
 </div>
 
@@ -201,12 +208,10 @@
        data-nav-key="side:log:pedidos"
        data-nav-parent="side:log"
        data-nav-pos="side"
-       data-nav-label="Pedidos"
+       data-nav-label="Controle de OP's"
        data-nav-selector="#menu-pedidos">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
-        <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-      </svg>
-      Pedidos
+      <i class="fa-solid fa-list-check" style="margin-right:8px;"></i>
+      Controle de OP's
     </a>
 
     <a href="#"
@@ -217,56 +222,413 @@
        data-nav-pos="side"
        data-nav-label="Armazéns"
        data-nav-selector="#menu-armazens">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right:8px;">
-        <path d="M3 9.5V21h3v-7h12v7h3V9.5L12 3 3 9.5zM9 19H6v-5h3v5zm9 0h-3v-5h3v5z"/>
-      </svg>
+      <i class="fa-solid fa-warehouse" style="margin-right:8px;"></i>
       Armazéns
+    </a>
+
+    <a href="#"
+       id="menu-solicitacao-transferencia"
+       class="menu-link"
+       data-nav-key="side:log:solicitacao-transferencia"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Solicitação de transferência"
+       data-nav-selector="#menu-solicitacao-transferencia">
+      <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:8px;"></i>
+      Solicitação de transferência
+    </a>
+
+    <a href="#"
+       id="menu-recebimento"
+       class="menu-link"
+       data-nav-key="side:log:recebimento"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Recebimento"
+       data-nav-selector="#menu-recebimento">
+      <i class="fa-solid fa-truck-ramp-box" style="margin-right:8px;"></i>
+      Recebimento
+    </a>
+
+    <a href="#"
+       id="menu-envio-mercadoria"
+       class="menu-link"
+       data-nav-key="side:log:envio-mercadoria"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Envio de mercadoria"
+       data-nav-selector="#menu-envio-mercadoria">
+      <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
+      Envio de mercadoria
     </a>
   </div>
 </div>
 
+<!-- Nova categoria: SAC -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:sac"
+       data-nav-pos="side"
+       data-nav-label="SAC">SAC</div>
 
-
-      </div>
-
-      <!-- Conteúdo principal -->
-
-      <!-- Painel Início — aparece primeiro -->
-<div id="paginaInicio" class="tab-pane" style="display:block;">
-  <div class="content-wrapper">
-    <div class="content-section">
-
-<div class="inicio-grid">
-  <button class="inicio-btn"
-          id="btn-linha-producao"
-          data-nav-key="inicio:linha-producao"
-          data-nav-pos="top"
-          data-nav-label="Linha de produção"
-          data-nav-selector="#btn-linha-producao">Linha de produção</button>
-
-  <button id="btn-prep-eletrica" class="inicio-btn"
-          data-nav-key="inicio:prep-eletrica"
-          data-nav-pos="top"
-          data-nav-label="Preparação elétrica"
-          data-nav-selector="#btn-prep-eletrica">Preparação elétrica</button>
-
-  <button class="inicio-btn"
-          data-nav-key="inicio:prep-base"
-          data-nav-pos="top"
-          data-nav-label="Preparação da base">Preparação da base</button>
-
-
-</div>
-
-
-
-    </div>
+  <div class="side-menu">
+    <a href="#"
+       id="menu-sac-solicitacao-envio"
+       class="menu-link"
+       data-nav-key="side:sac:solicitacao-envio"
+       data-nav-parent="side:sac"
+       data-nav-pos="side"
+       data-nav-label="Solicitação de envio"
+       data-nav-selector="#menu-sac-solicitacao-envio">
+      <i class="fa-solid fa-paper-plane" style="margin-right:8px;"></i>
+      Solicitação de envio
+    </a>
   </div>
 </div>
 
+        </div><!-- Fim do sidebar-content -->
+
+      </div><!-- Fim do left-side -->
+
+      <!-- Conteúdo principal -->
+
       <div class="main-container">
 
-        <!-- Painel de Lista de Produtos -->
+        <!-- Chat (tipo WhatsApp) dentro do content-wrapper padrão -->
+        <div id="chatPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header">
+              <div class="content-wrapper-context">
+                <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-comments" style="color:#10b981;"></i>
+                  <span>Mensagens</span>
+                </h3>
+                <div class="content-text">Converse com os usuários do sistema.</div>
+              </div>
+            </div>
+            <div id="chatLayout">
+              <aside class="chat-users">
+                <div class="chat-users-header">
+                  <input id="chatSearch" type="text" placeholder="Buscar usuário..." />
+                </div>
+                <ul id="chatUserList" class="chat-user-list"></ul>
+              </aside>
+              <section class="chat-conv">
+                <header class="chat-conv-header">
+                  <div class="chat-with" id="chatWith">Selecione um usuário</div>
+                </header>
+                <div id="chatMessages" class="chat-messages"></div>
+                <footer class="chat-input">
+                  <input id="chatText" type="text" placeholder="Digite uma mensagem" disabled />
+                  <button id="chatSend" disabled>Enviar</button>
+                </footer>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Solicitação de Compras (abre pelo ícone do carrinho) -->
+        <div id="comprasFormPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-cart-shopping" style="color:#f59e0b;"></i>
+                  Solicitação de Compras
+                </div>
+              </div>
+
+              <form id="comprasForm" class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:12px;">
+                <div class="form-field" style="grid-column:1/-1;">
+                  <label for="comprasCodigo">Código do produto *</label>
+                  <div class="combo-wrapper" style="position:relative;">
+                    <input id="comprasCodigo" type="text" autocomplete="off" placeholder="Digite para buscar" required />
+                    <input id="comprasDescricaoSelecionada" type="hidden" />
+                    <ul id="comprasCodigoSugestoes" style="list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;top:100%;left:0;z-index:120;width:100%;background:#0f1116;color:#f5f5f5;border:1px solid var(--border-color);border-radius:8px;max-height:240px;overflow-y:auto;display:none;box-shadow:0 12px 28px rgba(0,0,0,0.45);"></ul>
+                  </div>
+                  <small style="color:var(--inactive-color);">Digite parte do código ou descrição para buscar em produtos_omie.</small>
+                  <div id="comprasBuscaStatus" style="margin-top:6px;font-size:12px;color:#9ca3af;min-height:16px;"></div>
+                </div>
+                <div class="form-field">
+                  <label for="comprasQuantidade">Quantidade</label>
+                  <input id="comprasQuantidade" type="number" step="1" min="0" placeholder="Ex: 10" />
+                </div>
+                <div class="form-field">
+                  <label for="comprasPrazoSolicitado">Prazo solicitado</label>
+                  <input id="comprasPrazoSolicitado" type="date" />
+                </div>
+                <div class="form-field" style="grid-column:1/-1;">
+                  <label for="comprasObservacao">Observação</label>
+                  <textarea id="comprasObservacao" rows="3" placeholder="Detalhes adicionais" style="width:100%;"></textarea>
+                </div>
+                <div style="grid-column:1/-1;display:flex;justify-content:flex-end;gap:10px;">
+                  <button id="comprasSubmit" class="content-button" type="submit" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>Enviar solicitação</span>
+                  </button>
+                </div>
+              </form>
+              <div id="comprasFormStatus" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;"></div>
+            </div>
+
+            <!-- Minhas solicitações (somente do usuário logado) -->
+            <div id="minhasComprasWrapper" class="content-section" style="margin-top:16px;display:none;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-user-check" style="color:#22c55e;"></i>
+                  Minhas solicitações
+                </div>
+              </div>
+              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                <table class="tabela padrao" style="min-width:1000px;">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Código</th>
+                      <th>Descrição</th>
+                      <th>Qtd</th>
+                      <th>Prazo solicitado</th>
+                      <th>Previsão de chegada</th>
+                      <th>Status</th>
+                      <th>Quem vai receber?</th>
+                      <th>Criado em</th>
+                    </tr>
+                  </thead>
+                  <tbody id="comprasMinhasTbody">
+                    <tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Compras: somente tabela de solicitações registradas (abre pelo menu Compras) -->
+        <div id="comprasPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-list-check" style="color:#0ea5e9;"></i>
+                  Solicitações registradas
+                </div>
+                <button id="comprasRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Recarregar lista</span>
+                </button>
+              </div>
+              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                <table class="tabela padrao" style="min-width:1100px;">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Código</th>
+                      <th>Descrição</th>
+                      <th>Qtd</th>
+                      <th>Solicitante</th>
+                      <th>Prazo solicitado</th>
+                      <th>Previsão de chegada</th>
+                      <th>Status</th>
+                      <th>Observação</th>
+                      <th>Criado em</th>
+                    </tr>
+                  </thead>
+                  <tbody id="comprasTbody">
+                    <tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Recebimento: cópia da tabela de solicitações, filtrada por status "compra realizada" -->
+        <div id="recebimentoPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-truck-ramp-box" style="color:#f59e0b;"></i>
+                  Recebimento (compra realizada)
+                </div>
+                <button id="recebimentoRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Recarregar lista</span>
+                </button>
+              </div>
+              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                <table class="tabela padrao" style="min-width:1100px;">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Código</th>
+                      <th>Descrição</th>
+                      <th>Qtd</th>
+                      <th>Solicitante</th>
+                      <th>Prazo solicitado</th>
+                      <th>Previsão de chegada</th>
+                      <th>Quem vai receber?</th>
+                      <th>Status</th>
+                      <th>Observação</th>
+                      <th>Criado em</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recebimentoTbody">
+                    <tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel SAC: Solicitação de envio (apenas anexos por enquanto) -->
+        <div id="sacSolicitacaoEnvioPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-paper-plane" style="color:#22c55e;"></i>
+                  Solicitação de envio (SAC)
+                </div>
+                <div style="color:var(--inactive-color);font-size:13px;">Obrigatório anexar 2 arquivos: Etiqueta e Declaração de conteúdo (use os botões abaixo).</div>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Etiqueta</label>
+                  <button id="sacAttachEtiquetaBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">
+                    <i class="fa-solid fa-file-lines"></i>
+                    <span>Anexar Etiqueta</span>
+                  </button>
+                  <div id="sacFileInfoEtiqueta" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
+                  <input id="sacFileInputEtiqueta" type="file" style="display:none;" />
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <label style="font-size:13px;color:var(--inactive-color);">Escolha Declaração de conteúdo</label>
+                  <button id="sacAttachDeclaracaoBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#a855f7 0%,#7c3aed 100%);color:white;">
+                    <i class="fa-solid fa-file-signature"></i>
+                    <span>Anexar Declaração</span>
+                  </button>
+                  <div id="sacFileInfoDeclaracao" style="color:var(--inactive-color);font-size:12px;">Nenhum arquivo.</div>
+                  <input id="sacFileInputDeclaracao" type="file" style="display:none;" />
+                </div>
+              </div>
+
+              <div class="form-field" style="margin-top:14px;">
+                <label for="sacObservacao">Observação</label>
+                <textarea id="sacObservacao" rows="3" placeholder="Descreva detalhes do envio" style="width:100%;"></textarea>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;">
+                <div id="sacEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
+                <button id="sacSendBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>Enviar</span>
+                </button>
+              </div>
+
+              <div class="content-section" style="margin-top:18px;padding:0;">
+                <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-list" style="color:#a855f7;"></i>
+                    Registro de envios
+                  </div>
+                  <button id="sacRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>Recarregar</span>
+                  </button>
+                </div>
+
+                <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                  <table class="tabela padrao" style="min-width:1050px;">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Criado em</th>
+                        <th>Observação</th>
+                        <th>Identificação</th>
+                        <th>Conteúdo</th>
+                        <th>Status</th>
+                        <th>Anexos</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sacTabelaBody">
+                      <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Logística: Envio de mercadoria (tabela) -->
+        <div id="envioMercadoriaPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-truck-fast" style="color:#0ea5e9;"></i>
+                  Registro de envios
+                </div>
+                <button id="envioMercadoriaRefreshBtnTop" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Recarregar</span>
+                </button>
+              </div>
+
+              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+                <table class="tabela padrao" style="min-width:1050px;">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Criado em</th>
+                      <th>Observação</th>
+                      <th>Identificação</th>
+                      <th>Conteúdo</th>
+                      <th>Status</th>
+                      <th>Anexos</th>
+                    </tr>
+                  </thead>
+                  <tbody id="envioMercadoriaTabelaBodyPane">
+                    <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Início — aparece primeiro -->
+  <div id="paginaInicio" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section">
+
+            </div>
+
+            <!-- Calendário Semanal de Produção -->
+            <div class="content-section" style="margin-top: 24px;">
+              <div class="title-wrapper" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                <div class="content-section-title">Visão Semanal de Produção</div>
+                <button id="btnVoltarHoje" class="content-button" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 13px;">
+                  <i class="fa-solid fa-calendar-day"></i>
+                  <span>Hoje</span>
+                </button>
+              </div>
+
+              <!-- Carrossel de calendário semanal -->
+              <div class="semana-carousel-container">
+                <div class="semana-carousel" id="semanaCarousel">
+                  <!-- Os cards serão gerados dinamicamente aqui -->
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+  <!-- Painel de Lista de Produtos -->
         <div id="listaProdutos" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-section">
@@ -313,66 +675,584 @@
           </div>
         </div>
 
-<div id="produtoTabs">
+        <!-- Painel Definições (Famílias) -->
+        <div id="definicoesPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <!-- Seção: Famílias (Omie) -->
+            <div class="content-section" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(245, 158, 11, 0.03) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                  <i class="fa-solid fa-layer-group" style="color: white; font-size: 22px;"></i>
+                </div>
+                <div style="flex: 1;">
+                  <h3 style="margin: 0 0 4px 0; color: var(--content-title-color); font-size: 20px; font-weight: 600;">Famílias (Omie)</h3>
+                  <p style="margin: 0; color: var(--inactive-color); font-size: 13px;">
+                    Gerencie as famílias de produtos sincronizadas com o sistema Omie
+                  </p>
+                </div>
+                <div id="familiaSpinner" style="display:none; color: #f59e0b;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px;"></i>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                  <button id="familiaRefreshBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3); transition: all 0.2s;">
+                    <i class="fa-solid fa-sync"></i> Recarregar
+                  </button>
+                  <button id="familiaSaveBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3); transition: all 0.2s;">
+                    <i class="fa-solid fa-save"></i> Salvar
+                  </button>
+                </div>
+              </div>
 
-        <!-- Abas internas principais -->
-<div class="main-header">
-  <div class="header-menu">
-    <a class="main-header-link is-active"
-       href="#"
-       data-target="dadosProduto"
-       data-nav-key="produto:dados"
-       data-nav-parent="top:produto"
-       data-nav-pos="top"
-       data-nav-label="Dados do produto"
-       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="dadosProduto"]'>
-       Dados do produto
-    </a>
+              <div id="familiaError" style="display:none; background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%); border-left: 4px solid #ef4444; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: start; gap: 12px;">
+                <i class="fa-solid fa-exclamation-triangle" style="color: #dc2626; font-size: 18px; margin-top: 2px;"></i>
+                <div id="familiaErrorText" style="color: #991b1b; font-size: 13px; line-height: 1.6; font-weight: 500;"></div>
+              </div>
 
-    <a class="main-header-link"
-       href="#"
-       data-target="estruturaProduto"
-       data-nav-key="produto:estrutura"
-       data-nav-parent="top:produto"
-       data-nav-pos="top"
-       data-nav-label="Estrutura do produto"
-       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="estruturaProduto"]'>
-       Estrutura de produto
-    </a>
+              <div style="background: var(--content-bg); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <table class="tabela padrao" id="familiaTable" style="width:100%; border-collapse:collapse; margin: 0;">
+                  <thead>
+                    <tr style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.08) 100%);">
+                      <th style="text-align:left; padding: 16px 20px; font-weight: 600; font-size: 13px; color: var(--content-title-color); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f59e0b;">
+                        <i class="fa-solid fa-hashtag" style="color: #f59e0b; margin-right: 6px;"></i>Código
+                      </th>
+                      <th style="text-align:left; padding: 16px 20px; font-weight: 600; font-size: 13px; color: var(--content-title-color); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f59e0b;">
+                        <i class="fa-solid fa-tag" style="color: #f59e0b; margin-right: 6px;"></i>Nome da Família
+                      </th>
+                      <th style="text-align:left; padding: 16px 20px; font-weight: 600; font-size: 13px; color: var(--content-title-color); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #f59e0b;">
+                        <i class="fa-solid fa-cube" style="color: #f59e0b; margin-right: 6px;"></i>Tipo
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="familiaTbody">
+                    <tr>
+                      <td colspan="3" style="padding: 40px 20px; text-align: center; color: var(--inactive-color); font-size: 14px;">
+                        <i class="fa-solid fa-inbox" style="font-size: 32px; color: #f59e0b; opacity: 0.3; display: block; margin-bottom: 12px;"></i>
+                        Nenhuma família carregada. Clique em "Recarregar" para sincronizar.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-    <a class="main-header-link"
-       href="#"
-       data-target="listaPecasTab"
-       data-nav-key="produto:estrutura:lista-pecas"
-       data-nav-parent="produto:estrutura"
-       data-nav-pos="top"
-       data-nav-label="Lista de peças"
-       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaPecasTab"]'>
-       Lista de peças
-    </a>
+            <style>
+              #familiaRefreshBtn:hover, #familiaSaveBtn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+              }
+              
+              #familiaTable tbody tr {
+                transition: all 0.2s;
+                border-bottom: 1px solid var(--border-color);
+              }
+              
+              #familiaTable tbody tr:hover {
+                background: linear-gradient(135deg, rgba(245, 158, 11, 0.04) 0%, rgba(217, 119, 6, 0.02) 100%);
+                transform: scale(1.01);
+              }
+              
+              #familiaTable tbody tr:last-child {
+                border-bottom: none;
+              }
+              
+              #familiaTable tbody td {
+                padding: 14px 20px;
+                font-size: 14px;
+                color: var(--content-title-color);
+              }
+              
+              #familiaTable tbody td:first-child {
+                font-weight: 600;
+                color: #f59e0b;
+                font-family: monospace;
+              }
+            </style>
 
-    <a class="main-header-link"
-       href="#"
-       data-target="listaCaracteristica"
-       data-nav-key="produto:estrutura:caracteristica"
-       data-nav-parent="produto:estrutura"
-       data-nav-pos="top"
-       data-nav-label="Características"
-       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaCaracteristica"]'>
-       Características
-    </a>
+            <!-- Seção: Configuração de Campos Obrigatórios -->
+            <div class="content-section" style="margin-top: 40px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(59, 130, 246, 0.03) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);">
+                  <i class="fa-solid fa-list-check" style="color: white; font-size: 22px;"></i>
+                </div>
+                <div style="flex: 1;">
+                  <h3 style="margin: 0 0 4px 0; color: var(--content-title-color); font-size: 20px; font-weight: 600;">Configuração de Campos Obrigatórios</h3>
+                  <p style="margin: 0; color: var(--inactive-color); font-size: 13px;">
+                    Configure quais campos devem ser preenchidos antes de liberar o produto
+                  </p>
+                </div>
+              </div>
 
-    <a class="main-header-link"
-       href="#"
-       data-target="listaFotos"
-       data-nav-key="produto:estrutura:fotos"
-       data-nav-parent="produto:estrutura"
-       data-nav-pos="top"
-       data-nav-label="Fotos"
-       data-nav-selector='#produtoTabs .main-header .main-header-link[data-target="listaFotos"]'>
-       Fotos
-    </a>
+              <div style="background: var(--content-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                  <div style="flex: 1; min-width: 240px;">
+                    <label for="familiaConfigSelect" style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--content-title-color); font-size: 13px;">
+                      <i class="fa-solid fa-layer-group" style="margin-right: 6px; color: #3b82f6;"></i> Família do Produto
+                    </label>
+                    <select id="familiaConfigSelect" class="form-control" style="width: 100%; padding: 10px 14px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 8px; background: var(--content-bg); transition: all 0.2s;">
+                      <option value="">Selecione uma família...</option>
+                    </select>
+                  </div>
+                  <div style="display: flex; gap: 10px; align-items: flex-end; padding-top: 28px;">
+                    <button id="scanCamposBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3); transition: all 0.2s;">
+                      <i class="fa-solid fa-sync"></i> Escanear Campos
+                    </button>
+                    <button id="saveCamposConfigBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3); transition: all 0.2s;">
+                      <i class="fa-solid fa-save"></i> Salvar Configuração
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="camposConfigInfo" style="background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #3b82f6; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: start; gap: 12px;">
+                <i class="fa-solid fa-info-circle" style="color: #3b82f6; font-size: 18px; margin-top: 2px;"></i>
+                <div style="color: #1e40af; font-size: 13px; line-height: 1.6;">
+                  <strong>Importante:</strong> Campos marcados como obrigatórios devem ser preenchidos antes de remover o status "Inativo" ou "Bloqueado". Use o botão "Escanear Campos" para atualizar a lista de campos disponíveis.
+                </div>
+              </div>
+
+              <div id="camposConfigSpinner" style="display:none; text-align:center; padding:40px;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size:32px; color: #3b82f6;"></i>
+                <div style="margin-top:12px; color: var(--inactive-color); font-weight: 500;">Carregando campos disponíveis...</div>
+              </div>
+
+              <div id="camposConfigContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+                <!-- Checkboxes serão gerados dinamicamente aqui -->
+              </div>
+            </div>
+
+            <!-- Seção: Atividades de Engenharia -->
+            <div class="content-section" style="margin-top: 40px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(16, 185, 129, 0.03) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+                <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
+                  <i class="fa-solid fa-clipboard-list" style="color: white; font-size: 22px;"></i>
+                </div>
+                <div style="flex: 1;">
+                  <h3 style="margin: 0 0 4px 0; color: var(--content-title-color); font-size: 20px; font-weight: 600;">Atividades de Engenharia</h3>
+                  <p style="margin: 0; color: var(--inactive-color); font-size: 13px;">
+                    Gerencie as atividades que devem ser executadas para esta família
+                  </p>
+                </div>
+                <button id="addAtividadeBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3); transition: all 0.2s;">
+                  <i class="fa-solid fa-plus"></i> Adicionar Atividade
+                </button>
+              </div>
+
+              <div id="atividadesInfo" style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #10b981; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: start; gap: 12px;">
+                <i class="fa-solid fa-lightbulb" style="color: #059669; font-size: 18px; margin-top: 2px;"></i>
+                <div style="color: #065f46; font-size: 13px; line-height: 1.6;">
+                  As atividades definidas aqui servirão como checklist para os produtos desta família. Adicione todas as etapas que devem ser executadas pela equipe de engenharia.
+                </div>
+              </div>
+
+              <div id="atividadesSpinner" style="display:none; text-align:center; padding:40px;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size:32px; color: #10b981;"></i>
+                <div style="margin-top:12px; color: var(--inactive-color); font-weight: 500;">Carregando atividades...</div>
+              </div>
+
+              <div id="atividadesContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+                <!-- Atividades serão geradas dinamicamente aqui -->
+              </div>
+            </div>
+
+            <!-- Modal: Adicionar/Editar Atividade -->
+            <div id="modalAtividade" class="modal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); overflow: auto; backdrop-filter: blur(4px); animation: fadeIn 0.2s ease-in-out;">
+              <div class="modal-content" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(16, 185, 129, 0.02) 100%); margin: 5% auto; padding: 0; border: 1px solid var(--border-color); width: 90%; max-width: 650px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); animation: slideDown 0.3s ease-out;">
+                
+                <!-- Header do Modal -->
+                <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 24px 30px; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                      <i class="fa-solid fa-clipboard-list" style="color: white; font-size: 20px;"></i>
+                    </div>
+                    <h2 style="margin: 0; color: white; font-size: 22px; font-weight: 600;">Nova Atividade</h2>
+                  </div>
+                  <button id="closeModalAtividade" style="background: rgba(255,255,255,0.2); border: none; width: 36px; height: 36px; border-radius: 8px; font-size: 24px; cursor: pointer; color: white; line-height: 1; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">&times;</button>
+                </div>
+                
+                <!-- Corpo do Modal -->
+                <div style="padding: 30px;">
+                  <div style="margin-bottom: 24px;">
+                    <label for="inputNomeAtividade" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-weight: 600; color: var(--content-title-color); font-size: 14px;">
+                      <i class="fa-solid fa-tag" style="color: #10b981;"></i> Nome da Atividade <span style="color: #ef4444;">*</span>
+                    </label>
+                    <input type="text" id="inputNomeAtividade" class="form-control" placeholder="Ex: Soldar componentes principais" style="width: 100%; padding: 12px 16px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 10px; background: #ffffff; color: #1f2937; transition: all 0.2s;" required>
+                    <small style="display: block; margin-top: 6px; color: var(--inactive-color); font-size: 12px;">
+                      <i class="fa-solid fa-info-circle"></i> Digite um nome claro e objetivo para a atividade
+                    </small>
+                  </div>
+                  
+                  <div style="margin-bottom: 24px;">
+                    <label for="inputDescricaoAtividade" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-weight: 600; color: var(--content-title-color); font-size: 14px;">
+                      <i class="fa-solid fa-align-left" style="color: #10b981;"></i> Descrição
+                    </label>
+                    <textarea id="inputDescricaoAtividade" class="form-control" placeholder="Descreva os detalhes da atividade, materiais necessários, procedimentos, etc..." rows="4" style="width: 100%; padding: 12px 16px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 10px; background: #ffffff; color: #1f2937; resize: vertical; transition: all 0.2s; font-family: inherit;"></textarea>
+                    <small style="display: block; margin-top: 6px; color: var(--inactive-color); font-size: 12px;">
+                      <i class="fa-solid fa-pencil"></i> Opcional: adicione instruções detalhadas
+                    </small>
+                  </div>
+                </div>
+                
+                <!-- Footer do Modal -->
+                <div style="background: rgba(0,0,0,0.02); padding: 20px 30px; border-radius: 0 0 16px 16px; display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--border-color);">
+                  <button id="cancelModalAtividade" class="btn" type="button" style="padding: 10px 24px; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);">
+                    <i class="fa-solid fa-times"></i> Cancelar
+                  </button>
+                  <button id="saveModalAtividade" class="btn" type="button" style="padding: 10px 24px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+                    <i class="fa-solid fa-save"></i> Salvar Atividade
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <style>
+              @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+              }
+              @keyframes slideDown {
+                from { 
+                  opacity: 0;
+                  transform: translateY(-30px);
+                }
+                to { 
+                  opacity: 1;
+                  transform: translateY(0);
+                }
+              }
+              #modalAtividade .form-control:focus {
+                border-color: #10b981;
+                outline: none;
+                box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+              }
+              #closeModalAtividade:hover {
+                background: rgba(255,255,255,0.3);
+                transform: scale(1.05);
+              }
+              #cancelModalAtividade:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(107, 114, 128, 0.4);
+              }
+              #saveModalAtividade:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+              }
+              #scanCamposBtn:hover, #saveCamposConfigBtn:hover, #addAtividadeBtn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+              }
+              #familiaConfigSelect:focus {
+                border-color: #3b82f6;
+                outline: none;
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+              }
+            </style>
+
+          <!-- Seção: Atividades de Compras -->
+          <div class="content-section" style="margin-top: 28px; background: linear-gradient(135deg, var(--content-bg) 0%, rgba(245, 158, 11, 0.04) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+              <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+                <i class="fa-solid fa-cart-shopping" style="color: white; font-size: 22px;"></i>
+              </div>
+              <div style="flex: 1;">
+                <h3 style="margin: 0 0 4px 0; color: var(--content-title-color); font-size: 20px; font-weight: 600;">Atividades de Compras</h3>
+                <p style="margin: 0; color: var(--inactive-color); font-size: 13px;">
+                  Defina as atividades do fluxo de compras para esta família (serão usadas no checklist por produto)
+                </p>
+              </div>
+              <button id="addAtividadeComprasBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3); transition: all 0.2s;">
+                <i class="fa-solid fa-plus"></i> Adicionar Atividade
+              </button>
+            </div>
+
+            <div id="atividadesComprasInfo" style="background: linear-gradient(135deg, #fde68a 0%, #fbbf24 100%); border-left: 4px solid #f59e0b; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: start; gap: 12px;">
+              <i class="fa-solid fa-lightbulb" style="color: #b45309; font-size: 18px; margin-top: 2px;"></i>
+              <div style="color: #92400e; font-size: 13px; line-height: 1.6;">
+                As atividades cadastradas aqui aparecerão na guia Check-Compras dos produtos desta família.
+              </div>
+            </div>
+
+            <div id="atividadesComprasSpinner" style="display:none; text-align:center; padding:40px;">
+              <i class="fa-solid fa-spinner fa-spin" style="font-size:32px; color: #f59e0b;"></i>
+              <div style="margin-top:12px; color: var(--inactive-color); font-weight: 500;">Carregando atividades...</div>
+            </div>
+
+            <div id="atividadesComprasContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+              <!-- Atividades de compras serão geradas dinamicamente aqui -->
+            </div>
+          </div>
+
+          <!-- Modal: Adicionar Atividade de Compras -->
+          <div id="modalAtividadeCompras" class="modal" style="display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); overflow: auto; backdrop-filter: blur(4px); animation: fadeIn 0.2s ease-in-out;">
+            <div class="modal-content" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(245, 158, 11, 0.03) 100%); margin: 5% auto; padding: 0; border: 1px solid var(--border-color); width: 90%; max-width: 650px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); animation: slideDown 0.3s ease-out;">
+              <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 24px 30px; border-radius: 16px 16px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fa-solid fa-cart-shopping" style="color: white; font-size: 20px;"></i>
+                  </div>
+                  <h2 style="margin: 0; color: white; font-size: 22px; font-weight: 600;">Nova Atividade (Compras)</h2>
+                </div>
+                <button id="closeModalAtividadeCompras" style="background: rgba(255,255,255,0.2); border: none; width: 36px; height: 36px; border-radius: 8px; font-size: 24px; cursor: pointer; color: white; line-height: 1; transition: all 0.2s; display: flex; align-items: center; justify-content: center;">&times;</button>
+              </div>
+              <div style="padding: 30px;">
+                <div style="margin-bottom: 24px;">
+                  <label for="inputNomeAtividadeCompras" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-weight: 600; color: var(--content-title-color); font-size: 14px;">
+                    <i class="fa-solid fa-tag" style="color: #f59e0b;"></i> Nome da Atividade <span style="color: #ef4444;">*</span>
+                  </label>
+                  <input type="text" id="inputNomeAtividadeCompras" class="form-control" placeholder="Ex: Cotar fornecedores" style="width: 100%; padding: 12px 16px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 10px; background: #ffffff; color: #1f2937; transition: all 0.2s;" required>
+                  <small style="display: block; margin-top: 6px; color: var(--inactive-color); font-size: 12px;">
+                    <i class="fa-solid fa-info-circle"></i> Descreva a etapa do processo de compras
+                  </small>
+                </div>
+                <div style="margin-bottom: 24px;">
+                  <label for="inputDescricaoAtividadeCompras" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-weight: 600; color: var(--content-title-color); font-size: 14px;">
+                    <i class="fa-solid fa-align-left" style="color: #f59e0b;"></i> Descrição
+                  </label>
+                  <textarea id="inputDescricaoAtividadeCompras" class="form-control" placeholder="Detalhes, critérios de aprovação, documentos necessários, etc..." rows="4" style="width: 100%; padding: 12px 16px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 10px; background: #ffffff; color: #1f2937; resize: vertical; transition: all 0.2s; font-family: inherit;"></textarea>
+                  <small style="display: block; margin-top: 6px; color: var(--inactive-color); font-size: 12px;">
+                    <i class="fa-solid fa-pencil"></i> Opcional: adicione instruções detalhadas
+                  </small>
+                </div>
+              </div>
+              <div style="background: rgba(0,0,0,0.02); padding: 20px 30px; border-radius: 0 0 16px 16px; display: flex; gap: 12px; justify-content: flex-end; border-top: 1px solid var(--border-color);">
+                <button id="cancelModalAtividadeCompras" class="btn" type="button" style="padding: 10px 24px; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(107, 114, 128, 0.3);">
+                  <i class="fa-solid fa-times"></i> Cancelar
+                </button>
+                <button id="saveModalAtividadeCompras" class="btn" type="button" style="padding: 10px 24px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; border-radius: 8px; color: white; font-weight: 500; display: flex; align-items: center; gap: 8px; transition: all 0.2s; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);">
+                  <i class="fa-solid fa-save"></i> Salvar Atividade
+                </button>
+              </div>
+            </div>
+          </div>
+
+          </div>
+        </div>
+
+        <!-- Painel Engenharia (Produtos em criação) -->
+        <div id="engenhariaPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;">
+                <div class="content-section-title">Produtos em criação</div>
+                <div id="engSpinner" style="display:none;color:#6366f1;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size:20px;"></i>
+              </div>
+            </div>
+            <div style="margin-bottom:12px; font-size:12px; color:#6b7280;">Listagem dos produtos cuja descrição inicia com "Em criação".</div>
+            <table id="engTable" class="tabela padrao" style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="background:var(--content-bg);">
+                  <th style="text-align:left;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-color);">Código</th>
+                  <th style="text-align:left;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-color);">Descrição</th>
+                  <th style="text-align:center;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-color);width:120px;">Cadastro</th>
+                  <th style="text-align:center;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-color);width:280px;">Engenharia</th>
+                  <th style="text-align:center;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border-color);width:280px;">Compras</th>
+                </tr>
+              </thead>
+              <tbody id="engTbody">
+                <tr><td colspan="5" style="padding:32px 12px;text-align:center;color:#9ca3af;font-size:13px;">Clique na guia Engenharia para carregar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>            <div id="solicitacaoTransferencia" class="tab-pane" style="display:none;">
+              <div class="content-wrapper">
+                <div class="content-section">
+                  <div class="title-wrapper">
+                    <div class="content-section-title">Solicitações de transferência</div>
+                    <div class="actions" style="display:flex; gap:8px; align-items:center;">
+                      <button id="solicitacoesTransferRefresh" class="btn tiny" type="button">Atualizar</button>
+                    </div>
+                  </div>
+                  <div id="solicitacoesTransferSpinner" class="loading-indicator" style="display:none; margin-bottom:12px;">
+                    Carregando solicitações…
+                  </div>
+                  <div class="solicitacao-transfer-table-wrapper">
+                    <table class="tabela padrao solicitacao-transfer-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Código</th>
+                          <th class="desc-col">Descrição</th>
+                          <th>Qtd</th>
+                          <th>Origem</th>
+                          <th>Destino</th>
+                          <th>Solicitante</th>
+                          <th>Status</th>
+                          <th>Aprovado</th>
+                          <th>Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody id="solicitacoesTransferTbody">
+                        <tr>
+                          <td colspan="10">Nenhuma solicitação carregada ainda.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+    <div id="produtoTabs">
+
+        <!-- Dashboard de Navegação com Cards -->
+<div class="main-header" style="flex-direction: row; padding: 15px 20px; gap: 16px; height: auto; border-bottom: 1px solid var(--card-border-color); align-items: center;">
+  
+  <!-- Botão Hambúrguer -->
+  <button class="nav-hamburger" id="navHamburger" title="Menu de navegação">
+    <i class="fa-solid fa-bars"></i>
+  </button>
+
+  <!-- Grid de Cards de Navegação (inicialmente colapsado) -->
+  <div class="product-nav-grid collapsed" id="productNavGrid" style="display: none; position: absolute; top: 70px; left: 20px; z-index: 1000; background: var(--modal-bg-color); border: 2px solid var(--card-border-color); border-radius: 12px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); grid-template-columns: repeat(3, 140px); gap: 16px; width: auto; backdrop-filter: blur(10px);">
+    
+    <!-- Card: Dados -->
+    <div class="nav-card active" data-target="dadosProduto" 
+         data-nav-key="produto:dados"
+         data-nav-parent="top:produto"
+         data-nav-pos="top"
+         data-nav-label="Dados do produto">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+        <i class="fa-solid fa-info-circle"></i>
+      </div>
+      <div class="nav-card-title">Dados</div>
+    </div>
+
+    <!-- Card: Estrutura -->
+    <div class="nav-card" data-target="estruturaProduto"
+         data-nav-key="produto:estrutura"
+         data-nav-parent="top:produto"
+         data-nav-pos="top"
+         data-nav-label="Estrutura do produto">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);">
+        <i class="fa-solid fa-diagram-project"></i>
+      </div>
+      <div class="nav-card-title">Estrutura</div>
+    </div>
+
+    <!-- Card: Lista de Peças -->
+    <div class="nav-card" data-target="listaPecasTab"
+         data-nav-key="produto:estrutura:lista-pecas"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="Lista de peças">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
+        <i class="fa-solid fa-list"></i>
+      </div>
+      <div class="nav-card-title">Lista</div>
+    </div>
+
+    <!-- Card: Fotos -->
+    <div class="nav-card" data-target="listaFotos"
+         data-nav-key="produto:estrutura:fotos"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="Fotos">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);">
+        <i class="fa-solid fa-camera"></i>
+      </div>
+      <div class="nav-card-title">Fotos</div>
+    </div>
+
+    <!-- Card: Anexos -->
+    <div class="nav-card" data-target="listaAnexos"
+         data-nav-key="produto:estrutura:anexos"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="Anexos">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #818cf8 0%, #4f46e5 100%);">
+        <i class="fa-solid fa-paperclip"></i>
+      </div>
+      <div class="nav-card-title">Anexos</div>
+    </div>
+
+    <!-- Card: RI -->
+    <div class="nav-card" data-target="listaRI"
+         data-nav-key="produto:estrutura:ri"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="RI">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+        <i class="fa-solid fa-check"></i>
+      </div>
+      <div class="nav-card-title">RI</div>
+    </div>
+
+    <!-- Card: PIR -->
+    <div class="nav-card" data-target="listaPIR"
+         data-nav-key="produto:estrutura:pir"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="PIR">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+        <i class="fa-solid fa-clipboard-list"></i>
+      </div>
+      <div class="nav-card-title">PIR</div>
+    </div>
+
+    <!-- Card: Check-Proj -->
+    <div class="nav-card" data-target="checkProjTab"
+         data-nav-key="produto:estrutura:check-proj"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="Check-Proj">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);">
+        <i class="fa-solid fa-clipboard-check"></i>
+      </div>
+      <div class="nav-card-title">Check-Proj</div>
+    </div>
+
+    <!-- Card: Check-Compras -->
+    <div class="nav-card" data-target="checkComprasTab"
+         data-nav-key="produto:estrutura:check-compras"
+         data-nav-parent="produto:estrutura"
+         data-nav-pos="top"
+         data-nav-label="Check-Compras">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+        <i class="fa-solid fa-list-check"></i>
+      </div>
+      <div class="nav-card-title">Check-Compras</div>
+    </div>
+
+    <!-- Card: Novo Produto -->
+    <div class="nav-card nav-card-action" id="btnNovoProdutoCard">
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+        <i class="fa-solid fa-plus"></i>
+      </div>
+      <div class="nav-card-title">Novo</div>
+    </div>
+
   </div>
+
+  <!-- Título da seção atual + Informações do produto -->
+  <div style="flex: 1; text-align: center;">
+    <h2 id="currentSectionTitle" style="margin: 0 0 8px 0; color: var(--content-title-color); font-size: 18px; font-weight: 600;">Dados do produto</h2>
+    
+    <!-- Informações do produto (código, código OMIE e descrição) -->
+    <div id="productHeaderInfo" style="display: none; align-items: center; justify-content: center; gap: 12px; margin-top: 4px; font-size: 13px; color: var(--inactive-color);">
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <i class="fa-solid fa-barcode" style="color: #3b82f6;"></i>
+        <span id="headerCodigo" style="font-weight: 600; color: var(--content-title-color);"></span>
+      </div>
+      <span style="color: var(--border-color);">•</span>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <i class="fa-solid fa-tag" style="color: #8b5cf6;"></i>
+        <span style="font-weight: 500;">OMIE:</span>
+        <span id="headerCodigoOmie" style="font-weight: 600; color: var(--content-title-color);"></span>
+      </div>
+      <span style="color: var(--border-color);">•</span>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <i class="fa-solid fa-file-lines" style="color: #10b981;"></i>
+        <span id="headerDescricao" style="font-style: italic; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Botão original escondido (mantém funcionalidade do modal) -->
+  <button class="btn btn-primary btn-novo-produto" id="btnNovoProduto" style="display: none;">
+    <i class="fa-solid fa-plus"></i> Novo
+  </button>
+
 </div>
 
 
@@ -390,7 +1270,23 @@
                     <span id="productTitle">Código do produto</span>
                   </h3>
                   <div class="content-text" id="productDesc"></div>
-                  <button class="content-button">Pedido de compra</button>
+                  <!-- Círculo de progresso de completude -->
+                  <div id="completudeCircle" style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">
+                    <svg width="50" height="50" viewBox="0 0 50 50">
+                      <!-- Círculo de fundo -->
+                      <circle cx="25" cy="25" r="20" fill="none" stroke="#e0e0e0" stroke-width="4"/>
+                      <!-- Círculo de progresso -->
+                      <circle id="completudeProgress" cx="25" cy="25" r="20" fill="none" 
+                              stroke="#10b981" stroke-width="4" stroke-linecap="round"
+                              stroke-dasharray="125.6" stroke-dashoffset="125.6"
+                              transform="rotate(-90 25 25)"
+                              style="transition: stroke-dashoffset 0.5s ease;"/>
+                      <!-- Texto de porcentagem -->
+                      <text id="completudeText" x="25" y="29" text-anchor="middle" 
+                            font-size="12" font-weight="bold" fill="#333">0%</text>
+                    </svg>
+                    <div style="font-size: 13px; color: #666;">Completude do cadastro</div>
+                  </div>
                 </div>
                 <img class="content-wrapper-img"
                      id="productImg"
@@ -535,12 +1431,162 @@
 
           </div>
 
+          <!-- Check-Proj: Checklist de Atividades de Engenharia por Produto -->
+          <div id="checkProjTab" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(34, 197, 94, 0.04) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                <div style="width:40px; height:40px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 10px; display:flex; align-items:center; justify-content:center; box-shadow: 0 4px 12px rgba(34,197,94,0.3);">
+                  <i class="fa-solid fa-clipboard-check" style="color:#fff; font-size:18px;"></i>
+                </div>
+                <div style="flex:1;">
+                  <h3 style="margin:0 0 4px 0; color: var(--content-title-color); font-size: 19px; font-weight: 600;">Check-Proj (Engenharia)</h3>
+                  <p style="margin:0; color: var(--inactive-color); font-size: 13px;">Checklist das atividades de engenharia específicas deste produto, baseadas na família.</p>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <button id="checkProjNovaTarefaBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-plus"></i> Nova Tarefa
+                  </button>
+                  <button id="checkProjSalvarBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-save"></i> Salvar
+                  </button>
+                </div>
+              </div>                <!-- Progresso -->
+                <div id="checkProjProgresso" style="margin: 8px 0 16px 0;">
+                  <div style="height: 10px; background: rgba(34,197,94,0.15); border-radius: 999px; overflow: hidden;">
+                    <div id="checkProjProgressBar" style="height: 10px; width: 0%; background: linear-gradient(90deg, #22c55e, #16a34a); transition: width 0.2s;"></div>
+                  </div>
+                  <div id="checkProjProgressText" style="margin-top: 6px; font-size: 12px; color: var(--inactive-color);">0/0 concluídas</div>
+                </div>
+
+                <div id="checkProjInfo" style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); border-left: 4px solid #22c55e; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: none;
+                    color:#14532d; font-size: 13px;">
+                </div>
+
+                <!-- Lista -->
+                <div id="checkProjLista" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;"></div>
+
+                <!-- Estado vazio / Carregando -->
+                <div id="checkProjLoading" style="display:none; text-align:center; padding:24px;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size:24px; color:#22c55e;"></i>
+                  <div style="margin-top:8px; color: var(--inactive-color);">Carregando atividades…</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Check-Compras -->
+          <div id="checkComprasTab" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section" style="background: linear-gradient(135deg, var(--content-bg) 0%, rgba(245, 158, 11, 0.04) 100%); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                  <div style="width:40px; height:40px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: 10px; display:flex; align-items:center; justify-content:center; box-shadow: 0 4px 12px rgba(245,158,11,0.3);">
+                    <i class="fa-solid fa-list-check" style="color:#fff; font-size:18px;"></i>
+                  </div>
+                  <div style="flex:1;">
+                    <h3 style="margin:0 0 4px 0; color: var(--content-title-color); font-size: 19px; font-weight: 600;">Check-Compras</h3>
+                    <p style="margin:0; color: var(--inactive-color); font-size: 13px;">Checklist das atividades de compras deste produto, baseadas na família.</p>
+                  </div>
+                  <div style="display:flex; gap:8px;">
+                    <button id="checkComprasNovaTarefaBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                      <i class="fa-solid fa-plus"></i> Nova Tarefa
+                    </button>
+                    <button id="checkComprasSalvarBtn" class="btn" type="button" style="padding: 10px 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; border-radius: 8px; color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                      <i class="fa-solid fa-save"></i> Salvar
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Progresso -->
+                <div id="checkComprasProgresso" style="margin: 8px 0 16px 0;">
+                  <div style="height: 10px; background: rgba(245,158,11,0.2); border-radius: 999px; overflow: hidden;">
+                    <div id="checkComprasProgressBar" style="height: 10px; width: 0%; background: linear-gradient(90deg, #f59e0b, #d97706); transition: width 0.2s;"></div>
+                  </div>
+                  <div id="checkComprasProgressText" style="margin-top: 6px; font-size: 12px; color: var(--inactive-color);">0/0 concluídas</div>
+                </div>
+
+                <div id="checkComprasInfo" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; display: none; color:#7c2d12; font-size: 13px;"></div>
+
+                <!-- Lista -->
+                <div id="checkComprasLista" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;"></div>
+
+                <!-- Estado vazio / Carregando -->
+                <div id="checkComprasLoading" style="display:none; text-align:center; padding:24px;">
+                  <i class="fa-solid fa-spinner fa-spin" style="font-size:24px; color:#f59e0b;"></i>
+                  <div style="margin-top:8px; color: var(--inactive-color);">Carregando atividades…</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Estrutura do produto -->
           <div id="estruturaProduto" class="tab-pane" style="display:none;">
             <div class="content-wrapper">
               <div class="content-section">
-                <div class="title-wrapper">
-                  <div class="content-section-title">Estrutura de produto</div>
+
+
+                <div class="title-wrapper" style="display:flex; align-items:center; gap:12px;">
+                  <div class="tab-header-icon small theme-sky">
+                    <i class="fa-solid fa-diagram-project"></i>
+                  </div>
+                  <div class="content-section-title">
+  Estrutura de produto (<span id="estruturaCount">0</span>)
+</div>
+
+
+
+
+  <button
+    id="btnImportarEstrutura"
+    class="icon-inline-btn"
+    type="button"
+    aria-label="Importar estrutura de produto"
+    title="Importar estrutura de produto">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path d="M12 3v10m0 0l-4-4m4 4l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 21h16a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1h-5l-2 2-2-2H5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </button>
+
+  <!-- Versão & Atualizado por (UI) -->
+  <span id="estruturaVersaoWrap" style="margin-left:12px; display:inline-flex; gap:8px; align-items:center;">
+    <span style="font-weight:600;">Versão:</span>
+    <span id="estruturaVersaoValue" class="chip"
+          style="padding:2px 8px;border-radius:12px;border:1px solid var(--border,#ccc);">
+      —
+    </span>
+
+    <span style="margin-left:16px; font-weight:600;">Atualizado por:</span>
+    <span id="estruturaModValue" class="chip"
+          style="padding:2px 8px;border-radius:12px;border:1px solid var(--border,#ccc);">
+      —
+    </span>
+
+    <!-- Local de produção (listbox) -->
+    <label for="estruturaLocalProducao" style="margin-left:16px; font-weight:600;">Local de produção.</label>
+    <select id="estruturaLocalProducao"
+            style="min-width:220px; padding:4px 8px; border-radius:8px; border:1px solid var(--border,#ccc); background:var(--app-bg,#fff);">
+      <option value="" selected>Carregando…</option>
+    </select>
+  </span>
+
+  <button
+  id="btnExportarEstrutura"
+  class="icon-inline-btn"
+  type="button"
+  aria-label="Exportar estrutura de produto"
+  title="Exportar estrutura de produto">
+  <!-- Ícone: seta SAINDO da bandeja (exportar) -->
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <path d="M12 13V3m0 10l-4 4m4-4l4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M4 21h16a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1h-5l-2 2-2-2H5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</button>
+
+<!-- Spinner específico da guia Estrutura -->
+<div id="estruturaSpinner" data-pct="0" style="display:none;"></div>
+
+
                   <!-- Spinner + texto -->
                   <div id="estoqueSpinnerBox" class="spinner-box" style="display:none;">
                     <div id="estoqueSpinner" data-pct="0">
@@ -573,9 +1619,15 @@
   <div class="content-wrapper">
     <div class="content-section">
 
-      <!-- wrapper necessário p/ botão de filtro -->
-      <div class="title-wrapper">
-        <div class="content-section-title">Lista de peças</div>
+      <!-- Cabeçalho estilizado -->
+      <div class="tab-header">
+        <div class="tab-header-icon theme-purple">
+          <i class="fa-solid fa-list"></i>
+        </div>
+        <div class="tab-header-content">
+          <h3 class="tab-header-title">Lista de peças</h3>
+          <p class="tab-header-subtitle">Itens derivados da estrutura para referência rápida e ações pontuais.</p>
+        </div>
       </div>
 
       <!-- ul que o JS espera -->
@@ -595,93 +1647,144 @@
   </div>
 </div>
 
-          
-<!-- Características -->
-<div id="listaCaracteristica" class="tab-pane" style="display:none;">
-  <div class="content-wrapper">
-    <div class="content-section">
-      <div class="content-section-title">Características</div>
-
-      <!-- botão provisorio-->
-        <button class="content-button" data-action="incluir-conteudo" style="margin-left: 10px;">
-    🛠️ Incluir conteúdo
-        </button>
-       <!-- botão provisorio-->
-
-       
-      <ul id="listacaracteristica" class="content-list product-details"></ul>
-    </div>
-  </div>
-</div>
-
-
           <!-- Aba Fotos -->
           <div id="listaFotos" class="tab-pane" style="display:none;">
             <div class="content-wrapper">
-              <h3 class="content-section-title">Fotos</h3>
-              <div class="options"></div>
+              <div class="content-section">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+                  <div class="fotos-actions" style="display:flex; gap:10px; align-items:center;">
+                    <button id="btnGerenciarFotos" class="tab-action-btn btn-primary" type="button">
+                      <i class="fa-solid fa-list"></i> Gerenciar fotos
+                    </button>
+                  </div>
+                  <div class="options"></div>
+                </div>
+                <div id="fotosContainer">
+                  <!-- container vazio, preenchido via JS -->
+                </div>
+                <div id="modalGerenciarFotos" class="foto-gestao-modal" style="display:none;">
+                  <div class="fg-overlay"></div>
+                  <div class="fg-content">
+                    <div class="fg-header">
+                      <h3>Fotos (ativas e inativas)</h3>
+                      <button type="button" class="fg-close" aria-label="Fechar">✕</button>
+                    </div>
+                    <div class="fg-body" id="fgBody"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
+          <!-- Aba Anexos -->
+          <div id="listaAnexos" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="tab-section-card theme-indigo">
+                <div class="tab-header">
+                  <div class="tab-header-icon theme-indigo">
+                    <i class="fa-solid fa-paperclip"></i>
+                  </div>
+                  <div class="tab-header-content">
+                    <h3 class="tab-header-title">Anexos</h3>
+                    <p class="tab-header-subtitle">Arquivos complementares do produto.</p>
+                  </div>
+                  <button id="btnToggleAnexos" class="tab-action-btn btn-primary" type="button">
+                    <i class="fa-solid fa-eye"></i> <span class="btn-label">Exibir excluídos</span>
+                  </button>
+                  <button id="btnNovoAnexo" class="tab-action-btn btn-success" type="button">
+                    <i class="fa-solid fa-upload"></i> Adicionar
+                  </button>
+                </div>
+                <ul id="listaAnexosConteudo" class="content-list anexos-list"></ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Aba RI -->
+          <div id="listaRI" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="tab-section-card theme-green">
+                <div class="tab-header">
+                  <div class="tab-header-icon theme-green">
+                    <i class="fa-solid fa-ballot-check"></i>
+                  </div>
+                  <div class="tab-header-content">
+                    <h3 class="tab-header-title">Registro de Inspeção (RI)</h3>
+                    <p class="tab-header-subtitle">Itens e critérios de inspeção na produção.</p>
+                  </div>
+                  <button id="btnAdicionarRI" class="tab-action-btn btn-primary" type="button">
+                    <i class="fa-solid fa-plus"></i> Adicionar item
+                  </button>
+                </div>
+                
+                <div id="riConteudo" style="overflow-x: auto;">
+                  <table id="tabelaRI" class="ri-table" style="width:100%; border-collapse: collapse; margin-top: 1rem;">
+                    <thead>
+                      <tr style="background-color: var(--button-bg); color: var(--button-color);">
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Código</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Item Verificado</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">O que Verificar</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Local de Verificação</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Prioridade</th>
+                        <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Foto</th>
+                        <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tabelaRIBody">
+                      <!-- Linhas serão adicionadas dinamicamente -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Aba PIR -->
+          <div id="listaPIR" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="tab-section-card theme-amber">
+                <div class="tab-header">
+                  <div class="tab-header-icon theme-amber">
+                    <i class="fa-solid fa-clipboard-list"></i>
+                  </div>
+                  <div class="tab-header-content">
+                    <h3 class="tab-header-title">Plano de Inspeção e Recebimento (PIR)</h3>
+                    <p class="tab-header-subtitle">Checklist para inspeção e recebimento de itens.</p>
+                  </div>
+                  <button id="btnAdicionarPIR" class="tab-action-btn btn-primary" type="button">
+                    <i class="fa-solid fa-plus"></i> Adicionar item
+                  </button>
+                </div>
+                
+                <div id="pirConteudo" style="overflow-x: auto;">
+                  <table id="tabelaPIR" class="pir-table" style="width:100%; border-collapse: collapse; margin-top: 1rem;">
+                    <thead>
+                      <tr style="background-color: var(--button-bg); color: var(--button-color);">
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Código</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Item Verificado</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">O que Verificar</th>
+                        <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Foto</th>
+                        <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tabelaPIRBody">
+                      <!-- Linhas serão adicionadas dinamicamente -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
             
-          <div id="acessos" class="tab-pane" style="display:none;">
-            <div class="content-wrapper">
-              <div class="content-section">
-          
-                <!-- 1) Título -->
-                <div class="title-wrapper">
-                  <div class="content-section-title">Gerenciar Acessos</div>
-                </div>
-          
-                <!-- 2) Lista de usuários -->
-                <div id="userList" class="content-list"></div>
-          
-                <!-- 3) Botão Novo Usuário -->
-                <button id="btnNewUser" class="content-button">Novo Usuário</button>
-          
-                <!-- 4) Formulário oculto -->
-                <div id="userForm" style="display:none; margin-top:1rem;">
-                  <input id="inpUsername" placeholder="Usuário"/>
-                  <button id="btnSaveUser" class="content-button">Criar Usuário</button>
-                </div>
-          
-                <hr style="margin:2rem 0; border-color: var(--border-color)" />
-
-                <div class="menu-scroll">
-                  <!-- Categoria 1: Menu Lateral -->
-                  <div class="title-wrapper">
-                    <div class="content-section-title">Menu Lateral</div>
-                  </div>
-                  <ul id="sideMenuList" class="content-list">
-                    <!-- …itens… -->
-                  </ul>
-                
-                  <!-- Divisor interno entre categorias -->
-                  <hr style="margin:1.5rem 0; border-color: var(--border-color)" />
-                
-                  <!-- Categoria 2: Menu Superior -->
-                  <div class="title-wrapper">
-                    <div class="content-section-title">Menu Superior</div>
-                  </div>
-                  <ul id="topMenuList" class="content-list">
-                    <!-- …itens… -->
-                  </ul>
-                </div> <!-- /.menu-scroll -->
-                
-          
-              </div> <!-- /.content-section -->
-            </div> <!-- /.content-wrapper -->
-          </div> <!-- /#acessos -->
           
 <!-- Painel de notificações ------------------------------------------------>
 <div id="notificacoes" class="tab-pane" style="display:none;">
   <div class="content-wrapper">
     <div class="content-section">
       <div class="title-wrapper">
-        <div class="content-section-title">Notificações</div>
+        <div class="content-section-title">Registros de Modificações de Produto</div>
       </div>
-
-      <ul id="listaNotificacoes" class="content-list"></ul>
+      <ul id="listaRegistros" class="content-list"></ul>
     </div>
   </div>
 </div>
@@ -698,53 +1801,57 @@
 <!-- Abas de Pedidos (inicialmente ocultas) -->
 <div id="kanbanTabs" class="main-header" style="display:none; margin-top:1rem;">
   <div class="header-menu">
-    <a href="#" data-kanban-tab="comercial" class="main-header-link is-active">Comercial</a>
-    <a href="#" data-kanban-tab="pcp"       class="main-header-link">PCP</a>
-<a href="#" data-kanban-tab="preparacao" class="main-header-link">
-  Preparação
-</a>
-
-    <a href="#" data-kanban-tab="producao"  class="main-header-link">Produção</a>
-    <a href="#" data-kanban-tab="detalhes"  class="main-header-link">Detalhes</a>
+  <a href="#" data-kanban-tab="comercial" class="main-header-link is-active">Programação</a>
+  <a href="#" data-kanban-tab="pcp"       class="main-header-link">Solicitação</a>
+  <a href="#" data-kanban-tab="preparacao" class="main-header-link">Postos</a>
+  <a href="#" data-kanban-tab="producao"  class="main-header-link">Produção</a>
+  <a href="#" data-kanban-tab="detalhes"  class="main-header-link">Calendario</a>
   </div>
 </div>
 
 <!-- Abas de Armazéns (inicialmente ocultas) -->
 <div id="armazemTabs" class="main-header" style="display:none; margin-top:1rem;">
   <div class="header-menu">
-    <a href="#" data-arm-tab="almoxarifado" class="main-header-link is-active">Almoxarifado</a>
-    <a href="#" data-arm-tab="producao"      class="main-header-link">Produção</a>
-    <a href="#" data-arm-tab="expedicao"     class="main-header-link">Expedição</a>
-    <a href="#" data-arm-tab="produto"       class="main-header-link">Produto acabado</a>
-    <a href="#" data-arm-tab="terceiros"     class="main-header-link">Terceiros</a>
-    <a href="#" data-arm-tab="Geral"     class="main-header-link">geral</a>
+    <a href="#" data-arm-tab="estoque" class="main-header-link is-active">Estoque</a>
+    <a href="#" data-arm-tab="transferencia" class="main-header-link">Transferência</a>
   </div>
 </div>
 
 <div id="armazemContent" style="display:none;">
-<!-- Painel de Almoxarifado (Armazéns) -->
-<div id="conteudo-almoxarifado" class="armazem-page tab-pane" style="display:none;">
+<!-- Painel de Estoque -->
+<div id="conteudo-estoque" class="armazem-page tab-pane" style="display:none;">
   <div class="content-wrapper">
     <div class="content-section">
-      <div class="title-wrapper">
-        <div class="content-section-title">
-          Almoxarifado (<span id="almoxCount">0</span>)
+      <div class="title-wrapper" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="estoque-row" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div class="content-section-title" style="display: flex; align-items: center; gap: 12px; margin:0;">
+            <label for="estoqueLocalSelect" style="margin: 0; font-weight: 600;">Estoque:</label>
+            <select id="estoqueLocalSelect" class="transfer-select" style="min-width: 300px;">
+              <option value="">Carregando...</option>
+            </select>
+            <span style="margin-left: 8px;">(<span id="almoxCount">0</span>)</span>
+          </div>
+          <div class="estoque-actions" style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+            <button id="almoxFilterBtn" class="filter-icon" title="Filtrar por tipo">
+              <i class="fa-solid fa-filter"></i>
+            </button>
+            <button id="almoxRefreshBtn" class="filter-icon" title="Atualizar dados">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
         </div>
 
-        <input id="almoxSearch"
-       type="text"
-       placeholder="Pesquisar na descrição…"
-       class="search-box" />
+        <div class="estoque-row" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <input id="almoxSearch"
+            type="text"
+            placeholder="Pesquisar por código ou descrição…"
+            class="search-box" />
+          <span id="almoxCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
+          <span id="almoxPrecoDefTotal" class="cmc-total" style="margin-left:12px;">Total Vlr definido: R$ 0,00</span>
+        </div>
 
-       <span id="almoxCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
-      
-<button id="almoxFilterBtn" class="filter-icon" title="Filtrar por tipo">
-  <i class="fa-solid fa-filter"></i>
-</button>
-
-<!-- Painel que aparece/ some -->
-<div id="almoxFilterPanel" class="filter-panel" style="display:none;"></div>
-
+        <!-- Painel que aparece/ some -->
+        <div id="almoxFilterPanel" class="filter-panel" style="display:none;"></div>
 
         <!-- spinner opcional (mesmo padrão que você usa em Pedidos) -->
         <div id="almoxSpinner" data-pct="0" style="display:none;">
@@ -758,8 +1865,27 @@
   <table id="tbl-almoxarifado" class="tabela padrao">
     <thead>
       <tr>
-        <th>Código</th><th>Descrição</th><th>Est. mín.</th>
-        <th>Físico</th><th>Reservado</th><th>Saldo</th><th>CMC</th>
+        <th data-sort="codigo" class="sortable">
+          Código <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="descricao" class="desc-col sortable">
+          Descrição <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="min" class="sortable">
+          Mín <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="fisico" class="sortable">
+          Físico <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="saldo" class="sortable">
+          Saldo <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="cmc" class="sortable">
+          CMC <i class="fa-solid fa-sort"></i>
+        </th>
+        <th data-sort="preco_definido" class="sortable">
+          Vlr definido <i class="fa-solid fa-sort"></i>
+        </th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -778,54 +1904,80 @@
   </div>
 </div>
 
-<!-- Painel de Produção -->
-<div id="conteudo-producao" class="armazem-page tab-pane" style="display:none;">
-  <div class="content-wrapper">
-    <div class="content-section">
-      <div class="title-wrapper">
-        <div class="content-section-title">
-          Produção (<span id="prodCount">0</span>)
+  <div id="conteudo-transferencia" class="armazem-page" style="display:none;">
+    <div class="content-wrapper">
+      <div class="content-section">
+        <div class="title-wrapper">
+          <div class="content-section-title">Transferência entre armazens</div>
         </div>
-
-        <input id="prodSearch"
-               type="text"
-               placeholder="Pesquisar na descrição…"
-               class="search-box" />
-
-        <span id="prodCmcTotal" class="cmc-total">Total CMC: R$ 0,00</span>
-        <button id="prodFilterBtn" class="filter-icon" title="Filtrar por grupo">
-  <i class="fa-solid fa-filter"></i>
-</button>
-
-<div id="prodFilterPanel" class="filter-panel" style="display:none;"></div>
-
-      </div>
-
-      <div class="producao-wrapper">
-        <table id="tbl-producao" class="tabela padrao">
-          <thead>
-            <tr>
-              <th>Código</th><th>Descrição</th><th>Est. mín.</th>
-              <th>Físico</th><th>Reservado</th><th>Saldo</th><th>CMC</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <div class="almox-pager"><!-- reaproveita classe -->
-        <button id="prodPrev" class="btn tiny">◀</button>
-        <span   id="prodPageInfo">1 / 1</span>
-        <button id="prodNext" class="btn tiny">▶</button>
+        <div class="transferencia-locais">
+          <div class="origem-group">
+            <label for="transferOrigem">Origem</label>
+            <select id="transferOrigem" class="transfer-select">
+              <option value="">Selecione…</option>
+            </select>
+          </div>
+          <div class="destino-group">
+            <label for="transferDestino">Destino</label>
+            <select id="transferDestino" class="transfer-select">
+              <option value="">Selecione…</option>
+            </select>
+          </div>
+          <div class="transferencia-actions">
+            <label>&nbsp;</label>
+            <div class="destino-inline">
+              <input id="transferQtdBulk" type="number" min="0" step="0.01" placeholder="Qtd" class="transfer-qtd-bulk" title="Aplicar quantidade para todos" />
+              <button id="transferSelectAllBtn"
+                      type="button"
+                      class="icon-btn"
+                      title="Selecionar todos os itens"
+                      aria-label="Selecionar todos">
+                <i class="fa-solid fa-square-check"></i>
+              </button>
+              <button id="transferenciaBtn"
+                      type="button"
+                      class="icon-btn"
+                      title="Transferir itens selecionados"
+                      aria-label="Transferir itens"
+                      disabled>
+                <i class="fa-solid fa-right-left"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="transferencia-controls">
+          <div class="transferencia-search">
+            <input id="transferSearch" type="text"
+                   placeholder="Adicionar item por código ou descrição…"
+                   class="search-box" autocomplete="off" />
+            <div class="transfer-search-dropdown">
+              <ul id="transferSearchResults" class="transfer-search-results"></ul>
+            </div>
+          </div>
+        </div>
+        <div class="transferencia-wrapper">
+          <table class="tabela padrao transferencia-table">
+            <thead>
+              <tr>
+                <th class="sel-col"></th>
+                <th>Código</th>
+                <th class="desc-col">Descrição</th>
+                <th>Cod Omie</th>
+                <th>Qtd</th>
+                <th>Físico</th>
+                <th>Saldo</th>
+              </tr>
+            </thead>
+            <tbody id="transferenciaTbody">
+              <tr class="transferencia-placeholder">
+                <td colspan="7">Nenhum item selecionado para transferência.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
-</div>
-
-  <div id="conteudo-expedicao"    class="armazem-page" style="display:none;"></div>
-  <div id="conteudo-produto"      class="armazem-page" style="display:none;"></div>
-  <div id="conteudo-terceiros"    class="armazem-page" style="display:none;"></div>
-  <div id="conteudo-geral"    class="armazem-page" style="display:none;"></div>
 </div>
 
 
@@ -838,27 +1990,40 @@
   <div class="kanban-header">
     <div class="title-wrapper">
       <span>Pedido aprovado</span>
+      <!-- [MOVE] Botão para abrir a busca de produtos (agora nesta coluna) -->
+      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
       <!-- Spinner escondido por CSS até ser exibido pelo JS -->
       <i class="fas fa-spinner fa-spin kanban-spinner"></i>
     </div>
-  </div>
-  <ul id="coluna-comercial" class="kanban-list"></ul>
-</div>
 
-
-<div class="kanban-column">
-  <div class="kanban-header">
-    <div class="title-wrapper">
-      <span>Separação logística</span>
-      <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
-    </div>
+    <!-- [MOVE] Painel de busca que antes ficava em “Aguardando prazo” -->
     <div class="add-container">
       <input type="text" class="add-search" placeholder="Pesquisar…" />
       <!-- >>> Lista de resultados da busca <<< -->
       <ul class="add-results"></ul>
     </div>
   </div>
+  <ul id="coluna-comercial" class="kanban-list"></ul>
+
+</div>
+
+
+<div class="kanban-column">
+  <div class="kanban-header">
+    <div class="title-wrapper">
+      <span>Aguardando prazo</span>
+      <button type="button"
+              id="btn-listar-excluidos"
+              class="kanban-icon-btn"
+              title="Listar OPs excluídas"
+              aria-label="Listar OPs excluídas">
+        <i class="fas fa-ban" aria-hidden="true"></i>
+      </button>
+      <!-- [LIMPEZA] Removido o add-btn e o add-container desta coluna -->
+    </div>
+  </div>
   <ul id="coluna-pcp-aprovado" class="kanban-list"></ul>
+
 </div>
 
 
@@ -878,22 +2043,43 @@
     <div class="content-wrapper">
       <div class="content-section">
 
-        <!-- Barra: código do produto selecionado + multiplicador + OK + observação -->
+<!-- Barra: observações da PCP -->
 <div id="pcp-code-bar" class="code-bar" style="display:none; margin:6px 0 12px;">
-  <span id="pcp-code" class="prod-code"></span>
-  <button id="pcp-open-search" class="plus-btn" title="Escolher outro produto">+</button>
-
-  <input id="pcp-factor" class="qty-input" type="number" min="1" step="1" value="1" />
-  <button id="pcp-ok" class="ok-btn">OK</button>
-
+  <span id="pcp-code" class="prod-code" style="display:none;"></span>
   <input id="pcp-obs" type="text" placeholder="Observações…" style="flex:1; min-width:220px;">
 </div>
 
         <div class="title-wrapper" style="gap:12px; align-items:center;">
           <div class="content-section-title">Lista de peças</div>
+          <span id="pcpListaVersaoWrap"
+                style="display:inline-flex; align-items:center; gap:6px; font-size:0.85rem;">
+            <span style="font-weight:600;">Versão:</span>
+                <span id="pcpListaVersaoValue"
+                      class="chip"
+                      style="padding:2px 8px; border-radius:12px; border:1px solid var(--border,#ccc);">
+              —
+            </span>
+            <span id="pcp-op-num" class="chip" style="padding:2px 8px; border-radius:12px; border:1px solid var(--border,#ccc); display:none; background:yellow; color:#333; font-weight:600; margin-left:6px;"> </span>
+          </span>
 
-          <!-- toolbar da lista (select do produto + filtro + spinner) -->
-          <div style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+          <!-- toolbar da lista (ações da PCP) -->
+          <div id="pcpToolbar" style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+            <button id="pcpAddBtn" class="content-button" type="button" title="Incluir item na lista">
+              <i class="fa-solid fa-plus"></i>
+              <span style="margin-left:6px;">Incluir item</span>
+            </button>
+            <button id="pcpResetBtn" class="content-button danger" type="button" title="Remover todos os itens e manter apenas o pai">
+              <i class="fa-solid fa-rotate-left"></i>
+              <span style="margin-left:6px;">Resetar</span>
+            </button>
+          </div>
+
+          <!-- painel de inclusão (dropdown de busca) -->
+          <div id="pcpAddContainer" style="display:none; position:relative; width:100%; max-width:520px; margin-top:6px;">
+            <input id="pcpAddSearch" type="text" class="search-box" placeholder="Pesquisar por código ou descrição…" autocomplete="off" />
+            <div class="transfer-search-dropdown" style="position:absolute; top:36px; left:0; right:0; z-index:20;">
+              <ul id="pcpAddResults" class="transfer-search-results"></ul>
+            </div>
           </div>
         </div>
 
@@ -901,17 +2087,21 @@
 
         <!-- Lista de peças (cabeçalho fixo + linhas dinâmicas) -->
 <ul id="listaPecasPCPList" class="grid-pecas">
+<!-- Cabeçalho da Lista de peças (PCP) — rótulos ajustados para Arm Pro / Arm Alm -->
 <li class="header-row">
   <div class="cod">Código</div>
+  <div class="desc">Descrição</div>
   <div class="unid">Unid</div>
   <div class="qtd">Qtd</div>
-  <div class="perda">% perda</div>
-  <div class="qtdb">Qtd bruta</div>
-  <div class="qtdpro">Qtd Pro</div>
-  <div class="qtdalm">Qtd Alm</div>
-  <!-- NOVO -->
+  <div class="qtdprod">Qtd prod</div>
+  <div class="qtdpro">Arm Pro</div> <!-- só mudou o texto -->
+  <div class="qtdalm">Arm Alm</div> <!-- só mudou o texto -->
   <div class="acao">Ação</div>
 </li>
+
+
+
+
 
         </ul>
       </div>
@@ -923,46 +2113,48 @@
 
 <!-- === bloco PREPARAÇÃO (Kanban) ============================ -->
 <div id="conteudo-preparacao" class="kanban-page" style="display:none;">
-  <div class="kanban-board">
+  <!-- Cabeçalho com seletor de operação -->
+  <div class="preparacao-header" style="padding: 12px 20px; background: #1a1a1a; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px;">
+    <label for="preparacaoOperacaoSelect" style="font-weight: 600; margin: 0;">Posto de Trabalho:</label>
+    <select id="preparacaoOperacaoSelect" class="transfer-select" style="min-width: 300px;">
+      <option value="">Carregando operações...</option>
+    </select>
+    <span id="preparacaoCount" style="margin-left: 12px; opacity: 0.7;">0 itens</span>
+  </div>
 
-    <!-- Coluna 1: A Produzir -->
+  <div class="kanban-board">
+    <!-- Coluna 1: Aguardando prazo (igual Comercial - Pedido aprovado) -->
     <div class="kanban-column">
       <div class="kanban-header">
         <div class="title-wrapper">
-          <span>A Produzir</span>
-          <i class="fas fa-plus add-btn" title="Adicionar filtro"></i>
+          <span>Aguardando prazo</span>
+          <i class="fas fa-plus add-btn-prep" title="Adicionar filtro"></i>
+          <i class="fas fa-spinner fa-spin kanban-spinner-prep" style="display:none;"></i>
         </div>
-        <div class="add-container">
-          <input type="text" class="add-search" placeholder="Pesquisar…" />
-          <ul class="add-results"></ul>
+        <div class="add-container-prep" style="display:none;">
+          <input type="text" class="add-search-prep" placeholder="Pesquisar…" />
+          <ul class="add-results-prep"></ul>
+        </div>
+      </div>
+      <ul id="coluna-prep-aguardando" class="kanban-list"></ul>
+    </div>
+
+    <!-- Coluna 2: Fila de produção (igual Comercial - Aguardando prazo com botão) -->
+    <div class="kanban-column">
+      <div class="kanban-header">
+        <div class="title-wrapper">
+          <span>Fila de produção</span>
+          <button type="button"
+                  id="btn-prep-listar-excluidos"
+                  class="kanban-icon-btn"
+                  title="Listar OPs excluídas"
+                  aria-label="Listar OPs excluídas">
+            <i class="fas fa-ban" aria-hidden="true"></i>
+          </button>
         </div>
       </div>
       <ul id="coluna-prep-fila" class="kanban-list"></ul>
     </div>
-
-    <!-- Coluna 2: Produzindo -->
-    <div class="kanban-column">
-      <div class="kanban-header"><span>Produzindo</span></div>
-      <ul id="coluna-prep-em-producao" class="kanban-list"></ul>
-    </div>
-
-    <!-- Coluna 3: teste 1
-    <div class="kanban-column">
-      <div class="kanban-header"><span>teste 1</span></div>
-      <ul id="coluna-prep-estoque" class="kanban-list"></ul>
-    </div>
-
-    <div class="kanban-column">
-      <div class="kanban-header"><span>teste final</span></div>
-      <ul id="coluna-prep-teste-final" class="kanban-list"></ul>
-    </div> -->
-
-    <!-- Coluna 5: concluido -->
-    <div class="kanban-column">
-      <div class="kanban-header"><span>concluido</span></div>
-      <ul id="coluna-prep-concluido" class="kanban-list"></ul>
-    </div>
-
   </div>
 </div>
 <!-- ========================================================= -->
@@ -974,7 +2166,24 @@
   <div id="conteudo-producao" class="kanban-page" style="display:none;"></div>
   <div id="conteudo-detalhes" class="kanban-page" style="display:none;">
   <div id="detalhesContainer" class="detalhes-container">
-    <!-- Detalhes do pedido serão inseridos aqui -->
+    <div class="calendar-controls">
+      <button id="calPrev" class="icon-btn" title="Mês anterior"><i class="fa-solid fa-chevron-left"></i></button>
+      <select id="calMes"></select>
+      <input id="calAno" type="number" min="2000" max="2100" />
+      <select id="calLocal">
+        <option value="">Todos os locais</option>
+      </select>
+      <button id="calNext" class="icon-btn" title="Próximo mês"><i class="fa-solid fa-chevron-right"></i></button>
+    </div>
+    <div id="calGrid" class="calendar-grid"></div>
+  <div id="calSemData" class="cal-semdata" style="display:none;"></div>
+    <div id="calModal" class="cal-modal" style="display:none;">
+      <div class="cal-modal-content">
+        <button id="calModalClose" class="cal-modal-close" title="Fechar">×</button>
+        <h3 id="calModalTitulo">Detalhes do dia</h3>
+        <div id="calModalBody" class="cal-modal-body"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1028,6 +2237,7 @@
   <script type="module" src="./requisicoes_omie/Dados_produto.js" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js" defer></script>
+  <script src="produtos/produto_anexo.js" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
   <script type="module" src="kanban/kanban_preparacao.js"></script>
 
@@ -1049,6 +2259,444 @@
 
     .kanban-list.droptarget { outline: 2px dashed #60a5fa; outline-offset: 2px; }
   .kanban-card.dragging   { opacity: .6; }
+
+  /* ========== CALENDÁRIO ========== */
+  .calendar-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #1f2937;
+    border-radius: 8px;
+  }
+  
+  .calendar-controls select,
+  .calendar-controls input {
+    padding: 6px 12px;
+    background: #374151;
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    color: #e5e7eb;
+    font-size: 14px;
+  }
+  
+  .calendar-controls .icon-btn {
+    padding: 6px 12px;
+    background: #374151;
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    color: #e5e7eb;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  
+  .calendar-controls .icon-btn:hover {
+    background: #4b5563;
+  }
+  
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    background: #111827;
+    padding: 8px;
+    border-radius: 8px;
+  }
+  
+  .dow {
+    background: #374151;
+    padding: 12px 4px;
+    text-align: center;
+    font-weight: 600;
+    color: #9ca3af;
+    font-size: 13px;
+    border-radius: 4px;
+  }
+  
+  .cal-day {
+    min-height: 100px;
+    background: #1f2937;
+    border-radius: 4px;
+    padding: 6px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    overflow: hidden;
+  }
+  
+  .cal-day:hover {
+    background: #374151;
+    transform: scale(1.02);
+  }
+  
+  .cal-day.empty {
+    background: transparent;
+    cursor: default;
+  }
+  
+  .cal-day.empty:hover {
+    transform: none;
+  }
+  
+  .cal-day.hoje {
+    border: 2px solid #3b82f6;
+    background: #1e3a8a;
+  }
+  
+  .cal-day.has-impressao {
+    background: #1e40af;
+  }
+  
+  .day-num {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e5e7eb;
+    margin-bottom: 4px;
+  }
+  
+  .codes {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+    overflow: hidden;
+    max-height: 70px;
+  }
+  
+  .code {
+    background: #4b5563;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #e5e7eb;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+  }
+  
+  .code.impressao {
+    background: #059669;
+  }
+  
+  .status-produzido {
+    color: #10b981;
+  }
+  
+  .status-produzindo {
+    color: #f59e0b;
+  }
+  
+  .status-excluido {
+    color: #ef4444;
+  }
+  
+  .status-aguardando {
+    color: #9ca3af;
+  }
+  
+  .status-novo {
+    color: #60a5fa;
+  }
+  
+  /* Modal do calendário */
+  .cal-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  }
+  
+  .cal-modal-content {
+    background: #1f2937;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 800px;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  
+  .cal-modal-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: #374151;
+    border: none;
+    color: #e5e7eb;
+    font-size: 24px;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .cal-modal-close:hover {
+    background: #4b5563;
+  }
+  
+  .cal-modal h3 {
+    color: #e5e7eb;
+    margin-bottom: 16px;
+  }
+  
+  .cal-modal-body {
+    color: #d1d5db;
+  }
+  
+  .mod-local {
+    margin-bottom: 24px;
+    padding: 12px;
+    background: #374151;
+    border-radius: 8px;
+  }
+  
+  .mod-local h4 {
+    color: #60a5fa;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #4b5563;
+    padding-bottom: 8px;
+  }
+  
+  .mod-prod-ops {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .mod-prod-ops li {
+    padding: 8px;
+    margin: 6px 0;
+    background: #1f2937;
+    border-radius: 6px;
+    border-left: 3px solid #3b82f6;
+  }
+  
+  .mod-prod-ops .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 8px;
+  }
+  
+  .badge.etapa-aguardando {
+    background: #374151;
+    color: #9ca3af;
+  }
+  
+  .badge.etapa-fila {
+    background: #1e40af;
+    color: #93c5fd;
+  }
+  
+  .badge.etapa-produzindo {
+    background: #92400e;
+    color: #fbbf24;
+  }
+  
+  .badge.etapa-produzido {
+    background: #064e3b;
+    color: #34d399;
+  }
+  
+  .badge.etapa-em-andamento {
+    background: #1e3a8a;
+    color: #60a5fa;
+  }
+  
+  .loading-cal {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+  }
+  
+  /* Tooltip do calendário */
+  .cal-tip {
+    position: fixed;
+    background: #1f2937;
+    border: 1px solid #374151;
+    color: #e5e7eb;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.2s;
+    max-width: 300px;
+    word-wrap: break-word;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  }
+  
+  .cal-tip.show {
+    opacity: 1;
+  }
+
+  /* ========== CARROSSEL SEMANAL (Página Início) ========== */
+  .semana-carousel-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 20px 0;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  
+  .semana-carousel {
+    display: flex;
+    gap: 12px;
+    padding: 8px 4px;
+    cursor: grab;
+    user-select: none;
+    transition: none;
+    will-change: transform;
+    box-sizing: border-box;
+  }
+  
+  .semana-carousel:active {
+    cursor: grabbing;
+  }
+  
+  .semana-day-card {
+    min-width: 150px;
+    max-width: 150px;
+    background: #1f2937;
+    border-radius: 12px;
+    padding: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+    border: 2px solid transparent;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  
+  .semana-day-card.center {
+    background: #1e40af;
+    transform: scale(1.05);
+    border-color: #3b82f6;
+    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+  }
+  
+  .semana-day-card.hoje {
+    border-color: #10b981;
+  }
+  
+  .semana-day-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  }
+  
+  .semana-day-card.center:hover {
+    transform: scale(1.05) translateY(-4px);
+  }
+  
+  .semana-day-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #374151;
+  }
+  
+  .semana-day-date {
+    font-size: 16px;
+    font-weight: 600;
+    color: #e5e7eb;
+  }
+  
+  .semana-day-dow {
+    font-size: 12px;
+    color: #9ca3af;
+    font-weight: 500;
+  }
+  
+  .semana-day-badge {
+    background: #374151;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    color: #9ca3af;
+    font-weight: 600;
+  }
+  
+  .semana-day-card.center .semana-day-badge {
+    background: #2563eb;
+    color: #e0e7ff;
+  }
+  
+  .semana-produtos {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 180px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #4b5563 #1f2937;
+  }
+  
+  .semana-produtos::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .semana-produtos::-webkit-scrollbar-track {
+    background: #1f2937;
+    border-radius: 3px;
+  }
+  
+  .semana-produtos::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 3px;
+  }
+  
+  .semana-produto-item {
+    background: #374151;
+    padding: 6px 8px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #e5e7eb;
+    transition: background 0.2s;
+  }
+  
+  .semana-day-card.center .semana-produto-item {
+    background: #1e3a8a;
+  }
+  
+  .semana-produto-item:hover {
+    background: #4b5563;
+  }
+  
+  .semana-day-card.center .semana-produto-item:hover {
+    background: #1e40af;
+  }
+  
+  .semana-empty {
+    text-align: center;
+    padding: 16px;
+    color: #6b7280;
+    font-size: 12px;
+  }
 </style>
 
 
@@ -1112,7 +2760,7 @@
   function statusFromUlId(ulId) {
     if (ulId === IDS.fila) return 'A Produzir';
     if (ulId === IDS.em)   return 'Produzindo';
-    if (ulId === IDS.conc) return 'concluido';
+    if (ulId === IDS.conc) return 'Produzido';
     return null;
   }
 
@@ -1253,7 +2901,7 @@ function attachDropZone(ul) {
     const buckets = {
       fila: data['A Produzir'] || [],
       em:   data['Produzindo'] || [],
-      conc: data['concluido']  || []
+      conc: data['Produzido']  || []
     };
 
     const cpMap   = await buildCpToAlphaMap(buckets);
@@ -1388,6 +3036,596 @@ function attachDropZone(ul) {
 })();
 </script>
 
+<!-- Modal Criar/Editar Colaborador -->
+<!-- Modal Criar/Editar Colaborador -->
+<div id="colabModal" class="modal" style="display:none">
+  <div class="modal-content colab">
+    <div class="modal-header colab">
+      <h3 id="colabModalTitle">Novo colaborador</h3>
+      <button class="modal-close colab" id="colabModalClose" aria-label="Fechar">×</button>
+    </div>
+
+    <div class="modal-body colab">
+      <form id="colabForm" autocomplete="off" class="colab-grid">
+        <!-- Linha 1 -->
+        <div class="form-row">
+          <label class="form-field sm">
+            <span class="label">ID</span>
+            <input id="colab-id" type="text" readonly placeholder="(gerado ao salvar)">
+          </label>
+
+          <label class="form-field">
+            <span class="label">Usuário</span>
+            <input id="colab-username" type="text" required placeholder="ex.: joao.silva">
+          </label>
+        </div>
+
+        <!-- Linha 2 -->
+        <div class="form-row">
+          <div class="form-field">
+            <span class="label">Perfis</span>
+            <div class="chip-row" id="colab-roles">
+              <label class="chip"><input type="checkbox" value="admin"> admin</label>
+              <label class="chip"><input type="checkbox" value="editor"> editor</label>
+            </div>
+          </div>
+          <div class="form-field"></div>
+        </div>
+
+        <!-- Linha 3 -->
+        <div class="form-row">
+          <label class="form-field">
+            <span class="label">Função</span>
+            <div class="inline">
+              <select id="colab-funcao" required></select>
+              <button type="button" id="btn-add-funcao" class="btn-mini" title="Nova função">+</button>
+            </div>
+          </label>
+
+          <label class="form-field">
+            <span class="label">Setor</span>
+            <div class="inline">
+              <select id="colab-setor" required></select>
+              <button type="button" id="btn-add-setor" class="btn-mini" title="Novo setor">+</button>
+            </div>
+          </label>
+        </div>
+
+        <!-- Linha 4 - Permissões de Produto -->
+        <div class="form-row">
+          <label class="form-field full">
+            <span class="label">Permissões de Produto</span>
+            <select id="colab-produto-permissao">
+              <option value="">Selecionar permissão…</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field full">
+            <span class="label">Permissões selecionadas</span>
+            <div id="colab-produto-permissao-list" class="operacao-list">
+              <div class="operacao-empty">Nenhuma permissão adicionada.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Linha 5 - Operação (Omie) -->
+        <div class="form-row">
+          <label class="form-field full">
+            <span class="label">Operação (Omie)</span>
+            <select id="colab-operacao">
+              <option value="">Selecionar operação…</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field full">
+            <span class="label">Operações selecionadas</span>
+            <div id="colab-operacao-list" class="operacao-list">
+              <div class="operacao-empty">Nenhuma operação adicionada.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Permissões (somente no modo edição) -->
+        <div id="colab-permissoes" class="perm-wrapper" style="display:none">
+          <h4>Permissões</h4>
+          <div id="permissoes-grid"></div>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-footer colab">
+      <button id="colabSalvar" class="btn-primary">Salvar</button>
+      <button id="colabCancelar" class="btn-secondary" type="button">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ====== ESTILOS SOMENTE DO MODAL DE COLABORADOR ======
+     Tudo fica sob #colabModal para não afetar o restante da página. */
+  #colabModal .modal-content { max-width: 720px; border-radius: 14px; padding: 0; }
+  #colabModal .modal-header { display:flex; align-items:center; justify-content:space-between;
+    padding:16px 18px; border-bottom:1px solid rgba(0,0,0,.08); }
+  #colabModal .modal-header h3 { margin:0; font-size:1.15rem; font-weight:700; }
+  #colabModal .modal-close { border:none; background:transparent; font-size:22px; line-height:1;
+    width:36px; height:36px; border-radius:50%; cursor:pointer; }
+  #colabModal .modal-close:hover { background:rgba(0,0,0,.06); }
+
+  #colabModal .modal-body { padding:18px; }
+  #colabModal .modal-footer { display:flex; gap:10px; justify-content:flex-end; padding:14px 18px 18px;
+    border-top:1px solid rgba(0,0,0,.06); }
+
+  #colabModal .colab-grid { display:flex; flex-direction:column; gap:14px; }
+  #colabModal .form-row { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  #colabModal .form-field { display:flex; flex-direction:column; gap:6px; }
+  #colabModal .form-field.sm { max-width:220px; }
+  #colabModal .form-field.full { grid-column:1 / -1; }
+  #colabModal .form-field .label { font-size:.85rem; font-weight:600; color:#333; }
+  #colabModal .form-field input,
+  #colabModal .form-field select {
+    width:100%; height:38px; border-radius:10px; border:1px solid #d9d9d9;
+    padding:0 12px; outline:none; background:#fff;
+  }
+  #colabModal .form-field input[readonly] { background:#f6f6f6; color:#666; }
+
+  #colabModal .inline { display:flex; align-items:center; gap:8px; }
+  #colabModal .chip-row { display:flex; align-items:center; gap:14px; }
+  #colabModal .chip { display:flex; align-items:center; gap:6px; font-size:.95rem; }
+
+  #colabModal .btn-mini {
+    height:34px; min-width:34px; padding:0 10px; border-radius:999px; border:none; cursor:pointer;
+    background:#2f66ff; color:#fff; font-weight:600;
+  }
+  #colabModal .btn-mini:hover { filter:brightness(.95); }
+
+  #colabModal .btn-primary,
+  #colabModal .btn-secondary {
+    height:40px; padding:0 18px; border-radius:999px; border:none; cursor:pointer; font-weight:700;
+  }
+  #colabModal .btn-primary { background:#2f66ff; color:#fff; }
+  #colabModal .btn-primary[disabled] { opacity:.7; cursor:not-allowed; }
+  #colabModal .btn-secondary { background:#eef2ff; color:#2f3a66; }
+
+  #colabModal .perm-wrapper { margin-top:10px; padding-top:10px; border-top:1px dashed rgba(0,0,0,.1); }
+
+  #colabModal .operacao-list { display:flex; flex-wrap:wrap; gap:6px; padding:6px; border-radius:10px; border:1px dashed rgba(0,0,0,.12); background:rgba(0,0,0,.02); min-height:40px; align-items:center; }
+  #colabModal .operacao-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#1f2a4d; font-weight:600; font-size:0.85rem; }
+  #colabModal .operacao-chip button { border:none; background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  #colabModal .operacao-chip button:hover { background:rgba(0,0,0,.08); }
+  #colabModal .operacao-empty { color:#777; font-style:italic; }
+
+  /* Responsivo: 1 coluna no mobile */
+  @media (max-width: 640px) {
+    #colabModal .form-row { grid-template-columns: 1fr; }
+    #colabModal .form-field.sm { max-width:none; }
+  }
+
+  /* Ações da tabela de colaboradores — escopado */
+#dadosColaboradores .td-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#dadosColaboradores .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color: #cfd6ff;         /* tom claro para modo escuro */
+  cursor: pointer;
+}
+#dadosColaboradores .btn-icon:hover {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255,255,255,.22);
+}
+
+/* ===== MODAL NOVO PRODUTO ===== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.active {
+  display: flex;
+}
+.modal-dialog {
+  background: #1f2937;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  max-width: 720px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 24px;
+  color: #e5e7eb;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 12px;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #60a5fa;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.8rem;
+  color: #9ca3af;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f87171;
+}
+.modal-body {
+  margin-bottom: 20px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.form-row.full-width {
+  grid-template-columns: 1fr;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+.form-group label {
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #d1d5db;
+}
+.form-group input[type="text"],
+.form-group select {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  background: #374151;
+  color: #e5e7eb;
+  font-size: 0.95rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-group input[type="text"]:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+}
+.form-group select[multiple],
+.form-group select[size] {
+  min-height: 120px;
+  cursor: pointer;
+  padding: 8px;
+}
+.form-group select[multiple]::-webkit-scrollbar,
+.form-group select[size]::-webkit-scrollbar {
+  width: 8px;
+}
+.form-group select[multiple]::-webkit-scrollbar-track,
+.form-group select[size]::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 4px;
+}
+.form-group select[multiple]::-webkit-scrollbar-thumb,
+.form-group select[size]::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 4px;
+}
+.form-group select[multiple]::-webkit-scrollbar-thumb:hover,
+.form-group select[size]::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+.familia-id-display {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+.familia-id-display span {
+  color: #60a5fa;
+  font-weight: 600;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.modal-footer button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-cancel {
+  background: #374151;
+  color: #d1d5db;
+}
+.btn-cancel:hover {
+  background: #4b5563;
+}
+.btn-save {
+  background: #0ea5e9;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+}
+.btn-save:hover {
+  background: #0284c7;
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.35);
+}
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .modal-dialog {
+    width: 95%;
+    padding: 16px;
+  }
+}
+
+</style>
+
+<style>
+/* ===== Chat (escopado ao #chatPane) ===== */
+#chatPane #chatLayout{display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 220px);min-height:420px;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,24,39,.6)}
+#chatPane .chat-users{background:rgba(31,41,55,.75);display:flex;flex-direction:column}
+#chatPane .chat-users-header{padding:10px;border-bottom:1px solid rgba(255,255,255,.08)}
+#chatPane .chat-users-header input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111827;color:#e8ecff}
+#chatPane .chat-user-list{list-style:none;margin:0;padding:0;overflow:auto}
+#chatPane .chat-user-list li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
+#chatPane .chat-user-list li:hover{background:rgba(255,255,255,.06)}
+#chatPane .chat-user-list li.active{background:rgba(59,130,246,.18)}
+#chatPane .chat-user-list .avatar{width:32px;height:32px;border-radius:50%;background:#374151;display:inline-flex;align-items:center;justify-content:center;color:#cbd5e1;font-weight:700}
+#chatPane .chat-conv{display:grid;grid-template-rows:auto 1fr auto;background:rgba(17,24,39,.2)}
+#chatPane .chat-conv-header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px;color:#e5e7eb}
+#chatPane .chat-messages{padding:14px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+#chatPane .msg{max-width:68%;padding:10px 12px;border-radius:14px;line-height:1.35}
+#chatPane .msg.you{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:6px}
+#chatPane .msg.other{align-self:flex-start;background:rgba(255,255,255,.08);color:#e5e7eb;border-bottom-left-radius:6px}
+#chatPane .msg .time{display:block;margin-top:4px;font-size:11px;opacity:.75}
+#chatPane .chat-input{padding:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:10px}
+#chatPane .chat-input input{flex:1;padding:10px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#111827;color:#e8ecff}
+#chatPane .chat-input button{padding:0 16px;border-radius:999px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;font-weight:600}
+@media(max-width:900px){#chatPane #chatLayout{grid-template-columns:1fr}}
+</style>
+
+<!-- ===== MODAL NOVO PRODUTO ===== -->
+<div id="modalNovoProduto" class="modal-overlay">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h2>Novo Produto</h2>
+      <button class="modal-close" aria-label="Fechar">&times;</button>
+    </div>
+    
+    <div class="modal-body">
+      <form id="formNovoProduto">
+        <!-- Preview do Código (gerado automaticamente) -->
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label>Código do Produto</label>
+            <div id="codigoPreview" style="font-size: 1.5rem; font-weight: 700; color: #60a5fa; padding: 16px; background: #374151; border-radius: 8px; text-align: center; font-family: monospace; letter-spacing: 2px;">
+              --.--.-.-----
+            </div>
+            <small style="color: #9ca3af; margin-top: 8px; display: block; text-align: center;">
+              Selecione uma família para gerar o código automaticamente
+            </small>
+          </div>
+        </div>
+
+        <!-- Família (listbox com nome_familia) -->
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="novoProd_familia">Família <span style="color:#f87171;">*</span></label>
+            <select id="novoProd_familia" name="familia" required style="width: 100%;">
+              <option value="">Selecione...</option>
+              <!-- Opções carregadas dinamicamente -->
+            </select>
+            <div class="familia-info-display" style="margin-top: 8px; padding: 8px; background: #1f2937; border-radius: 6px; font-size: 0.9rem;">
+              <div style="display: flex; gap: 16px;">
+                <span style="color: #9ca3af;">Tipo: <strong id="novoProd_familiaTipo" style="color: #10b981;">-</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Origem / Restante do Código (dinâmico conforme família) -->
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label id="novoProd_origem_label" for="novoProd_origem">Origem <span style="color:#f87171;">*</span></label>
+            <!-- Select padrão (para famílias com prefixo numérico) -->
+            <select id="novoProd_origem" name="origem" required style="width: 100%;">
+              <option value="">Selecione...</option>
+              <option value="0">Nacional</option>
+              <option value="1">Importado</option>
+            </select>
+            <!-- Campo alternativo (para famílias com prefixo de letras) -->
+            <input 
+              type="text" 
+              id="novoProd_resto"
+              name="resto_codigo"
+              inputmode="text"
+              pattern="^[A-Za-z0-9]{2,10}$"
+              maxlength="10"
+              placeholder="Digite o restante do código (letras e números, 2 a 10 caracteres)"
+              style="width: 100%; display: none;"
+            />
+            <small id="novoProd_resto_help" style="display:none;color:#9ca3af; margin-top: 6px; display: block; font-style: italic;">
+              Ex.: família FT → o código ficará FT + o restante que você digitar (letras e números), como FTAB2 ou FT123456
+            </small>
+          </div>
+        </div>
+
+        <!-- Descrição Principal -->
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="novoProd_descricaoPrincipal">Descrição Principal <span style="color:#f87171;">*</span></label>
+            <input 
+              type="text" 
+              id="novoProd_descricaoPrincipal" 
+              name="descricao_principal" 
+              required 
+              maxlength="50"
+              pattern="^\S+$"
+              title="Digite apenas uma palavra (sem espaços)"
+              style="width: 100%;"
+            />
+            <small style="color: #9ca3af; margin-top: 6px; display: block; font-style: italic;">
+              * Somente uma palavra principal da descrição deste produto
+            </small>
+          </div>
+        </div>
+
+        <!-- Unidade -->
+        <div class="form-row full-width">
+          <div class="form-group">
+            <label for="novoProd_unidade">Unidade <span style="color:#f87171;">*</span></label>
+            <select 
+              id="novoProd_unidade" 
+              name="unidade" 
+              required
+              style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;"
+            >
+              <option value="">Carregando...</option>
+            </select>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn-cancel" id="btnCancelarModal">Cancelar</button>
+      <button type="submit" form="formNovoProduto" class="btn-save" id="btnCriarProduto">Criar produto</button>
+    </div>
+
+    <!-- Status da criação do produto -->
+    <div id="statusCriacaoProduto" style="padding: 16px; margin: 12px 20px; border-radius: 6px; display: none; font-size: 14px; text-align: center;">
+      <div id="statusSpinner" style="display: none; margin-bottom: 12px;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; color: #3b82f6;"></i>
+      </div>
+      <div id="statusTexto" style="font-weight: 500;"></div>
+      <div id="statusDetalhes" style="font-size: 12px; color: #6b7280; margin-top: 8px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Nova Tarefa do Produto (Check-Proj) -->
+<div id="modalNovaTarefaProduto" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); z-index:9999; align-items:center; justify-content:center;">
+  <div style="background:var(--app-bg); border-radius:16px; padding:24px; width:90%; max-width:500px; box-shadow:0 20px 60px rgba(0,0,0,0.5); border:1px solid var(--border-color);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <h3 style="margin:0; color:var(--content-title-color); font-size:18px; font-weight:600;">
+        <i class="fa-solid fa-plus-circle" style="color:#3b82f6; margin-right:8px;"></i>
+        Nova Tarefa do Produto
+      </h3>
+      <button id="modalNovaTarefaFechar" style="background:none; border:none; color:var(--inactive-color); cursor:pointer; font-size:20px; padding:4px 8px;">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+    
+    <div style="margin-bottom:16px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Descrição da Tarefa <span style="color:#dc2626;">*</span>
+      </label>
+      <input type="text" id="novaTarefaDescricao" placeholder="Ex: Validar desenho técnico" 
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color);">
+    </div>
+    
+    <div style="margin-bottom:20px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Observações (opcional)
+      </label>
+      <textarea id="novaTarefaObs" placeholder="Detalhes adicionais sobre a tarefa..." rows="3"
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color); resize:vertical;"></textarea>
+    </div>
+    
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button id="modalNovaTarefaCancelar" style="padding:10px 20px; background:var(--content-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--content-title-color); font-weight:600; cursor:pointer;">
+        Cancelar
+      </button>
+      <button id="modalNovaTarefaSalvar" style="padding:10px 20px; background:linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border:none; border-radius:8px; color:white; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
+        <i class="fa-solid fa-check"></i> Adicionar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="modalNovaTarefaCompras" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); z-index:9999; align-items:center; justify-content:center;">
+  <div style="background:var(--app-bg); border-radius:16px; padding:24px; width:90%; max-width:500px; box-shadow:0 20px 60px rgba(0,0,0,0.5); border:1px solid var(--border-color);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <h3 style="margin:0; color:var(--content-title-color); font-size:18px; font-weight:600;">
+        <i class="fa-solid fa-plus-circle" style="color:#f59e0b; margin-right:8px;"></i>
+        Nova Tarefa de Compras
+      </h3>
+      <button id="modalNovaTarefaComprasFechar" style="background:none; border:none; color:var(--inactive-color); cursor:pointer; font-size:20px; padding:4px 8px;">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+    
+    <div style="margin-bottom:16px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Descrição da Tarefa <span style="color:#dc2626;">*</span>
+      </label>
+      <input type="text" id="novaTarefaComprasDescricao" placeholder="Ex: Solicitar cotação de fornecedores" 
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color);">
+    </div>
+    
+    <div style="margin-bottom:20px;">
+      <label style="display:block; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--content-title-color);">
+        Observações (opcional)
+      </label>
+      <textarea id="novaTarefaComprasObs" placeholder="Detalhes adicionais sobre a tarefa..." rows="3"
+        style="width:100%; padding:10px 12px; border:1px solid var(--border-color); border-radius:8px; font-size:14px; background:var(--content-bg); color:var(--content-title-color); resize:vertical;"></textarea>
+    </div>
+    
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button id="modalNovaTarefaComprasCancelar" style="padding:10px 20px; background:var(--content-bg); border:1px solid var(--border-color); border-radius:8px; color:var(--content-title-color); font-weight:600; cursor:pointer;">
+        Cancelar
+      </button>
+      <button id="modalNovaTarefaComprasSalvar" style="padding:10px 20px; background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border:none; border-radius:8px; color:white; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:6px;">
+        <i class="fa-solid fa-check"></i> Adicionar
+      </button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
