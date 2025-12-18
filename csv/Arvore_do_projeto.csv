@@ -24,6 +24,8 @@ pm2 restart intranet_api
 pm2 logs intranet_api
 
 
+
+
 "para rodar o SITE AT"
 cd ~/Projetos/intranet/Site_AT
 PORT=3000 npm start   # ou 3000 se estiver livre
