@@ -10316,6 +10316,72 @@ if (mh) mh.style.display = 'none';
   });
 });
 
+// Gerenciamento de anexos para compras
+let comprasAnexoAtual = null;
+
+function initComprasAnexo() {
+  const inputFile = document.getElementById('modalComprasAnexo');
+  const btnAnexo = document.getElementById('modalComprasAnexoBtn');
+  const preview = document.getElementById('modalComprasAnexoPreview');
+  const nomeArquivo = document.getElementById('modalComprasAnexoNome');
+  const btnRemover = document.getElementById('modalComprasAnexoRemover');
+  
+  if (!inputFile || !btnAnexo) return;
+  
+  // Clique no botão abre seletor de arquivo
+  btnAnexo.addEventListener('click', () => inputFile.click());
+  
+  // Quando arquivo é selecionado
+  inputFile.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      comprasAnexoAtual = file;
+      nomeArquivo.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      preview.style.display = 'flex';
+      document.getElementById('modalComprasAnexoLabel').textContent = 'Arquivo selecionado';
+      btnAnexo.style.background = '#d1fae5';
+      btnAnexo.style.borderColor = '#22c55e';
+    }
+  });
+  
+  // Remover anexo
+  btnRemover?.addEventListener('click', () => {
+    comprasAnexoAtual = null;
+    inputFile.value = '';
+    preview.style.display = 'none';
+    document.getElementById('modalComprasAnexoLabel').textContent = 'Clique para selecionar arquivo';
+    btnAnexo.style.background = '#f3f4f6';
+    btnAnexo.style.borderColor = '#9ca3af';
+  });
+}
+
+async function uploadComprasAnexo(file, numeroPedido, produtoCodigo) {
+  if (!file) return null;
+  
+  try {
+    const formData = new FormData();
+    const timestamp = Date.now();
+    const fileName = `compras/${numeroPedido}/${produtoCodigo}_${timestamp}_${file.name}`;
+    
+    formData.append('file', file);
+    formData.append('path', fileName);
+    
+    const response = await fetch('/api/upload/supabase', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+    
+    if (!response.ok) throw new Error('Erro ao fazer upload');
+    
+    const data = await response.json();
+    return data.url || data.path;
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao fazer upload:', err);
+    return null;
+  }
+}
+
 // Eventos específicos da aba Compras
 function initComprasUI() {
   document.getElementById('comprasForm')?.addEventListener('submit', submitComprasSolicitacao);
@@ -10326,6 +10392,12 @@ function initComprasUI() {
   attachComprasAutocomplete();
   console.log('[COMPRAS] initComprasUI -> autocomplete e eventos registrados');
 
+  // Inicializa sistema de anexos
+  initComprasAnexo();
+
+  // Inicializa filtro de status em "Minhas solicitações"
+  setTimeout(() => initMinhasSolicitacoesFiltro(), 100);
+
   // Carrega usuários ativos para “Quem vai receber?”
   fetch('/api/users/ativos', { credentials: 'include' })
     .then(r => r.ok ? r.json() : { users: [] })
@@ -10334,6 +10406,164 @@ function initComprasUI() {
       loadMinhasSolicitacoes();
     })
     .catch(err => console.warn('[COMPRAS] Falha ao carregar usuários ativos', err));
+}
+
+function initMinhasSolicitacoesFiltro() {
+  const filtroBtn = document.getElementById('minhasComprasFiltroBtn');
+  const filtroDropdown = document.getElementById('minhasComprasFiltroDropdown');
+  const filtroOpcoes = document.getElementById('minhasComprasFiltroOpcoes');
+  const filtroAplicar = document.getElementById('minhasComprasFiltroAplicar');
+  const filtroLimpar = document.getElementById('minhasComprasFiltroLimpar');
+  
+  if (!filtroBtn || !filtroDropdown || !filtroOpcoes || !filtroAplicar || !filtroLimpar) return;
+  
+  // Estado do filtro
+  let statusSelecionados = [];
+  
+  // Carrega opções de status do banco
+  fetch('/api/compras/status')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok || !data.status) return;
+      
+      const statusList = data.status.map(s => s.nome);
+      statusSelecionados = [...statusList]; // Inicializa com todos selecionados
+      
+      // Renderiza checkboxes
+      filtroOpcoes.innerHTML = statusList.map(status => `
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#374151;">
+          <input type="checkbox" class="status-checkbox" value="${escapeHtml(status)}" checked style="cursor:pointer;width:14px !important;height:14px !important;min-width:14px !important;min-height:14px !important;max-width:14px !important;max-height:14px !important;flex-shrink:0;margin:0;padding:0;transform:none !important;appearance:auto;">
+          <span>${escapeHtml(status)}</span>
+        </label>
+      `).join('');
+    })
+    .catch(err => console.error('[COMPRAS] Erro ao carregar status para filtro:', err));
+  
+  // Toggle dropdown
+  filtroBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = filtroDropdown.style.display !== 'none';
+    filtroDropdown.style.display = isVisible ? 'none' : 'block';
+    
+    // Posiciona dropdown abaixo do botão
+    if (!isVisible) {
+      const rect = filtroBtn.getBoundingClientRect();
+      filtroDropdown.style.position = 'fixed';
+      filtroDropdown.style.top = `${rect.bottom + 4}px`;
+      filtroDropdown.style.left = `${rect.left}px`;
+    }
+  });
+  
+  // Fecha dropdown ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (!filtroBtn.contains(e.target) && !filtroDropdown.contains(e.target)) {
+      filtroDropdown.style.display = 'none';
+    }
+  });
+  
+  // Aplicar filtro
+  filtroAplicar.addEventListener('click', () => {
+    const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
+    const statusSelecionados = Array.from(checkboxes)
+      .filter(cb => cb.checked)
+      .map(cb => cb.value.toLowerCase());
+    
+    loadMinhasSolicitacoes(statusSelecionados.length > 0 ? statusSelecionados : null);
+    filtroDropdown.style.display = 'none';
+  });
+  
+  // Botão para ativar/desativar todos
+  filtroLimpar.addEventListener('click', () => {
+    const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
+    const todosAtivos = Array.from(checkboxes).every(cb => cb.checked);
+    
+    if (todosAtivos) {
+      // Desativa todos
+      checkboxes.forEach(cb => cb.checked = false);
+      filtroLimpar.textContent = 'Ativar todos';
+    } else {
+      // Ativa todos
+      checkboxes.forEach(cb => cb.checked = true);
+      filtroLimpar.textContent = 'Desativar todos';
+    }
+  });
+}
+
+function initMinhasSolicitacoesFiltro() {
+  const filtroBtn = document.getElementById('minhasComprasFiltroBtn');
+  const filtroDropdown = document.getElementById('minhasComprasFiltroDropdown');
+  const filtroOpcoes = document.getElementById('minhasComprasFiltroOpcoes');
+  const filtroAplicar = document.getElementById('minhasComprasFiltroAplicar');
+  const filtroLimpar = document.getElementById('minhasComprasFiltroLimpar');
+  
+  if (!filtroBtn || !filtroDropdown || !filtroOpcoes || !filtroAplicar || !filtroLimpar) return;
+  
+  // Carrega opções de status do banco
+  fetch('/api/compras/status')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok || !data.status) return;
+      
+      const statusList = data.status.map(s => s.nome);
+      
+      // Renderiza checkboxes
+      filtroOpcoes.innerHTML = statusList.map(status => `
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:#374151;">
+          <input type="checkbox" class="status-checkbox" value="${escapeHtml(status)}" checked style="cursor:pointer;">
+          <span>${escapeHtml(status)}</span>
+        </label>
+      `).join('');
+    })
+    .catch(err => console.error('[COMPRAS] Erro ao carregar status para filtro:', err));
+  
+  // Toggle dropdown
+  filtroBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = filtroDropdown.style.display !== 'none';
+    filtroDropdown.style.display = isVisible ? 'none' : 'block';
+    
+    // Posiciona dropdown abaixo do botão
+    if (!isVisible) {
+      const rect = filtroBtn.getBoundingClientRect();
+      filtroDropdown.style.position = 'fixed';
+      filtroDropdown.style.top = `${rect.bottom + 4}px`;
+      filtroDropdown.style.left = `${rect.left}px`;
+    }
+  });
+  
+  // Fecha dropdown ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (!filtroBtn.contains(e.target) && !filtroDropdown.contains(e.target)) {
+      filtroDropdown.style.display = 'none';
+    }
+  });
+  
+  // Aplicar filtro
+  filtroAplicar.addEventListener('click', () => {
+    const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
+    const statusSelecionados = Array.from(checkboxes)
+      .filter(cb => cb.checked)
+      .map(cb => cb.value.toLowerCase());
+    
+    loadMinhasSolicitacoes(statusSelecionados.length > 0 ? statusSelecionados : null);
+    filtroDropdown.style.display = 'none';
+  });
+  
+  // Botão para ativar/desativar todos
+  filtroLimpar.addEventListener('click', () => {
+    const checkboxes = filtroOpcoes.querySelectorAll('.status-checkbox');
+    const todosAtivos = Array.from(checkboxes).every(cb => cb.checked);
+    
+    if (todosAtivos) {
+      // Desativa todos
+      checkboxes.forEach(cb => cb.checked = false);
+      filtroLimpar.textContent = 'Ativar todos';
+    } else {
+      // Ativa todos
+      checkboxes.forEach(cb => cb.checked = true);
+      filtroLimpar.textContent = 'Desativar todos';
+    }
+  });
 }
 
 if (document.readyState === 'loading') {
@@ -11984,8 +12214,13 @@ function openComprasTab() {
 
 function openComprasFormTab() {
   try {
+    console.log('[COMPRAS] Abrindo painel de compras...');
     const formPane = document.getElementById('comprasFormPane');
-    if (!formPane) return;
+    if (!formPane) {
+      console.error('[COMPRAS] Elemento #comprasFormPane não encontrado!');
+      return;
+    }
+    console.log('[COMPRAS] formPane encontrado:', formPane);
 
     const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim() || window.__sessionUser?.username || '';
     if (!currentUser) {
@@ -11993,8 +12228,9 @@ function openComprasFormTab() {
       formPane.style.display = 'none';
       return;
     }
+    console.log('[COMPRAS] Usuário logado:', currentUser);
 
-
+    console.log('[COMPRAS] Limpando container...');
     window.clearMainContainer?.();
     try { hideKanban(); } catch {}
     try { hideArmazem(); } catch {}
@@ -12006,12 +12242,431 @@ function openComprasFormTab() {
     document.querySelectorAll('.header .header-menu > .menu-link')
       .forEach(a => a.classList.remove('is-active'));
 
+    console.log('[COMPRAS] Chamando showOnlyInMain...');
     window.showOnlyInMain?.(formPane);
-    document.getElementById('comprasCodigo')?.focus();
+    console.log('[COMPRAS] Renderizando carrinho...');
+    renderCarrinhoCompras();
+    console.log('[COMPRAS] Carregando minhas solicitações...');
+    loadMinhasSolicitacoes();
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir formulário:', err);
   }
 }
+
+// ===================== CARRINHO DE COMPRAS =====================
+
+// Helper para escape HTML
+if (typeof escapeHtml === 'undefined') {
+  window.escapeHtml = function(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      '\'': '&#39;'
+    }[c]));
+  };
+}
+
+// Array global do carrinho
+window.carrinhoCompras = window.carrinhoCompras || [];
+
+// Renderiza a lista do carrinho
+function renderCarrinhoCompras() {
+  const tbody = document.getElementById('comprasCarrinhoTbody');
+  const countEl = document.getElementById('comprasCarrinhoCount');
+  const btnLimpar = document.getElementById('comprasLimparCarrinhoBtn');
+  const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
+  const tituloCarrinho = document.getElementById('comprasTituloCarrinho');
+  const containerCarrinho = document.getElementById('comprasCarrinhoContainer');
+  
+  if (!tbody) return;
+  
+  const carrinho = window.carrinhoCompras || [];
+  
+  if (countEl) countEl.textContent = carrinho.length;
+  
+  if (carrinho.length === 0) {
+    // Oculta título e container quando vazio
+    if (tituloCarrinho) tituloCarrinho.style.display = 'none';
+    if (containerCarrinho) containerCarrinho.style.display = 'none';
+    if (btnLimpar) btnLimpar.style.display = 'none';
+    if (btnEnviar) btnEnviar.style.display = 'none';
+    return;
+  }
+  
+  // Mostra título e container quando tem itens
+  if (tituloCarrinho) tituloCarrinho.style.display = 'flex';
+  if (containerCarrinho) containerCarrinho.style.display = 'block';
+  
+  tbody.innerHTML = carrinho.map((item, idx) => {
+    const prazoFmt = item.prazo_solicitado || '—';
+    return `
+      <tr>
+        <td>${window.escapeHtml(item.produto_codigo)}</td>
+        <td style="max-width:300px;">${window.escapeHtml(item.produto_descricao || '')}</td>
+        <td>${item.quantidade}</td>
+        <td>${prazoFmt}</td>
+        <td style="max-width:200px;">${window.escapeHtml(item.observacao || '')}</td>
+        <td>
+          <button class="content-button" data-idx="${idx}" style="padding:4px 8px;background:#ef4444;color:white;font-size:12px;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </td>
+      </tr>`;
+  }).join('');
+  
+  if (btnLimpar) btnLimpar.style.display = 'inline-flex';
+  if (btnEnviar) btnEnviar.style.display = 'inline-flex';
+  
+  // Bind botões de remover
+  tbody.querySelectorAll('[data-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      window.carrinhoCompras.splice(idx, 1);
+      renderCarrinhoCompras();
+    });
+  });
+}
+
+// Abre modal para adicionar produto
+async function abrirModalCompras() {
+  const modal = document.getElementById('comprasModalOverlay');
+  const spinner = document.getElementById('comprasModalSpinner');
+  const form = document.getElementById('comprasModalForm');
+  if (!modal) return;
+  
+  // Mostra modal com spinner
+  modal.style.display = 'flex';
+  if (spinner) spinner.style.display = 'block';
+  if (form) form.style.display = 'none';
+  
+  // Limpa campos com segurança (verifica se existem antes de limpar)
+  const codigo = document.getElementById('modalComprasCodigo');
+  const descSelecionada = document.getElementById('modalComprasDescricaoSelecionada');
+  const descricao = document.getElementById('modalComprasDescricao');
+  const quantidade = document.getElementById('modalComprasQuantidade');
+  const prazo = document.getElementById('modalComprasPrazo');
+  const objetivo = document.getElementById('modalComprasObjetivo');
+  const observacao = document.getElementById('modalComprasObservacao');
+  const departamento = document.getElementById('modalComprasDepartamento');
+  const centroCusto = document.getElementById('modalComprasCentroCusto');
+  
+  if (codigo) codigo.value = '';
+  if (descSelecionada) descSelecionada.value = '';
+  if (descricao) descricao.value = '';
+  if (quantidade) quantidade.value = '1';
+  if (prazo) prazo.value = '';
+  if (objetivo) objetivo.value = '';
+  if (observacao) observacao.value = '';
+  if (departamento) departamento.value = '';
+  if (centroCusto) centroCusto.value = '';
+  
+  // Carrega departamentos, centros de custo e usuários (já define responsável como usuário logado)
+  await carregarDepartamentosECentros();
+  
+  // Esconde spinner e mostra formulário
+  if (spinner) spinner.style.display = 'none';
+  if (form) form.style.display = 'block';
+  
+  setTimeout(() => document.getElementById('modalComprasCodigo')?.focus(), 100);
+}
+
+// Carrega opções de departamentos, centros de custo e usuários
+async function carregarDepartamentosECentros() {
+  try {
+    // Carrega departamentos
+    const respDept = await fetch('/api/compras/departamentos');
+    const dataDept = await respDept.json();
+    const selectDept = document.getElementById('modalComprasDepartamento');
+    
+    if (selectDept && dataDept.ok) {
+      selectDept.innerHTML = '<option value="">Selecione o departamento</option>' +
+        (dataDept.departamentos || []).map(d => 
+          `<option value="${window.escapeHtml(d.nome)}">${window.escapeHtml(d.nome)}</option>`
+        ).join('');
+    }
+    
+    // Carrega centros de custo
+    const respCentros = await fetch('/api/compras/centros-custo');
+    const dataCentros = await respCentros.json();
+    const selectCentros = document.getElementById('modalComprasCentroCusto');
+    
+    if (selectCentros && dataCentros.ok) {
+      selectCentros.innerHTML = '<option value="">Selecione o centro de custo</option>' +
+        (dataCentros.centros || []).map(c => 
+          `<option value="${window.escapeHtml(c.nome)}">${window.escapeHtml(c.nome)}</option>`
+        ).join('');
+    }
+    
+    // Carrega status de compras (armazena globalmente)
+    const respStatus = await fetch('/api/compras/status');
+    const dataStatus = await respStatus.json();
+    if (dataStatus.ok) {
+      window.comprasStatusList = (dataStatus.status || []).map(s => s.nome);
+    } else {
+      window.comprasStatusList = [];
+    }
+    
+    // Carrega usuários
+    const respUsers = await fetch('/api/compras/usuarios');
+    const dataUsers = await respUsers.json();
+    const selectResp = document.getElementById('modalComprasResponsavel');
+    
+    if (selectResp && dataUsers.ok) {
+      const usuarioLogado = window.__sessionUser?.username || '';
+      selectResp.innerHTML = '<option value="">Selecione o responsável</option>' +
+        (dataUsers.usuarios || []).map(u => 
+          `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+        ).join('');
+      // Define usuário logado como padrão
+      if (usuarioLogado) {
+        selectResp.value = usuarioLogado;
+      }
+    }
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao carregar departamentos/centros/usuários:', err);
+  }
+}
+
+function fecharModalCompras() {
+  const modal = document.getElementById('comprasModalOverlay');
+  if (modal) modal.style.display = 'none';
+}
+
+// Adiciona item ao carrinho
+function adicionarItemCarrinho(ev) {
+  if (ev) ev.preventDefault();
+  
+  const codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
+  const descricao = (document.getElementById('modalComprasDescricao')?.value || '').trim();
+  const quantidade = parseFloat(document.getElementById('modalComprasQuantidade')?.value || 0);
+  const prazo = document.getElementById('modalComprasPrazo')?.value || '';
+  const observacao = (document.getElementById('modalComprasObservacao')?.value || '').trim();
+  const departamento = (document.getElementById('modalComprasDepartamento')?.value || '').trim();
+  const centroCusto = (document.getElementById('modalComprasCentroCusto')?.value || '').trim();
+  const objetivoCompra = (document.getElementById('modalComprasObjetivo')?.value || '').trim();
+  const responsavel = (document.getElementById('modalComprasResponsavel')?.value || '').trim();
+  const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
+  
+  if (!codigo) {
+    alert('Digite o código do produto');
+    return;
+  }
+  
+  if (quantidade <= 0) {
+    alert('Quantidade deve ser maior que zero');
+    return;
+  }
+  
+  if (!departamento) {
+    alert('Selecione o departamento');
+    return;
+  }
+  
+  if (!centroCusto) {
+    alert('Selecione o centro de custo');
+    return;
+  }
+  
+  if (!objetivoCompra) {
+    alert('Informe o objetivo da compra');
+    return;
+  }
+  
+  if (!responsavel) {
+    alert('Selecione o responsável pela inspeção de recebimento');
+    return;
+  }
+  
+  if (!retornoCotacao) {
+    alert('Selecione se é necessário retorno das cotações realizadas');
+    return;
+  }
+  
+  window.carrinhoCompras.push({
+    produto_codigo: codigo,
+    produto_descricao: descricao,
+    quantidade,
+    prazo_solicitado: prazo || null,
+    observacao: observacao || '',
+    departamento: departamento,
+    centro_custo: centroCusto,
+    objetivo_compra: objetivoCompra,
+    resp_inspecao_recebimento: responsavel,
+    retorno_cotacao: retornoCotacao
+  });
+  
+  renderCarrinhoCompras();
+  fecharModalCompras();
+}
+
+// Limpa carrinho
+function limparCarrinhoCompras() {
+  if (!confirm('Deseja limpar todos os itens do carrinho?')) return;
+  window.carrinhoCompras = [];
+  renderCarrinhoCompras();
+}
+
+// Envia pedido completo
+async function enviarPedidoCompras() {
+  const carrinho = window.carrinhoCompras || [];
+  
+  if (carrinho.length === 0) {
+    alert('Carrinho vazio');
+    return;
+  }
+  
+  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim() 
+    || window.__sessionUser?.username || '';
+  
+  if (!solicitante) {
+    alert('Usuário não identificado');
+    return;
+  }
+  
+  if (!confirm(`Enviar pedido com ${carrinho.length} item(ns)?`)) return;
+  
+  const statusEl = document.getElementById('comprasFormStatus');
+  const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
+  
+  if (btnEnviar) btnEnviar.disabled = true;
+  
+  try {
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#3b82f6';
+      statusEl.style.color = 'white';
+      statusEl.textContent = 'Enviando pedido...';
+    }
+    
+    const resp = await fetch('/api/compras/pedido', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itens: carrinho, solicitante })
+    });
+    
+    const data = await resp.json();
+    
+    if (!resp.ok || !data.ok) {
+      throw new Error(data.error || 'Erro ao enviar pedido');
+    }
+    
+    if (statusEl) {
+      statusEl.style.background = '#22c55e';
+      statusEl.textContent = `✓ Pedido ${data.numero_pedido} enviado com sucesso! (${data.total_itens} itens)`;
+    }
+    
+    window.carrinhoCompras = [];
+    renderCarrinhoCompras();
+    
+    setTimeout(() => {
+      if (statusEl) statusEl.style.display = 'none';
+      loadMinhasSolicitacoes();
+    }, 3000);
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao enviar pedido:', err);
+    if (statusEl) {
+      statusEl.style.background = '#ef4444';
+      statusEl.textContent = `✗ ${err.message}`;
+    }
+    alert('Erro ao enviar pedido: ' + err.message);
+  } finally {
+    if (btnEnviar) btnEnviar.disabled = false;
+  }
+}
+
+// Binds dos botões do carrinho
+document.getElementById('comprasAbrirModalBtn')?.addEventListener('click', abrirModalCompras);
+document.getElementById('comprasModalFecharBtn')?.addEventListener('click', fecharModalCompras);
+document.getElementById('modalComprasCancelarBtn')?.addEventListener('click', fecharModalCompras);
+document.getElementById('comprasModalForm')?.addEventListener('submit', adicionarItemCarrinho);
+document.getElementById('comprasLimparCarrinhoBtn')?.addEventListener('click', limparCarrinhoCompras);
+document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoCompras);
+
+// Autocomplete para o modal (reutiliza lógica existente)
+(function initModalComprasAutocomplete() {
+  const inputEl = document.getElementById('modalComprasCodigo');
+  const sugestoesEl = document.getElementById('modalComprasCodigoSugestoes');
+  const descHiddenEl = document.getElementById('modalComprasDescricaoSelecionada');
+  const statusEl = document.getElementById('modalComprasBuscaStatus');
+  
+  if (!inputEl || !sugestoesEl) return;
+  
+  let timeoutBusca = null;
+  
+  inputEl.addEventListener('input', () => {
+    clearTimeout(timeoutBusca);
+    const termo = (inputEl.value || '').trim();
+    
+    if (termo.length < 2) {
+      sugestoesEl.style.display = 'none';
+      sugestoesEl.innerHTML = '';
+      if (statusEl) statusEl.textContent = '';
+      return;
+    }
+    
+    if (statusEl) statusEl.textContent = 'Buscando...';
+    
+    timeoutBusca = setTimeout(async () => {
+      try {
+        const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(termo)}`);
+        const data = await resp.json();
+        
+        if (!resp.ok) throw new Error('Erro na busca');
+        
+        const prods = data.produtos || [];
+        
+        if (statusEl) statusEl.textContent = prods.length ? `${prods.length} resultado(s)` : 'Nenhum produto encontrado';
+        
+        if (prods.length === 0) {
+          sugestoesEl.style.display = 'none';
+          sugestoesEl.innerHTML = '';
+          return;
+        }
+        
+        sugestoesEl.innerHTML = prods.slice(0, 20).map(p => `
+          <li style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);transition:background 0.2s;"
+              data-codigo="${window.escapeHtml(p.codigo)}"
+              data-descricao="${window.escapeHtml(p.descricao)}"
+              onmouseover="this.style.background='rgba(59,130,246,0.2)'"
+              onmouseout="this.style.background='transparent'">
+            <strong>${window.escapeHtml(p.codigo)}</strong> — ${window.escapeHtml(p.descricao)}
+          </li>
+        `).join('');
+        
+        sugestoesEl.style.display = 'block';
+        
+        sugestoesEl.querySelectorAll('li').forEach(li => {
+          li.addEventListener('click', () => {
+            inputEl.value = li.getAttribute('data-codigo') || '';
+            const desc = li.getAttribute('data-descricao') || '';
+            descHiddenEl.value = desc;
+            // Preenche o campo descrição visível
+            const descInput = document.getElementById('modalComprasDescricao');
+            if (descInput) descInput.value = desc;
+            sugestoesEl.style.display = 'none';
+            if (statusEl) statusEl.textContent = '';
+          });
+        });
+        
+      } catch (err) {
+        console.error('[Modal Compras] Erro ao buscar:', err);
+        if (statusEl) statusEl.textContent = 'Erro na busca';
+      }
+    }, 400);
+  });
+  
+  // Fecha ao clicar fora
+  document.addEventListener('click', (ev) => {
+    if (!inputEl.contains(ev.target) && !sugestoesEl.contains(ev.target)) {
+      sugestoesEl.style.display = 'none';
+    }
+  });
+})();
+
+// ===================== FIM CARRINHO DE COMPRAS =====================
 
 // Helpers para formatar código e detectar links (quando o usuário digita um URL)
 function isProvavelUrl(valor) {
@@ -12052,23 +12707,44 @@ function formatarCodigoParaLista(codigo) {
 async function loadComprasSolicitacoes() {
   const tbody = document.getElementById('comprasTbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
   try {
-    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
-    const lista = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    // Filtra apenas itens com status "aguardando compra" ou "aguardando cotação"
+    const lista = listaCompleta.filter(item => {
+      const status = (item.status || '').toLowerCase();
+      return status === 'aguardando compra' || status === 'aguardando cotação';
+    });
+    
     if (!lista.length) {
-      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação aguardando compra ou cotação.</td></tr>';
       return;
     }
-    const statusOptions = [
+
+    // Agrupa itens por numero_pedido
+    const pedidosMap = new Map();
+    lista.forEach(item => {
+      const numPedido = item.numero_pedido || 'sem-numero';
+      if (!pedidosMap.has(numPedido)) {
+        pedidosMap.set(numPedido, []);
+      }
+      pedidosMap.get(numPedido).push(item);
+    });
+
+    // Usa lista de status do banco (carregada globalmente)
+    const statusOptions = window.comprasStatusList || [
       'aguardando aprovação',
+      'aguardando cotação',
       'aguardando compra',
       'compra realizada',
       'aguardando liberação',
       'compra cancelada',
-      'recebido'
+      'recebido',
+      'revisão'
     ];
 
     const fmtInputDate = (iso) => {
@@ -12082,70 +12758,220 @@ async function loadComprasSolicitacoes() {
       }
     };
 
-    tbody.innerHTML = lista.map(item => {
-      const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
-      const criado = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-';
-      const previsaoValue = fmtInputDate(item.prazo_estipulado);
-      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
-      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
-      const obs = item.observacao ? escapeHtml(item.observacao) : '-';
-      return `
-        <tr>
-          <td>${item.id}</td>
-          <td>${codigoFmt.html}</td>
-          <td>${descricao}</td>
-          <td>${item.quantidade ?? '-'}</td>
-          <td>${item.solicitante || '-'}</td>
-          <td>${prazo}</td>
-          <td>
-            <input type="date" data-id="${item.id}" data-field="prazo_estipulado" value="${previsaoValue}" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;" />
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const fmtDateTime = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
+    };
+
+    let html = '';
+    let pedidoIndex = 0;
+
+    pedidosMap.forEach((itens, numeroPedido) => {
+      const primeiroItem = itens[0];
+      const totalItens = itens.length;
+      const dataCriacao = fmtDateTime(primeiroItem.created_at);
+      const solicitante = escapeHtml(primeiroItem.solicitante || '-');
+      const expandId = `compras-pedido-expand-${pedidoIndex}`;
+
+      // Linha principal do pedido (colapsada)
+      html += `
+        <tr class="compras-pedido-header" data-expand-id="${expandId}" style="cursor:pointer;background:#f9fafb;">
+          <td style="text-align:center;">
+            <i class="fa-solid fa-chevron-right compras-expand-icon" style="color:#6b7280;transition:transform 0.2s;"></i>
           </td>
-          <td>
-            <select data-id="${item.id}" data-field="status" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;">
-              ${statusOptions.map(opt => `<option value="${opt}" ${ (item.status || 'aguardando aprovação') === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-            </select>
-          </td>
-              <td>${obs}</td>
-          <td>${criado}</td>
+          <td><strong style="color:#3b82f6;">${escapeHtml(numeroPedido)}</strong></td>
+          <td><span style="background:#e0e7ff;color:#3730a3;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">${totalItens} ${totalItens === 1 ? 'item' : 'itens'}</span></td>
+          <td style="color:#1f2937;font-weight:500;">${solicitante}</td>
+          <td style="color:#1f2937;font-weight:500;">${dataCriacao}</td>
+          <td></td>
         </tr>
       `;
-    }).join('');
 
-    // Listeners para atualizar status e previsão
-    const selects = tbody.querySelectorAll('select[data-field="status"]');
-    selects.forEach(sel => {
-      sel.addEventListener('change', async () => {
-        const id = sel.dataset.id;
-        await updateSolicitacaoCompras(id, { status: sel.value });
+      // Linhas dos itens (inicialmente ocultas)
+      itens.forEach((item) => {
+        const previsaoValue = fmtInputDate(item.previsao_chegada);
+        const obs = item.observacao ? escapeHtml(item.observacao) : '-';
+        
+        html += `
+          <tr class="compras-pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
+            <td></td>
+            <td colspan="5" style="padding:12px 20px;">
+              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start;border-left:3px solid #e5e7eb;padding-left:16px;">
+                <div style="min-width:60px;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
+                  <div style="font-weight:600;color:#374151;">${item.id}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
+                    <div style="font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
+                  </div>
+                  <div style="grid-column:span 2;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+                    <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
+                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
+                    <div>
+                      <select data-id="${item.id}" data-field="status" data-original="${escapeHtml(item.status || 'pendente')}" class="compras-editable-field" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;cursor:pointer;width:100%;max-width:200px;">
+                        ${statusOptions.map(opt => `<option value="${opt}" ${ (item.status || 'pendente') === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
+                    <div style="color:#374151;">${fmtDate(item.prazo_solicitado)}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Previsão chegada</div>
+                    <div>
+                      <input type="date" data-id="${item.id}" data-field="previsao_chegada" data-original="${previsaoValue}" class="compras-editable-field" value="${previsaoValue}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;max-width:200px;" />
+                    </div>
+                  </div>
+                  <div style="grid-column:span 3;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
+                    <div style="color:#374151;">${obs}</div>
+                  </div>
+                </div>
+                <div id="compras-save-btn-${item.id}" style="display:none;">
+                  <button class="compras-save-changes" data-id="${item.id}" style="padding:8px 16px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;white-space:nowrap;">
+                    <i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvar
+                  </button>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      });
+
+      pedidoIndex++;
+    });
+
+    tbody.innerHTML = html;
+
+    // Adiciona event listeners para expandir/colapsar
+    document.querySelectorAll('.compras-pedido-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const expandId = header.getAttribute('data-expand-id');
+        const icon = header.querySelector('.compras-expand-icon');
+        const itens = document.querySelectorAll(`.compras-pedido-item[data-pedido="${expandId}"]`);
+        
+        const isExpanded = itens[0]?.style.display !== 'none';
+        
+        itens.forEach(item => {
+          item.style.display = isExpanded ? 'none' : 'table-row';
+        });
+        
+        icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
       });
     });
 
-    const dates = tbody.querySelectorAll('input[data-field="prazo_estipulado"]');
-    dates.forEach(inp => {
-      inp.addEventListener('change', async () => {
-        const id = inp.dataset.id;
-        await updateSolicitacaoCompras(id, { prazo_estipulado: inp.value || null });
+    // Listeners para detectar mudanças nos campos editáveis
+    const editableFields = tbody.querySelectorAll('.compras-editable-field');
+    editableFields.forEach(field => {
+      field.addEventListener('change', () => {
+        const itemId = field.getAttribute('data-id');
+        const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+        if (saveBtn) {
+          saveBtn.style.display = 'block';
+        }
       });
     });
+
+    // Listeners para os botões de salvar
+    const saveBtns = tbody.querySelectorAll('.compras-save-changes');
+    saveBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-id');
+        
+        // Coleta os valores dos campos editáveis deste item
+        const statusField = tbody.querySelector(`select[data-id="${itemId}"][data-field="status"]`);
+        const previsaoField = tbody.querySelector(`input[data-id="${itemId}"][data-field="previsao_chegada"]`);
+        
+        const payload = {};
+        
+        if (statusField && statusField.value !== statusField.getAttribute('data-original')) {
+          payload.status = statusField.value;
+        }
+        
+        if (previsaoField && previsaoField.value !== previsaoField.getAttribute('data-original')) {
+          payload.previsao_chegada = previsaoField.value || null;
+        }
+        
+        if (Object.keys(payload).length === 0) {
+          // Nenhuma mudança
+          const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+          if (saveBtn) saveBtn.style.display = 'none';
+          return;
+        }
+        
+        // Salva as mudanças
+        try {
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Salvando...';
+          btn.disabled = true;
+          
+          await updateSolicitacaoCompras(itemId, payload);
+          
+          // Atualiza os valores originais
+          if (statusField) statusField.setAttribute('data-original', statusField.value);
+          if (previsaoField) previsaoField.setAttribute('data-original', previsaoField.value);
+          
+          // Feedback visual
+          btn.style.background = '#10b981';
+          btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvo!';
+          
+          setTimeout(() => {
+            const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+            if (saveBtn) saveBtn.style.display = 'none';
+            btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvar';
+            btn.disabled = false;
+          }, 1500);
+          
+        } catch (err) {
+          console.error('[COMPRAS] Erro ao salvar:', err);
+          btn.style.background = '#ef4444';
+          btn.innerHTML = '<i class="fa-solid fa-xmark" style="margin-right:6px;"></i>Erro';
+          btn.disabled = false;
+          
+          setTimeout(() => {
+            btn.style.background = '#10b981';
+            btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Salvar';
+          }, 2000);
+        }
+      });
+    });
+
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar:', err);
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar solicitações.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar solicitações.</td></tr>';
   }
 }
 
 async function loadComprasRecebimento() {
   const tbody = document.getElementById('recebimentoTbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
   try {
-    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     const lista = (Array.isArray(data.solicitacoes) ? data.solicitacoes : [])
       .filter(item => (item.status || '').toLowerCase() === 'compra realizada');
 
     if (!lista.length) {
-      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada com status "compra realizada".</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada com status "compra realizada".</td></tr>';
       return;
     }
 
@@ -12162,23 +12988,22 @@ async function loadComprasRecebimento() {
 
     tbody.innerHTML = lista.map(item => {
       const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
-      const criado = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-';
-      const previsao = fmtInputDate(item.prazo_estipulado);
-      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
-      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
+      const criado = item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '-';
+      const previsao = fmtInputDate(item.previsao_chegada);
       const obs = item.observacao ? escapeHtml(item.observacao) : '-';
-      const quem = item.quem_recebe ? escapeHtml(item.quem_recebe) : '-';
+      const responsavel = item.responsavel ? escapeHtml(item.responsavel) : '-';
       return `
         <tr>
+          <td><strong>${escapeHtml(item.numero_pedido || '')}</strong></td>
           <td>${item.id}</td>
-          <td>${codigoFmt.html}</td>
-          <td>${descricao}</td>
+          <td>${escapeHtml(item.produto_codigo || '')}</td>
+          <td style="max-width:300px;">${escapeHtml(item.produto_descricao || '-')}</td>
           <td>${item.quantidade ?? '-'}</td>
-          <td>${item.solicitante || '-'}</td>
+          <td>${escapeHtml(item.solicitante || '-')}</td>
           <td>${prazo}</td>
           <td>${previsao ? new Date(previsao).toLocaleDateString('pt-BR') : ''}</td>
-          <td>${quem}</td>
-          <td>${escapeHtml(item.status || '-')}</td>
+          <td>${responsavel}</td>
+          <td><span style="padding:4px 8px;border-radius:6px;background:#3b82f6;color:white;font-size:12px;">${escapeHtml(item.status || 'pendente')}</span></td>
           <td>${obs}</td>
           <td>${criado}</td>
         </tr>
@@ -12186,11 +13011,11 @@ async function loadComprasRecebimento() {
     }).join('');
   } catch (err) {
     console.error('[recebimento] carregar', err);
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:16px;color:var(--inactive-color);">Erro ao carregar dados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Erro ao carregar dados.</td></tr>';
   }
 }
 
-async function loadMinhasSolicitacoes() {
+async function loadMinhasSolicitacoes(filtroStatus = null) {
   const tbody = document.getElementById('comprasMinhasTbody');
   const wrapper = document.getElementById('minhasComprasWrapper');
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
@@ -12200,16 +13025,32 @@ async function loadMinhasSolicitacoes() {
     return;
   }
   wrapper.style.display = 'block';
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
   try {
-    const resp = await fetch('/api/compras/solicitacoes', { credentials: 'include' });
+    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
-    const lista = (Array.isArray(data.solicitacoes) ? data.solicitacoes : []).filter(it => (it.solicitante || '').trim() === currentUser);
+    let lista = data.solicitacoes || [];
+    
+    // Aplica filtro de status se fornecido
+    if (filtroStatus && filtroStatus.length > 0) {
+      lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
+    }
+    
     if (!lista.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação sua.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr>';
       return;
     }
+
+    // Agrupa itens por numero_pedido
+    const pedidosMap = new Map();
+    lista.forEach(item => {
+      const numPedido = item.numero_pedido || 'sem-numero';
+      if (!pedidosMap.has(numPedido)) {
+        pedidosMap.set(numPedido, []);
+      }
+      pedidosMap.get(numPedido).push(item);
+    });
 
     const fmtDate = (iso) => {
       if (!iso) return '-';
@@ -12217,50 +13058,167 @@ async function loadMinhasSolicitacoes() {
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
 
-    const optionsRecebedor = (selected) => {
-      const opts = comprasActiveUsers.map(u => `<option value="${u}" ${selected === u ? 'selected' : ''}>${u}</option>`).join('');
-      return `<option value="">Selecione</option>${opts}`;
+    const fmtDateTime = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
     };
 
-    tbody.innerHTML = lista.map(item => {
-      const codigoFmt = formatarCodigoParaLista(item.produto_codigo);
-      const descricao = codigoFmt.descricaoVazia ? '' : escapeHtml(item.produto_descricao || '-');
-      return `
-      <tr>
-        <td>${item.id}</td>
-        <td>${codigoFmt.html}</td>
-        <td>${descricao}</td>
-        <td>${item.quantidade ?? '-'}</td>
-        <td>${fmtDate(item.prazo_solicitado)}</td>
-        <td>${fmtDate(item.prazo_estipulado)}</td>
-        <td>${item.status || 'aguardando aprovação'}</td>
-        <td>
-          <select data-id="${item.id}" data-field="quem_recebe" style="background:#0f1116;color:#e5e7eb;border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;min-width:140px;">
-            ${optionsRecebedor(item.quem_recebe || '')}
-          </select>
-        </td>
-        <td>${item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '-'}</td>
-      </tr>
-    `;
-    }).join('');
+    let html = '';
+    let pedidoIndex = 0;
 
-    const selects = tbody.querySelectorAll('select[data-field="quem_recebe"]');
-    selects.forEach(sel => {
-      sel.addEventListener('change', async () => {
-        const id = sel.dataset.id;
-        await updateSolicitacaoCompras(id, { quem_recebe: sel.value || null });
+    pedidosMap.forEach((itens, numeroPedido) => {
+      const primeiroItem = itens[0];
+      const totalItens = itens.length;
+      const dataCriacao = fmtDateTime(primeiroItem.created_at);
+      const expandId = `pedido-expand-${pedidoIndex}`;
+
+      // Linha principal do pedido (colapsada)
+      html += `
+        <tr class="pedido-header" data-expand-id="${expandId}" style="cursor:pointer;background:#f9fafb;">
+          <td style="text-align:center;">
+            <i class="fa-solid fa-chevron-right expand-icon" style="color:#6b7280;transition:transform 0.2s;"></i>
+          </td>
+          <td><strong style="color:#3b82f6;">${escapeHtml(numeroPedido)}</strong></td>
+          <td><span style="background:#e0e7ff;color:#3730a3;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">${totalItens} ${totalItens === 1 ? 'item' : 'itens'}</span></td>
+          <td style="color:#1f2937;font-weight:500;">${dataCriacao}</td>
+          <td></td>
+        </tr>
+      `;
+
+      // Linhas dos itens (inicialmente ocultas)
+      itens.forEach((item, idx) => {
+        html += `
+          <tr class="pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
+            <td></td>
+            <td colspan="4" style="padding:12px 20px;">
+              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start;border-left:3px solid #e5e7eb;padding-left:16px;">
+                <div style="min-width:60px;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
+                  <div style="font-weight:600;color:#374151;">${item.id}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
+                    <div style="font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
+                  </div>
+                  <div style="grid-column:span 2;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+                    <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
+                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
+                    <div><span style="padding:4px 10px;border-radius:6px;background:#3b82f6;color:white;font-size:11px;font-weight:600;">${escapeHtml(item.status || 'pendente')}</span></div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
+                    <div style="color:#374151;">${fmtDate(item.prazo_solicitado)}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Resp. Inspeção</div>
+                    <div>
+                      <select class="resp-select" data-item-id="${item.id}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;cursor:pointer;width:100%;max-width:200px;">
+                        <option value="">Carregando...</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      });
+
+      pedidoIndex++;
+    });
+
+    tbody.innerHTML = html;
+
+    // Adiciona event listeners para expandir/colapsar
+    document.querySelectorAll('.pedido-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const expandId = header.getAttribute('data-expand-id');
+        const icon = header.querySelector('.expand-icon');
+        const itens = document.querySelectorAll(`.pedido-item[data-pedido="${expandId}"]`);
+        
+        const isExpanded = itens[0]?.style.display !== 'none';
+        
+        itens.forEach(item => {
+          item.style.display = isExpanded ? 'none' : 'table-row';
+        });
+        
+        icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
+      });
+    });
+
+    // Carrega lista de usuários para os selects
+    await carregarUsuariosParaSelects(lista);
+
+  } catch (err) {
+    console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar suas solicitações.</td></tr>';
+  }
+}
+
+// Carrega usuários nos selects de responsável
+async function carregarUsuariosParaSelects(lista, seletor = '.resp-select') {
+  try {
+    const respUsers = await fetch('/api/compras/usuarios');
+    if (!respUsers.ok) throw new Error('Erro ao carregar usuários');
+    const dataUsers = await respUsers.json();
+    const usuarios = dataUsers.usuarios || [];
+
+    // Popula cada select com a lista de usuários
+    document.querySelectorAll(seletor).forEach(select => {
+      const itemId = select.getAttribute('data-item-id');
+      const item = lista.find(i => i.id == itemId);
+      const respAtual = item?.resp_inspecao_recebimento || '';
+
+      select.innerHTML = usuarios.map(u => 
+        `<option value="${escapeHtml(u.username)}" ${u.username === respAtual ? 'selected' : ''}>${escapeHtml(u.username)}</option>`
+      ).join('');
+
+      // Event listener para salvar ao mudar
+      select.addEventListener('change', async (e) => {
+        const novoResp = e.target.value;
+        if (!novoResp) return;
+        
+        try {
+          const resp = await fetch(`/api/compras/item/${itemId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ resp_inspecao_recebimento: novoResp })
+          });
+          
+          if (!resp.ok) throw new Error('Falha ao atualizar');
+          
+          // Feedback visual
+          e.target.style.background = '#d1fae5';
+          setTimeout(() => {
+            e.target.style.background = 'white';
+          }, 1000);
+          
+        } catch (err) {
+          console.error('[COMPRAS] Erro ao atualizar responsável:', err);
+          alert('Erro ao atualizar responsável. Tente novamente.');
+          await loadMinhasSolicitacoes(); // Recarrega para restaurar valor original
+        }
       });
     });
   } catch (err) {
-    console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar suas solicitações.</td></tr>';
+    console.error('[COMPRAS] Erro ao carregar usuários:', err);
   }
 }
 
 async function updateSolicitacaoCompras(id, payload) {
   if (!id) return;
   try {
-    const resp = await fetch(`/api/compras/solicitacoes/${id}`, {
+    const resp = await fetch(`/api/compras/item/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -13458,7 +14416,6 @@ function highlightTokens(escapedText, tokens){
   const pattern = tokens.map(t => escapeRegex(t)).join('|');
   return escapedText.replace(new RegExp(pattern, 'gi'), m => `<mark class="hi">${m}</mark>`);
 }
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 
 // UI: expand/collapse da sub-estrutura com “grupo visual” próprio

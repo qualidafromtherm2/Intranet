@@ -1963,6 +1963,179 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
   }
 );
 
+// ============================================================================
+// WEBHOOKS E ENDPOINTS DE FORNECEDORES
+// ============================================================================
+
+// ============================================================================
+// WEBHOOK DE FORNECEDORES/CLIENTES DA OMIE
+// Eventos: ClienteFornecedor.Incluido, ClienteFornecedor.Alterado, ClienteFornecedor.Excluido
+// ============================================================================
+
+app.post(['/webhooks/omie/clientes', '/api/webhooks/omie/clientes'],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+      const event = body.event || body;
+      
+      // Log do webhook recebido
+      console.log('[webhooks/omie/clientes] Webhook recebido:', JSON.stringify(body, null, 2));
+      
+      // Campos que podem vir no webhook da Omie
+      const topic = body.topic || event.topic || '';  // Ex: "ClienteFornecedor.Incluido"
+      const codigoClienteOmie = event.codigo_cliente_omie || 
+                                 event.codigoClienteOmie || 
+                                 event.nCodCli ||
+                                 body.codigo_cliente_omie ||
+                                 body.codigoClienteOmie ||
+                                 body.nCodCli;
+      
+      if (!codigoClienteOmie) {
+        console.warn('[webhooks/omie/clientes] Webhook sem codigo_cliente_omie:', JSON.stringify(body));
+        return res.json({ ok: true, msg: 'Sem codigo_cliente_omie para processar' });
+      }
+      
+      console.log(`[webhooks/omie/clientes] Processando evento "${topic}" para cliente ${codigoClienteOmie}`);
+      
+      // Se for exclusão, apenas marca como inativo no banco
+      if (topic.includes('Excluido') || event.excluido || body.excluido) {
+        await pool.query(`
+          UPDATE omie.fornecedores 
+          SET inativo = true, updated_at = NOW()
+          WHERE codigo_cliente_omie = $1
+        `, [codigoClienteOmie]);
+        
+        console.log(`[webhooks/omie/clientes] Cliente ${codigoClienteOmie} marcado como inativo (excluído)`);
+        
+        return res.json({ 
+          ok: true, 
+          codigo_cliente_omie: codigoClienteOmie,
+          acao: 'excluido',
+          atualizado: true 
+        });
+      }
+      
+      // Para inclusão ou alteração, busca dados completos na API da Omie
+      const response = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarCliente',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            codigo_cliente_omie: parseInt(codigoClienteOmie)
+          }]
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[webhooks/omie/clientes] Erro na API Omie: ${response.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+      
+      const cliente = await response.json();
+      
+      // Atualiza no banco
+      await upsertFornecedor(cliente);
+      
+      const acao = topic.includes('Incluido') ? 'incluido' : 'alterado';
+      console.log(`[webhooks/omie/clientes] Cliente ${codigoClienteOmie} ${acao} com sucesso`);
+      
+      res.json({ 
+        ok: true, 
+        codigo_cliente_omie: codigoClienteOmie,
+        acao: acao,
+        atualizado: true 
+      });
+    } catch (err) {
+      console.error('[webhooks/omie/clientes] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+// Endpoint para sincronizar todos os fornecedores manualmente
+app.post('/api/fornecedores/sync', express.json(), async (req, res) => {
+  try {
+    const result = await syncFornecedoresOmie();
+    res.json(result);
+  } catch (err) {
+    console.error('[API /api/fornecedores/sync] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para listar fornecedores do banco local
+app.get('/api/fornecedores', async (req, res) => {
+  try {
+    const { ativo, search, limit = 100 } = req.query;
+    
+    let query = 'SELECT * FROM omie.fornecedores WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+    
+    // Filtro por ativo/inativo
+    if (ativo === 'true' || ativo === '1') {
+      query += ` AND inativo = false`;
+    } else if (ativo === 'false' || ativo === '0') {
+      query += ` AND inativo = true`;
+    }
+    
+    // Busca por nome, razão social ou CNPJ
+    if (search && search.trim()) {
+      query += ` AND (
+        razao_social ILIKE $${paramCount} OR 
+        nome_fantasia ILIKE $${paramCount} OR 
+        cnpj_cpf ILIKE $${paramCount}
+      )`;
+      params.push(`%${search.trim()}%`);
+      paramCount++;
+    }
+    
+    query += ` ORDER BY razao_social LIMIT $${paramCount}`;
+    params.push(parseInt(limit) || 100);
+    
+    const { rows } = await pool.query(query, params);
+    
+    res.json({ 
+      ok: true, 
+      total: rows.length,
+      fornecedores: rows 
+    });
+  } catch (err) {
+    console.error('[API /api/fornecedores] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar um fornecedor específico
+app.get('/api/fornecedores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { rows } = await pool.query(
+      'SELECT * FROM omie.fornecedores WHERE codigo_cliente_omie = $1',
+      [id]
+    );
+    
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Fornecedor não encontrado' });
+    }
+    
+    res.json({ 
+      ok: true, 
+      fornecedor: rows[0] 
+    });
+  } catch (err) {
+    console.error('[API /api/fornecedores/:id] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 
 // --- Buscar produtos no Postgres (autocomplete do PCP) ---
 app.get('/api/produtos/search', async (req, res) => {
@@ -1975,40 +2148,25 @@ app.get('/api/produtos/search', async (req, res) => {
     }
 
     // Busca por código OU pela descrição (case/accent-insensitive)
-    // Usa índices: idx_produtos_codigo, idx_produtos_desc_trgm
-// SUBSTITUA o SQL dentro de GET /api/produtos/search por isto:
-const { rows } = await pool.query(
-  `
-  WITH m AS (
-    SELECT p.codigo, p.descricao, p.tipo, 1 AS prio
-      FROM public.produtos p
-     WHERE p.codigo ILIKE $1
-        OR unaccent(p.descricao) ILIKE unaccent($2)
+    // Busca na tabela produtos_omie (coluna codigo e descricao)
+    const { rows } = await pool.query(
+      `
+      SELECT 
+        codigo,
+        descricao
+      FROM public.produtos_omie
+      WHERE 
+        codigo ILIKE $1
+        OR unaccent(descricao) ILIKE unaccent($2)
+      ORDER BY
+        (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
+        codigo
+      LIMIT $4
+      `,
+      [`%${q}%`, `%${q}%`, `${q}%`, limit]
+    );
 
-    UNION ALL
-
-    SELECT v.codigo, v.descricao, NULL::text AS tipo, 2 AS prio
-      FROM public.vw_lista_produtos v
-     WHERE v.codigo ILIKE $1
-        OR unaccent(v.descricao) ILIKE unaccent($2)
-  ),
-  dedup AS (
-    SELECT DISTINCT ON (codigo) codigo, descricao, tipo, prio
-      FROM m
-     ORDER BY codigo, prio        -- prefere linha da tabela (prio=1) se existir
-  )
-  SELECT codigo, descricao, tipo
-    FROM dedup
-   ORDER BY
-     (CASE WHEN codigo ILIKE $3 THEN 0 ELSE 1 END),
-     codigo
-   LIMIT $4
-  `,
-  [`%${q}%`, `%${q}%`, `${q}%`, limit]
-);
-
-
-    res.json({ ok: true, total: rows.length, data: rows });
+    res.json({ ok: true, total: rows.length, produtos: rows });
   } catch (err) {
     console.error('[GET /api/produtos/search] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
@@ -2954,6 +3112,47 @@ app.post('/api/upload/bom', upload.single('bom'), async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[upload/bom]', err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Upload de arquivos para Supabase Storage (compras e outros anexos)
+app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+    
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
+    const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+    
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
+    
+    const { data, error } = await supabase.storage
+      .from('compras-anexos')
+      .upload(filePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false
+      });
+    
+    if (error) {
+      console.error('[Supabase Upload Error]', error);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    // Gera URL pública
+    const { data: publicData } = supabase.storage
+      .from('compras-anexos')
+      .getPublicUrl(filePath);
+    
+    res.json({ 
+      ok: true, 
+      path: filePath,
+      url: publicData.publicUrl
+    });
+  } catch (err) {
+    console.error('[upload/supabase]', err);
     res.status(500).json({ error: String(err) });
   }
 });
@@ -8399,6 +8598,798 @@ app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async 
   } catch (err) {
     console.error('[API] /api/engenharia/atividade-produto-status/bulk erro:', err);
     res.status(500).json({ error: 'Falha ao salvar status das atividades específicas' });
+  }
+});
+
+// ===================== COMPRAS - CARRINHO DE PEDIDOS =====================
+
+// Cria schema e tabela de solicitações de compras com número de pedido
+async function ensureComprasSchema() {
+  try {
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS compras`);
+    
+    // Cria tabela se não existir
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.solicitacao_compras (
+        id SERIAL PRIMARY KEY,
+        numero_pedido TEXT,
+        produto_codigo TEXT NOT NULL,
+        produto_descricao TEXT,
+        quantidade NUMERIC(15,4) DEFAULT 0,
+        prazo_solicitado DATE,
+        previsao_chegada DATE,
+        status TEXT DEFAULT 'pendente',
+        observacao TEXT,
+        solicitante TEXT,
+        responsavel TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Adiciona coluna numero_pedido se não existir (migração)
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'numero_pedido'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN numero_pedido TEXT;
+        END IF;
+      END $$;
+    `);
+    
+    // Renomeia colunas antigas se existirem
+    await pool.query(`
+      DO $$
+      BEGIN
+        -- Renomeia prazo_estipulado para previsao_chegada se existir
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'prazo_estipulado'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          RENAME COLUMN prazo_estipulado TO previsao_chegada;
+        END IF;
+        
+        -- Renomeia criado_em para created_at se existir
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'criado_em'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          RENAME COLUMN criado_em TO created_at;
+        END IF;
+        
+        -- Renomeia responsavel para resp_inspecao_recebimento se existir
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'responsavel'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          RENAME COLUMN responsavel TO resp_inspecao_recebimento;
+        END IF;
+        
+        -- Remove coluna quem_recebe (substituída por resp_inspecao_recebimento)
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'quem_recebe'
+        ) THEN
+          -- Copia dados de quem_recebe para resp_inspecao_recebimento se estiver vazio
+          UPDATE compras.solicitacao_compras 
+          SET resp_inspecao_recebimento = quem_recebe 
+          WHERE resp_inspecao_recebimento IS NULL AND quem_recebe IS NOT NULL;
+          
+          ALTER TABLE compras.solicitacao_compras 
+          DROP COLUMN quem_recebe;
+        END IF;
+        
+        -- Adiciona coluna updated_at se não existir
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'updated_at'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+        END IF;
+      END $$;
+    `);
+    
+    // Cria schema configuracoes se não existir
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS configuracoes`);
+    
+    // Cria tabela de departamentos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.departamento (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL UNIQUE,
+        ativo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Insere departamentos padrão se não existirem
+    await pool.query(`
+      INSERT INTO configuracoes.departamento (nome) 
+      VALUES 
+        ('Administrativo'),
+        ('Produção'),
+        ('Comercial')
+      ON CONFLICT (nome) DO NOTHING
+    `);
+    
+    // Cria tabela de centro de custo
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.centro_custo (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL UNIQUE,
+        ativo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Insere centros de custo padrão se não existirem
+    await pool.query(`
+      INSERT INTO configuracoes.centro_custo (nome)
+      VALUES
+        ('Materia prima'),
+        ('Investimento na produção'),
+        ('Maquinas e equipamentos'),
+        ('Manutenção'),
+        ('Certificação e qualidade'),
+        ('P&D'),
+        ('Engenharia'),
+        ('Ferramentas'),
+        ('Outros')
+      ON CONFLICT (nome) DO NOTHING
+    `);
+    
+    // Cria tabela de status de compras
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.status_compras (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL UNIQUE,
+        ordem INTEGER DEFAULT 0,
+        ativo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Insere status padrão se não existirem
+    await pool.query(`
+      INSERT INTO configuracoes.status_compras (nome, ordem)
+      VALUES
+        ('aguardando aprovação', 1),
+        ('aguardando cotação', 2),
+        ('aguardando compra', 3),
+        ('compra realizada', 4),
+        ('aguardando liberação', 5),
+        ('compra cancelada', 6),
+        ('recebido', 7),
+        ('revisão', 8)
+      ON CONFLICT (nome) DO NOTHING
+    `);
+    
+    // Adiciona colunas departamento, centro_custo e objetivo_compra na tabela solicitacao_compras
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'departamento'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN departamento TEXT;
+        END IF;
+        
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'centro_custo'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN centro_custo TEXT;
+        END IF;
+        
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'objetivo_compra'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN objetivo_compra TEXT;
+        END IF;
+        
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'anexo_url'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN anexo_url TEXT;
+        END IF;
+        
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'retorno_cotacao'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN retorno_cotacao TEXT;
+        END IF;
+      END $$;
+    `);
+    
+    // Cria índices se não existirem
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_numero_pedido 
+        ON compras.solicitacao_compras(numero_pedido);
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_solicitante 
+        ON compras.solicitacao_compras(solicitante);
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_status 
+        ON compras.solicitacao_compras(status);
+    `);
+    
+    console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
+  } catch (e) {
+    console.error('[Compras] Erro ao criar schema:', e);
+  }
+}
+ensureComprasSchema();
+
+// ============================================================================
+// FORNECEDORES (CLIENTES) DA OMIE
+// ============================================================================
+
+async function ensureFornecedoresSchema() {
+  try {
+    // Cria schema omie se não existir
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS omie`);
+    
+    // Cria tabela de fornecedores
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS omie.fornecedores (
+        id SERIAL PRIMARY KEY,
+        codigo_cliente_omie BIGINT UNIQUE,
+        codigo_cliente_integracao TEXT,
+        razao_social TEXT,
+        nome_fantasia TEXT,
+        cnpj_cpf TEXT,
+        telefone1_ddd TEXT,
+        telefone1_numero TEXT,
+        email TEXT,
+        endereco TEXT,
+        endereco_numero TEXT,
+        complemento TEXT,
+        bairro TEXT,
+        cidade TEXT,
+        estado TEXT,
+        cep TEXT,
+        inativo BOOLEAN DEFAULT false,
+        tags TEXT[],
+        info JSON,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Cria índices
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_codigo_omie 
+        ON omie.fornecedores(codigo_cliente_omie);
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_cnpj 
+        ON omie.fornecedores(cnpj_cpf);
+      CREATE INDEX IF NOT EXISTS idx_fornecedores_nome 
+        ON omie.fornecedores(razao_social);
+    `);
+    
+    console.log('[Fornecedores] Schema e tabela garantidos');
+  } catch (e) {
+    console.error('[Fornecedores] Erro ao criar schema:', e);
+  }
+}
+ensureFornecedoresSchema();
+
+// Sincroniza todos os fornecedores da Omie
+async function syncFornecedoresOmie() {
+  try {
+    console.log('[Fornecedores] Iniciando sincronização com Omie...');
+    let pagina = 1;
+    let totalSincronizados = 0;
+    let continuar = true;
+    
+    while (continuar) {
+      const body = {
+        call: 'ListarClientes',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina: pagina,
+          registros_por_pagina: 50,
+          apenas_importado_api: 'N'
+        }]
+      };
+      
+      console.log(`[Fornecedores] Buscando página ${pagina}...`);
+      
+      const response = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const clientes = data.clientes_cadastro || [];
+      const totalPaginas = data.total_de_paginas || 1;
+      const totalRegistros = data.total_de_registros || 0;
+      
+      console.log(`[Fornecedores] Página ${pagina}/${totalPaginas} - ${clientes.length} registros (Total na Omie: ${totalRegistros})`);
+      
+      if (!clientes.length) {
+        continuar = false;
+        break;
+      }
+      
+      // Upsert em batch
+      for (const cliente of clientes) {
+        await upsertFornecedor(cliente);
+        totalSincronizados++;
+        
+        // Log a cada 500 itens
+        if (totalSincronizados % 500 === 0) {
+          console.log(`[Fornecedores] ✓ Progresso: ${totalSincronizados} fornecedores sincronizados...`);
+        }
+      }
+      
+      // Verifica se tem mais páginas
+      if (pagina >= totalPaginas) {
+        continuar = false;
+      } else {
+        pagina++;
+      }
+    }
+    
+    console.log(`[Fornecedores] ✓✓✓ Sincronização concluída: ${totalSincronizados} fornecedores sincronizados com sucesso!`);
+    return { ok: true, total: totalSincronizados };
+  } catch (e) {
+    console.error('[Fornecedores] ✗ Erro na sincronização:', e);
+    return { ok: false, error: e.message };
+  }
+}
+
+// Upsert de um fornecedor no banco
+async function upsertFornecedor(cliente) {
+  try {
+    const {
+      codigo_cliente_omie,
+      codigo_cliente_integracao,
+      razao_social,
+      nome_fantasia,
+      cnpj_cpf,
+      telefone1_ddd,
+      telefone1_numero,
+      email,
+      endereco,
+      endereco_numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+      cep,
+      inativo,
+      tags
+    } = cliente;
+    
+    await pool.query(`
+      INSERT INTO omie.fornecedores (
+        codigo_cliente_omie,
+        codigo_cliente_integracao,
+        razao_social,
+        nome_fantasia,
+        cnpj_cpf,
+        telefone1_ddd,
+        telefone1_numero,
+        email,
+        endereco,
+        endereco_numero,
+        complemento,
+        bairro,
+        cidade,
+        estado,
+        cep,
+        inativo,
+        tags,
+        info,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+      ON CONFLICT (codigo_cliente_omie) 
+      DO UPDATE SET
+        codigo_cliente_integracao = EXCLUDED.codigo_cliente_integracao,
+        razao_social = EXCLUDED.razao_social,
+        nome_fantasia = EXCLUDED.nome_fantasia,
+        cnpj_cpf = EXCLUDED.cnpj_cpf,
+        telefone1_ddd = EXCLUDED.telefone1_ddd,
+        telefone1_numero = EXCLUDED.telefone1_numero,
+        email = EXCLUDED.email,
+        endereco = EXCLUDED.endereco,
+        endereco_numero = EXCLUDED.endereco_numero,
+        complemento = EXCLUDED.complemento,
+        bairro = EXCLUDED.bairro,
+        cidade = EXCLUDED.cidade,
+        estado = EXCLUDED.estado,
+        cep = EXCLUDED.cep,
+        inativo = EXCLUDED.inativo,
+        tags = EXCLUDED.tags,
+        info = EXCLUDED.info,
+        updated_at = NOW()
+    `, [
+      codigo_cliente_omie,
+      codigo_cliente_integracao || null,
+      razao_social || '',
+      nome_fantasia || '',
+      cnpj_cpf || '',
+      telefone1_ddd || '',
+      telefone1_numero || '',
+      email || '',
+      endereco || '',
+      endereco_numero || '',
+      complemento || '',
+      bairro || '',
+      cidade || '',
+      estado || '',
+      cep || '',
+      inativo === 'S' || inativo === true,
+      Array.isArray(tags) ? tags : [],
+      JSON.stringify(cliente)
+    ]);
+  } catch (e) {
+    console.error('[Fornecedores] Erro ao fazer upsert:', e);
+  }
+}
+
+// Gera número único de pedido (formato: YYYYMMDD-HHMMSS-RANDOM)
+function gerarNumeroPedido() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${yyyy}${mm}${dd}-${hh}${min}${ss}-${rand}`;
+}
+
+// GET /api/compras/departamentos - Lista departamentos disponíveis
+app.get('/api/compras/departamentos', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, nome 
+      FROM configuracoes.departamento 
+      WHERE ativo = true 
+      ORDER BY nome
+    `);
+    res.json({ ok: true, departamentos: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar departamentos:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar departamentos' });
+  }
+});
+
+// GET /api/compras/centros-custo - Lista centros de custo disponíveis
+app.get('/api/compras/centros-custo', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, nome 
+      FROM configuracoes.centro_custo 
+      WHERE ativo = true 
+      ORDER BY nome
+    `);
+    res.json({ ok: true, centros: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar centros de custo:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar centros de custo' });
+  }
+});
+
+// GET /api/compras/status - Lista status de compras
+app.get('/api/compras/status', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, nome 
+      FROM configuracoes.status_compras 
+      WHERE ativo = true 
+      ORDER BY ordem, nome
+    `);
+    res.json({ ok: true, status: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar status:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar status' });
+  }
+});
+
+// GET /api/compras/usuarios - Lista usuários para responsável inspeção
+app.get('/api/compras/usuarios', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT username 
+      FROM public.auth_user 
+      WHERE username IS NOT NULL AND username != ''
+      ORDER BY username
+    `);
+    res.json({ ok: true, usuarios: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar usuários:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar usuários' });
+  }
+});
+
+// POST /api/compras/pedido - Cria um pedido completo (vários itens de uma vez)
+app.post('/api/compras/pedido', async (req, res) => {
+  try {
+    const { itens, solicitante } = req.body || {};
+    
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum item no carrinho' });
+    }
+    
+    if (!solicitante) {
+      return res.status(400).json({ ok: false, error: 'Solicitante é obrigatório' });
+    }
+    
+    const numeroPedido = gerarNumeroPedido();
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const item of itens) {
+        const {
+          produto_codigo,
+          produto_descricao,
+          quantidade,
+          prazo_solicitado,
+          observacao,
+          departamento,
+          centro_custo,
+          objetivo_compra,
+          resp_inspecao_recebimento,
+          retorno_cotacao
+        } = item;
+        
+        if (!produto_codigo || !quantidade) {
+          throw new Error('Cada item precisa ter produto_codigo e quantidade');
+        }
+        
+        // Define status inicial baseado no retorno_cotacao
+        // Se retorno_cotacao = 'Não' -> 'aguardando compra'
+        // Se retorno_cotacao = 'Sim' -> 'aguardando cotação'
+        const statusInicial = (retorno_cotacao === 'Não') ? 'aguardando compra' : 'aguardando cotação';
+        
+        await client.query(`
+          INSERT INTO compras.solicitacao_compras (
+            numero_pedido,
+            produto_codigo,
+            produto_descricao,
+            quantidade,
+            prazo_solicitado,
+            status,
+            observacao,
+            solicitante,
+            departamento,
+            centro_custo,
+            objetivo_compra,
+            resp_inspecao_recebimento,
+            retorno_cotacao,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+        `, [
+          numeroPedido,
+          produto_codigo,
+          produto_descricao || '',
+          quantidade,
+          prazo_solicitado || null,
+          statusInicial,
+          observacao || '',
+          solicitante,
+          departamento || null,
+          centro_custo || null,
+          objetivo_compra || null,
+          resp_inspecao_recebimento || solicitante,
+          retorno_cotacao || null
+        ]);
+      }
+      
+      await client.query('COMMIT');
+      
+      console.log(`[Compras] Pedido ${numeroPedido} criado com ${itens.length} item(ns) por ${solicitante}`);
+      
+      res.json({
+        ok: true,
+        numero_pedido: numeroPedido,
+        total_itens: itens.length
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[Compras] Erro ao criar pedido:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao criar pedido' });
+  }
+});
+
+// GET /api/compras/minhas - Lista solicitações do usuário logado
+app.get('/api/compras/minhas', async (req, res) => {
+  try {
+    const solicitante = req.query.solicitante;
+    
+    if (!solicitante) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro solicitante é obrigatório' });
+    }
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        numero_pedido,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        prazo_solicitado,
+        previsao_chegada,
+        status,
+        observacao,
+        solicitante,
+        resp_inspecao_recebimento,
+        departamento,
+        centro_custo,
+        objetivo_compra,
+        created_at,
+        updated_at
+      FROM compras.solicitacao_compras
+      WHERE solicitante = $1
+      ORDER BY created_at DESC
+      LIMIT 500
+    `, [solicitante]);
+    
+    res.json({ ok: true, solicitacoes: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar minhas solicitações:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// GET /api/compras/todas - Lista todas as solicitações (para gestores)
+app.get('/api/compras/todas', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        numero_pedido,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        prazo_solicitado,
+        previsao_chegada,
+        status,
+        observacao,
+        solicitante,
+        resp_inspecao_recebimento,
+        departamento,
+        centro_custo,
+        objetivo_compra,
+        created_at,
+        updated_at
+      FROM compras.solicitacao_compras
+      ORDER BY created_at DESC
+      LIMIT 1000
+    `);
+    
+    res.json({ ok: true, solicitacoes: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar todas solicitações:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// PUT /api/compras/item/:id - Atualiza uma solicitação individual
+app.put('/api/compras/item/:id', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const { status, previsao_chegada, observacao, resp_inspecao_recebimento } = req.body || {};
+    
+    const allowedStatus = [
+      'pendente',
+      'aguardando aprovação',
+      'aguardando compra',
+      'compra realizada',
+      'aguardando liberação',
+      'compra cancelada',
+      'recebido'
+    ];
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (status) {
+      if (!allowedStatus.includes(status)) {
+        return res.status(400).json({ ok: false, error: 'Status inválido' });
+      }
+      fields.push(`status = $${idx++}`);
+      values.push(status);
+    }
+
+    if (typeof previsao_chegada !== 'undefined') {
+      fields.push(`previsao_chegada = $${idx++}`);
+      values.push(previsao_chegada || null);
+    }
+
+    if (typeof observacao !== 'undefined') {
+      fields.push(`observacao = $${idx++}`);
+      values.push(observacao || null);
+    }
+
+    if (typeof resp_inspecao_recebimento !== 'undefined') {
+      fields.push(`resp_inspecao_recebimento = $${idx++}`);
+      values.push(resp_inspecao_recebimento || null);
+    }
+
+    if (!fields.length) {
+      return res.status(400).json({ ok: false, error: 'Nada para atualizar' });
+    }
+
+    fields.push(`updated_at = NOW()`);
+    values.push(id);
+
+    const sql = `
+      UPDATE compras.solicitacao_compras
+      SET ${fields.join(', ')}
+      WHERE id = $${idx}
+      RETURNING *
+    `;
+
+    const { rows } = await pool.query(sql, values);
+    
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Solicitação não encontrada' });
+    }
+
+    res.json({ ok: true, solicitacao: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao atualizar item:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar solicitação' });
   }
 });
 
