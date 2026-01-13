@@ -5164,6 +5164,79 @@ function garantirBadgeEnvioParaLogistica() {
 // roda no carregamento e quando a sessão mudar
 garantirBadgeEnvioParaLogistica();
 
+// ========== BADGE DE COMPRAS NO TÍTULO DA ABA ==========
+// Atualiza o contador de compras na guia (apenas usuários do departamento de compras)
+let comprasBadgeTimer = null;
+let comprasBadgeVisibilityBound = false;
+
+async function _atualizarTituloCompras() {
+  try {
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    // Conta itens por status
+    const aguardandoCompra = listaCompleta.filter(item => 
+      (item.status || '').toLowerCase() === 'aguardando compra'
+    ).length;
+    
+    const aguardandoCotacao = listaCompleta.filter(item => 
+      (item.status || '').toLowerCase() === 'aguardando cotação'
+    ).length;
+    
+    const baseTitle = 'Produtos';
+    
+    // Atualiza título apenas se houver itens pendentes
+    if (aguardandoCompra > 0 || aguardandoCotacao > 0) {
+      document.title = `${baseTitle} (${aguardandoCompra}) - (${aguardandoCotacao})`;
+    } else {
+      document.title = baseTitle;
+    }
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao atualizar título:', err);
+  }
+}
+
+function _pararBadgeCompras() {
+  if (comprasBadgeTimer) {
+    clearInterval(comprasBadgeTimer);
+    comprasBadgeTimer = null;
+  }
+  document.title = 'Produtos';
+}
+
+function garantirBadgeComprasParaCompras() {
+  const userRoles = _rolesDoUsuario();
+  const setorNome = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '').toLowerCase();
+  const isCompras =
+    userRoles.some(r => String(r || '').toLowerCase() === 'compras') ||
+    setorNome.includes('compra');
+
+  if (!isCompras) {
+    _pararBadgeCompras();
+    return;
+  }
+
+  // evita múltiplos timers
+  if (!comprasBadgeTimer) {
+    const PING_INTERVAL_MS = 15000; // atualiza a cada 15 segundos
+    comprasBadgeTimer = setInterval(_atualizarTituloCompras, PING_INTERVAL_MS);
+    setTimeout(_atualizarTituloCompras, 200); // atualiza imediatamente
+  }
+
+  if (!comprasBadgeVisibilityBound) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') _atualizarTituloCompras();
+    });
+    comprasBadgeVisibilityBound = true;
+  }
+}
+
+// roda no carregamento e quando a sessão mudar
+garantirBadgeComprasParaCompras();
+// ========== FIM BADGE DE COMPRAS ==========
+
 // Impressão dos anexos (etiqueta/declaração) a partir dos botões da tabela
 function setupPrintButtons(container) {
   if (!container) return;
@@ -16954,6 +17027,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // reapply quando login/logout ou permissões mudarem
 window.addEventListener('auth:changed', ensureAuthVisibility);
 window.addEventListener('auth:changed', garantirBadgeEnvioParaLogistica);
+window.addEventListener('auth:changed', garantirBadgeComprasParaCompras);
 
 // após login/logout, sincroniza nós (se logado)
 window.addEventListener('auth:changed', async () => {
