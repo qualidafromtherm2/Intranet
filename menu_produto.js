@@ -12722,6 +12722,46 @@ async function carregarDepartamentosECentros() {
   }
 }
 
+// Aliases para compatibilidade com a função de edição
+async function loadModalComprasDepartamentos() {
+  const respDept = await fetch('/api/compras/departamentos');
+  const dataDept = await respDept.json();
+  const selectDept = document.getElementById('modalComprasDepartamento');
+  
+  if (selectDept && dataDept.ok) {
+    selectDept.innerHTML = '<option value="">Selecione o departamento</option>' +
+      (dataDept.departamentos || []).map(d => 
+        `<option value="${window.escapeHtml(d.nome)}">${window.escapeHtml(d.nome)}</option>`
+      ).join('');
+  }
+}
+
+async function loadModalComprasCentrosCusto() {
+  const respCentros = await fetch('/api/compras/centros-custo');
+  const dataCentros = await respCentros.json();
+  const selectCentros = document.getElementById('modalComprasCentroCusto');
+  
+  if (selectCentros && dataCentros.ok) {
+    selectCentros.innerHTML = '<option value="">Selecione o centro de custo</option>' +
+      (dataCentros.centros || []).map(c => 
+        `<option value="${window.escapeHtml(c.nome)}">${window.escapeHtml(c.nome)}</option>`
+      ).join('');
+  }
+}
+
+async function loadModalComprasResponsaveis() {
+  const respUsers = await fetch('/api/compras/usuarios');
+  const dataUsers = await respUsers.json();
+  const selectResp = document.getElementById('modalComprasResponsavel');
+  
+  if (selectResp && dataUsers.ok) {
+    selectResp.innerHTML = '<option value="">Selecione o responsável</option>' +
+      (dataUsers.usuarios || []).map(u => 
+        `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+      ).join('');
+  }
+}
+
 function fecharModalCompras() {
   const modal = document.getElementById('comprasModalOverlay');
   if (modal) modal.style.display = 'none';
@@ -14192,6 +14232,204 @@ async function loadComprasSolicitacoes() {
   }
 }
 
+// Abre modal de edição de item de compra
+async function abrirModalEditarCompra(item) {
+  if (!item) {
+    alert('Item não encontrado.');
+    return;
+  }
+
+  // Verifica se o status permite edição
+  const status = (item.status || '').toLowerCase();
+  if (status !== 'aguardando compra' && status !== 'aguardando cotação' && status !== 'aguardando_compra' && status !== 'aguardando_cotacao') {
+    alert('Este item não pode ser editado. Apenas itens com status "aguardando compra" ou "aguardando cotação" podem ser editados.');
+    return;
+  }
+
+  const modal = document.getElementById('comprasModalOverlay');
+  if (!modal) {
+    alert('Modal não encontrado.');
+    return;
+  }
+
+  // Mostra o modal
+  modal.style.display = 'flex';
+
+  // Mostra spinner
+  const spinner = document.getElementById('comprasModalSpinner');
+  const form = document.getElementById('comprasModalForm');
+  if (spinner) spinner.style.display = 'block';
+  if (form) form.style.display = 'none';
+
+  try {
+    // Carrega dados necessários para os selects
+    await Promise.all([
+      loadModalComprasDepartamentos(),
+      loadModalComprasCentrosCusto(),
+      loadModalComprasResponsaveis()
+    ]);
+
+    // Preenche os campos do formulário com os dados do item
+    const camposCodigo = document.getElementById('modalComprasCodigo');
+    const camposDescricao = document.getElementById('modalComprasDescricao');
+    const camposQuantidade = document.getElementById('modalComprasQuantidade');
+    const camposDepartamento = document.getElementById('modalComprasDepartamento');
+    const camposCentroCusto = document.getElementById('modalComprasCentroCusto');
+    const camposRetornoCotacao = document.getElementById('modalComprasRetornoCotacao');
+    const camposPrazo = document.getElementById('modalComprasPrazo');
+    const camposResponsavel = document.getElementById('modalComprasResponsavel');
+    const camposObjetivo = document.getElementById('modalComprasObjetivo');
+    const camposObservacao = document.getElementById('modalComprasObservacao');
+
+    if (camposCodigo) camposCodigo.value = item.produto_codigo || '';
+    if (camposDescricao) camposDescricao.value = item.descricao || '';
+    if (camposQuantidade) camposQuantidade.value = item.quantidade || 1;
+    if (camposDepartamento) camposDepartamento.value = item.departamento || '';
+    if (camposCentroCusto) camposCentroCusto.value = item.centro_custo || '';
+    if (camposRetornoCotacao) camposRetornoCotacao.value = item.retorno_cotacao || '';
+    if (camposPrazo && item.prazo_solicitado) {
+      const prazoDate = new Date(item.prazo_solicitado);
+      if (!isNaN(prazoDate.getTime())) {
+        camposPrazo.value = prazoDate.toISOString().slice(0, 10);
+      }
+    }
+    if (camposResponsavel) camposResponsavel.value = item.resp_inspecao_recebimento || '';
+    if (camposObjetivo) camposObjetivo.value = item.objetivo_compra || '';
+    if (camposObservacao) camposObservacao.value = item.observacao || '';
+
+    // Altera o título do modal
+    const modalTitulo = modal.querySelector('.modal-header h3');
+    if (modalTitulo) {
+      modalTitulo.innerHTML = '<i class="fa-solid fa-edit" style="color:#f59e0b;"></i> Editar item de compra';
+    }
+
+    // Altera o botão de submit
+    const btnSalvar = document.getElementById('modalComprasAdicionarBtn');
+    if (btnSalvar) {
+      btnSalvar.textContent = 'Atualizar';
+      btnSalvar.style.background = '#f59e0b';
+      
+      // Remove listeners antigos e adiciona novo para edição
+      const novoBtnSalvar = btnSalvar.cloneNode(true);
+      btnSalvar.parentNode.replaceChild(novoBtnSalvar, btnSalvar);
+      
+      novoBtnSalvar.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await salvarEdicaoCompra(item.id);
+      });
+    }
+
+    // Oculta spinner e mostra form
+    if (spinner) spinner.style.display = 'none';
+    if (form) form.style.display = 'block';
+
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao abrir modal de edição:', err);
+    alert('Erro ao carregar dados para edição.');
+    modal.style.display = 'none';
+  }
+}
+
+// Salva a edição de um item de compra
+async function salvarEdicaoCompra(itemId) {
+  const camposCodigo = document.getElementById('modalComprasCodigo');
+  const camposDescricao = document.getElementById('modalComprasDescricao');
+  const camposQuantidade = document.getElementById('modalComprasQuantidade');
+  const camposDepartamento = document.getElementById('modalComprasDepartamento');
+  const camposCentroCusto = document.getElementById('modalComprasCentroCusto');
+  const camposRetornoCotacao = document.getElementById('modalComprasRetornoCotacao');
+  const camposPrazo = document.getElementById('modalComprasPrazo');
+  const camposResponsavel = document.getElementById('modalComprasResponsavel');
+  const camposObjetivo = document.getElementById('modalComprasObjetivo');
+  const camposObservacao = document.getElementById('modalComprasObservacao');
+
+  // Validações básicas
+  if (!camposCodigo?.value?.trim()) {
+    alert('O código do produto é obrigatório.');
+    return;
+  }
+  if (!camposQuantidade?.value || camposQuantidade.value < 1) {
+    alert('A quantidade deve ser maior que zero.');
+    return;
+  }
+  if (!camposDepartamento?.value) {
+    alert('Selecione um departamento.');
+    return;
+  }
+  if (!camposCentroCusto?.value) {
+    alert('Selecione um centro de custo.');
+    return;
+  }
+  if (!camposRetornoCotacao?.value) {
+    alert('Selecione se necessário retorno de cotação.');
+    return;
+  }
+  if (!camposResponsavel?.value) {
+    alert('Selecione um responsável pela inspeção de recebimento.');
+    return;
+  }
+  if (!camposObjetivo?.value?.trim()) {
+    alert('O objetivo da compra é obrigatório.');
+    return;
+  }
+
+  const payload = {
+    produto_codigo: camposCodigo.value.trim(),
+    descricao: camposDescricao.value.trim(),
+    quantidade: parseInt(camposQuantidade.value),
+    departamento: camposDepartamento.value,
+    centro_custo: camposCentroCusto.value,
+    retorno_cotacao: camposRetornoCotacao.value,
+    prazo_solicitado: camposPrazo?.value || null,
+    resp_inspecao_recebimento: camposResponsavel.value,
+    objetivo_compra: camposObjetivo.value.trim(),
+    observacao: camposObservacao?.value?.trim() || null
+  };
+
+  const btnSalvar = document.getElementById('modalComprasAdicionarBtn');
+  if (btnSalvar) {
+    btnSalvar.disabled = true;
+    btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+  }
+
+  try {
+    const resp = await fetch(`/api/compras/item/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error || 'Erro ao atualizar item');
+    }
+
+    // Feedback visual
+    if (btnSalvar) {
+      btnSalvar.style.background = '#10b981';
+      btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Salvo!';
+    }
+
+    // Fecha o modal e recarrega a lista
+    setTimeout(() => {
+      const modal = document.getElementById('comprasModalOverlay');
+      if (modal) modal.style.display = 'none';
+      loadComprasSolicitacoes();
+    }, 1000);
+
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao salvar edição:', err);
+    alert('Erro ao salvar: ' + err.message);
+    
+    if (btnSalvar) {
+      btnSalvar.disabled = false;
+      btnSalvar.innerHTML = '<i class="fa-solid fa-edit"></i> Atualizar';
+      btnSalvar.style.background = '#f59e0b';
+    }
+  }
+}
+
 // Carrega itens cotados do usuário logado
 async function loadComprasCotadas() {
   const tbody = document.getElementById('comprasCotadasTbody');
@@ -14897,6 +15135,32 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                     </div>
                   </div>
                 </div>
+                ${(item.status === 'aguardando compra' || item.status === 'aguardando cotação' || item.status === 'aguardando_compra' || item.status === 'aguardando_cotacao') ? `
+                  <div style="display:flex;gap:8px;margin-top:12px;padding-left:16px;">
+                    <button 
+                      type="button" 
+                      class="minhas-compras-editar-btn" 
+                      data-item-id="${item.id}"
+                      style="padding:6px 12px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                      onmouseover="this.style.background='#d97706'"
+                      onmouseout="this.style.background='#f59e0b'"
+                    >
+                      <i class="fa-solid fa-edit"></i>
+                      Editar
+                    </button>
+                    <button 
+                      type="button" 
+                      class="minhas-compras-excluir-btn" 
+                      data-item-id="${item.id}"
+                      style="padding:6px 12px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                      onmouseover="this.style.background='#dc2626'"
+                      onmouseout="this.style.background='#ef4444'"
+                    >
+                      <i class="fa-solid fa-trash"></i>
+                      Excluir
+                    </button>
+                  </div>
+                ` : ''}
               </div>
             </td>
           </tr>
@@ -14927,6 +15191,78 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     // Carrega lista de usuários para os selects
     await carregarUsuariosParaSelects(lista);
+    
+    // Event listeners para botões de editar e excluir
+    const editarBtns = document.querySelectorAll('.minhas-compras-editar-btn');
+    editarBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        
+        // Encontra o item na lista
+        const item = lista.find(i => i.id == itemId);
+        if (!item) {
+          alert('Item não encontrado.');
+          return;
+        }
+        
+        // Abre o modal de edição preenchido com os dados do item
+        await abrirModalEditarCompra(item);
+      });
+    });
+    
+    const excluirBtns = document.querySelectorAll('.minhas-compras-excluir-btn');
+    excluirBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        
+        // Encontra o item na lista
+        const item = lista.find(i => i.id == itemId);
+        if (!item) {
+          alert('Item não encontrado.');
+          return;
+        }
+        
+        // Confirmação
+        const descricao = item.produto_descricao || item.descricao || 'este item';
+        if (!confirm(`Tem certeza que deseja excluir "${descricao}"?\n\nEsta ação não pode ser desfeita.`)) {
+          return;
+        }
+        
+        try {
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Excluindo...';
+          btn.disabled = true;
+          
+          // Chama o endpoint DELETE
+          const resp = await fetch(`/api/compras/itens/${itemId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+          });
+          
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.error || 'Erro ao excluir item');
+          }
+          
+          // Feedback visual
+          btn.style.background = '#10b981';
+          btn.innerHTML = '<i class="fa-solid fa-check"></i> Excluído!';
+          
+          // Recarrega a tabela após 1 segundo
+          setTimeout(() => {
+            loadMinhasSolicitacoes();
+          }, 1000);
+          
+        } catch (err) {
+          console.error('[COMPRAS] Erro ao excluir item:', err);
+          alert('Erro ao excluir item: ' + err.message);
+          btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
+          btn.disabled = false;
+          btn.style.background = '#ef4444';
+        }
+      });
+    });
 
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
