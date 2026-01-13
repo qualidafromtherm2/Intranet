@@ -1,0 +1,19 @@
+                                               Tabela "compras.cotacoes"
+     Coluna      |           Tipo           | Ordenação | Pode ser nulo |                    Padrão                    
+-----------------+--------------------------+-----------+---------------+----------------------------------------------
+ id              | integer                  |           | not null      | nextval('compras.cotacoes_id_seq'::regclass)
+ solicitacao_id  | integer                  |           | not null      | 
+ fornecedor_nome | text                     |           | not null      | 
+ fornecedor_id   | text                     |           |               | 
+ valor_cotado    | numeric(15,2)            |           |               | 
+ observacao      | text                     |           |               | 
+ anexos          | jsonb                    |           |               | 
+ criado_por      | text                     |           |               | 
+ criado_em       | timestamp with time zone |           |               | now()
+ atualizado_em   | timestamp with time zone |           |               | now()
+Índices:
+    "cotacoes_pkey" PRIMARY KEY, btree (id)
+    "idx_cotacoes_solicitacao" btree (solicitacao_id)
+Restrições de chave estrangeira:
+    "cotacoes_solicitacao_id_fkey" FOREIGN KEY (solicitacao_id) REFERENCES compras.solicitacao_compras(id) ON DELETE CASCADE
+
