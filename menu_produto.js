@@ -12205,10 +12205,71 @@ function openComprasTab() {
     document.getElementById('menu-compras')?.classList.add('is-active');
 
     window.showOnlyInMain?.(comprasPane);
+    
+    // Configura sub-abas se ainda não foi configurado
+    setupComprasSubTabs();
+    
+    // Mostra a primeira aba por padrão
+    showComprasSubTab('comprasPedidos');
+    
     loadComprasSolicitacoes();
     loadMinhasSolicitacoes();
+    loadComprasCotadas(); // Carrega itens cotados
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir painel:', err);
+  }
+}
+
+// Configura listeners das sub-abas de compras
+function setupComprasSubTabs() {
+  const btns = document.querySelectorAll('.sub-tab-btn[data-subtab]');
+  if (!btns.length) return;
+  
+  // Remove listeners antigos para evitar duplicação
+  btns.forEach(btn => {
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+  });
+  
+  // Adiciona novos listeners
+  document.querySelectorAll('.sub-tab-btn[data-subtab]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const subtab = this.getAttribute('data-subtab');
+      showComprasSubTab(subtab);
+    });
+  });
+}
+
+// Mostra uma sub-aba específica
+function showComprasSubTab(subtabId) {
+  // Atualiza botões
+  document.querySelectorAll('.sub-tab-btn').forEach(btn => {
+    if (btn.getAttribute('data-subtab') === subtabId) {
+      btn.classList.add('active');
+      btn.style.borderBottom = '3px solid #0ea5e9';
+      btn.style.color = '#0ea5e9';
+      btn.style.fontWeight = '600';
+    } else {
+      btn.classList.remove('active');
+      btn.style.borderBottom = '3px solid transparent';
+      btn.style.color = '#6b7280';
+      btn.style.fontWeight = '500';
+    }
+  });
+  
+  // Atualiza conteúdo
+  document.querySelectorAll('.sub-tab-content').forEach(content => {
+    content.style.display = 'none';
+  });
+  
+  const activeContent = document.getElementById(subtabId);
+  if (activeContent) {
+    activeContent.style.display = 'block';
+    
+    // Carrega dados da aba se necessário
+    if (subtabId === 'comprasCotacoes') {
+      loadComprasCotadas();
+    }
   }
 }
 
@@ -12271,6 +12332,32 @@ if (typeof escapeHtml === 'undefined') {
 // Array global do carrinho
 window.carrinhoCompras = window.carrinhoCompras || [];
 
+// Função global para configurar event listeners de expandir/colapsar nas tabelas de compras
+function setupComprasExpandListeners() {
+  document.querySelectorAll('.compras-pedido-header').forEach(header => {
+    // Remove listener antigo se existir
+    const newHeader = header.cloneNode(true);
+    header.parentNode.replaceChild(newHeader, header);
+    
+    // Adiciona novo listener
+    newHeader.addEventListener('click', () => {
+      const expandId = newHeader.getAttribute('data-expand-id');
+      const icon = newHeader.querySelector('.compras-expand-icon');
+      const itens = document.querySelectorAll(`.compras-pedido-item[data-pedido="${expandId}"]`);
+      
+      const isExpanded = itens[0]?.style.display !== 'none';
+      
+      itens.forEach(item => {
+        item.style.display = isExpanded ? 'none' : 'table-row';
+      });
+      
+      if (icon) {
+        icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
+      }
+    });
+  });
+}
+
 // Renderiza a lista do carrinho
 function renderCarrinhoCompras() {
   const tbody = document.getElementById('comprasCarrinhoTbody');
@@ -12329,6 +12416,208 @@ function renderCarrinhoCompras() {
   });
 }
 
+// ========== SISTEMA DE FORNECEDORES ==========
+
+// Array global para armazenar fornecedores
+window.fornecedoresCache = [];
+
+// Carrega lista de fornecedores da Omie (apenas com tag "Fornecedor")
+async function loadFornecedores() {
+  try {
+    const response = await fetch('/api/fornecedores?limit=5000');
+    const data = await response.json();
+    
+    if (data.ok && Array.isArray(data.fornecedores)) {
+      // Filtrar apenas fornecedores ativos (que têm a tag "Fornecedor" e inativo = false)
+      window.fornecedoresCache = data.fornecedores.filter(f => {
+        // Verifica se está ativo
+        if (f.inativo === true) return false;
+        
+        // Verifica se tem tag Fornecedor
+        if (!f.tags || !Array.isArray(f.tags)) return false;
+        return f.tags.some(tag => {
+          try {
+            const parsed = JSON.parse(tag);
+            return parsed.tag === 'Fornecedor';
+          } catch {
+            return false;
+          }
+        });
+      });
+      
+      console.log(`[Compras] ${window.fornecedoresCache.length} fornecedores carregados`);
+    }
+  } catch (err) {
+    console.error('[Compras] Erro ao carregar fornecedores:', err);
+  }
+}
+
+// Configura autocomplete de fornecedores com filtro em tempo real
+function setupFornecedorAutocomplete() {
+  const input = document.getElementById('modalComprasFornecedor');
+  const hiddenId = document.getElementById('modalComprasFornecedorId');
+  const list = document.getElementById('modalComprasFornecedorList');
+  
+  if (!input || !list) return;
+  
+  // Evento de digitação - filtra em tempo real
+  input.addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    hiddenId.value = ''; // Limpa ID ao digitar
+    
+    if (query.length < 2) {
+      list.style.display = 'none';
+      return;
+    }
+    
+    // Filtra fornecedores pelo nome_fantasia
+    const filtered = window.fornecedoresCache.filter(f => {
+      const nome = (f.nome_fantasia || '').toLowerCase();
+      return nome.includes(query);
+    });
+    
+    if (filtered.length === 0) {
+      list.innerHTML = '<div style="padding:12px;color:#666;text-align:center;font-size:13px;">Nenhum fornecedor encontrado</div>';
+      list.style.display = 'block';
+      return;
+    }
+    
+    // Renderiza lista filtrada (máximo 10 resultados)
+    list.innerHTML = filtered.slice(0, 10).map(f => `
+      <div 
+        class="fornecedor-item" 
+        data-id="${f.codigo_cliente_omie}"
+        data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
+        style="
+          padding:12px;
+          cursor:pointer;
+          border-bottom:1px solid #eee;
+          transition:background 0.2s;
+        "
+        onmouseover="this.style.background='#f0f9ff'"
+        onmouseout="this.style.background='white'"
+      >
+        <div style="font-weight:500;color:#1e293b;font-size:13px;">${f.nome_fantasia || 'Sem nome'}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px;">
+          ${f.cnpj_cpf || ''} ${f.cidade ? '• ' + f.cidade : ''}
+        </div>
+      </div>
+    `).join('');
+    
+    list.style.display = 'block';
+    
+    // Adiciona evento de clique nos itens
+    list.querySelectorAll('.fornecedor-item').forEach(item => {
+      item.addEventListener('click', function() {
+        const id = this.getAttribute('data-id');
+        const nome = this.getAttribute('data-nome');
+        input.value = nome;
+        hiddenId.value = id;
+        list.style.display = 'none';
+      });
+    });
+  });
+  
+  // Fecha lista ao clicar fora
+  document.addEventListener('click', function(e) {
+    if (!input.contains(e.target) && !list.contains(e.target)) {
+      list.style.display = 'none';
+    }
+  });
+}
+
+// Configura autocomplete de fornecedores para campos na tabela de solicitações
+function setupFornecedorAutocompleteTabela() {
+  const inputs = document.querySelectorAll('.compras-fornecedor-input');
+  
+  console.log('[Fornecedores] Configurando autocomplete para', inputs.length, 'campos');
+  console.log('[Fornecedores] Cache contém', window.fornecedoresCache?.length || 0, 'fornecedores');
+  
+  inputs.forEach(input => {
+    const itemId = input.getAttribute('data-id');
+    const hiddenId = document.querySelector(`.compras-fornecedor-id[data-id="${itemId}"]`);
+    const list = document.querySelector(`.compras-fornecedor-list[data-item-id="${itemId}"]`);
+    
+    if (!list) return;
+    
+    // Evento de digitação - filtra em tempo real
+    input.addEventListener('input', function() {
+      const query = this.value.trim().toLowerCase();
+      if (hiddenId) hiddenId.value = ''; // Limpa ID ao digitar
+      
+      console.log('[Fornecedor] Digitado:', query, '| Cache:', window.fornecedoresCache?.length || 0);
+      
+      // Mostra botão salvar
+      const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+      if (saveBtn) saveBtn.style.display = 'block';
+      
+      if (query.length < 2) {
+        list.style.display = 'none';
+        return;
+      }
+      
+      // Filtra fornecedores pelo nome_fantasia
+      const filtered = window.fornecedoresCache.filter(f => {
+        const nome = (f.nome_fantasia || '').toLowerCase();
+        return nome.includes(query);
+      });
+      
+      console.log('[Fornecedor] Filtrados:', filtered.length, 'resultados');
+      
+      if (filtered.length === 0) {
+        list.innerHTML = '<div style="padding:8px;color:#666;text-align:center;font-size:12px;">Nenhum fornecedor encontrado</div>';
+        list.style.display = 'block';
+        return;
+      }
+      
+      // Renderiza lista filtrada (máximo 10 resultados)
+      list.innerHTML = filtered.slice(0, 10).map(f => `
+        <div 
+          class="fornecedor-item-tabela" 
+          data-id="${f.codigo_cliente_omie}"
+          data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
+          style="
+            padding:8px 10px;
+            cursor:pointer;
+            border-bottom:1px solid #eee;
+            transition:background 0.2s;
+          "
+          onmouseover="this.style.background='#f0f9ff'"
+          onmouseout="this.style.background='white'"
+        >
+          <div style="font-weight:500;color:#1e293b;font-size:12px;">${f.nome_fantasia || 'Sem nome'}</div>
+          <div style="font-size:10px;color:#64748b;margin-top:2px;">
+            ${f.cnpj_cpf || ''} ${f.cidade ? '• ' + f.cidade : ''}
+          </div>
+        </div>
+      `).join('');
+      
+      list.style.display = 'block';
+      
+      // Adiciona evento de clique nos itens
+      list.querySelectorAll('.fornecedor-item-tabela').forEach(item => {
+        item.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const id = this.getAttribute('data-id');
+          const nome = this.getAttribute('data-nome');
+          input.value = nome;
+          if (hiddenId) hiddenId.value = id;
+          list.style.display = 'none';
+        });
+      });
+    });
+    
+    // Fecha lista ao clicar fora
+    document.addEventListener('click', function(e) {
+      if (!input.contains(e.target) && !list.contains(e.target)) {
+        list.style.display = 'none';
+      }
+    });
+  });
+}
+
+// ========== FIM SISTEMA DE FORNECEDORES ==========
+
 // Abre modal para adicionar produto
 async function abrirModalCompras() {
   const modal = document.getElementById('comprasModalOverlay');
@@ -12362,7 +12651,7 @@ async function abrirModalCompras() {
   if (departamento) departamento.value = '';
   if (centroCusto) centroCusto.value = '';
   
-  // Carrega departamentos, centros de custo e usuários (já define responsável como usuário logado)
+  // Carrega departamentos, centros de custo e usuários
   await carregarDepartamentosECentros();
   
   // Esconde spinner e mostra formulário
@@ -12424,6 +12713,10 @@ async function carregarDepartamentosECentros() {
         selectResp.value = usuarioLogado;
       }
     }
+    
+    // Carrega fornecedores para usar na tabela de solicitações
+    await loadFornecedores();
+    
   } catch (err) {
     console.error('[COMPRAS] Erro ao carregar departamentos/centros/usuários:', err);
   }
@@ -12585,6 +12878,76 @@ document.getElementById('comprasModalForm')?.addEventListener('submit', adiciona
 document.getElementById('comprasLimparCarrinhoBtn')?.addEventListener('click', limparCarrinhoCompras);
 document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoCompras);
 
+// Botão de exportar Excel
+document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', async () => {
+  try {
+    const btn = document.getElementById('comprasExportarExcelBtn');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Gerando...';
+    btn.disabled = true;
+    
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao buscar dados');
+    
+    const data = await resp.json();
+    const solicitacoes = data.solicitacoes || [];
+    
+    if (!solicitacoes.length) {
+      alert('Nenhuma solicitação para exportar.');
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+      return;
+    }
+    
+    // Prepara dados para Excel
+    const dadosExcel = solicitacoes.map(item => ({
+      'Nº Pedido': item.numero_pedido || '-',
+      'Código Produto': item.produto_codigo || '-',
+      'Descrição': item.produto_descricao || '-',
+      'Quantidade': item.quantidade || 0,
+      'Status': item.status || '-',
+      'Solicitante': item.solicitante || '-',
+      'Prazo Solicitado': item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-',
+      'Previsão Chegada': item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-',
+      'Fornecedor': item.fornecedor_nome || '-',
+      'Observação': item.observacao || '-',
+      'Criado em': item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '-'
+    }));
+    
+    // Converte para CSV
+    const headers = Object.keys(dadosExcel[0]);
+    const csvContent = [
+      headers.join(','),
+      ...dadosExcel.map(row => headers.map(h => {
+        const valor = String(row[h] || '').replace(/"/g, '""');
+        return `"${valor}"`;
+      }).join(','))
+    ].join('\n');
+    
+    // Download do arquivo
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `solicitacoes_compras_${new Date().toISOString().slice(0,10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Exportado!';
+    setTimeout(() => {
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+    }, 2000);
+    
+  } catch (err) {
+    console.error('[Excel] Erro:', err);
+    alert('Erro ao exportar para Excel.');
+    const btn = document.getElementById('comprasExportarExcelBtn');
+    btn.innerHTML = '<i class="fa-solid fa-file-excel" style="font-size:18px;margin-right:6px;"></i><span style="font-size:13px;font-weight:600;">Exportar Excel</span>';
+    btn.disabled = false;
+  }
+});
+
 // Autocomplete para o modal (reutiliza lógica existente)
 (function initModalComprasAutocomplete() {
   const inputEl = document.getElementById('modalComprasCodigo');
@@ -12668,6 +13031,541 @@ document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', env
 
 // ===================== FIM CARRINHO DE COMPRAS =====================
 
+// ========== SISTEMA DE ANEXOS NA TABELA ==========
+
+// Armazena temporariamente os anexos de cada item
+window.comprasAnexosTabela = {};
+
+// Configura listeners para anexos em cada item da tabela
+function setupComprasAnexosTabela() {
+  // Listeners para bot\u00f5es "Adicionar anexo"
+  document.querySelectorAll('.compras-adicionar-anexo-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const itemId = this.getAttribute('data-item-id');
+      const fileInput = document.querySelector(`.compras-anexo-input[data-item-id="${itemId}"]`);
+      if (fileInput) fileInput.click();
+    });
+  });
+  
+  // Listeners para inputs de arquivo
+  document.querySelectorAll('.compras-anexo-input').forEach(input => {
+    input.addEventListener('change', async function() {
+      const itemId = this.getAttribute('data-item-id');
+      const files = Array.from(this.files || []);
+      
+      if (files.length === 0) return;
+      
+      // Inicializa array de anexos para este item se n\u00e3o existir
+      if (!window.comprasAnexosTabela[itemId]) {
+        window.comprasAnexosTabela[itemId] = [];
+      }
+      
+      // Adiciona novos arquivos
+      for (const file of files) {
+        try {
+          // Converte para base64
+          const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          
+          window.comprasAnexosTabela[itemId].push({
+            nome: file.name,
+            tipo: file.type,
+            tamanho: file.size,
+            base64: base64
+          });
+        } catch (err) {
+          console.error('[Anexos] Erro ao processar arquivo:', err);
+        }
+      }
+      
+      // Renderiza lista de anexos
+      renderComprasAnexosTabela(itemId);
+      
+      // Mostra bot\u00e3o salvar
+      const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+      if (saveBtn) saveBtn.style.display = 'block';
+      
+      // Limpa input
+      this.value = '';
+    });
+  });
+}
+
+// Renderiza lista de anexos de um item
+function renderComprasAnexosTabela(itemId) {
+  const container = document.querySelector(`.compras-anexos-list[data-item-id="${itemId}"]`);
+  if (!container) return;
+  
+  const anexos = window.comprasAnexosTabela[itemId] || [];
+  
+  if (anexos.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  
+  container.innerHTML = anexos.map((anexo, idx) => `
+    <div style=\"display:flex;align-items:center;gap:4px;background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:11px;\">
+      <i class=\"fa-solid fa-file\" style=\"color:#6b7280;\"></i>
+      <span style=\"color:#374151;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\" title=\"${escapeHtml(anexo.nome)}\">${escapeHtml(anexo.nome)}</span>
+      <button 
+        type=\"button\" 
+        class=\"compras-remover-anexo\" 
+        data-item-id=\"${itemId}\" 
+        data-anexo-idx=\"${idx}\"
+        style=\"background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;font-size:10px;\"
+        title=\"Remover\"
+      >
+        <i class=\"fa-solid fa-times\"></i>
+      </button>
+    </div>
+  `).join('');
+  
+  // Adiciona listeners para remover
+  container.querySelectorAll('.compras-remover-anexo').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const itemId = this.getAttribute('data-item-id');
+      const anexoIdx = parseInt(this.getAttribute('data-anexo-idx'));
+      
+      if (window.comprasAnexosTabela[itemId]) {
+        window.comprasAnexosTabela[itemId].splice(anexoIdx, 1);
+        renderComprasAnexosTabela(itemId);
+        
+        // Mostra bot\u00e3o salvar
+        const saveBtn = document.getElementById(`compras-save-btn-${itemId}`);
+        if (saveBtn) saveBtn.style.display = 'block';
+      }
+    });
+  });
+}
+
+// ========== FIM SISTEMA DE ANEXOS NA TABELA ==========
+
+// ========== SISTEMA DE COTAÇÕES (MÚLTIPLOS FORNECEDORES) ==========
+
+// Armazena temporariamente os arquivos de cotação antes de salvar
+window.comprasCotacoesAnexos = {};
+
+async function loadCotacoesItem(solicitacaoId) {
+  try {
+    const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
+    if (!response.ok) throw new Error('Erro ao carregar cotações');
+    const cotacoes = await response.json();
+    
+    // Valida se é array
+    if (!Array.isArray(cotacoes)) {
+      console.error('[COTACOES] Resposta não é array:', cotacoes);
+      renderCotacoesList(solicitacaoId, []);
+      return;
+    }
+    
+    console.log(`[COTACOES] Carregadas ${cotacoes.length} cotações para item ${solicitacaoId}`);
+    renderCotacoesList(solicitacaoId, cotacoes);
+  } catch (err) {
+    console.error('[COTACOES] Erro ao carregar:', err);
+    renderCotacoesList(solicitacaoId, []);
+  }
+}
+
+function renderCotacoesList(solicitacaoId, cotacoes = []) {
+  const container = document.querySelector(`.compras-cotacoes-list[data-item-id="${solicitacaoId}"]`);
+  if (!container) return;
+  
+  if (cotacoes.length === 0) {
+    container.innerHTML = '<div style="color:#6b7280;font-size:12px;font-style:italic;">Nenhuma cotação adicionada</div>';
+    return;
+  }
+  
+  container.innerHTML = cotacoes.map(cotacao => {
+    // Parse anexos se for string JSON
+    let anexosArray = [];
+    if (cotacao.anexos) {
+      try {
+        anexosArray = typeof cotacao.anexos === 'string' ? JSON.parse(cotacao.anexos) : cotacao.anexos;
+        if (!Array.isArray(anexosArray)) anexosArray = [];
+      } catch (e) {
+        console.error('[COTACOES] Erro ao parsear anexos:', e, cotacao.anexos);
+        anexosArray = [];
+      }
+    }
+    
+    return `
+    <div class="compras-cotacao-row" data-cotacao-id="${cotacao.id}" style="background:#f9fafb;padding:12px;border:1px solid #e5e7eb;border-radius:6px;display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;">
+      <!-- Fornecedor -->
+      <div>
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Fornecedor</div>
+        <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(cotacao.fornecedor_nome)}</div>
+      </div>
+      
+      <!-- Valor -->
+      <div>
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Valor</div>
+        <div style="font-weight:600;color:#059669;font-size:13px;">R$ ${(parseFloat(cotacao.valor_cotado) || 0).toFixed(2)}</div>
+      </div>
+      
+      <!-- Anexos -->
+      <div>
+        ${anexosArray.length > 0 ? `
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${anexosArray.map((anexo, idx) => `
+              <a href="${anexo.base64 || anexo.url}" download="${escapeHtml(anexo.nome)}" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;text-decoration:none;font-size:11px;color:#1e40af;cursor:pointer;" title="${escapeHtml(anexo.nome)}">
+                <i class="fa-solid fa-file"></i>
+                <span style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(anexo.nome)}</span>
+              </a>
+            `).join('')}
+          </div>
+        ` : '<span style="color:#9ca3af;font-size:11px;">Sem anexos</span>'}
+      </div>
+      
+      <!-- Ações -->
+      <div style="display:flex;gap:4px;">
+        <button 
+          type="button" 
+          class="compras-editar-cotacao-btn" 
+          data-cotacao-id="${cotacao.id}"
+          data-solicitacao-id="${solicitacaoId}"
+          style="padding:6px 10px;background:#6366f1;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+          title="Editar"
+        >
+          <i class="fa-solid fa-edit"></i>
+        </button>
+        <button 
+          type="button" 
+          class="compras-remover-cotacao-btn" 
+          data-cotacao-id="${cotacao.id}"
+          data-solicitacao-id="${solicitacaoId}"
+          style="padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;"
+          title="Remover"
+        >
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    </div>
+    `;
+  }).join('');
+  
+  // Adiciona event listeners para editar/remover
+  container.querySelectorAll('.compras-editar-cotacao-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cotacaoId = btn.getAttribute('data-cotacao-id');
+      const solicitacaoId = btn.getAttribute('data-solicitacao-id');
+      editarCotacao(cotacaoId, solicitacaoId);
+    });
+  });
+  
+  container.querySelectorAll('.compras-remover-cotacao-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Deseja remover esta cotação?')) return;
+      
+      const cotacaoId = btn.getAttribute('data-cotacao-id');
+      const solicitacaoId = btn.getAttribute('data-solicitacao-id');
+      
+      try {
+        const response = await fetch(`/api/compras/cotacoes/${cotacaoId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Erro ao remover cotação');
+        
+        // Recarrega a lista
+        await loadCotacoesItem(solicitacaoId);
+      } catch (err) {
+        console.error('[COTACOES] Erro ao remover:', err);
+        alert('Erro ao remover cotação');
+      }
+    });
+  });
+}
+
+async function abrirModalNovaCotacao(solicitacaoId) {
+  // Garante que fornecedores estejam carregados
+  if (!window.comprasFornecedores || !Array.isArray(window.comprasFornecedores)) {
+    console.log('[COTACOES] Carregando fornecedores...');
+    await loadFornecedores();
+  }
+  
+  // Remove modal antigo se existir
+  const modalAntigo = document.getElementById('modal-cotacao');
+  if (modalAntigo) modalAntigo.remove();
+  
+  const modal = document.createElement('div');
+  modal.id = 'modal-cotacao';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+  
+  modal.innerHTML = `
+    <div style="background:white;padding:24px;border-radius:8px;max-width:500px;width:90%;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+      <h3 style="margin:0 0 20px 0;font-size:18px;color:#1f2937;">
+        <i class="fa-solid fa-plus-circle" style="color:#3b82f6;margin-right:8px;"></i>
+        Nova Cotação
+      </h3>
+      
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <!-- Fornecedor -->
+        <div>
+          <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Fornecedor *</label>
+          <div style="position:relative;">
+            <input 
+              type="text" 
+              id="cotacao-fornecedor-nome" 
+              placeholder="Digite para buscar..." 
+              autocomplete="off"
+              style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;" 
+            />
+            <input type="hidden" id="cotacao-fornecedor-id" />
+            <div id="cotacao-fornecedor-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:white;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;margin-top:2px;"></div>
+          </div>
+        </div>
+        
+        <!-- Valor -->
+        <div>
+          <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Valor Cotado</label>
+          <input 
+            type="number" 
+            id="cotacao-valor" 
+            placeholder="0.00" 
+            step="0.01"
+            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;" 
+          />
+        </div>
+        
+        <!-- Observação -->
+        <div>
+          <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Observação</label>
+          <textarea 
+            id="cotacao-observacao" 
+            rows="2"
+            placeholder="Observações adicionais..."
+            style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;width:100%;resize:vertical;" 
+          ></textarea>
+        </div>
+        
+        <!-- Anexos -->
+        <div>
+          <label style="font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;display:block;">Anexos</label>
+          <button 
+            type="button" 
+            id="cotacao-adicionar-anexo-btn"
+            style="padding:8px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;"
+          >
+            <i class="fa-solid fa-paperclip"></i>
+            Adicionar arquivos
+          </button>
+          <input type="file" id="cotacao-anexo-input" style="display:none;" multiple />
+          <div id="cotacao-anexos-list" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
+        </div>
+      </div>
+      
+      <div style="display:flex;gap:12px;margin-top:24px;justify-content:flex-end;">
+        <button 
+          type="button" 
+          id="cotacao-cancelar-btn"
+          style="padding:8px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;"
+        >
+          Cancelar
+        </button>
+        <button 
+          type="button" 
+          id="cotacao-salvar-btn"
+          style="padding:8px 16px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;"
+        >
+          <i class="fa-solid fa-check" style="margin-right:6px;"></i>
+          Salvar
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Configurar autocomplete de fornecedor no modal
+  const fornecedorInput = document.getElementById('cotacao-fornecedor-nome');
+  const fornecedorIdInput = document.getElementById('cotacao-fornecedor-id');
+  const fornecedorList = document.getElementById('cotacao-fornecedor-list');
+  
+  fornecedorInput.addEventListener('input', function() {
+    const busca = this.value.toLowerCase();
+    if (busca.length < 2) {
+      fornecedorList.style.display = 'none';
+      return;
+    }
+    
+    if (!window.comprasFornecedores || !Array.isArray(window.comprasFornecedores)) {
+      // Mostra mensagem de carregamento ao invés de warning
+      fornecedorList.innerHTML = '<div style="padding:12px;color:#6b7280;text-align:center;font-size:12px;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando fornecedores...</div>';
+      fornecedorList.style.display = 'block';
+      return;
+    }
+    
+    const fornecedoresFiltrados = window.comprasFornecedores.filter(f => {
+      const nome = (f.nome_fantasia || '').toLowerCase();
+      const razao = (f.razao_social || '').toLowerCase();
+      return nome.includes(busca) || razao.includes(busca);
+    }).slice(0, 10);
+    
+    if (fornecedoresFiltrados.length === 0) {
+      fornecedorList.style.display = 'none';
+      return;
+    }
+    
+    fornecedorList.innerHTML = fornecedoresFiltrados.map(f => `
+      <div class="fornecedor-option" data-id="${f.codigo_cliente_fornecedor}" data-nome="${escapeHtml(f.nome_fantasia)}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f3f4f6;">
+        <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(f.nome_fantasia)}</div>
+        <div style="font-size:11px;color:#6b7280;">${escapeHtml(f.razao_social)}</div>
+      </div>
+    `).join('');
+    
+    fornecedorList.style.display = 'block';
+    
+    // Event listeners para seleção
+    fornecedorList.querySelectorAll('.fornecedor-option').forEach(opt => {
+      opt.addEventListener('click', function() {
+        fornecedorInput.value = this.getAttribute('data-nome');
+        fornecedorIdInput.value = this.getAttribute('data-id');
+        fornecedorList.style.display = 'none';
+      });
+    });
+  });
+  
+  // Fechar lista ao clicar fora
+  document.addEventListener('click', function(e) {
+    if (!fornecedorInput.contains(e.target) && !fornecedorList.contains(e.target)) {
+      fornecedorList.style.display = 'none';
+    }
+  });
+  
+  // Sistema de anexos do modal
+  const anexoBtn = document.getElementById('cotacao-adicionar-anexo-btn');
+  const anexoInput = document.getElementById('cotacao-anexo-input');
+  const anexosList = document.getElementById('cotacao-anexos-list');
+  
+  const tempKey = `modal_${solicitacaoId}`;
+  window.comprasCotacoesAnexos[tempKey] = [];
+  
+  anexoBtn.addEventListener('click', () => anexoInput.click());
+  
+  anexoInput.addEventListener('change', function() {
+    const arquivos = Array.from(this.files);
+    
+    arquivos.forEach(arquivo => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        window.comprasCotacoesAnexos[tempKey].push({
+          nome: arquivo.name,
+          tipo: arquivo.type,
+          tamanho: arquivo.size,
+          base64: e.target.result
+        });
+        renderCotacaoAnexosModal(tempKey);
+      };
+      reader.readAsDataURL(arquivo);
+    });
+    
+    this.value = '';
+  });
+  
+  function renderCotacaoAnexosModal(key) {
+    const anexos = window.comprasCotacoesAnexos[key] || [];
+    
+    anexosList.innerHTML = anexos.map((anexo, idx) => `
+      <div style="display:flex;align-items:center;gap:4px;background:#f3f4f6;padding:4px 8px;border-radius:4px;font-size:11px;">
+        <i class="fa-solid fa-file" style="color:#6b7280;"></i>
+        <span style="color:#374151;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
+        <button 
+          type="button" 
+          class="remover-anexo-cotacao" 
+          data-idx="${idx}"
+          style="background:none;border:none;color:#ef4444;cursor:pointer;padding:2px;font-size:10px;"
+        >
+          <i class="fa-solid fa-times"></i>
+        </button>
+      </div>
+    `).join('');
+    
+    anexosList.querySelectorAll('.remover-anexo-cotacao').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const idx = parseInt(this.getAttribute('data-idx'));
+        window.comprasCotacoesAnexos[key].splice(idx, 1);
+        renderCotacaoAnexosModal(key);
+      });
+    });
+  }
+  
+  // Botão cancelar
+  document.getElementById('cotacao-cancelar-btn').addEventListener('click', () => {
+    delete window.comprasCotacoesAnexos[tempKey];
+    modal.remove();
+  });
+  
+  // Botão salvar
+  document.getElementById('cotacao-salvar-btn').addEventListener('click', async () => {
+    const fornecedorNome = fornecedorInput.value.trim();
+    const fornecedorId = fornecedorIdInput.value.trim();
+    const valor = parseFloat(document.getElementById('cotacao-valor').value) || 0;
+    const observacao = document.getElementById('cotacao-observacao').value.trim();
+    
+    if (!fornecedorNome) {
+      alert('Selecione um fornecedor');
+      return;
+    }
+    
+    const btn = document.getElementById('cotacao-salvar-btn');
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+    btn.disabled = true;
+    
+    try {
+      const dados = {
+        solicitacao_id: solicitacaoId,
+        fornecedor_nome: fornecedorNome,
+        fornecedor_id: fornecedorId,
+        valor_cotado: valor,
+        observacao: observacao,
+        anexos: window.comprasCotacoesAnexos[tempKey] || [],
+        criado_por: window.nomeUsuario || 'Sistema'
+      };
+      
+      const response = await fetch('/api/compras/cotacoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      });
+      
+      if (!response.ok) throw new Error('Erro ao salvar cotação');
+      
+      // Limpa anexos temporários
+      delete window.comprasCotacoesAnexos[tempKey];
+      
+      // Fecha modal
+      modal.remove();
+      
+      // Recarrega lista de cotações
+      await loadCotacoesItem(solicitacaoId);
+      
+    } catch (err) {
+      console.error('[COTACOES] Erro ao salvar:', err);
+      alert('Erro ao salvar cotação');
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Salvar';
+      btn.disabled = false;
+    }
+  });
+  
+  // Fechar ao clicar fora
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      delete window.comprasCotacoesAnexos[tempKey];
+      modal.remove();
+    }
+  });
+}
+
+async function editarCotacao(cotacaoId, solicitacaoId) {
+  alert('Função de edição em desenvolvimento');
+  // TODO: Implementar modal de edição similar ao de criação
+}
+
+// ========== FIM SISTEMA DE COTAÇÕES ==========
+
 // Helpers para formatar código e detectar links (quando o usuário digita um URL)
 function isProvavelUrl(valor) {
   if (!valor) return false;
@@ -12708,6 +13606,12 @@ async function loadComprasSolicitacoes() {
   const tbody = document.getElementById('comprasTbody');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  
+  // Garante que os fornecedores estão carregados antes de renderizar
+  if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
+    await loadFornecedores();
+  }
+  
   try {
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
@@ -12773,6 +13677,29 @@ async function loadComprasSolicitacoes() {
     let html = '';
     let pedidoIndex = 0;
 
+    // Busca todas as cotações aprovadas de uma vez para melhor performance
+    const cotacoesMap = new Map();
+    const idsItens = Array.from(pedidosMap.values()).flat().map(item => item.id);
+    
+    try {
+      await Promise.all(idsItens.map(async (itemId) => {
+        try {
+          const cotacoesResp = await fetch(`/api/compras/cotacoes/${itemId}`);
+          if (cotacoesResp.ok) {
+            const cotacoes = await cotacoesResp.json();
+            const aprovadas = Array.isArray(cotacoes) ? cotacoes.filter(c => c.status_aprovacao === 'aprovado') : [];
+            if (aprovadas.length > 0) {
+              cotacoesMap.set(itemId, aprovadas);
+            }
+          }
+        } catch (e) {
+          console.error(`[Cotações] Erro ao buscar cotações do item ${itemId}:`, e);
+        }
+      }));
+    } catch (e) {
+      console.error('[Cotações] Erro ao buscar cotações:', e);
+    }
+
     pedidosMap.forEach((itens, numeroPedido) => {
       const primeiroItem = itens[0];
       const totalItens = itens.length;
@@ -12799,16 +13726,98 @@ async function loadComprasSolicitacoes() {
         const previsaoValue = fmtInputDate(item.previsao_chegada);
         const obs = item.observacao ? escapeHtml(item.observacao) : '-';
         
+        // Busca cotações aprovadas para este item do Map previamente carregado
+        let cotacoesAprovadasHtml = '';
+        const aprovadas = cotacoesMap.get(item.id) || [];
+        
+        if (aprovadas.length > 0) {
+          cotacoesAprovadasHtml = `
+            <div style="margin-bottom:12px;padding:10px;background:#ecfdf5;border:1px solid #10b981;border-radius:6px;">
+              <div style="font-size:11px;color:#047857;text-transform:uppercase;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-check-circle"></i>
+                Cotações Aprovadas
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                ${aprovadas.map(cot => {
+                  // Processa anexos da cotação
+                  let anexosCotacaoHtml = '';
+                  try {
+                    const anexosCot = cot.anexos ? (typeof cot.anexos === 'string' ? JSON.parse(cot.anexos) : cot.anexos) : [];
+                    if (Array.isArray(anexosCot) && anexosCot.length > 0) {
+                      anexosCotacaoHtml = `
+                        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+                          ${anexosCot.map(anexo => `
+                            <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#d1fae5;padding:3px 8px;border-radius:4px;font-size:10px;text-decoration:none;color:#047857;">
+                              <i class="fa-solid fa-file" style="color:#10b981;"></i>
+                              <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
+                              <i class="fa-solid fa-external-link-alt" style="font-size:8px;color:#059669;"></i>
+                            </a>
+                          `).join('')}
+                        </div>
+                      `;
+                    }
+                  } catch (e) {
+                    console.error('[Cotações] Erro ao processar anexos:', e);
+                  }
+                  
+                  const obsCot = cot.observacao ? escapeHtml(cot.observacao) : '';
+                  
+                  return `
+                    <div style="background:white;padding:10px;border-radius:6px;border:1px solid #d1fae5;">
+                      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
+                        <div>
+                          <div style="font-size:10px;color:#6b7280;">Fornecedor</div>
+                          <div style="font-weight:600;font-size:12px;color:#047857;">${escapeHtml(cot.fornecedor_nome)}</div>
+                        </div>
+                        <div style="border-left:1px solid #d1fae5;padding-left:12px;">
+                          <div style="font-size:10px;color:#6b7280;">Valor</div>
+                          <div style="font-weight:700;font-size:13px;color:#059669;">R$ ${(parseFloat(cot.valor_cotado) || 0).toFixed(2)}</div>
+                        </div>
+                      </div>
+                      ${obsCot ? `
+                        <div style="margin-top:6px;padding-top:6px;border-top:1px solid #d1fae5;">
+                          <div style="font-size:10px;color:#6b7280;margin-bottom:2px;">Observação:</div>
+                          <div style="font-size:11px;color:#1f2937;">${obsCot}</div>
+                        </div>
+                      ` : ''}
+                      ${anexosCotacaoHtml}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+        
+        // Processa anexos existentes
+        let anexosExistentesHtml = '';
+        try {
+          const anexosExistentes = item.anexos ? (typeof item.anexos === 'string' ? JSON.parse(item.anexos) : item.anexos) : [];
+          if (Array.isArray(anexosExistentes) && anexosExistentes.length > 0) {
+            anexosExistentesHtml = anexosExistentes.map(anexo => `
+              <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
+                <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
+                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
+                <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
+              </a>
+            `).join('');
+          }
+        } catch (e) {
+          console.error('[Anexos] Erro ao processar anexos:', e);
+        }
+        
         html += `
           <tr class="compras-pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
             <td></td>
             <td colspan="5" style="padding:12px 20px;">
+              ${cotacoesAprovadasHtml}
               <div style="display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start;border-left:3px solid #e5e7eb;padding-left:16px;">
                 <div style="min-width:60px;">
                   <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
                   <div style="font-weight:600;color:#374151;">${item.id}</div>
                 </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                  <!-- Primeira linha: ID - Código - Descrição (3 colunas) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
                     <div style="font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
@@ -12817,31 +13826,166 @@ async function loadComprasSolicitacoes() {
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
                     <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
                   </div>
+                  
+                  <!-- Segunda linha: Quantidade - Observação (2 colunas, Observação ocupa 2 cols) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
                     <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
                   </div>
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
-                    <div>
-                      <select data-id="${item.id}" data-field="status" data-original="${escapeHtml(item.status || 'pendente')}" class="compras-editable-field" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;cursor:pointer;width:100%;max-width:200px;">
-                        ${statusOptions.map(opt => `<option value="${opt}" ${ (item.status || 'pendente') === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-                      </select>
-                    </div>
+                  <div style="grid-column:span 2;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
+                    <textarea 
+                      data-id="${item.id}" 
+                      data-field="observacao" 
+                      data-original="${escapeHtml(item.observacao || '')}" 
+                      class="compras-editable-field" 
+                      style="padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;min-height:60px;resize:vertical;font-family:inherit;"
+                      placeholder="Digite a observação..."
+                    >${escapeHtml(item.observacao || '')}</textarea>
                   </div>
+                  
+                  <!-- Terceira linha: Prazo solicitado - Previsão chegada - Fornecedor (2 ou 3 colunas) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
                     <div style="color:#374151;">${fmtDate(item.prazo_solicitado)}</div>
                   </div>
+                  ${(item.status !== 'aguardando_cotacao' && item.status !== 'aguardando cotação') ? `
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Previsão chegada</div>
                     <div>
-                      <input type="date" data-id="${item.id}" data-field="previsao_chegada" data-original="${previsaoValue}" class="compras-editable-field" value="${previsaoValue}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;max-width:200px;" />
+                      <input type="date" data-id="${item.id}" data-field="previsao_chegada" data-original="${previsaoValue}" class="compras-editable-field" value="${previsaoValue}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;" />
                     </div>
                   </div>
+                  ` : ''}
+                  <div style="position:relative;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Fornecedor</div>
+                    ${(item.status === 'aguardando_cotacao' || item.status === 'aguardando cotação') ? `
+                      <!-- Interface de cotações (múltiplos fornecedores) -->
+                      <div class="compras-cotacoes-container" data-item-id="${item.id}" style="display:flex;flex-direction:column;gap:8px;">
+                        <div class="compras-cotacoes-list" data-item-id="${item.id}">
+                          <!-- Será preenchido via JS com cotações existentes -->
+                        </div>
+                        <button 
+                          type="button" 
+                          class="compras-adicionar-cotacao-btn" 
+                          data-item-id="${item.id}"
+                          style="padding:8px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;align-self:flex-start;"
+                          onmouseover="this.style.background='#2563eb'"
+                          onmouseout="this.style.background='#3b82f6'"
+                        >
+                          <i class="fa-solid fa-plus"></i>
+                          Adicionar Fornecedor
+                        </button>
+                      </div>
+                    ` : `
+                      <!-- Campo fornecedor simples (para outros status) -->
+                      <div style="position:relative;">
+                        <input 
+                          type="text" 
+                          data-id="${item.id}" 
+                          data-field="fornecedor_nome" 
+                          data-original="${escapeHtml(item.fornecedor_nome || '')}" 
+                          class="compras-editable-field compras-fornecedor-input" 
+                          value="${escapeHtml(item.fornecedor_nome || '')}" 
+                          placeholder="Digite para buscar..." 
+                          autocomplete="off"
+                          style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;width:100%;" 
+                        />
+                        <input type="hidden" data-id="${item.id}" data-field="fornecedor_id" class="compras-fornecedor-id" value="${item.fornecedor_id || ''}" />
+                        <div class="compras-fornecedor-list" data-item-id="${item.id}" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:white;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;margin-top:2px;"></div>
+                      </div>
+                    `}
+                  </div>
+                  
+                  <!-- Quarta linha: Status (3 colunas) -->
                   <div style="grid-column:span 3;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
-                    <div style="color:#374151;">${obs}</div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <!-- Badge de status (somente leitura) -->
+                      <span style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;
+                        ${item.status === 'pendente' ? 'background:#fbbf24;color:#78350f;' : ''}
+                        ${(item.status === 'aguardando_cotacao' || item.status === 'aguardando cotação') ? 'background:#fbbf24;color:#000000;' : ''}
+                        ${(item.status === 'aguardando_compra' || item.status === 'aguardando compra') ? 'background:#10b981;color:#ffffff;' : ''}
+                        ${item.status === 'cotado' ? 'background:#8b5cf6;color:#ffffff;' : ''}
+                        ${item.status === 'aprovado' ? 'background:#10b981;color:#ffffff;' : ''}
+                        ${item.status === 'pedido_enviado' ? 'background:#7c3aed;color:#ffffff;' : ''}
+                        ${item.status === 'recebido' ? 'background:#059669;color:#ffffff;' : ''}
+                        ${item.status === 'cancelado' ? 'background:#ef4444;color:#ffffff;' : ''}
+                        ${!['pendente','aguardando_cotacao','aguardando cotação','aguardando_compra','aguardando compra','cotado','aprovado','pedido_enviado','recebido','cancelado'].includes(item.status) ? 'background:#6b7280;color:#ffffff;' : ''}
+                      ">
+                        ${item.status || 'pendente'}
+                      </span>
+                      
+                      <!-- Botão Cotado (só aparece se status = aguardando_cotacao ou aguardando cotação) -->
+                      ${(item.status === 'aguardando_cotacao' || item.status === 'aguardando cotação') ? `
+                        <button 
+                          type="button" 
+                          class="compras-marcar-cotado-btn" 
+                          data-item-id="${item.id}"
+                          style="padding:6px 12px;background:#10b981;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                          onmouseover="this.style.background='#059669'"
+                          onmouseout="this.style.background='#10b981'"
+                        >
+                          <i class="fa-solid fa-check-circle"></i>
+                          Marcar como Cotado
+                        </button>
+                      ` : ''}
+                    </div>
+                    <!-- Hidden input para manter o status -->
+                    <input type="hidden" data-id="${item.id}" data-field="status" data-original="${escapeHtml(item.status || 'pendente')}" class="compras-status-hidden" value="${item.status || 'pendente'}" />
+                  </div>
+                  
+                  <!-- Quinta linha: Anexos (ocupa toda a largura) -->
+                  <div style="grid-column:span 3;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Anexos</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <!-- Botão Enviar E-mail -->
+                      <button 
+                        type="button" 
+                        class="compras-enviar-email-btn" 
+                        data-item-id="${item.id}"
+                        style="padding:6px 12px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                        onmouseover="this.style.background='#4f46e5'"
+                        onmouseout="this.style.background='#6366f1'"
+                      >
+                        <i class="fa-solid fa-envelope"></i>
+                        Enviar E-mail
+                      </button>
+                      
+                      <!-- Botão Enviar WhatsApp -->
+                      <button 
+                        type="button" 
+                        class="compras-enviar-whatsapp-btn" 
+                        data-item-id="${item.id}"
+                        style="padding:6px 12px;background:#25d366;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                        onmouseover="this.style.background='#1da851'"
+                        onmouseout="this.style.background='#25d366'"
+                      >
+                        <i class="fa-brands fa-whatsapp"></i>
+                        Enviar WhatsApp
+                      </button>
+                      
+                      ${anexosExistentesHtml}
+                      <button 
+                        type="button" 
+                        class="compras-adicionar-anexo-btn" 
+                        data-item-id="${item.id}"
+                        style="padding:6px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
+                        onmouseover="this.style.background='#2563eb'"
+                        onmouseout="this.style.background='#3b82f6'"
+                      >
+                        <i class="fa-solid fa-paperclip"></i>
+                        Adicionar anexo
+                      </button>
+                      <input 
+                        type="file" 
+                        class="compras-anexo-input" 
+                        data-item-id="${item.id}" 
+                        style="display:none;" 
+                        multiple
+                      />
+                      <div class="compras-anexos-list" data-item-id="${item.id}" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                    </div>
                   </div>
                 </div>
                 <div id="compras-save-btn-${item.id}" style="display:none;">
@@ -12860,22 +14004,8 @@ async function loadComprasSolicitacoes() {
 
     tbody.innerHTML = html;
 
-    // Adiciona event listeners para expandir/colapsar
-    document.querySelectorAll('.compras-pedido-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const expandId = header.getAttribute('data-expand-id');
-        const icon = header.querySelector('.compras-expand-icon');
-        const itens = document.querySelectorAll(`.compras-pedido-item[data-pedido="${expandId}"]`);
-        
-        const isExpanded = itens[0]?.style.display !== 'none';
-        
-        itens.forEach(item => {
-          item.style.display = isExpanded ? 'none' : 'table-row';
-        });
-        
-        icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
-      });
-    });
+    // Adiciona event listeners para expandir/colapsar usando função global
+    setupComprasExpandListeners();
 
     // Listeners para detectar mudanças nos campos editáveis
     const editableFields = tbody.querySelectorAll('.compras-editable-field');
@@ -12888,6 +14018,29 @@ async function loadComprasSolicitacoes() {
         }
       });
     });
+    
+    // Setup autocomplete para campos de fornecedor na tabela
+    setupFornecedorAutocompleteTabela();
+    
+    // Setup listeners para anexos em cada item
+    setupComprasAnexosTabela();
+    
+    // Setup listeners para cotações (múltiplos fornecedores)
+    const adicionarCotacaoBtns = tbody.querySelectorAll('.compras-adicionar-cotacao-btn');
+    adicionarCotacaoBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        await abrirModalNovaCotacao(itemId);
+      });
+    });
+    
+    // Carrega cotações existentes para itens em "aguardando cotação"
+    const cotacoesContainers = tbody.querySelectorAll('.compras-cotacoes-container');
+    cotacoesContainers.forEach(container => {
+      const itemId = container.getAttribute('data-item-id');
+      loadCotacoesItem(itemId);
+    });
 
     // Listeners para os botões de salvar
     const saveBtns = tbody.querySelectorAll('.compras-save-changes');
@@ -12897,17 +14050,29 @@ async function loadComprasSolicitacoes() {
         const itemId = btn.getAttribute('data-id');
         
         // Coleta os valores dos campos editáveis deste item
-        const statusField = tbody.querySelector(`select[data-id="${itemId}"][data-field="status"]`);
         const previsaoField = tbody.querySelector(`input[data-id="${itemId}"][data-field="previsao_chegada"]`);
+        const fornecedorNomeField = tbody.querySelector(`input[data-id="${itemId}"][data-field="fornecedor_nome"]`);
+        const fornecedorIdField = tbody.querySelector(`input[data-id="${itemId}"][data-field="fornecedor_id"]`);
+        const observacaoField = tbody.querySelector(`textarea[data-id="${itemId}"][data-field="observacao"]`);
         
         const payload = {};
         
-        if (statusField && statusField.value !== statusField.getAttribute('data-original')) {
-          payload.status = statusField.value;
-        }
-        
         if (previsaoField && previsaoField.value !== previsaoField.getAttribute('data-original')) {
           payload.previsao_chegada = previsaoField.value || null;
+        }
+        
+        if (fornecedorNomeField && fornecedorNomeField.value !== fornecedorNomeField.getAttribute('data-original')) {
+          payload.fornecedor_nome = fornecedorNomeField.value || null;
+          payload.fornecedor_id = fornecedorIdField?.value || null;
+        }
+        
+        if (observacaoField && observacaoField.value !== observacaoField.getAttribute('data-original')) {
+          payload.observacao = observacaoField.value || null;
+        }
+        
+        // Adiciona anexos se houver
+        if (window.comprasAnexosTabela[itemId] && window.comprasAnexosTabela[itemId].length > 0) {
+          payload.anexos = window.comprasAnexosTabela[itemId];
         }
         
         if (Object.keys(payload).length === 0) {
@@ -12925,8 +14090,14 @@ async function loadComprasSolicitacoes() {
           await updateSolicitacaoCompras(itemId, payload);
           
           // Atualiza os valores originais
-          if (statusField) statusField.setAttribute('data-original', statusField.value);
           if (previsaoField) previsaoField.setAttribute('data-original', previsaoField.value);
+          if (fornecedorNomeField) fornecedorNomeField.setAttribute('data-original', fornecedorNomeField.value);
+          if (observacaoField) observacaoField.setAttribute('data-original', observacaoField.value);
+          
+          // Limpa anexos temporários após salvar
+          if (window.comprasAnexosTabela[itemId]) {
+            delete window.comprasAnexosTabela[itemId];
+          }
           
           // Feedback visual
           btn.style.background = '#10b981';
@@ -12953,9 +14124,602 @@ async function loadComprasSolicitacoes() {
       });
     });
 
+    // Event listener para o botão "Marcar como Cotado"
+    const cotadoBtns = tbody.querySelectorAll('.compras-marcar-cotado-btn');
+    cotadoBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        
+        if (!confirm('Deseja marcar este item como cotado?')) {
+          return;
+        }
+        
+        try {
+          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando...';
+          btn.disabled = true;
+          
+          // Atualiza o status para "cotado"
+          await updateSolicitacaoCompras(itemId, { status: 'cotado' });
+          
+          // Feedback visual
+          btn.style.background = '#10b981';
+          btn.innerHTML = '<i class="fa-solid fa-check"></i> Cotado!';
+          
+          // Recarrega a tabela após 1 segundo para atualizar o status
+          setTimeout(() => {
+            loadComprasSolicitacoes();
+            loadComprasCotadas(); // Recarrega também a tabela de cotados
+          }, 1000);
+          
+        } catch (err) {
+          console.error('[COMPRAS] Erro ao marcar como cotado:', err);
+          alert('Erro ao marcar como cotado. Tente novamente.');
+          btn.innerHTML = '<i class="fa-solid fa-check-circle"></i> Marcar como Cotado';
+          btn.disabled = false;
+          btn.style.background = '#10b981';
+        }
+      });
+    });
+    
+    // Event listener para o botão "Enviar E-mail"
+    const emailBtns = tbody.querySelectorAll('.compras-enviar-email-btn');
+    emailBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        
+        // TODO: Implementar funcionalidade de envio de e-mail
+        alert('Funcionalidade de envio de e-mail será implementada em breve.\nItem ID: ' + itemId);
+      });
+    });
+    
+    // Event listener para o botão "Enviar WhatsApp"
+    const whatsappBtns = tbody.querySelectorAll('.compras-enviar-whatsapp-btn');
+    whatsappBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const itemId = btn.getAttribute('data-item-id');
+        
+        // TODO: Implementar funcionalidade de envio de WhatsApp
+        alert('Funcionalidade de envio de WhatsApp será implementada em breve.\nItem ID: ' + itemId);
+      });
+    });
+
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar:', err);
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar solicitações.</td></tr>';
+  }
+}
+
+// Carrega itens cotados do usuário logado
+async function loadComprasCotadas() {
+  const tbody = document.getElementById('comprasCotadasTbody');
+  if (!tbody) return;
+  
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  
+  // Garante que os fornecedores estão carregados antes de renderizar
+  if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
+    await loadFornecedores();
+  }
+  
+  try {
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    // Pega usuário logado
+    const usuario = window.__sessionUser?.username || document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+    
+    // Filtra apenas itens com status "cotado" do usuário logado
+    const lista = listaCompleta.filter(item => {
+      const status = (item.status || '').toLowerCase();
+      const solicitante = (item.solicitante || '').toLowerCase();
+      return (status === 'cotado') && (solicitante === usuario.toLowerCase());
+    });
+    
+    // Atualiza contador da aba de Cotações
+    const contadorCotacoes = document.getElementById('contadorMinhasCotacoes');
+    if (contadorCotacoes) {
+      contadorCotacoes.textContent = lista.length;
+    }
+    
+    if (!lista.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum item cotado.</td></tr>';
+      return;
+    }
+
+    // Agrupa itens por numero_pedido
+    const pedidosMap = new Map();
+    lista.forEach(item => {
+      const numPedido = item.numero_pedido || 'sem-numero';
+      if (!pedidosMap.has(numPedido)) {
+        pedidosMap.set(numPedido, []);
+      }
+      pedidosMap.get(numPedido).push(item);
+    });
+
+    const fmtInputDate = (iso) => {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().slice(0, 10);
+      } catch (_) {
+        return '';
+      }
+    };
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const fmtDateTime = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
+    };
+
+    let html = '';
+    let pedidoIndex = 0;
+
+    pedidosMap.forEach((itens, numeroPedido) => {
+      const primeiroItem = itens[0];
+      const totalItens = itens.length;
+      const dataCriacao = fmtDateTime(primeiroItem.created_at);
+      const solicitante = escapeHtml(primeiroItem.solicitante || '-');
+      const expandId = `compras-cotado-expand-${pedidoIndex}`;
+
+      // Linha principal do pedido (colapsada)
+      html += `
+        <tr class="compras-pedido-header" data-expand-id="${expandId}" style="cursor:pointer;background:#f9fafb;">
+          <td style="text-align:center;">
+            <i class="fa-solid fa-chevron-right compras-expand-icon" style="color:#6b7280;transition:transform 0.2s;"></i>
+          </td>
+          <td><strong style="color:#8b5cf6;">${escapeHtml(numeroPedido)}</strong></td>
+          <td><span style="background:#ddd6fe;color:#5b21b6;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">${totalItens} ${totalItens === 1 ? 'item' : 'itens'}</span></td>
+          <td style="color:#1f2937;font-weight:500;">${solicitante}</td>
+          <td style="color:#1f2937;font-weight:500;">${dataCriacao}</td>
+          <td></td>
+        </tr>
+      `;
+
+      // Linhas dos itens (inicialmente ocultas) - usando mesma estrutura da outra tabela
+      itens.forEach((item) => {
+        const previsaoValue = fmtInputDate(item.previsao_chegada);
+        const obs = item.observacao ? escapeHtml(item.observacao) : '-';
+        
+        // Processa anexos existentes
+        let anexosExistentesHtml = '';
+        try {
+          const anexosExistentes = item.anexos ? (typeof item.anexos === 'string' ? JSON.parse(item.anexos) : item.anexos) : [];
+          if (Array.isArray(anexosExistentes) && anexosExistentes.length > 0) {
+            anexosExistentesHtml = anexosExistentes.map(anexo => `
+              <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
+                <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
+                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
+                <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
+              </a>
+            `).join('');
+          }
+        } catch (e) {
+          console.error('[Anexos] Erro ao processar anexos:', e);
+        }
+        
+        html += `
+          <tr class="compras-pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
+            <td></td>
+            <td colspan="5" style="padding:12px 20px;">
+              <div style="display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start;border-left:3px solid #8b5cf6;padding-left:16px;">
+                <div style="min-width:60px;">
+                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
+                  <div style="font-weight:600;color:#374151;">${item.id}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                  <!-- Primeira linha: Código - Descrição -->
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
+                    <div style="font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
+                  </div>
+                  <div style="grid-column:span 2;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+                    <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
+                  </div>
+                  
+                  <!-- Segunda linha: Quantidade - Observação -->
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
+                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+                  </div>
+                  <div style="grid-column:span 2;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
+                    <div style="color:#374151;">${obs}</div>
+                  </div>
+                  
+                  <!-- Terceira linha: Prazo - Previsão - Fornecedor -->
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
+                    <div style="color:#374151;">${fmtDate(item.prazo_solicitado)}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Previsão chegada</div>
+                    <div style="color:#374151;">${item.previsao_chegada ? fmtDate(item.previsao_chegada) : '-'}</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Fornecedor</div>
+                    <div style="color:#374151;">${escapeHtml(item.fornecedor_nome || '-')}</div>
+                  </div>
+                  
+                  <!-- Quarta linha: Status -->
+                  <div style="grid-column:span 3;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
+                    <div>
+                      <span style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;background:#8b5cf6;color:#ffffff;">
+                        ${item.status || 'cotado'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <!-- Quinta linha: Anexos -->
+                  ${anexosExistentesHtml ? `
+                    <div style="grid-column:span 3;">
+                      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Anexos</div>
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        ${anexosExistentesHtml}
+                      </div>
+                    </div>
+                  ` : ''}
+                  
+                  <!-- Sexta linha: Cotações recebidas -->
+                  <div style="grid-column:span 3;margin-top:12px;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                      <i class="fa-solid fa-file-invoice-dollar" style="color:#8b5cf6;"></i>
+                      Cotações Recebidas
+                    </div>
+                    <div class="compras-cotacoes-list-cotados" data-item-id="${item.id}" style="display:flex;flex-direction:column;gap:8px;">
+                      <!-- Será preenchido via JS -->
+                      <div style="color:#9ca3af;font-size:12px;font-style:italic;">Carregando cotações...</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      });
+
+      pedidoIndex++;
+    });
+
+    tbody.innerHTML = html;
+
+    // Adiciona event listeners para expandir/colapsar usando função global
+    setupComprasExpandListeners();
+    
+    // Carrega cotações de cada item
+    const cotacoesContainers = tbody.querySelectorAll('.compras-cotacoes-list-cotados');
+    cotacoesContainers.forEach(container => {
+      const itemId = container.getAttribute('data-item-id');
+      loadCotacoesItemCotados(itemId);
+    });
+
+  } catch (err) {
+    console.error('[COMPRAS] Falha ao listar cotados:', err);
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar itens cotados.</td></tr>';
+  }
+}
+
+// Carrega e renderiza cotações para itens cotados (visualização simplificada)
+async function loadCotacoesItemCotados(solicitacaoId) {
+  const container = document.querySelector(`.compras-cotacoes-list-cotados[data-item-id="${solicitacaoId}"]`);
+  if (!container) return;
+  
+  try {
+    const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
+    if (!response.ok) throw new Error('Erro ao carregar cotações');
+    const cotacoes = await response.json();
+    
+    if (!Array.isArray(cotacoes)) {
+      container.innerHTML = '<div style="color:#9ca3af;font-size:12px;font-style:italic;">Nenhuma cotação encontrada</div>';
+      return;
+    }
+    
+    if (cotacoes.length === 0) {
+      container.innerHTML = '<div style="color:#9ca3af;font-size:12px;font-style:italic;">Nenhuma cotação adicionada</div>';
+      return;
+    }
+    
+    container.innerHTML = cotacoes.map(cotacao => {
+      // Parse anexos
+      let anexosArray = [];
+      if (cotacao.anexos) {
+        try {
+          anexosArray = typeof cotacao.anexos === 'string' ? JSON.parse(cotacao.anexos) : cotacao.anexos;
+          if (!Array.isArray(anexosArray)) anexosArray = [];
+        } catch (e) {
+          anexosArray = [];
+        }
+      }
+      
+      // Define cor e texto baseado no status
+      const statusAprovacao = cotacao.status_aprovacao || 'pendente';
+      let statusColor, statusBg, statusText;
+      
+      if (statusAprovacao === 'aprovado') {
+        statusColor = '#059669';
+        statusBg = '#d1fae5';
+        statusText = 'Aprovado';
+      } else if (statusAprovacao === 'reprovado') {
+        statusColor = '#dc2626';
+        statusBg = '#fee2e2';
+        statusText = 'Reprovado';
+      } else {
+        statusColor = '#6b7280';
+        statusBg = '#f3f4f6';
+        statusText = 'Pendente';
+      }
+      
+      return `
+        <div class="cotacao-card" data-cotacao-id="${cotacao.id}" data-status="${statusAprovacao}" style="background:#f9fafb;padding:12px;border:2px solid ${statusAprovacao === 'aprovado' ? '#10b981' : statusAprovacao === 'reprovado' ? '#ef4444' : '#e5e7eb'};border-radius:8px;position:relative;">
+          
+          <!-- Badge de Status -->
+          <div style="position:absolute;top:8px;right:8px;background:${statusBg};color:${statusColor};padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">
+            ${statusText}
+          </div>
+          
+          <!-- Grid de informações -->
+          <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center;margin-bottom:${cotacao.observacao ? '8px' : '0'};padding-right:90px;">
+            <!-- Fornecedor -->
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Fornecedor</div>
+              <div style="font-weight:600;color:#1f2937;font-size:13px;">${escapeHtml(cotacao.fornecedor_nome)}</div>
+            </div>
+            
+            <!-- Valor -->
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Valor</div>
+              <div style="font-weight:600;color:#059669;font-size:14px;">R$ ${(parseFloat(cotacao.valor_cotado) || 0).toFixed(2)}</div>
+            </div>
+            
+            <!-- Anexos -->
+            <div>
+              ${anexosArray.length > 0 ? `
+                <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                  ${anexosArray.map(anexo => `
+                    <a href="${anexo.base64 || anexo.url}" download="${escapeHtml(anexo.nome)}" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;text-decoration:none;font-size:11px;color:#1e40af;cursor:pointer;" title="${escapeHtml(anexo.nome)}">
+                      <i class="fa-solid fa-file"></i>
+                      <span style="max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(anexo.nome)}</span>
+                    </a>
+                  `).join('')}
+                </div>
+              ` : '<div style="font-size:11px;color:#9ca3af;font-style:italic;">Sem anexos</div>'}
+            </div>
+          </div>
+          
+          <!-- Observação (se existir) -->
+          ${cotacao.observacao ? `
+            <div style="padding-top:8px;border-top:1px solid #e5e7eb;margin-bottom:10px;">
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
+              <div style="font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(cotacao.observacao)}</div>
+            </div>
+          ` : ''}
+          
+          <!-- Botões de Ação -->
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button 
+              class="btn-aprovar-cotacao" 
+              data-cotacao-id="${cotacao.id}"
+              style="flex:1;padding:8px 16px;background:${statusAprovacao === 'aprovado' ? '#10b981' : '#fff'};color:${statusAprovacao === 'aprovado' ? '#fff' : '#10b981'};border:2px solid #10b981;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;"
+              ${statusAprovacao === 'aprovado' ? 'disabled' : ''}
+            >
+              <i class="fa-solid fa-check-circle"></i>
+              <span>Aprovar</span>
+            </button>
+            <button 
+              class="btn-reprovar-cotacao" 
+              data-cotacao-id="${cotacao.id}"
+              style="flex:1;padding:8px 16px;background:${statusAprovacao === 'reprovado' ? '#ef4444' : '#fff'};color:${statusAprovacao === 'reprovado' ? '#fff' : '#ef4444'};border:2px solid #ef4444;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:6px;"
+              ${statusAprovacao === 'reprovado' ? 'disabled' : ''}
+            >
+              <i class="fa-solid fa-times-circle"></i>
+              <span>Reprovar</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Adiciona event listeners para os botões de aprovar/reprovar
+    setTimeout(() => {
+      container.querySelectorAll('.btn-aprovar-cotacao').forEach(btn => {
+        btn.addEventListener('click', () => atualizarStatusCotacao(btn.dataset.cotacaoId, 'aprovado', solicitacaoId));
+      });
+      
+      container.querySelectorAll('.btn-reprovar-cotacao').forEach(btn => {
+        btn.addEventListener('click', () => atualizarStatusCotacao(btn.dataset.cotacaoId, 'reprovado', solicitacaoId));
+      });
+    }, 100);
+    
+  } catch (err) {
+    console.error('[COTACOES] Erro ao carregar para item cotado:', err);
+    container.innerHTML = '<div style="color:#ef4444;font-size:12px;">Erro ao carregar cotações</div>';
+  }
+}
+
+// Atualiza status de aprovação de uma cotação
+async function atualizarStatusCotacao(cotacaoId, status, solicitacaoId) {
+  try {
+    const response = await fetch(`/api/compras/cotacoes/${cotacaoId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status })
+    });
+    
+    if (!response.ok) throw new Error('Erro ao atualizar status');
+    
+    // Recarrega as cotações para atualizar a UI
+    await loadCotacoesItemCotados(solicitacaoId);
+    
+    // Verifica se todas as cotações foram marcadas
+    verificarCotacoesCompletas(solicitacaoId);
+    
+  } catch (err) {
+    console.error('[COTACOES] Erro ao atualizar status:', err);
+    alert('Erro ao atualizar status da cotação');
+  }
+}
+
+// Verifica se todas as cotações de um item foram marcadas
+async function verificarCotacoesCompletas(solicitacaoId) {
+  try {
+    console.log('[VERIFICACAO] Verificando cotações para item:', solicitacaoId);
+    
+    const response = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
+    if (!response.ok) return;
+    
+    const cotacoes = await response.json();
+    console.log('[VERIFICACAO] Cotações recebidas:', cotacoes);
+    
+    if (!Array.isArray(cotacoes) || cotacoes.length === 0) {
+      console.log('[VERIFICACAO] Nenhuma cotação encontrada');
+      return;
+    }
+    
+    // Verifica se todas as cotações foram marcadas (aprovado ou reprovado)
+    const todasMarcadas = cotacoes.every(c => c.status_aprovacao === 'aprovado' || c.status_aprovacao === 'reprovado');
+    console.log('[VERIFICACAO] Todas marcadas?', todasMarcadas);
+    
+    // Verifica se tem pelo menos uma cotação aprovada
+    const temAprovada = cotacoes.some(c => c.status_aprovacao === 'aprovado');
+    console.log('[VERIFICACAO] Tem aprovada?', temAprovada);
+    
+    // Busca o container de cotações deste item
+    const cotacoesContainer = document.querySelector(`.compras-cotacoes-list-cotados[data-item-id="${solicitacaoId}"]`);
+    if (!cotacoesContainer) {
+      console.log('[VERIFICACAO] Container de cotações não encontrado');
+      return;
+    }
+    
+    console.log('[VERIFICACAO] Container encontrado:', cotacoesContainer);
+    
+    // Remove QUALQUER container de ações anterior (pode haver múltiplos se houver bug)
+    const oldContainers = document.querySelectorAll(`.cotacoes-actions-container[data-solicitacao="${solicitacaoId}"]`);
+    oldContainers.forEach(old => old.remove());
+    
+    if (todasMarcadas) {
+      console.log('[VERIFICACAO] Mostrando botões de ação');
+      
+      // Cria NOVO container de ações
+      const actionsContainer = document.createElement('div');
+      actionsContainer.className = 'cotacoes-actions-container';
+      actionsContainer.dataset.solicitacao = solicitacaoId; // Identificador único
+      actionsContainer.style.cssText = 'margin-top:16px;padding:16px;background:#f0fdf4;border:2px solid #10b981;border-radius:8px;display:flex;gap:12px;align-items:center;';
+      
+      // Verifica se tem pelo menos uma cotação aprovada
+      const temAprovada = cotacoes.some(c => c.status_aprovacao === 'aprovado');
+      
+      actionsContainer.innerHTML = `
+        <div style="flex:1;">
+          <div style="font-weight:600;color:#059669;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-check-circle" style="font-size:18px;"></i>
+            <span>Todas as cotações foram avaliadas!</span>
+          </div>
+          <div style="font-size:13px;color:#047857;">
+            ${temAprovada ? 'Você pode enviar para compra ou excluir este item.' : 'Todas foram reprovadas. Você pode excluir este item.'}
+          </div>
+        </div>
+        ${temAprovada ? `
+          <button 
+            class="btn-enviar-compra" 
+            data-item-id="${solicitacaoId}"
+            style="padding:10px 20px;background:#10b981;color:white;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 2px 4px rgba(16,185,129,0.3);"
+          >
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>Enviar para Compra</span>
+          </button>
+        ` : ''}
+        <button 
+          class="btn-excluir-item" 
+          data-item-id="${solicitacaoId}"
+          style="padding:10px 20px;background:#ef4444;color:white;border:none;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 2px 4px rgba(239,68,68,0.3);"
+        >
+          <i class="fa-solid fa-trash"></i>
+          <span>Excluir Item</span>
+        </button>
+      `;
+      
+      // Adiciona após o container de cotações
+      cotacoesContainer.parentElement.appendChild(actionsContainer);
+      
+      // Event listeners para os novos botões
+      const btnEnviar = actionsContainer.querySelector('.btn-enviar-compra');
+      if (btnEnviar) {
+        btnEnviar.addEventListener('click', () => enviarParaCompra(solicitacaoId));
+      }
+      
+      const btnExcluir = actionsContainer.querySelector('.btn-excluir-item');
+      if (btnExcluir) {
+        btnExcluir.addEventListener('click', () => excluirItemCompra(solicitacaoId));
+      }
+      
+      console.log('[VERIFICACAO] Container de ações criado e inserido');
+    }
+    
+  } catch (err) {
+    console.error('[COTACOES] Erro ao verificar completude:', err);
+  }
+}
+
+// Envia item para compra (muda status para "aguardando compra")
+async function enviarParaCompra(itemId) {
+  if (!confirm('Deseja enviar este item para compra?')) return;
+  
+  try {
+    const response = await fetch(`/api/compras/itens/${itemId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'aguardando compra' })
+    });
+    
+    if (!response.ok) throw new Error('Erro ao enviar para compra');
+    
+    alert('Item enviado para compra com sucesso!');
+    
+    // Recarrega a lista de itens cotados
+    loadComprasCotadas();
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao enviar para compra:', err);
+    alert('Erro ao enviar item para compra');
+  }
+}
+
+// Exclui um item da solicitação de compra
+async function excluirItemCompra(itemId) {
+  if (!confirm('Deseja realmente excluir este item? Esta ação não pode ser desfeita.')) return;
+  
+  try {
+    const response = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    
+    if (!response.ok) throw new Error('Erro ao excluir item');
+    
+    alert('Item excluído com sucesso!');
+    
+    // Recarrega a lista de itens cotados
+    loadComprasCotadas();
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao excluir item:', err);
+    alert('Erro ao excluir item');
   }
 }
 
@@ -13035,6 +14799,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Aplica filtro de status se fornecido
     if (filtroStatus && filtroStatus.length > 0) {
       lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
+    }
+    
+    // Atualiza contador da aba de Controle de pedidos
+    const contadorPedidos = document.getElementById('contadorMinhasPedidos');
+    if (contadorPedidos) {
+      contadorPedidos.textContent = lista.length;
     }
     
     if (!lista.length) {
@@ -13227,6 +14997,7 @@ async function updateSolicitacaoCompras(id, payload) {
     if (!resp.ok) throw new Error('Falha ao atualizar');
     await loadComprasSolicitacoes();
     await loadMinhasSolicitacoes();
+    await loadComprasCotadas(); // Recarrega itens cotados
   } catch (err) {
     console.error('[COMPRAS] Falha ao atualizar solicitação', err);
   }

@@ -1,15 +1,15 @@
 {
   "[javascript]": {
-    "editor.hover.enabled": false
+    "editor.hover.enabled": "off"
   },
   "[javascriptreact]": {
-    "editor.hover.enabled": false
+    "editor.hover.enabled": "off"
   },
   "[typescript]": {
-    "editor.hover.enabled": false
+    "editor.hover.enabled": "off"
   },
   "[typescriptreact]": {
-    "editor.hover.enabled": false
+    "editor.hover.enabled": "off"
   },
 
   "highlight.regexes": {

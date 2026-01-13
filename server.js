@@ -8706,6 +8706,85 @@ async function ensureComprasSchema() {
           ALTER TABLE compras.solicitacao_compras 
           ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
         END IF;
+        
+        -- Adiciona coluna fornecedor_nome se não existir
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'fornecedor_nome'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN fornecedor_nome TEXT;
+        END IF;
+        
+        -- Adiciona coluna fornecedor_id se não existir
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'fornecedor_id'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN fornecedor_id TEXT;
+        END IF;
+        
+        -- Adiciona coluna anexos se não existir (JSONB para armazenar array de objetos)
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'anexos'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN anexos JSONB;
+        END IF;
+      END $$;
+    `);
+    
+    // Cria tabela de cotações para armazenar múltiplos fornecedores por item
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.cotacoes (
+        id SERIAL PRIMARY KEY,
+        solicitacao_id INTEGER NOT NULL REFERENCES compras.solicitacao_compras(id) ON DELETE CASCADE,
+        fornecedor_nome TEXT NOT NULL,
+        fornecedor_id TEXT,
+        valor_cotado DECIMAL(15,2),
+        observacao TEXT,
+        anexos JSONB,
+        status_aprovacao VARCHAR(20) DEFAULT 'pendente' CHECK (status_aprovacao IN ('pendente', 'aprovado', 'reprovado')),
+        criado_por TEXT,
+        criado_em TIMESTAMPTZ DEFAULT NOW(),
+        atualizado_em TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      -- Cria índice para busca rápida por solicitacao_id
+      CREATE INDEX IF NOT EXISTS idx_cotacoes_solicitacao 
+      ON compras.cotacoes(solicitacao_id);
+      
+      -- Cria índice para busca rápida por status_aprovacao
+      CREATE INDEX IF NOT EXISTS idx_cotacoes_status_aprovacao
+      ON compras.cotacoes(status_aprovacao);
+    `);
+    
+    // Migration: Adiciona coluna status_aprovacao se não existir
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND column_name = 'status_aprovacao'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          ADD COLUMN status_aprovacao VARCHAR(20) DEFAULT 'pendente' 
+          CHECK (status_aprovacao IN ('pendente', 'aprovado', 'reprovado'));
+          
+          -- Cria índice para a nova coluna
+          CREATE INDEX idx_cotacoes_status_aprovacao 
+          ON compras.cotacoes(status_aprovacao);
+        END IF;
       END $$;
     `);
     
@@ -9305,6 +9384,9 @@ app.get('/api/compras/todas', async (req, res) => {
         departamento,
         centro_custo,
         objetivo_compra,
+        fornecedor_nome,
+        fornecedor_id,
+        anexos,
         created_at,
         updated_at
       FROM compras.solicitacao_compras
@@ -9327,12 +9409,14 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
 
-    const { status, previsao_chegada, observacao, resp_inspecao_recebimento } = req.body || {};
+    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, anexos } = req.body || {};
     
     const allowedStatus = [
       'pendente',
       'aguardando aprovação',
       'aguardando compra',
+      'aguardando cotação',
+      'cotado',
       'compra realizada',
       'aguardando liberação',
       'compra cancelada',
@@ -9342,6 +9426,51 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     const fields = [];
     const values = [];
     let idx = 1;
+    
+    // Processa anexos se houver
+    let anexosUrls = null;
+    if (anexos && Array.isArray(anexos) && anexos.length > 0) {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
+        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        anexosUrls = [];
+        
+        for (const anexo of anexos) {
+          const buffer = Buffer.from(anexo.base64, 'base64');
+          const filePath = `item_${id}/${Date.now()}_${anexo.nome}`;
+          
+          const { data, error } = await supabase.storage
+            .from('compras-anexos')
+            .upload(filePath, buffer, {
+              contentType: anexo.tipo,
+              upsert: false
+            });
+          
+          if (!error) {
+            const { data: publicData } = supabase.storage
+              .from('compras-anexos')
+              .getPublicUrl(filePath);
+            
+            anexosUrls.push({
+              nome: anexo.nome,
+              url: publicData.publicUrl,
+              tipo: anexo.tipo,
+              tamanho: anexo.tamanho
+            });
+          }
+        }
+        
+        if (anexosUrls.length > 0) {
+          fields.push(`anexos = $${idx++}`);
+          values.push(JSON.stringify(anexosUrls));
+        }
+      } catch (uploadErr) {
+        console.error('[Compras] Erro ao fazer upload de anexos:', uploadErr);
+      }
+    }
 
     if (status) {
       if (!allowedStatus.includes(status)) {
@@ -9364,6 +9493,16 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     if (typeof resp_inspecao_recebimento !== 'undefined') {
       fields.push(`resp_inspecao_recebimento = $${idx++}`);
       values.push(resp_inspecao_recebimento || null);
+    }
+    
+    if (typeof fornecedor_nome !== 'undefined') {
+      fields.push(`fornecedor_nome = $${idx++}`);
+      values.push(fornecedor_nome || null);
+    }
+    
+    if (typeof fornecedor_id !== 'undefined') {
+      fields.push(`fornecedor_id = $${idx++}`);
+      values.push(fornecedor_id || null);
     }
 
     if (!fields.length) {
@@ -9392,6 +9531,316 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     res.status(500).json({ ok: false, error: 'Erro ao atualizar solicitação' });
   }
 });
+
+// ========== ENDPOINTS DE COTAÇÕES ==========
+
+// POST /api/compras/cotacoes - Adiciona uma cotação de fornecedor
+app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
+  try {
+    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por } = req.body || {};
+    
+    if (!solicitacao_id || !fornecedor_nome) {
+      return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
+    }
+    
+    // Processa anexos se houver
+    let anexosUrls = null;
+    if (anexos && Array.isArray(anexos) && anexos.length > 0) {
+      console.log(`[Cotações] Processando ${anexos.length} anexos para solicitacao_id ${solicitacao_id}`);
+      
+      // Salva os anexos diretamente como base64 no JSONB (sem Supabase por enquanto)
+      anexosUrls = anexos.map(anexo => ({
+        nome: anexo.nome,
+        tipo: anexo.tipo || 'application/octet-stream',
+        tamanho: anexo.tamanho || 0,
+        base64: anexo.base64
+      }));
+      
+      console.log(`[Cotações] ${anexosUrls.length} anexos salvos como base64`);
+    }
+    
+    const { rows } = await pool.query(`
+      INSERT INTO compras.cotacoes 
+        (solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [
+      solicitacao_id,
+      fornecedor_nome,
+      fornecedor_id || null,
+      valor_cotado || null,
+      observacao || null,
+      anexosUrls ? JSON.stringify(anexosUrls) : null,
+      criado_por || null
+    ]);
+    
+    console.log('[Cotações] Cotação salva:', {
+      id: rows[0].id,
+      fornecedor: rows[0].fornecedor_nome,
+      anexos_count: anexosUrls ? anexosUrls.length : 0
+    });
+    
+    res.json({ ok: true, cotacao: rows[0] });
+  } catch (err) {
+    console.error('[Cotações] Erro ao adicionar cotação:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao adicionar cotação' });
+  }
+});
+
+// GET /api/compras/cotacoes/:solicitacao_id - Lista cotações de um item
+app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
+  try {
+    const solicitacao_id = Number(req.params.solicitacao_id);
+    if (!Number.isInteger(solicitacao_id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      SELECT * FROM compras.cotacoes 
+      WHERE solicitacao_id = $1 
+      ORDER BY criado_em DESC
+    `, [solicitacao_id]);
+    
+    res.json(rows);
+  } catch (err) {
+    console.error('[Cotações] Erro ao listar cotações:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar cotações' });
+  }
+});
+
+// PUT /api/compras/cotacoes/:id - Atualiza uma cotação
+app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos } = req.body || {};
+    
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    
+    // Processa anexos se houver
+    let anexosUrls = null;
+    if (anexos && Array.isArray(anexos) && anexos.length > 0) {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
+        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        // Busca cotação para pegar solicitacao_id
+        const { rows: cotacaoRows } = await pool.query(`
+          SELECT solicitacao_id FROM compras.cotacoes WHERE id = $1
+        `, [id]);
+        
+        if (cotacaoRows.length > 0) {
+          anexosUrls = [];
+          
+          for (const anexo of anexos) {
+            const buffer = Buffer.from(anexo.base64, 'base64');
+            const filePath = `cotacao_${cotacaoRows[0].solicitacao_id}/${Date.now()}_${anexo.nome}`;
+            
+            const { data, error } = await supabase.storage
+              .from('compras-anexos')
+              .upload(filePath, buffer, {
+                contentType: anexo.tipo,
+                upsert: false
+              });
+            
+            if (!error) {
+              const { data: publicData } = supabase.storage
+                .from('compras-anexos')
+                .getPublicUrl(filePath);
+              
+              anexosUrls.push({
+                nome: anexo.nome,
+                url: publicData.publicUrl,
+                tipo: anexo.tipo,
+                tamanho: anexo.tamanho
+              });
+            }
+          }
+          
+          if (anexosUrls.length > 0) {
+            fields.push(`anexos = $${idx++}`);
+            values.push(JSON.stringify(anexosUrls));
+          }
+        }
+      } catch (uploadErr) {
+        console.error('[Cotações] Erro ao fazer upload de anexos:', uploadErr);
+      }
+    }
+    
+    if (fornecedor_nome) {
+      fields.push(`fornecedor_nome = $${idx++}`);
+      values.push(fornecedor_nome);
+    }
+    
+    if (typeof fornecedor_id !== 'undefined') {
+      fields.push(`fornecedor_id = $${idx++}`);
+      values.push(fornecedor_id || null);
+    }
+    
+    if (typeof valor_cotado !== 'undefined') {
+      fields.push(`valor_cotado = $${idx++}`);
+      values.push(valor_cotado || null);
+    }
+    
+    if (typeof observacao !== 'undefined') {
+      fields.push(`observacao = $${idx++}`);
+      values.push(observacao || null);
+    }
+    
+    if (fields.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+    }
+    
+    fields.push(`atualizado_em = NOW()`);
+    values.push(id);
+    
+    const { rows } = await pool.query(`
+      UPDATE compras.cotacoes 
+      SET ${fields.join(', ')}
+      WHERE id = $${idx}
+      RETURNING *
+    `, values);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
+    }
+    
+    res.json({ ok: true, cotacao: rows[0] });
+  } catch (err) {
+    console.error('[Cotações] Erro ao atualizar cotação:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar cotação' });
+  }
+});
+
+// DELETE /api/compras/cotacoes/:id - Remove uma cotação
+app.delete('/api/compras/cotacoes/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      DELETE FROM compras.cotacoes 
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
+    }
+    
+    res.json({ ok: true, message: 'Cotação removida com sucesso' });
+  } catch (err) {
+    console.error('[Cotações] Erro ao remover cotação:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao remover cotação' });
+  }
+});
+
+// Endpoint para atualizar status de aprovação de uma cotação
+app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // Valida status
+    if (!status || !['pendente', 'aprovado', 'reprovado'].includes(status)) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'Status inválido. Use: pendente, aprovado ou reprovado' 
+      });
+    }
+    
+    // Atualiza status da cotação
+    const { rows } = await pool.query(`
+      UPDATE compras.cotacoes 
+      SET status_aprovacao = $1, atualizado_em = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
+    }
+    
+    res.json({ ok: true, cotacao: rows[0] });
+    
+  } catch (err) {
+    console.error('[Cotações] Erro ao atualizar status:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar status da cotação' });
+  }
+});
+
+// Endpoint para alterar status de um item de compra
+app.put('/api/compras/itens/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // Valida status
+    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado'];
+    if (!status || !statusValidos.includes(status)) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: `Status inválido. Use: ${statusValidos.join(', ')}` 
+      });
+    }
+    
+    // Atualiza status do item
+    const { rows } = await pool.query(`
+      UPDATE compras.solicitacao_compras 
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+    
+    res.json({ ok: true, item: rows[0] });
+    
+  } catch (err) {
+    console.error('[Compras] Erro ao atualizar status do item:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar status do item' });
+  }
+});
+
+// Endpoint para excluir um item de compra
+app.delete('/api/compras/itens/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Verifica se o item existe
+    const { rows: itemRows } = await pool.query(`
+      SELECT * FROM compras.solicitacao_compras WHERE id = $1
+    `, [id]);
+    
+    if (itemRows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+    
+    // Exclui o item (as cotações serão excluídas automaticamente por CASCADE)
+    await pool.query(`
+      DELETE FROM compras.solicitacao_compras WHERE id = $1
+    `, [id]);
+    
+    res.json({ ok: true, message: 'Item excluído com sucesso' });
+    
+  } catch (err) {
+    console.error('[Compras] Erro ao excluir item:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao excluir item' });
+  }
+});
+
+// ========== FIM ENDPOINTS DE COTAÇÕES ==========
 
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
