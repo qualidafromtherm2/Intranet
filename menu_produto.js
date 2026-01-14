@@ -10460,7 +10460,8 @@ function initComprasUI() {
   document.getElementById('comprasForm')?.addEventListener('submit', submitComprasSolicitacao);
   document.getElementById('comprasRefreshBtn')?.addEventListener('click', e => {
     e.preventDefault();
-    loadComprasSolicitacoes();
+    // Atualiza o kanban
+    renderComprasKanban();
   });
   attachComprasAutocomplete();
   console.log('[COMPRAS] initComprasUI -> autocomplete e eventos registrados');
@@ -12288,6 +12289,7 @@ function openComprasTab() {
     loadComprasSolicitacoes();
     loadMinhasSolicitacoes();
     loadComprasCotadas(); // Carrega itens cotados
+    renderComprasKanban(); // Carrega o kanban
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir painel:', err);
   }
@@ -12724,6 +12726,13 @@ async function abrirModalCompras() {
   if (departamento) departamento.value = '';
   if (centroCusto) centroCusto.value = '';
   
+  // Define "Não" como padrão em "Necessário retorno das cotações realizadas?"
+  const retornoCotacao = document.getElementById('modalComprasRetornoCotacao');
+  if (retornoCotacao) retornoCotacao.value = 'Não';
+  
+  // Garante que todos os campos estejam visíveis ao abrir o modal
+  ocultarCamposComprasProdutoExistente(false);
+  
   // Carrega departamentos, centros de custo e usuários
   await carregarDepartamentosECentros();
   
@@ -13076,6 +13085,10 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
     clearTimeout(timeoutBusca);
     const termo = (inputEl.value || '').trim();
     
+    // Quando o usuário digita manualmente (não selecionou da lista ainda), mostra os campos
+    if (descHiddenEl) descHiddenEl.value = '';
+    ocultarCamposComprasProdutoExistente(false);
+    
     if (termo.length < 2) {
       sugestoesEl.style.display = 'none';
       sugestoesEl.innerHTML = '';
@@ -13124,6 +13137,15 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
             if (descInput) descInput.value = desc;
             sugestoesEl.style.display = 'none';
             if (statusEl) statusEl.textContent = '';
+            
+            // Quando seleciona um produto existente da lista, oculta campos específicos
+            ocultarCamposComprasProdutoExistente(true);
+            
+            // Define "Não" como padrão em "Necessário retorno das cotações realizadas?"
+            const retornoCotacao = document.getElementById('modalComprasRetornoCotacao');
+            if (retornoCotacao && !retornoCotacao.value) {
+              retornoCotacao.value = 'Não';
+            }
           });
         });
         
@@ -13141,6 +13163,65 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
     }
   });
 })();
+
+// Função para ocultar/mostrar campos quando produto existente é selecionado
+function ocultarCamposComprasProdutoExistente(ocultar) {
+  // Objetivo da compra
+  const objetivoField = document.getElementById('modalComprasObjetivo')?.closest('.form-field');
+  const objetivoInput = document.getElementById('modalComprasObjetivo');
+  
+  // Anexo
+  const anexoField = document.querySelector('label[for="modalComprasAnexo"]')?.closest('.form-field');
+  
+  // Observação
+  const observacaoField = document.getElementById('modalComprasObservacao')?.closest('.form-field');
+  
+  // Responsável
+  const responsavelField = document.getElementById('modalComprasResponsavel')?.closest('.form-field');
+  const responsavelInput = document.getElementById('modalComprasResponsavel');
+  
+  const camposParaOcultar = [objetivoField, anexoField, observacaoField, responsavelField].filter(Boolean);
+  
+  camposParaOcultar.forEach(campo => {
+    if (campo) {
+      campo.style.display = ocultar ? 'none' : '';
+    }
+  });
+  
+  // Gerencia atributo required dos campos
+  if (objetivoInput) {
+    if (ocultar) {
+      objetivoInput.removeAttribute('required');
+      objetivoInput.value = 'Reposição de estoque'; // Valor padrão quando oculto
+    } else {
+      objetivoInput.setAttribute('required', 'required');
+    }
+  }
+  
+  if (responsavelInput) {
+    if (ocultar) {
+      responsavelInput.removeAttribute('required');
+      // Preenche com usuário logado se disponível
+      const usuarioLogado = window.__sessionUser?.username || '';
+      if (usuarioLogado) responsavelInput.value = usuarioLogado;
+    } else {
+      responsavelInput.setAttribute('required', 'required');
+    }
+  }
+  
+  // Se estiver ocultando, limpa anexo e observação (mas mantém objetivo e responsável com valores padrão)
+  if (ocultar) {
+    const observacao = document.getElementById('modalComprasObservacao');
+    const anexoInput = document.getElementById('modalComprasAnexo');
+    
+    if (observacao) observacao.value = '';
+    if (anexoInput) anexoInput.value = '';
+    
+    // Limpa visualização de anexo se houver
+    const anexoPreview = document.getElementById('modalComprasAnexoPreview');
+    if (anexoPreview) anexoPreview.style.display = 'none';
+  }
+}
 
 // ===================== FIM CARRINHO DE COMPRAS =====================
 
@@ -13652,8 +13733,14 @@ async function abrirModalNovaCotacao(solicitacaoId) {
       // Fecha modal
       modal.remove();
       
-      // Recarrega lista de cotações
+      // Recarrega lista de cotações na tabela
       await loadCotacoesItem(solicitacaoId);
+      
+      // Recarrega lista de cotações no modal se estiver aberto
+      const modalDetalhesPedido = document.getElementById('modalDetalhesPedidoCompras');
+      if (modalDetalhesPedido && modalDetalhesPedido.style.display === 'flex') {
+        await loadCotacoesItemModal(solicitacaoId);
+      }
       
     } catch (err) {
       console.error('[COTACOES] Erro ao salvar:', err);
@@ -13731,14 +13818,11 @@ async function loadComprasSolicitacoes() {
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     
-    // Filtra apenas itens com status "aguardando compra" ou "aguardando cotação"
-    const lista = listaCompleta.filter(item => {
-      const status = (item.status || '').toLowerCase();
-      return status === 'aguardando compra' || status === 'aguardando cotação';
-    });
+    // Mostra TODAS as solicitações (removido o filtro anterior)
+    const lista = listaCompleta;
     
     if (!lista.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação aguardando compra ou cotação.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação registrada.</td></tr>';
       return;
     }
 
@@ -14304,6 +14388,769 @@ async function loadComprasSolicitacoes() {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar solicitações.</td></tr>';
   }
 }
+
+// ========== KANBAN DE COMPRAS ==========
+let comprasViewMode = 'table'; // 'table' ou 'kanban'
+
+// Função para alternar entre visualizações
+// Abre modal com detalhes completos do pedido
+async function abrirModalDetalhesPedidoCompras(numeroPedido) {
+  const modal = document.getElementById('modalDetalhesPedidoCompras');
+  const modalBody = document.getElementById('modalPedidoBody');
+  const modalTitulo = document.getElementById('modalPedidoTitulo');
+  
+  if (!modal || !modalBody || !modalTitulo) return;
+  
+  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  modal.style.display = 'flex';
+  
+  try {
+    // Busca todos os itens do pedido
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    
+    if (itensPedido.length === 0) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Pedido não encontrado.</div>';
+      return;
+    }
+    
+    const primeiroItem = itensPedido[0];
+    modalTitulo.textContent = `Pedido ${numeroPedido}`;
+    
+    // Busca cotações para cada item
+    const cotacoesMap = new Map();
+    await Promise.all(itensPedido.map(async (item) => {
+      try {
+        const cotacoesResp = await fetch(`/api/compras/cotacoes/${item.id}`);
+        if (cotacoesResp.ok) {
+          const cotacoes = await cotacoesResp.json();
+          cotacoesMap.set(item.id, Array.isArray(cotacoes) ? cotacoes : []);
+        }
+      } catch (e) {
+        console.error(`Erro ao buscar cotações do item ${item.id}:`, e);
+      }
+    }));
+    
+    // Renderiza o modal
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+    
+    const fmtDateTime = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
+    };
+    
+    let html = `
+      <!-- Informações do Pedido -->
+      <div style="background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:20px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Solicitante</div>
+            <div style="font-size:14px;color:#1f2937;font-weight:600;">${escapeHtml(primeiroItem.solicitante || '-')}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Criado em</div>
+            <div style="font-size:14px;color:#1f2937;font-weight:600;">${fmtDateTime(primeiroItem.created_at)}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Total de Itens</div>
+            <div style="font-size:14px;color:#1f2937;font-weight:600;">${itensPedido.length}</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Lista de Itens -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+    `;
+    
+    itensPedido.forEach((item, index) => {
+      const aprovadas = (cotacoesMap.get(item.id) || []).filter(c => c.status_aprovacao === 'aprovado');
+      
+      html += `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:16px;">
+          <!-- Cabeçalho do Item -->
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;">
+            <div>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Item ${index + 1}</div>
+              <div style="font-size:16px;font-weight:700;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
+              <div style="font-size:13px;color:#6b7280;margin-top:4px;">${escapeHtml(item.descricao || item.produto_descricao || '-')}</div>
+            </div>
+            <div style="background:${item.status === 'aguardando cotação' ? '#fef3c7' : item.status === 'aguardando compra' ? '#d1fae5' : '#dbeafe'};color:${item.status === 'aguardando cotação' ? '#92400e' : item.status === 'aguardando compra' ? '#065f46' : '#1e40af'};padding:6px 12px;border-radius:12px;font-size:11px;font-weight:700;text-transform:uppercase;white-space:nowrap;">
+              ${escapeHtml(item.status || '-')}
+            </div>
+          </div>
+          
+          <!-- Informações do Item -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:6px;">
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Quantidade</div>
+              <div style="font-size:14px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Prazo Solicitado</div>
+              <div style="font-size:13px;color:#1f2937;">${fmtDate(item.prazo_solicitado)}</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Previsão Chegada</div>
+              <div style="font-size:13px;color:#1f2937;">${fmtDate(item.previsao_chegada)}</div>
+            </div>
+            ${item.fornecedor_nome ? `
+            <div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Fornecedor</div>
+              <div style="font-size:13px;font-weight:600;color:#1f2937;">${escapeHtml(item.fornecedor_nome)}</div>
+            </div>
+            ` : ''}
+          </div>
+          
+          ${item.observacao ? `
+          <div style="margin-bottom:12px;padding:10px;background:#fef3c7;border-left:3px solid #fbbf24;border-radius:4px;">
+            <div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700;margin-bottom:4px;">Observação</div>
+            <div style="font-size:12px;color:#1f2937;">${escapeHtml(item.observacao)}</div>
+          </div>
+          ` : ''}
+          
+          ${aprovadas.length > 0 ? `
+          <div style="padding:12px;background:#ecfdf5;border:1px solid #10b981;border-radius:6px;margin-bottom:12px;">
+            <div style="font-size:11px;color:#047857;text-transform:uppercase;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-check-circle"></i>
+              Cotações Aprovadas
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${aprovadas.map(cot => `
+                <div style="background:white;padding:10px;border-radius:6px;border:1px solid #d1fae5;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                      <div style="font-size:10px;color:#6b7280;">Fornecedor</div>
+                      <div style="font-weight:600;font-size:12px;color:#047857;">${escapeHtml(cot.fornecedor_nome)}</div>
+                    </div>
+                    <div style="text-align:right;">
+                      <div style="font-size:10px;color:#6b7280;">Valor</div>
+                      <div style="font-weight:700;font-size:14px;color:#059669;">R$ ${(parseFloat(cot.valor_cotado) || 0).toFixed(2)}</div>
+                    </div>
+                  </div>
+                  ${cot.observacao ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #d1fae5;font-size:11px;color:#1f2937;">${escapeHtml(cot.observacao)}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+          
+          ${(item.status === 'aguardando cotação' || item.status === 'cotado' || item.status === 'aguardando_cotacao') ? `
+          <!-- Seção de Cotações (para status aguardando cotação) -->
+          <div style="padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:12px;">
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;font-weight:700;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+              <span><i class="fa-solid fa-list"></i> Cotações Registradas</span>
+              <button 
+                id="btn-adicionar-cotacao-${item.id}"
+                onclick="adicionarCotacaoComSpinner('${item.id}')" 
+                style="display:flex;align-items:center;gap:6px;background:#3b82f6;color:white;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;"
+                title="Adicionar nova cotação">
+                <i class="fa-solid fa-plus"></i>
+                Adicionar Cotação
+              </button>
+            </div>
+            <div class="compras-cotacoes-list-modal" data-item-id="${item.id}" style="display:flex;flex-direction:column;gap:8px;">
+              <!-- Será preenchido dinamicamente via JS -->
+              <div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">
+                <i class="fa-solid fa-spinner fa-spin"></i> Carregando cotações...
+              </div>
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- Botões de Ação -->
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            ${(item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao') ? `
+            <button 
+              onclick="marcarComoCotadoModal('${item.id}')" 
+              style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;" 
+              title="Marcar como cotado">
+              <i class="fa-solid fa-check-double"></i>
+              Marcar como Cotado
+            </button>
+            ` : ''}
+            <button onclick="enviarEmailCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#3b82f6;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
+              <i class="fa-solid fa-envelope"></i>
+              E-mail
+            </button>
+            <button onclick="enviarWhatsAppCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
+              <i class="fa-brands fa-whatsapp"></i>
+              WhatsApp
+            </button>
+            <button onclick="anexarArquivoCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
+              <i class="fa-solid fa-paperclip"></i>
+              Anexar
+            </button>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+    modalBody.innerHTML = html;
+    
+    // Carrega cotações para itens em "aguardando cotação"
+    itensPedido.forEach(item => {
+      if (item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao' || item.status === 'cotado') {
+        loadCotacoesItemModal(item.id);
+      }
+    });
+    
+  } catch (err) {
+    console.error('[MODAL PEDIDO] Erro:', err);
+    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do pedido.</div>';
+  }
+}
+
+// Carrega cotações de um item no modal
+async function loadCotacoesItemModal(solicitacaoId) {
+  const container = document.querySelector(`.compras-cotacoes-list-modal[data-item-id="${solicitacaoId}"]`);
+  if (!container) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/cotacoes/${solicitacaoId}`);
+    if (!resp.ok) throw new Error('Erro ao carregar cotações');
+    
+    const cotacoes = await resp.json();
+    
+    if (!Array.isArray(cotacoes) || cotacoes.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Nenhuma cotação registrada</div>';
+      return;
+    }
+    
+    const html = cotacoes.map(cot => {
+      const statusColor = cot.status_aprovacao === 'aprovado' ? '#10b981' : 
+                         cot.status_aprovacao === 'rejeitado' ? '#ef4444' : '#6b7280';
+      const statusBg = cot.status_aprovacao === 'aprovado' ? '#d1fae5' : 
+                      cot.status_aprovacao === 'rejeitado' ? '#fee2e2' : '#f3f4f6';
+      
+      return `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+            <div style="flex:1;">
+              <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Fornecedor</div>
+              <div style="font-weight:600;font-size:13px;color:#1f2937;">${escapeHtml(cot.fornecedor_nome)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Valor</div>
+              <div style="font-weight:700;font-size:14px;color:#1f2937;">R$ ${(parseFloat(cot.valor_cotado) || 0).toFixed(2)}</div>
+            </div>
+          </div>
+          ${cot.observacao ? `
+          <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">${escapeHtml(cot.observacao)}</div>
+          ` : ''}
+          <div style="margin-top:8px;">
+            <span style="background:${statusBg};color:${statusColor};padding:4px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;">
+              ${cot.status_aprovacao || 'pendente'}
+            </span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    container.innerHTML = html;
+    
+  } catch (err) {
+    console.error('[COTAÇÕES MODAL] Erro:', err);
+    container.innerHTML = '<div style="text-align:center;padding:12px;color:#ef4444;font-size:12px;">Erro ao carregar cotações</div>';
+  }
+}
+
+// Marca item como cotado no modal
+async function marcarComoCotadoModal(itemId) {
+  if (!confirm('Marcar este item como COTADO? Isso significa que as cotações foram concluídas.')) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/item/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'cotado' })
+    });
+    
+    if (!resp.ok) throw new Error('Erro ao atualizar status');
+    
+    alert('Item marcado como COTADO com sucesso!');
+    
+    // Fecha o modal e recarrega o kanban
+    fecharModalDetalhesPedidoCompras();
+    renderComprasKanban();
+    
+  } catch (err) {
+    console.error('[MARCAR COTADO] Erro:', err);
+    alert('Erro ao marcar como cotado: ' + err.message);
+  }
+}
+
+function fecharModalDetalhesPedidoCompras() {
+  const modal = document.getElementById('modalDetalhesPedidoCompras');
+  if (modal) modal.style.display = 'none';
+}
+
+// Função que adiciona spinner ao botão antes de abrir modal de cotação
+async function adicionarCotacaoComSpinner(itemId) {
+  const btn = document.getElementById(`btn-adicionar-cotacao-${itemId}`);
+  if (!btn) return;
+  
+  // Salva HTML original
+  const originalHtml = btn.innerHTML;
+  
+  // Mostra spinner
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Carregando...';
+  btn.disabled = true;
+  
+  try {
+    // Abre o modal de nova cotação
+    await abrirModalNovaCotacao(itemId);
+    
+    // Restaura botão após um pequeno delay (o modal já está aberto)
+    setTimeout(() => {
+      btn.innerHTML = originalHtml;
+      btn.disabled = false;
+    }, 500);
+    
+  } catch (err) {
+    console.error('[ADICIONAR COTAÇÃO] Erro:', err);
+    btn.innerHTML = originalHtml;
+    btn.disabled = false;
+  }
+}
+
+// Torna as funções globais para uso no onclick do HTML
+window.abrirModalDetalhesPedidoCompras = abrirModalDetalhesPedidoCompras;
+window.fecharModalDetalhesPedidoCompras = fecharModalDetalhesPedidoCompras;
+window.loadCotacoesItemModal = loadCotacoesItemModal;
+window.marcarComoCotadoModal = marcarComoCotadoModal;
+window.abrirModalNovaCotacao = abrirModalNovaCotacao;
+window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
+
+// Modal específico para "Minhas Solicitações" (visualização do usuário solicitante)
+async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
+  const modal = document.getElementById('modalDetalhesPedidoCompras');
+  const modalBody = document.getElementById('modalPedidoBody');
+  const modalTitulo = document.getElementById('modalPedidoTitulo');
+  
+  if (!modal || !modalBody || !modalTitulo) return;
+  
+  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  modal.style.display = 'flex';
+  
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  
+  try {
+    // Busca apenas os itens do usuário logado
+    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    
+    if (itensPedido.length === 0) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Pedido não encontrado.</div>';
+      return;
+    }
+    
+    modalTitulo.textContent = `Meu Pedido ${numeroPedido}`;
+    
+    // Busca cotações apenas para itens cotados
+    const cotacoesMap = new Map();
+    if (statusColuna === 'cotado aguardando escolha') {
+      await Promise.all(itensPedido.map(async (item) => {
+        try {
+          const cotacoesResp = await fetch(`/api/compras/cotacoes/${item.id}`);
+          if (cotacoesResp.ok) {
+            const cotacoes = await cotacoesResp.json();
+            cotacoesMap.set(item.id, Array.isArray(cotacoes) ? cotacoes : []);
+          }
+        } catch (e) {
+          console.error(`Erro ao buscar cotações do item ${item.id}:`, e);
+        }
+      }));
+    }
+    
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+    
+    let html = '<div style="display:flex;flex-direction:column;gap:20px;">';
+    
+    itensPedido.forEach((item, idx) => {
+      const prazo = fmtDate(item.prazo_solicitado);
+      const cotacoes = cotacoesMap.get(item.id) || [];
+      
+      // Escapar strings antes de usar no template
+      const codigoEscaped = escapeHtml(item.produto_codigo || '-');
+      const statusEscaped = escapeHtml(item.status || 'pendente');
+      const descricaoEscaped = escapeHtml(item.produto_descricao || item.descricao || '-');
+      
+      html += `
+        <div style="padding:16px;background:#f9fafb;border-radius:8px;border-left:4px solid #3b82f6;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+            <div>
+              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
+              <div style="font-weight:600;color:#374151;">${item.id}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
+              <div style="font-weight:600;color:#1f2937;">${codigoEscaped}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
+              <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
+              <div><span style="padding:4px 10px;border-radius:6px;background:#3b82f6;color:white;font-size:11px;font-weight:600;">${statusEscaped}</span></div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
+              <div style="color:#374151;">${prazo}</div>
+            </div>
+          </div>
+          <div style="grid-column:1/-1;">
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+            <div style="color:#374151;">${descricaoEscaped}</div>
+          </div>
+          
+          ${(statusColuna === 'cotado aguardando escolha' && cotacoes.length > 0) ? `
+          <div style="margin-top:16px;padding-top:16px;border-top:2px solid #e5e7eb;">
+            <div style="font-weight:600;color:#1f2937;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+              <i class="fa-solid fa-list"></i> Cotações Disponíveis para Aprovação
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${cotacoes.map((cotacao, cotIdx) => {
+                // Escapar strings da cotação antes de inserir no template
+                const fornecedorEscaped = escapeHtml(cotacao.fornecedor_nome || '-');
+                const observacaoEscaped = cotacao.observacao ? escapeHtml(cotacao.observacao) : '';
+                const valorCotado = Number(cotacao.valor_cotado) || 0;
+                
+                return `
+                <div style="background:white;padding:12px;border-radius:6px;border:1px solid #e5e7eb;">
+                  <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center;">
+                    <div>
+                      <div style="font-size:11px;color:#6b7280;">Fornecedor</div>
+                      <div style="font-weight:600;color:#1f2937;">${fornecedorEscaped}</div>
+                    </div>
+                    <div>
+                      <div style="font-size:11px;color:#6b7280;">Valor Cotado</div>
+                      <div style="font-weight:600;color:#059669;">R$ ${valorCotado.toFixed(2)}</div>
+                    </div>
+                    <button 
+                      id="btn-aprovar-cotacao-${item.id}-${cotacao.id}"
+                      onclick="toggleAprovarCotacaoMinhas('${item.id}', ${cotacao.id})"
+                      data-aprovado="false"
+                      style="background:#10b981;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;"
+                      title="Aprovar esta cotação">
+                      <i class="fa-solid fa-check"></i>
+                      Aprovar
+                    </button>
+                  </div>
+                  ${cotacao.observacao ? `
+                    <div style="margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;">
+                      <div style="font-size:11px;color:#6b7280;">Observações</div>
+                      <div style="font-size:12px;color:#374151;">${observacaoEscaped}</div>
+                    </div>
+                  ` : ''}
+                  ${(cotacao.anexos && Array.isArray(cotacao.anexos) && cotacao.anexos.length > 0) ? `
+                    <div style="margin-top:8px;padding-top:8px;border-top:1px solid #f3f4f6;">
+                      <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">Anexos</div>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${cotacao.anexos.map((anexo, anexoIdx) => {
+                          const nomeAnexo = anexo.nome || `Anexo ${anexoIdx + 1}`;
+                          return `
+                          <a 
+                            href="${anexo.url || anexo.path || '#'}" 
+                            target="_blank"
+                            style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;transition:background 0.2s;"
+                            onmouseover="this.style.background='#e5e7eb'"
+                            onmouseout="this.style.background='#f3f4f6'"
+                            title="${nomeAnexo}">
+                            <i class="fa-solid fa-paperclip" style="color:#3b82f6;"></i>
+                            <span>${nomeAnexo}</span>
+                          </a>
+                          `;
+                        }).join('')}
+                      </div>
+                    </div>
+                  ` : ''}
+                </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- Botões de Ação conforme status -->
+          ${statusColuna === 'aguardando cotação' ? `
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button 
+              onclick="editarItemMinhas('${item.id}')"
+              style="display:flex;align-items:center;gap:6px;background:#f59e0b;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+              title="Editar este item">
+              <i class="fa-solid fa-edit"></i>
+              Editar
+            </button>
+            <button 
+              onclick="excluirItemMinhas('${item.id}')"
+              style="display:flex;align-items:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+              title="Excluir este item">
+              <i class="fa-solid fa-trash"></i>
+              Excluir
+            </button>
+          </div>
+          ` : ''}
+          
+          ${statusColuna === 'cotado aguardando escolha' ? `
+          <div style="margin-top:12px;">
+            <button 
+              onclick="enviarEscolhaMinhas('${item.id}')"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;"
+              title="Enviar escolha da cotação">
+              <i class="fa-solid fa-paper-plane"></i>
+              Enviar Escolha
+            </button>
+          </div>
+          ` : ''}
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+    modalBody.innerHTML = html;
+    
+  } catch (err) {
+    console.error('[MODAL MINHAS] Erro:', err);
+    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do pedido.</div>';
+  }
+}
+
+// Funções auxiliares para o modal de Minhas Solicitações
+// Armazena temporariamente as cotações aprovadas (estado visual) - permite múltiplas por item
+const cotacoesAprovadas = new Map(); // Map<itemId, Set<cotacaoId>>
+
+function toggleAprovarCotacaoMinhas(itemId, cotacaoId) {
+  const btn = document.getElementById(`btn-aprovar-cotacao-${itemId}-${cotacaoId}`);
+  if (!btn) return;
+  
+  const aprovado = btn.getAttribute('data-aprovado') === 'true';
+  
+  // Garante que o Set existe para este item
+  if (!cotacoesAprovadas.has(itemId)) {
+    cotacoesAprovadas.set(itemId, new Set());
+  }
+  
+  const cotacoesDoItem = cotacoesAprovadas.get(itemId);
+  
+  if (aprovado) {
+    // Cancelar aprovação (visual apenas)
+    btn.setAttribute('data-aprovado', 'false');
+    btn.style.background = '#10b981';
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Aprovar';
+    btn.title = 'Aprovar esta cotação';
+    cotacoesDoItem.delete(cotacaoId);
+  } else {
+    // Aprovar (visual apenas) - permite múltiplas aprovações
+    btn.setAttribute('data-aprovado', 'true');
+    btn.style.background = '#ef4444';
+    btn.innerHTML = '<i class="fa-solid fa-times"></i> Cancelar';
+    btn.title = 'Cancelar aprovação';
+    cotacoesDoItem.add(cotacaoId);
+  }
+}
+
+async function enviarEscolhaMinhas(itemId) {
+  const cotacoesDoItem = cotacoesAprovadas.get(itemId);
+  
+  if (!cotacoesDoItem || cotacoesDoItem.size === 0) {
+    alert('Por favor, aprove pelo menos uma cotação antes de enviar.');
+    return;
+  }
+  
+  const cotacoesAprovadaIds = Array.from(cotacoesDoItem);
+  
+  if (!confirm(`Deseja confirmar o envio de ${cotacoesAprovadaIds.length} cotação(ões) selecionada(s) para compra?`)) return;
+  
+  try {
+    // Atualiza o status do item para "aguardando compra"
+    const resp = await fetch(`/api/compras/item/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ 
+        status: 'aguardando compra',
+        cotacoes_aprovadas_ids: cotacoesAprovadaIds
+      })
+    });
+    
+    if (!resp.ok) throw new Error('Erro ao enviar escolha');
+    
+    alert('Escolha enviada para compra com sucesso!');
+    cotacoesAprovadas.delete(itemId);
+    fecharModalDetalhesPedidoCompras();
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('Erro ao enviar escolha:', err);
+    alert('Erro ao enviar escolha: ' + err.message);
+  }
+}
+
+async function editarItemMinhas(itemId) {
+  alert('Função de edição em desenvolvimento');
+}
+
+async function excluirItemMinhas(itemId) {
+  if (!confirm('Tem certeza que deseja excluir este item?')) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    
+    if (!resp.ok) throw new Error('Erro ao excluir item');
+    
+    alert('Item excluído com sucesso!');
+    fecharModalDetalhesPedidoCompras();
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('Erro ao excluir:', err);
+    alert('Erro ao excluir item: ' + err.message);
+  }
+}
+
+window.abrirModalDetalhesPedidoMinhas = abrirModalDetalhesPedidoMinhas;
+window.toggleAprovarCotacaoMinhas = toggleAprovarCotacaoMinhas;
+window.enviarEscolhaMinhas = enviarEscolhaMinhas;
+window.editarItemMinhas = editarItemMinhas;
+window.excluirItemMinhas = excluirItemMinhas;
+
+// Renderiza o kanban de compras
+async function renderComprasKanban() {
+  try {
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    // Normaliza status para lowercase
+    const itensComStatusNormalizado = listaCompleta.map(item => ({
+      ...item,
+      statusNormalizado: (item.status || '').toLowerCase().trim()
+    }));
+    
+    // Agrupa por status (exclui itens com status "cotado")
+    const statusColunas = {
+      'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
+      'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
+      'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
+      'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
+      'recebido': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido'),
+      'concluído': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido')
+    };
+    
+    // Renderiza cada coluna
+    Object.keys(statusColunas).forEach(status => {
+      const coluna = document.querySelector(`.kanban-column[data-status="${status}"]`);
+      if (!coluna) return;
+      
+      const cardsContainer = coluna.querySelector('.kanban-cards');
+      const countBadge = coluna.querySelector('.kanban-count');
+      const itens = statusColunas[status];
+      
+      // Atualiza contador
+      if (countBadge) countBadge.textContent = itens.length;
+      
+      // Renderiza cards
+      if (cardsContainer) {
+        if (itens.length === 0) {
+          cardsContainer.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+        } else {
+          // Define altura máxima e overflow para barra de rolagem
+          cardsContainer.style.maxHeight = '600px';
+          cardsContainer.style.overflowY = 'auto';
+          
+          cardsContainer.innerHTML = itens.map(item => {
+            const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+            const previsao = item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-';
+            
+            return `
+              <div class="kanban-card" data-item-id="${item.id}" style="
+                background:#ffffff;
+                border:1px solid #e5e7eb;
+                border-radius:8px;
+                padding:12px;
+                cursor:pointer;
+                transition:all 0.2s;
+                box-shadow:0 1px 3px rgba(0,0,0,0.1);
+                flex-shrink:0;
+              "
+              onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
+              onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
+                <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+                  <div style="font-weight:700;color:#1f2937;font-size:13px;">#${item.numero_pedido || 'S/N'}</div>
+                  <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
+                </div>
+                <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
+                  ${escapeHtml(item.produto_codigo || '-')}
+                </div>
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
+                  ${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 80))}${(item.descricao || item.produto_descricao || '').length > 80 ? '...' : ''}
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
+                    <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
+                    <div style="font-size:11px;color:#374151;">${prazo}</div>
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Solicitante</div>
+                    <div style="font-size:10px;color:#374151;">${escapeHtml(item.solicitante || '-')}</div>
+                  </div>
+                </div>
+                ${item.fornecedor_nome ? `
+                  <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
+                    <i class="fa-solid fa-building" style="margin-right:4px;"></i>
+                    ${escapeHtml(item.fornecedor_nome)}
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).join('');
+          
+          // Adiciona event listener aos cards
+          cardsContainer.querySelectorAll('.kanban-card').forEach(card => {
+            card.addEventListener('click', () => {
+              const itemId = card.getAttribute('data-item-id');
+              const item = itens.find(i => i.id == itemId);
+              if (item && item.numero_pedido) {
+                abrirModalDetalhesPedidoCompras(item.numero_pedido);
+              }
+            });
+          });
+        }
+      }
+    });
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao renderizar kanban:', err);
+  }
+}
+
+// ========== FIM KANBAN DE COMPRAS ==========
 
 // Abre modal de edição de item de compra
 async function abrirModalEditarCompra(item) {
@@ -15091,16 +15938,19 @@ async function loadComprasRecebimento() {
 }
 
 async function loadMinhasSolicitacoes(filtroStatus = null) {
-  const tbody = document.getElementById('comprasMinhasTbody');
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const wrapper = document.getElementById('minhasComprasWrapper');
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-  if (!tbody || !wrapper) return;
+  
+  if (!kanbanContainer || !wrapper) return;
   if (!currentUser) {
     wrapper.style.display = 'none';
     return;
   }
+  
   wrapper.style.display = 'block';
-  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+  kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Carregando...</div>';
+  
   try {
     const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
@@ -15112,234 +15962,110 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
     }
     
-    // Atualiza contador da aba de Controle de pedidos
-    const contadorPedidos = document.getElementById('contadorMinhasPedidos');
-    if (contadorPedidos) {
-      contadorPedidos.textContent = lista.length;
-    }
-    
     if (!lista.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhuma solicitação encontrada com os filtros aplicados.</td></tr>';
+      kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Nenhuma solicitação encontrada.</div>';
       return;
     }
 
-    // Agrupa itens por numero_pedido
-    const pedidosMap = new Map();
-    lista.forEach(item => {
-      const numPedido = item.numero_pedido || 'sem-numero';
-      if (!pedidosMap.has(numPedido)) {
-        pedidosMap.set(numPedido, []);
-      }
-      pedidosMap.get(numPedido).push(item);
-    });
-
-    const fmtDate = (iso) => {
-      if (!iso) return '-';
-      const d = new Date(iso);
-      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    // Normaliza status para lowercase
+    const itensComStatusNormalizado = lista.map(item => ({
+      ...item,
+      statusNormalizado: (item.status || '').toLowerCase().trim()
+    }));
+    
+    // Agrupa por status (apenas os que o usuário solicitou)
+    const statusColunas = {
+      'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
+      'cotado aguardando escolha': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado'),
+      'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
+      'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
+      'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
+      'recebido': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido'),
+      'concluído': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido')
     };
 
-    const fmtDateTime = (iso) => {
-      if (!iso) return '-';
-      const d = new Date(iso);
-      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
-    };
-
-    let html = '';
-    let pedidoIndex = 0;
-
-    pedidosMap.forEach((itens, numeroPedido) => {
-      const primeiroItem = itens[0];
-      const totalItens = itens.length;
-      const dataCriacao = fmtDateTime(primeiroItem.created_at);
-      const expandId = `pedido-expand-${pedidoIndex}`;
-
-      // Linha principal do pedido (colapsada)
-      html += `
-        <tr class="pedido-header" data-expand-id="${expandId}" style="cursor:pointer;background:#f9fafb;">
-          <td style="text-align:center;">
-            <i class="fa-solid fa-chevron-right expand-icon" style="color:#6b7280;transition:transform 0.2s;"></i>
-          </td>
-          <td><strong style="color:#3b82f6;">${escapeHtml(numeroPedido)}</strong></td>
-          <td><span style="background:#e0e7ff;color:#3730a3;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;">${totalItens} ${totalItens === 1 ? 'item' : 'itens'}</span></td>
-          <td style="color:#1f2937;font-weight:500;">${dataCriacao}</td>
-          <td></td>
-        </tr>
-      `;
-
-      // Linhas dos itens (inicialmente ocultas)
-      itens.forEach((item, idx) => {
-        html += `
-          <tr class="pedido-item" data-pedido="${expandId}" style="display:none;background:#fefefe;">
-            <td></td>
-            <td colspan="4" style="padding:12px 20px;">
-              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:start;border-left:3px solid #e5e7eb;padding-left:16px;">
-                <div style="min-width:60px;">
-                  <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">ID</div>
-                  <div style="font-weight:600;color:#374151;">${item.id}</div>
-                </div>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Código</div>
-                    <div style="font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</div>
-                  </div>
-                  <div style="grid-column:span 2;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
-                    <div style="color:#374151;">${escapeHtml(item.produto_descricao || '-')}</div>
-                  </div>
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
-                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
-                  </div>
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
-                    <div><span style="padding:4px 10px;border-radius:6px;background:#3b82f6;color:white;font-size:11px;font-weight:600;">${escapeHtml(item.status || 'pendente')}</span></div>
-                  </div>
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Prazo solicitado</div>
-                    <div style="color:#374151;">${fmtDate(item.prazo_solicitado)}</div>
-                  </div>
-                  <div>
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Resp. Inspeção</div>
-                    <div>
-                      <select class="resp-select" data-item-id="${item.id}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;color:#1f2937;cursor:pointer;width:100%;max-width:200px;">
-                        <option value="">Carregando...</option>
-                      </select>
+    // Renderiza colunas do kanban
+    kanbanContainer.innerHTML = Object.keys(statusColunas).map((status, idx) => {
+      const itens = statusColunas[status];
+      const cores = {
+        'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
+        'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
+        'aguardando compra': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-cart-shopping' },
+        'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
+        'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
+        'recebido': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-box-open' },
+        'concluído': { bg: '#22c55e', bgLight: '#dcfce7', text: '#166534', icon: 'fa-circle-check' }
+      };
+      const cor = cores[status] || { bg: '#6b7280', bgLight: '#f3f4f6', text: '#374151', icon: 'fa-circle' };
+      
+      return `
+        <div class="kanban-column-minhas" data-status="${status}" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${cor.bg};">
+            <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
+              <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
+              ${status.charAt(0).toUpperCase() + status.slice(1)}
+            </h3>
+            <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
+          </div>
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+            ${itens.length === 0 ? '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>' : 
+              itens.map(item => {
+                const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+                return `
+                  <div class="kanban-card" onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')" data-item-id="${item.id}" style="
+                    background:#ffffff;
+                    border:1px solid #e5e7eb;
+                    border-radius:8px;
+                    padding:12px;
+                    cursor:pointer;
+                    transition:all 0.2s;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.1);
+                    flex-shrink:0;
+                  "
+                  onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
+                  onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
+                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+                      <div style="font-weight:700;color:#1f2937;font-size:13px;">#${item.numero_pedido || 'S/N'}</div>
+                      <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
                     </div>
+                    <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
+                      ${escapeHtml(item.produto_codigo || '-')}
+                    </div>
+                    <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
+                      ${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 80))}${(item.descricao || item.produto_descricao || '').length > 80 ? '...' : ''}
+                    </div>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;">
+                      <div style="flex:1;">
+                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
+                        <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+                      </div>
+                      <div style="flex:1;">
+                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
+                        <div style="font-size:11px;color:#374151;">${prazo}</div>
+                      </div>
+                      <div style="flex:1;">
+                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Solicitante</div>
+                        <div style="font-size:10px;color:#374151;">${escapeHtml(item.solicitante || '-')}</div>
+                      </div>
+                    </div>
+                    ${item.fornecedor_nome ? `
+                      <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
+                        <i class="fa-solid fa-building" style="margin-right:4px;"></i>
+                        ${escapeHtml(item.fornecedor_nome)}
+                      </div>
+                    ` : ''}
                   </div>
-                </div>
-                ${(item.status === 'aguardando compra' || item.status === 'aguardando cotação' || item.status === 'aguardando_compra' || item.status === 'aguardando_cotacao') ? `
-                  <div style="display:flex;gap:8px;margin-top:12px;padding-left:16px;">
-                    <button 
-                      type="button" 
-                      class="minhas-compras-editar-btn" 
-                      data-item-id="${item.id}"
-                      style="padding:6px 12px;background:#f59e0b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
-                      onmouseover="this.style.background='#d97706'"
-                      onmouseout="this.style.background='#f59e0b'"
-                    >
-                      <i class="fa-solid fa-edit"></i>
-                      Editar
-                    </button>
-                    <button 
-                      type="button" 
-                      class="minhas-compras-excluir-btn" 
-                      data-item-id="${item.id}"
-                      style="padding:6px 12px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px;transition:background 0.2s;"
-                      onmouseover="this.style.background='#dc2626'"
-                      onmouseout="this.style.background='#ef4444'"
-                    >
-                      <i class="fa-solid fa-trash"></i>
-                      Excluir
-                    </button>
-                  </div>
-                ` : ''}
-              </div>
-            </td>
-          </tr>
-        `;
-      });
-
-      pedidoIndex++;
-    });
-
-    tbody.innerHTML = html;
-
-    // Adiciona event listeners para expandir/colapsar
-    document.querySelectorAll('.pedido-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const expandId = header.getAttribute('data-expand-id');
-        const icon = header.querySelector('.expand-icon');
-        const itens = document.querySelectorAll(`.pedido-item[data-pedido="${expandId}"]`);
-        
-        const isExpanded = itens[0]?.style.display !== 'none';
-        
-        itens.forEach(item => {
-          item.style.display = isExpanded ? 'none' : 'table-row';
-        });
-        
-        icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(90deg)';
-      });
-    });
-
-    // Carrega lista de usuários para os selects
-    await carregarUsuariosParaSelects(lista);
-    
-    // Event listeners para botões de editar e excluir
-    const editarBtns = document.querySelectorAll('.minhas-compras-editar-btn');
-    editarBtns.forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const itemId = btn.getAttribute('data-item-id');
-        
-        // Encontra o item na lista
-        const item = lista.find(i => i.id == itemId);
-        if (!item) {
-          alert('Item não encontrado.');
-          return;
-        }
-        
-        // Abre o modal de edição preenchido com os dados do item
-        await abrirModalEditarCompra(item);
-      });
-    });
-    
-    const excluirBtns = document.querySelectorAll('.minhas-compras-excluir-btn');
-    excluirBtns.forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const itemId = btn.getAttribute('data-item-id');
-        
-        // Encontra o item na lista
-        const item = lista.find(i => i.id == itemId);
-        if (!item) {
-          alert('Item não encontrado.');
-          return;
-        }
-        
-        // Confirmação
-        const descricao = item.produto_descricao || item.descricao || 'este item';
-        if (!confirm(`Tem certeza que deseja excluir "${descricao}"?\n\nEsta ação não pode ser desfeita.`)) {
-          return;
-        }
-        
-        try {
-          btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Excluindo...';
-          btn.disabled = true;
-          
-          // Chama o endpoint DELETE
-          const resp = await fetch(`/api/compras/itens/${itemId}`, {
-            method: 'DELETE',
-            credentials: 'include'
-          });
-          
-          if (!resp.ok) {
-            const errData = await resp.json().catch(() => ({}));
-            throw new Error(errData.error || 'Erro ao excluir item');
-          }
-          
-          // Feedback visual
-          btn.style.background = '#10b981';
-          btn.innerHTML = '<i class="fa-solid fa-check"></i> Excluído!';
-          
-          // Recarrega a tabela após 1 segundo
-          setTimeout(() => {
-            loadMinhasSolicitacoes();
-          }, 1000);
-          
-        } catch (err) {
-          console.error('[COMPRAS] Erro ao excluir item:', err);
-          alert('Erro ao excluir item: ' + err.message);
-          btn.innerHTML = '<i class="fa-solid fa-trash"></i> Excluir';
-          btn.disabled = false;
-          btn.style.background = '#ef4444';
-        }
-      });
-    });
+                `;
+              }).join('')
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
 
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:#b91c1c;">Erro ao carregar suas solicitações.</td></tr>';
+    kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#ef4444;font-size:14px;">Erro ao carregar suas solicitações.</div>';
   }
 }
 
