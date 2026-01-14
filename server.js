@@ -1416,8 +1416,11 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const { status, prazo_estipulado, quem_recebe } = req.body || {};
     const allowedStatus = [
       'aguardando aprovação',
+      'aguardando cotação',
+      'cotado',
       'aguardando compra',
       'compra realizada',
+      'faturada pelo fornecedor',
       'aguardando liberação',
       'compra cancelada',
       'recebido'
@@ -8856,10 +8859,11 @@ async function ensureComprasSchema() {
         ('aguardando cotação', 2),
         ('aguardando compra', 3),
         ('compra realizada', 4),
-        ('aguardando liberação', 5),
-        ('compra cancelada', 6),
-        ('recebido', 7),
-        ('revisão', 8)
+        ('faturada pelo fornecedor', 5),
+        ('aguardando liberação', 6),
+        ('compra cancelada', 7),
+        ('recebido', 8),
+        ('revisão', 9)
       ON CONFLICT (nome) DO NOTHING
     `);
     
@@ -9418,6 +9422,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       'aguardando cotação',
       'cotado',
       'compra realizada',
+      'faturada pelo fornecedor',
       'aguardando liberação',
       'compra cancelada',
       'recebido'

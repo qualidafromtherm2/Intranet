@@ -386,146 +386,23 @@
             <!-- Minhas solicitações (somente do usuário logado) -->
             <div id="minhasComprasWrapper" class="content-section" style="margin-top:16px;display:none;">
               
-              <!-- Sub-abas de Minhas Compras -->
-              <div class="sub-tabs" style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid #e5e7eb;padding-bottom:0;">
-                <button 
-                  class="sub-tab-btn active" 
-                  data-subtab="minhasPedidos"
-                  style="padding:12px 24px;background:none;border:none;border-bottom:3px solid #0ea5e9;color:#0ea5e9;font-weight:600;cursor:pointer;transition:all 0.2s;font-size:14px;"
-                >
-                  <i class="fa-solid fa-list-check" style="margin-right:6px;"></i>
-                  Controle de pedidos
-                  <span id="contadorMinhasPedidos" style="background:#0ea5e9;color:white;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:6px;font-weight:700;">0</span>
-                </button>
-                <button 
-                  class="sub-tab-btn" 
-                  data-subtab="minhasCotacoes"
-                  style="padding:12px 24px;background:none;border:none;border-bottom:3px solid transparent;color:#6b7280;font-weight:500;cursor:pointer;transition:all 0.2s;font-size:14px;"
-                >
-                  <i class="fa-solid fa-file-invoice-dollar" style="margin-right:6px;"></i>
-                  Cotações
-                  <span id="contadorMinhasCotacoes" style="background:#6b7280;color:white;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:6px;font-weight:700;">0</span>
-                </button>
-                <button 
-                  class="sub-tab-btn" 
-                  data-subtab="minhasControle"
-                  style="padding:12px 24px;background:none;border:none;border-bottom:3px solid transparent;color:#6b7280;font-weight:500;cursor:pointer;transition:all 0.2s;font-size:14px;"
-                >
-                  <i class="fa-solid fa-clipboard-check" style="margin-right:6px;"></i>
-                  Controle de pedidos
-                </button>
-              </div>
-
-              <!-- Conteúdo: Controle de pedidos -->
-              <div id="minhasPedidos" class="sub-tab-content" style="display:block;">
-                <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;">
-                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                    <i class="fa-solid fa-user-check" style="color:#22c55e;"></i>
-                    Minhas solicitações
-                  </div>
-                  <button id="minhasComprasFiltroBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
-                    <i class="fa-solid fa-filter"></i>
-                    <span>Filtrar por status</span>
+              <!-- Título e Botões de Ação -->
+              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-user-check" style="color:#22c55e;"></i>
+                  Minhas solicitações
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <button id="comprasExportarExcelMinhasBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Exportar para Excel">
+                    <i class="fa-solid fa-file-excel" style="font-size:18px;"></i>
+                    <span style="font-size:13px;font-weight:600;">Exportar Excel</span>
                   </button>
                 </div>
-                <!-- Dropdown de filtros -->
-                <div id="minhasComprasFiltroDropdown" style="display:none;position:fixed;background:white;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,0.15);padding:12px;z-index:9999;min-width:220px;">
-                  <style>
-                    #minhasComprasFiltroOpcoes input[type="checkbox"] {
-                      width: 14px !important;
-                      height: 14px !important;
-                      min-width: 14px !important;
-                      min-height: 14px !important;
-                      max-width: 14px !important;
-                      max-height: 14px !important;
-                      margin: 0 !important;
-                      padding: 0 !important;
-                      transform: scale(1) !important;
-                      -webkit-transform: scale(1) !important;
-                    }
-                    #minhasComprasFiltroOpcoes label::before {
-                      display: none !important;
-                    }
-                  </style>
-                  <div style="margin-bottom:8px;font-weight:600;color:#374151;font-size:13px;">Status:</div>
-                  <div id="minhasComprasFiltroOpcoes" style="display:flex;flex-direction:column;gap:6px;">
-                    <!-- Opções carregadas dinamicamente -->
-                  </div>
-                  <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;gap:8px;">
-                    <button id="minhasComprasFiltroLimpar" style="padding:6px 12px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Desativar todos</button>
-                    <button id="minhasComprasFiltroAplicar" style="flex:1;padding:6px 12px;background:#3b82f6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">Aplicar</button>
-                  </div>
-                </div>
-                <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
-                  <table class="tabela padrao" style="min-width:900px;">
-                    <thead>
-                      <tr>
-                        <th style="width:40px;"></th>
-                        <th>Nº Pedido</th>
-                        <th>Qtd Itens</th>
-                        <th>Criado em</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody id="comprasMinhasTbody">
-                      <tr><td colspan="5" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
-                    </tbody>
-                  </table>
-                </div>
               </div>
 
-              <!-- Conteúdo: Cotações -->
-              <div id="minhasCotacoes" class="sub-tab-content" style="display:none;">
-                <div class="title-wrapper">
-                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                    <i class="fa-solid fa-file-invoice-dollar" style="color:#8b5cf6;"></i>
-                    Itens Cotados aguardando sua aprovação
-                  </div>
-                </div>
-                <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
-                  <table class="tabela padrao" style="min-width:900px;">
-                    <thead>
-                      <tr>
-                        <th style="width:40px;"></th>
-                        <th>Nº Pedido</th>
-                        <th>Qtd Itens</th>
-                        <th>Criado em</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody id="comprasCotadasTbody">
-                      <tr><td colspan="5" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Conteúdo: Controle de pedidos -->
-              <div id="minhasControle" class="sub-tab-content" style="display:none;">
-                <div class="title-wrapper">
-                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                    <i class="fa-solid fa-clipboard-check" style="color:#059669;"></i>
-                    Controle de pedidos de compra
-                  </div>
-                </div>
-                <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
-                  <table class="tabela padrao" style="min-width:900px;">
-                    <thead>
-                      <tr>
-                        <th style="width:40px;"></th>
-                        <th>Nº Pedido</th>
-                        <th>Fornecedor</th>
-                        <th>Valor Total</th>
-                        <th>Status</th>
-                        <th>Data</th>
-                        <th>Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody id="comprasControleTbody">
-                      <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Em breve: controle completo de pedidos de compra</td></tr>
-                    </tbody>
-                  </table>
-                </div>
+              <!-- Kanban de Minhas Solicitações -->
+              <div id="kanbanMinhasSolicitacoes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:20px;">
+                <!-- As colunas serão renderizadas via JavaScript -->
               </div>
 
             </div>
@@ -666,31 +543,124 @@
             <div class="content-section" style="margin-top:0;">
               <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                 <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-list-check" style="color:#0ea5e9;"></i>
-                  Solicitações registradas
+                  <i class="fa-solid fa-table-columns" style="color:#0ea5e9;"></i>
+                  Kanban de Compras
                 </div>
                 <button id="comprasRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
                   <i class="fa-solid fa-rotate"></i>
-                  <span>Recarregar lista</span>
+                  <span>Recarregar</span>
                 </button>
               </div>
-              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
-                <table class="tabela padrao" style="min-width:800px;">
-                  <thead>
-                    <tr>
-                      <th style="width:40px;"></th>
-                      <th>Nº Pedido</th>
-                      <th>Qtd. itens</th>
-                      <th>Solicitante</th>
-                      <th>Criado em</th>
-                      <th>Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody id="comprasTbody">
-                    <tr><td colspan="6" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
-                  </tbody>
-                </table>
+              
+              <!-- Visualização Kanban -->
+              <div id="comprasKanbanView" style="margin-top:20px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:12px;background:#f8fafc;border-radius:12px;">
+                  
+                  <!-- Coluna: Aguardando Cotação -->
+                  <div class="kanban-column" data-status="aguardando cotação" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #fbbf24;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#92400e;">
+                        <i class="fa-solid fa-hourglass-half" style="margin-right:6px;color:#fbbf24;"></i>
+                        Aguardando Cotação
+                      </h3>
+                      <span class="kanban-count" style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                  <!-- Coluna: Aguardando Compra -->
+                  <div class="kanban-column" data-status="aguardando compra" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #10b981;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#065f46;">
+                        <i class="fa-solid fa-cart-shopping" style="margin-right:6px;color:#10b981;"></i>
+                        Aguardando Compra
+                      </h3>
+                      <span class="kanban-count" style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                  <!-- Coluna: Compra Realizada -->
+                  <div class="kanban-column" data-status="compra realizada" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #3b82f6;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#1e40af;">
+                        <i class="fa-solid fa-check-circle" style="margin-right:6px;color:#3b82f6;"></i>
+                        Compra Realizada
+                      </h3>
+                      <span class="kanban-count" style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                  <!-- Coluna: Faturada pelo Fornecedor -->
+                  <div class="kanban-column" data-status="faturada pelo fornecedor" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #f59e0b;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#92400e;">
+                        <i class="fa-solid fa-file-invoice-dollar" style="margin-right:6px;color:#f59e0b;"></i>
+                        Faturada pelo Fornecedor
+                      </h3>
+                      <span class="kanban-count" style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                  <!-- Coluna: Recebido -->
+                  <div class="kanban-column" data-status="recebido" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #8b5cf6;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#5b21b6;">
+                        <i class="fa-solid fa-box-open" style="margin-right:6px;color:#8b5cf6;"></i>
+                        Recebido
+                      </h3>
+                      <span class="kanban-count" style="background:#ede9fe;color:#5b21b6;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                  <!-- Coluna: Concluído -->
+                  <div class="kanban-column" data-status="concluído" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #22c55e;">
+                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#166534;">
+                        <i class="fa-solid fa-circle-check" style="margin-right:6px;color:#22c55e;"></i>
+                        Concluído
+                      </h3>
+                      <span class="kanban-count" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
+                    </div>
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                      <!-- Cards serão inseridos aqui -->
+                    </div>
+                  </div>
+                  
+                </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Detalhes do Pedido -->
+        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;">
+          <div class="modal-content" style="max-width:900px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
+                <span id="modalPedidoTitulo">Detalhes do Pedido</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalDetalhesPedidoCompras()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalPedidoBody" style="padding:20px;">
+              <!-- Conteúdo será inserido dinamicamente -->
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" onclick="fecharModalDetalhesPedidoCompras()">Fechar</button>
             </div>
           </div>
         </div>
