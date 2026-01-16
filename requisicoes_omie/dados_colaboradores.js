@@ -314,6 +314,7 @@ async function abrirDetalhes(u){
       <div class="body">
         <div class="row"><label>ID</label><div>${user.id}</div></div>
         <div class="row"><label>Usuário</label><div>${user.username}</div></div>
+        <div class="row"><label>E-mail</label><div>${user.email || '—'}</div></div>
         <div class="row"><label>Perfis</label>
           <div class="pill">${roles.length ? roles.map(r=>`<span class="badge">${r}</span>`).join(' ') : '—'}</div>
         </div>
@@ -409,6 +410,7 @@ modal.querySelector('.js-edit')?.addEventListener('click', async (ev) => {
     const payload = {
       id: user.id,
       username: user.username,
+      email: user.email || '',
       roles: Array.isArray(user.roles) ? user.roles : [],
       funcao: funcao || '',  // nomes já extraídos acima
       setor:  setor  || '',
