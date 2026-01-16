@@ -5022,14 +5022,23 @@ if (sacSendBtn) {
   });
 }
 
-async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly = false } = {}) {
+async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly = false, filterByUser = false } = {}) {
   const bodyEl = targetBody || sacTabelaBody;
   if (!bodyEl) return;
+  
+  // Detecta se é a tabela do painel "Envio de mercadoria" (que tem a coluna Requisitante)
+  const isEnvioMercadoriaPane = bodyEl === envioMercadoriaTabelaBodyPane;
+  const numCols = isEnvioMercadoriaPane ? 8 : 7; // 8 colunas para Envio de Mercadoria, 7 para SAC
+  
   if (!titleOnly) {
-    bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
+    bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>`;
   }
   try {
-    const url = hideDone ? '/api/sac/solicitacoes?hideDone=1' : '/api/sac/solicitacoes';
+    // Monta a URL com os parâmetros necessários
+    const params = new URLSearchParams();
+    if (hideDone) params.append('hideDone', '1');
+    if (filterByUser) params.append('filterByUser', '1');
+    const url = `/api/sac/solicitacoes${params.toString() ? '?' + params.toString() : ''}`;
     const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
@@ -5047,11 +5056,12 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
     if (titleOnly) return; // já atualizou o título, não altera a tabela
 
     if (!rows.length) {
-      bodyEl.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>';
+      bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
       return;
     }
     bodyEl.innerHTML = rows.map(r => {
       const dataFmt = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '—';
+      const usuario = r.usuario || '—'; // Campo requisitante (usuário que criou o registro)
       const obs = r.observacao || '—';
       const status = normalizeSacStatus(r.status);
       const etiqueta = r.etiqueta_url || r.etiqueta || '';
@@ -5076,16 +5086,34 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
         <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
           ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === status ? 'selected' : ''}>${opt}</option>`).join('')}
         </select>`;
-      return `
-        <tr>
-          <td>${r.id}</td>
-          <td>${dataFmt}</td>
-          <td style="max-width:280px;">${obs}</td>
-          <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
-          <td style="max-width:260px;">${conteudo}</td>
-          <td>${statusSelect}</td>
-          <td>${buttons || '—'}</td>
-        </tr>`;
+      
+      // Renderiza com ou sem a coluna Requisitante, dependendo da tabela
+      if (isEnvioMercadoriaPane) {
+        // Tabela "Envios registrados" (menu lateral) - COM coluna Requisitante
+        return `
+          <tr>
+            <td>${r.id}</td>
+            <td>${dataFmt}</td>
+            <td>${usuario}</td>
+            <td style="max-width:280px;">${obs}</td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td style="max-width:260px;">${conteudo}</td>
+            <td>${statusSelect}</td>
+            <td>${buttons || '—'}</td>
+          </tr>`;
+      } else {
+        // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
+        return `
+          <tr>
+            <td>${r.id}</td>
+            <td>${dataFmt}</td>
+            <td style="max-width:280px;">${obs}</td>
+            <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td style="max-width:260px;">${conteudo}</td>
+            <td>${statusSelect}</td>
+            <td>${buttons || '—'}</td>
+          </tr>`;
+      }
     }).join('');
     preencherStatusRastreio(bodyEl);
   } catch (err) {
@@ -5094,13 +5122,15 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   }
 }
 
-sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false }));
-envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true }));
+// Painel SAC: filtra por usuário logado (filterByUser: true)
+sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
+// Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
+envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
 
-// Carrega registros ao abrir o painel SAC
+// Carrega registros ao abrir o painel SAC (com filtro por usuário)
 if (sacMenuLink) {
   sacMenuLink.addEventListener('click', () => {
-    setTimeout(() => { carregarSacSolicitacoes(sacTabelaBody, { hideDone: false }); }, 50);
+    setTimeout(() => { carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }); }, 50);
   }, { once: true });
 }
 
@@ -5110,7 +5140,8 @@ if (envioMercadoriaMenu) {
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     envioMercadoriaMenu.classList.add('is-active');
     showMainTab('envioMercadoriaPane');
-    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true });
+    // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
+    carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false });
   });
 }
 
