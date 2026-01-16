@@ -20839,7 +20839,7 @@ async function excluirExcedentesEstruturaOmie(paiCodigo, itensCsv) {
     fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'fileImportBOMcsv';
-    fileInput.accept = '.csv';
+    fileInput.accept = '.csv,.xlsx,.xls'; // Aceita CSV e Excel
     fileInput.style.display = 'none';
     document.body.appendChild(fileInput);
   }
@@ -20909,24 +20909,61 @@ fileInput.addEventListener('change', async () => {
     fileInput.value = '';
     if (!file) return;
 
-    // 🔄 spinner ON assim que o usuário anexa o CSV
+    // 🔄 spinner ON assim que o usuário anexa o arquivo
     showEstruturaSpinner();
-
 
     const codigo = (window.codigoSelecionado || window.ultimoCodigo || '').trim();
     if (!codigo) {
-      console.warn('[Importar BOM CSV] Código do produto não identificado na tela.');
+      console.warn('[Importar BOM] Código do produto não identificado na tela.');
+      hideEstruturaSpinner();
       return;
     }
 
-    const text = await file.text();
+    let rows;
 
-    // tenta ;, se não, tenta ,
-    let rows = parseCSV(text, ';');
-    if (rows.length <= 1 || rows[0].length < 4) rows = parseCSV(text, ',');
-    if (!rows || !rows.length) throw new Error('Arquivo CSV vazio.');
+    // Detectar tipo de arquivo
+    const fileName = file.name.toLowerCase();
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
 
-    const headerRaw = rows[0].map(h => h.replace(/^"|"$/g,''));
+    if (isExcel) {
+      console.log('[Importar BOM] Arquivo Excel detectado, convertendo...');
+      
+      // Carregar biblioteca XLSX dinamicamente
+      if (typeof XLSX === 'undefined') {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+        document.head.appendChild(script);
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = () => reject(new Error('Falha ao carregar biblioteca XLSX'));
+        });
+      }
+
+      // Ler arquivo Excel
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      
+      // Pegar primeira planilha
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      // Converter para array de arrays
+      rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
+      
+      console.log('[Importar BOM] Excel convertido com sucesso:', rows.length, 'linhas');
+    } else {
+      // Processar CSV normalmente
+      console.log('[Importar BOM] Arquivo CSV detectado');
+      const text = await file.text();
+
+      // tenta ;, se não, tenta ,
+      rows = parseCSV(text, ';');
+      if (rows.length <= 1 || rows[0].length < 4) rows = parseCSV(text, ',');
+    }
+
+    if (!rows || !rows.length) throw new Error('Arquivo vazio.');
+
+    const headerRaw = rows[0].map(h => String(h || '').replace(/^"|"$/g,''));
     const header    = headerRaw.map(normHeader);
 
     // mapeia cabeçalhos esperados → índice
@@ -20937,7 +20974,7 @@ fileInput.addEventListener('change', async () => {
     const req = ['identificação do produto','descrição do produto','qtde prevista','unidade'];
     const missing = req.filter(h => idx[h] === -1);
     if (missing.length) {
-      console.warn('[Import CSV] Cabeçalho detectado:', headerRaw);
+      console.warn('[Import] Cabeçalho detectado:', headerRaw);
       throw new Error('Cabeçalho do CSV não confere. Faltando: ' + missing.join(', '));
     }
 
@@ -20971,7 +21008,7 @@ fileInput.addEventListener('change', async () => {
       });
     }
 
-    if (itens.length) console.debug('[Import CSV] amostra do primeiro item:', itens[0]);
+    if (itens.length) console.debug('[Import] amostra do primeiro item:', itens[0]);
 
     // ⚙️ OMIE: Excluir → Atualizar → Incluir (sem alert/return)
     console.group('[ImportarBOM] OMIE — Excluir/Atualizar/Incluir');
@@ -21012,7 +21049,7 @@ fileInput.addEventListener('change', async () => {
     let js; try { js = JSON.parse(raw); } catch { js = { raw }; }
 
     if (!resp.ok || js?.error) {
-      console.error('[Importar BOM CSV] Erro JSON recebido da API:', js);
+      console.error('[Importar BOM] Erro JSON recebido da API:', js);
       throw new Error(js?.error || `Falha HTTP ${resp.status}`);
     }
 
@@ -21020,7 +21057,7 @@ fileInput.addEventListener('change', async () => {
     if (typeof window.loadEstruturaProduto === 'function') {
       window.loadEstruturaProduto(codigo);
     }
-    console.info(`[ImportarBOM] Concluído para ${codigo}. Linhas CSV: ${itens.length}`);
+    console.info(`[ImportarBOM] Concluído para ${codigo}. Linhas importadas: ${itens.length}`);
 
     // Recarrega meta para atualizar Versão/Atualizado por na UI
     try {
@@ -21031,7 +21068,7 @@ fileInput.addEventListener('change', async () => {
     }
 
   } catch (err) {
-    console.error('[Importar BOM CSV] erro:', err);
+    console.error('[Importar BOM] erro:', err);
   } finally {
     // 🔄 spinner OFF (sempre)
     hideEstruturaSpinner();
