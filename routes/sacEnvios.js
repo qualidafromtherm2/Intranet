@@ -299,30 +299,36 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   }
 });
 
-// Lista solicitações de envio (filtradas por usuário logado)
+// Lista solicitações de envio (com opção de filtrar por usuário logado)
 router.get('/solicitacoes', async (req, res) => {
   try {
     const hideDone = String(req.query?.hideDone || '').toLowerCase() === 'true' || req.query?.hideDone === '1';
-    
-    // Obtém o usuário logado da sessão
-    const usuarioLogado = req.session?.user?.fullName 
-                       || req.session?.user?.username 
-                       || req.session?.user?.login
-                       || null;
+    // Novo parâmetro: filterByUser=1 indica que deve filtrar apenas registros do usuário logado
+    const filterByUser = String(req.query?.filterByUser || '').toLowerCase() === 'true' || req.query?.filterByUser === '1';
 
-    if (!usuarioLogado) {
-      return res.status(401).json({ ok: false, error: 'Usuário não autenticado.' });
-    }
-
-    // Monta a cláusula WHERE com filtro de status e usuário
     const conditions = [];
-    const params = [usuarioLogado];
-    
+    const params = [];
+
+    // Filtro por status (oculta Enviado e Finalizado)
     if (hideDone) {
       conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado')");
     }
-    conditions.push('usuario = $1');
-    
+
+    // Filtro por usuário logado (apenas se filterByUser=true)
+    if (filterByUser) {
+      const usuarioLogado = req.session?.user?.fullName 
+                         || req.session?.user?.username 
+                         || req.session?.user?.login
+                         || null;
+
+      if (!usuarioLogado) {
+        return res.status(401).json({ ok: false, error: 'Usuário não autenticado.' });
+      }
+
+      params.push(usuarioLogado);
+      conditions.push(`usuario = $${params.length}`);
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
