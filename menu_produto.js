@@ -5507,6 +5507,15 @@ const OMIE_SYNC_TASKS = [
     method: 'POST',
     body: {},
     buttonLabel: 'Atualizar produtos Omie'
+  },
+  {
+    key: 'imagens-omie',
+    label: 'imagens_omie',
+    description: 'Atualiza URLs das imagens de produtos da Omie (resolve URLs expiradas).',
+    endpoint: '/api/admin/sync/imagens-omie',
+    method: 'POST',
+    body: {},
+    buttonLabel: 'Atualizar imagens Omie'
   }
 ];
 
@@ -12280,6 +12289,11 @@ function openComprasTab() {
 
     window.showOnlyInMain?.(comprasPane);
     
+    // Carrega fornecedores se ainda não foram carregados
+    if (!window.fornecedoresCache || window.fornecedoresCache.length === 0) {
+      loadFornecedores();
+    }
+    
     // Configura sub-abas se ainda não foi configurado
     setupComprasSubTabs();
     
@@ -12708,9 +12722,11 @@ async function abrirModalCompras() {
   // Limpa campos com segurança (verifica se existem antes de limpar)
   const codigo = document.getElementById('modalComprasCodigo');
   const descSelecionada = document.getElementById('modalComprasDescricaoSelecionada');
+  const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie');
   const descricao = document.getElementById('modalComprasDescricao');
   const quantidade = document.getElementById('modalComprasQuantidade');
   const prazo = document.getElementById('modalComprasPrazo');
+  const familia = document.getElementById('modalComprasFamilia');
   const objetivo = document.getElementById('modalComprasObjetivo');
   const observacao = document.getElementById('modalComprasObservacao');
   const departamento = document.getElementById('modalComprasDepartamento');
@@ -12718,9 +12734,11 @@ async function abrirModalCompras() {
   
   if (codigo) codigo.value = '';
   if (descSelecionada) descSelecionada.value = '';
+  if (codigoProdutoOmie) codigoProdutoOmie.value = '';
   if (descricao) descricao.value = '';
   if (quantidade) quantidade.value = '1';
   if (prazo) prazo.value = '';
+  if (familia) familia.value = '';
   if (objetivo) objetivo.value = '';
   if (observacao) observacao.value = '';
   if (departamento) departamento.value = '';
@@ -12767,6 +12785,18 @@ async function carregarDepartamentosECentros() {
       selectCentros.innerHTML = '<option value="">Selecione o centro de custo</option>' +
         (dataCentros.centros || []).map(c => 
           `<option value="${window.escapeHtml(c.nome)}">${window.escapeHtml(c.nome)}</option>`
+        ).join('');
+    }
+    
+    // Carrega famílias de produtos
+    const respFamilias = await fetch('/api/compras/familias');
+    const dataFamilias = await respFamilias.json();
+    const selectFamilias = document.getElementById('modalComprasFamilia');
+    
+    if (selectFamilias && dataFamilias.ok) {
+      selectFamilias.innerHTML = '<option value="">Selecione a família...</option>' +
+        (dataFamilias.familias || []).map(f => 
+          `<option value="${f.codigo}">${window.escapeHtml(f.nome_familia)}</option>`
         ).join('');
     }
     
@@ -12857,12 +12887,19 @@ function adicionarItemCarrinho(ev) {
   const descricao = (document.getElementById('modalComprasDescricao')?.value || '').trim();
   const quantidade = parseFloat(document.getElementById('modalComprasQuantidade')?.value || 0);
   const prazo = document.getElementById('modalComprasPrazo')?.value || '';
+  const familia = (document.getElementById('modalComprasFamilia')?.value || '').trim();
+  const familiaTexto = document.getElementById('modalComprasFamilia')?.selectedOptions[0]?.text || '';
   const observacao = (document.getElementById('modalComprasObservacao')?.value || '').trim();
   const departamento = (document.getElementById('modalComprasDepartamento')?.value || '').trim();
   const centroCusto = (document.getElementById('modalComprasCentroCusto')?.value || '').trim();
   const objetivoCompra = (document.getElementById('modalComprasObjetivo')?.value || '').trim();
   const responsavel = (document.getElementById('modalComprasResponsavel')?.value || '').trim();
   const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
+  const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
+  
+  // Verifica se o campo família está visível (produto novo) ou oculto (produto existente)
+  const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
+  const familiaVisivel = familiaField && familiaField.style.display !== 'none';
   
   if (!codigo) {
     alert('Digite o código do produto');
@@ -12871,6 +12908,12 @@ function adicionarItemCarrinho(ev) {
   
   if (quantidade <= 0) {
     alert('Quantidade deve ser maior que zero');
+    return;
+  }
+  
+  // Só valida família se o campo estiver visível (produto novo)
+  if (familiaVisivel && !familia) {
+    alert('Selecione a família do produto');
     return;
   }
   
@@ -12884,12 +12927,20 @@ function adicionarItemCarrinho(ev) {
     return;
   }
   
-  if (!objetivoCompra) {
+  // Só valida objetivo se o campo estiver visível (produto novo)
+  const objetivoField = document.getElementById('modalComprasObjetivo')?.closest('.form-field');
+  const objetivoVisivel = objetivoField && objetivoField.style.display !== 'none';
+  
+  if (objetivoVisivel && !objetivoCompra) {
     alert('Informe o objetivo da compra');
     return;
   }
   
-  if (!responsavel) {
+  // Só valida responsável se o campo estiver visível (produto novo)
+  const responsavelField = document.getElementById('modalComprasResponsavel')?.closest('.form-field');
+  const responsavelVisivel = responsavelField && responsavelField.style.display !== 'none';
+  
+  if (responsavelVisivel && !responsavel) {
     alert('Selecione o responsável pela inspeção de recebimento');
     return;
   }
@@ -12904,11 +12955,14 @@ function adicionarItemCarrinho(ev) {
     produto_descricao: descricao,
     quantidade,
     prazo_solicitado: prazo || null,
+    familia_codigo: familia || null,
+    familia_nome: familiaTexto || null,
     observacao: observacao || '',
     departamento: departamento,
     centro_custo: centroCusto,
-    objetivo_compra: objetivoCompra,
-    resp_inspecao_recebimento: responsavel,
+    codigo_produto_omie: codigoProdutoOmie || null,
+    objetivo_compra: objetivoCompra || '',
+    resp_inspecao_recebimento: responsavel || '',
     retorno_cotacao: retornoCotacao
   });
   
@@ -12940,7 +12994,7 @@ async function enviarPedidoCompras() {
     return;
   }
   
-  if (!confirm(`Enviar pedido com ${carrinho.length} item(ns)?`)) return;
+  if (!confirm(`Enviar ${carrinho.length} item(ns) para solicitação?`)) return;
   
   const statusEl = document.getElementById('comprasFormStatus');
   const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
@@ -12952,7 +13006,7 @@ async function enviarPedidoCompras() {
       statusEl.style.display = 'block';
       statusEl.style.background = '#3b82f6';
       statusEl.style.color = 'white';
-      statusEl.textContent = 'Enviando pedido...';
+      statusEl.textContent = 'Enviando solicitações...';
     }
     
     const resp = await fetch('/api/compras/pedido', {
@@ -12964,12 +13018,12 @@ async function enviarPedidoCompras() {
     const data = await resp.json();
     
     if (!resp.ok || !data.ok) {
-      throw new Error(data.error || 'Erro ao enviar pedido');
+      throw new Error(data.error || 'Erro ao enviar solicitações');
     }
     
     if (statusEl) {
       statusEl.style.background = '#22c55e';
-      statusEl.textContent = `✓ Pedido ${data.numero_pedido} enviado com sucesso! (${data.total_itens} itens)`;
+      statusEl.textContent = `✓ ${data.total_itens} solicitação(ões) enviada(s) com sucesso!`;
     }
     
     window.carrinhoCompras = [];
@@ -12981,12 +13035,12 @@ async function enviarPedidoCompras() {
     }, 3000);
     
   } catch (err) {
-    console.error('[COMPRAS] Erro ao enviar pedido:', err);
+    console.error('[COMPRAS] Erro ao enviar solicitações:', err);
     if (statusEl) {
       statusEl.style.background = '#ef4444';
       statusEl.textContent = `✗ ${err.message}`;
     }
-    alert('Erro ao enviar pedido: ' + err.message);
+    alert('Erro ao enviar solicitações: ' + err.message);
   } finally {
     if (btnEnviar) btnEnviar.disabled = false;
   }
@@ -13119,6 +13173,8 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
           <li style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border-color);transition:background 0.2s;"
               data-codigo="${window.escapeHtml(p.codigo)}"
               data-descricao="${window.escapeHtml(p.descricao)}"
+              data-familia="${window.escapeHtml(p.descricao_familia || '')}"
+              data-codigo-produto="${window.escapeHtml(p.codigo_produto || '')}"
               onmouseover="this.style.background='rgba(59,130,246,0.2)'"
               onmouseout="this.style.background='transparent'">
             <strong>${window.escapeHtml(p.codigo)}</strong> — ${window.escapeHtml(p.descricao)}
@@ -13131,10 +13187,33 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
           li.addEventListener('click', () => {
             inputEl.value = li.getAttribute('data-codigo') || '';
             const desc = li.getAttribute('data-descricao') || '';
+            const familia = li.getAttribute('data-familia') || '';
+            const codigoProdutoOmie = li.getAttribute('data-codigo-produto') || null;
             descHiddenEl.value = desc;
+            
+            // Armazena codigo_produto_omie em um campo hidden ou data attribute
+            const codigoOmieHidden = document.getElementById('modalComprasCodigoProdutoOmie');
+            if (codigoOmieHidden) {
+              codigoOmieHidden.value = codigoProdutoOmie;
+            }
+            
             // Preenche o campo descrição visível
             const descInput = document.getElementById('modalComprasDescricao');
             if (descInput) descInput.value = desc;
+            
+            // Preenche o campo família automaticamente
+            const familiaInput = document.getElementById('modalComprasFamilia');
+            if (familiaInput && familia) {
+              // Busca a opção no select que corresponde ao nome da família
+              const options = Array.from(familiaInput.options);
+              const matchingOption = options.find(opt => 
+                opt.text.toLowerCase() === familia.toLowerCase()
+              );
+              if (matchingOption) {
+                familiaInput.value = matchingOption.value;
+              }
+            }
+            
             sugestoesEl.style.display = 'none';
             if (statusEl) statusEl.textContent = '';
             
@@ -13166,6 +13245,10 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
 
 // Função para ocultar/mostrar campos quando produto existente é selecionado
 function ocultarCamposComprasProdutoExistente(ocultar) {
+  // Família
+  const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
+  const familiaInput = document.getElementById('modalComprasFamilia');
+  
   // Objetivo da compra
   const objetivoField = document.getElementById('modalComprasObjetivo')?.closest('.form-field');
   const objetivoInput = document.getElementById('modalComprasObjetivo');
@@ -13180,7 +13263,7 @@ function ocultarCamposComprasProdutoExistente(ocultar) {
   const responsavelField = document.getElementById('modalComprasResponsavel')?.closest('.form-field');
   const responsavelInput = document.getElementById('modalComprasResponsavel');
   
-  const camposParaOcultar = [objetivoField, anexoField, observacaoField, responsavelField].filter(Boolean);
+  const camposParaOcultar = [familiaField, objetivoField, anexoField, observacaoField, responsavelField].filter(Boolean);
   
   camposParaOcultar.forEach(campo => {
     if (campo) {
@@ -14448,6 +14531,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
     };
     
+    // Verifica se pelo menos um item está em "aguardando compra" para mostrar dados da compra
+    const temItemAguardandoCompra = itensPedido.some(item => item.status === 'aguardando compra');
+    
     let html = `
       <!-- Informações do Pedido -->
       <div style="background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:20px;">
@@ -14466,6 +14552,77 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
         </div>
       </div>
+      
+      ${temItemAguardandoCompra ? `
+      <!-- Dados da Compra (Únicos para todo o pedido) -->
+      <div style="padding:16px;background:#f0fdf4;border:2px solid #10b981;border-radius:8px;margin-bottom:20px;">
+        <div style="font-size:14px;color:#047857;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-shopping-cart"></i> Dados da Compra (Pedido: ${numeroPedido})
+        </div>
+        
+        <!-- Fornecedor -->
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
+            <i class="fa-solid fa-building"></i> Fornecedor *
+          </label>
+          <div style="position:relative;">
+            <input 
+              type="text" 
+              id="compras-fornecedor-input-${numeroPedido}"
+              class="compras-fornecedor-input-modal"
+              placeholder="Digite o nome do fornecedor..."
+              value="${primeiroItem.fornecedor_nome || ''}"
+              style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"
+            />
+            <input type="hidden" id="compras-fornecedor-id-${numeroPedido}" value="${primeiroItem.fornecedor_id || ''}" />
+            <div 
+              id="compras-fornecedor-list-${numeroPedido}" 
+              class="compras-fornecedor-list-modal"
+              style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+            </div>
+          </div>
+        </div>
+        
+        <!-- Previsão de Entrega -->
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
+            <i class="fa-solid fa-calendar"></i> Previsão de Entrega
+          </label>
+          <input 
+            type="date" 
+            id="compras-previsao-entrega-${numeroPedido}"
+            value="${primeiroItem.previsao_entrega ? new Date(primeiroItem.previsao_entrega).toISOString().split('T')[0] : ''}"
+            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"
+          />
+        </div>
+        
+        <!-- Categoria da Compra -->
+        <div style="margin-bottom:14px;">
+          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
+            <i class="fa-solid fa-tags"></i> Categoria da Compra
+          </label>
+          <select 
+            id="compras-categoria-${numeroPedido}"
+            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;background:white;">
+            <option value="">Selecione uma categoria...</option>
+            <!-- Será preenchido dinamicamente -->
+          </select>
+        </div>
+        
+        <!-- Condição de Pagamento -->
+        <div style="margin-bottom:0;">
+          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
+            <i class="fa-solid fa-credit-card"></i> Condição de Pagamento
+          </label>
+          <select 
+            id="compras-parcela-${numeroPedido}"
+            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;background:white;">
+            <option value="">Carregando...</option>
+            <!-- Será preenchido dinamicamente -->
+          </select>
+        </div>
+      </div>
+      ` : ''}
       
       <!-- Lista de Itens -->
       <div style="display:flex;flex-direction:column;gap:16px;">
@@ -14499,7 +14656,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <div style="font-size:13px;color:#1f2937;">${fmtDate(item.prazo_solicitado)}</div>
             </div>
             <div>
-              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Previsão Chegada</div>
+              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Previsão de Entrega</div>
               <div style="font-size:13px;color:#1f2937;">${fmtDate(item.previsao_chegada)}</div>
             </div>
             ${item.fornecedor_nome ? `
@@ -14543,6 +14700,26 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
           ` : ''}
           
+          ${item.status === 'aguardando compra' ? `
+          <!-- Valor Unitário (específico por item) -->
+          <div style="padding:12px;background:#f0fdf4;border:1px solid #10b981;border-radius:6px;margin-bottom:12px;">
+            <div style="margin-bottom:0;">
+              <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
+                <i class="fa-solid fa-dollar-sign"></i> Valor Unitário (R$) - Item ${index + 1}
+              </label>
+              <input 
+                type="number" 
+                id="compras-valor-unitario-${item.id}"
+                value="${item.valor_unitario || ''}"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+              />
+            </div>
+          </div>
+          ` : ''}
+          
           ${(item.status === 'aguardando cotação' || item.status === 'cotado' || item.status === 'aguardando_cotacao') ? `
           <!-- Seção de Cotações (para status aguardando cotação) -->
           <div style="padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:12px;">
@@ -14566,9 +14743,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           </div>
           ` : ''}
           
-          <!-- Botões de Ação -->
-          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-            ${(item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao') ? `
+          <!-- Botões de Ação por Item (apenas para cotações) -->
+          ${(item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao') ? `
+          <div style="margin-top:12px;">
             <button 
               onclick="marcarComoCotadoModal('${item.id}')" 
               style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;" 
@@ -14576,33 +14753,318 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
               <i class="fa-solid fa-check-double"></i>
               Marcar como Cotado
             </button>
-            ` : ''}
-            <button onclick="enviarEmailCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#3b82f6;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
-              <i class="fa-solid fa-envelope"></i>
-              E-mail
-            </button>
-            <button onclick="enviarWhatsAppCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#10b981;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
-              <i class="fa-brands fa-whatsapp"></i>
-              WhatsApp
-            </button>
-            <button onclick="anexarArquivoCompra('${item.id}')" style="display:flex;align-items:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
-              <i class="fa-solid fa-paperclip"></i>
-              Anexar
-            </button>
           </div>
+          ` : ''}
         </div>
       `;
     });
     
-    html += '</div>';
+    html += '</div>'; // Fecha lista de itens
+    
+    // Adiciona botões globais e frete apenas se houver itens em "aguardando compra"
+    if (temItemAguardandoCompra) {
+      html += `
+        <!-- Seção de Frete e Ações Globais -->
+        <div style="padding:16px;background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;margin-top:20px;">
+          <div style="font-size:14px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-truck"></i> Frete e Ações
+          </div>
+          
+          <!-- Botão Incluir Frete -->
+          <div style="margin-bottom:16px;">
+            <button 
+              id="btn-incluir-frete-${numeroPedido}"
+              onclick="toggleFreteFields('${numeroPedido}')"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#3b82f6;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
+              <i class="fa-solid fa-truck"></i>
+              <span id="frete-btn-text-${numeroPedido}">Incluir Frete</span>
+            </button>
+          </div>
+          
+          <!-- Campos de Frete (inicialmente ocultos) -->
+          <div id="frete-fields-${numeroPedido}" style="display:none;padding:14px;background:white;border:1px solid #bfdbfe;border-radius:6px;margin-bottom:16px;">
+            <div style="font-size:11px;color:#1e40af;text-transform:uppercase;font-weight:700;margin-bottom:12px;">
+              <i class="fa-solid fa-truck"></i> Dados do Frete
+            </div>
+            
+            <!-- Transportadora -->
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                Transportadora
+              </label>
+              <div style="position:relative;">
+                <input 
+                  type="text" 
+                  id="compras-transportadora-input-${numeroPedido}"
+                  class="compras-transportadora-input-modal"
+                  placeholder="Digite o nome da transportadora..."
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+                <input type="hidden" id="compras-transportadora-id-${numeroPedido}" />
+                <div 
+                  id="compras-transportadora-list-${numeroPedido}" 
+                  class="compras-transportadora-list-modal"
+                  style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #bfdbfe;border-top:none;border-radius:0 0 6px 6px;max-height:150px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                </div>
+              </div>
+            </div>
+            
+            <!-- Tipo do Frete -->
+            <div style="margin-bottom:12px;">
+              <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                Tipo do Frete
+              </label>
+              <select 
+                id="compras-tipo-frete-${numeroPedido}"
+                style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;background:white;">
+                <option value="">Selecione...</option>
+                <option value="0">0 - Contratação do Frete por conta do Remetente (CIF)</option>
+                <option value="1">1 - Contratação do Frete por conta do Destinatário (FOB)</option>
+                <option value="2">2 - Contratação do Frete por conta de Terceiros</option>
+                <option value="3">3 - Transporte Próprio por conta do Remetente</option>
+                <option value="4">4 - Transporte Próprio por conta do Destinatário</option>
+                <option value="9">9 - Sem Ocorrência de Transporte</option>
+              </select>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <!-- Placa do Veículo -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Placa do Veículo
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-placa-${numeroPedido}"
+                  placeholder="ABC-1234"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- UF -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  UF
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-uf-${numeroPedido}"
+                  placeholder="SP"
+                  maxlength="2"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;text-transform:uppercase;"
+                />
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <!-- Quantidade de Volumes -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Quantidade de Volumes
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-qtd-volumes-${numeroPedido}"
+                  placeholder="0"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- Espécie dos Volumes -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Espécie dos Volumes
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-especie-volumes-${numeroPedido}"
+                  placeholder="Caixa, Pallet, etc"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <!-- Marca dos Volumes -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Marca dos Volumes
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-marca-volumes-${numeroPedido}"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- Numeração dos Volumes -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Numeração dos Volumes
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-numero-volumes-${numeroPedido}"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <!-- Peso Líquido (Kg) -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Peso Líquido (Kg)
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-peso-liquido-${numeroPedido}"
+                  placeholder="0,000"
+                  step="0.001"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- Peso Bruto (Kg) -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Peso Bruto (Kg)
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-peso-bruto-${numeroPedido}"
+                  placeholder="0,000"
+                  step="0.001"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+              <!-- Valor do Frete -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Valor do Frete
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-valor-frete-${numeroPedido}"
+                  placeholder="0,00"
+                  step="0.01"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- Valor do Seguro -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Valor do Seguro
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-valor-seguro-${numeroPedido}"
+                  placeholder="0,00"
+                  step="0.01"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <!-- Número do Lacre -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Número do Lacre
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-lacre-${numeroPedido}"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+              
+              <!-- Outras Despesas Acessórias -->
+              <div>
+                <label style="display:block;font-size:11px;color:#1e40af;font-weight:600;margin-bottom:6px;">
+                  Outras Despesas Acessórias
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-outras-despesas-${numeroPedido}"
+                  placeholder="0,00"
+                  step="0.01"
+                  min="0"
+                  style="width:100%;padding:10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <!-- Botões Globais de Ação -->
+          <div style="display:grid;gap:10px;">
+            <button 
+              id="btn-salvar-dados-compra-${numeroPedido}"
+              onclick="salvarDadosCompraModal('${numeroPedido}')"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#10b981;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
+              title="Salvar dados da compra">
+              <i class="fa-solid fa-save"></i>
+              Salvar Dados da Compra
+            </button>
+            
+            <button 
+              id="btn-gerar-compra-${numeroPedido}"
+              onclick="gerarPedidoCompraOmie('${numeroPedido}')"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:#6366f1;color:white;border:none;padding:12px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
+              title="Enviar pedido de compra para a Omie">
+              <i class="fa-solid fa-paper-plane"></i>
+              Gerar Compra na Omie
+            </button>
+            
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+              <button onclick="enviarEmailCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#3b82f6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por e-mail">
+                <i class="fa-solid fa-envelope"></i>
+                E-mail
+              </button>
+              <button onclick="enviarWhatsAppCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#10b981;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Enviar por WhatsApp">
+                <i class="fa-brands fa-whatsapp"></i>
+                WhatsApp
+              </button>
+              <button onclick="anexarArquivoCompra(null, '${numeroPedido}')" style="display:flex;align-items:center;justify-content:center;gap:6px;background:#8b5cf6;color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;" title="Anexar arquivo">
+                <i class="fa-solid fa-paperclip"></i>
+                Anexar
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
     modalBody.innerHTML = html;
     
-    // Carrega cotações para itens em "aguardando cotação"
-    itensPedido.forEach(item => {
-      if (item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao' || item.status === 'cotado') {
-        loadCotacoesItemModal(item.id);
-      }
-    });
+    // Aguarda o DOM ser atualizado antes de configurar autocomplete
+    setTimeout(() => {
+      // Carrega cotações para itens em "aguardando cotação"
+      itensPedido.forEach(item => {
+        if (item.status === 'aguardando cotação' || item.status === 'aguardando_cotacao' || item.status === 'cotado') {
+          loadCotacoesItemModal(item.id);
+        }
+        
+        // Configura autocomplete e campos para itens em "aguardando compra"
+        if (item.status === 'aguardando compra') {
+          console.log('[MODAL] Configurando campos para pedido:', item.numero_pedido);
+          console.log('[MODAL] Fornecedores disponíveis:', window.fornecedoresCache?.length || 0);
+          setupFornecedorAutocompleteModal(item.numero_pedido);
+          loadCategoriasCompraModal(item.numero_pedido, item.categoria_compra_codigo);
+          loadParcelasCompraModal(item.numero_pedido, item.cod_parcela);
+          loadDadosPedidoCompra(item.numero_pedido);
+        }
+      });
+    }, 100);
     
   } catch (err) {
     console.error('[MODAL PEDIDO] Erro:', err);
@@ -14694,6 +15156,577 @@ function fecharModalDetalhesPedidoCompras() {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   if (modal) modal.style.display = 'none';
 }
+
+// Configura autocomplete de fornecedores para campos no modal
+function setupFornecedorAutocompleteModal(itemId) {
+  const input = document.getElementById(`compras-fornecedor-input-${itemId}`);
+  const hiddenId = document.getElementById(`compras-fornecedor-id-${itemId}`);
+  const list = document.getElementById(`compras-fornecedor-list-${itemId}`);
+  
+  console.log('[AUTOCOMPLETE MODAL] Configurando para item:', itemId);
+  console.log('[AUTOCOMPLETE MODAL] Input encontrado:', !!input);
+  console.log('[AUTOCOMPLETE MODAL] List encontrado:', !!list);
+  console.log('[AUTOCOMPLETE MODAL] Cache de fornecedores:', window.fornecedoresCache?.length || 0);
+  
+  if (!input || !list) {
+    console.error('[AUTOCOMPLETE MODAL] Elementos não encontrados!');
+    return;
+  }
+  
+  // Evento de digitação - filtra em tempo real
+  input.addEventListener('input', function() {
+    const query = this.value.trim().toLowerCase();
+    if (hiddenId) hiddenId.value = ''; // Limpa ID ao digitar
+    
+    console.log('[AUTOCOMPLETE MODAL] Digitado:', query);
+    
+    if (query.length < 2) {
+      list.style.display = 'none';
+      return;
+    }
+    
+    // Filtra fornecedores pelo nome_fantasia
+    const filtered = window.fornecedoresCache.filter(f => {
+      const nome = (f.nome_fantasia || '').toLowerCase();
+      return nome.includes(query);
+    });
+    
+    console.log('[AUTOCOMPLETE MODAL] Fornecedores filtrados:', filtered.length);
+    
+    if (filtered.length === 0) {
+      list.innerHTML = '<div style="padding:12px;color:#666;text-align:center;font-size:13px;">Nenhum fornecedor encontrado</div>';
+      list.style.display = 'block';
+      return;
+    }
+    
+    // Renderiza lista filtrada (máximo 10 resultados)
+    list.innerHTML = filtered.slice(0, 10).map(f => `
+      <div 
+        class="fornecedor-item-modal" 
+        data-id="${f.codigo_cliente_omie}"
+        data-nome="${(f.nome_fantasia || '').replace(/"/g, '&quot;')}"
+        style="
+          padding:12px;
+          cursor:pointer;
+          border-bottom:1px solid #eee;
+          transition:background 0.2s;
+        "
+        onmouseover="this.style.background='#f0f9ff'"
+        onmouseout="this.style.background='white'"
+      >
+        <div style="font-weight:500;color:#1e293b;font-size:13px;">${f.nome_fantasia || 'Sem nome'}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:2px;">
+          ${f.cnpj_cpf || ''} ${f.cidade ? '• ' + f.cidade : ''}
+        </div>
+      </div>
+    `).join('');
+    
+    list.style.display = 'block';
+    
+    // Adiciona evento de clique nos itens
+    list.querySelectorAll('.fornecedor-item-modal').forEach(item => {
+      item.addEventListener('click', function() {
+        const id = this.getAttribute('data-id');
+        const nome = this.getAttribute('data-nome');
+        input.value = nome;
+        if (hiddenId) hiddenId.value = id;
+        list.style.display = 'none';
+        console.log('[AUTOCOMPLETE MODAL] Fornecedor selecionado:', nome, id);
+      });
+    });
+  });
+  
+  // Fecha lista ao clicar fora
+  document.addEventListener('click', function(e) {
+    if (!input.contains(e.target) && !list.contains(e.target)) {
+      list.style.display = 'none';
+    }
+  });
+}
+
+// Salva fornecedor selecionado no modal
+async function salvarFornecedorModal(itemId) {
+  const inputNome = document.getElementById(`compras-fornecedor-input-${itemId}`);
+  const inputId = document.getElementById(`compras-fornecedor-id-${itemId}`);
+  
+  if (!inputNome || !inputId) {
+    alert('Erro: campos não encontrados');
+    return;
+  }
+  
+  const fornecedorNome = inputNome.value.trim();
+  const fornecedorId = inputId.value.trim();
+  
+  if (!fornecedorNome || !fornecedorId) {
+    alert('Por favor, selecione um fornecedor da lista');
+    return;
+  }
+  
+  try {
+    const resp = await fetch(`/api/compras/item/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ 
+        fornecedor_nome: fornecedorNome,
+        fornecedor_id: fornecedorId
+      })
+    });
+    
+    if (!resp.ok) throw new Error('Erro ao salvar fornecedor');
+    
+    alert('Fornecedor salvo com sucesso!');
+    
+    // Recarrega o kanban e fecha o modal
+    renderComprasKanban();
+    fecharModalDetalhesPedidoCompras();
+    
+  } catch (err) {
+    console.error('[SALVAR FORNECEDOR] Erro:', err);
+    alert('Erro ao salvar fornecedor: ' + err.message);
+  }
+}
+
+// Salva dados da compra (fornecedor, previsão de entrega e categoria)
+// Função para salvar dados da compra (agora salva na tabela ped_compra)
+// Objetivo: Salvar dados do pedido (não do item individual) na nova estrutura
+async function salvarDadosCompraModal(numeroPedido) {
+  try {
+    const inputFornecedorNome = document.getElementById(`compras-fornecedor-input-${numeroPedido}`);
+    const inputFornecedorId = document.getElementById(`compras-fornecedor-id-${numeroPedido}`);
+    const inputPrevisaoEntrega = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
+    const selectCategoria = document.getElementById(`compras-categoria-${numeroPedido}`);
+    const selectParcela = document.getElementById(`compras-parcela-${numeroPedido}`);
+    
+    if (!inputFornecedorNome || !inputFornecedorId) {
+      alert('Erro: campos não encontrados');
+      return;
+    }
+    
+    const fornecedorNome = inputFornecedorNome.value.trim();
+    const fornecedorId = inputFornecedorId.value.trim();
+    const previsaoEntrega = inputPrevisaoEntrega?.value || null;
+    const categoriaSelect = selectCategoria?.selectedOptions[0];
+    const categoriaDescricao = categoriaSelect?.text || null;
+    const categoriaCodigo = categoriaSelect?.value || null;
+    
+    // Captura a condição de pagamento selecionada
+    const parcelaSelect = selectParcela?.selectedOptions[0];
+    const parcelaCodigo = parcelaSelect?.value || 'A15'; // Padrão A15
+    const parcelaDescricao = parcelaSelect?.text || 'Para 15 dias';
+    
+    if (!fornecedorNome || !fornecedorId) {
+      alert('Por favor, selecione um fornecedor da lista');
+      return;
+    }
+    
+    // Busca todos os itens do pedido para coletar valores unitários
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    
+    // Coleta valores unitários de cada item
+    const valoresUnitarios = {};
+    itensPedido.forEach(item => {
+      const inputValorItem = document.getElementById(`compras-valor-unitario-${item.id}`);
+      if (inputValorItem) {
+        valoresUnitarios[item.id] = parseFloat(inputValorItem.value) || null;
+      }
+    });
+    
+    console.log('[SALVAR DADOS] Valores Unitários por item:', valoresUnitarios);
+    
+    // Coleta dados de frete se estiver incluído
+    const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
+    const incluirFrete = freteFields && freteFields.style.display !== 'none';
+    
+    const body = {
+      numero_pedido: numeroPedido,
+      fornecedor_nome: fornecedorNome,
+      fornecedor_id: fornecedorId,
+      previsao_entrega: previsaoEntrega,
+      categoria_compra: categoriaDescricao,
+      categoria_compra_codigo: categoriaCodigo,
+      valores_unitarios: valoresUnitarios,
+      cod_parcela: parcelaCodigo,
+      descricao_parcela: parcelaDescricao,
+      incluir_frete: incluirFrete
+    };
+    
+    console.log('[SALVAR DADOS] Body completo:', body);
+    
+    if (incluirFrete) {
+      body.transportadora_nome = document.getElementById(`compras-transportadora-input-${numeroPedido}`)?.value.trim() || null;
+      body.transportadora_id = document.getElementById(`compras-transportadora-id-${numeroPedido}`)?.value || null;
+      body.tipo_frete = document.getElementById(`compras-tipo-frete-${numeroPedido}`)?.value || null;
+      body.placa_veiculo = document.getElementById(`compras-placa-${numeroPedido}`)?.value.trim() || null;
+      body.uf_veiculo = document.getElementById(`compras-uf-${numeroPedido}`)?.value.trim().toUpperCase() || null;
+      body.qtd_volumes = document.getElementById(`compras-qtd-volumes-${numeroPedido}`)?.value ? parseInt(document.getElementById(`compras-qtd-volumes-${numeroPedido}`).value) : null;
+      body.especie_volumes = document.getElementById(`compras-especie-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.marca_volumes = document.getElementById(`compras-marca-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.numero_volumes = document.getElementById(`compras-numero-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.peso_liquido = document.getElementById(`compras-peso-liquido-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-peso-liquido-${numeroPedido}`).value) : null;
+      body.peso_bruto = document.getElementById(`compras-peso-bruto-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-peso-bruto-${numeroPedido}`).value) : null;
+      body.valor_frete = document.getElementById(`compras-valor-frete-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-valor-frete-${numeroPedido}`).value) : null;
+      body.valor_seguro = document.getElementById(`compras-valor-seguro-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-valor-seguro-${numeroPedido}`).value) : null;
+      body.outras_despesas = document.getElementById(`compras-outras-despesas-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-outras-despesas-${numeroPedido}`).value) : null;
+    }
+    
+    const respSalvar = await fetch('/api/compras/pedido/dados', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    
+    if (!respSalvar.ok) throw new Error('Erro ao salvar dados da compra');
+    
+    alert('Dados da compra salvos com sucesso!');
+    
+    // Recarrega o kanban e fecha o modal
+    renderComprasKanban();
+    fecharModalDetalhesPedidoCompras();
+    
+  } catch (err) {
+    console.error('[SALVAR DADOS COMPRA] Erro:', err);
+    alert('Erro ao salvar dados da compra: ' + err.message);
+  }
+}
+
+// Função para alternar exibição dos campos de frete
+function toggleFreteFields(numeroPedido) {
+  const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
+  const btnText = document.getElementById(`frete-btn-text-${numeroPedido}`);
+  
+  if (freteFields && btnText) {
+    const isHidden = freteFields.style.display === 'none' || !freteFields.style.display;
+    freteFields.style.display = isHidden ? 'block' : 'none';
+    btnText.textContent = isHidden ? 'Ocultar Frete' : 'Incluir Frete';
+  }
+}
+
+// Função para carregar dados do pedido existente
+async function loadDadosPedidoCompra(numeroPedido) {
+  try {
+    const resp = await fetch(`/api/compras/pedido/${numeroPedido}`);
+    if (!resp.ok) return;
+    
+    const data = await resp.json();
+    if (!data.ok || !data.pedido) return;
+    
+    const pedido = data.pedido;
+    
+    // Preenche campos principais
+    if (pedido.fornecedor_nome) {
+      const inputNome = document.getElementById(`compras-fornecedor-input-${numeroPedido}`);
+      const inputId = document.getElementById(`compras-fornecedor-id-${numeroPedido}`);
+      if (inputNome) inputNome.value = pedido.fornecedor_nome;
+      if (inputId) inputId.value = pedido.fornecedor_id || '';
+    }
+    
+    if (pedido.previsao_entrega) {
+      const inputPrevisao = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
+      if (inputPrevisao) inputPrevisao.value = new Date(pedido.previsao_entrega).toISOString().split('T')[0];
+    }
+    
+    // Preenche frete se incluído
+    if (pedido.incluir_frete) {
+      toggleFreteFields(numeroPedido);
+      
+      if (pedido.transportadora_nome) {
+        const inputTransp = document.getElementById(`compras-transportadora-input-${numeroPedido}`);
+        const inputTranspId = document.getElementById(`compras-transportadora-id-${numeroPedido}`);
+        if (inputTransp) inputTransp.value = pedido.transportadora_nome;
+        if (inputTranspId) inputTranspId.value = pedido.transportadora_id || '';
+      }
+      
+      const campos = {
+        'tipo-frete': pedido.tipo_frete,
+        'placa': pedido.placa_veiculo,
+        'uf': pedido.uf_veiculo,
+        'qtd-volumes': pedido.qtd_volumes,
+        'especie-volumes': pedido.especie_volumes,
+        'marca-volumes': pedido.marca_volumes,
+        'numero-volumes': pedido.numero_volumes,
+        'peso-liquido': pedido.peso_liquido,
+        'peso-bruto': pedido.peso_bruto,
+        'valor-frete': pedido.valor_frete,
+        'valor-seguro': pedido.valor_seguro,
+        'lacre': pedido.lacre,
+        'outras-despesas': pedido.outras_despesas
+      };
+      
+      Object.keys(campos).forEach(campo => {
+        const elem = document.getElementById(`compras-${campo}-${numeroPedido}`);
+        if (elem && campos[campo] !== null && campos[campo] !== undefined) {
+          elem.value = campos[campo];
+        }
+      });
+    }
+  } catch (err) {
+    console.error('[LOAD DADOS PEDIDO] Erro:', err);
+  }
+}
+
+// Função para carregar parcelas da Omie
+window.salvarFornecedorModal = salvarFornecedorModal;
+window.salvarDadosCompraModal = salvarDadosCompraModal;
+window.toggleFreteFields = toggleFreteFields;
+
+// Função para gerar pedido de compra na Omie
+// Objetivo: Enviar pedido de compra completo para a API da Omie (IncluirPedCompra)
+async function gerarPedidoCompraOmie(numeroPedido) {
+  try {
+    const btn = document.getElementById(`btn-gerar-compra-${numeroPedido}`);
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando Dados...';
+    }
+    
+    // Primeiro, salva os dados do pedido (auto-save)
+    console.log('[GERAR COMPRA] Salvando dados do pedido antes de enviar...');
+    
+    const inputFornecedorNome = document.getElementById(`compras-fornecedor-input-${numeroPedido}`);
+    const inputFornecedorId = document.getElementById(`compras-fornecedor-id-${numeroPedido}`);
+    const inputPrevisaoEntrega = document.getElementById(`compras-previsao-entrega-${numeroPedido}`);
+    const selectCategoria = document.getElementById(`compras-categoria-${numeroPedido}`);
+    const selectParcela = document.getElementById(`compras-parcela-${numeroPedido}`);
+    
+    if (!inputFornecedorNome || !inputFornecedorId) {
+      throw new Error('Campos não encontrados. Verifique se o modal está aberto corretamente.');
+    }
+    
+    const fornecedorNome = inputFornecedorNome.value.trim();
+    const fornecedorId = inputFornecedorId.value.trim();
+    const previsaoEntrega = inputPrevisaoEntrega?.value || null;
+    const categoriaSelect = selectCategoria?.selectedOptions[0];
+    const categoriaDescricao = categoriaSelect?.text || null;
+    const categoriaCodigo = categoriaSelect?.value || null;
+    
+    // Captura a condição de pagamento selecionada
+    const parcelaSelect = selectParcela?.selectedOptions[0];
+    const parcelaCodigo = parcelaSelect?.value || 'A15'; // Padrão A15
+    const parcelaDescricao = parcelaSelect?.text || 'Para 15 dias';
+    
+    if (!fornecedorNome || !fornecedorId) {
+      throw new Error('Por favor, selecione um fornecedor da lista');
+    }
+    
+    // Busca todos os itens do pedido para coletar valores unitários
+    const respItens = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!respItens.ok) throw new Error('Não foi possível carregar as solicitações');
+    const dataItens = await respItens.json();
+    const listaCompleta = Array.isArray(dataItens.solicitacoes) ? dataItens.solicitacoes : [];
+    const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    
+    // Coleta valores unitários de cada item
+    const valoresUnitarios = {};
+    let temValorVazio = false;
+    itensPedido.forEach(item => {
+      const inputValorItem = document.getElementById(`compras-valor-unitario-${item.id}`);
+      if (inputValorItem) {
+        const valor = parseFloat(inputValorItem.value);
+        if (!valor || valor <= 0) {
+          temValorVazio = true;
+        }
+        valoresUnitarios[item.id] = valor || null;
+      } else {
+        temValorVazio = true;
+      }
+    });
+    
+    if (temValorVazio) {
+      throw new Error('Por favor, informe o valor unitário do produto');
+    }
+    
+    console.log('[GERAR COMPRA] Valores Unitários:', valoresUnitarios);
+    
+    // Coleta dados de frete se estiver incluído
+    const freteFields = document.getElementById(`frete-fields-${numeroPedido}`);
+    const incluirFrete = freteFields && freteFields.style.display !== 'none';
+    
+    const body = {
+      numero_pedido: numeroPedido,
+      fornecedor_nome: fornecedorNome,
+      fornecedor_id: fornecedorId,
+      previsao_entrega: previsaoEntrega,
+      categoria_compra: categoriaDescricao,
+      categoria_compra_codigo: categoriaCodigo,
+      valores_unitarios: valoresUnitarios,
+      cod_parcela: parcelaCodigo,
+      descricao_parcela: parcelaDescricao,
+      incluir_frete: incluirFrete
+    };
+    
+    if (incluirFrete) {
+      body.transportadora_nome = document.getElementById(`compras-transportadora-input-${numeroPedido}`)?.value.trim() || null;
+      body.transportadora_id = document.getElementById(`compras-transportadora-id-${numeroPedido}`)?.value || null;
+      body.tipo_frete = document.getElementById(`compras-tipo-frete-${numeroPedido}`)?.value || null;
+      body.placa_veiculo = document.getElementById(`compras-placa-${numeroPedido}`)?.value.trim() || null;
+      body.uf_veiculo = document.getElementById(`compras-uf-${numeroPedido}`)?.value.trim().toUpperCase() || null;
+      body.qtd_volumes = document.getElementById(`compras-qtd-volumes-${numeroPedido}`)?.value ? parseInt(document.getElementById(`compras-qtd-volumes-${numeroPedido}`).value) : null;
+      body.especie_volumes = document.getElementById(`compras-especie-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.marca_volumes = document.getElementById(`compras-marca-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.numero_volumes = document.getElementById(`compras-numero-volumes-${numeroPedido}`)?.value.trim() || null;
+      body.peso_liquido = document.getElementById(`compras-peso-liquido-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-peso-liquido-${numeroPedido}`).value) : null;
+      body.peso_bruto = document.getElementById(`compras-peso-bruto-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-peso-bruto-${numeroPedido}`).value) : null;
+      body.valor_frete = document.getElementById(`compras-valor-frete-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-valor-frete-${numeroPedido}`).value) : null;
+      body.valor_seguro = document.getElementById(`compras-valor-seguro-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-valor-seguro-${numeroPedido}`).value) : null;
+      body.lacre = document.getElementById(`compras-lacre-${numeroPedido}`)?.value.trim() || null;
+      body.outras_despesas = document.getElementById(`compras-outras-despesas-${numeroPedido}`)?.value ? parseFloat(document.getElementById(`compras-outras-despesas-${numeroPedido}`).value) : null;
+    }
+    
+    // Salva os dados primeiro
+    const saveResp = await fetch('/api/compras/pedido/dados', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body)
+    });
+    
+    if (!saveResp.ok) {
+      throw new Error('Erro ao salvar dados do pedido');
+    }
+    
+    console.log('[GERAR COMPRA] Dados salvos com sucesso. Gerando pedido na Omie...');
+    
+    // Atualiza o botão
+    if (btn) {
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando na Omie...';
+    }
+    
+    // Agora gera o pedido na Omie
+    const resp = await fetch(`/api/compras/pedido/gerar-omie/${numeroPedido}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include'
+    });
+    
+    const data = await resp.json();
+    
+    if (!resp.ok || !data.ok) {
+      throw new Error(data.error || 'Erro ao gerar pedido na Omie');
+    }
+    
+    alert(`✅ Pedido de compra gerado com sucesso na Omie!\n\nNúmero: ${data.numero}\nCódigo: ${data.codigo}`);
+    
+    // Recarrega o kanban e fecha o modal
+    renderComprasKanban();
+    fecharModalDetalhesPedidoCompras();
+    
+  } catch (err) {
+    console.error('[GERAR COMPRA OMIE] Erro:', err);
+    alert('❌ Erro ao gerar pedido na Omie:\n\n' + err.message);
+    
+    const btn = document.getElementById(`btn-gerar-compra-${numeroPedido}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Gerar Compra na Omie';
+    }
+  }
+}
+
+window.gerarPedidoCompraOmie = gerarPedidoCompraOmie;
+
+// Carrega categorias de compra da Omie e preenche o select
+async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = null) {
+  const select = document.getElementById(`compras-categoria-${numeroPedido}`);
+  if (!select) {
+    console.error('[CATEGORIAS] Select não encontrado para pedido:', numeroPedido);
+    return;
+  }
+  
+  try {
+    select.innerHTML = '<option value="">Carregando categorias...</option>';
+    
+    const resp = await fetch('/api/compras/categorias');
+    if (!resp.ok) throw new Error('Erro ao buscar categorias');
+    
+    const data = await resp.json();
+    
+    if (!data.ok || !Array.isArray(data.categorias)) {
+      throw new Error('Resposta inválida do servidor');
+    }
+    
+    // Preenche o select com as categorias
+    select.innerHTML = '<option value="">Selecione uma categoria...</option>';
+    
+    data.categorias.forEach(cat => {
+      const option = document.createElement('option');
+      option.value = cat.codigo;
+      option.textContent = cat.descricao;
+      
+      // Seleciona a categoria atual se houver
+      if (categoriaSelecionada && cat.codigo == categoriaSelecionada) {
+        option.selected = true;
+      }
+      
+      select.appendChild(option);
+    });
+    
+    console.log('[CATEGORIAS] Carregadas:', data.categorias.length, 'categorias');
+    
+  } catch (err) {
+    console.error('[CATEGORIAS] Erro ao carregar:', err);
+    select.innerHTML = '<option value="">Erro ao carregar categorias</option>';
+  }
+}
+
+// Carrega condições de pagamento (parcelas) da Omie e preenche o select
+// Objetivo: Listar parcelas disponíveis e selecionar "A15" como padrão
+async function loadParcelasCompraModal(numeroPedido, parcelaSelecionada = null) {
+  console.log('[PARCELAS] Iniciando carregamento para pedido:', numeroPedido);
+  const select = document.getElementById(`compras-parcela-${numeroPedido}`);
+  if (!select) {
+    console.error('[PARCELAS] Select não encontrado para pedido:', numeroPedido);
+    return;
+  }
+  
+  try {
+    select.innerHTML = '<option value="">Carregando parcelas...</option>';
+    
+    console.log('[PARCELAS] Buscando do endpoint /api/compras/parcelas');
+    const resp = await fetch('/api/compras/parcelas');
+    console.log('[PARCELAS] Resposta recebida, status:', resp.status);
+    
+    if (!resp.ok) throw new Error('Erro ao buscar parcelas');
+    
+    const data = await resp.json();
+    console.log('[PARCELAS] Dados recebidos:', data);
+    
+    if (!data.ok || !Array.isArray(data.parcelas)) {
+      throw new Error('Resposta inválida do servidor');
+    }
+    
+    // Preenche o select com as parcelas
+    select.innerHTML = '<option value="">Selecione uma condição...</option>';
+    
+    data.parcelas.forEach(parc => {
+      const option = document.createElement('option');
+      option.value = parc.nCodigo;
+      option.textContent = parc.cDescricao;
+      option.setAttribute('data-parcelas', parc.nParcelas);
+      
+      // Seleciona a parcela salva OU "A15" como padrão
+      if (parcelaSelecionada && parc.nCodigo == parcelaSelecionada) {
+        option.selected = true;
+      } else if (!parcelaSelecionada && parc.nCodigo === 'A15') {
+        option.selected = true;
+      }
+      
+      select.appendChild(option);
+    });
+    
+    console.log('[PARCELAS] Carregadas:', data.parcelas.length, 'parcelas');
+    
+  } catch (err) {
+    console.error('[PARCELAS] Erro ao carregar:', err);
+    select.innerHTML = '<option value="">Erro ao carregar parcelas</option>';
+  }
+}
+
 
 // Função que adiciona spinner ao botão antes de abrir modal de cotação
 async function adicionarCotacaoComSpinner(itemId) {
@@ -15071,7 +16104,7 @@ async function renderComprasKanban() {
       // Atualiza contador
       if (countBadge) countBadge.textContent = itens.length;
       
-      // Renderiza cards
+      // Renderiza cards - cada item individualmente (sem agrupamento)
       if (cardsContainer) {
         if (itens.length === 0) {
           cardsContainer.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
@@ -15090,7 +16123,6 @@ async function renderComprasKanban() {
                 border:1px solid #e5e7eb;
                 border-radius:8px;
                 padding:12px;
-                cursor:pointer;
                 transition:all 0.2s;
                 box-shadow:0 1px 3px rgba(0,0,0,0.1);
                 flex-shrink:0;
@@ -15098,8 +16130,8 @@ async function renderComprasKanban() {
               onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
               onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
-                  <div style="font-weight:700;color:#1f2937;font-size:13px;">#${item.numero_pedido || 'S/N'}</div>
                   <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
+                  ${item.numero_pedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</div>` : ''}
                 </div>
                 <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
                   ${escapeHtml(item.produto_codigo || '-')}
@@ -15130,17 +16162,6 @@ async function renderComprasKanban() {
               </div>
             `;
           }).join('');
-          
-          // Adiciona event listener aos cards
-          cardsContainer.querySelectorAll('.kanban-card').forEach(card => {
-            card.addEventListener('click', () => {
-              const itemId = card.getAttribute('data-item-id');
-              const item = itens.find(i => i.id == itemId);
-              if (item && item.numero_pedido) {
-                abrirModalDetalhesPedidoCompras(item.numero_pedido);
-              }
-            });
-          });
         }
       }
     });
@@ -15150,7 +16171,1597 @@ async function renderComprasKanban() {
   }
 }
 
-// ========== FIM KANBAN DE COMPRAS ==========
+// ========== MODAL SELEÇÃO DE ITENS PARA COMPRA ==========
+
+// Carrinho temporário de itens selecionados para compra
+window.carrinhoSelecaoCompra = [];
+
+// Abre modal de seleção de itens para compra
+async function abrirModalSelecaoItensCompra() {
+  // Mostra spinner
+  const spinner = document.createElement('div');
+  spinner.id = 'spinnerCompra';
+  spinner.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10003;background:rgba(0,0,0,0.8);padding:30px 40px;border-radius:12px;color:white;font-size:16px;font-weight:600;display:flex;align-items:center;gap:12px;';
+  spinner.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i> Carregando itens...';
+  document.body.appendChild(spinner);
+  
+  try {
+    const modal = document.getElementById('modalSelecaoItensCompra');
+    if (!modal) {
+      document.body.removeChild(spinner);
+      return;
+    }
+    
+    // Carrega catálogo se ainda não foi carregado (para ter as imagens)
+    if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
+      try {
+        const respCatalogo = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
+        if (respCatalogo.ok) {
+          const catalogo = await respCatalogo.json();
+          window.produtosCatalogoOmie = catalogo.produtos || [];
+        }
+      } catch (errCatalogo) {
+        console.warn('[COMPRAS] Não foi possível carregar catálogo para imagens:', errCatalogo);
+      }
+    }
+    
+    // Busca itens com status "aguardando compra"
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    const itensAguardandoCompra = todosItens.filter(item => 
+      (item.status || '').toLowerCase().trim() === 'aguardando compra'
+    );
+    
+    if (itensAguardandoCompra.length === 0) {
+      alert('Não há itens aguardando compra no momento.');
+      return;
+    }
+    
+    // Limpa carrinho ao abrir o modal
+    window.carrinhoSelecaoCompra = [];
+    atualizarContadorSelecao();
+    
+    // Renderiza lista de itens
+    renderizarListaSelecaoItens(itensAguardandoCompra);
+    
+    modal.style.display = 'flex';
+    
+    // Remove spinner
+    const spinnerEl = document.getElementById('spinnerCompra');
+    if (spinnerEl) document.body.removeChild(spinnerEl);
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao abrir modal de seleção:', err);
+    alert('Erro ao carregar itens: ' + err.message);
+    
+    // Remove spinner em caso de erro
+    const spinnerEl = document.getElementById('spinnerCompra');
+    if (spinnerEl) document.body.removeChild(spinnerEl);
+  }
+}
+
+// Renderiza lista de itens para seleção, agrupados por família de produto
+function renderizarListaSelecaoItens(itens) {
+  const container = document.getElementById('listaItensSelecaoCompra');
+  if (!container) return;
+  
+  // Agrupa itens por familia_produto
+  const itensPorFamilia = {};
+  itens.forEach(item => {
+    const familia = item.familia_produto || 'Sem Família';
+    if (!itensPorFamilia[familia]) {
+      itensPorFamilia[familia] = [];
+    }
+    itensPorFamilia[familia].push(item);
+  });
+  
+  // Renderiza cada grupo de família
+  const html = Object.keys(itensPorFamilia).sort().map(familia => {
+    const itensGrupo = itensPorFamilia[familia];
+    
+    const itensHtml = itensGrupo.map(item => {
+      const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+      const jaAdicionado = window.carrinhoSelecaoCompra.some(i => i.id === item.id);
+      
+      // Busca imagem do produto (mesmo sistema do catálogo)
+      const codigoProduto = item.produto_codigo || item.codigo;
+      let imgUrl = '';
+      if (codigoProduto && window.produtosCatalogoOmie) {
+        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+          p.codigo === codigoProduto || p.codigo_produto === codigoProduto
+        );
+        imgUrl = produtoComImagem?.url_imagem || '';
+      }
+      
+      // Verifica se URL está expirada
+      let urlExpirada = false;
+      if (imgUrl && imgUrl.includes('Expires=')) {
+        const match = imgUrl.match(/Expires=(\d+)/);
+        if (match) {
+          const expiresTimestamp = parseInt(match[1]);
+          const agora = Math.floor(Date.now() / 1000);
+          urlExpirada = expiresTimestamp < agora;
+        }
+      }
+      
+      const imgHtml = imgUrl && !urlExpirada ? 
+        `<img 
+          src="${imgUrl}" 
+          alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
+          style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
+          onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+          onerror="this.style.display='none'"
+        />` :
+        urlExpirada ?
+        `<div style="width:50px;height:50px;background:#fef3c7;border-radius:6px;display:flex;align-items:center;justify-content:center;" title="Imagem expirada">
+          <i class="fa-solid fa-clock" style="color:#f59e0b;font-size:16px;"></i>
+        </div>` :
+        `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+          <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
+        </div>`;
+      
+      return `
+        <div id="item-selecao-${item.id}" style="
+          background:${jaAdicionado ? '#f0fdf4' : '#ffffff'};
+          border:2px solid ${jaAdicionado ? '#22c55e' : '#e5e7eb'};
+          border-radius:8px;
+          padding:16px;
+          display:grid;
+          grid-template-columns:auto 1fr auto;
+          gap:16px;
+          align-items:start;
+          transition:all 0.2s;
+        ">
+          <!-- Mini Foto -->
+          ${imgHtml}
+          
+          <!-- Informações do Produto -->
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</span>
+              ${item.numero_pedido ? `<span style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</span>` : ''}
+            </div>
+            <div style="font-size:14px;color:#1f2937;font-weight:600;margin-bottom:6px;">
+              ${escapeHtml(item.produto_codigo || '-')}
+            </div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.4;">
+              ${escapeHtml(item.descricao || item.produto_descricao || '-')}
+            </div>
+            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+              <div style="display:flex;align-items:center;gap:6px;" title="Quantidade">
+                <i class="fa-solid fa-hashtag" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:13px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;" title="Prazo Solicitado">
+                <i class="fa-solid fa-calendar-clock" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:13px;color:#374151;">${prazo}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;" title="Solicitante">
+                <i class="fa-solid fa-user" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:12px;color:#374151;">${escapeHtml(item.solicitante || '-')}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Botão Adicionar/Remover -->
+          <div>
+            <button 
+              id="btn-adicionar-${item.id}"
+              onclick="toggleItemSelecaoCompra(${item.id})"
+              title="${jaAdicionado ? 'Remover item' : 'Adicionar item'}"
+              style="
+                background:${jaAdicionado ? 'linear-gradient(135deg,#ef4444 0%,#dc2626 100%)' : 'linear-gradient(135deg,#10b981 0%,#059669 100%)'};
+                color:white;
+                border:none;
+                padding:12px;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                transition:all 0.2s;
+                width:44px;
+                height:44px;
+              "
+              onmouseover="this.style.transform='scale(1.1)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid ${jaAdicionado ? 'fa-times' : 'fa-plus'}"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    return `
+      <div style="margin-bottom:24px;">
+        <div style="
+          background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);
+          color:white;
+          padding:12px 16px;
+          border-radius:8px;
+          font-size:14px;
+          font-weight:700;
+          margin-bottom:12px;
+          display:flex;
+          align-items:center;
+          gap:10px;
+          box-shadow:0 2px 8px rgba(59,130,246,0.3);
+        ">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>${escapeHtml(familia)}</span>
+          <span style="
+            background:rgba(255,255,255,0.2);
+            padding:4px 10px;
+            border-radius:12px;
+            font-size:12px;
+            margin-left:auto;
+          ">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
+        </div>
+        <div style="display:grid;gap:12px;padding-left:8px;">
+          ${itensHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html || '<div style="text-align:center;color:#9ca3af;padding:40px;">Nenhum item disponível</div>';
+}
+
+// Adiciona/remove item do carrinho de seleção
+function toggleItemSelecaoCompra(itemId) {
+  // Busca o item completo
+  fetch('/api/compras/todas', { credentials: 'include' })
+    .then(resp => resp.json())
+    .then(data => {
+      const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+      const item = todosItens.find(i => i.id == itemId);
+      
+      if (!item) {
+        alert('Item não encontrado');
+        return;
+      }
+      
+      const index = window.carrinhoSelecaoCompra.findIndex(i => i.id === itemId);
+      
+      if (index >= 0) {
+        // Remove do carrinho
+        window.carrinhoSelecaoCompra.splice(index, 1);
+      } else {
+        // Adiciona ao carrinho
+        window.carrinhoSelecaoCompra.push(item);
+      }
+      
+      // Atualiza visual
+      atualizarContadorSelecao();
+      const itensAguardandoCompra = todosItens.filter(i => 
+        (i.status || '').toLowerCase().trim() === 'aguardando compra'
+      );
+      renderizarListaSelecaoItens(itensAguardandoCompra);
+    })
+    .catch(err => {
+      console.error('[COMPRAS] Erro ao toggle item:', err);
+      alert('Erro ao processar item');
+    });
+}
+
+// Atualiza contador de itens selecionados
+function atualizarContadorSelecao() {
+  const contador = document.getElementById('contadorItensSelecionados');
+  if (contador) {
+    contador.textContent = window.carrinhoSelecaoCompra.length;
+  }
+  
+  const btnConcluir = document.getElementById('btnConcluirSelecaoCompra');
+  if (btnConcluir) {
+    btnConcluir.disabled = window.carrinhoSelecaoCompra.length === 0;
+    btnConcluir.style.opacity = window.carrinhoSelecaoCompra.length === 0 ? '0.5' : '1';
+    btnConcluir.style.cursor = window.carrinhoSelecaoCompra.length === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+// Fecha modal de seleção
+function fecharModalSelecaoItensCompra() {
+  const modal = document.getElementById('modalSelecaoItensCompra');
+  if (modal) {
+    modal.style.display = 'none';
+    window.carrinhoSelecaoCompra = [];
+  }
+}
+
+// Conclui seleção e abre modal de detalhes do pedido
+async function concluirSelecaoItensCompra() {
+  if (window.carrinhoSelecaoCompra.length === 0) {
+    alert('Selecione pelo menos um item');
+    return;
+  }
+  
+  try {
+    // Gera um numero_pedido no formato YYYYMMDD-HHMMSS-mmm
+    const agora = new Date();
+    const ano = agora.getFullYear();
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const dia = String(agora.getDate()).padStart(2, '0');
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const minuto = String(agora.getMinutes()).padStart(2, '0');
+    const segundo = String(agora.getSeconds()).padStart(2, '0');
+    const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
+    const numeroPedidoTemp = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+    
+    // Atualiza os itens selecionados com o numero_pedido
+    const idsItens = window.carrinhoSelecaoCompra.map(i => i.id);
+    
+    const resp = await fetch('/api/compras/agrupar-itens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ids: idsItens, numero_pedido: numeroPedidoTemp })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.error || 'Erro ao agrupar itens');
+    }
+    
+    // Fecha o modal de seleção
+    fecharModalSelecaoItensCompra();
+    
+    // Abre o modal de detalhes do pedido
+    await abrirModalDetalhesPedidoCompras(numeroPedidoTemp);
+    
+    // Atualiza o kanban
+    renderComprasKanban();
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao concluir seleção:', err);
+    alert('Erro ao processar itens: ' + err.message);
+  }
+}
+
+// Exporta funções globais
+window.abrirModalSelecaoItensCompra = abrirModalSelecaoItensCompra;
+window.fecharModalSelecaoItensCompra = fecharModalSelecaoItensCompra;
+window.toggleItemSelecaoCompra = toggleItemSelecaoCompra;
+window.concluirSelecaoItensCompra = concluirSelecaoItensCompra;
+
+// ========== FIM MODAL SELEÇÃO DE ITENS PARA COMPRA ==========
+
+// ========== MODAL SELEÇÃO DE ITENS PARA COTAÇÃO ==========
+
+// Carinho temporário para cotação
+window.carrinhoSelecaoCotacao = [];
+
+// Abre modal de seleção de itens para cotação
+async function abrirModalSelecaoItensCotacao() {
+  // Mostra spinner
+  const spinner = document.createElement('div');
+  spinner.id = 'spinnerCotacao';
+  spinner.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10003;background:rgba(0,0,0,0.8);padding:30px 40px;border-radius:12px;color:white;font-size:16px;font-weight:600;display:flex;align-items:center;gap:12px;';
+  spinner.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i> Carregando itens...';
+  document.body.appendChild(spinner);
+  
+  try {
+    const modal = document.getElementById('modalSelecaoItensCotacao');
+    if (!modal) {
+      document.body.removeChild(spinner);
+      return;
+    }
+    
+    // Carrega catálogo se ainda não foi carregado (para ter as imagens)
+    if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
+      try {
+        const respCatalogo = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
+        if (respCatalogo.ok) {
+          const catalogo = await respCatalogo.json();
+          window.produtosCatalogoOmie = catalogo.produtos || [];
+        }
+      } catch (errCatalogo) {
+        console.warn('[COTAÇÃO] Não foi possível carregar catálogo para imagens:', errCatalogo);
+      }
+    }
+    
+    // Busca itens com status "aguardando cotação"
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    const itensAguardandoCotacao = todosItens.filter(item => 
+      (item.status || '').toLowerCase().trim() === 'aguardando cotação'
+    );
+    
+    if (itensAguardandoCotacao.length === 0) {
+      alert('Não há itens aguardando cotação no momento.');
+      return;
+    }
+    
+    // Limpa carrinho ao abrir o modal
+    window.carrinhoSelecaoCotacao = [];
+    atualizarContadorSelecaoCotacao();
+    
+    // Renderiza lista de itens
+    renderizarListaSelecaoCotacao(itensAguardandoCotacao);
+    
+    modal.style.display = 'flex';
+    
+    // Remove spinner
+    const spinnerEl = document.getElementById('spinnerCotacao');
+    if (spinnerEl) document.body.removeChild(spinnerEl);
+  } catch (err) {
+    console.error('[COTAÇÃO] Erro ao abrir modal de seleção:', err);
+    alert('Erro ao carregar itens: ' + err.message);
+    
+    // Remove spinner em caso de erro
+    const spinnerEl = document.getElementById('spinnerCotacao');
+    if (spinnerEl) document.body.removeChild(spinnerEl);
+  }
+}
+
+// Renderiza lista de itens para seleção de cotação
+function renderizarListaSelecaoCotacao(itens) {
+  const container = document.getElementById('listaItensSelecaoCotacao');
+  if (!container) return;
+  
+  // Usa a mesma função de renderização dos itens de compra
+  // Mas com IDs diferentes e callbacks diferentes
+  const itensPorFamilia = {};
+  itens.forEach(item => {
+    const familia = item.familia_produto || 'Sem Família';
+    if (!itensPorFamilia[familia]) {
+      itensPorFamilia[familia] = [];
+    }
+    itensPorFamilia[familia].push(item);
+  });
+  
+  const html = Object.keys(itensPorFamilia).sort().map(familia => {
+    const itensGrupo = itensPorFamilia[familia];
+    
+    const itensHtml = itensGrupo.map(item => {
+      const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+      const jaAdicionado = window.carrinhoSelecaoCotacao.some(i => i.id === item.id);
+      
+      // Busca imagem do produto
+      const codigoProduto = item.produto_codigo || item.codigo;
+      let imgUrl = '';
+      if (codigoProduto && window.produtosCatalogoOmie) {
+        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+          p.codigo === codigoProduto || p.codigo_produto === codigoProduto
+        );
+        imgUrl = produtoComImagem?.url_imagem || '';
+      }
+      
+      // Verifica se URL está expirada
+      let urlExpirada = false;
+      if (imgUrl && imgUrl.includes('Expires=')) {
+        const match = imgUrl.match(/Expires=(\d+)/);
+        if (match) {
+          const expiresTimestamp = parseInt(match[1]);
+          const agora = Math.floor(Date.now() / 1000);
+          urlExpirada = expiresTimestamp < agora;
+        }
+      }
+      
+      const imgHtml = imgUrl && !urlExpirada ? 
+        `<img 
+          src="${imgUrl}" 
+          alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
+          style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
+          onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+          onerror="this.style.display='none'"
+        />` :
+        urlExpirada ?
+        `<div style="width:50px;height:50px;background:#fef3c7;border-radius:6px;display:flex;align-items:center;justify-content:center;" title="Imagem expirada">
+          <i class="fa-solid fa-clock" style="color:#f59e0b;font-size:16px;"></i>
+        </div>` :
+        `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+          <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
+        </div>`;
+      
+      return `
+        <div id="item-selecao-cotacao-${item.id}" style="
+          background:${jaAdicionado ? '#fef3c7' : '#ffffff'};
+          border:2px solid ${jaAdicionado ? '#fbbf24' : '#e5e7eb'};
+          border-radius:8px;
+          padding:16px;
+          display:grid;
+          grid-template-columns:auto 1fr auto;
+          gap:16px;
+          align-items:start;
+          transition:all 0.2s;
+        ">
+          <!-- Mini Foto -->
+          ${imgHtml}
+          
+          <!-- Informações do Produto -->
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</span>
+              ${item.numero_pedido ? `<span style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</span>` : ''}
+            </div>
+            <div style="font-size:14px;color:#1f2937;font-weight:600;margin-bottom:6px;">
+              ${escapeHtml(item.produto_codigo || '-')}
+            </div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.4;">
+              ${escapeHtml(item.descricao || item.produto_descricao || '-')}
+            </div>
+            <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+              <div style="display:flex;align-items:center;gap:6px;" title="Quantidade">
+                <i class="fa-solid fa-hashtag" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:13px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;" title="Prazo Solicitado">
+                <i class="fa-solid fa-calendar-clock" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:13px;color:#374151;">${prazo}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;" title="Solicitante">
+                <i class="fa-solid fa-user" style="font-size:12px;color:#9ca3af;"></i>
+                <span style="font-size:12px;color:#374151;">${escapeHtml(item.solicitante || '-')}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Botão Adicionar/Remover -->
+          <div>
+            <button 
+              id="btn-adicionar-cotacao-${item.id}"
+              onclick="toggleItemSelecaoCotacao(${item.id})"
+              title="${jaAdicionado ? 'Remover item' : 'Adicionar item'}"
+              style="
+                background:${jaAdicionado ? 'linear-gradient(135deg,#ef4444 0%,#dc2626 100%)' : 'linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%)'};
+                color:${jaAdicionado ? 'white' : '#000'};
+                border:none;
+                padding:12px;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                transition:all 0.2s;
+                width:44px;
+                height:44px;
+              "
+              onmouseover="this.style.transform='scale(1.1)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid ${jaAdicionado ? 'fa-times' : 'fa-plus'}"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    return `
+      <div style="margin-bottom:20px;">
+        <h4 style="margin:0 0 12px 0;color:#6b7280;font-size:13px;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-folder" style="color:#fbbf24;"></i>
+          ${escapeHtml(familia)}
+          <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-size:11px;">${itensGrupo.length}</span>
+        </h4>
+        <div style="display:grid;gap:12px;">
+          ${itensHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html;
+}
+
+// Toggle item no carrinho de cotação
+function toggleItemSelecaoCotacao(itemId) {
+  const itemIndex = window.carrinhoSelecaoCotacao.findIndex(i => i.id === itemId);
+  
+  if (itemIndex === -1) {
+    // Adiciona
+    window.carrinhoSelecaoCotacao.push({ id: itemId });
+  } else {
+    // Remove
+    window.carrinhoSelecaoCotacao.splice(itemIndex, 1);
+  }
+  
+  // Atualiza visual
+  fetch('/api/compras/todas', { credentials: 'include' })
+    .then(resp => resp.json())
+    .then(data => {
+      const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+      atualizarContadorSelecaoCotacao();
+      const itensAguardandoCotacao = todosItens.filter(i => 
+        (i.status || '').toLowerCase().trim() === 'aguardando cotação'
+      );
+      renderizarListaSelecaoCotacao(itensAguardandoCotacao);
+    })
+    .catch(err => {
+      console.error('[COTAÇÃO] Erro ao toggle item:', err);
+      alert('Erro ao processar item');
+    });
+}
+
+// Atualiza contador de itens selecionados para cotação
+function atualizarContadorSelecaoCotacao() {
+  const contador = document.getElementById('contadorItensSelecionadosCotacao');
+  if (contador) {
+    contador.textContent = window.carrinhoSelecaoCotacao.length;
+  }
+  
+  const btnConcluir = document.getElementById('btnConcluirSelecaoCotacao');
+  if (btnConcluir) {
+    btnConcluir.disabled = window.carrinhoSelecaoCotacao.length === 0;
+    btnConcluir.style.opacity = window.carrinhoSelecaoCotacao.length === 0 ? '0.5' : '1';
+    btnConcluir.style.cursor = window.carrinhoSelecaoCotacao.length === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+// Fecha modal de seleção de cotação
+function fecharModalSelecaoItensCotacao() {
+  const modal = document.getElementById('modalSelecaoItensCotacao');
+  if (modal) {
+    modal.style.display = 'none';
+    window.carrinhoSelecaoCotacao = [];
+  }
+}
+
+// Conclui seleção de cotação e abre modal para inserir dados
+async function concluirSelecaoItensCotacao() {
+  if (window.carrinhoSelecaoCotacao.length === 0) {
+    alert('Selecione pelo menos um item');
+    return;
+  }
+  
+  try {
+    // Busca os itens completos
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+    const data = await resp.json();
+    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    const itensSelecionados = todosItens.filter(item => 
+      window.carrinhoSelecaoCotacao.some(c => c.id === item.id)
+    );
+    
+    // Fecha modal de seleção
+    fecharModalSelecaoItensCotacao();
+    
+    // Abre modal de inserção de cotações
+    abrirModalInserirCotacoes(itensSelecionados);
+    
+  } catch (err) {
+    console.error('[COTAÇÃO] Erro ao concluir seleção:', err);
+    alert('Erro ao processar itens: ' + err.message);
+  }
+}
+
+// Abre modal para inserir cotações (novo fluxo)
+function abrirModalInserirCotacoes(itens) {
+  const modal = document.getElementById('modalInserirCotacoes');
+  const listbox = document.getElementById('listboxItensCotacao');
+  if (!modal || !listbox) return;
+  
+  // Armazena itens globalmente
+  window.itensCotacao = itens;
+  window.cotacoesRegistradas = [];
+  window.itemSelecionadoCotacao = null;
+  window.anexosCotacao = []; // Array para armazenar múltiplos anexos
+  
+  // Renderiza listbox de itens
+  const listboxHtml = itens.map((item, index) => {
+    // Busca imagem do produto no catálogo
+    const codigoProduto = item.produto_codigo || item.codigo;
+    let imgUrl = '';
+    if (codigoProduto && window.produtosCatalogoOmie) {
+      const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+        p.codigo === codigoProduto || p.codigo_produto === codigoProduto
+      );
+      imgUrl = produtoComImagem?.url_imagem || '';
+    }
+    
+    // Verifica se URL está expirada
+    let urlExpirada = false;
+    if (imgUrl && imgUrl.includes('Expires=')) {
+      const match = imgUrl.match(/Expires=(\d+)/);
+      if (match) {
+        const expiresTimestamp = parseInt(match[1]);
+        const agora = Math.floor(Date.now() / 1000);
+        urlExpirada = expiresTimestamp < agora;
+      }
+    }
+    
+    // HTML da imagem ou ícone fallback
+    const imgHtml = imgUrl && !urlExpirada ? 
+      `<img 
+        src="${imgUrl}" 
+        alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
+        style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
+        onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+        onerror="this.style.display='none'"
+      />` :
+      urlExpirada ?
+      `<div style="width:50px;height:50px;background:#fef3c7;border-radius:6px;display:flex;align-items:center;justify-content:center;" title="Imagem expirada">
+        <i class="fa-solid fa-clock" style="color:#f59e0b;font-size:16px;"></i>
+      </div>` :
+      `<div style="width:50px;height:50px;background:#f3f4f6;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+        <i class="fa-solid fa-image" style="color:#9ca3af;font-size:16px;"></i>
+      </div>`;
+    
+    return `
+      <div 
+        id="item-cotacao-${item.id}"
+        onclick="selecionarItemCotacao(${item.id})"
+        style="
+          background:white;
+          border:2px solid #e5e7eb;
+          border-radius:6px;
+          padding:12px;
+          cursor:pointer;
+          transition:all 0.2s;
+          display:grid;
+          grid-template-columns:60px 1fr;
+          gap:12px;
+        "
+        onmouseover="this.style.borderColor='#fbbf24'"
+        onmouseout="if(!this.classList.contains('item-selecionado')) this.style.borderColor='#e5e7eb'">
+        
+        <!-- Coluna da Foto -->
+        <div style="display:flex;align-items:flex-start;justify-content:center;padding:4px;background:#fafafa;border-radius:6px;">
+          ${imgHtml}
+        </div>
+        
+        <!-- Coluna dos Dados -->
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span style="background:#f3f4f6;color:#6b7280;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;">ID: ${item.id}</span>
+            <i class="fa-solid fa-circle" style="font-size:6px;color:#d1d5db;" id="status-${item.id}"></i>
+          </div>
+          <div style="font-size:12px;font-weight:600;color:#1f2937;margin-bottom:4px;">${escapeHtml(item.produto_codigo || '-')}</div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.3;">${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 50))}${(item.descricao || item.produto_descricao || '').length > 50 ? '...' : ''}</div>
+          <div style="font-size:11px;color:#374151;margin-top:6px;">
+            <i class="fa-solid fa-hashtag" style="font-size:10px;"></i>
+            Qtd: ${item.quantidade || '-'}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  listbox.innerHTML = listboxHtml;
+  
+  // Limpa formulário
+  document.getElementById('cotacaoFornecedor').value = '';
+  document.getElementById('cotacaoValor').value = '';
+  document.getElementById('cotacaoAnexo').value = '';
+  document.getElementById('cotacaoObservacoesGerais').value = '';
+  
+  // Limpa lista de anexos
+  window.anexosCotacao = [];
+  renderizarListaAnexosCotacao();
+  
+  // Limpa lista de cotações registradas
+  document.getElementById('listaCotacoesRegistradas').innerHTML = '';
+  
+  // Seleciona primeiro item automaticamente
+  if (itens.length > 0) {
+    selecionarItemCotacao(itens[0].id);
+  }
+  
+  modal.style.display = 'flex';
+}
+
+// Adiciona um anexo à lista de anexos
+window.adicionarAnexoCotacao = function() {
+  const anexoInput = document.getElementById('cotacaoAnexo');
+  
+  if (!anexoInput || !anexoInput.files[0]) {
+    return;
+  }
+  
+  const file = anexoInput.files[0];
+  
+  // Gera ID único para o anexo
+  const anexoId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  
+  // Armazena o arquivo
+  if (!window.anexosCotacao) window.anexosCotacao = [];
+  window.anexosCotacao.push({
+    id: anexoId,
+    file: file,
+    nome: file.name,
+    tipo: file.type,
+    tamanho: file.size
+  });
+  
+  // Renderiza a lista de anexos
+  renderizarListaAnexosCotacao();
+  
+  // Limpa o input
+  anexoInput.value = '';
+};
+
+// Renderiza a lista de anexos com botão de exclusão
+function renderizarListaAnexosCotacao() {
+  const listaContainer = document.getElementById('listaAnexosCotacao');
+  if (!listaContainer) return;
+  
+  if (!window.anexosCotacao || window.anexosCotacao.length === 0) {
+    listaContainer.innerHTML = '';
+    return;
+  }
+  
+  const html = window.anexosCotacao.map(anexo => {
+    const tamanhoKB = (anexo.tamanho / 1024).toFixed(1);
+    return `
+      <div style="display:flex;align-items:center;gap:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;">
+        <i class="fa-solid fa-paperclip" style="color:#0284c7;font-size:12px;"></i>
+        <span style="flex:1;font-size:12px;color:#0c4a6e;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">
+          ${escapeHtml(anexo.nome)}
+        </span>
+        <span style="font-size:11px;color:#0369a1;">${tamanhoKB} KB</span>
+        <button 
+          onclick="removerAnexoCotacao('${anexo.id}')"
+          style="background:transparent;color:#ef4444;border:none;padding:4px;border-radius:4px;font-size:14px;cursor:pointer;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;"
+          title="Remover anexo"
+          onmouseover="this.style.background='#fee2e2'"
+          onmouseout="this.style.background='transparent'">
+          <i class="fa-solid fa-times"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+  
+  listaContainer.innerHTML = html;
+}
+
+// Remove um anexo específico da lista
+// Remove um anexo específico da lista
+window.removerAnexoCotacao = function(anexoId) {
+  if (!window.anexosCotacao) return;
+  
+  window.anexosCotacao = window.anexosCotacao.filter(a => a.id !== anexoId);
+  renderizarListaAnexosCotacao();
+};
+
+// Seleciona um item do listbox
+function selecionarItemCotacao(itemId) {
+  // Remove seleção anterior
+  document.querySelectorAll('[id^="item-cotacao-"]').forEach(el => {
+    el.classList.remove('item-selecionado');
+    el.style.borderColor = '#e5e7eb';
+    el.style.background = 'white';
+    el.style.animation = '';
+    el.style.boxShadow = '';
+  });
+  
+  // Adiciona seleção ao item clicado com animação
+  const itemEl = document.getElementById(`item-cotacao-${itemId}`);
+  if (itemEl) {
+    itemEl.classList.add('item-selecionado');
+    itemEl.style.borderColor = '#3b82f6';
+    itemEl.style.background = '#dbeafe';
+    itemEl.style.animation = 'rotatingBorder 1.5s linear infinite';
+    itemEl.style.boxShadow = '';
+  }
+  
+  window.itemSelecionadoCotacao = itemId;
+}
+
+// Registra uma cotação para o item selecionado
+async function registrarCotacao() {
+  if (!window.itemSelecionadoCotacao) {
+    alert('Selecione um item da lista à direita');
+    return;
+  }
+  
+  const fornecedor = document.getElementById('cotacaoFornecedor').value.trim();
+  const valor = parseFloat(document.getElementById('cotacaoValor').value || '0');
+  
+  if (!fornecedor) {
+    alert('Preencha o fornecedor');
+    return;
+  }
+  
+  if (!valor || valor <= 0) {
+    alert('Preencha um valor válido');
+    return;
+  }
+  
+  try {
+    // Converte anexos para base64 se houver
+    let anexosArray = null;
+    if (window.anexosCotacao && window.anexosCotacao.length > 0) {
+      anexosArray = [];
+      for (const anexo of window.anexosCotacao) {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]); // Remove "data:xxx;base64,"
+          reader.onerror = reject;
+          reader.readAsDataURL(anexo.file);
+        });
+        
+        anexosArray.push({
+          nome: anexo.nome,
+          tipo: anexo.tipo,
+          tamanho: anexo.tamanho,
+          base64: base64
+        });
+      }
+    }
+    
+    // Salva cotação no backend (usando JSON, não FormData)
+    const resp = await fetch('/api/compras/cotacoes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        solicitacao_id: window.itemSelecionadoCotacao,
+        fornecedor_nome: fornecedor,
+        valor_cotado: valor,
+        anexos: anexosArray
+      })
+    });
+    
+    if (!resp.ok) {
+      const errorData = await resp.json();
+      throw new Error(errorData.error || 'Erro ao salvar cotação');
+    }
+    
+    const data = await resp.json();
+    
+    // Adiciona à lista de cotações registradas
+    window.cotacoesRegistradas.push({
+      id: data.cotacao?.id || Date.now(),
+      item_id: window.itemSelecionadoCotacao,
+      fornecedor: fornecedor,
+      valor_unitario: valor,
+      anexos: window.anexosCotacao ? window.anexosCotacao.map(a => a.nome).join(', ') : null
+    });
+    
+    // Atualiza indicador visual no listbox
+    const statusIcon = document.getElementById(`status-${window.itemSelecionadoCotacao}`);
+    if (statusIcon) {
+      statusIcon.style.color = '#10b981';
+      statusIcon.classList.add('fa-check');
+      statusIcon.classList.remove('fa-circle');
+    }
+    
+    // Renderiza lista de cotações registradas
+    renderizarCotacoesRegistradas();
+    
+    // Limpa apenas o campo de valor (mantém fornecedor e anexos)
+    document.getElementById('cotacaoValor').value = '';
+    
+  } catch (err) {
+    console.error('[COTAÇÃO] Erro ao registrar:', err);
+    alert('Erro ao registrar cotação: ' + err.message);
+  }
+}
+
+// Renderiza lista de cotações já registradas
+function renderizarCotacoesRegistradas() {
+  const container = document.getElementById('listaCotacoesRegistradas');
+  if (!container) return;
+  
+  if (window.cotacoesRegistradas.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
+    return;
+  }
+  
+  const html = window.cotacoesRegistradas.map((cotacao, index) => {
+    const item = window.itensCotacao.find(i => i.id === cotacao.item_id);
+    
+    // Gera HTML para os anexos
+    let anexosHtml = '';
+    if (cotacao.anexos) {
+      const listaAnexos = cotacao.anexos.split(', ').filter(a => a);
+      if (listaAnexos.length > 0) {
+        anexosHtml = `
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+            <strong><i class="fa-solid fa-paperclip"></i> Anexos:</strong>
+            <div style="margin-top:4px;padding-left:8px;">
+              ${listaAnexos.map(anexo => `<div style="color:#0284c7;">• ${escapeHtml(anexo)}</div>`).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+    
+    return `
+      <div style="background:white;border:2px solid #10b981;border-radius:8px;padding:12px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+            <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(item?.produto_codigo || `Item ${cotacao.item_id}`)}</span>
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">
+            <strong>Fornecedor:</strong> ${escapeHtml(cotacao.fornecedor)}
+          </div>
+          <div style="font-size:11px;color:#6b7280;">
+            <strong>Valor:</strong> R$ ${cotacao.valor_unitario.toFixed(2)}
+          </div>
+          ${anexosHtml}
+        </div>
+        <button 
+          onclick="removerCotacaoRegistrada(${index})"
+          title="Remover cotação"
+          style="background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html;
+}
+
+// Remove uma cotação registrada
+async function removerCotacaoRegistrada(index) {
+  if (!confirm('Remover esta cotação?')) return;
+  
+  const cotacao = window.cotacoesRegistradas[index];
+  
+  try {
+    // Remove do backend se tiver ID
+    if (cotacao.id) {
+      const resp = await fetch(`/api/compras/cotacoes/${cotacao.id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (!resp.ok) console.warn('Erro ao remover cotação do backend');
+    }
+    
+    // Remove da lista local
+    window.cotacoesRegistradas.splice(index, 1);
+    
+    // Verifica se ainda há cotações para este item
+    const temOutrasCotacoes = window.cotacoesRegistradas.some(c => c.item_id === cotacao.item_id);
+    if (!temOutrasCotacoes) {
+      const statusIcon = document.getElementById(`status-${cotacao.item_id}`);
+      if (statusIcon) {
+        statusIcon.style.color = '#d1d5db';
+        statusIcon.classList.remove('fa-check');
+        statusIcon.classList.add('fa-circle');
+      }
+    }
+    
+    renderizarCotacoesRegistradas();
+    
+  } catch (err) {
+    console.error('[COTAÇÃO] Erro ao remover:', err);
+    alert('Erro ao remover cotação');
+  }
+}
+
+// Fecha modal de inserir cotações
+function fecharModalInserirCotacoes() {
+  const modal = document.getElementById('modalInserirCotacoes');
+  if (modal) modal.style.display = 'none';
+  window.itensCotacao = [];
+  window.cotacoesRegistradas = [];
+  window.itemSelecionadoCotacao = null;
+}
+
+// Envia todas as cotações e muda status para "cotado"
+async function enviarCotacoes() {
+  if (window.cotacoesRegistradas.length === 0) {
+    alert('Registre pelo menos uma cotação antes de enviar');
+    return;
+  }
+  
+  const observacoesGerais = document.getElementById('cotacaoObservacoesGerais').value.trim();
+  
+  try {
+    // Atualiza status de todos os itens para "cotado"
+    const idsItens = [...new Set(window.cotacoesRegistradas.map(c => c.item_id))];
+    
+    for (const itemId of idsItens) {
+      const resp = await fetch(`/api/compras/solicitacoes/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          status: 'cotado',
+          observacoes: observacoesGerais || undefined
+        })
+      });
+      
+      if (!resp.ok) console.warn(`Erro ao atualizar status do item ${itemId}`);
+    }
+    
+    alert('Cotações enviadas com sucesso! Status atualizado para "cotado".');
+    fecharModalInserirCotacoes();
+    
+    // Atualiza o kanban
+    if (typeof renderKanbanCompras === 'function') {
+      renderKanbanCompras();
+    }
+    
+  } catch (err) {
+    console.error('[COTAÇÃO] Erro ao enviar:', err);
+    alert('Erro ao enviar cotações: ' + err.message);
+  }
+}
+
+// Exporta funções globais de cotação
+window.abrirModalSelecaoItensCotacao = abrirModalSelecaoItensCotacao;
+window.fecharModalSelecaoItensCotacao = fecharModalSelecaoItensCotacao;
+window.toggleItemSelecaoCotacao = toggleItemSelecaoCotacao;
+window.concluirSelecaoItensCotacao = concluirSelecaoItensCotacao;
+window.abrirModalInserirCotacoes = abrirModalInserirCotacoes;
+window.fecharModalInserirCotacoes = fecharModalInserirCotacoes;
+window.selecionarItemCotacao = selecionarItemCotacao;
+window.registrarCotacao = registrarCotacao;
+window.removerCotacaoRegistrada = removerCotacaoRegistrada;
+window.enviarCotacoes = enviarCotacoes;
+
+// ========== FIM MODAL SELEÇÃO DE ITENS PARA COTAÇÃO ==========
+
+// ========== CATÁLOGO OMIE ==========
+
+// Armazena produtos do catálogo
+window.produtosCatalogoOmie = [];
+
+// Abre modal do catálogo Omie
+async function abrirModalCatalogoOmie() {
+  const modal = document.getElementById('modalCatalogoOmie');
+  if (!modal) return;
+  
+  const lista = document.getElementById('listaProdutosCatalogo');
+  if (lista) {
+    lista.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando catálogo...</div>';
+  }
+  
+  modal.style.display = 'flex';
+  
+  try {
+    // Busca produtos da Omie
+    const resp = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar catálogo');
+    
+    const data = await resp.json();
+    window.produtosCatalogoOmie = data.produtos || [];
+    
+    // Popula select de famílias
+    const selectFamilia = document.getElementById('catalogoFamilia');
+    if (selectFamilia) {
+      const familias = [...new Set(window.produtosCatalogoOmie.map(p => p.descricao_familia).filter(f => f))].sort();
+      selectFamilia.innerHTML = '<option value="">Todas as Famílias</option>' + 
+        familias.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
+    }
+    
+    // Renderiza produtos
+    renderizarCatalogoOmie(window.produtosCatalogoOmie);
+    
+    // Carrega departamentos e centros de custo
+    await carregarDepartamentosCatalogo();
+    await carregarCentrosCustoCatalogo();
+    
+  } catch (err) {
+    console.error('[CATÁLOGO OMIE] Erro:', err);
+    if (lista) {
+      lista.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar catálogo</div>';
+    }
+  }
+}
+
+// Renderiza produtos do catálogo
+function renderizarCatalogoOmie(produtos) {
+  const lista = document.getElementById('listaProdutosCatalogo');
+  if (!lista) return;
+  
+  if (produtos.length === 0) {
+    lista.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
+    return;
+  }
+  
+  lista.innerHTML = produtos.map(produto => {
+    // Valida se a URL da imagem é válida
+    const temImagem = produto.url_imagem && 
+                      produto.url_imagem.trim() && 
+                      (produto.url_imagem.startsWith('http://') || produto.url_imagem.startsWith('https://'));
+    
+    // Verifica se URL está expirada (parâmetro Expires)
+    let urlExpirada = false;
+    if (temImagem && produto.url_imagem.includes('Expires=')) {
+      const match = produto.url_imagem.match(/Expires=(\d+)/);
+      if (match) {
+        const expiresTimestamp = parseInt(match[1]);
+        const agora = Math.floor(Date.now() / 1000);
+        urlExpirada = expiresTimestamp < agora;
+      }
+    }
+    
+    const imgHtml = temImagem && !urlExpirada ? 
+      `<img 
+        src="${produto.url_imagem}" 
+        alt="${escapeHtml(produto.descricao)}"
+        style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
+        onclick="ampliarImagemProduto('${produto.url_imagem}', '${escapeHtml(produto.codigo)} - ${escapeHtml(produto.descricao)}');event.stopPropagation();"
+        onmouseover="this.style.transform='scale(1.05)'"
+        onmouseout="this.style.transform='scale(1)'"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+      />
+      <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#9ca3af;">
+        <i class="fa-solid fa-image" style="font-size:48px;"></i>
+      </div>` :
+      urlExpirada ? 
+      `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#f59e0b;flex-direction:column;gap:8px;" title="Imagem expirada - execute sincronização de imagens">
+        <i class="fa-solid fa-clock" style="font-size:32px;"></i>
+        <span style="font-size:10px;text-align:center;">URL expirada</span>
+      </div>` :
+      `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#9ca3af;">
+        <i class="fa-solid fa-image" style="font-size:48px;"></i>
+      </div>`;
+    
+    return `
+      <div style="
+        background:white;
+        border:1px solid #e5e7eb;
+        border-radius:8px;
+        overflow:hidden;
+        transition:all 0.2s;
+        cursor:pointer;
+        display:flex;
+        flex-direction:column;
+      " 
+      onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)';this.style.transform='translateY(-2px)'"
+      onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
+        
+        <!-- Imagem -->
+        <div style="
+          width:100%;
+          height:140px;
+          background:#f9fafb;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          overflow:hidden;
+          position:relative;
+        ">
+          ${imgHtml}
+        </div>
+        
+        <!-- Informações -->
+        <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
+          <div style="font-size:9px;color:#6b7280;margin-bottom:3px;">
+            Cód: ${escapeHtml(produto.codigo)}
+          </div>
+          <div style="font-size:12px;font-weight:600;color:#1f2937;margin-bottom:6px;line-height:1.3;min-height:32px;">
+            ${escapeHtml(produto.descricao)}
+          </div>
+          
+          <!-- Badges: Família e Estoque -->
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
+            ${produto.descricao_familia ? `
+            <span style="background:#dbeafe;color:#1e40af;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;">
+              ${escapeHtml(produto.descricao_familia)}
+            </span>
+            ` : ''}
+            ${produto.abaixo_minimo ? `
+            <span style="background:#fef3c7;color:#92400e;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;display:flex;align-items:center;gap:3px;" title="Estoque: ${produto.saldo_estoque} | Mínimo: ${produto.estoque_minimo}">
+              <i class="fa-solid fa-triangle-exclamation" style="font-size:8px;"></i>
+              Est. ${Math.round(produto.saldo_estoque)}/${Math.round(produto.estoque_minimo)}
+            </span>
+            ` : ''}
+          </div>
+          
+          <!-- Linha com Quantidade, Prazo e Carrinho -->
+          <div style="margin-top:auto;display:flex;gap:6px;align-items:stretch;">
+            <!-- Campo Quantidade -->
+            <input 
+              type="number" 
+              id="catalogo-qtd-${produto.codigo}" 
+              min="1" 
+              value="1" 
+              title="Quantidade"
+              placeholder="Qtd"
+              style="width:50px;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;text-align:center;"
+            />
+            
+            <!-- Botão Calendário (toggle prazo) -->
+            <button 
+              onclick="togglePrazoCatalogo('${produto.codigo}')"
+              id="catalogo-btn-prazo-${produto.codigo}"
+              title="Definir prazo de entrega"
+              style="
+                width:32px;
+                background:#f3f4f6;
+                color:#4b5563;
+                border:1px solid #d1d5db;
+                padding:6px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:14px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                flex-shrink:0;
+              "
+              onmouseover="this.style.background='#e5e7eb'"
+              onmouseout="this.style.background='#f3f4f6'">
+              <i class="fa-solid fa-calendar-plus"></i>
+            </button>
+            
+            <!-- Botão Adicionar ao Carrinho -->
+            <button 
+              onclick="selecionarProdutoCatalogo('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}')"
+              title="Adicionar ao carrinho"
+              style="
+                flex:1;
+                background:linear-gradient(135deg,#10b981 0%,#059669 100%);
+                color:white;
+                border:none;
+                padding:6px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:16px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+              "
+              onmouseover="this.style.transform='scale(1.02)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-cart-plus"></i>
+            </button>
+          </div>
+          
+          <!-- Campo Prazo (inicialmente oculto, linha separada abaixo) -->
+          <div id="catalogo-prazo-container-${produto.codigo}" style="display:none;margin-top:6px;">
+            <input 
+              type="date" 
+              id="catalogo-prazo-${produto.codigo}" 
+              placeholder="Prazo de entrega"
+              style="width:100%;padding:6px;border:1px solid #10b981;border-radius:4px;font-size:10px;background:#f0fdf4;"
+            />
+          </div>
+          
+          <!-- Departamento -->
+          <div style="margin-top:8px;">
+            <select 
+              id="catalogo-dept-${produto.codigo}" 
+              style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;background:white;">
+              <option value="">Departamento *</option>
+            </select>
+          </div>
+          
+          <!-- Centro de Custo -->
+          <div style="margin-top:6px;">
+            <select 
+              id="catalogo-cc-${produto.codigo}" 
+              style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;background:white;">
+              <option value="">Centro de Custo *</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Carrega departamentos nos selects do catálogo
+async function carregarDepartamentosCatalogo() {
+  try {
+    const resp = await fetch('/api/compras/departamentos');
+    const data = await resp.json();
+    
+    if (data.ok && data.departamentos) {
+      window.catalogoDepartamentos = data.departamentos;
+      
+      // Atualiza todos os selects de departamento no catálogo
+      document.querySelectorAll('[id^="catalogo-dept-"]').forEach(select => {
+        const valorAtual = select.value;
+        select.innerHTML = '<option value="">Departamento *</option>' +
+          data.departamentos.map(d => 
+            `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`
+          ).join('');
+        if (valorAtual) select.value = valorAtual;
+      });
+    }
+  } catch (err) {
+    console.error('[Catálogo] Erro ao carregar departamentos:', err);
+  }
+}
+
+// Carrega centros de custo nos selects do catálogo
+async function carregarCentrosCustoCatalogo() {
+  try {
+    const resp = await fetch('/api/compras/centros-custo');
+    const data = await resp.json();
+    
+    if (data.ok && data.centros) {
+      window.catalogoCentrosCusto = data.centros;
+      
+      // Atualiza todos os selects de centro de custo no catálogo
+      document.querySelectorAll('[id^="catalogo-cc-"]').forEach(select => {
+        const valorAtual = select.value;
+        select.innerHTML = '<option value="">Centro de Custo *</option>' +
+          data.centros.map(c => 
+            `<option value="${escapeHtml(c.nome)}">${escapeHtml(c.nome)}</option>`
+          ).join('');
+        if (valorAtual) select.value = valorAtual;
+      });
+    }
+  } catch (err) {
+    console.error('[Catálogo] Erro ao carregar centros de custo:', err);
+  }
+}
+
+// Toggle campo de prazo no catálogo
+function togglePrazoCatalogo(codigo) {
+  const container = document.getElementById(`catalogo-prazo-container-${codigo}`);
+  const btn = document.getElementById(`catalogo-btn-prazo-${codigo}`);
+  
+  if (container && btn) {
+    if (container.style.display === 'none') {
+      // Ativa prazo
+      container.style.display = 'block';
+      btn.innerHTML = '<i class="fa-solid fa-calendar-xmark"></i>';
+      btn.style.background = '#fee2e2';
+      btn.style.color = '#dc2626';
+      btn.style.borderColor = '#fca5a5';
+      btn.title = 'Remover prazo';
+    } else {
+      // Desativa prazo
+      container.style.display = 'none';
+      btn.innerHTML = '<i class="fa-solid fa-calendar-plus"></i>';
+      btn.style.background = '#f3f4f6';
+      btn.style.color = '#4b5563';
+      btn.style.borderColor = '#d1d5db';
+      btn.title = 'Definir prazo de entrega';
+      // Limpa o valor do campo
+      const inputPrazo = document.getElementById(`catalogo-prazo-${codigo}`);
+      if (inputPrazo) inputPrazo.value = '';
+    }
+  }
+}
+
+// Filtra produtos do catálogo
+function filtrarCatalogoOmie() {
+  const busca = document.getElementById('catalogoBuscaProduto')?.value.toLowerCase() || '';
+  const familia = document.getElementById('catalogoFamilia')?.value || '';
+  const abaixoMinimo = document.getElementById('catalogoAbaixoMinimo')?.checked || false;
+  
+  const produtosFiltrados = window.produtosCatalogoOmie.filter(p => {
+    const matchBusca = !busca || 
+      p.codigo.toLowerCase().includes(busca) || 
+      p.descricao.toLowerCase().includes(busca);
+    
+    const matchFamilia = !familia || p.descricao_familia === familia;
+    
+    const matchEstoque = !abaixoMinimo || p.abaixo_minimo === true;
+    
+    return matchBusca && matchFamilia && matchEstoque;
+  });
+  
+  renderizarCatalogoOmie(produtosFiltrados);
+}
+
+// Limpa filtros do catálogo
+function limparFiltrosCatalogo() {
+  const inputBusca = document.getElementById('catalogoBuscaProduto');
+  const selectFamilia = document.getElementById('catalogoFamilia');
+  const checkboxAbaixoMin = document.getElementById('catalogoAbaixoMinimo');
+  
+  if (inputBusca) inputBusca.value = '';
+  if (selectFamilia) selectFamilia.value = '';
+  if (checkboxAbaixoMin) checkboxAbaixoMin.checked = false;
+  
+  renderizarCatalogoOmie(window.produtosCatalogoOmie);
+}
+
+// Seleciona produto do catálogo e adiciona direto ao carrinho
+function selecionarProdutoCatalogo(codigo, descricao) {
+  // Captura dados do card
+  const inputQtd = document.getElementById(`catalogo-qtd-${codigo}`);
+  const inputPrazo = document.getElementById(`catalogo-prazo-${codigo}`);
+  const prazoContainer = document.getElementById(`catalogo-prazo-container-${codigo}`);
+  const selectDept = document.getElementById(`catalogo-dept-${codigo}`);
+  const selectCC = document.getElementById(`catalogo-cc-${codigo}`);
+  
+  const quantidade = inputQtd ? parseInt(inputQtd.value) || 1 : 1;
+  const prazo = (prazoContainer && prazoContainer.style.display !== 'none' && inputPrazo) ? inputPrazo.value : '';
+  const departamento = selectDept ? selectDept.value.trim() : '';
+  const centroCusto = selectCC ? selectCC.value.trim() : '';
+  
+  // Validações
+  if (quantidade < 1) {
+    alert('Quantidade deve ser maior que zero!');
+    return;
+  }
+  
+  if (!departamento) {
+    alert('Selecione o departamento!');
+    selectDept?.focus();
+    return;
+  }
+  
+  if (!centroCusto) {
+    alert('Selecione o centro de custo!');
+    selectCC?.focus();
+    return;
+  }
+  
+  // Adiciona direto ao carrinho
+  window.carrinhoCompras.push({
+    produto_codigo: codigo,
+    produto_descricao: descricao,
+    quantidade: quantidade,
+    prazo_solicitado: prazo || null,
+    familia_codigo: null,
+    familia_nome: null,
+    observacao: '',
+    departamento: departamento,
+    centro_custo: centroCusto,
+    codigo_produto_omie: null,
+    objetivo_compra: 'Compra via catálogo Omie',
+    resp_inspecao_recebimento: '',
+    retorno_cotacao: 'N'
+  });
+  
+  // Renderiza carrinho atualizado
+  renderCarrinhoCompras();
+  
+  // Feedback visual
+  const btn = event?.target?.closest('button');
+  if (btn) {
+    const originalHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+    btn.style.background = '#059669';
+    setTimeout(() => {
+      btn.innerHTML = originalHTML;
+      btn.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+    }, 500);
+  }
+  
+  // Reseta campos do card
+  if (inputQtd) inputQtd.value = 1;
+  if (prazoContainer && prazoContainer.style.display !== 'none') {
+    togglePrazoCatalogo(codigo);
+  }
+  
+  // NÃO fecha o catálogo para permitir adicionar mais produtos
+  // fecharModalCatalogoOmie();
+}
+
+// Fecha modal do catálogo
+function fecharModalCatalogoOmie() {
+  const modal = document.getElementById('modalCatalogoOmie');
+  if (modal) modal.style.display = 'none';
+}
+
+// Abre modal de imagem ampliada
+function ampliarImagemProduto(urlImagem, infoProduto) {
+  const modal = document.getElementById('modalImagemAmpliada');
+  const img = document.getElementById('imagemAmpliada');
+  
+  img.src = urlImagem;
+  modal.style.display = 'flex';
+  
+  // Fechar com ESC
+  const handleEsc = (e) => {
+    if (e.key === 'Escape') {
+      fecharImagemAmpliada();
+      document.removeEventListener('keydown', handleEsc);
+    }
+  };
+  document.addEventListener('keydown', handleEsc);
+}
+
+// Fecha modal de imagem ampliada
+function fecharImagemAmpliada() {
+  const modal = document.getElementById('modalImagemAmpliada');
+  if (modal) modal.style.display = 'none';
+}
+
+// Exporta funções globais
+window.abrirModalCatalogoOmie = abrirModalCatalogoOmie;
+window.fecharModalCatalogoOmie = fecharModalCatalogoOmie;
+window.filtrarCatalogoOmie = filtrarCatalogoOmie;
+window.limparFiltrosCatalogo = limparFiltrosCatalogo;
+window.ampliarImagemProduto = ampliarImagemProduto;
+window.fecharImagemAmpliada = fecharImagemAmpliada;
+window.selecionarProdutoCatalogo = selecionarProdutoCatalogo;
+window.togglePrazoCatalogo = togglePrazoCatalogo;
+
+// ========== FIM CATÁLOGO OMIE ==========
 
 // Abre modal de edição de item de compra
 async function abrirModalEditarCompra(item) {
@@ -16012,12 +18623,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               itens.map(item => {
                 const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
                 return `
-                  <div class="kanban-card" onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')" data-item-id="${item.id}" style="
+                  <div class="kanban-card" data-item-id="${item.id}" style="
                     background:#ffffff;
                     border:1px solid #e5e7eb;
                     border-radius:8px;
                     padding:12px;
-                    cursor:pointer;
                     transition:all 0.2s;
                     box-shadow:0 1px 3px rgba(0,0,0,0.1);
                     flex-shrink:0;
@@ -16025,8 +18635,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
                   onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
                     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
-                      <div style="font-weight:700;color:#1f2937;font-size:13px;">#${item.numero_pedido || 'S/N'}</div>
                       <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
+                      ${item.numero_pedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</div>` : ''}
                     </div>
                     <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
                       ${escapeHtml(item.produto_codigo || '-')}
@@ -16042,10 +18652,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                       <div style="flex:1;">
                         <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
                         <div style="font-size:11px;color:#374151;">${prazo}</div>
-                      </div>
-                      <div style="flex:1;">
-                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Solicitante</div>
-                        <div style="font-size:10px;color:#374151;">${escapeHtml(item.solicitante || '-')}</div>
                       </div>
                     </div>
                     ${item.fornecedor_nome ? `

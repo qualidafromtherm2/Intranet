@@ -337,12 +337,12 @@
                   Meu Carrinho de Compras
                 </div>
                 <div style="display:flex;gap:8px;">
-                  <button id="comprasExportarExcelBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Exportar pedidos para Excel">
-                    <i class="fa-solid fa-file-excel" style="font-size:18px;"></i>
-                    <span style="font-size:13px;font-weight:600;">Exportar Excel</span>
-                  </button>
                   <button id="comprasAbrirModalBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Adicionar produto ao carrinho">
                     <i class="fa-solid fa-cart-plus" style="font-size:20px;"></i>
+                  </button>
+                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;height:44px;" title="Abrir catálogo Omie">
+                    <i class="fa-solid fa-book" style="font-size:16px;"></i>
+                    <span style="font-size:13px;font-weight:600;">Catálogo Omie</span>
                   </button>
                 </div>
               </div>
@@ -432,10 +432,13 @@
                 <!-- Campo Código em largura total (primeira linha) -->
                 <div class="form-field" style="margin-bottom:16px;">
                   <label for="modalComprasCodigo">Código do produto *</label>
-                  <div class="combo-wrapper" style="position:relative;">
-                    <input id="modalComprasCodigo" type="text" autocomplete="off" placeholder="Digite para buscar" required />
-                    <input id="modalComprasDescricaoSelecionada" type="hidden" />
-                    <ul id="modalComprasCodigoSugestoes" style="list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;top:100%;left:0;z-index:120;width:100%;background:#0f1116;color:#f5f5f5;border:1px solid var(--border-color);border-radius:8px;max-height:240px;overflow-y:auto;display:none;box-shadow:0 12px 28px rgba(0,0,0,0.45);"></ul>
+                  <div style="display:flex;gap:8px;align-items:flex-start;">
+                    <div class="combo-wrapper" style="position:relative;flex:1;">
+                      <input id="modalComprasCodigo" type="text" autocomplete="off" placeholder="Digite para buscar" required />
+                      <input id="modalComprasDescricaoSelecionada" type="hidden" />
+                      <input id="modalComprasCodigoProdutoOmie" type="hidden" />
+                      <ul id="modalComprasCodigoSugestoes" style="list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;top:100%;left:0;z-index:120;width:100%;background:#0f1116;color:#f5f5f5;border:1px solid var(--border-color);border-radius:8px;max-height:240px;overflow-y:auto;display:none;box-shadow:0 12px 28px rgba(0,0,0,0.45);"></ul>
+                    </div>
                   </div>
                   <small style="color:var(--inactive-color);">Digite parte do código ou descrição para buscar ou apenas uma curta descrição se o item não está cadastrado na Omie.</small>
                   <div id="modalComprasBuscaStatus" style="margin-top:6px;font-size:12px;color:#9ca3af;min-height:16px;"></div>
@@ -470,7 +473,7 @@
                 <!-- Grid de 3 colunas: Retorno Cotação, Prazo solicitado, Responsável -->
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
                   <div class="form-field">
-                    <label for="modalComprasRetornoCotacao">Necessário retorno das cotações realizadas? *</label>
+                    <label for="modalComprasRetornoCotacao">Retorno das cotações *</label>
                     <select id="modalComprasRetornoCotacao" required>
                       <option value="">Selecione</option>
                       <option value="Sim">Sim</option>
@@ -487,6 +490,15 @@
                       <option value="">Selecione o responsável</option>
                     </select>
                   </div>
+                </div>
+                
+                <!-- Campo Família do Produto em largura total -->
+                <div class="form-field" style="margin-bottom:16px;">
+                  <label for="modalComprasFamilia">Família do Produto *</label>
+                  <select id="modalComprasFamilia" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+                    <option value="">Selecione a família...</option>
+                    <!-- Será preenchido dinamicamente -->
+                  </select>
                 </div>
                 
                 <!-- Campo Objetivo da compra em largura total -->
@@ -557,7 +569,7 @@
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:12px;background:#f8fafc;border-radius:12px;">
                   
                   <!-- Coluna: Aguardando Cotação -->
-                  <div class="kanban-column" data-status="aguardando cotação" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                  <div class="kanban-column" data-status="aguardando cotação" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onclick="abrirModalSelecaoItensCotacao()" onmouseover="this.style.boxShadow='0 4px 16px rgba(251,191,36,0.3)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #fbbf24;">
                       <h3 style="margin:0;font-size:15px;font-weight:700;color:#92400e;">
                         <i class="fa-solid fa-hourglass-half" style="margin-right:6px;color:#fbbf24;"></i>
@@ -565,13 +577,13 @@
                       </h3>
                       <span class="kanban-count" style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
                     </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;pointer-events:none;">
                       <!-- Cards serão inseridos aqui -->
                     </div>
                   </div>
                   
                   <!-- Coluna: Aguardando Compra -->
-                  <div class="kanban-column" data-status="aguardando compra" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                  <div class="kanban-column" data-status="aguardando compra" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onclick="abrirModalSelecaoItensCompra()" onmouseover="this.style.boxShadow='0 4px 16px rgba(16,185,129,0.3)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #10b981;">
                       <h3 style="margin:0;font-size:15px;font-weight:700;color:#065f46;">
                         <i class="fa-solid fa-cart-shopping" style="margin-right:6px;color:#10b981;"></i>
@@ -579,7 +591,7 @@
                       </h3>
                       <span class="kanban-count" style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
                     </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;pointer-events:none;">
                       <!-- Cards serão inseridos aqui -->
                     </div>
                   </div>
@@ -662,6 +674,297 @@
             <div class="modal-footer">
               <button class="btn-secondary" onclick="fecharModalDetalhesPedidoCompras()">Fechar</button>
             </div>
+          </div>
+        </div>
+
+        <!-- Modal Seleção de Itens para Compra -->
+        <div id="modalSelecaoItensCompra" class="modal" style="display:none;">
+          <div class="modal-content" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-cart-plus" style="color:#10b981;"></i>
+                <span>Selecionar Itens para Compra</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalSelecaoItensCompra()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <div style="margin-bottom:16px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-info-circle" style="color:#16a34a;"></i>
+                    <span style="font-size:13px;color:#166534;">Selecione os itens que deseja agrupar para gerar o pedido de compra.</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span id="contadorItensSelecionados" style="background:#22c55e;color:white;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:700;">0</span>
+                  </div>
+                </div>
+              </div>
+              <div id="listaItensSelecaoCompra" style="display:grid;gap:12px;">
+                <!-- Itens serão inseridos dinamicamente -->
+              </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+              <button class="btn-secondary" onclick="fecharModalSelecaoItensCompra()">Cancelar</button>
+              <button id="btnConcluirSelecaoCompra" class="content-button" onclick="concluirSelecaoItensCompra()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:10px 20px;">
+                <i class="fa-solid fa-check"></i>
+                <span>Prosseguir com Compra</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Seleção de Itens para Cotação -->
+        <div id="modalSelecaoItensCotacao" class="modal" style="display:none;">
+          <div class="modal-content" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-file-invoice-dollar" style="color:#fbbf24;"></i>
+                <span>Selecionar Itens para Cotação</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalSelecaoItensCotacao()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <div style="margin-bottom:16px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-info-circle" style="color:#92400e;"></i>
+                    <span style="font-size:13px;color:#92400e;">Selecione os itens que deseja agrupar para cotar.</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span id="contadorItensSelecionadosCotacao" style="background:#fbbf24;color:#000;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:700;">0</span>
+                  </div>
+                </div>
+              </div>
+              <div id="listaItensSelecaoCotacao" style="display:grid;gap:12px;">
+                <!-- Itens serão inseridos dinamicamente -->
+              </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+              <button class="btn-secondary" onclick="fecharModalSelecaoItensCotacao()">Cancelar</button>
+              <button id="btnConcluirSelecaoCotacao" class="content-button" onclick="concluirSelecaoItensCotacao()" style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:10px 20px;">
+                <i class="fa-solid fa-check"></i>
+                <span>Prosseguir com Cotação</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Inserir Cotações -->
+        <div id="modalInserirCotacoes" class="modal" style="display:none;">
+          <div class="modal-content" style="max-width:1200px;width:90%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-file-invoice-dollar" style="color:#fbbf24;"></i>
+                <span>Inserir Cotações</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalInserirCotacoes()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              
+              <div style="display:grid;grid-template-columns:0.8fr 450px;gap:20px;">
+                
+                <!-- Coluna Esquerda: Formulário -->
+                <div>
+                  <div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:20px;">
+                    <h4 style="margin:0 0 16px 0;font-size:14px;font-weight:700;color:#1f2937;">
+                      <i class="fa-solid fa-edit" style="color:#fbbf24;"></i>
+                      Registrar Nova Cotação
+                    </h4>
+                    
+                    <div style="margin-bottom:12px;">
+                      <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Fornecedor *</label>
+                      <input 
+                        type="text" 
+                        id="cotacaoFornecedor"
+                        placeholder="Nome do fornecedor..."
+                        style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+                      />
+                    </div>
+                    
+                    <div style="margin-bottom:12px;">
+                      <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Valor Unitário (R$) *</label>
+                      <input 
+                        type="number" 
+                        id="cotacaoValor"
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                        style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+                      />
+                    </div>
+                    
+                    <div style="margin-bottom:16px;">
+                      <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Anexos (opcional)</label>
+                      <input 
+                        type="file" 
+                        id="cotacaoAnexo"
+                        accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
+                        onchange="adicionarAnexoCotacao()"
+                        style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+                      />
+                      <!-- Lista de anexos adicionados -->
+                      <div id="listaAnexosCotacao" style="margin-top:10px;display:grid;gap:6px;">
+                        <!-- Anexos serão inseridos aqui dinamicamente -->
+                      </div>
+                    </div>
+                    
+                    <button 
+                      onclick="registrarCotacao()"
+                      style="width:100%;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
+                      <i class="fa-solid fa-plus"></i>
+                      Registrar Cotação
+                    </button>
+                  </div>
+                  
+                  <!-- Lista de Cotações Registradas -->
+                  <div>
+                    <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;">
+                      <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+                      Cotações Registradas
+                    </h4>
+                    <div id="listaCotacoesRegistradas" style="display:grid;gap:12px;max-height:300px;overflow-y:auto;">
+                      <div style="text-align:center;padding:30px;color:#9ca3af;font-size:13px;background:#f9fafb;border-radius:6px;border:2px dashed #d1d5db;">
+                        Nenhuma cotação registrada ainda
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Coluna Direita: Listbox de Itens -->
+                <div>
+                  <div style="background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;padding:16px;position:sticky;top:20px;">
+                    <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#92400e;">
+                      <i class="fa-solid fa-list-check"></i>
+                      Itens para Cotar
+                    </h4>
+                    <div style="font-size:11px;color:#92400e;margin-bottom:12px;padding:8px;background:#fde68a;border-radius:4px;">
+                      <i class="fa-solid fa-info-circle"></i>
+                      Clique em um item para selecioná-lo
+                    </div>
+                    <div id="listboxItensCotacao" style="max-height:400px;overflow-y:auto;display:grid;gap:8px;">
+                      <!-- Itens aparecerão aqui -->
+                    </div>
+                  </div>
+                </div>
+                
+              </div>
+              
+              <!-- Observações Gerais -->
+              <div style="margin-top:20px;background:#f0fdf4;border:2px solid #86efac;border-radius:8px;padding:16px;">
+                <label style="display:block;font-size:12px;color:#166534;font-weight:600;margin-bottom:8px;">
+                  <i class="fa-solid fa-comment-dots"></i>
+                  Observações Gerais (aplicam-se a todos os itens)
+                </label>
+                <textarea 
+                  id="cotacaoObservacoesGerais"
+                  rows="3"
+                  placeholder="Observações que se aplicam a todas as cotações deste lote..."
+                  style="width:100%;padding:10px;border:1px solid #86efac;border-radius:6px;font-size:13px;resize:vertical;"
+                ></textarea>
+              </div>
+              
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-top:1px solid #e5e7eb;">
+              <button class="btn-secondary" onclick="fecharModalInserirCotacoes()">
+                <i class="fa-solid fa-times"></i>
+                Cancelar
+              </button>
+              <button 
+                id="btnEnviarCotacoes"
+                onclick="enviarCotacoes()" 
+                style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 28px;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-paper-plane"></i>
+                <span>Enviar Cotações</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Catálogo Omie -->
+        <div id="modalCatalogoOmie" class="modal" style="display:none;z-index:10001;">
+          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-book" style="color:#3b82f6;"></i>
+                <span>Catálogo de Produtos Omie</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalCatalogoOmie()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <!-- Filtros -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;margin-bottom:20px;">
+                <div>
+                  <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Buscar Produto</label>
+                  <input 
+                    type="text" 
+                    id="catalogoBuscaProduto"
+                    placeholder="Código ou Descrição..."
+                    onkeyup="filtrarCatalogoOmie()"
+                    style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+                  />
+                </div>
+                <div>
+                  <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Família</label>
+                  <select 
+                    id="catalogoFamilia"
+                    onchange="filtrarCatalogoOmie()"
+                    style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+                    <option value="">Todas as Famílias</option>
+                  </select>
+                </div>
+                <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+                  <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#92400e;">
+                    <input 
+                      type="checkbox" 
+                      id="catalogoAbaixoMinimo"
+                      onchange="filtrarCatalogoOmie()"
+                      style="width:16px;height:16px;cursor:pointer;"
+                    />
+                    <i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;"></i>
+                    Abaixo do Mínimo
+                  </label>
+                </div>
+                <div style="display:flex;align-items:flex-end;">
+                  <button 
+                    onclick="limparFiltrosCatalogo()"
+                    style="padding:10px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-eraser"></i>
+                    Limpar Filtros
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Lista de Produtos -->
+              <div id="listaProdutosCatalogo" style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;max-height:500px;overflow-y:auto;">
+                <!-- Produtos serão inseridos dinamicamente -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Lightbox para Ampliar Imagem -->
+        <div id="modalImagemAmpliada" class="modal" style="display:none;z-index:10002;" onclick="fecharImagemAmpliada()">
+          <div style="
+            width:100%;
+            height:100%;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:20px;
+          ">
+            <img 
+              id="imagemAmpliada" 
+              src="" 
+              alt="Imagem ampliada"
+              onclick="event.stopPropagation();"
+              style="
+                max-width:95%;
+                max-height:95vh;
+                object-fit:contain;
+                border-radius:8px;
+                box-shadow:0 10px 40px rgba(0,0,0,0.5);
+              "
+            />
           </div>
         </div>
 
@@ -2480,6 +2783,45 @@
     box-shadow:0 6px 14px rgba(14,165,233,.25);
   }
   .mp-header .mp-back:hover{ filter:brightness(1.05); }
+  
+  /* Animação para item selecionado no listbox de cotação */
+@keyframes rotatingBorder {
+        0% {
+          box-shadow: 
+            3px 0 0 0 #3b82f6,
+            0 0 0 0 transparent,
+            0 0 0 0 transparent,
+            0 0 0 0 transparent;
+        }
+        25% {
+          box-shadow: 
+            3px 0 0 0 #3b82f6,
+            0 3px 0 0 #3b82f6,
+            0 0 0 0 transparent,
+            0 0 0 0 transparent;
+        }
+        50% {
+          box-shadow: 
+            3px 0 0 0 #3b82f6,
+            0 3px 0 0 #3b82f6,
+            -3px 0 0 0 #3b82f6,
+            0 0 0 0 transparent;
+        }
+        75% {
+          box-shadow: 
+            3px 0 0 0 #3b82f6,
+            0 3px 0 0 #3b82f6,
+            -3px 0 0 0 #3b82f6,
+            0 -3px 0 0 #3b82f6;
+        }
+        100% {
+          box-shadow: 
+            3px 0 0 0 #3b82f6,
+            0 3px 0 0 #3b82f6,
+            -3px 0 0 0 #3b82f6,
+            0 -3px 0 0 #3b82f6;
+    }
+  }
 
     .kanban-list.droptarget { outline: 2px dashed #60a5fa; outline-offset: 2px; }
   .kanban-card.dragging   { opacity: .6; }

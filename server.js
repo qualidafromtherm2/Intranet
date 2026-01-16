@@ -1577,7 +1577,28 @@ async function sincronizarProdutoParaPostgres(produto) {
   ];
   
   await pool.query(sql, valores);
+  
+  // Sincroniza imagens do produto (se existirem)
+  if (produto.imagens && Array.isArray(produto.imagens) && produto.imagens.length > 0) {
+    const codigoProduto = produto.codigo_produto;
+    
+    // Remove imagens antigas
+    await pool.query('DELETE FROM produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
+    
+    // Insere novas imagens
+    for (let pos = 0; pos < produto.imagens.length; pos++) {
+      const img = produto.imagens[pos];
+      if (img.url_imagem) {
+        await pool.query(
+          `INSERT INTO produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
+           VALUES ($1, $2, $3, $4)`,
+          [codigoProduto, pos, img.url_imagem, img.path_key || null]
+        );
+      }
+    }
+  }
 }
+
 
 
 
@@ -2061,6 +2082,97 @@ app.post(['/webhooks/omie/clientes', '/api/webhooks/omie/clientes'],
   }
 );
 
+// ——— WEBHOOK DE PRODUTOS DA OMIE (atualiza imagens) ———
+app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+      const { topic, author, appKey, event, messageId } = body;
+      
+      console.log('[webhooks/omie/produtos] Webhook recebido:', JSON.stringify(body, null, 2));
+      
+      // Campos que podem vir no webhook da Omie
+      const codigoProduto = body.codigo_produto || body.nCodProd;
+      
+      if (!codigoProduto) {
+        console.warn('[webhooks/omie/produtos] Webhook sem codigo_produto:', JSON.stringify(body));
+        return res.json({ ok: true, message: 'Webhook sem codigo_produto, ignorado' });
+      }
+      
+      console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
+      
+      // Se produto foi excluído, remove imagens
+      if (topic === 'Produto.Excluido' || body.inativo === 'S' || body.bloqueado === 'S') {
+        await pool.query(
+          'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
+          [codigoProduto]
+        );
+        console.log(`[webhooks/omie/produtos] Imagens do produto ${codigoProduto} removidas (excluído/inativo)`);
+        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'removido' });
+      }
+      
+      // Consulta produto na Omie para pegar imagens atualizadas
+      const omieBody = {
+        call: 'ConsultarProduto',
+        app_key: process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param: [{ codigo_produto: parseInt(codigoProduto) }]
+      };
+      
+      const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(omieBody)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[webhooks/omie/produtos] Erro na API Omie: ${response.status} - ${errorText}`);
+        return res.status(500).json({ ok: false, error: 'Erro ao consultar produto na Omie' });
+      }
+      
+      const omieData = await response.json();
+      
+      // Remove imagens antigas
+      await pool.query(
+        'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
+        [codigoProduto]
+      );
+      
+      // Insere novas imagens
+      let totalImagens = 0;
+      if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
+        for (let pos = 0; pos < omieData.imagens.length; pos++) {
+          const img = omieData.imagens[pos];
+          if (img.url_imagem) {
+            await pool.query(
+              `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
+               VALUES ($1, $2, $3, $4)`,
+              [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
+            );
+            totalImagens++;
+          }
+        }
+      }
+      
+      const acao = totalImagens > 0 ? `atualizado (${totalImagens} imagens)` : 'atualizado (sem imagens)';
+      console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} ${acao}`);
+      
+      res.json({ 
+        ok: true, 
+        codigo_produto: codigoProduto,
+        acao: acao,
+        total_imagens: totalImagens 
+      });
+    } catch (err) {
+      console.error('[webhooks/omie/produtos] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
 // Endpoint para sincronizar todos os fornecedores manualmente
 app.post('/api/fornecedores/sync', express.json(), async (req, res) => {
   try {
@@ -2140,6 +2252,499 @@ app.get('/api/fornecedores/:id', async (req, res) => {
 });
 
 
+// Endpoint para buscar condições de pagamento (parcelas) da Omie
+// Objetivo: Listar parcelas disponíveis para seleção no pedido de compra
+app.get('/api/compras/parcelas', async (req, res) => {
+  try {
+    console.log('[API /api/compras/parcelas] Buscando parcelas da Omie...');
+    
+    const omiePayload = {
+      call: 'ListarParcelas',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        pagina: 1,
+        registros_por_pagina: 200
+      }]
+    };
+    
+    const resp = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(omiePayload)
+    });
+    
+    if (!resp.ok) {
+      throw new Error(`Erro na API Omie: ${resp.status}`);
+    }
+    
+    const data = await resp.json();
+    
+    console.log('[API /api/compras/parcelas] Resposta da Omie:', JSON.stringify(data).substring(0, 500));
+    
+    if (data.faultstring) {
+      throw new Error(data.faultstring);
+    }
+    
+    const parcelas = data.cadastros || []; // Omie retorna em "cadastros", não "lista_parcelas"
+    console.log(`[API /api/compras/parcelas] ${parcelas.length} parcelas encontradas`);
+    
+    res.json({ ok: true, parcelas });
+    
+  } catch (err) {
+    console.error('[API /api/compras/parcelas] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar categorias de compra da Omie
+// Objetivo: Listar categorias de despesa ativas para uso no módulo de compras
+// Filtra apenas categorias que são conta de despesa (S) e não estão inativas (N)
+app.get('/api/compras/categorias', async (req, res) => {
+  try {
+    console.log('[API /api/compras/categorias] Buscando categorias da Omie...');
+    
+    // Busca categorias usando a API correta da Omie
+    // Endpoint: /api/v1/geral/categorias/ - ListarCategorias
+    const response = await fetch('https://app.omie.com.br/api/v1/geral/categorias/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ListarCategorias',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina: 1,
+          registros_por_pagina: 500
+        }]
+      })
+    });
+    
+    const data = await response.json();
+    
+    // Verifica se houve erro na resposta da Omie
+    if (data.faultstring) {
+      throw new Error(data.faultstring);
+    }
+    
+    console.log('[API /api/compras/categorias] Total de categorias retornadas:', data.total_de_registros);
+    
+    // Filtra categorias:
+    // - conta_despesa: "S" (apenas contas de despesa)
+    // - conta_inativa: "N" (apenas contas ativas)
+    // - categoria_superior: "2.01" (categoria específica)
+    const categorias = (data.categoria_cadastro || [])
+      .filter(cat => {
+        return cat.conta_despesa === 'S' && 
+               cat.conta_inativa === 'N' && 
+               cat.categoria_superior === '2.01';
+      })
+      .map(cat => ({
+        codigo: cat.codigo,
+        descricao: cat.descricao
+      }));
+    
+    console.log('[API /api/compras/categorias] Categorias filtradas (despesa ativa):', categorias.length);
+    
+    res.json({ 
+      ok: true, 
+      total: categorias.length,
+      categorias 
+    });
+  } catch (err) {
+    console.error('[API /api/compras/categorias] Erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar famílias de produtos
+// Objetivo: Listar todas as famílias cadastradas no banco para seleção no modal de compras
+app.get('/api/compras/familias', async (req, res) => {
+  try {
+    console.log('[API /api/compras/familias] Buscando famílias do banco...');
+    
+    const result = await pool.query(
+      'SELECT codigo, nome_familia FROM public.familia ORDER BY nome_familia ASC'
+    );
+    
+    console.log('[API /api/compras/familias] Total de famílias encontradas:', result.rows.length);
+    
+    res.json({ 
+      ok: true, 
+      total: result.rows.length,
+      familias: result.rows
+    });
+  } catch (err) {
+    console.error('[API /api/compras/familias] Erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar parcelas de pagamento da Omie
+// Objetivo: Listar todas as condições de pagamento disponíveis para pedidos de compra
+app.get('/api/compras/parcelas', async (req, res) => {
+  try {
+    console.log('[API /api/compras/parcelas] Buscando parcelas da Omie...');
+    
+    const response = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ListarParcelas',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina: 1,
+          registros_por_pagina: 200
+        }]
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.faultstring) {
+      throw new Error(data.faultstring);
+    }
+    
+    console.log('[API /api/compras/parcelas] Total de parcelas retornadas:', data.total_de_registros);
+    
+    // Mapeia as parcelas retornadas
+    const parcelas = (data.lista_parcelas || []).map(parc => ({
+      codigo: parc.codigo,
+      descricao: parc.descricao
+    }));
+    
+    console.log('[API /api/compras/parcelas] Parcelas mapeadas:', parcelas.length);
+    
+    res.json({ 
+      ok: true, 
+      total: parcelas.length,
+      parcelas 
+    });
+  } catch (err) {
+    console.error('[API /api/compras/parcelas] Erro:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar dados do pedido de compra
+// Objetivo: Recuperar dados gerais do pedido (fornecedor, previsão, categoria, frete)
+app.get('/api/compras/pedido/:numero_pedido', async (req, res) => {
+  try {
+    const { numero_pedido } = req.params;
+    
+    const { rows } = await pool.query(
+      'SELECT * FROM compras.ped_compra WHERE numero_pedido = $1',
+      [numero_pedido]
+    );
+    
+    res.json({ ok: true, pedido: rows[0] || null });
+  } catch (err) {
+    console.error('[API /api/compras/pedido GET] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para salvar/atualizar dados do pedido de compra
+// Objetivo: Salvar dados gerais do pedido (UPSERT por numero_pedido)
+// Endpoint para salvar/atualizar dados do pedido de compra (tabela ped_compra)
+// Objetivo: UPSERT dos dados do pedido (fornecedor, categoria, frete, etc)
+app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
+  try {
+    const {
+      numero_pedido,
+      fornecedor_nome,
+      fornecedor_id,
+      previsao_entrega,
+      categoria_compra,
+      categoria_compra_codigo,
+      valores_unitarios, // Agora recebe um objeto com {itemId: valor}
+      cod_parcela,
+      descricao_parcela,
+      incluir_frete,
+      transportadora_nome,
+      transportadora_id,
+      tipo_frete,
+      placa_veiculo,
+      uf_veiculo,
+      qtd_volumes,
+      especie_volumes,
+      marca_volumes,
+      numero_volumes,
+      peso_liquido,
+      peso_bruto,
+      valor_frete,
+      valor_seguro,
+      lacre,
+      outras_despesas
+    } = req.body;
+    
+    if (!numero_pedido) {
+      return res.status(400).json({ ok: false, error: 'numero_pedido é obrigatório' });
+    }
+    
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // UPSERT dos dados gerais do pedido (sem valor_unitario na tabela ped_compra)
+      const queryPedido = `
+        INSERT INTO compras.ped_compra (
+          numero_pedido, fornecedor_nome, fornecedor_id, previsao_entrega,
+          categoria_compra, categoria_compra_codigo, cod_parcela, descricao_parcela,
+          incluir_frete, transportadora_nome, transportadora_id, tipo_frete,
+          placa_veiculo, uf_veiculo, qtd_volumes, especie_volumes, marca_volumes,
+          numero_volumes, peso_liquido, peso_bruto, valor_frete, valor_seguro,
+          lacre, outras_despesas, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+          $21, $22, $23, $24, NOW()
+        )
+        ON CONFLICT (numero_pedido) DO UPDATE SET
+          fornecedor_nome = EXCLUDED.fornecedor_nome,
+          fornecedor_id = EXCLUDED.fornecedor_id,
+          previsao_entrega = EXCLUDED.previsao_entrega,
+          categoria_compra = EXCLUDED.categoria_compra,
+          categoria_compra_codigo = EXCLUDED.categoria_compra_codigo,
+          cod_parcela = EXCLUDED.cod_parcela,
+          descricao_parcela = EXCLUDED.descricao_parcela,
+          incluir_frete = EXCLUDED.incluir_frete,
+          transportadora_nome = EXCLUDED.transportadora_nome,
+          transportadora_id = EXCLUDED.transportadora_id,
+          tipo_frete = EXCLUDED.tipo_frete,
+          placa_veiculo = EXCLUDED.placa_veiculo,
+          uf_veiculo = EXCLUDED.uf_veiculo,
+          qtd_volumes = EXCLUDED.qtd_volumes,
+          especie_volumes = EXCLUDED.especie_volumes,
+          marca_volumes = EXCLUDED.marca_volumes,
+          numero_volumes = EXCLUDED.numero_volumes,
+          peso_liquido = EXCLUDED.peso_liquido,
+          peso_bruto = EXCLUDED.peso_bruto,
+          valor_frete = EXCLUDED.valor_frete,
+          valor_seguro = EXCLUDED.valor_seguro,
+          lacre = EXCLUDED.lacre,
+          outras_despesas = EXCLUDED.outras_despesas,
+          updated_at = NOW()
+        RETURNING *
+      `;
+      
+      const { rows } = await client.query(queryPedido, [
+        numero_pedido, fornecedor_nome, fornecedor_id, previsao_entrega,
+        categoria_compra, categoria_compra_codigo, cod_parcela, descricao_parcela,
+        incluir_frete, transportadora_nome, transportadora_id, tipo_frete,
+        placa_veiculo, uf_veiculo, qtd_volumes, especie_volumes, marca_volumes,
+        numero_volumes, peso_liquido, peso_bruto, valor_frete, valor_seguro,
+        lacre, outras_despesas
+      ]);
+      
+      // Cria coluna valor_unitario se não existir (migration)
+      try {
+        await client.query('ALTER TABLE compras.solicitacao_compras ADD COLUMN IF NOT EXISTS valor_unitario DECIMAL(15,2)');
+        console.log('[MIGRATION] Coluna valor_unitario verificada/criada em solicitacao_compras');
+      } catch (err) {
+        console.log('[MIGRATION] Erro ao criar coluna valor_unitario:', err.message);
+      }
+      
+      // Atualiza valores unitários de cada item na tabela solicitacao_compras
+      if (valores_unitarios && typeof valores_unitarios === 'object') {
+        for (const [itemId, valor] of Object.entries(valores_unitarios)) {
+          await client.query(`
+            UPDATE compras.solicitacao_compras
+            SET valor_unitario = $1, updated_at = NOW()
+            WHERE id = $2
+          `, [valor, itemId]);
+          console.log(`[SALVAR DADOS] Atualizado valor unitário ${valor} para item ${itemId}`);
+        }
+      }
+      
+      await client.query('COMMIT');
+      res.json({ ok: true, pedido: rows[0] });
+      
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[API /api/compras/pedido/dados POST] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para gerar pedido de compra na Omie
+// Objetivo: Montar o JSON completo do pedido e enviar para IncluirPedCompra da Omie
+app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async (req, res) => {
+  try {
+    const { numero_pedido } = req.params;
+    
+    console.log('\n========================================');
+    console.log('🚀 [GERAR PEDIDO OMIE] Iniciando...');
+    console.log('📋 Número do Pedido:', numero_pedido);
+    console.log('========================================\n');
+    
+    // Busca dados do pedido
+    console.log('📥 Buscando dados do pedido na tabela compras.ped_compra...');
+    const { rows: pedidoRows } = await pool.query(
+      'SELECT * FROM compras.ped_compra WHERE numero_pedido = $1',
+      [numero_pedido]
+    );
+    
+    if (!pedidoRows.length) {
+      console.log('❌ Pedido não encontrado no banco!');
+      return res.status(404).json({ ok: false, error: 'Dados do pedido não encontrados. Salve os dados antes de gerar a compra.' });
+    }
+    
+    const pedido = pedidoRows[0];
+    console.log('✅ Dados do pedido encontrados:');
+    console.log('   Fornecedor:', pedido.fornecedor_nome, '(ID:', pedido.fornecedor_id + ')');
+    console.log('   Previsão Entrega:', pedido.previsao_entrega);
+    console.log('   Categoria:', pedido.categoria_compra, '(Código:', pedido.categoria_compra_codigo + ')');
+    console.log('   Condição de Pagamento:', pedido.descricao_parcela, '(Código:', pedido.cod_parcela + ')');
+    console.log('   Incluir Frete:', pedido.incluir_frete);
+    
+    // Busca itens do pedido
+    console.log('\n📦 Buscando itens do pedido...');
+    const { rows: itens } = await pool.query(
+      `SELECT *
+      FROM compras.solicitacao_compras
+      WHERE numero_pedido = $1`,
+      [numero_pedido]
+    );
+    
+    if (!itens.length) {
+      console.log('❌ Nenhum item encontrado para este pedido!');
+      return res.status(400).json({ ok: false, error: 'Nenhum item encontrado no pedido' });
+    }
+    
+    console.log(`✅ ${itens.length} item(ns) encontrado(s):`);
+    itens.forEach((item, idx) => {
+      console.log(`   ${idx + 1}. Produto: ${item.produto_descricao} (Código: ${item.produto_codigo}) - Qtd: ${item.quantidade}`);
+      console.log(`      Código Omie: ${item.codigo_produto_omie || 'Não encontrado'}`);
+      console.log(`      Valor Unitário: ${item.valor_unitario || 'Não informado'}`);
+    });
+    
+    // Monta o cabeçalho do pedido
+    console.log('\n🔧 Montando JSON para envio à Omie...');
+    const cabecalho = {
+      cCodIntPed: numero_pedido,
+      dDtPrevisao: pedido.previsao_entrega ? new Date(pedido.previsao_entrega).toISOString().split('T')[0].split('-').reverse().join('/') : null,
+      nCodFor: pedido.fornecedor_id ? parseInt(pedido.fornecedor_id) : null,
+      cCodCateg: pedido.categoria_compra_codigo || null,
+      cCodParc: pedido.cod_parcela || null
+    };
+    
+    // Monta os produtos (usa valor_unitario de cada item)
+    const produtos = itens.map((item, index) => {
+      return {
+        nCodProd: item.codigo_produto_omie || null,
+        nQtde: item.quantidade || 0,
+        nValUnit: item.valor_unitario || null,
+        cObs: item.observacao || null
+      };
+    });
+    
+    // Monta o frete se incluído
+    let frete = null;
+    if (pedido.incluir_frete) {
+      console.log('🚚 Adicionando dados de frete...');
+      frete = {
+        nCodTransp: pedido.transportadora_id ? parseInt(pedido.transportadora_id) : null,
+        cTpFrete: pedido.tipo_frete || null,
+        cPlaca: pedido.placa_veiculo || null,
+        cUF: pedido.uf_veiculo || null,
+        nQtdVol: pedido.qtd_volumes || null,
+        cEspVol: pedido.especie_volumes || null,
+        cMarVol: pedido.marca_volumes || null,
+        cNumVol: pedido.numero_volumes || null,
+        nPesoLiq: pedido.peso_liquido || null,
+        nPesoBruto: pedido.peso_bruto || null,
+        nValFrete: pedido.valor_frete || null,
+        nValSeguro: pedido.valor_seguro || null,
+        cLacre: pedido.lacre || null,
+        nValOutras: pedido.outras_despesas || null
+      };
+      console.log('   Transportadora ID:', pedido.transportadora_id);
+      console.log('   Tipo Frete:', pedido.tipo_frete);
+    }
+    
+    // Monta o JSON completo para a Omie
+    const pedidoCompra = {
+      cabecalho_incluir: cabecalho,
+      produtos_incluir: produtos
+    };
+    
+    if (frete) {
+      pedidoCompra.frete_incluir = frete;
+    }
+    
+    console.log('\n📤 JSON COMPLETO PARA ENVIO À OMIE:');
+    console.log(JSON.stringify(pedidoCompra, null, 2));
+    
+    const omiePayload = {
+      call: 'IncluirPedCompra',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [pedidoCompra]
+    };
+    
+    // Chama a API da Omie
+    console.log('\n🌐 Enviando requisição para Omie...');
+    console.log('   URL: https://app.omie.com.br/api/v1/produtos/pedidocompra/');
+    const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(omiePayload)
+    });
+    
+    const data = await response.json();
+    
+    console.log('\n📥 RESPOSTA DA OMIE:');
+    console.log('   Status HTTP:', response.status);
+    console.log('   Dados:', JSON.stringify(data, null, 2));
+    
+    if (data.faultstring) {
+      console.log('❌ Erro na API da Omie!');
+      console.log('   Código:', data.faultcode);
+      console.log('   Mensagem:', data.faultstring);
+      throw new Error(data.faultstring);
+    }
+    
+    console.log('✅ Pedido criado com sucesso na Omie!');
+    console.log('   Número Pedido:', data.cNumero);
+    console.log('   Código Pedido:', data.nCodPed || data.cCodIntPed);
+    
+    // Atualiza status dos itens para "compra realizada"
+    console.log('\n🔄 Atualizando status dos itens...');
+    await pool.query(
+      'UPDATE compras.solicitacao_compras SET status = $1 WHERE numero_pedido = $2',
+      ['compra realizada', numero_pedido]
+    );
+    console.log(`✅ ${itens.length} item(ns) atualizado(s) para 'compra realizada'`);
+    
+    console.log('\n========================================');
+    console.log('✅ PROCESSO CONCLUÍDO COM SUCESSO!');
+    console.log('========================================\n');
+    
+    res.json({
+      ok: true,
+      numero: data.cNumero,
+      codigo: data.nCodPed || data.cCodIntPed,
+      mensagem: 'Pedido de compra gerado com sucesso na Omie'
+    });
+    
+  } catch (err) {
+    console.error('\n========================================');
+    console.error('❌ ERRO NO PROCESSO:');
+    console.error('   Mensagem:', err.message);
+    console.error('   Stack:', err.stack);
+    console.error('========================================\n');
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+
 // --- Buscar produtos no Postgres (autocomplete do PCP) ---
 app.get('/api/produtos/search', async (req, res) => {
   try {
@@ -2151,12 +2756,14 @@ app.get('/api/produtos/search', async (req, res) => {
     }
 
     // Busca por código OU pela descrição (case/accent-insensitive)
-    // Busca na tabela produtos_omie (coluna codigo e descricao)
+    // Busca na tabela produtos_omie (coluna codigo, descricao, descricao_familia e codigo_produto)
     const { rows } = await pool.query(
       `
       SELECT 
         codigo,
-        descricao
+        descricao,
+        descricao_familia,
+        codigo_produto
       FROM public.produtos_omie
       WHERE 
         codigo ILIKE $1
@@ -8742,7 +9349,72 @@ async function ensureComprasSchema() {
           ALTER TABLE compras.solicitacao_compras 
           ADD COLUMN anexos JSONB;
         END IF;
+        
+        -- Adiciona coluna categoria_compra se não existir
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'categoria_compra'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN categoria_compra TEXT;
+        END IF;
+        
+        -- Adiciona coluna categoria_compra_codigo se não existir
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'solicitacao_compras' 
+          AND column_name = 'categoria_compra_codigo'
+        ) THEN
+          ALTER TABLE compras.solicitacao_compras 
+          ADD COLUMN categoria_compra_codigo TEXT;
+        END IF;
       END $$;
+    `);
+    
+    // Cria tabela para armazenar dados do pedido de compra
+    // Objetivo: Separar dados do pedido (que são únicos por numero_pedido) dos itens
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.ped_compra (
+        id SERIAL PRIMARY KEY,
+        numero_pedido TEXT UNIQUE NOT NULL,
+        fornecedor_nome TEXT,
+        fornecedor_id TEXT,
+        previsao_entrega DATE,
+        categoria_compra TEXT,
+        categoria_compra_codigo TEXT,
+        cod_parcela TEXT,
+        descricao_parcela TEXT,
+        
+        -- Dados de Frete
+        incluir_frete BOOLEAN DEFAULT false,
+        transportadora_nome TEXT,
+        transportadora_id TEXT,
+        tipo_frete TEXT,
+        placa_veiculo TEXT,
+        uf_veiculo TEXT,
+        qtd_volumes INTEGER,
+        especie_volumes TEXT,
+        marca_volumes TEXT,
+        numero_volumes TEXT,
+        peso_liquido DECIMAL(15,3),
+        peso_bruto DECIMAL(15,3),
+        valor_frete DECIMAL(15,2),
+        valor_seguro DECIMAL(15,2),
+        lacre TEXT,
+        outras_despesas DECIMAL(15,2),
+        
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    
+    // Cria índice para busca rápida por numero_pedido
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_ped_compra_numero 
+      ON compras.ped_compra(numero_pedido);
     `);
     
     // Cria tabela de cotações para armazenar múltiplos fornecedores por item
@@ -9231,7 +9903,7 @@ app.get('/api/compras/usuarios', async (req, res) => {
   }
 });
 
-// POST /api/compras/pedido - Cria um pedido completo (vários itens de uma vez)
+// POST /api/compras/pedido - Cria solicitações de compra (cada item independente, sem numero_pedido)
 app.post('/api/compras/pedido', async (req, res) => {
   try {
     const { itens, solicitante } = req.body || {};
@@ -9244,8 +9916,9 @@ app.post('/api/compras/pedido', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Solicitante é obrigatório' });
     }
     
-    const numeroPedido = gerarNumeroPedido();
+    // Não gera mais numero_pedido aqui - será gerado em outra etapa
     const client = await pool.connect();
+    const idsInseridos = [];
     
     try {
       await client.query('BEGIN');
@@ -9256,12 +9929,15 @@ app.post('/api/compras/pedido', async (req, res) => {
           produto_descricao,
           quantidade,
           prazo_solicitado,
+          familia_codigo,
+          familia_nome,
           observacao,
           departamento,
           centro_custo,
           objetivo_compra,
           resp_inspecao_recebimento,
-          retorno_cotacao
+          retorno_cotacao,
+          codigo_produto_omie
         } = item;
         
         if (!produto_codigo || !quantidade) {
@@ -9273,13 +9949,14 @@ app.post('/api/compras/pedido', async (req, res) => {
         // Se retorno_cotacao = 'Sim' -> 'aguardando cotação'
         const statusInicial = (retorno_cotacao === 'Não') ? 'aguardando compra' : 'aguardando cotação';
         
-        await client.query(`
+        // Insere item sem numero_pedido (NULL) - será preenchido em etapa posterior
+        const result = await client.query(`
           INSERT INTO compras.solicitacao_compras (
-            numero_pedido,
             produto_codigo,
             produto_descricao,
             quantidade,
             prazo_solicitado,
+            familia_produto,
             status,
             observacao,
             solicitante,
@@ -9288,15 +9965,17 @@ app.post('/api/compras/pedido', async (req, res) => {
             objetivo_compra,
             resp_inspecao_recebimento,
             retorno_cotacao,
+            codigo_produto_omie,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          RETURNING id
         `, [
-          numeroPedido,
           produto_codigo,
           produto_descricao || '',
           quantidade,
           prazo_solicitado || null,
+          familia_nome || null,
           statusInicial,
           observacao || '',
           solicitante,
@@ -9304,18 +9983,21 @@ app.post('/api/compras/pedido', async (req, res) => {
           centro_custo || null,
           objetivo_compra || null,
           resp_inspecao_recebimento || solicitante,
-          retorno_cotacao || null
+          retorno_cotacao || null,
+          codigo_produto_omie || null
         ]);
+        
+        idsInseridos.push(result.rows[0].id);
       }
       
       await client.query('COMMIT');
       
-      console.log(`[Compras] Pedido ${numeroPedido} criado com ${itens.length} item(ns) por ${solicitante}`);
+      console.log(`[Compras] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsInseridos.join(', ')}`);
       
       res.json({
         ok: true,
-        numero_pedido: numeroPedido,
-        total_itens: itens.length
+        total_itens: itens.length,
+        ids: idsInseridos
       });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -9324,8 +10006,239 @@ app.post('/api/compras/pedido', async (req, res) => {
       client.release();
     }
   } catch (err) {
-    console.error('[Compras] Erro ao criar pedido:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Erro ao criar pedido' });
+    console.error('[Compras] Erro ao criar solicitações:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao criar solicitações' });
+  }
+});
+
+// POST /api/compras/agrupar-itens - Agrupa itens selecionados com um numero_pedido
+app.post('/api/compras/agrupar-itens', express.json(), async (req, res) => {
+  try {
+    const { ids, numero_pedido } = req.body;
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Lista de IDs é obrigatória' });
+    }
+    
+    if (!numero_pedido) {
+      return res.status(400).json({ ok: false, error: 'Número do pedido é obrigatório' });
+    }
+    
+    // Atualiza os itens com o numero_pedido
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+    const { rowCount } = await pool.query(`
+      UPDATE compras.solicitacao_compras
+      SET numero_pedido = $${ids.length + 1}
+      WHERE id IN (${placeholders})
+    `, [...ids, numero_pedido]);
+    
+    console.log(`[Compras] ${rowCount} itens agrupados no pedido ${numero_pedido}`);
+    
+    res.json({ ok: true, itens_atualizados: rowCount, numero_pedido });
+    
+  } catch (err) {
+    console.error('[Compras] Erro ao agrupar itens:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao agrupar itens' });
+  }
+});
+
+// GET /api/compras/catalogo-omie - Lista produtos do catálogo Omie
+app.get('/api/compras/catalogo-omie', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        p.codigo,
+        p.descricao,
+        p.descricao_familia,
+        p.codigo_produto,
+        TRIM(i.url_imagem) as url_imagem,
+        COALESCE(e.saldo, 0) as saldo_estoque,
+        COALESCE(e.estoque_minimo, 0) as estoque_minimo,
+        CASE 
+          WHEN e.estoque_minimo > 0 AND e.saldo < e.estoque_minimo THEN true 
+          ELSE false 
+        END as abaixo_minimo
+      FROM public.produtos_omie p
+      LEFT JOIN LATERAL (
+        SELECT url_imagem
+        FROM public.produtos_omie_imagens
+        WHERE codigo_produto = p.codigo_produto
+        ORDER BY pos
+        LIMIT 1
+      ) i ON true
+      LEFT JOIN LATERAL (
+        SELECT saldo, estoque_minimo
+        FROM public.omie_estoque_posicao
+        WHERE omie_prod_id = p.codigo_produto::bigint
+        ORDER BY data_posicao DESC
+        LIMIT 1
+      ) e ON true
+      WHERE p.inativo = 'N' 
+        AND p.bloqueado = 'N'
+      ORDER BY p.descricao
+    `);
+    
+    res.json({ ok: true, produtos: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao buscar catálogo Omie:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar catálogo' });
+  }
+});
+
+// GET /api/compras/imagem-fresca/:codigo_produto - Busca URL fresca da imagem direto da Omie
+app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
+  try {
+    const codigoProduto = req.params.codigo_produto;
+    
+    // Consulta produto na Omie para pegar URLs frescas das imagens
+    const omieBody = {
+      call: 'ConsultarProduto',
+      app_key: process.env.OMIE_APP_KEY,
+      app_secret: process.env.OMIE_APP_SECRET,
+      param: [{ codigo_produto: parseInt(codigoProduto) }]
+    };
+    
+    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(omieBody)
+    });
+    
+    if (!omieResp.ok) {
+      return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
+    }
+    
+    const omieData = await omieResp.json();
+    
+    // Atualiza URLs no banco se houver imagens
+    if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
+      // Remove imagens antigas
+      await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
+      
+      // Insere novas imagens com URLs frescas
+      for (let pos = 0; pos < omieData.imagens.length; pos++) {
+        const img = omieData.imagens[pos];
+        if (img.url_imagem) {
+          await pool.query(
+            `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
+             VALUES ($1, $2, $3, $4)`,
+            [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
+          );
+        }
+      }
+      
+      // Retorna primeira imagem
+      const primeiraImagem = omieData.imagens[0]?.url_imagem?.trim() || null;
+      res.json({ ok: true, url_imagem: primeiraImagem });
+    } else {
+      res.json({ ok: true, url_imagem: null });
+    }
+  } catch (err) {
+    console.error('[Compras] Erro ao buscar imagem fresca:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar imagem' });
+  }
+});
+
+// POST /api/admin/sync/imagens-omie - Sincroniza TODAS as imagens dos produtos ativos
+app.post('/api/admin/sync/imagens-omie', express.json(), async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    console.log('[Sync Imagens] Iniciando sincronização...');
+    
+    // Busca todos os produtos ativos que têm imagens na tabela atual
+    const { rows: produtos } = await pool.query(`
+      SELECT DISTINCT p.codigo_produto, p.codigo, p.descricao
+      FROM public.produtos_omie p
+      WHERE p.inativo = 'N' AND p.bloqueado = 'N'
+      ORDER BY p.codigo_produto
+    `);
+    
+    console.log(`[Sync Imagens] ${produtos.length} produtos ativos encontrados`);
+    
+    let sucessos = 0;
+    let erros = 0;
+    let semImagem = 0;
+    const DELAY_MS = 350; // Rate limit Omie: 3 req/seg = ~333ms, usando 350ms para segurança
+    
+    for (let i = 0; i < produtos.length; i++) {
+      const produto = produtos[i];
+      
+      try {
+        // Consulta produto na Omie para pegar URLs frescas
+        const omieBody = {
+          call: 'ConsultarProduto',
+          app_key: process.env.OMIE_APP_KEY,
+          app_secret: process.env.OMIE_APP_SECRET,
+          param: [{ codigo_produto: parseInt(produto.codigo_produto) }]
+        };
+        
+        const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(omieBody)
+        });
+        
+        if (!omieResp.ok) {
+          console.error(`[Sync Imagens] Erro HTTP ${omieResp.status} para produto ${produto.codigo}`);
+          erros++;
+          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+          continue;
+        }
+        
+        const omieData = await omieResp.json();
+        
+        // Se houver imagens, atualiza no banco
+        if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
+          // Remove imagens antigas
+          await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [produto.codigo_produto]);
+          
+          // Insere novas imagens com URLs frescas
+          for (let pos = 0; pos < omieData.imagens.length; pos++) {
+            const img = omieData.imagens[pos];
+            if (img.url_imagem) {
+              await pool.query(
+                `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
+                 VALUES ($1, $2, $3, $4)`,
+                [produto.codigo_produto, pos, img.url_imagem.trim(), img.path_key || null]
+              );
+            }
+          }
+          
+          sucessos++;
+          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: ${omieData.imagens.length} imagens atualizadas`);
+        } else {
+          semImagem++;
+          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: sem imagens`);
+        }
+        
+        // Aguarda para respeitar rate limit
+        if (i < produtos.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+        }
+        
+      } catch (err) {
+        console.error(`[Sync Imagens] Erro ao processar produto ${produto.codigo}:`, err.message);
+        erros++;
+      }
+    }
+    
+    const tempoDecorrido = ((Date.now() - startTime) / 1000).toFixed(1);
+    const resultado = {
+      ok: true,
+      total: produtos.length,
+      sucessos,
+      erros,
+      semImagem,
+      tempoDecorrido: `${tempoDecorrido}s`
+    };
+    
+    console.log('[Sync Imagens] Concluído:', resultado);
+    res.json(resultado);
+    
+  } catch (err) {
+    console.error('[Sync Imagens] Erro geral:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -9390,6 +10303,7 @@ app.get('/api/compras/todas', async (req, res) => {
         objetivo_compra,
         fornecedor_nome,
         fornecedor_id,
+        familia_produto,
         anexos,
         created_at,
         updated_at
@@ -9413,7 +10327,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
 
-    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, anexos } = req.body || {};
+    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna } = req.body || {};
     
     const allowedStatus = [
       'pendente',
@@ -9508,6 +10422,42 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     if (typeof fornecedor_id !== 'undefined') {
       fields.push(`fornecedor_id = $${idx++}`);
       values.push(fornecedor_id || null);
+    }
+    
+    if (typeof categoria_compra !== 'undefined') {
+      fields.push(`categoria_compra = $${idx++}`);
+      values.push(categoria_compra || null);
+    }
+    
+    if (typeof categoria_compra_codigo !== 'undefined') {
+      fields.push(`categoria_compra_codigo = $${idx++}`);
+      values.push(categoria_compra_codigo || null);
+    }
+    
+    // Novos campos do PedidoCompraJsonClient
+    if (typeof cod_parc !== 'undefined') {
+      fields.push(`cod_parc = $${idx++}`);
+      values.push(cod_parc || null);
+    }
+    
+    if (typeof qtde_parc !== 'undefined') {
+      fields.push(`qtde_parc = $${idx++}`);
+      values.push(qtde_parc || null);
+    }
+    
+    if (typeof contato !== 'undefined') {
+      fields.push(`contato = $${idx++}`);
+      values.push(contato || null);
+    }
+    
+    if (typeof contrato !== 'undefined') {
+      fields.push(`contrato = $${idx++}`);
+      values.push(contrato || null);
+    }
+    
+    if (typeof obs_interna !== 'undefined') {
+      fields.push(`obs_interna = $${idx++}`);
+      values.push(obs_interna || null);
     }
 
     if (!fields.length) {
