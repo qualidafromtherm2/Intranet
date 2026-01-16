@@ -299,20 +299,39 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   }
 });
 
+// Lista solicitações de envio (filtradas por usuário logado)
 router.get('/solicitacoes', async (req, res) => {
   try {
     const hideDone = String(req.query?.hideDone || '').toLowerCase() === 'true' || req.query?.hideDone === '1';
+    
+    // Obtém o usuário logado da sessão
+    const usuarioLogado = req.session?.user?.fullName 
+                       || req.session?.user?.username 
+                       || req.session?.user?.login
+                       || null;
 
-    const whereClause = hideDone
-      ? "WHERE COALESCE(status, '') NOT IN ('Enviado', 'Finalizado')"
-      : '';
+    if (!usuarioLogado) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado.' });
+    }
+
+    // Monta a cláusula WHERE com filtro de status e usuário
+    const conditions = [];
+    const params = [usuarioLogado];
+    
+    if (hideDone) {
+      conditions.push("COALESCE(status, '') NOT IN ('Enviado', 'Finalizado')");
+    }
+    conditions.push('usuario = $1');
+    
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
       `SELECT id, created_at, usuario, observacao, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
-        LIMIT 200`
+        LIMIT 200`,
+      params
     );
     return res.json({ ok: true, rows: r.rows });
   } catch (err) {
