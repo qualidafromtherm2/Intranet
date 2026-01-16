@@ -485,6 +485,7 @@ const BASE = API_BASE;
 
 const txtId     = document.getElementById('colab-id');
 const txtUser   = document.getElementById('colab-username');
+const txtEmail  = document.getElementById('colab-email');
 const selFunc   = document.getElementById('colab-funcao');
 const selSetor  = document.getElementById('colab-setor');
 const selOper   = document.getElementById('colab-operacao');
@@ -745,6 +746,7 @@ function openColabModalCreate() {
   document.getElementById('colabModalTitle').textContent = 'Novo colaborador';
   txtId.value = '';
   txtUser.value = '';
+  txtEmail.value = '';
   rolesBox.querySelectorAll('input[type=checkbox]').forEach(i => (i.checked = false));
   if (selFunc) selFunc.selectedIndex = 0;
   if (selSetor) selSetor.selectedIndex = 0;
@@ -777,6 +779,7 @@ async function openColabModalEdit(userObj) {
   colabEditSnapshot = {
     id:        String(userObj.id || '').trim(),
     username:  String(userObj.username || '').trim(),
+    email:     String(userObj.email || '').trim(),
     funcao:    String(userObj.funcao || '').trim(),   // nome da função
     setor:     String(userObj.setor  || '').trim(),   // nome do setor
     operacao:  String(userObj.operacao || '').trim(),
@@ -800,6 +803,7 @@ async function openColabModalEdit(userObj) {
   // preencher campos
   txtId.value   = colabEditSnapshot.id;
   txtUser.value = colabEditSnapshot.username;
+  txtEmail.value = colabEditSnapshot.email;
 
   // marcar roles
   marcarRoles(colabEditSnapshot.roles);
@@ -929,6 +933,7 @@ async function salvarNovoColaborador() {
   const username = txtUser.value.trim();
   if (!username) { alert('Informe o Usuário'); txtUser.focus(); return; }
 
+  const email = txtEmail.value.trim();
   const roles     = getSelectedRoles();      // ['admin'] / ['editor'] / []
   const funcao_id = Number(selFunc.value);
   const setor_id  = Number(selSetor.value);
@@ -951,6 +956,7 @@ async function salvarNovoColaborador() {
     credentials: 'include',
     body: JSON.stringify({ 
       username, 
+      email: email || null,
       senha: senha_inicial, 
       roles, 
       funcao_id, 
@@ -983,6 +989,7 @@ async function salvarEdicaoColaborador() {
   // valores atuais
   const now = {
     username: txtUser.value.trim(),
+    email: txtEmail.value.trim(),
     roles: getSelectedRoles(),
     funcao_id: Number(selFunc.value || 0) || null,
     setor_id:  Number(selSetor.value || 0) || null,
@@ -998,6 +1005,7 @@ async function salvarEdicaoColaborador() {
   // monta payload só com o que mudou
   const body = {};
   if (now.username && now.username !== colabEditSnapshot.username) body.username = now.username;
+  if (now.email !== colabEditSnapshot.email) body.email = now.email || null;
 
   const sameRoles = (a,b) => {
     const A = (a||[]).slice().sort().join('|');
@@ -15785,14 +15793,28 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     
-    const itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    // Se numero_pedido for "undefined" ou vazio, busca todos os itens com aquele status
+    let itensPedido;
+    if (!numeroPedido || numeroPedido === 'undefined' || numeroPedido === 'null') {
+      // Filtra por status para exibir todos os itens daquele kanban
+      itensPedido = listaCompleta.filter(item => {
+        const itemStatus = (item.status || '').toLowerCase().trim();
+        const colunaStatus = statusColuna.toLowerCase().trim();
+        return itemStatus === colunaStatus || 
+               (colunaStatus === 'cotado aguardando escolha' && itemStatus === 'cotado');
+      });
+    } else {
+      itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    }
     
     if (itensPedido.length === 0) {
-      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Pedido não encontrado.</div>';
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Nenhum item encontrado.</div>';
       return;
     }
     
-    modalTitulo.textContent = `Meu Pedido ${numeroPedido}`;
+    modalTitulo.textContent = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' 
+      ? `Meu Pedido ${numeroPedido}` 
+      : `Meus Itens - ${statusColuna}`;
     
     // Busca cotações apenas para itens cotados
     const cotacoesMap = new Map();
@@ -16220,6 +16242,27 @@ async function abrirModalSelecaoItensCompra() {
       return;
     }
     
+    // Busca cotações aprovadas para cada item
+    const cotacoesMap = new Map();
+    await Promise.all(itensAguardandoCompra.map(async (item) => {
+      try {
+        const cotacoesResp = await fetch(`/api/compras/cotacoes/${item.id}`);
+        if (cotacoesResp.ok) {
+          const cotacoes = await cotacoesResp.json();
+          // Filtra apenas cotações que foram aprovadas (status_aprovacao = 'aprovado')
+          const cotacoesAprovadas = Array.isArray(cotacoes) ? cotacoes.filter(c => c.status_aprovacao === 'aprovado') : [];
+          if (cotacoesAprovadas.length > 0) {
+            cotacoesMap.set(item.id, cotacoesAprovadas);
+          }
+        }
+      } catch (e) {
+        console.warn(`Erro ao buscar cotações do item ${item.id}:`, e);
+      }
+    }));
+    
+    // Armazena cotações globalmente para uso na renderização
+    window.cotacoesItensCompra = cotacoesMap;
+    
     // Limpa carrinho ao abrir o modal
     window.carrinhoSelecaoCompra = [];
     atualizarContadorSelecao();
@@ -16343,6 +16386,60 @@ function renderizarListaSelecaoItens(itens) {
                 <span style="font-size:12px;color:#374151;">${escapeHtml(item.solicitante || '-')}</span>
               </div>
             </div>
+            
+            ${(() => {
+              // Busca cotações aprovadas do item
+              const cotacoes = window.cotacoesItensCompra?.get(item.id) || [];
+              if (cotacoes.length === 0) return '';
+              
+              // Se houver múltiplas cotações aprovadas, mostra todas
+              if (cotacoes.length === 1) {
+                const cotacao = cotacoes[0];
+                const fornecedor = escapeHtml(cotacao.fornecedor_nome || '-');
+                const valor = Number(cotacao.valor_cotado) || 0;
+                
+                return `
+                  <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                      <i class="fa-solid fa-check-circle" style="color:#10b981;font-size:12px;"></i>
+                      <span style="font-size:11px;font-weight:600;color:#059669;">Cotação Escolhida</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">
+                      <div>
+                        <div style="color:#6b7280;">Fornecedor:</div>
+                        <div style="font-weight:600;color:#1f2937;">${fornecedor}</div>
+                      </div>
+                      <div>
+                        <div style="color:#6b7280;">Valor Unitário:</div>
+                        <div style="font-weight:600;color:#059669;">R$ ${valor.toFixed(2)}</div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              } else {
+                // Múltiplas cotações aprovadas
+                return `
+                  <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                      <i class="fa-solid fa-check-circle" style="color:#10b981;font-size:12px;"></i>
+                      <span style="font-size:11px;font-weight:600;color:#059669;">${cotacoes.length} Cotações Escolhidas</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                      ${cotacoes.map(cot => {
+                        const fornecedor = escapeHtml(cot.fornecedor_nome || '-');
+                        const valor = Number(cot.valor_cotado) || 0;
+                        return `
+                          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;font-size:10px;padding:6px;background:#f0fdf4;border-radius:4px;">
+                            <div style="font-weight:600;color:#1f2937;">${fornecedor}</div>
+                            <div style="font-weight:600;color:#059669;">R$ ${valor.toFixed(2)}</div>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  </div>
+                `;
+              }
+            })()}
           </div>
           
           <!-- Botão Adicionar/Remover -->
@@ -18623,7 +18720,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               itens.map(item => {
                 const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
                 return `
-                  <div class="kanban-card" data-item-id="${item.id}" style="
+                  <div class="kanban-card" data-item-id="${item.id}" 
+                    onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')"
+                    style="
                     background:#ffffff;
                     border:1px solid #e5e7eb;
                     border-radius:8px;
@@ -18631,9 +18730,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                     transition:all 0.2s;
                     box-shadow:0 1px 3px rgba(0,0,0,0.1);
                     flex-shrink:0;
+                    cursor:pointer;
                   "
                   onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
-                  onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
+                  onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">>
                     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                       <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
                       ${item.numero_pedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</div>` : ''}

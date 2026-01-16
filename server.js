@@ -2584,6 +2584,22 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     console.log('📋 Número do Pedido:', numero_pedido);
     console.log('========================================\n');
     
+    // Busca email do usuário logado para campo cEmailAprovador
+    let emailAprovador = null;
+    if (req.session && req.session.user && req.session.user.id) {
+      console.log('👤 Buscando email do usuário logado...');
+      const { rows: userRows } = await pool.query(
+        'SELECT email FROM public.auth_user WHERE id = $1',
+        [req.session.user.id]
+      );
+      if (userRows.length && userRows[0].email) {
+        emailAprovador = userRows[0].email;
+        console.log('   Email aprovador:', emailAprovador);
+      } else {
+        console.log('   ⚠️ Email não encontrado para o usuário logado');
+      }
+    }
+    
     // Busca dados do pedido
     console.log('📥 Buscando dados do pedido na tabela compras.ped_compra...');
     const { rows: pedidoRows } = await pool.query(
@@ -2634,6 +2650,12 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       cCodCateg: pedido.categoria_compra_codigo || null,
       cCodParc: pedido.cod_parcela || null
     };
+    
+    // Adiciona email do aprovador se disponível
+    if (emailAprovador) {
+      cabecalho.cEmailAprovador = emailAprovador;
+      console.log('   ✅ Email aprovador incluído:', emailAprovador);
+    }
     
     // Monta os produtos (usa valor_unitario de cada item)
     const produtos = itens.map((item, index) => {
@@ -10327,7 +10349,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
 
-    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna } = req.body || {};
+    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna, cotacoes_aprovadas_ids } = req.body || {};
     
     const allowedStatus = [
       'pendente',
@@ -10478,6 +10500,32 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     
     if (!rows.length) {
       return res.status(404).json({ ok: false, error: 'Solicitação não encontrada' });
+    }
+
+    // Se recebeu cotacoes_aprovadas_ids, atualiza o status_aprovacao das cotações
+    if (cotacoes_aprovadas_ids && Array.isArray(cotacoes_aprovadas_ids) && cotacoes_aprovadas_ids.length > 0) {
+      console.log(`[Compras] Atualizando status de aprovação das cotações do item ${id}:`, cotacoes_aprovadas_ids);
+      
+      try {
+        // Marca as cotações aprovadas com status_aprovacao = 'aprovado'
+        await pool.query(`
+          UPDATE compras.cotacoes 
+          SET status_aprovacao = 'aprovado', atualizado_em = NOW()
+          WHERE id = ANY($1::int[]) AND solicitacao_id = $2
+        `, [cotacoes_aprovadas_ids, id]);
+        
+        // Marca as outras cotações do mesmo item como 'reprovado'
+        await pool.query(`
+          UPDATE compras.cotacoes 
+          SET status_aprovacao = 'reprovado', atualizado_em = NOW()
+          WHERE id != ALL($1::int[]) AND solicitacao_id = $2
+        `, [cotacoes_aprovadas_ids, id]);
+        
+        console.log(`[Compras] Status de aprovação atualizado com sucesso para item ${id}`);
+      } catch (cotacaoErr) {
+        console.error('[Compras] Erro ao atualizar status das cotações:', cotacaoErr);
+        // Não falha a requisição se erro ao atualizar cotações
+      }
     }
 
     res.json({ ok: true, solicitacao: rows[0] });

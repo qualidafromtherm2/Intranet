@@ -187,7 +187,7 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
     ) AS produto_permissoes`;
 
   const q = `
-    SELECT u.id::text AS id, u.username::text AS username, u.roles,
+    SELECT u.id::text AS id, u.username::text AS username, u.email, u.roles,
            s.name AS setor, f.name AS funcao
            ${operSelect}
            ${operListSelect}
@@ -197,11 +197,11 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
       LEFT JOIN public.auth_sector s ON s.id = up.sector_id
       LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
       ${operJoin}
-     GROUP BY u.id, u.username, u.roles, s.name, f.name${extraGroup}
+     GROUP BY u.id, u.username, u.email, u.roles, s.name, f.name${extraGroup}
      ORDER BY u.username`;
   const { rows } = await pool.query(q);
   res.json(rows.map(r => ({
-    id: r.id, username: r.username, roles: r.roles || [],
+    id: r.id, username: r.username, email: r.email || null, roles: r.roles || [],
     setor: r.setor || null, funcao: r.funcao || null,
     operacao: r.operacao || null,
     operacao_id: r.operacao_id != null ? Number(r.operacao_id) : null,
@@ -251,7 +251,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
        '[]'::json AS operacoes`;
   const extraGroup = useOper ? `, ${operLabelExpr}, up.operacao_id` : '';
   const q = `
-    SELECT u.id::text AS id, u.username::text AS username, u.roles,
+    SELECT u.id::text AS id, u.username::text AS username, u.email, u.roles,
            s.name AS setor, f.name AS funcao
            ${operSelect}
            ${operListSelect}
@@ -262,7 +262,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
       ${operJoin}
       ${operListJoin}
      WHERE u.id = $1
-     GROUP BY u.id, u.username, u.roles, s.name, f.name${extraGroup}
+     GROUP BY u.id, u.username, u.email, u.roles, s.name, f.name${extraGroup}
      LIMIT 1`;
   const { rows } = await pool.query(q, [uid]);
   const r = rows[0];
@@ -278,7 +278,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
   );
 
   res.json({
-    user:    { id: r.id, username: r.username, roles: r.roles || [] },
+    user:    { id: r.id, username: r.username, email: r.email || null, roles: r.roles || [] },
     profile: {
       setor: r.setor || null,
       funcao: r.funcao || null,

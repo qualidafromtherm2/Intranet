@@ -223,7 +223,7 @@ router.get('/operacoes', async (_req, res) => {
 
 /* ======= CRIAR COLABORADOR ======= */
 router.post('/', async (req, res) => {
-  const { username, senha, roles = [], funcao_id, setor_id } = req.body || {};
+  const { username, senha, roles, funcao_id, setor_id, email } = req.body || {};
   const bodyOperacaoId = req.body?.operacao_id;
   const rawOperIds = Array.isArray(req.body?.operacao_ids)
     ? req.body.operacao_ids
@@ -266,12 +266,20 @@ const q = await cx.query(
 // (removido: função duplicada syncUserProdutoPermissoes — agora definida no escopo superior)
 
         userRow = q.rows?.[0];
+        
+        // Se conseguiu criar pelo auth_create_user, atualiza o email separadamente
+        if (userRow?.id && email != null) {
+          await cx.query(
+            'UPDATE public.auth_user SET email = $1 WHERE id = $2',
+            [email.trim() || null, userRow.id]
+          );
+        }
       } catch (e) {
         // fallback: insere manualmente com crypt()
 const q = await cx.query(
   `WITH upsert AS (
-  INSERT INTO public.auth_user (username, password_hash, roles)
-  VALUES ($1, crypt(COALESCE($2, gen_random_uuid()::text), gen_salt('bf')), $3::text[])
+  INSERT INTO public.auth_user (username, password_hash, roles, email)
+  VALUES ($1, crypt(COALESCE($2, gen_random_uuid()::text), gen_salt('bf')), $3::text[], $4)
   ON CONFLICT (username) DO NOTHING
   RETURNING *
 )
@@ -279,7 +287,7 @@ SELECT * FROM upsert;
 `,
 
 
-  [username.trim(), senhaProvisoria, roles]
+  [username.trim(), senhaProvisoria, roles, email?.trim() || null]
 );
 
         userRow = q.rows?.[0];
@@ -317,7 +325,7 @@ SELECT * FROM upsert;
 // === Atualizar colaborador (username, função, setor, roles) ===
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { username, funcao_id, setor_id, roles } = req.body || {};
+  const { username, funcao_id, setor_id, roles, email } = req.body || {};
   try { console.log('[PUT /api/colaboradores/:id] RAW BODY', req.body); } catch {}
   const bodyOperacaoId = req.body?.operacao_id;
   const rawOperIds = Array.isArray(req.body?.operacao_ids)
@@ -369,6 +377,16 @@ router.put('/:id', async (req, res) => {
               SET username = $1, updated_at = now()
             WHERE id = $2`,
           [newName, id]
+        );
+      }
+
+      // atualiza email (se veio no body, mesmo que vazio)
+      if (email !== undefined) {
+        await cx.query(
+          `UPDATE public.auth_user
+              SET email = $1, updated_at = now()
+            WHERE id = $2`,
+          [email?.trim() || null, id]
         );
       }
 

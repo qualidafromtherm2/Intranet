@@ -679,7 +679,7 @@
 
         <!-- Modal Seleção de Itens para Compra -->
         <div id="modalSelecaoItensCompra" class="modal" style="display:none;">
-          <div class="modal-content" style="max-width:1100px;max-height:90vh;overflow-y:auto;">
+          <div class="modal-content" style="max-width:1100px;max-height:90vh;display:flex;flex-direction:column;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-cart-plus" style="color:#10b981;"></i>
@@ -687,7 +687,7 @@
               </h3>
               <button class="modal-close" onclick="fecharModalSelecaoItensCompra()">&times;</button>
             </div>
-            <div class="modal-body" style="padding:20px;">
+            <div class="modal-body" style="padding:20px;overflow-y:auto;flex:1;">
               <div style="margin-bottom:16px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;">
                   <div style="display:flex;align-items:center;gap:8px;">
@@ -703,7 +703,7 @@
                 <!-- Itens serão inseridos dinamicamente -->
               </div>
             </div>
-            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;position:sticky;bottom:0;padding:0;margin:0;">
               <button class="btn-secondary" onclick="fecharModalSelecaoItensCompra()">Cancelar</button>
               <button id="btnConcluirSelecaoCompra" class="content-button" onclick="concluirSelecaoItensCompra()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:10px 20px;">
                 <i class="fa-solid fa-check"></i>
@@ -3626,7 +3626,15 @@ function attachDropZone(ul) {
           </label>
         </div>
 
-        <!-- Linha 2 -->
+        <!-- Linha 2 - E-mail -->
+        <div class="form-row">
+          <label class="form-field full">
+            <span class="label">E-mail</span>
+            <input id="colab-email" type="email" placeholder="ex.: joao.silva@empresa.com.br">
+          </label>
+        </div>
+
+        <!-- Linha 3 - Perfis -->
         <div class="form-row">
           <div class="form-field">
             <span class="label">Perfis</span>
