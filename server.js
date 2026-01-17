@@ -2189,7 +2189,6 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
 // ============================================================================
 
 app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
-  chkOmieToken,
   express.json(),
   async (req, res) => {
     try {
