@@ -10142,6 +10142,26 @@ async function upsertFornecedor(cliente) {
 // ============================================================================
 // Upsert de um pedido de compra no banco (tabelas no schema compras)
 // ============================================================================
+
+// Função auxiliar para converter data do formato Omie (DD/MM/YYYY) para PostgreSQL (YYYY-MM-DD)
+function convertOmieDate(omieDate) {
+  if (!omieDate) return null;
+  
+  // Se já estiver no formato YYYY-MM-DD, retorna como está
+  if (omieDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return omieDate;
+  }
+  
+  // Converte DD/MM/YYYY para YYYY-MM-DD
+  const match = omieDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    const [, dia, mes, ano] = match;
+    return `${ano}-${mes}-${dia}`;
+  }
+  
+  return null;
+}
+
 async function upsertPedidoCompra(pedido, eventoWebhook = '') {
   const client = await pool.connect();
   try {
@@ -10216,9 +10236,9 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
       nCodPed,
       cabecalho.cCodIntPed || cabecalho.c_cod_int_ped || null,
       cabecalho.cNumero || cabecalho.c_numero || null,
-      cabecalho.dIncData || cabecalho.d_inc_data || null,
+      convertOmieDate(cabecalho.dIncData || cabecalho.d_inc_data),
       cabecalho.cIncHora || cabecalho.c_inc_hora || null,
-      cabecalho.dDtPrevisao || cabecalho.d_dt_previsao || null,
+      convertOmieDate(cabecalho.dDtPrevisao || cabecalho.d_dt_previsao),
       cabecalho.cEtapa || cabecalho.c_etapa || null,
       cabecalho.cCodStatus || cabecalho.c_cod_status || null,
       cabecalho.cDescStatus || cabecalho.c_desc_status || null,
@@ -10343,7 +10363,7 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
         `, [
           nCodPed,
           parc.nParcela || parc.n_parcela || null,
-          parc.dVencto || parc.d_vencto || null,
+          convertOmieDate(parc.dVencto || parc.d_vencto),
           parc.nValor || parc.n_valor || null,
           parc.nDias || parc.n_dias || null,
           parc.nPercent || parc.n_percent || null,
