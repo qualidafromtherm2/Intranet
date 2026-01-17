@@ -2173,6 +2173,104 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
   }
 );
 
+// ============================================================================
+// WEBHOOK DE PEDIDOS DE COMPRA DA OMIE
+// Eventos: CompraProduto.Incluida, CompraProduto.Alterada, CompraProduto.Cancelada
+//          CompraProduto.Encerrada, CompraProduto.EtapaAlterada, CompraProduto.Excluida
+// ============================================================================
+
+app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+      const event = body.event || body;
+      
+      // Log do webhook recebido
+      console.log('[webhooks/omie/pedidos-compra] Webhook recebido:', JSON.stringify(body, null, 2));
+      
+      // Campos que podem vir no webhook da Omie
+      const topic = body.topic || event.topic || '';  // Ex: "CompraProduto.Incluida"
+      const nCodPed = event.nCodPed || 
+                      event.n_cod_ped || 
+                      body.nCodPed ||
+                      body.n_cod_ped ||
+                      event.codigo_pedido ||
+                      body.codigo_pedido;
+      
+      if (!nCodPed) {
+        console.warn('[webhooks/omie/pedidos-compra] Webhook sem nCodPed:', JSON.stringify(body));
+        return res.json({ ok: true, msg: 'Sem nCodPed para processar' });
+      }
+      
+      console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para pedido ${nCodPed}`);
+      
+      // Se for exclusão ou cancelamento, apenas marca como inativo no banco
+      if (topic.includes('Excluida') || topic.includes('Cancelada') || event.excluido || body.excluido) {
+        await pool.query(`
+          UPDATE compras.pedidos_omie 
+          SET inativo = true, 
+              evento_webhook = $1,
+              data_webhook = NOW(),
+              updated_at = NOW()
+          WHERE n_cod_ped = $2
+        `, [topic, nCodPed]);
+        
+        const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
+        console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} marcado como inativo (${acao})`);
+        
+        return res.json({ 
+          ok: true, 
+          n_cod_ped: nCodPed,
+          acao: acao,
+          atualizado: true 
+        });
+      }
+      
+      // Para inclusão, alteração, encerramento ou mudança de etapa, busca dados completos na API da Omie
+      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            nCodPed: parseInt(nCodPed)
+          }]
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+      
+      const pedido = await response.json();
+      
+      // Atualiza no banco
+      await upsertPedidoCompra(pedido, topic);
+      
+      const acao = topic.includes('Incluida') ? 'incluido' : 
+                   topic.includes('Encerrada') ? 'encerrado' :
+                   topic.includes('EtapaAlterada') ? 'etapa alterada' : 'alterado';
+      console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com sucesso`);
+      
+      res.json({ 
+        ok: true, 
+        n_cod_ped: nCodPed,
+        acao: acao,
+        atualizado: true 
+      });
+    } catch (err) {
+      console.error('[webhooks/omie/pedidos-compra] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
 // Endpoint para sincronizar todos os fornecedores manualmente
 app.post('/api/fornecedores/sync', express.json(), async (req, res) => {
   try {
@@ -2659,12 +2757,23 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     
     // Monta os produtos (usa valor_unitario de cada item)
     const produtos = itens.map((item, index) => {
-      return {
-        nCodProd: item.codigo_produto_omie || null,
+      const produto = {
         nQtde: item.quantidade || 0,
         nValUnit: item.valor_unitario || null,
         cObs: item.observacao || null
       };
+      
+      // Prioriza nCodProd (código Omie numérico), senão usa cProduto (código interno)
+      if (item.codigo_produto_omie) {
+        produto.nCodProd = item.codigo_produto_omie;
+      } else if (item.produto_codigo) {
+        produto.cProduto = item.produto_codigo;
+        console.log(`   ⚠️ Item ${index + 1}: Usando cProduto (${item.produto_codigo}) pois nCodProd não disponível`);
+      } else {
+        console.log(`   ❌ Item ${index + 1}: Sem código Omie nem código interno!`);
+      }
+      
+      return produto;
     });
     
     // Monta o frete se incluído
@@ -2737,13 +2846,18 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     console.log('   Número Pedido:', data.cNumero);
     console.log('   Código Pedido:', data.nCodPed || data.cCodIntPed);
     
-    // Atualiza status dos itens para "compra realizada"
-    console.log('\n🔄 Atualizando status dos itens...');
+    // Atualiza status dos itens para "compra realizada" e salva dados do pedido Omie
+    console.log('\n🔄 Atualizando status e dados do pedido Omie nos itens...');
     await pool.query(
-      'UPDATE compras.solicitacao_compras SET status = $1 WHERE numero_pedido = $2',
-      ['compra realizada', numero_pedido]
+      `UPDATE compras.solicitacao_compras 
+       SET status = $1, nCodPed = $2, cNumero = $3 
+       WHERE numero_pedido = $4`,
+      ['compra realizada', data.nCodPed, data.cNumero, numero_pedido]
     );
-    console.log(`✅ ${itens.length} item(ns) atualizado(s) para 'compra realizada'`);
+    console.log(`✅ ${itens.length} item(ns) atualizado(s):`);
+    console.log(`   - Status: 'compra realizada'`);
+    console.log(`   - nCodPed: ${data.nCodPed}`);
+    console.log(`   - cNumero: ${data.cNumero}`);
     
     console.log('\n========================================');
     console.log('✅ PROCESSO CONCLUÍDO COM SUCESSO!');
@@ -9848,6 +9962,250 @@ async function upsertFornecedor(cliente) {
   }
 }
 
+// ============================================================================
+// Upsert de um pedido de compra no banco (tabelas no schema compras)
+// ============================================================================
+async function upsertPedidoCompra(pedido, eventoWebhook = '') {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Extrai os dados do cabeçalho
+    const cabecalho = pedido.cabecalho || pedido.cabecalho_consulta || {};
+    const produtos = pedido.produtos || pedido.produtos_consulta || [];
+    const frete = pedido.frete || pedido.frete_consulta || {};
+    const parcelas = pedido.parcelas || pedido.parcelas_consulta || [];
+    const departamentos = pedido.departamentos || pedido.departamentos_consulta || [];
+    
+    const nCodPed = cabecalho.nCodPed || cabecalho.n_cod_ped;
+    
+    if (!nCodPed) {
+      throw new Error('nCodPed não encontrado no pedido');
+    }
+    
+    // 1. Upsert do cabeçalho
+    await client.query(`
+      INSERT INTO compras.pedidos_omie (
+        n_cod_ped, c_cod_int_ped, c_numero,
+        d_inc_data, c_inc_hora, d_dt_previsao,
+        c_etapa, c_cod_status, c_desc_status,
+        n_cod_for, c_cod_int_for, c_cnpj_cpf_for,
+        c_cod_parc, n_qtde_parc,
+        c_cod_categ, n_cod_compr, c_contato, c_contrato,
+        n_cod_cc, n_cod_int_cc, n_cod_proj,
+        c_num_pedido, c_obs, c_obs_int, c_email_aprovador,
+        evento_webhook, data_webhook, updated_at
+      )
+      VALUES (
+        $1, $2, $3,
+        $4, $5, $6,
+        $7, $8, $9,
+        $10, $11, $12,
+        $13, $14,
+        $15, $16, $17, $18,
+        $19, $20, $21,
+        $22, $23, $24, $25,
+        $26, NOW(), NOW()
+      )
+      ON CONFLICT (n_cod_ped) DO UPDATE SET
+        c_cod_int_ped = EXCLUDED.c_cod_int_ped,
+        c_numero = EXCLUDED.c_numero,
+        d_inc_data = EXCLUDED.d_inc_data,
+        c_inc_hora = EXCLUDED.c_inc_hora,
+        d_dt_previsao = EXCLUDED.d_dt_previsao,
+        c_etapa = EXCLUDED.c_etapa,
+        c_cod_status = EXCLUDED.c_cod_status,
+        c_desc_status = EXCLUDED.c_desc_status,
+        n_cod_for = EXCLUDED.n_cod_for,
+        c_cod_int_for = EXCLUDED.c_cod_int_for,
+        c_cnpj_cpf_for = EXCLUDED.c_cnpj_cpf_for,
+        c_cod_parc = EXCLUDED.c_cod_parc,
+        n_qtde_parc = EXCLUDED.n_qtde_parc,
+        c_cod_categ = EXCLUDED.c_cod_categ,
+        n_cod_compr = EXCLUDED.n_cod_compr,
+        c_contato = EXCLUDED.c_contato,
+        c_contrato = EXCLUDED.c_contrato,
+        n_cod_cc = EXCLUDED.n_cod_cc,
+        n_cod_int_cc = EXCLUDED.n_cod_int_cc,
+        n_cod_proj = EXCLUDED.n_cod_proj,
+        c_num_pedido = EXCLUDED.c_num_pedido,
+        c_obs = EXCLUDED.c_obs,
+        c_obs_int = EXCLUDED.c_obs_int,
+        c_email_aprovador = EXCLUDED.c_email_aprovador,
+        evento_webhook = EXCLUDED.evento_webhook,
+        data_webhook = NOW(),
+        updated_at = NOW()
+    `, [
+      nCodPed,
+      cabecalho.cCodIntPed || cabecalho.c_cod_int_ped || null,
+      cabecalho.cNumero || cabecalho.c_numero || null,
+      cabecalho.dIncData || cabecalho.d_inc_data || null,
+      cabecalho.cIncHora || cabecalho.c_inc_hora || null,
+      cabecalho.dDtPrevisao || cabecalho.d_dt_previsao || null,
+      cabecalho.cEtapa || cabecalho.c_etapa || null,
+      cabecalho.cCodStatus || cabecalho.c_cod_status || null,
+      cabecalho.cDescStatus || cabecalho.c_desc_status || null,
+      cabecalho.nCodFor || cabecalho.n_cod_for || null,
+      cabecalho.cCodIntFor || cabecalho.c_cod_int_for || null,
+      cabecalho.cCnpjCpfFor || cabecalho.c_cnpj_cpf_for || null,
+      cabecalho.cCodParc || cabecalho.c_cod_parc || null,
+      cabecalho.nQtdeParc || cabecalho.n_qtde_parc || null,
+      cabecalho.cCodCateg || cabecalho.c_cod_categ || null,
+      cabecalho.nCodCompr || cabecalho.n_cod_compr || null,
+      cabecalho.cContato || cabecalho.c_contato || null,
+      cabecalho.cContrato || cabecalho.c_contrato || null,
+      cabecalho.nCodCC || cabecalho.n_cod_cc || null,
+      cabecalho.nCodIntCC || cabecalho.n_cod_int_cc || null,
+      cabecalho.nCodProj || cabecalho.n_cod_proj || null,
+      cabecalho.cNumPedido || cabecalho.c_num_pedido || null,
+      cabecalho.cObs || cabecalho.c_obs || null,
+      cabecalho.cObsInt || cabecalho.c_obs_int || null,
+      cabecalho.cEmailAprovador || cabecalho.c_email_aprovador || null,
+      eventoWebhook
+    ]);
+    
+    // 2. Remove produtos antigos e insere novos
+    await client.query('DELETE FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1', [nCodPed]);
+    
+    if (Array.isArray(produtos) && produtos.length > 0) {
+      for (const prod of produtos) {
+        await client.query(`
+          INSERT INTO compras.pedidos_omie_produtos (
+            n_cod_ped, c_cod_int_item, n_cod_item,
+            c_cod_int_prod, n_cod_prod, c_produto, c_descricao,
+            c_ncm, c_unidade, c_ean, n_peso_liq, n_peso_bruto,
+            n_qtde, n_qtde_rec, n_val_unit, n_val_merc, n_desconto, n_val_tot,
+            n_valor_icms, n_valor_st, n_valor_ipi, n_valor_pis, n_valor_cofins,
+            n_frete, n_seguro, n_despesas,
+            c_obs, c_mkp_atu_pv, c_mkp_atu_sm, n_mkp_perc,
+            codigo_local_estoque, c_cod_categ
+          )
+          VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+            $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+            $24, $25, $26, $27, $28, $29, $30, $31, $32
+          )
+        `, [
+          nCodPed,
+          prod.cCodIntItem || prod.c_cod_int_item || null,
+          prod.nCodItem || prod.n_cod_item || null,
+          prod.cCodIntProd || prod.c_cod_int_prod || null,
+          prod.nCodProd || prod.n_cod_prod || null,
+          prod.cProduto || prod.c_produto || null,
+          prod.cDescricao || prod.c_descricao || null,
+          prod.cNCM || prod.c_ncm || null,
+          prod.cUnidade || prod.c_unidade || null,
+          prod.cEAN || prod.c_ean || null,
+          prod.nPesoLiq || prod.n_peso_liq || null,
+          prod.nPesoBruto || prod.n_peso_bruto || null,
+          prod.nQtde || prod.n_qtde || null,
+          prod.nQtdeRec || prod.n_qtde_rec || null,
+          prod.nValUnit || prod.n_val_unit || null,
+          prod.nValMerc || prod.n_val_merc || null,
+          prod.nDesconto || prod.n_desconto || null,
+          prod.nValTot || prod.n_val_tot || null,
+          prod.nValorIcms || prod.n_valor_icms || null,
+          prod.nValorSt || prod.n_valor_st || null,
+          prod.nValorIpi || prod.n_valor_ipi || null,
+          prod.nValorPis || prod.n_valor_pis || null,
+          prod.nValorCofins || prod.n_valor_cofins || null,
+          prod.nFrete || prod.n_frete || null,
+          prod.nSeguro || prod.n_seguro || null,
+          prod.nDespesas || prod.n_despesas || null,
+          prod.cObs || prod.c_obs || null,
+          prod.cMkpAtuPv || prod.c_mkp_atu_pv || null,
+          prod.cMkpAtuSm || prod.c_mkp_atu_sm || null,
+          prod.nMkpPerc || prod.n_mkp_perc || null,
+          prod.codigo_local_estoque || null,
+          prod.cCodCateg || prod.c_cod_categ || null
+        ]);
+      }
+    }
+    
+    // 3. Upsert do frete (1:1 com pedido)
+    await client.query('DELETE FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1', [nCodPed]);
+    
+    if (frete && Object.keys(frete).length > 0) {
+      await client.query(`
+        INSERT INTO compras.pedidos_omie_frete (
+          n_cod_ped, n_cod_transp, c_cod_int_transp, c_tp_frete,
+          c_placa, c_uf, n_qtd_vol, c_esp_vol, c_mar_vol, c_num_vol,
+          n_peso_liq, n_peso_bruto, n_val_frete, n_val_seguro, n_val_outras, c_lacre
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      `, [
+        nCodPed,
+        frete.nCodTransp || frete.n_cod_transp || null,
+        frete.cCodIntTransp || frete.c_cod_int_transp || null,
+        frete.cTpFrete || frete.c_tp_frete || null,
+        frete.cPlaca || frete.c_placa || null,
+        frete.cUF || frete.c_uf || null,
+        frete.nQtdVol || frete.n_qtd_vol || null,
+        frete.cEspVol || frete.c_esp_vol || null,
+        frete.cMarVol || frete.c_mar_vol || null,
+        frete.cNumVol || frete.c_num_vol || null,
+        frete.nPesoLiq || frete.n_peso_liq || null,
+        frete.nPesoBruto || frete.n_peso_bruto || null,
+        frete.nValFrete || frete.n_val_frete || null,
+        frete.nValSeguro || frete.n_val_seguro || null,
+        frete.nValOutras || frete.n_val_outras || null,
+        frete.cLacre || frete.c_lacre || null
+      ]);
+    }
+    
+    // 4. Remove parcelas antigas e insere novas
+    await client.query('DELETE FROM compras.pedidos_omie_parcelas WHERE n_cod_ped = $1', [nCodPed]);
+    
+    if (Array.isArray(parcelas) && parcelas.length > 0) {
+      for (const parc of parcelas) {
+        await client.query(`
+          INSERT INTO compras.pedidos_omie_parcelas (
+            n_cod_ped, n_parcela, d_vencto, n_valor, n_dias, n_percent, c_tipo_doc
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [
+          nCodPed,
+          parc.nParcela || parc.n_parcela || null,
+          parc.dVencto || parc.d_vencto || null,
+          parc.nValor || parc.n_valor || null,
+          parc.nDias || parc.n_dias || null,
+          parc.nPercent || parc.n_percent || null,
+          parc.cTipoDoc || parc.c_tipo_doc || null
+        ]);
+      }
+    }
+    
+    // 5. Remove departamentos antigos e insere novos
+    await client.query('DELETE FROM compras.pedidos_omie_departamentos WHERE n_cod_ped = $1', [nCodPed]);
+    
+    if (Array.isArray(departamentos) && departamentos.length > 0) {
+      for (const dept of departamentos) {
+        await client.query(`
+          INSERT INTO compras.pedidos_omie_departamentos (
+            n_cod_ped, c_cod_depto, n_perc, n_valor
+          )
+          VALUES ($1, $2, $3, $4)
+        `, [
+          nCodPed,
+          dept.cCodDepto || dept.c_cod_depto || null,
+          dept.nPerc || dept.n_perc || null,
+          dept.nValor || dept.n_valor || null
+        ]);
+      }
+    }
+    
+    await client.query('COMMIT');
+    console.log(`[PedidosCompra] ✓ Pedido ${nCodPed} sincronizado com sucesso`);
+    
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[PedidosCompra] ✗ Erro ao fazer upsert do pedido:', e);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // Gera número único de pedido (formato: YYYYMMDD-HHMMSS-RANDOM)
 function gerarNumeroPedido() {
   const now = new Date();
@@ -9967,9 +10325,9 @@ app.post('/api/compras/pedido', async (req, res) => {
         }
         
         // Define status inicial baseado no retorno_cotacao
-        // Se retorno_cotacao = 'Não' -> 'aguardando compra'
-        // Se retorno_cotacao = 'Sim' -> 'aguardando cotação'
-        const statusInicial = (retorno_cotacao === 'Não') ? 'aguardando compra' : 'aguardando cotação';
+        // Se retorno_cotacao = 'N' ou 'Não' -> 'aguardando compra'
+        // Se retorno_cotacao = 'S' ou 'Sim' -> 'aguardando cotação'
+        const statusInicial = (retorno_cotacao === 'N' || retorno_cotacao === 'Não') ? 'aguardando compra' : 'aguardando cotação';
         
         // Insere item sem numero_pedido (NULL) - será preenchido em etapa posterior
         const result = await client.query(`
@@ -10290,7 +10648,9 @@ app.get('/api/compras/minhas', async (req, res) => {
         centro_custo,
         objetivo_compra,
         created_at,
-        updated_at
+        updated_at,
+        cnumero AS "cNumero",
+        ncodped AS "nCodPed"
       FROM compras.solicitacao_compras
       WHERE solicitante = $1
       ORDER BY created_at DESC
@@ -10328,7 +10688,9 @@ app.get('/api/compras/todas', async (req, res) => {
         familia_produto,
         anexos,
         created_at,
-        updated_at
+        updated_at,
+        cnumero AS "cNumero",
+        ncodped AS "nCodPed"
       FROM compras.solicitacao_compras
       ORDER BY created_at DESC
       LIMIT 1000

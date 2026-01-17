@@ -5009,7 +5009,7 @@ if (sacSendBtn) {
         if (sacFileInfoEtiqueta) sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
         if (sacFileInfoDeclaracao) sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
         sacObservacao.value = '';
-        try { await carregarSacSolicitacoes(); } catch {}
+        try { await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }); } catch {}
       } else {
         setStatus(data.error || 'Falha ao registrar.', true);
       }
@@ -16196,20 +16196,74 @@ async function renderComprasKanban() {
       // Atualiza contador
       if (countBadge) countBadge.textContent = itens.length;
       
-      // Renderiza cards - cada item individualmente (sem agrupamento)
+      // Status que devem ser agrupados por número do pedido Omie (cNumero)
+      const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
+      const deveAgrupar = statusAgrupados.includes(status);
+      
+      // Renderiza cards
       if (cardsContainer) {
         if (itens.length === 0) {
           cardsContainer.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
         } else {
-          // Define altura máxima e overflow para barra de rolagem
-          cardsContainer.style.maxHeight = '600px';
-          cardsContainer.style.overflowY = 'auto';
+          // Aplica barra de rolagem mantendo altura original do kanban
+          if (!cardsContainer.style.overflowY) {
+            cardsContainer.style.overflowY = 'auto';
+          }
           
-          cardsContainer.innerHTML = itens.map(item => {
-            const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
-            const previsao = item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-';
+          let htmlContent = '';
+          
+          if (deveAgrupar) {
+            // Agrupa itens por cNumero (número do pedido Omie)
+            const grupos = {};
+            itens.forEach(item => {
+              const chave = item.cNumero || 'sem_pedido';
+              if (!grupos[chave]) grupos[chave] = [];
+              grupos[chave].push(item);
+            });
             
-            return `
+            // Renderiza cada grupo
+            Object.keys(grupos).forEach(cNumero => {
+              const itensGrupo = grupos[cNumero];
+              
+              htmlContent += `
+                <div 
+                  onclick="abrirModalPedidoAgrupado('${cNumero}', ${JSON.stringify(itensGrupo.map(i => i.id)).replace(/"/g, '&quot;')})"
+                  style="
+                    margin-bottom:12px;
+                    border:2px solid #3b82f6;
+                    border-radius:8px;
+                    overflow:hidden;
+                    background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);
+                    color:white;
+                    padding:12px 16px;
+                    font-weight:600;
+                    font-size:13px;
+                    display:flex;
+                    justify-content:space-between;
+                    align-items:center;
+                    cursor:pointer;
+                    transition:all 0.2s;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1);
+                  "
+                  onmouseover="this.style.background='linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.3)'"
+                  onmouseout="this.style.background='linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';this.style.transform='translateY(0)';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+                  <span><i class="fa-solid fa-file-invoice"></i> Pedido: ${cNumero !== 'sem_pedido' ? cNumero : 'Não gerado'}</span>
+                  <span style="background:rgba(255,255,255,0.25);padding:4px 12px;border-radius:12px;font-size:12px;font-weight:700;">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
+                </div>
+              `;
+            });
+            
+          } else {
+            // Renderização normal (sem agrupamento)
+            htmlContent = itens.map(item => {
+              const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+              const previsao = item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-';
+              
+              // Para "Aguardando Compra", não exibe numero_pedido
+              const mostrarNumeroPedido = status !== 'aguardando compra' && (item.cNumero || item.numero_pedido);
+              const numeroPedidoExibir = item.cNumero || item.numero_pedido;
+              
+              return `
               <div class="kanban-card" data-item-id="${item.id}" style="
                 background:#ffffff;
                 border:1px solid #e5e7eb;
@@ -16223,7 +16277,7 @@ async function renderComprasKanban() {
               onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                   <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
-                  ${item.numero_pedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</div>` : ''}
+                  ${mostrarNumeroPedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${numeroPedidoExibir}</div>` : ''}
                 </div>
                 <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
                   ${escapeHtml(item.produto_codigo || '-')}
@@ -16253,15 +16307,128 @@ async function renderComprasKanban() {
                 ` : ''}
               </div>
             `;
-          }).join('');
+            }).join('');
+          }
+          
+          cardsContainer.innerHTML = htmlContent;
         }
       }
     });
-    
   } catch (err) {
-    console.error('[COMPRAS] Erro ao renderizar kanban:', err);
+    console.error('[Kanban Compras] Erro ao renderizar:', err);
   }
 }
+
+// Abre modal com detalhes de um pedido agrupado
+async function abrirModalPedidoAgrupado(cNumero, idsItens) {
+  try {
+    // Busca detalhes de todos os itens do grupo
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar detalhes');
+    
+    const data = await resp.json();
+    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    
+    // Filtra apenas os itens deste pedido
+    const itensPedido = todosItens.filter(item => 
+      item.cNumero === cNumero || (cNumero === 'sem_pedido' && !item.cNumero)
+    );
+    
+    if (itensPedido.length === 0) {
+      alert('Nenhum item encontrado para este pedido');
+      return;
+    }
+    
+    // Monta HTML da tabela
+    const tabelaHtml = `
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:#f3f4f6;border-bottom:2px solid #e5e7eb;">
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">ID</th>
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Código</th>
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Descrição</th>
+              <th style="padding:10px;text-align:center;font-weight:600;color:#374151;">Qtd</th>
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Solicitante</th>
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Departamento</th>
+              <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itensPedido.map((item, idx) => `
+              <tr style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}">
+                <td style="padding:10px;color:#6b7280;">${item.id}</td>
+                <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
+                <td style="padding:10px;color:#374151;max-width:300px;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
+                <td style="padding:10px;text-align:center;font-weight:600;color:#1f2937;">${item.quantidade}</td>
+                <td style="padding:10px;color:#374151;">${escapeHtml(item.solicitante || '-')}</td>
+                <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
+                <td style="padding:10px;">
+                  <span style="background:#dbeafe;color:#1e40af;padding:4px 8px;border-radius:4px;font-size:10px;font-weight:600;">
+                    ${escapeHtml(item.status || '-')}
+                  </span>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      
+      <div style="margin-top:20px;padding:16px;background:#f0f9ff;border:2px solid #3b82f6;border-radius:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+          <div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Total de Itens</div>
+            <div style="font-size:20px;font-weight:700;color:#1f2937;">${itensPedido.length}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Número do Pedido</div>
+            <div style="font-size:18px;font-weight:700;color:#3b82f6;">${cNumero !== 'sem_pedido' ? cNumero : 'Não gerado'}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Quantidade Total</div>
+            <div style="font-size:20px;font-weight:700;color:#1f2937;">${itensPedido.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Cria e abre modal
+    const modalId = 'modalPedidoAgrupado';
+    let modal = document.getElementById(modalId);
+    
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = modalId;
+      modal.className = 'modal';
+      modal.style.display = 'none';
+      modal.style.zIndex = '10002';
+      document.body.appendChild(modal);
+    }
+    
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:1200px;width:90%;max-height:80vh;overflow-y:auto;">
+        <div class="modal-header">
+          <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
+            <span>Detalhes do Pedido ${cNumero !== 'sem_pedido' ? cNumero : ''}</span>
+          </h3>
+          <button class="modal-close" onclick="document.getElementById('${modalId}').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:20px;">
+          ${tabelaHtml}
+        </div>
+      </div>
+    `;
+    
+    modal.style.display = 'flex';
+    
+  } catch (err) {
+    console.error('[Modal Pedido Agrupado] Erro:', err);
+    alert('Erro ao carregar detalhes do pedido: ' + err.message);
+  }
+}
+
+window.abrirModalPedidoAgrupado = abrirModalPedidoAgrupado;
 
 // ========== MODAL SELEÇÃO DE ITENS PARA COMPRA ==========
 
@@ -17478,6 +17645,9 @@ async function abrirModalCatalogoOmie() {
   
   modal.style.display = 'flex';
   
+  // Inicializa contador de carrinho
+  atualizarContadorCatalogo();
+  
   try {
     // Busca produtos da Omie
     const resp = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
@@ -17679,31 +17849,13 @@ function renderizarCatalogoOmie(produtos) {
               style="width:100%;padding:6px;border:1px solid #10b981;border-radius:4px;font-size:10px;background:#f0fdf4;"
             />
           </div>
-          
-          <!-- Departamento -->
-          <div style="margin-top:8px;">
-            <select 
-              id="catalogo-dept-${produto.codigo}" 
-              style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;background:white;">
-              <option value="">Departamento *</option>
-            </select>
-          </div>
-          
-          <!-- Centro de Custo -->
-          <div style="margin-top:6px;">
-            <select 
-              id="catalogo-cc-${produto.codigo}" 
-              style="width:100%;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:10px;background:white;">
-              <option value="">Centro de Custo *</option>
-            </select>
-          </div>
         </div>
       </div>
     `;
   }).join('');
 }
 
-// Carrega departamentos nos selects do catálogo
+// Carrega departamentos no select global do catálogo
 async function carregarDepartamentosCatalogo() {
   try {
     const resp = await fetch('/api/compras/departamentos');
@@ -17712,22 +17864,23 @@ async function carregarDepartamentosCatalogo() {
     if (data.ok && data.departamentos) {
       window.catalogoDepartamentos = data.departamentos;
       
-      // Atualiza todos os selects de departamento no catálogo
-      document.querySelectorAll('[id^="catalogo-dept-"]').forEach(select => {
-        const valorAtual = select.value;
-        select.innerHTML = '<option value="">Departamento *</option>' +
+      // Atualiza o select global de departamento
+      const selectGlobal = document.getElementById('catalogoDepartamentoGlobal');
+      if (selectGlobal) {
+        const valorAtual = selectGlobal.value;
+        selectGlobal.innerHTML = '<option value="">Selecione...</option>' +
           data.departamentos.map(d => 
             `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`
           ).join('');
-        if (valorAtual) select.value = valorAtual;
-      });
+        if (valorAtual) selectGlobal.value = valorAtual;
+      }
     }
   } catch (err) {
     console.error('[Catálogo] Erro ao carregar departamentos:', err);
   }
 }
 
-// Carrega centros de custo nos selects do catálogo
+// Carrega centros de custo no select global do catálogo
 async function carregarCentrosCustoCatalogo() {
   try {
     const resp = await fetch('/api/compras/centros-custo');
@@ -17736,15 +17889,16 @@ async function carregarCentrosCustoCatalogo() {
     if (data.ok && data.centros) {
       window.catalogoCentrosCusto = data.centros;
       
-      // Atualiza todos os selects de centro de custo no catálogo
-      document.querySelectorAll('[id^="catalogo-cc-"]').forEach(select => {
-        const valorAtual = select.value;
-        select.innerHTML = '<option value="">Centro de Custo *</option>' +
+      // Atualiza o select global de centro de custo
+      const selectGlobal = document.getElementById('catalogoCentroCustoGlobal');
+      if (selectGlobal) {
+        const valorAtual = selectGlobal.value;
+        selectGlobal.innerHTML = '<option value="">Selecione...</option>' +
           data.centros.map(c => 
             `<option value="${escapeHtml(c.nome)}">${escapeHtml(c.nome)}</option>`
           ).join('');
-        if (valorAtual) select.value = valorAtual;
-      });
+        if (valorAtual) selectGlobal.value = valorAtual;
+      }
     }
   } catch (err) {
     console.error('[Catálogo] Erro ao carregar centros de custo:', err);
@@ -17816,17 +17970,35 @@ function limparFiltrosCatalogo() {
 
 // Seleciona produto do catálogo e adiciona direto ao carrinho
 function selecionarProdutoCatalogo(codigo, descricao) {
-  // Captura dados do card
+  // Captura dados GLOBAIS do topo do modal
+  const selectDeptGlobal = document.getElementById('catalogoDepartamentoGlobal');
+  const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
+  const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
+  
+  const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
+  const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
+  const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
+  
+  // Validações dos campos globais
+  if (!departamento) {
+    alert('Selecione o departamento no topo do catálogo!');
+    selectDeptGlobal?.focus();
+    return;
+  }
+  
+  if (!centroCusto) {
+    alert('Selecione o centro de custo no topo do catálogo!');
+    selectCCGlobal?.focus();
+    return;
+  }
+  
+  // Captura dados específicos do produto
   const inputQtd = document.getElementById(`catalogo-qtd-${codigo}`);
   const inputPrazo = document.getElementById(`catalogo-prazo-${codigo}`);
   const prazoContainer = document.getElementById(`catalogo-prazo-container-${codigo}`);
-  const selectDept = document.getElementById(`catalogo-dept-${codigo}`);
-  const selectCC = document.getElementById(`catalogo-cc-${codigo}`);
   
   const quantidade = inputQtd ? parseInt(inputQtd.value) || 1 : 1;
   const prazo = (prazoContainer && prazoContainer.style.display !== 'none' && inputPrazo) ? inputPrazo.value : '';
-  const departamento = selectDept ? selectDept.value.trim() : '';
-  const centroCusto = selectCC ? selectCC.value.trim() : '';
   
   // Validações
   if (quantidade < 1) {
@@ -17834,37 +18006,32 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     return;
   }
   
-  if (!departamento) {
-    alert('Selecione o departamento!');
-    selectDept?.focus();
-    return;
-  }
+  // Busca o produto completo no catálogo para pegar a família
+  const produtoCatalogo = (window.produtosCatalogoOmie || []).find(p => p.codigo === codigo);
+  const familiaDescricao = produtoCatalogo ? produtoCatalogo.descricao_familia : null;
   
-  if (!centroCusto) {
-    alert('Selecione o centro de custo!');
-    selectCC?.focus();
-    return;
-  }
-  
-  // Adiciona direto ao carrinho
+  // Adiciona direto ao carrinho com os dados globais
   window.carrinhoCompras.push({
     produto_codigo: codigo,
     produto_descricao: descricao,
     quantidade: quantidade,
     prazo_solicitado: prazo || null,
     familia_codigo: null,
-    familia_nome: null,
+    familia_nome: familiaDescricao,
     observacao: '',
     departamento: departamento,
     centro_custo: centroCusto,
     codigo_produto_omie: null,
     objetivo_compra: 'Compra via catálogo Omie',
     resp_inspecao_recebimento: '',
-    retorno_cotacao: 'N'
+    retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N'
   });
   
   // Renderiza carrinho atualizado
   renderCarrinhoCompras();
+  
+  // Atualiza contador no modal do catálogo
+  atualizarContadorCatalogo();
   
   // Feedback visual
   const btn = event?.target?.closest('button');
@@ -17886,6 +18053,24 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   
   // NÃO fecha o catálogo para permitir adicionar mais produtos
   // fecharModalCatalogoOmie();
+}
+
+// Atualiza contador de itens no carrinho do catálogo
+function atualizarContadorCatalogo() {
+  const contador = document.getElementById('catalogoNumeroItens');
+  if (contador) {
+    const total = (window.carrinhoCompras || []).length;
+    contador.textContent = total;
+    
+    // Adiciona animação de pulso
+    const container = document.getElementById('catalogoContadorCarrinho');
+    if (container && total > 0) {
+      container.style.transform = 'scale(1.2)';
+      setTimeout(() => {
+        container.style.transform = 'scale(1)';
+      }, 200);
+    }
+  }
 }
 
 // Fecha modal do catálogo
@@ -18776,6 +18961,107 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       };
       const cor = cores[status] || { bg: '#6b7280', bgLight: '#f3f4f6', text: '#374151', icon: 'fa-circle' };
       
+      // Status que devem ser agrupados por número do pedido Omie (cNumero)
+      const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
+      const deveAgrupar = statusAgrupados.includes(status);
+      
+      let cardsHtml = '';
+      
+      if (itens.length === 0) {
+        cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+      } else if (deveAgrupar) {
+        // Agrupa itens por cNumero (número do pedido Omie)
+        const grupos = {};
+        itens.forEach(item => {
+          const chave = item.cNumero || 'sem_pedido';
+          if (!grupos[chave]) grupos[chave] = [];
+          grupos[chave].push(item);
+        });
+        
+        // Renderiza cada grupo
+        cardsHtml = Object.keys(grupos).map(cNumero => {
+          const itensGrupo = grupos[cNumero];
+          return `
+            <div 
+              onclick="abrirModalPedidoAgrupado('${cNumero}', ${JSON.stringify(itensGrupo.map(i => i.id)).replace(/"/g, '&quot;')})"
+              style="
+                margin-bottom:12px;
+                border:2px solid ${cor.bg};
+                border-radius:8px;
+                overflow:hidden;
+                background:linear-gradient(135deg,${cor.bg} 0%,${cor.bg}ee 100%);
+                color:white;
+                padding:12px 16px;
+                font-weight:600;
+                font-size:13px;
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                cursor:pointer;
+                transition:all 0.2s;
+                box-shadow:0 2px 4px rgba(0,0,0,0.1);
+              "
+              onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
+              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+              <span><i class="fa-solid fa-file-invoice"></i> Pedido: ${cNumero !== 'sem_pedido' ? cNumero : 'Não gerado'}</span>
+              <span style="background:rgba(255,255,255,0.25);padding:4px 12px;border-radius:12px;font-size:12px;font-weight:700;">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
+            </div>
+          `;
+        }).join('');
+      } else {
+        // Renderização normal (sem agrupamento)
+        cardsHtml = itens.map(item => {
+          const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
+          // Para "Aguardando Compra", não exibe numero_pedido
+          const mostrarNumeroPedido = status !== 'aguardando compra' && (item.cNumero || item.numero_pedido);
+          const numeroPedidoExibir = item.cNumero || item.numero_pedido;
+          
+          return `
+            <div class="kanban-card" data-item-id="${item.id}" 
+              onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')"
+              style="
+              background:#ffffff;
+              border:1px solid #e5e7eb;
+              border-radius:8px;
+              padding:12px;
+              transition:all 0.2s;
+              box-shadow:0 1px 3px rgba(0,0,0,0.1);
+              flex-shrink:0;
+              cursor:pointer;
+            "
+            onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
+            onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
+              <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+                <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
+                ${mostrarNumeroPedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${numeroPedidoExibir}</div>` : ''}
+              </div>
+              <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
+                ${escapeHtml(item.produto_codigo || '-')}
+              </div>
+              <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
+                ${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 80))}${(item.descricao || item.produto_descricao || '').length > 80 ? '...' : ''}
+              </div>
+              <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <div style="flex:1;">
+                  <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
+                  <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+                </div>
+                <div style="flex:1;">
+                  <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
+                  <div style="font-size:11px;color:#374151;">${prazo}</div>
+                </div>
+              </div>
+              ${item.fornecedor_nome ? `
+                <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
+                  <i class="fa-solid fa-building" style="margin-right:4px;"></i>
+                  ${escapeHtml(item.fornecedor_nome)}
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('');
+      }
+      
       return `
         <div class="kanban-column-minhas" data-status="${status}" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${cor.bg};">
@@ -18786,54 +19072,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
           <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
-            ${itens.length === 0 ? '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>' : 
-              itens.map(item => {
-                const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
-                return `
-                  <div class="kanban-card" data-item-id="${item.id}" 
-                    onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')"
-                    style="
-                    background:#ffffff;
-                    border:1px solid #e5e7eb;
-                    border-radius:8px;
-                    padding:12px;
-                    transition:all 0.2s;
-                    box-shadow:0 1px 3px rgba(0,0,0,0.1);
-                    flex-shrink:0;
-                    cursor:pointer;
-                  "
-                  onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
-                  onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">>
-                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
-                      <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
-                      ${item.numero_pedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${item.numero_pedido}</div>` : ''}
-                    </div>
-                    <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
-                      ${escapeHtml(item.produto_codigo || '-')}
-                    </div>
-                    <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
-                      ${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 80))}${(item.descricao || item.produto_descricao || '').length > 80 ? '...' : ''}
-                    </div>
-                    <div style="display:flex;gap:8px;margin-bottom:8px;">
-                      <div style="flex:1;">
-                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
-                        <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
-                      </div>
-                      <div style="flex:1;">
-                        <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
-                        <div style="font-size:11px;color:#374151;">${prazo}</div>
-                      </div>
-                    </div>
-                    ${item.fornecedor_nome ? `
-                      <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
-                        <i class="fa-solid fa-building" style="margin-right:4px;"></i>
-                        ${escapeHtml(item.fornecedor_nome)}
-                      </div>
-                    ` : ''}
-                  </div>
-                `;
-              }).join('')
-            }
+            ${cardsHtml}
           </div>
         </div>
       `;
