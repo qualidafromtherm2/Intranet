@@ -2290,6 +2290,175 @@ app.post('/api/fornecedores/sync', express.json(), async (req, res) => {
   }
 });
 
+// ============================================================================
+// Endpoint para sincronizar todos os pedidos de compra da Omie manualmente
+// ============================================================================
+app.post('/api/compras/pedidos-omie/sync', express.json(), async (req, res) => {
+  try {
+    const filtros = req.body || {};
+    
+    console.log('[API] Iniciando sincronização de pedidos de compra da Omie...');
+    const result = await syncPedidosCompraOmie(filtros);
+    
+    res.json(result);
+  } catch (err) {
+    console.error('[API /api/compras/pedidos-omie/sync] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para listar pedidos de compra do banco local
+app.get('/api/compras/pedidos-omie', async (req, res) => {
+  try {
+    const { 
+      fornecedor, 
+      etapa, 
+      data_de, 
+      data_ate, 
+      limit = 100,
+      offset = 0
+    } = req.query;
+    
+    let query = 'SELECT * FROM compras.pedidos_omie WHERE 1=1';
+    const params = [];
+    let paramCount = 1;
+    
+    // Filtro por fornecedor
+    if (fornecedor) {
+      query += ` AND n_cod_for = $${paramCount}`;
+      params.push(fornecedor);
+      paramCount++;
+    }
+    
+    // Filtro por etapa
+    if (etapa) {
+      query += ` AND c_etapa = $${paramCount}`;
+      params.push(etapa);
+      paramCount++;
+    }
+    
+    // Filtro por data inicial
+    if (data_de) {
+      query += ` AND d_inc_data >= $${paramCount}`;
+      params.push(data_de);
+      paramCount++;
+    }
+    
+    // Filtro por data final
+    if (data_ate) {
+      query += ` AND d_inc_data <= $${paramCount}`;
+      params.push(data_ate);
+      paramCount++;
+    }
+    
+    // Ordenação e paginação
+    query += ` ORDER BY d_inc_data DESC, n_cod_ped DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+    params.push(limit, offset);
+    
+    const { rows } = await pool.query(query, params);
+    
+    // Buscar total de registros
+    let countQuery = 'SELECT COUNT(*) as total FROM compras.pedidos_omie WHERE 1=1';
+    const countParams = [];
+    let countParamCount = 1;
+    
+    if (fornecedor) {
+      countQuery += ` AND n_cod_for = $${countParamCount}`;
+      countParams.push(fornecedor);
+      countParamCount++;
+    }
+    
+    if (etapa) {
+      countQuery += ` AND c_etapa = $${countParamCount}`;
+      countParams.push(etapa);
+      countParamCount++;
+    }
+    
+    if (data_de) {
+      countQuery += ` AND d_inc_data >= $${countParamCount}`;
+      countParams.push(data_de);
+      countParamCount++;
+    }
+    
+    if (data_ate) {
+      countQuery += ` AND d_inc_data <= $${countParamCount}`;
+      countParams.push(data_ate);
+      countParamCount++;
+    }
+    
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].total);
+    
+    res.json({ 
+      ok: true, 
+      pedidos: rows,
+      total: total,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+  } catch (err) {
+    console.error('[API /api/compras/pedidos-omie] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para consultar um pedido específico com todos os detalhes
+app.get('/api/compras/pedidos-omie/:nCodPed', async (req, res) => {
+  try {
+    const { nCodPed } = req.params;
+    
+    // Buscar cabeçalho
+    const pedidoResult = await pool.query(
+      'SELECT * FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      [nCodPed]
+    );
+    
+    if (pedidoResult.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Pedido não encontrado' });
+    }
+    
+    const pedido = pedidoResult.rows[0];
+    
+    // Buscar produtos
+    const produtosResult = await pool.query(
+      'SELECT * FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1 ORDER BY id',
+      [nCodPed]
+    );
+    
+    // Buscar frete
+    const freteResult = await pool.query(
+      'SELECT * FROM compras.pedidos_omie_frete WHERE n_cod_ped = $1',
+      [nCodPed]
+    );
+    
+    // Buscar parcelas
+    const parcelasResult = await pool.query(
+      'SELECT * FROM compras.pedidos_omie_parcelas WHERE n_cod_ped = $1 ORDER BY n_parcela',
+      [nCodPed]
+    );
+    
+    // Buscar departamentos
+    const departamentosResult = await pool.query(
+      'SELECT * FROM compras.pedidos_omie_departamentos WHERE n_cod_ped = $1',
+      [nCodPed]
+    );
+    
+    res.json({
+      ok: true,
+      pedido: {
+        ...pedido,
+        produtos: produtosResult.rows,
+        frete: freteResult.rows[0] || null,
+        parcelas: parcelasResult.rows,
+        departamentos: departamentosResult.rows
+      }
+    });
+  } catch (err) {
+    console.error('[API /api/compras/pedidos-omie/:nCodPed] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Endpoint para listar fornecedores do banco local
 app.get('/api/fornecedores', async (req, res) => {
   try {
@@ -10225,6 +10394,124 @@ function gerarNumeroPedido() {
   const ss = String(now.getSeconds()).padStart(2, '0');
   const rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `${yyyy}${mm}${dd}-${hh}${min}${ss}-${rand}`;
+}
+
+// ============================================================================
+// Sincroniza todos os pedidos de compra da Omie para o banco de dados local
+// ============================================================================
+async function syncPedidosCompraOmie(filtros = {}) {
+  try {
+    console.log('[PedidosCompra] Iniciando sincronização com Omie...');
+    let pagina = 1;
+    let totalSincronizados = 0;
+    let continuar = true;
+    
+    while (continuar) {
+      const body = {
+        call: 'PesquisarPedCompra',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          nPagina: pagina,
+          nRegsPorPagina: 50,
+          // Filtros opcionais
+          lExibirPedidosPendentes: filtros.pendentes !== false,
+          lExibirPedidosFaturados: filtros.faturados !== false,
+          lExibirPedidosRecebidos: filtros.recebidos !== false,
+          lExibirPedidosCancelados: filtros.cancelados !== false,
+          lExibirPedidosEncerrados: filtros.encerrados !== false,
+          ...(filtros.data_inicial ? { dDataInicial: filtros.data_inicial } : {}),
+          ...(filtros.data_final ? { dDataFinal: filtros.data_final } : {})
+        }]
+      };
+      
+      console.log(`[PedidosCompra] Buscando página ${pagina}...`);
+      
+      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[PedidosCompra] Erro na API Omie: ${response.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const pedidos = data.pedidos_pesquisa || [];
+      const totalPaginas = data.nTotalPaginas || 1;
+      const totalRegistros = data.nTotalRegistros || 0;
+      
+      console.log(`[PedidosCompra] Página ${pagina}/${totalPaginas} - ${pedidos.length} pedidos (Total na Omie: ${totalRegistros})`);
+      
+      if (!pedidos.length) {
+        continuar = false;
+        break;
+      }
+      
+      // Para cada pedido da pesquisa, busca os detalhes completos
+      for (const pedidoResumo of pedidos) {
+        try {
+          const nCodPed = pedidoResumo.cabecalho?.nCodPed || pedidoResumo.cabecalho_consulta?.nCodPed;
+          
+          if (!nCodPed) {
+            console.warn('[PedidosCompra] Pedido sem nCodPed, pulando:', pedidoResumo);
+            continue;
+          }
+          
+          // Consulta detalhes completos do pedido
+          const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              call: 'ConsultarPedCompra',
+              app_key: OMIE_APP_KEY,
+              app_secret: OMIE_APP_SECRET,
+              param: [{ nCodPed: parseInt(nCodPed) }]
+            })
+          });
+          
+          if (!detalhesResponse.ok) {
+            console.error(`[PedidosCompra] Erro ao consultar pedido ${nCodPed}:`, detalhesResponse.status);
+            continue;
+          }
+          
+          const pedidoCompleto = await detalhesResponse.json();
+          
+          // Faz o upsert no banco
+          await upsertPedidoCompra(pedidoCompleto, 'sync');
+          totalSincronizados++;
+          
+          // Log a cada 10 pedidos
+          if (totalSincronizados % 10 === 0) {
+            console.log(`[PedidosCompra] ✓ Progresso: ${totalSincronizados} pedidos sincronizados...`);
+          }
+          
+          // Pequeno delay para não sobrecarregar a API da Omie
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+        } catch (pedidoError) {
+          console.error('[PedidosCompra] Erro ao processar pedido:', pedidoError);
+          // Continua com o próximo pedido
+        }
+      }
+      
+      // Verifica se tem mais páginas
+      if (pagina >= totalPaginas) {
+        continuar = false;
+      } else {
+        pagina++;
+      }
+    }
+    
+    console.log(`[PedidosCompra] ✓✓✓ Sincronização concluída: ${totalSincronizados} pedidos sincronizados com sucesso!`);
+    return { ok: true, total: totalSincronizados };
+  } catch (e) {
+    console.error('[PedidosCompra] ✗ Erro na sincronização:', e);
+    return { ok: false, error: e.message };
+  }
 }
 
 // GET /api/compras/departamentos - Lista departamentos disponíveis
