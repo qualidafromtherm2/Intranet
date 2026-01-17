@@ -5076,7 +5076,46 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const rastStatusDisplay = isFinalizado ? (rastStatus || 'Objeto entregue ao destinatário') : rastStatus;
       const rastQuandoDisplay = isFinalizado ? (finalizadoEm || rastQuando) : rastQuando;
       const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
-      const conteudo = r.conteudo || '—';
+      
+      // Formata o conteúdo como tabela interna com colunas para Conteúdo e Quantidade
+      const conteudoRaw = r.conteudo || '—';
+      let conteudo = '—';
+      
+      if (conteudoRaw !== '—') {
+        try {
+          // Tenta parsear como JSON (novo formato)
+          const items = JSON.parse(conteudoRaw);
+          if (Array.isArray(items) && items.length > 0) {
+            conteudo = `
+              <div style="display:table;width:100%;border-collapse:collapse;">
+                ${items.map((item, idx) => {
+                  // Extrai o primeiro número do conteúdo e adiciona "- " depois dele
+                  let conteudoFormatado = item.conteudo;
+                  const match = item.conteudo.match(/^(\d)(.*)$/);
+                  if (match) {
+                    // Se começa com um número, adiciona "- " depois do primeiro dígito
+                    conteudoFormatado = `${match[1]}- ${match[2]}`;
+                  }
+                  
+                  return `
+                    <div style="display:table-row;${idx > 0 ? 'border-top:1px solid var(--border-color);' : ''}">
+                      <div style="display:table-cell;padding:8px 12px 8px 0;vertical-align:top;width:85%;">${conteudoFormatado}</div>
+                      <div style="display:table-cell;padding:8px 0;vertical-align:top;width:15%;font-weight:600;color:var(--inactive-color);">Qtd: ${item.quantidade}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `;
+          } else {
+            // Formato inválido, usa o texto original
+            conteudo = conteudoRaw.replace(/\n/g, '<br>');
+          }
+        } catch {
+          // Não é JSON, usa o formato antigo (texto com quebras de linha)
+          conteudo = conteudoRaw.replace(/\n/g, '<br>');
+        }
+      }
+      
       const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
       const buttons = [
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
@@ -5097,7 +5136,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${usuario}</td>
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
-            <td style="max-width:260px;">${conteudo}</td>
+            <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelect}</td>
             <td>${buttons || '—'}</td>
           </tr>`;
@@ -5109,7 +5148,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${dataFmt}</td>
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
-            <td style="max-width:260px;">${conteudo}</td>
+            <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelect}</td>
             <td>${buttons || '—'}</td>
           </tr>`;
