@@ -1779,10 +1779,19 @@ function gravarEstoque(obj) {
 
 // valida o token do OMIE presente na query ?token=...
 function chkOmieToken(req, res, next) {
+  // Se OMIE_WEBHOOK_TOKEN não estiver configurado, libera o acesso
+  if (!process.env.OMIE_WEBHOOK_TOKEN || process.env.OMIE_WEBHOOK_TOKEN === 'null') {
+    console.log('[chkOmieToken] Token não configurado, liberando acesso');
+    return next();
+  }
+  
+  // Se estiver configurado, valida o token
   const token = req.query.token || req.headers['x-omie-token'];
   if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
+    console.log('[chkOmieToken] Token inválido ou ausente');
     return res.status(401).json({ ok:false, error:'unauthorized' });
   }
+  
   next();
 }
 
