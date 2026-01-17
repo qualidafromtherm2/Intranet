@@ -340,9 +340,8 @@
                   <button id="comprasAbrirModalBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Adicionar produto ao carrinho">
                     <i class="fa-solid fa-cart-plus" style="font-size:20px;"></i>
                   </button>
-                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;height:44px;" title="Abrir catálogo Omie">
-                    <i class="fa-solid fa-book" style="font-size:16px;"></i>
-                    <span style="font-size:13px;font-weight:600;">Catálogo Omie</span>
+                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Abrir catálogo Omie">
+                    <i class="fa-solid fa-book" style="font-size:18px;"></i>
                   </button>
                 </div>
               </div>
@@ -888,11 +887,17 @@
                 <i class="fa-solid fa-book" style="color:#3b82f6;"></i>
                 <span>Catálogo de Produtos Omie</span>
               </h3>
-              <button class="modal-close" onclick="fecharModalCatalogoOmie()">&times;</button>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:8px 16px;border-radius:20px;font-size:13px;font-weight:700;transition:transform 0.2s ease;">
+                  <i class="fa-solid fa-shopping-cart"></i>
+                  <span id="catalogoNumeroItens">0</span>
+                </div>
+                <button class="modal-close" onclick="fecharModalCatalogoOmie()">&times;</button>
+              </div>
             </div>
             <div class="modal-body" style="padding:20px;">
               <!-- Filtros -->
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;margin-bottom:20px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;margin-bottom:16px;">
                 <div>
                   <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Buscar Produto</label>
                   <input 
@@ -931,6 +936,44 @@
                     <i class="fa-solid fa-eraser"></i>
                     Limpar Filtros
                   </button>
+                </div>
+              </div>
+              
+              <!-- Configurações Globais -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
+                <div>
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
+                    Departamento *
+                  </label>
+                  <select 
+                    id="catalogoDepartamentoGlobal"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                    <option value="">Selecione...</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-coins" style="color:#3b82f6;margin-right:4px;"></i>
+                    Centro de Custo *
+                  </label>
+                  <select 
+                    id="catalogoCentroCustoGlobal"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                    <option value="">Selecione...</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;margin-right:4px;"></i>
+                    Retorno das cotações *
+                  </label>
+                  <select 
+                    id="catalogoRetornoCotacoesGlobal"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                    <option value="nao">Não</option>
+                    <option value="sim">Sim</option>
+                  </select>
                 </div>
               </div>
               
