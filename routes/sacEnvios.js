@@ -109,6 +109,7 @@ function normalizeStatus(statusRaw) {
   return normalized || STATUS_LIST[0];
 }
 
+// Extrai e formata o conteúdo da declaração de conteúdo (PDF)
 function extractConteudo(textRaw) {
   const text = String(textRaw || '');
   const lower = text.toLowerCase();
@@ -138,23 +139,50 @@ function extractConteudo(textRaw) {
 
   const items = [];
   const seen = new Set();
+  
   for (const line of lines) {
     const normalized = line.replace(/\s+/g, ' ').trim();
-    // ignora headers ou linhas puramente numéricas (artefatos de layout)
+    
+    // Ignora headers ou linhas puramente numéricas
     if (!/[A-Za-z]/.test(normalized)) continue;
     if (/^í?tem|^conte(ú|u)do|^quant|^valor/i.test(normalized)) continue;
     if (/(item|ítem).*(conte(ú|u)do)/i.test(normalized)) continue;
     if (/^totais?/i.test(normalized)) break;
-    if (seen.has(normalized)) continue; // evita duplicar página 2
+    if (seen.has(normalized)) continue; // evita duplicar
     seen.add(normalized);
-    items.push({ conteudo: normalized, quantidade: 1 });
+    
+    // Extrai apenas conteúdo e quantidade (ignora coluna Item do PDF)
+    // Quantidade deve ser apenas 1 ou 2 dígitos no FINAL da linha
+    
+    // Remove número inicial (coluna Item do PDF) se existir
+    const withoutLeadingNumber = normalized.replace(/^\d+\s+/, '');
+    
+    // Tenta extrair quantidade: apenas 1 ou 2 dígitos no final
+    const match = withoutLeadingNumber.match(/^(.+?)\s+(\d{1,2})\s*$/);
+    
+    if (match) {
+      const conteudo = match[1].trim();
+      const quantidade = match[2];
+      
+      items.push({
+        conteudo: conteudo,
+        quantidade: quantidade
+      });
+    } else {
+      // Se não encontrou quantidade, adiciona com quantidade 1
+      if (withoutLeadingNumber) {
+        items.push({
+          conteudo: withoutLeadingNumber,
+          quantidade: '1'
+        });
+      }
+    }
   }
 
   if (!items.length) return null;
 
-  return items
-    .map((it, idx) => `Item ${idx + 1}: ${it.conteudo} Quantidade ${it.quantidade}`)
-    .join(' | ');
+  // Retorna em formato JSON para melhor estruturação no frontend
+  return JSON.stringify(items);
 }
 
 const pool = new Pool({
