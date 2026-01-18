@@ -2307,6 +2307,124 @@ app.post('/api/compras/pedidos-omie/sync', express.json(), async (req, res) => {
   }
 });
 
+// Endpoint para testar o que a API da Omie retorna
+app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
+  try {
+    console.log('[API] Testando TODAS as combinações de filtros da API Omie...');
+    
+    const analisarEtapas = (pedidos) => {
+      const etapas = {};
+      for (const ped of (pedidos || [])) {
+        const etapa = ped.cabecalho?.cEtapa || ped.cabecalho_consulta?.cEtapa || 'SEM';
+        etapas[etapa] = (etapas[etapa] || 0) + 1;
+      }
+      return etapas;
+    };
+    
+    const testarFiltro = async (nome, filtros) => {
+      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'PesquisarPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            nPagina: 1,
+            nRegsPorPagina: 50,
+            ...filtros
+          }]
+        })
+      });
+      const data = await response.json();
+      return {
+        nome,
+        filtros_enviados: filtros,
+        total_registros: data.nTotalRegistros || 0,
+        retornados: data.pedidos_pesquisa?.length || 0,
+        etapas: analisarEtapas(data.pedidos_pesquisa),
+        tem_etapa_40_60_80: Object.keys(analisarEtapas(data.pedidos_pesquisa)).some(e => ['40', '60', '80'].includes(e))
+      };
+    };
+    
+    // Testa todas as combinações possíveis
+    const testes = [
+      { nome: "1. Sem filtros (padrão)", filtros: {} },
+      { nome: "2. Apenas pendentes", filtros: { lExibirPedidosPendentes: true } },
+      { nome: "3. Apenas faturados", filtros: { lExibirPedidosFaturados: true } },
+      { nome: "4. Apenas recebidos", filtros: { lExibirPedidosRecebidos: true } },
+      { nome: "5. Apenas cancelados", filtros: { lExibirPedidosCancelados: true } },
+      { nome: "6. Apenas encerrados", filtros: { lExibirPedidosEncerrados: true } },
+      { nome: "7. Faturados + Recebidos", filtros: { 
+        lExibirPedidosFaturados: true,
+        lExibirPedidosRecebidos: true 
+      }},
+      { nome: "8. Parciais (RecParciais)", filtros: { lExibirPedidosRecParciais: true } },
+      { nome: "9. Parciais (FatParciais)", filtros: { lExibirPedidosFatParciais: true } },
+      { nome: "10. Ambos parciais", filtros: { 
+        lExibirPedidosRecParciais: true,
+        lExibirPedidosFatParciais: true 
+      }},
+      { nome: "11. Todos = true", filtros: {
+        lExibirPedidosPendentes: true,
+        lExibirPedidosFaturados: true,
+        lExibirPedidosRecebidos: true,
+        lExibirPedidosCancelados: true,
+        lExibirPedidosEncerrados: true
+      }},
+      { nome: "12. Todos = false", filtros: {
+        lExibirPedidosPendentes: false,
+        lExibirPedidosFaturados: false,
+        lExibirPedidosRecebidos: false,
+        lExibirPedidosCancelados: false,
+        lExibirPedidosEncerrados: false
+      }},
+      { nome: "13. Só FALSE nos pendentes", filtros: {
+        lExibirPedidosPendentes: false
+      }},
+      { nome: "14. Tudo TRUE + Parciais", filtros: {
+        lExibirPedidosPendentes: true,
+        lExibirPedidosFaturados: true,
+        lExibirPedidosRecebidos: true,
+        lExibirPedidosCancelados: true,
+        lExibirPedidosEncerrados: true,
+        lExibirPedidosRecParciais: true,
+        lExibirPedidosFatParciais: true
+      }}
+    ];
+    
+    const resultados = [];
+    for (const teste of testes) {
+      const resultado = await testarFiltro(teste.nome, teste.filtros);
+      resultados.push(resultado);
+      console.log(`[TESTE] ${teste.nome}: ${resultado.total_registros} total, Etapas: ${JSON.stringify(resultado.etapas)}`);
+      // Pequeno delay para não sobrecarregar a API
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Encontra qual teste retornou etapas 40, 60, 80
+    const testeComEtapas = resultados.find(r => r.tem_etapa_40_60_80);
+    
+    const resposta = {
+      ok: true,
+      resumo: {
+        total_testes: resultados.length,
+        encontrou_etapas_40_60_80: !!testeComEtapas,
+        melhor_configuracao: testeComEtapas?.nome || 'Nenhuma configuração retornou etapas 40, 60, 80'
+      },
+      resultados_completos: resultados
+    };
+    
+    console.log('[API] Testes concluídos:', JSON.stringify(resposta.resumo, null, 2));
+    res.json(resposta);
+    
+  } catch (err) {
+    console.error('[API /api/compras/pedidos-omie/teste-api] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+
 // Endpoint para listar pedidos de compra do banco local
 app.get('/api/compras/pedidos-omie', async (req, res) => {
   try {
@@ -10427,22 +10545,43 @@ async function syncPedidosCompraOmie(filtros = {}) {
     let continuar = true;
     
     while (continuar) {
+      // Monta os parâmetros da requisição
+      const param = {
+        nPagina: pagina,
+        nRegsPorPagina: 50
+      };
+      
+      // Só adiciona filtros de status se EXPLICITAMENTE definidos
+      // Se não definir nenhum filtro, a API retorna TODOS os pedidos (comportamento padrão)
+      if (filtros.pendentes !== undefined) {
+        param.lExibirPedidosPendentes = filtros.pendentes;
+      }
+      if (filtros.faturados !== undefined) {
+        param.lExibirPedidosFaturados = filtros.faturados;
+      }
+      if (filtros.recebidos !== undefined) {
+        param.lExibirPedidosRecebidos = filtros.recebidos;
+      }
+      if (filtros.cancelados !== undefined) {
+        param.lExibirPedidosCancelados = filtros.cancelados;
+      }
+      if (filtros.encerrados !== undefined) {
+        param.lExibirPedidosEncerrados = filtros.encerrados;
+      }
+      
+      // Filtros de data (sempre adiciona se definidos)
+      if (filtros.data_inicial) {
+        param.dDataInicial = filtros.data_inicial;
+      }
+      if (filtros.data_final) {
+        param.dDataFinal = filtros.data_final;
+      }
+      
       const body = {
         call: 'PesquisarPedCompra',
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
-        param: [{
-          nPagina: pagina,
-          nRegsPorPagina: 50,
-          // Filtros opcionais
-          lExibirPedidosPendentes: filtros.pendentes !== false,
-          lExibirPedidosFaturados: filtros.faturados !== false,
-          lExibirPedidosRecebidos: filtros.recebidos !== false,
-          lExibirPedidosCancelados: filtros.cancelados !== false,
-          lExibirPedidosEncerrados: filtros.encerrados !== false,
-          ...(filtros.data_inicial ? { dDataInicial: filtros.data_inicial } : {}),
-          ...(filtros.data_final ? { dDataFinal: filtros.data_final } : {})
-        }]
+        param: [param]
       };
       
       console.log(`[PedidosCompra] Buscando página ${pagina}...`);
