@@ -4868,6 +4868,17 @@ if (sacMenuLink) {
   });
 }
 
+// COMPRAS: Configurações de Departamentos e Categorias
+const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
+if (comprasConfigMenuLink) {
+  comprasConfigMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    comprasConfigMenuLink.classList.add('is-active');
+    abrirPainelConfiguracaoCateg();
+  });
+}
+
 const sacAttachEtiquetaBtn = document.getElementById('sacAttachEtiquetaBtn');
 const sacAttachDeclaracaoBtn = document.getElementById('sacAttachDeclaracaoBtn');
 const sacFileInputEtiqueta = document.getElementById('sacFileInputEtiqueta');
@@ -12839,6 +12850,37 @@ async function abrirModalCompras() {
   setTimeout(() => document.getElementById('modalComprasCodigo')?.focus(), 100);
 }
 
+// Mapeamento de Departamentos para Categorias
+window.categoriasPorDepartamento = {
+  'Administrativo': [
+    'Predial',
+    'Imobilizados',
+    'Móveis e Utensilios',
+    'Tecnologia da informação',
+    'Serviços administrativos',
+    'Recursos Humanos',
+    'Suprimentos administrativos'
+  ],
+  'Comercial': [
+    'Vendas',
+    'Visitas/Treinamentos',
+    'Materiais',
+    'Eventos comerciais',
+    'Outros'
+  ],
+  'Produção': [
+    'Certificação e qualidade',
+    'Engenharia',
+    'Ferramentas',
+    'Investimento na produção',
+    'Manutenção',
+    'Maquinas e equipamentos',
+    'Materia prima',
+    'Outros',
+    'P&D'
+  ]
+};
+
 // Carrega opções de departamentos, centros de custo e usuários
 async function carregarDepartamentosECentros() {
   try {
@@ -12852,18 +12894,21 @@ async function carregarDepartamentosECentros() {
         (dataDept.departamentos || []).map(d => 
           `<option value="${window.escapeHtml(d.nome)}">${window.escapeHtml(d.nome)}</option>`
         ).join('');
+      
+      // Adiciona evento de mudança para filtrar categorias
+      selectDept.addEventListener('change', function() {
+        atualizarCategoriasPorDepartamento(this.value);
+        verificarFamiliaObrigatoria(); // Verifica se família é obrigatória
+      });
     }
     
-    // Carrega centros de custo
-    const respCentros = await fetch('/api/compras/centros-custo');
-    const dataCentros = await respCentros.json();
+    // Inicializa o select de categorias vazio
     const selectCentros = document.getElementById('modalComprasCentroCusto');
-    
-    if (selectCentros && dataCentros.ok) {
-      selectCentros.innerHTML = '<option value="">Selecione o centro de custo</option>' +
-        (dataCentros.centros || []).map(c => 
-          `<option value="${window.escapeHtml(c.nome)}">${window.escapeHtml(c.nome)}</option>`
-        ).join('');
+    if (selectCentros) {
+      selectCentros.innerHTML = '<option value="">Selecione primeiro o departamento</option>';
+      
+      // Adiciona evento de mudança para verificar se família é obrigatória
+      selectCentros.addEventListener('change', verificarFamiliaObrigatoria);
     }
     
     // Carrega famílias de produtos
@@ -12912,6 +12957,38 @@ async function carregarDepartamentosECentros() {
   }
 }
 
+// Atualiza as categorias com base no departamento selecionado
+function atualizarCategoriasPorDepartamento(departamento, selectId = 'modalComprasCentroCusto') {
+  const selectCategorias = document.getElementById(selectId);
+  if (!selectCategorias) return;
+  
+  if (!departamento || !window.categoriasPorDepartamento[departamento]) {
+    selectCategorias.innerHTML = '<option value="">Selecione primeiro o departamento</option>';
+    return;
+  }
+  
+  const categorias = window.categoriasPorDepartamento[departamento];
+  selectCategorias.innerHTML = '<option value="">Selecione a categoria</option>' +
+    categorias.map(c => `<option value="${window.escapeHtml(c)}">${window.escapeHtml(c)}</option>`).join('');
+}
+
+// Verifica se o campo Família do Produto deve ser obrigatório
+// Obrigatório apenas quando: Departamento = "Produção" E Categoria = "Materia prima"
+function verificarFamiliaObrigatoria() {
+  const departamento = document.getElementById('modalComprasDepartamento')?.value || '';
+  const categoria = document.getElementById('modalComprasCentroCusto')?.value || '';
+  const indicador = document.getElementById('familiaObrigatorioIndicador');
+  
+  // Mostra asterisco vermelho se for Produção + Materia prima
+  if (indicador) {
+    if (departamento === 'Produção' && categoria === 'Materia prima') {
+      indicador.style.display = 'inline';
+    } else {
+      indicador.style.display = 'none';
+    }
+  }
+}
+
 // Aliases para compatibilidade com a função de edição
 async function loadModalComprasDepartamentos() {
   const respDept = await fetch('/api/compras/departamentos');
@@ -12927,15 +13004,11 @@ async function loadModalComprasDepartamentos() {
 }
 
 async function loadModalComprasCentrosCusto() {
-  const respCentros = await fetch('/api/compras/centros-custo');
-  const dataCentros = await respCentros.json();
+  // Categorias agora são carregadas dinamicamente com base no departamento
+  // Esta função mantida apenas para compatibilidade
   const selectCentros = document.getElementById('modalComprasCentroCusto');
-  
-  if (selectCentros && dataCentros.ok) {
-    selectCentros.innerHTML = '<option value="">Selecione o centro de custo</option>' +
-      (dataCentros.centros || []).map(c => 
-        `<option value="${window.escapeHtml(c.nome)}">${window.escapeHtml(c.nome)}</option>`
-      ).join('');
+  if (selectCentros) {
+    selectCentros.innerHTML = '<option value="">Selecione primeiro o departamento</option>';
   }
 }
 
@@ -12957,12 +13030,139 @@ function fecharModalCompras() {
   if (modal) modal.style.display = 'none';
 }
 
+// Gera código provisório caso o campo código esteja vazio e descrição preenchida
+// Agora é chamada APENAS ao clicar em "Adicionar ao carrinho"
+async function gerarCodigoProvisorio() {
+  const codigoInput = document.getElementById('modalComprasCodigo');
+  const descricaoInput = document.getElementById('modalComprasDescricao');
+  
+  if (!codigoInput || !descricaoInput) return null;
+  
+  const codigo = codigoInput.value.trim();
+  const descricao = descricaoInput.value.trim();
+  
+  // Se código está vazio e descrição está preenchida, gera código provisório
+  if (!codigo && descricao) {
+    try {
+      const resp = await fetch('/api/compras/proximo-codigo-provisorio');
+      const data = await resp.json();
+      
+      if (data.ok && data.codigo) {
+        codigoInput.value = data.codigo;
+        codigoInput.style.background = '#fef3c7'; // Amarelo claro para indicar provisório
+        codigoInput.title = 'Código provisório gerado automaticamente';
+        console.log('[COMPRAS] Código provisório gerado:', data.codigo);
+        return data.codigo;
+      }
+    } catch (err) {
+      console.error('[COMPRAS] Erro ao gerar código provisório:', err);
+      return null;
+    }
+  }
+  
+  return codigo; // Retorna código existente
+}
+
+// Valida se o código digitado existe na Omie
+// Retorna true se válido, false se inválido
+async function validarCodigoOmie() {
+  const codigoInput = document.getElementById('modalComprasCodigo');
+  const descricaoInput = document.getElementById('modalComprasDescricao');
+  
+  if (!codigoInput) return false;
+  
+  const codigo = codigoInput.value.trim();
+  
+  // Se está vazio, é válido (será gerado provisório depois)
+  if (!codigo) {
+    codigoInput.style.background = 'white';
+    codigoInput.title = '';
+    return true;
+  }
+  
+  // Se é código provisório, é válido
+  if (codigo.startsWith('CODPROV - ')) {
+    codigoInput.style.background = '#fef3c7';
+    codigoInput.title = 'Código provisório';
+    return true;
+  }
+  
+  // Valida código digitado na Omie
+  try {
+    const resp = await fetch(`/api/compras/validar-codigo-omie?codigo=${encodeURIComponent(codigo)}`);
+    const data = await resp.json();
+    
+    if (data.ok && data.existe) {
+      // Código existe na Omie - OK
+      codigoInput.style.background = '#d1fae5'; // Verde claro
+      codigoInput.title = 'Código válido na Omie';
+      
+      // Se encontrou produto, preenche descrição automaticamente (se estiver vazia)
+      if (data.produto && data.produto.descricao && descricaoInput && !descricaoInput.value.trim()) {
+        descricaoInput.value = data.produto.descricao;
+      }
+      
+      console.log('[COMPRAS] Código válido:', codigo);
+      return true;
+    } else {
+      // Código NÃO existe na Omie - BLOQUEIA
+      codigoInput.style.background = '#fee2e2'; // Vermelho claro
+      codigoInput.title = 'Código não cadastrado na Omie';
+      
+      alert(`ATENÇÃO: O código "${codigo}" não está cadastrado na Omie!\n\nO campo será limpo. Deixe em branco para gerar código provisório automaticamente.`);
+      
+      // LIMPA o campo automaticamente
+      codigoInput.value = '';
+      codigoInput.style.background = 'white';
+      codigoInput.title = '';
+      codigoInput.focus();
+      
+      console.warn('[COMPRAS] Código inválido removido:', codigo);
+      return false;
+    }
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao validar código:', err);
+    codigoInput.style.background = 'white';
+    return false;
+  }
+}
+
 // Adiciona item ao carrinho
-function adicionarItemCarrinho(ev) {
+// Adiciona item ao carrinho
+async function adicionarItemCarrinho(ev) {
   if (ev) ev.preventDefault();
   
-  const codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
+  let codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
   const descricao = (document.getElementById('modalComprasDescricao')?.value || '').trim();
+  
+  // PRIMEIRA VALIDAÇÃO: Descrição obrigatória
+  if (!descricao) {
+    alert('Digite a descrição do produto');
+    return;
+  }
+  
+  // SEGUNDA VALIDAÇÃO: Se código foi digitado, valida na Omie
+  if (codigo && !codigo.startsWith('CODPROV - ')) {
+    const codigoValido = await validarCodigoOmie();
+    if (!codigoValido) {
+      // Código inválido - já foi limpo pela função validarCodigoOmie
+      return; // BLOQUEIA adição ao carrinho
+    }
+    // Recarrega código após validação (pode ter sido limpo)
+    codigo = (document.getElementById('modalComprasCodigo')?.value || '').trim();
+  }
+  
+  // TERCEIRA AÇÃO: Se código está vazio, gera código provisório AGORA
+  if (!codigo) {
+    const codigoGerado = await gerarCodigoProvisorio();
+    if (!codigoGerado) {
+      alert('Erro ao gerar código provisório. Tente novamente.');
+      return;
+    }
+    codigo = codigoGerado;
+  }
+  
+  // Continua com as outras validações
   const quantidade = parseFloat(document.getElementById('modalComprasQuantidade')?.value || 0);
   const prazo = document.getElementById('modalComprasPrazo')?.value || '';
   const familia = (document.getElementById('modalComprasFamilia')?.value || '').trim();
@@ -12979,19 +13179,15 @@ function adicionarItemCarrinho(ev) {
   const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
   const familiaVisivel = familiaField && familiaField.style.display !== 'none';
   
-  if (!codigo) {
-    alert('Digite o código do produto');
-    return;
-  }
-  
   if (quantidade <= 0) {
     alert('Quantidade deve ser maior que zero');
     return;
   }
   
-  // Só valida família se o campo estiver visível (produto novo)
-  if (familiaVisivel && !familia) {
-    alert('Selecione a família do produto');
+  // Valida família apenas se: campo visível E (Departamento = "Produção" E Categoria = "Materia prima")
+  const familiaObrigatoria = departamento === 'Produção' && centroCusto === 'Materia prima';
+  if (familiaVisivel && familiaObrigatoria && !familia) {
+    alert('Selecione a família do produto (obrigatório para Produção - Materia prima)');
     return;
   }
   
@@ -13001,7 +13197,7 @@ function adicionarItemCarrinho(ev) {
   }
   
   if (!centroCusto) {
-    alert('Selecione o centro de custo');
+    alert('Selecione a categoria');
     return;
   }
   
@@ -17667,9 +17863,8 @@ async function abrirModalCatalogoOmie() {
     // Renderiza produtos
     renderizarCatalogoOmie(window.produtosCatalogoOmie);
     
-    // Carrega departamentos e centros de custo
+    // Carrega departamentos (que agora controla as categorias dinamicamente)
     await carregarDepartamentosCatalogo();
-    await carregarCentrosCustoCatalogo();
     
   } catch (err) {
     console.error('[CATÁLOGO OMIE] Erro:', err);
@@ -17873,6 +18068,16 @@ async function carregarDepartamentosCatalogo() {
             `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`
           ).join('');
         if (valorAtual) selectGlobal.value = valorAtual;
+        
+        // Adiciona evento para atualizar categorias quando departamento mudar
+        selectGlobal.removeEventListener('change', handleCatalogoDepartamentoChange);
+        selectGlobal.addEventListener('change', handleCatalogoDepartamentoChange);
+      }
+      
+      // Inicializa o select de categorias vazio
+      const selectCategorias = document.getElementById('catalogoCentroCustoGlobal');
+      if (selectCategorias && !valorAtual) {
+        selectCategorias.innerHTML = '<option value="">Selecione primeiro o departamento</option>';
       }
     }
   } catch (err) {
@@ -17880,29 +18085,9 @@ async function carregarDepartamentosCatalogo() {
   }
 }
 
-// Carrega centros de custo no select global do catálogo
-async function carregarCentrosCustoCatalogo() {
-  try {
-    const resp = await fetch('/api/compras/centros-custo');
-    const data = await resp.json();
-    
-    if (data.ok && data.centros) {
-      window.catalogoCentrosCusto = data.centros;
-      
-      // Atualiza o select global de centro de custo
-      const selectGlobal = document.getElementById('catalogoCentroCustoGlobal');
-      if (selectGlobal) {
-        const valorAtual = selectGlobal.value;
-        selectGlobal.innerHTML = '<option value="">Selecione...</option>' +
-          data.centros.map(c => 
-            `<option value="${escapeHtml(c.nome)}">${escapeHtml(c.nome)}</option>`
-          ).join('');
-        if (valorAtual) selectGlobal.value = valorAtual;
-      }
-    }
-  } catch (err) {
-    console.error('[Catálogo] Erro ao carregar centros de custo:', err);
-  }
+// Handler para mudança no departamento do catálogo
+function handleCatalogoDepartamentoChange(event) {
+  atualizarCategoriasPorDepartamento(event.target.value, 'catalogoCentroCustoGlobal');
 }
 
 // Toggle campo de prazo no catálogo
@@ -17987,7 +18172,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   }
   
   if (!centroCusto) {
-    alert('Selecione o centro de custo no topo do catálogo!');
+    alert('Selecione a categoria no topo do catálogo!');
     selectCCGlobal?.focus();
     return;
   }
@@ -18103,6 +18288,300 @@ function fecharImagemAmpliada() {
   if (modal) modal.style.display = 'none';
 }
 
+// ===== CONFIGURAÇÃO DE CATEGORIAS E DEPARTAMENTOS =====
+
+// Abre painel de configuração (não é mais modal)
+function abrirPainelConfiguracaoCateg() {
+  try {
+    // Limpa tudo
+    window.clearMainContainer?.();
+
+    // Esconde todos os painéis
+    document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+
+    // Mostra painel de configurações
+    const pane = document.getElementById('comprasConfiguracoesPane');
+    if (pane) {
+      pane.style.display = 'block';
+      renderizarDepartamentosConfig();
+    }
+  } catch (err) {
+    console.error('[CONFIG] Erro ao abrir painel:', err);
+  }
+}
+
+// Fecha modal de configuração (mantido para compatibilidade, mas não faz mais nada)
+function fecharModalConfiguracaoCateg() {
+  // Não faz nada - mantido apenas para evitar erros
+}
+
+// Renderiza lista de departamentos e suas categorias
+function renderizarDepartamentosConfig() {
+  const container = document.getElementById('listaDepartamentosConfig');
+  if (!container) return;
+  
+  const departamentos = window.categoriasPorDepartamento || {};
+  
+  container.innerHTML = Object.keys(departamentos).map((dept, idx) => {
+    const categorias = departamentos[dept];
+    
+    return `
+      <div style="
+        background:white;
+        border:2px solid #e5e7eb;
+        border-radius:12px;
+        padding:20px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.05);
+      ">
+        <!-- Cabeçalho do Departamento -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #f3f4f6;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <i class="fa-solid fa-building" style="color:#3b82f6;font-size:20px;"></i>
+            <h4 style="margin:0;color:#1f2937;font-size:16px;font-weight:700;">${window.escapeHtml(dept)}</h4>
+            <span style="background:#dbeafe;color:#1e40af;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">
+              ${categorias.length} ${categorias.length === 1 ? 'categoria' : 'categorias'}
+            </span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button 
+              onclick="editarNomeDepartamento('${window.escapeHtml(dept)}')"
+              title="Editar nome do departamento"
+              style="
+                background:#f59e0b;
+                color:white;
+                border:none;
+                border-radius:6px;
+                width:36px;
+                height:36px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                cursor:pointer;
+                transition:all 0.2s;
+              "
+              onmouseover="this.style.transform='scale(1.05)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+            <button 
+              onclick="excluirDepartamento('${window.escapeHtml(dept)}')"
+              title="Excluir departamento"
+              style="
+                background:#ef4444;
+                color:white;
+                border:none;
+                border-radius:6px;
+                width:36px;
+                height:36px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                cursor:pointer;
+                transition:all 0.2s;
+              "
+              onmouseover="this.style.transform='scale(1.05)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Lista de Categorias -->
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
+          ${categorias.map((cat, catIdx) => `
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              padding:10px 14px;
+              background:#f9fafb;
+              border:1px solid #e5e7eb;
+              border-radius:8px;
+              transition:all 0.2s;
+            "
+            onmouseover="this.style.background='#f3f4f6';this.style.borderColor='#d1d5db'"
+            onmouseout="this.style.background='#f9fafb';this.style.borderColor='#e5e7eb'">
+              <span style="color:#374151;font-size:14px;font-weight:500;">
+                <i class="fa-solid fa-tag" style="color:#6b7280;margin-right:8px;"></i>
+                ${window.escapeHtml(cat)}
+              </span>
+              <div style="display:flex;gap:6px;">
+                <button 
+                  onclick="editarCategoria('${window.escapeHtml(dept)}', ${catIdx})"
+                  title="Editar categoria"
+                  style="
+                    background:white;
+                    color:#f59e0b;
+                    border:1px solid #f59e0b;
+                    border-radius:4px;
+                    width:28px;
+                    height:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    cursor:pointer;
+                    transition:all 0.2s;
+                  "
+                  onmouseover="this.style.background='#f59e0b';this.style.color='white'"
+                  onmouseout="this.style.background='white';this.style.color='#f59e0b'">
+                  <i class="fa-solid fa-pen" style="font-size:11px;"></i>
+                </button>
+                <button 
+                  onclick="excluirCategoria('${window.escapeHtml(dept)}', ${catIdx})"
+                  title="Excluir categoria"
+                  style="
+                    background:white;
+                    color:#ef4444;
+                    border:1px solid #ef4444;
+                    border-radius:4px;
+                    width:28px;
+                    height:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    cursor:pointer;
+                    transition:all 0.2s;
+                  "
+                  onmouseover="this.style.background='#ef4444';this.style.color='white'"
+                  onmouseout="this.style.background='white';this.style.color='#ef4444'">
+                  <i class="fa-solid fa-trash" style="font-size:11px;"></i>
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        
+        <!-- Botão Adicionar Categoria -->
+        <button 
+          onclick="adicionarNovaCategoria('${window.escapeHtml(dept)}')"
+          style="
+            width:100%;
+            padding:10px;
+            background:linear-gradient(135deg,#10b981 0%,#059669 100%);
+            color:white;
+            border:none;
+            border-radius:8px;
+            font-size:13px;
+            font-weight:600;
+            cursor:pointer;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            gap:8px;
+            transition:all 0.2s;
+          "
+          onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'"
+          onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='none'">
+          <i class="fa-solid fa-plus-circle"></i>
+          <span>Adicionar Categoria</span>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// Adicionar novo departamento
+function adicionarNovoDepartamento() {
+  const nome = prompt('Digite o nome do novo departamento:');
+  if (!nome || !nome.trim()) return;
+  
+  const nomeTrimmed = nome.trim();
+  
+  if (window.categoriasPorDepartamento[nomeTrimmed]) {
+    alert('Este departamento já existe!');
+    return;
+  }
+  
+  window.categoriasPorDepartamento[nomeTrimmed] = [];
+  renderizarDepartamentosConfig();
+  alert('Departamento adicionado com sucesso!');
+}
+
+// Editar nome do departamento
+function editarNomeDepartamento(nomeAtual) {
+  const novoNome = prompt('Digite o novo nome do departamento:', nomeAtual);
+  if (!novoNome || !novoNome.trim() || novoNome.trim() === nomeAtual) return;
+  
+  const novoNomeTrimmed = novoNome.trim();
+  
+  if (window.categoriasPorDepartamento[novoNomeTrimmed]) {
+    alert('Já existe um departamento com este nome!');
+    return;
+  }
+  
+  // Move categorias para novo nome
+  window.categoriasPorDepartamento[novoNomeTrimmed] = window.categoriasPorDepartamento[nomeAtual];
+  delete window.categoriasPorDepartamento[nomeAtual];
+  
+  renderizarDepartamentosConfig();
+  alert('Departamento renomeado com sucesso!');
+}
+
+// Excluir departamento
+function excluirDepartamento(nome) {
+  const categorias = window.categoriasPorDepartamento[nome];
+  const msg = categorias.length > 0 
+    ? `Tem certeza que deseja excluir o departamento "${nome}" e suas ${categorias.length} categorias?`
+    : `Tem certeza que deseja excluir o departamento "${nome}"?`;
+  
+  if (!confirm(msg)) return;
+  
+  delete window.categoriasPorDepartamento[nome];
+  renderizarDepartamentosConfig();
+  alert('Departamento excluído com sucesso!');
+}
+
+// Adicionar nova categoria
+function adicionarNovaCategoria(departamento) {
+  const nome = prompt(`Digite o nome da nova categoria para "${departamento}":`);
+  if (!nome || !nome.trim()) return;
+  
+  const nomeTrimmed = nome.trim();
+  
+  if (window.categoriasPorDepartamento[departamento].includes(nomeTrimmed)) {
+    alert('Esta categoria já existe neste departamento!');
+    return;
+  }
+  
+  window.categoriasPorDepartamento[departamento].push(nomeTrimmed);
+  renderizarDepartamentosConfig();
+  alert('Categoria adicionada com sucesso!');
+}
+
+// Editar categoria
+function editarCategoria(departamento, indice) {
+  const categorias = window.categoriasPorDepartamento[departamento];
+  const nomeAtual = categorias[indice];
+  
+  const novoNome = prompt('Digite o novo nome da categoria:', nomeAtual);
+  if (!novoNome || !novoNome.trim() || novoNome.trim() === nomeAtual) return;
+  
+  const novoNomeTrimmed = novoNome.trim();
+  
+  if (categorias.includes(novoNomeTrimmed)) {
+    alert('Já existe uma categoria com este nome!');
+    return;
+  }
+  
+  categorias[indice] = novoNomeTrimmed;
+  renderizarDepartamentosConfig();
+  alert('Categoria renomeada com sucesso!');
+}
+
+// Excluir categoria
+function excluirCategoria(departamento, indice) {
+  const categorias = window.categoriasPorDepartamento[departamento];
+  const nomeCategoria = categorias[indice];
+  
+  if (!confirm(`Tem certeza que deseja excluir a categoria "${nomeCategoria}"?`)) return;
+  
+  categorias.splice(indice, 1);
+  renderizarDepartamentosConfig();
+  alert('Categoria excluída com sucesso!');
+}
+
+// ===== FIM CONFIGURAÇÃO =====
+
 // Exporta funções globais
 window.abrirModalCatalogoOmie = abrirModalCatalogoOmie;
 window.fecharModalCatalogoOmie = fecharModalCatalogoOmie;
@@ -18112,6 +18591,17 @@ window.ampliarImagemProduto = ampliarImagemProduto;
 window.fecharImagemAmpliada = fecharImagemAmpliada;
 window.selecionarProdutoCatalogo = selecionarProdutoCatalogo;
 window.togglePrazoCatalogo = togglePrazoCatalogo;
+
+// Exporta funções de configuração
+window.abrirPainelConfiguracaoCateg = abrirPainelConfiguracaoCateg;
+window.fecharModalConfiguracaoCateg = fecharModalConfiguracaoCateg;
+window.renderizarDepartamentosConfig = renderizarDepartamentosConfig;
+window.adicionarNovoDepartamento = adicionarNovoDepartamento;
+window.editarNomeDepartamento = editarNomeDepartamento;
+window.excluirDepartamento = excluirDepartamento;
+window.adicionarNovaCategoria = adicionarNovaCategoria;
+window.editarCategoria = editarCategoria;
+window.excluirCategoria = excluirCategoria;
 
 // ========== FIM CATÁLOGO OMIE ==========
 
@@ -18240,7 +18730,7 @@ async function salvarEdicaoCompra(itemId) {
     return;
   }
   if (!camposCentroCusto?.value) {
-    alert('Selecione um centro de custo.');
+    alert('Selecione uma categoria.');
     return;
   }
   if (!camposRetornoCotacao?.value) {

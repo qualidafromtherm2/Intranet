@@ -85,7 +85,7 @@
     </div>
     <i id="cart-icon" class="fa-solid fa-cart-shopping" title="Solicitação de compras"></i>
     <i class="fa-solid fa-print"></i>
-    <i class="fa-solid fa-cloud"></i>
+    <i id="config-icon" class="fa-solid fa-cog" title="Configurações" style="cursor:pointer;"></i>
     <img id="profile-icon" class="profile-img"
          src="https://images.unsplash.com/photo-1600353068440-6361ef3a86e8?auto=format&fit=crop&w=1000&q=80"
          alt="Perfil">
@@ -286,6 +286,28 @@
   </div>
 </div>
 
+<!-- Nova categoria: Compras -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:compras"
+       data-nav-pos="side"
+       data-nav-label="Compras">Compras</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-compras-configuracoes"
+       class="menu-link"
+       data-nav-key="side:compras:configuracoes"
+       data-nav-parent="side:compras"
+       data-nav-pos="side"
+       data-nav-label="Configurações"
+       data-nav-selector="#menu-compras-configuracoes">
+      <i class="fa-solid fa-cog" style="margin-right:8px;"></i>
+      Configurações
+    </a>
+  </div>
+</div>
+
         </div><!-- Fim do sidebar-content -->
 
       </div><!-- Fim do left-side -->
@@ -430,10 +452,10 @@
               <form id="comprasModalForm" style="display:none;">
                 <!-- Campo Código em largura total (primeira linha) -->
                 <div class="form-field" style="margin-bottom:16px;">
-                  <label for="modalComprasCodigo">Código do produto *</label>
+                  <label for="modalComprasCodigo">Código do produto <small style="color:#6b7280;">(deixe vazio para gerar automático)</small></label>
                   <div style="display:flex;gap:8px;align-items:flex-start;">
                     <div class="combo-wrapper" style="position:relative;flex:1;">
-                      <input id="modalComprasCodigo" type="text" autocomplete="off" placeholder="Digite para buscar" required />
+                      <input id="modalComprasCodigo" type="text" autocomplete="off" placeholder="Digite para buscar ou deixe vazio" />
                       <input id="modalComprasDescricaoSelecionada" type="hidden" />
                       <input id="modalComprasCodigoProdutoOmie" type="hidden" />
                       <ul id="modalComprasCodigoSugestoes" style="list-style:none;margin:4px 0 0;padding:4px 0;position:absolute;top:100%;left:0;z-index:120;width:100%;background:#0f1116;color:#f5f5f5;border:1px solid var(--border-color);border-radius:8px;max-height:240px;overflow-y:auto;display:none;box-shadow:0 12px 28px rgba(0,0,0,0.45);"></ul>
@@ -449,7 +471,7 @@
                   <input id="modalComprasDescricao" type="text" placeholder="Preenchido automaticamente ou digite manualmente" />
                 </div>
                 
-                <!-- Grid de 3 colunas: Quantidade, Departamento, Centro de Custo -->
+                <!-- Grid de 3 colunas: Quantidade, Departamento, Categoria -->
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
                   <div class="form-field">
                     <label for="modalComprasQuantidade">Quantidade *</label>
@@ -462,9 +484,9 @@
                     </select>
                   </div>
                   <div class="form-field">
-                    <label for="modalComprasCentroCusto">Centro de Custo *</label>
+                    <label for="modalComprasCentroCusto">Categoria *</label>
                     <select id="modalComprasCentroCusto" required>
-                      <option value="">Selecione o centro de custo</option>
+                      <option value="">Selecione a categoria</option>
                     </select>
                   </div>
                 </div>
@@ -493,8 +515,8 @@
                 
                 <!-- Campo Família do Produto em largura total -->
                 <div class="form-field" style="margin-bottom:16px;">
-                  <label for="modalComprasFamilia">Família do Produto *</label>
-                  <select id="modalComprasFamilia" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+                  <label for="modalComprasFamilia">Família do Produto <span id="familiaObrigatorioIndicador" style="color:#ef4444;display:none;">*</span></label>
+                  <select id="modalComprasFamilia" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
                     <option value="">Selecione a família...</option>
                     <!-- Será preenchido dinamicamente -->
                   </select>
@@ -955,7 +977,7 @@
                 <div>
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
                     <i class="fa-solid fa-coins" style="color:#3b82f6;margin-right:4px;"></i>
-                    Centro de Custo *
+                    Categoria *
                   </label>
                   <select 
                     id="catalogoCentroCustoGlobal"
@@ -1008,6 +1030,35 @@
                 box-shadow:0 10px 40px rgba(0,0,0,0.5);
               "
             />
+          </div>
+        </div>
+
+        <!-- Painel Configurações de Compras: Departamentos e Categorias -->
+        <div id="comprasConfiguracoesPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header">
+              <div class="content-wrapper-context">
+                <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                  <i class="fa-solid fa-cog" style="color:#3b82f6;"></i>
+                  <span>Configuração de Departamentos e Categorias</span>
+                </h3>
+                <div class="content-text">Gerencie os departamentos e suas categorias associadas.</div>
+              </div>
+              <button 
+                onclick="adicionarNovoDepartamento()"
+                class="content-button"
+                style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-plus"></i>
+                <span>Novo Departamento</span>
+              </button>
+            </div>
+
+            <div class="content-section" style="margin-top:20px;">
+              <!-- Lista de Departamentos e Categorias -->
+              <div id="listaDepartamentosConfig" style="display:flex;flex-direction:column;gap:16px;">
+                <!-- Será preenchido dinamicamente -->
+              </div>
+            </div>
           </div>
         </div>
 
