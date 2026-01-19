@@ -3118,23 +3118,83 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     // Chama a API da Omie
     console.log('\n🌐 Enviando requisição para Omie...');
     console.log('   URL: https://app.omie.com.br/api/v1/produtos/pedidocompra/');
-    const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(omiePayload)
-    });
     
-    const data = await response.json();
+    let tentativa = 1;
+    let maxTentativas = 2; // Primeira tentativa + 1 retry após cadastrar produto
+    let data;
     
-    console.log('\n📥 RESPOSTA DA OMIE:');
-    console.log('   Status HTTP:', response.status);
-    console.log('   Dados:', JSON.stringify(data, null, 2));
-    
-    if (data.faultstring) {
-      console.log('❌ Erro na API da Omie!');
-      console.log('   Código:', data.faultcode);
-      console.log('   Mensagem:', data.faultstring);
-      throw new Error(data.faultstring);
+    while (tentativa <= maxTentativas) {
+      console.log(`\n🔄 Tentativa ${tentativa} de ${maxTentativas}...`);
+      
+      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(omiePayload)
+      });
+      
+      data = await response.json();
+      
+      console.log('\n📥 RESPOSTA DA OMIE:');
+      console.log('   Status HTTP:', response.status);
+      console.log('   Dados:', JSON.stringify(data, null, 2));
+      
+      if (data.faultstring) {
+        console.log('❌ Erro na API da Omie!');
+        console.log('   Código:', data.faultcode);
+        console.log('   Mensagem:', data.faultstring);
+        
+        // Verifica se é erro de produto não cadastrado (aceita qualquer encoding)
+        const erroMatch = data.faultstring.match(/Produto n.{1,3}o cadastrado para o C.{1,3}digo \[(.*?)\]/i);
+        
+        if (erroMatch && tentativa < maxTentativas) {
+          const codigoNaoCadastrado = erroMatch[1];
+          console.log(`\n⚠️ Produto não cadastrado detectado: ${codigoNaoCadastrado}`);
+          
+          // Busca a descrição do produto nos itens
+          const itemNaoCadastrado = itens.find(item => item.produto_codigo === codigoNaoCadastrado);
+          const descricaoProduto = itemNaoCadastrado ? itemNaoCadastrado.produto_descricao : 'Produto provisório';
+          
+          console.log(`\n🔧 Tentando cadastrar produto automaticamente...`);
+          const resultadoCadastro = await cadastrarProdutoNaOmie(codigoNaoCadastrado, descricaoProduto);
+          
+          if (resultadoCadastro.ok) {
+            console.log(`\n⏳ Aguardando 5 segundos antes de tentar novamente...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Atualiza o nCodProd no JSON se foi obtido
+            if (resultadoCadastro.codigo_produto) {
+              const produtoIndex = produtos.findIndex(p => p.cProduto === codigoNaoCadastrado);
+              if (produtoIndex !== -1) {
+                produtos[produtoIndex].nCodProd = resultadoCadastro.codigo_produto;
+                delete produtos[produtoIndex].cProduto;
+                console.log(`✅ Item atualizado com nCodProd: ${resultadoCadastro.codigo_produto}`);
+                
+                // Recria o payload atualizado
+                const pedidoCompraAtualizado = {
+                  cabecalho_incluir: cabecalho,
+                  produtos_incluir: produtos
+                };
+                if (frete) {
+                  pedidoCompraAtualizado.frete_incluir = frete;
+                }
+                omiePayload.param = [pedidoCompraAtualizado];
+              }
+            }
+            
+            tentativa++;
+            continue; // Tenta novamente
+          } else {
+            console.error(`❌ Falha ao cadastrar produto: ${resultadoCadastro.error}`);
+            throw new Error(`Erro ao cadastrar produto ${codigoNaoCadastrado}: ${resultadoCadastro.error}`);
+          }
+        } else {
+          // Erro diferente ou já tentou cadastrar
+          throw new Error(data.faultstring);
+        }
+      } else {
+        // Sucesso!
+        break;
+      }
     }
     
     console.log('✅ Pedido criado com sucesso na Omie!');
@@ -10672,6 +10732,167 @@ async function syncPedidosCompraOmie(filtros = {}) {
     return { ok: false, error: e.message };
   }
 }
+
+// Função para cadastrar produto provisório na Omie
+async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto) {
+  try {
+    console.log(`\n🆕 Cadastrando produto provisório na Omie...`);
+    console.log(`   Código: ${codigoProduto}`);
+    console.log(`   Descrição: ${descricaoProduto}`);
+    
+    const payload = {
+      call: 'IncluirProduto',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        codigo_produto_integracao: codigoProduto,
+        codigo: codigoProduto,
+        descricao: descricaoProduto,
+        ncm: '0000.00.00',
+        unidade: 'UN'
+      }]
+    };
+    
+    console.log('📤 Enviando para API Omie (IncluirProduto)...');
+    const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    const data = await response.json();
+    
+    console.log('📥 Resposta da Omie:');
+    console.log(JSON.stringify(data, null, 2));
+    
+    if (data.codigo_status === '0' || data.descricao_status?.includes('sucesso')) {
+      console.log(`✅ Produto cadastrado com sucesso!`);
+      console.log(`   Código Produto Omie: ${data.codigo_produto}`);
+      
+      // Atualiza a tabela produtos_omie com o novo produto
+      try {
+        await pool.query(
+          `INSERT INTO produtos_omie (codigo, descricao, codigo_produto, ncm, unidade) 
+           VALUES ($1, $2, $3, $4, $5) 
+           ON CONFLICT (codigo) DO UPDATE SET 
+             descricao = EXCLUDED.descricao,
+             codigo_produto = EXCLUDED.codigo_produto`,
+          [codigoProduto, descricaoProduto, data.codigo_produto, '0000.00.00', 'UN']
+        );
+        console.log(`✅ Produto salvo na tabela produtos_omie`);
+      } catch (dbErr) {
+        console.warn(`⚠️ Erro ao salvar na tabela local (não crítico):`, dbErr.message);
+      }
+      
+      return { ok: true, codigo_produto: data.codigo_produto };
+    } else {
+      console.error(`❌ Erro ao cadastrar produto:`, data);
+      return { ok: false, error: data.descricao_status || 'Erro desconhecido' };
+    }
+  } catch (err) {
+    console.error(`❌ Erro na função cadastrarProdutoNaOmie:`, err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// Endpoint para obter o próximo código provisório
+// Verifica em produtos_omie E compras.solicitacao_compras para evitar duplicatas
+app.get('/api/compras/proximo-codigo-provisorio', async (req, res) => {
+  try {
+    // Busca o último código provisório em produtos_omie
+    const query1 = `
+      SELECT codigo 
+      FROM produtos_omie 
+      WHERE codigo LIKE 'CODPROV - %' 
+      ORDER BY codigo DESC 
+      LIMIT 1
+    `;
+    
+    // Busca o último código provisório em compras.solicitacao_compras
+    const query2 = `
+      SELECT produto_codigo AS codigo
+      FROM compras.solicitacao_compras 
+      WHERE produto_codigo LIKE 'CODPROV - %' 
+      ORDER BY produto_codigo DESC 
+      LIMIT 1
+    `;
+    
+    const result1 = await pool.query(query1);
+    const result2 = await pool.query(query2);
+    
+    let maiorNumero = 0; // Inicia com 0 (próximo será 1)
+    
+    // Verifica o maior número em produtos_omie
+    if (result1.rows.length > 0) {
+      const codigo = result1.rows[0].codigo;
+      const match = codigo.match(/CODPROV - (\d+)/);
+      if (match && match[1]) {
+        maiorNumero = Math.max(maiorNumero, parseInt(match[1], 10));
+      }
+    }
+    
+    // Verifica o maior número em compras.solicitacao_compras
+    if (result2.rows.length > 0) {
+      const codigo = result2.rows[0].codigo;
+      const match = codigo.match(/CODPROV - (\d+)/);
+      if (match && match[1]) {
+        maiorNumero = Math.max(maiorNumero, parseInt(match[1], 10));
+      }
+    }
+    
+    // Próximo número é o maior encontrado + 1
+    const proximoNumero = maiorNumero + 1;
+    
+    // Formata com 5 dígitos (ex: 00001, 00002, etc.)
+    const codigoFormatado = `CODPROV - ${String(proximoNumero).padStart(5, '0')}`;
+    
+    console.log(`[API] Código provisório gerado: ${codigoFormatado} (maior anterior: ${maiorNumero})`);
+    
+    res.json({ ok: true, codigo: codigoFormatado });
+    
+  } catch (err) {
+    console.error('[API] Erro ao gerar código provisório:', err);
+    res.status(500).json({ ok: false, erro: 'Erro ao gerar código provisório' });
+  }
+});
+
+// Endpoint para validar se um código existe na Omie
+app.get('/api/compras/validar-codigo-omie', async (req, res) => {
+  try {
+    const { codigo } = req.query;
+    
+    if (!codigo) {
+      return res.status(400).json({ ok: false, erro: 'Código não informado' });
+    }
+    
+    // Verifica se o código existe na tabela produtos_omie
+    const query = `
+      SELECT codigo, descricao, codigo_produto 
+      FROM produtos_omie 
+      WHERE codigo = $1 
+      LIMIT 1
+    `;
+    
+    const result = await pool.query(query, [codigo]);
+    
+    if (result.rows.length > 0) {
+      res.json({ 
+        ok: true, 
+        existe: true, 
+        produto: result.rows[0] 
+      });
+    } else {
+      res.json({ 
+        ok: true, 
+        existe: false 
+      });
+    }
+    
+  } catch (err) {
+    console.error('[API] Erro ao validar código Omie:', err);
+    res.status(500).json({ ok: false, erro: 'Erro ao validar código' });
+  }
+});
 
 // GET /api/compras/departamentos - Lista departamentos disponíveis
 app.get('/api/compras/departamentos', async (req, res) => {
