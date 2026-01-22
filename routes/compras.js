@@ -250,5 +250,35 @@ module.exports = (pool) => {
     }
   });
 
+  // Busca solicitações de compras para recebimento
+  router.get('/solicitacoes-recebimento', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query(`
+        SELECT 
+          cnumero,
+          id,
+          produto_codigo,
+          produto_descricao,
+          quantidade,
+          solicitante,
+          previsao_chegada,
+          resp_inspecao_recebimento,
+          observacao,
+          created_at
+        FROM compras.solicitacao_compras
+        WHERE status = 'compra realizada'
+        AND cnumero IS NOT NULL
+        ORDER BY cnumero DESC, id ASC
+      `);
+      res.json(rows);
+    } catch (e) {
+      console.error('[GET /api/compras/solicitacoes-recebimento] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
   return router;
 };

@@ -3999,6 +3999,10 @@ app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
 
+// Router de agendamento de sincronização
+const agendamentoRouter = require('./routes/agendamento')(pool);
+app.use('/api/sincronizacao/agendamento', agendamentoRouter);
+
 // [API][produto/descricao] — retorna descr_produto a partir de int_produto (id) OU cod_produto (code)
 app.get('/api/produto/descricao', async (req, res) => {
   try {
@@ -7910,6 +7914,102 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
     }
   });
 
+  // Endpoint GET: Buscar produto individual por código
+  app.get('/api/produtos/:codigo', async (req, res) => {
+    try {
+      const codigo = req.params.codigo;
+      
+      // Busca no banco local primeiro
+      const result = await pool.query(
+        `SELECT 
+          codigo,
+          descricao,
+          lead_time,
+          estoque_minimo,
+          url_imagem,
+          descricao_familia,
+          codigo_familia,
+          saldo_estoque
+        FROM public.produtos_omie 
+        WHERE codigo = $1 
+        LIMIT 1`,
+        [codigo]
+      );
+      
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'Produto não encontrado' });
+      }
+      
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error('[API] GET /api/produtos/:codigo erro:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Endpoint PUT: Atualizar produto (apenas campos permitidos)
+  app.put('/api/produtos/:codigo', express.json(), async (req, res) => {
+    try {
+      const codigo = req.params.codigo;
+      const { descricao, lead_time, estoque_minimo, url_imagem } = req.body;
+      
+      // Valida se o produto existe
+      const checkResult = await pool.query(
+        'SELECT codigo FROM public.produtos_omie WHERE codigo = $1 LIMIT 1',
+        [codigo]
+      );
+      
+      if (checkResult.rowCount === 0) {
+        return res.status(404).json({ error: 'Produto não encontrado' });
+      }
+      
+      // Atualiza apenas os campos permitidos
+      const updateResult = await pool.query(
+        `UPDATE public.produtos_omie 
+        SET 
+          descricao = COALESCE($1, descricao),
+          lead_time = $2,
+          estoque_minimo = $3,
+          url_imagem = $4,
+          updated_at = NOW()
+        WHERE codigo = $5
+        RETURNING *`,
+        [descricao, lead_time, estoque_minimo, url_imagem, codigo]
+      );
+      
+      // Auditoria
+      try {
+        const usuarioAudit = userFromReq(req);
+        const campos = [];
+        if (descricao) campos.push(`Descrição: ${descricao}`);
+        if (lead_time !== undefined) campos.push(`Lead time: ${lead_time}`);
+        if (estoque_minimo !== undefined) campos.push(`Estoque mínimo: ${estoque_minimo}`);
+        if (url_imagem !== undefined) campos.push('URL imagem atualizada');
+        
+        await registrarModificacao({
+          codigo_omie: codigo,
+          codigo_texto: codigo,
+          codigo_produto: null,
+          tipo_acao: 'ALTERACAO_CATALOGO',
+          usuario: usuarioAudit,
+          origem: 'CATALOGO_WEB',
+          detalhes: `Campos alterados: ${campos.join(', ')}`
+        });
+      } catch (e) {
+        console.warn('[auditoria][produtos/:codigo PUT] falhou:', e?.message || e);
+      }
+      
+      res.json({ 
+        success: true, 
+        message: 'Produto atualizado com sucesso',
+        produto: updateResult.rows[0]
+      });
+    } catch (err) {
+      console.error('[API] PUT /api/produtos/:codigo erro:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/prodcaract/alterar', async (req, res) => {
     try {
       const data = await omieCall(
@@ -10999,10 +11099,9 @@ app.post('/api/compras/pedido', async (req, res) => {
           throw new Error('Cada item precisa ter produto_codigo e quantidade');
         }
         
-        // Define status inicial baseado no retorno_cotacao
-        // Se retorno_cotacao = 'N' ou 'Não' -> 'aguardando compra'
-        // Se retorno_cotacao = 'S' ou 'Sim' -> 'aguardando cotação'
-        const statusInicial = (retorno_cotacao === 'N' || retorno_cotacao === 'Não') ? 'aguardando compra' : 'aguardando cotação';
+        // Define status inicial como 'aguardando aprovação da requisição'
+        // Todas as solicitações devem passar por aprovação antes de seguir o fluxo
+        const statusInicial = 'aguardando aprovação da requisição';
         
         // Insere item sem numero_pedido (NULL) - será preenchido em etapa posterior
         const result = await client.query(`
@@ -11317,11 +11416,14 @@ app.get('/api/compras/minhas', async (req, res) => {
         previsao_chegada,
         status,
         observacao,
+        observacao_retificacao,
         solicitante,
         resp_inspecao_recebimento,
         departamento,
         centro_custo,
         objetivo_compra,
+        familia_produto,
+        retorno_cotacao,
         created_at,
         updated_at,
         cnumero AS "cNumero",
@@ -11339,6 +11441,77 @@ app.get('/api/compras/minhas', async (req, res) => {
   }
 });
 
+// GET /api/compras/filtro-kanbans - Retorna as preferências de filtro do usuário
+app.get('/api/compras/filtro-kanbans', async (req, res) => {
+  try {
+    // Pega username da sessão do usuário logado
+    const username = req.session?.user?.username;
+    if (!username) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
+    // Busca as preferências do usuário
+    const { rows } = await pool.query(`
+      SELECT kanbans_visiveis
+      FROM compras.filtro_kanbans_usuario
+      WHERE username = $1
+    `, [username]);
+
+    if (rows.length === 0) {
+      // Se não existe preferência, retorna todos os kanbans como visíveis
+      const todosKanbans = [
+        'aguardando aprovação da requisição',
+        'aguardando cotação',
+        'cotado aguardando escolha',
+        'solicitado revisão',
+        'aguardando compra',
+        'compra realizada',
+        'faturada pelo fornecedor',
+        'recebido',
+        'concluído'
+      ];
+      return res.json({ ok: true, kanbans_visiveis: todosKanbans });
+    }
+
+    res.json({ ok: true, kanbans_visiveis: rows[0].kanbans_visiveis || [] });
+  } catch (err) {
+    console.error('[Compras] Erro ao carregar filtro de kanbans:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar preferências' });
+  }
+});
+
+// POST /api/compras/filtro-kanbans - Salva as preferências de filtro do usuário
+app.post('/api/compras/filtro-kanbans', async (req, res) => {
+  try {
+    // Pega username da sessão do usuário logado
+    const username = req.session?.user?.username;
+    const { kanbans_visiveis } = req.body;
+    
+    if (!username) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+    
+    if (!Array.isArray(kanbans_visiveis)) {
+      return res.status(400).json({ ok: false, error: 'kanbans_visiveis deve ser um array' });
+    }
+
+    // Insere ou atualiza as preferências
+    await pool.query(`
+      INSERT INTO compras.filtro_kanbans_usuario (username, kanbans_visiveis, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (username)
+      DO UPDATE SET 
+        kanbans_visiveis = $2,
+        updated_at = NOW()
+    `, [username, JSON.stringify(kanbans_visiveis)]);
+
+    res.json({ ok: true, message: 'Preferências salvas com sucesso' });
+  } catch (err) {
+    console.error('[Compras] Erro ao salvar filtro de kanbans:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao salvar preferências' });
+  }
+});
+
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
@@ -11353,6 +11526,7 @@ app.get('/api/compras/todas', async (req, res) => {
         previsao_chegada,
         status,
         observacao,
+        observacao_retificacao,
         solicitante,
         resp_inspecao_recebimento,
         departamento,
@@ -11822,10 +11996,10 @@ app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
 app.put('/api/compras/itens/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, observacao_retificacao, usuario_comentario } = req.body;
     
     // Valida status
-    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado'];
+    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar'];
     if (!status || !statusValidos.includes(status)) {
       return res.status(400).json({ 
         ok: false, 
@@ -11833,13 +12007,51 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
       });
     }
     
-    // Atualiza status do item
-    const { rows } = await pool.query(`
-      UPDATE compras.solicitacao_compras 
-      SET status = $1, updated_at = NOW()
-      WHERE id = $2
-      RETURNING *
-    `, [status, id]);
+    // Se o status for 'retificar', exige observação
+    if (status === 'retificar' && (!observacao_retificacao || observacao_retificacao.trim() === '')) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'Observação é obrigatória ao solicitar retificação' 
+      });
+    }
+    
+    // Atualiza status do item (e observação se houver comentário)
+    let query, params;
+    
+    // Se tiver observação (retificar ou voltando de retificar), acrescenta ao histórico
+    if (observacao_retificacao && observacao_retificacao.trim() !== '') {
+      // Busca histórico existente
+      const { rows: existingRows } = await pool.query(
+        'SELECT observacao_retificacao FROM compras.solicitacao_compras WHERE id = $1',
+        [id]
+      );
+      
+      const historicoExistente = existingRows[0]?.observacao_retificacao || '';
+      const nomeUsuario = usuario_comentario || 'Usuário';
+      const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      
+      // Acrescenta novo comentário ao histórico
+      const novaLinha = `User ${nomeUsuario} - ${dataHora}\n${observacao_retificacao}\n`;
+      const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
+      
+      query = `
+        UPDATE compras.solicitacao_compras 
+        SET status = $1, observacao_retificacao = $2, updated_at = NOW()
+        WHERE id = $3
+        RETURNING *
+      `;
+      params = [status, novoHistorico, id];
+    } else {
+      query = `
+        UPDATE compras.solicitacao_compras 
+        SET status = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING *
+      `;
+      params = [status, id];
+    }
+    
+    const { rows } = await pool.query(query, params);
     
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
@@ -11850,6 +12062,56 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao atualizar status do item:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar status do item' });
+  }
+});
+
+// Endpoint para atualizar observação de retificação
+app.put('/api/compras/itens/:id/observacao-retificacao', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { observacao_retificacao, usuario_comentario } = req.body;
+    
+    // Valida observação obrigatória
+    if (!observacao_retificacao || observacao_retificacao.trim() === '') {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'Observação não pode estar vazia' 
+      });
+    }
+    
+    // Busca histórico existente
+    const { rows: existingRows } = await pool.query(
+      'SELECT observacao_retificacao FROM compras.solicitacao_compras WHERE id = $1',
+      [id]
+    );
+    
+    const historicoExistente = existingRows[0]?.observacao_retificacao || '';
+    const nomeUsuario = usuario_comentario || 'Usuário';
+    const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    
+    // Acrescenta novo comentário ao histórico
+    const novaLinha = `User ${nomeUsuario} - ${dataHora}\n${observacao_retificacao}\n`;
+    const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
+    
+    // Atualiza observação
+    const query = `
+      UPDATE compras.solicitacao_compras 
+      SET observacao_retificacao = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `;
+    
+    const { rows } = await pool.query(query, [novoHistorico, id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+    
+    res.json({ ok: true, item: rows[0] });
+    
+  } catch (err) {
+    console.error('[Compras] Erro ao atualizar observação de retificação:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar observação' });
   }
 });
 
