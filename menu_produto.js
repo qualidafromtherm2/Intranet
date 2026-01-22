@@ -4054,6 +4054,42 @@ window.fetch = async function(input, init = {}) {
   }
 };
 
+// ===== CONSTANTES E FUNÇÕES DE PERMISSÕES (movidas para cima) =====
+
+// O que pode ficar visível quando DESLOGADO
+const PUBLIC_WHEN_LOGGED_OUT = [
+  '#menu-inicio',          // Início no topo
+  '#profile-icon',         // ícone usuário (abre login)
+  '#btn-login','#user-button','#btn-user','#login-btn' // fallbacks, se existirem
+];
+
+// **TUDO** que é controlado por login/permissão
+const GATED_SELECTORS = [
+  // topo (qualquer item com id #menu-*)
+  'a[id^="menu-"]',
+  '.header .header-menu > .menu-link',
+
+  // abas internas (Produto, etc.)
+  '#produtoTabs .main-header .main-header-link',
+  '#kanbanTabs .main-header .main-header-link',
+  '#armazemTabs .main-header .main-header-link',
+
+  // lateral
+  '.side-menu-item',
+  '.left-side .side-menu a',
+  '.sidebar a',
+  '.menu-lateral a',
+
+  // genéricos
+  '.tab-header a',
+  '.tab-header button.perm-gated',
+  '[data-top]', '[data-menu]', '[data-submenu]'
+].join(',');
+
+function findGatedCandidates(){
+  return document.querySelectorAll(GATED_SELECTORS);
+}
+
 // injeta CSS para esconder via classe
 (function ensurePermCss(){
   if (document.getElementById('perm-hide-style')) return;
@@ -4854,7 +4890,7 @@ document.getElementById('menu-solicitacao-transferencia')?.addEventListener('cli
 document.getElementById('menu-recebimento')?.addEventListener('click', async e => {
   e.preventDefault();
   showMainTab('recebimentoPane');
-  await loadComprasRecebimento();
+  // await loadComprasRecebimento(); // COMENTADO - usando nova implementação inline no HTML
 });
 
 // SAC: abre painel de solicitação de envio e permite anexar até 2 arquivos
@@ -5399,7 +5435,7 @@ document.getElementById('solicitacoesTransferRefresh')?.addEventListener('click'
 });
 
 document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
-  await loadComprasRecebimento();
+  // await loadComprasRecebimento(); // COMENTADO - usando nova implementação inline no HTML
 });
 
 // Ao abrir "Cadastro de colaboradores", mostra a aba e injeta o botão "+"
@@ -10449,9 +10485,6 @@ headerLinks.forEach(link => {
     } else if (link.id === 'menu-registros') {
       if (window.openRegistros) window.openRegistros();
       
-    } else if (link.id === 'menu-compras') {
-      openComprasTab();
-      
     } else if (link.id === 'menu-inicio') {
 
   /* 1) fecha Kanban e Armazéns, se abertos */
@@ -10486,6 +10519,10 @@ if (mh) mh.style.display = 'none';
     
   });
 });
+
+// Variáveis globais para compras
+let comprasActiveUsers = [];
+let comprasSearchTimeout = null;
 
 // Gerenciamento de anexos para compras
 let comprasAnexoAtual = null;
@@ -10559,7 +10596,7 @@ function initComprasUI() {
   document.getElementById('comprasRefreshBtn')?.addEventListener('click', e => {
     e.preventDefault();
     // Atualiza o kanban
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
   });
   attachComprasAutocomplete();
   console.log('[COMPRAS] initComprasUI -> autocomplete e eventos registrados');
@@ -12352,6 +12389,8 @@ const header   = document.getElementById('appHeader');   // <div class="header">
 const menu     = document.getElementById('mainMenu');    // <nav …>
 
 // ---------- COMPRAS: helpers para painel de solicitações ----------
+// FUNÇÃO REMOVIDA - Página "Kanban de Compras" foi substituída por "Minhas solicitações"
+/*
 function openComprasTab() {
   try {
     const comprasPane = document.getElementById('comprasPane');
@@ -12397,6 +12436,7 @@ function openComprasTab() {
     console.error('[COMPRAS] Erro ao abrir painel:', err);
   }
 }
+*/
 
 // Configura listeners das sub-abas de compras
 function setupComprasSubTabs() {
@@ -13327,6 +13367,19 @@ document.getElementById('modalComprasCancelarBtn')?.addEventListener('click', fe
 document.getElementById('comprasModalForm')?.addEventListener('submit', adicionarItemCarrinho);
 document.getElementById('comprasLimparCarrinhoBtn')?.addEventListener('click', limparCarrinhoCompras);
 document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoCompras);
+
+// Binds dos botões de filtro de kanbans
+document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', abrirModalFiltroKanbans);
+document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', fecharModalFiltroKanbans);
+document.getElementById('filtroKanbanSelecionarTodos')?.addEventListener('click', toggleSelecionarTodosKanbans);
+document.getElementById('filtroKanbanAplicar')?.addEventListener('click', salvarPreferenciasKanbans);
+
+// Fecha modal ao clicar fora
+document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modalFiltroKanbans') {
+    fecharModalFiltroKanbans();
+  }
+});
 
 // Botão de exportar Excel
 document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', async () => {
@@ -14775,6 +14828,12 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       return;
     }
     
+    // Armazena itens em cache global para acesso nas funções de cálculo
+    window.itensPedidoCache = window.itensPedidoCache || {};
+    itensPedido.forEach(item => {
+      window.itensPedidoCache[item.id] = item;
+    });
+    
     const primeiroItem = itensPedido[0];
     modalTitulo.textContent = `Pedido ${numeroPedido}`;
     
@@ -14834,66 +14893,69 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           <i class="fa-solid fa-shopping-cart"></i> Dados da Compra (Pedido: ${numeroPedido})
         </div>
         
-        <!-- Fornecedor -->
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
-            <i class="fa-solid fa-building"></i> Fornecedor *
-          </label>
-          <div style="position:relative;">
-            <input 
-              type="text" 
-              id="compras-fornecedor-input-${numeroPedido}"
-              class="compras-fornecedor-input-modal"
-              placeholder="Digite o nome do fornecedor..."
-              value="${primeiroItem.fornecedor_nome || ''}"
-              style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"
-            />
-            <input type="hidden" id="compras-fornecedor-id-${numeroPedido}" value="${primeiroItem.fornecedor_id || ''}" />
-            <div 
-              id="compras-fornecedor-list-${numeroPedido}" 
-              class="compras-fornecedor-list-modal"
-              style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+        <!-- Campos em Grid (4 colunas) -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;">
+          <!-- Fornecedor -->
+          <div>
+            <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
+              <i class="fa-solid fa-building"></i> Fornecedor *
+            </label>
+            <div style="position:relative;">
+              <input 
+                type="text" 
+                id="compras-fornecedor-input-${numeroPedido}"
+                class="compras-fornecedor-input-modal"
+                placeholder="Digite o nome do fornecedor..."
+                value="${primeiroItem.fornecedor_nome || ''}"
+                style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+              />
+              <input type="hidden" id="compras-fornecedor-id-${numeroPedido}" value="${primeiroItem.fornecedor_id || ''}" />
+              <div 
+                id="compras-fornecedor-list-${numeroPedido}" 
+                class="compras-fornecedor-list-modal"
+                style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:200px;overflow-y:auto;z-index:1000;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+              </div>
             </div>
           </div>
-        </div>
-        
-        <!-- Previsão de Entrega -->
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
-            <i class="fa-solid fa-calendar"></i> Previsão de Entrega
-          </label>
-          <input 
-            type="date" 
-            id="compras-previsao-entrega-${numeroPedido}"
-            value="${primeiroItem.previsao_entrega ? new Date(primeiroItem.previsao_entrega).toISOString().split('T')[0] : ''}"
-            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;"
-          />
-        </div>
-        
-        <!-- Categoria da Compra -->
-        <div style="margin-bottom:14px;">
-          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
-            <i class="fa-solid fa-tags"></i> Categoria da Compra
-          </label>
-          <select 
-            id="compras-categoria-${numeroPedido}"
-            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;background:white;">
-            <option value="">Selecione uma categoria...</option>
-            <!-- Será preenchido dinamicamente -->
-          </select>
-        </div>
-        
-        <!-- Condição de Pagamento -->
-        <div style="margin-bottom:0;">
-          <label style="display:block;font-size:12px;color:#047857;font-weight:600;margin-bottom:6px;">
-            <i class="fa-solid fa-credit-card"></i> Condição de Pagamento
-          </label>
-          <select 
-            id="compras-parcela-${numeroPedido}"
-            style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;background:white;">
-            <option value="">Carregando...</option>
-            <!-- Será preenchido dinamicamente -->
-          </select>
+          
+          <!-- Previsão de Entrega -->
+          <div>
+            <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
+              <i class="fa-solid fa-calendar"></i> Previsão de Entrega
+            </label>
+            <input 
+              type="date" 
+              id="compras-previsao-entrega-${numeroPedido}"
+              value="${primeiroItem.previsao_entrega ? new Date(primeiroItem.previsao_entrega).toISOString().split('T')[0] : ''}"
+              style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+            />
+          </div>
+          
+          <!-- Categoria da Compra -->
+          <div>
+            <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
+              <i class="fa-solid fa-tags"></i> Categoria da Compra
+            </label>
+            <select 
+              id="compras-categoria-${numeroPedido}"
+              style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+              <option value="">Selecione...</option>
+              <!-- Será preenchido dinamicamente -->
+            </select>
+          </div>
+          
+          <!-- Condição de Pagamento -->
+          <div>
+            <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
+              <i class="fa-solid fa-credit-card"></i> Condição de Pagamento
+            </label>
+            <select 
+              id="compras-parcela-${numeroPedido}"
+              style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+              <option value="">Carregando...</option>
+              <!-- Será preenchido dinamicamente -->
+            </select>
+          </div>
         </div>
       </div>
       ` : ''}
@@ -14975,21 +15037,493 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           ` : ''}
           
           ${item.status === 'aguardando compra' ? `
-          <!-- Valor Unitário (específico por item) -->
+          <!-- Campos do Item em Grid (4 colunas) -->
           <div style="padding:12px;background:#f0fdf4;border:1px solid #10b981;border-radius:6px;margin-bottom:12px;">
-            <div style="margin-bottom:0;">
-              <label style="display:block;font-size:11px;color:#047857;font-weight:600;margin-bottom:6px;">
-                <i class="fa-solid fa-dollar-sign"></i> Valor Unitário (R$) - Item ${index + 1}
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+              <!-- Valor Unitário -->
+              <div>
+                <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
+                  <i class="fa-solid fa-dollar-sign"></i> Valor Unitário (R$)
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-valor-unitario-${item.id}"
+                  value="${item.valor_unitario || ''}"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  oninput="calcularValoresItem(${item.id})"
+                  style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;"
+                />
+              </div>
+              
+              <!-- Local de Estoque -->
+              <div>
+                <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
+                  <i class="fa-solid fa-warehouse"></i> Local de Estoque
+                </label>
+                <select 
+                  id="compras-local-estoque-${item.id}"
+                  style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:white;">
+                  <option value="">Selecione...</option>
+                  <option value="01">01 - Principal</option>
+                  <option value="02">02 - Secundário</option>
+                  <option value="03">03 - Terceiro</option>
+                </select>
+              </div>
+              
+              <!-- Valor da Mercadoria -->
+              <div>
+                <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
+                  <i class="fa-solid fa-calculator"></i> Valor da Mercadoria
+                </label>
+                <input 
+                  type="text" 
+                  id="compras-valor-mercadoria-${item.id}"
+                  value=""
+                  readonly
+                  style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:#f9fafb;cursor:not-allowed;"
+                  title="Calculado automaticamente: Valor Unitário × Quantidade"
+                />
+              </div>
+              
+              <!-- % de Desconto -->
+              <div>
+                <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:6px;">
+                  <i class="fa-solid fa-percent"></i> % de Desconto
+                </label>
+                <input 
+                  type="number" 
+                  id="compras-desconto-${item.id}"
+                  value="0"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  placeholder="0.00"
+                  oninput="calcularValoresItem(${item.id})"
+                  style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;"
+                />
+              </div>
+            </div>
+            
+            <!-- Valor Total do Item (abaixo, destacado) -->
+            <div style="margin-top:12px;padding:10px;background:#d1fae5;border-radius:6px;">
+              <label style="display:block;font-size:10px;color:#047857;font-weight:600;margin-bottom:4px;">
+                <i class="fa-solid fa-coins"></i> Valor Total do Item
               </label>
-              <input 
-                type="number" 
-                id="compras-valor-unitario-${item.id}"
-                value="${item.valor_unitario || ''}"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
-              />
+              <div 
+                id="compras-valor-total-${item.id}"
+                style="font-size:18px;font-weight:700;color:#047857;">
+                R$ 0,00
+              </div>
+            </div>
+          </div>
+          
+          <!-- Sistema de Guias/Tabs -->
+          <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:12px;">
+            <!-- Cabeçalho das Guias -->
+            <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e5e7eb;flex-wrap:wrap;">
+              <button class="tab-btn-item-${item.id}" data-tab="icms" onclick="abrirTabItem(${item.id}, 'icms')" style="padding:8px 14px;background:#3b82f6;color:white;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">ICMS</button>
+              <button class="tab-btn-item-${item.id}" data-tab="icms-st" onclick="abrirTabItem(${item.id}, 'icms-st')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">ICMS ST</button>
+              <button class="tab-btn-item-${item.id}" data-tab="ipi" onclick="abrirTabItem(${item.id}, 'ipi')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">IPI</button>
+              <button class="tab-btn-item-${item.id}" data-tab="pis" onclick="abrirTabItem(${item.id}, 'pis')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">PIS</button>
+              <button class="tab-btn-item-${item.id}" data-tab="cofins" onclick="abrirTabItem(${item.id}, 'cofins')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">COFINS</button>
+              <button class="tab-btn-item-${item.id}" data-tab="info-adicionais" onclick="abrirTabItem(${item.id}, 'info-adicionais')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">Info. Adic.</button>
+              <button class="tab-btn-item-${item.id}" data-tab="preco-venda" onclick="abrirTabItem(${item.id}, 'preco-venda')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">Preço Venda</button>
+              <button class="tab-btn-item-${item.id}" data-tab="custo-estoque" onclick="abrirTabItem(${item.id}, 'custo-estoque')" style="padding:8px 14px;background:#f3f4f6;color:#6b7280;border:none;border-radius:6px 6px 0 0;cursor:pointer;font-size:11px;font-weight:600;transition:all 0.2s;">Custo Estoque</button>
+            </div>
+            
+            <!-- Conteúdo das Guias -->
+            <div id="tab-content-item-${item.id}">
+              <!-- Guia ICMS -->
+              <div class="tab-panel-item-${item.id}" data-tab="icms" style="display:block;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Situação Tributária do ICMS</label>
+                    <select id="icms-sit-trib-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="00">00 - Tributada integralmente</option>
+                      <option value="10">10 - Tributada com cobrança do ICMS ST</option>
+                      <option value="20">20 - Com redução de base de cálculo</option>
+                      <option value="30">30 - Isenta ou não tributada com cobrança do ICMS ST</option>
+                      <option value="40">40 - Isenta</option>
+                      <option value="41">41 - Não tributada</option>
+                      <option value="50">50 - Suspensão</option>
+                      <option value="51">51 - Diferimento</option>
+                      <option value="60">60 - ICMS cobrado anteriormente por ST</option>
+                      <option value="70">70 - Com redução de BC e cobrança do ICMS ST</option>
+                      <option value="90">90 - Outras</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Origem</label>
+                    <select id="icms-origem-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="0">0 - Nacional</option>
+                      <option value="1">1 - Estrangeira (Importação direta)</option>
+                      <option value="2">2 - Estrangeira (Adquirida no mercado interno)</option>
+                      <option value="3">3 - Nacional com mais de 40% de conteúdo estrangeiro</option>
+                      <option value="4">4 - Nacional produzida através de processos produtivos básicos</option>
+                      <option value="5">5 - Nacional com menos de 40% de conteúdo estrangeiro</option>
+                      <option value="6">6 - Estrangeira (Importação direta) sem similar nacional</option>
+                      <option value="7">7 - Estrangeira (Adquirida no mercado interno) sem similar nacional</option>
+                      <option value="8">8 - Nacional com mais de 70% de conteúdo estrangeiro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Modalidade da BC do ICMS</label>
+                    <select id="icms-mod-bc-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="0">0 - Margem Valor Agregado (%)</option>
+                      <option value="1">1 - Pauta (Valor)</option>
+                      <option value="2">2 - Preço Tabelado Máx. (valor)</option>
+                      <option value="3">3 - Valor da Operação</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Redução da BC do ICMS (%)</label>
+                    <input type="number" id="icms-red-bc-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Base de Cálculo do ICMS</label>
+                    <input type="number" id="icms-bc-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíquota do ICMS (%)</label>
+                    <input type="number" id="icms-aliq-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do ICMS</label>
+                    <input type="number" id="icms-valor-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia ICMS ST -->
+              <div class="tab-panel-item-${item.id}" data-tab="icms-st" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Modalidade da BC do ICMS ST</label>
+                    <select id="icms-st-mod-bc-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="0">0 - Preço tabelado ou máximo sugerido</option>
+                      <option value="1">1 - Lista Negativa (valor)</option>
+                      <option value="2">2 - Lista Positiva (valor)</option>
+                      <option value="3">3 - Lista Neutra (valor)</option>
+                      <option value="4">4 - Margem Valor Agregado (%)</option>
+                      <option value="5">5 - Pauta (valor)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Margem de Valor Adicionado (%)</label>
+                    <input type="number" id="icms-st-mva-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Redução da BC do ICMS ST (%)</label>
+                    <input type="number" id="icms-st-red-bc-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Red. BC. ICMS Oper. Própria (%)</label>
+                    <input type="number" id="icms-st-red-bc-prop-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Base de Cálculo do ICMS ST</label>
+                    <input type="number" id="icms-st-bc-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíquota do ICMS ST (%)</label>
+                    <input type="number" id="icms-st-aliq-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíq. do ICMS Oper. Própria (%)</label>
+                    <input type="number" id="icms-st-aliq-prop-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">CEST</label>
+                    <input type="text" id="icms-st-cest-${item.id}" placeholder="0000000" maxlength="7" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do ICMS ST</label>
+                    <input type="number" id="icms-st-valor-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia IPI -->
+              <div class="tab-panel-item-${item.id}" data-tab="ipi" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Situação Tributária do IPI</label>
+                    <select id="ipi-sit-trib-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="00">00 - Entrada com Recuperação de Crédito</option>
+                      <option value="01">01 - Entrada Tributada com Alíquota Zero</option>
+                      <option value="02">02 - Entrada Isenta</option>
+                      <option value="03">03 - Entrada Não-Tributada</option>
+                      <option value="04">04 - Entrada Imune</option>
+                      <option value="05">05 - Entrada com Suspensão</option>
+                      <option value="49">49 - Outras Entradas</option>
+                      <option value="50">50 - Saída Tributada</option>
+                      <option value="51">51 - Saída Tributável com Alíquota Zero</option>
+                      <option value="52">52 - Saída Isenta</option>
+                      <option value="53">53 - Saída Não-Tributada</option>
+                      <option value="54">54 - Saída Imune</option>
+                      <option value="55">55 - Saída com Suspensão</option>
+                      <option value="99">99 - Outras Saídas</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Tipo de Cálculo para o IPI</label>
+                    <select id="ipi-tipo-calc-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="percent">Percentual</option>
+                      <option value="valor">Valor por Unidade</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Base de Cálculo do IPI</label>
+                    <input type="number" id="ipi-bc-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíquota do IPI (%)</label>
+                    <input type="number" id="ipi-aliq-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Qtd Unidades Tributáveis</label>
+                    <input type="number" id="ipi-qtd-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do IPI por Unid. Tribut.</label>
+                    <input type="number" id="ipi-valor-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Enquadramento Fiscal do IPI</label>
+                    <input type="text" id="ipi-enq-fiscal-${item.id}" placeholder="" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do IPI</label>
+                    <input type="number" id="ipi-valor-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia PIS -->
+              <div class="tab-panel-item-${item.id}" data-tab="pis" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Situação Tributária do PIS</label>
+                    <select id="pis-sit-trib-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="01">01 - Operação Tributável com Alíquota Básica</option>
+                      <option value="02">02 - Operação Tributável com Alíquota Diferenciada</option>
+                      <option value="03">03 - Operação Tributável com Alíquota por Unidade de Medida</option>
+                      <option value="04">04 - Operação Tributável Monofásica - Revenda a Alíquota Zero</option>
+                      <option value="05">05 - Operação Tributável por Substituição Tributária</option>
+                      <option value="06">06 - Operação Tributável a Alíquota Zero</option>
+                      <option value="07">07 - Operação Isenta da Contribuição</option>
+                      <option value="08">08 - Operação sem Incidência da Contribuição</option>
+                      <option value="09">09 - Operação com Suspensão da Contribuição</option>
+                      <option value="99">99 - Outras Operações</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Tipo de Cálculo para o PIS</label>
+                    <select id="pis-tipo-calc-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="percent">Percentual</option>
+                      <option value="valor">Valor por Unidade</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Redução da Base de PIS (%)</label>
+                    <input type="number" id="pis-red-bc-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Base de Cálculo do PIS</label>
+                    <input type="number" id="pis-bc-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíquota do PIS (%)</label>
+                    <input type="number" id="pis-aliq-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Qtd Unidades Tributáveis</label>
+                    <input type="number" id="pis-qtd-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do PIS por Unid. Tribut.</label>
+                    <input type="number" id="pis-valor-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do PIS</label>
+                    <input type="number" id="pis-valor-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia COFINS -->
+              <div class="tab-panel-item-${item.id}" data-tab="cofins" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Situação Tributária do COFINS</label>
+                    <select id="cofins-sit-trib-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="01">01 - Operação Tributável com Alíquota Básica</option>
+                      <option value="02">02 - Operação Tributável com Alíquota Diferenciada</option>
+                      <option value="03">03 - Operação Tributável com Alíquota por Unidade de Medida</option>
+                      <option value="04">04 - Operação Tributável Monofásica - Revenda a Alíquota Zero</option>
+                      <option value="05">05 - Operação Tributável por Substituição Tributária</option>
+                      <option value="06">06 - Operação Tributável a Alíquota Zero</option>
+                      <option value="07">07 - Operação Isenta da Contribuição</option>
+                      <option value="08">08 - Operação sem Incidência da Contribuição</option>
+                      <option value="09">09 - Operação com Suspensão da Contribuição</option>
+                      <option value="99">99 - Outras Operações</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Tipo de Cálculo para o COFINS</label>
+                    <select id="cofins-tipo-calc-${item.id}" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;">
+                      <option value="">Selecione...</option>
+                      <option value="percent">Percentual</option>
+                      <option value="valor">Valor por Unidade</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Redução da Base de COFINS (%)</label>
+                    <input type="number" id="cofins-red-bc-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Base de Cálculo do COFINS</label>
+                    <input type="number" id="cofins-bc-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Alíquota do COFINS (%)</label>
+                    <input type="number" id="cofins-aliq-${item.id}" step="0.01" min="0" max="100" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Qtd Unidades Tributáveis</label>
+                    <input type="number" id="cofins-qtd-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do COFINS p/ Un. Trib.</label>
+                    <input type="number" id="cofins-valor-unid-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Valor do COFINS</label>
+                    <input type="number" id="cofins-valor-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia Informações Adicionais -->
+              <div class="tab-panel-item-${item.id}" data-tab="info-adicionais" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Peso Líquido (Kg)</label>
+                    <input type="number" id="info-peso-liquido-${item.id}" step="0.001" min="0" placeholder="0.000" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Peso Bruto (Kg)</label>
+                    <input type="number" id="info-peso-bruto-${item.id}" step="0.001" min="0" placeholder="0.000" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Categoria do Item</label>
+                    <input type="text" id="info-categoria-${item.id}" placeholder="" style="width:100%;padding:7px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+                  </div>
+                </div>
+                <div>
+                  <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Observações deste item (impressas no pedido de compra)</label>
+                  <textarea id="info-observacoes-${item.id}" rows="4" placeholder="Digite as observações..." style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;resize:vertical;"></textarea>
+                </div>
+              </div>
+              
+              <!-- Guia Atualização do Preço de Venda -->
+              <div class="tab-panel-item-${item.id}" data-tab="preco-venda" style="display:none;">
+                <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="preco-atualizar-${item.id}" onchange="toggleAtualizacaoPreco(${item.id})" style="width:18px;height:18px;cursor:pointer;" />
+                    <span style="font-size:12px;font-weight:600;color:#92400e;">Quero atualizar automaticamente o preço de venda deste produto no recebimento da compra</span>
+                  </label>
+                </div>
+                
+                <div id="preco-campos-${item.id}" style="display:none;">
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:10px;color:#374151;font-weight:600;margin-bottom:4px;">Percentual utilizado para a atualização (%)</label>
+                    <input type="number" id="preco-percentual-${item.id}" step="0.01" min="0" placeholder="0.00" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;" />
+                  </div>
+                  
+                  <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="preco-apenas-maior-${item.id}" style="width:18px;height:18px;cursor:pointer;" />
+                      <span style="font-size:11px;color:#92400e;">Atualizar apenas se o novo preço for maior que o preço de venda atual do produto</span>
+                    </label>
+                  </div>
+                  
+                  <div style="padding:12px;background:#f3f4f6;border-radius:6px;">
+                    <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Fórmula de Cálculo:</div>
+                    <div style="font-size:11px;color:#374151;font-family:monospace;">
+                      <!-- TODO: Implementar cálculo dinâmico -->
+                      (Custo de Estoque Item) / (Quantidade) × (1 + (% de Atualização do Preço))
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Guia Custo de Estoque -->
+              <div class="tab-panel-item-${item.id}" data-tab="custo-estoque" style="display:none;">
+                <div style="font-size:11px;color:#6b7280;margin-bottom:12px;">
+                  Selecione os impostos que fazem parte do custo de estoque desta compra:
+                </div>
+                
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px;">
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-icms-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">ICMS é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-icms-st-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">ICMS ST é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-ipi-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">IPI é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-seguro-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">Seguro é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-pis-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">PIS é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-cofins-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">COFINS é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-frete-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">Frete é custo de estoque</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:8px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;">
+                    <input type="checkbox" id="custo-outras-desp-${item.id}" style="width:16px;height:16px;cursor:pointer;" />
+                    <span style="font-size:11px;color:#374151;">Outras Desp. é custo de estoque</span>
+                  </label>
+                </div>
+                
+                <div style="padding:10px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px;">
+                  <div style="font-size:10px;color:#92400e;margin-bottom:4px;">
+                    <i class="fa-solid fa-info-circle"></i> Estas informações serão sempre sugeridas nas próximas Compras de Mercadorias para Revenda
+                  </div>
+                </div>
+                
+                <div style="padding:12px;background:#f3f4f6;border-radius:6px;">
+                  <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Dessa forma, o valor de entrada deste item será de:</div>
+                  <div style="font-size:13px;color:#374151;font-weight:600;font-family:monospace;">
+                    <!-- TODO: Implementar cálculo dinâmico -->
+                    R$ 129,531 com o CMC de R$ 130,330714. Para alterar o % de crédito do PIS e COFINS, clique aqui.
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           ` : ''}
@@ -15336,6 +15870,9 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           loadCategoriasCompraModal(item.numero_pedido, item.categoria_compra_codigo);
           loadParcelasCompraModal(item.numero_pedido, item.cod_parcela);
           loadDadosPedidoCompra(item.numero_pedido);
+          
+          // Inicializa cálculos de valores para o item
+          calcularValoresItem(item.id);
         }
       });
     }, 100);
@@ -15418,7 +15955,7 @@ async function marcarComoCotadoModal(itemId) {
     
     // Fecha o modal e recarrega o kanban
     fecharModalDetalhesPedidoCompras();
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
     
   } catch (err) {
     console.error('[MARCAR COTADO] Erro:', err);
@@ -15430,6 +15967,78 @@ function fecharModalDetalhesPedidoCompras() {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   if (modal) modal.style.display = 'none';
 }
+
+// Função para trocar de guia (tab) nos campos tributários
+function abrirTabItem(itemId, tabName) {
+  // Atualiza botões
+  const botoes = document.querySelectorAll(`.tab-btn-item-${itemId}`);
+  botoes.forEach(btn => {
+    if (btn.dataset.tab === tabName) {
+      btn.style.background = '#3b82f6';
+      btn.style.color = 'white';
+    } else {
+      btn.style.background = '#f3f4f6';
+      btn.style.color = '#6b7280';
+    }
+  });
+  
+  // Atualiza painéis
+  const paineis = document.querySelectorAll(`.tab-panel-item-${itemId}`);
+  paineis.forEach(panel => {
+    if (panel.dataset.tab === tabName) {
+      panel.style.display = 'block';
+    } else {
+      panel.style.display = 'none';
+    }
+  });
+}
+
+// Função para calcular valores do item
+function calcularValoresItem(itemId) {
+  const valorUnitario = parseFloat(document.getElementById(`compras-valor-unitario-${itemId}`)?.value || 0);
+  const desconto = parseFloat(document.getElementById(`compras-desconto-${itemId}`)?.value || 0);
+  
+  // Tenta buscar quantidade do item dos dados armazenados globalmente ou do DOM
+  let quantidade = 1;
+  
+  // Se houver dados de itens do pedido em cache, busca de lá
+  if (window.itensPedidoCache && window.itensPedidoCache[itemId]) {
+    quantidade = parseFloat(window.itensPedidoCache[itemId].quantidade || 1);
+  }
+  
+  // Calcula valor da mercadoria (valor unitário × quantidade)
+  const valorMercadoria = valorUnitario * quantidade;
+  
+  // Calcula valor total (valor mercadoria - desconto %)
+  const valorTotal = valorMercadoria * (1 - (desconto / 100));
+  
+  // Atualiza campos
+  const campoValorMercadoria = document.getElementById(`compras-valor-mercadoria-${itemId}`);
+  const campoValorTotal = document.getElementById(`compras-valor-total-${itemId}`);
+  
+  if (campoValorMercadoria) {
+    campoValorMercadoria.value = `R$ ${valorMercadoria.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  
+  if (campoValorTotal) {
+    campoValorTotal.textContent = `R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+}
+
+// Função para toggle de atualização de preço de venda
+function toggleAtualizacaoPreco(itemId) {
+  const checkbox = document.getElementById(`preco-atualizar-${itemId}`);
+  const campos = document.getElementById(`preco-campos-${itemId}`);
+  
+  if (checkbox && campos) {
+    campos.style.display = checkbox.checked ? 'block' : 'none';
+  }
+}
+
+// Exporta funções globais
+window.abrirTabItem = abrirTabItem;
+window.calcularValoresItem = calcularValoresItem;
+window.toggleAtualizacaoPreco = toggleAtualizacaoPreco;
 
 // Configura autocomplete de fornecedores para campos no modal
 function setupFornecedorAutocompleteModal(itemId) {
@@ -15552,7 +16161,7 @@ async function salvarFornecedorModal(itemId) {
     alert('Fornecedor salvo com sucesso!');
     
     // Recarrega o kanban e fecha o modal
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
     
   } catch (err) {
@@ -15660,7 +16269,7 @@ async function salvarDadosCompraModal(numeroPedido) {
     alert('Dados da compra salvos com sucesso!');
     
     // Recarrega o kanban e fecha o modal
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
     
   } catch (err) {
@@ -15887,7 +16496,7 @@ async function gerarPedidoCompraOmie(numeroPedido) {
     alert(`✅ Pedido de compra gerado com sucesso na Omie!\n\nNúmero: ${data.numero}\nCódigo: ${data.codigo}`);
     
     // Recarrega o kanban e fecha o modal
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
     fecharModalDetalhesPedidoCompras();
     
   } catch (err) {
@@ -16040,7 +16649,7 @@ window.abrirModalNovaCotacao = abrirModalNovaCotacao;
 window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 
 // Modal específico para "Minhas Solicitações" (visualização do usuário solicitante)
-async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
+async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
   const modalTitulo = document.getElementById('modalPedidoTitulo');
@@ -16059,18 +16668,26 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
     const data = await resp.json();
     const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
     
-    // Se numero_pedido for "undefined" ou vazio, busca todos os itens com aquele status
+    // Busca itens por diferentes critérios
     let itensPedido;
-    if (!numeroPedido || numeroPedido === 'undefined' || numeroPedido === 'null') {
-      // Filtra por status para exibir todos os itens daquele kanban
+    
+    // Se tiver itemId específico, busca por ele
+    if (itemId) {
+      itensPedido = listaCompleta.filter(item => item.id == itemId);
+    }
+    // Se numero_pedido for válido, busca por ele
+    else if (numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' && numeroPedido !== '') {
+      itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
+    }
+    // Senão, busca todos os itens com aquele status
+    else {
       itensPedido = listaCompleta.filter(item => {
         const itemStatus = (item.status || '').toLowerCase().trim();
         const colunaStatus = statusColuna.toLowerCase().trim();
         return itemStatus === colunaStatus || 
-               (colunaStatus === 'cotado aguardando escolha' && itemStatus === 'cotado');
+               (colunaStatus === 'cotado aguardando escolha' && itemStatus === 'cotado') ||
+               (colunaStatus === 'solicitado revisão' && itemStatus === 'retificar');
       });
-    } else {
-      itensPedido = listaCompleta.filter(item => item.numero_pedido === numeroPedido);
     }
     
     if (itensPedido.length === 0) {
@@ -16143,6 +16760,32 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
             <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
             <div style="color:#374151;">${descricaoEscaped}</div>
           </div>
+          
+          ${statusColuna === 'solicitado revisão' ? `
+          <!-- Histórico de comentários (read-only) -->
+          ${item.observacao_retificacao ? `
+          <div style="margin-top:12px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;">
+            <div style="font-weight:600;color:#92400e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-comment-dots"></i> Histórico de Comentários
+            </div>
+            <div style="color:#78350f;font-size:13px;line-height:1.5;white-space:pre-wrap;">
+              ${escapeHtml(item.observacao_retificacao)}
+            </div>
+          </div>
+          ` : ''}
+          
+          <!-- Campo para adicionar novo comentário -->
+          <div style="margin-top:12px;padding:12px;background:#e0f2fe;border:1px solid #0ea5e9;border-radius:6px;">
+            <div style="font-weight:600;color:#075985;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-plus-circle"></i> Adicionar Novo Comentário (Obrigatório)
+            </div>
+            <textarea 
+              id="novo-comentario-retificacao-${item.id}" 
+              placeholder="Digite seu comentário para voltar este item para Aguardando Compra..."
+              style="width:100%;min-height:80px;padding:10px;border:1px solid #0ea5e9;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"
+            ></textarea>
+          </div>
+          ` : ''}
           
           ${(statusColuna === 'cotado aguardando escolha' && cotacoes.length > 0) ? `
           <div style="margin-top:16px;padding-top:16px;border-top:2px solid #e5e7eb;">
@@ -16229,6 +16872,34 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna) {
               <i class="fa-solid fa-trash"></i>
               Excluir
             </button>
+          </div>
+          ` : ''}
+          
+          ${statusColuna === 'solicitado revisão' ? `
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
+            <button 
+              onclick="voltarParaAguardandoCompra('${item.id}')"
+              style="display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
+              title="Voltar para Aguardando Compra">
+              <i class="fa-solid fa-arrow-left"></i>
+              Voltar para Aguardando Compra
+            </button>
+            <div style="display:flex;gap:8px;">
+              <button 
+                onclick="editarItemMinhas('${item.id}')"
+                style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:#f59e0b;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+                title="Editar este item">
+                <i class="fa-solid fa-edit"></i>
+                Editar
+              </button>
+              <button 
+                onclick="excluirItemMinhas('${item.id}')"
+                style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+                title="Excluir este item">
+                <i class="fa-solid fa-trash"></i>
+                Excluir
+              </button>
+            </div>
           </div>
           ` : ''}
           
@@ -16350,12 +17021,60 @@ async function excluirItemMinhas(itemId) {
   }
 }
 
+// Função para voltar item de "retificar" para "aguardando compra"
+async function voltarParaAguardandoCompra(itemId) {
+  // Pega o valor do textarea de comentário
+  const textarea = document.getElementById(`novo-comentario-retificacao-${itemId}`);
+  const novoComentario = textarea ? textarea.value.trim() : '';
+  
+  // Valida se o comentário foi preenchido
+  if (!novoComentario) {
+    alert('Por favor, adicione um comentário antes de voltar o item para Aguardando Compra.');
+    if (textarea) textarea.focus();
+    return;
+  }
+  
+  if (!confirm('Deseja realmente voltar este item para "Aguardando Compra"?')) return;
+  
+  // Pega o nome do usuário logado
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || 'User').trim();
+  
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ 
+        status: 'aguardando compra',
+        observacao_retificacao: novoComentario,
+        usuario_comentario: currentUser
+      })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.error || 'Erro ao atualizar status');
+    }
+    
+    alert('Item movido para "Aguardando Compra" com sucesso!');
+    fecharModalDetalhesPedidoCompras();
+    loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('Erro ao voltar para aguardando compra:', err);
+    alert('Erro ao atualizar status: ' + err.message);
+  }
+}
+
 window.abrirModalDetalhesPedidoMinhas = abrirModalDetalhesPedidoMinhas;
 window.toggleAprovarCotacaoMinhas = toggleAprovarCotacaoMinhas;
 window.enviarEscolhaMinhas = enviarEscolhaMinhas;
 window.editarItemMinhas = editarItemMinhas;
 window.excluirItemMinhas = excluirItemMinhas;
+window.voltarParaAguardandoCompra = voltarParaAguardandoCompra;
 
+// FUNÇÃO REMOVIDA - Página "Kanban de Compras" foi substituída por "Minhas solicitações"
+// A renderização do kanban agora é feita pela função listarMinhasSolicitacoes()
+/*
 // Renderiza o kanban de compras
 async function renderComprasKanban() {
   try {
@@ -16623,8 +17342,10 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
     alert('Erro ao carregar detalhes do pedido: ' + err.message);
   }
 }
+*/
+// FIM DAS FUNÇÕES REMOVIDAS
 
-window.abrirModalPedidoAgrupado = abrirModalPedidoAgrupado;
+// window.abrirModalPedidoAgrupado = abrirModalPedidoAgrupado; // REMOVIDO - Função não existe mais
 
 // ========== MODAL SELEÇÃO DE ITENS PARA COMPRA ==========
 
@@ -16821,6 +17542,24 @@ function renderizarListaSelecaoItens(itens) {
             </div>
             
             ${(() => {
+              // Mostra observação de retificação se existir
+              if (item.observacao_retificacao) {
+                return `
+                  <div style="margin-top:12px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;">
+                    <div style="font-size:10px;color:#92400e;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:4px;">
+                      <i class="fa-solid fa-comment-dots"></i>
+                      Histórico de Comentários
+                    </div>
+                    <div style="font-size:11px;color:#78350f;line-height:1.4;white-space:pre-wrap;max-height:80px;overflow-y:auto;">
+                      ${escapeHtml(item.observacao_retificacao)}
+                    </div>
+                  </div>
+                `;
+              }
+              return '';
+            })()}
+            
+            ${(() => {
               // Busca cotações aprovadas do item
               const cotacoes = window.cotacoesItensCompra?.get(item.id) || [];
               if (cotacoes.length === 0) return '';
@@ -16875,8 +17614,33 @@ function renderizarListaSelecaoItens(itens) {
             })()}
           </div>
           
-          <!-- Botão Adicionar/Remover -->
-          <div>
+          <!-- Botões de Ação (Retificar e Adicionar/Remover) -->
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <!-- Botão Retificar -->
+            <button 
+              onclick="retificarItemCompra(${item.id}, event)"
+              title="Retificar item - Enviar para correção"
+              style="
+                background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);
+                color:white;
+                border:none;
+                padding:10px;
+                border-radius:8px;
+                font-size:14px;
+                cursor:pointer;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                transition:all 0.2s;
+                width:44px;
+                height:44px;
+              "
+              onmouseover="this.style.transform='scale(1.1)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-wrench"></i>
+            </button>
+            
+            <!-- Botão Adicionar/Remover -->
             <button 
               id="btn-adicionar-${item.id}"
               onclick="toggleItemSelecaoCompra(${item.id})"
@@ -16992,6 +17756,147 @@ function atualizarContadorSelecao() {
   }
 }
 
+// Retificar item - Abre modal para solicitar observação
+async function retificarItemCompra(itemId, event) {
+  // Evita propagação do evento para não acionar o toggle
+  if (event) event.stopPropagation();
+  
+  // Busca informações do item
+  try {
+    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao buscar item');
+    
+    const data = await resp.json();
+    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    const item = todosItens.find(i => i.id == itemId);
+    
+    if (!item) {
+      alert('Item não encontrado');
+      return;
+    }
+    
+    // Armazena ID do item e histórico existente para usar na confirmação
+    window.itemRetificacaoId = itemId;
+    window.itemRetificacaoHistorico = item.observacao_retificacao || '';
+    
+    // Atualiza informação do item no modal
+    const itemInfo = document.getElementById('observacaoRetificacaoItem');
+    if (itemInfo) {
+      itemInfo.textContent = `${item.produto_codigo || '-'} - ${item.descricao || item.produto_descricao || '-'}`;
+    }
+    
+    // Busca ou cria div para mostrar histórico
+    const modalBody = document.querySelector('#modalObservacaoRetificacao .modal-body');
+    let historicoDiv = document.getElementById('observacaoRetificacaoHistorico');
+    
+    // Se já existe histórico, mostra antes do campo de novo comentário
+    if (item.observacao_retificacao && modalBody) {
+      if (!historicoDiv) {
+        // Cria div de histórico se não existir
+        historicoDiv = document.createElement('div');
+        historicoDiv.id = 'observacaoRetificacaoHistorico';
+        // Insere antes do label "Motivo da Retificação"
+        const labelMotivo = modalBody.querySelector('label');
+        if (labelMotivo && labelMotivo.parentElement) {
+          labelMotivo.parentElement.insertBefore(historicoDiv, labelMotivo.parentElement.firstChild);
+        }
+      }
+      
+      historicoDiv.innerHTML = `
+        <div style="margin-bottom:16px;padding:12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;">
+          <div style="font-weight:600;color:#065f46;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-history"></i> Histórico de Comentários
+          </div>
+          <div style="color:#166534;font-size:13px;line-height:1.5;white-space:pre-wrap;max-height:150px;overflow-y:auto;padding:8px;background:#dcfce7;border-radius:4px;">
+            ${escapeHtml(item.observacao_retificacao)}
+          </div>
+        </div>
+      `;
+    } else if (historicoDiv) {
+      // Remove histórico se não houver
+      historicoDiv.remove();
+    }
+    
+    // Limpa campo de novo comentário
+    const textarea = document.getElementById('observacaoRetificacaoTexto');
+    const errorDiv = document.getElementById('observacaoRetificacaoError');
+    if (textarea) textarea.value = '';
+    if (errorDiv) errorDiv.style.display = 'none';
+    
+    // Abre modal
+    const modal = document.getElementById('modalObservacaoRetificacao');
+    if (modal) modal.style.display = 'flex';
+    
+    // Foca no textarea
+    setTimeout(() => {
+      if (textarea) textarea.focus();
+    }, 100);
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao abrir modal de retificação:', err);
+    alert('Erro ao processar item: ' + err.message);
+  }
+}
+
+// Fecha modal de observação de retificação
+function fecharModalObservacaoRetificacao() {
+  const modal = document.getElementById('modalObservacaoRetificacao');
+  if (modal) modal.style.display = 'none';
+  window.itemRetificacaoId = null;
+}
+
+// Confirma retificação com observação
+async function confirmarRetificacao() {
+  const textarea = document.getElementById('observacaoRetificacaoTexto');
+  const errorDiv = document.getElementById('observacaoRetificacaoError');
+  const itemId = window.itemRetificacaoId;
+  
+  if (!textarea || !itemId) return;
+  
+  const observacao = textarea.value.trim();
+  
+  // Valida observação
+  if (!observacao) {
+    if (errorDiv) errorDiv.style.display = 'block';
+    textarea.focus();
+    return;
+  }
+  
+  try {
+    // Chama o endpoint para atualizar o status com observação
+    const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ 
+        status: 'retificar',
+        observacao_retificacao: observacao
+      })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.error || 'Erro ao retificar item');
+    }
+    
+    const resultado = await resp.json();
+    
+    // Mostra mensagem de sucesso
+    alert('Item enviado para retificação com sucesso!');
+    
+    // Fecha os modais
+    fecharModalObservacaoRetificacao();
+    fecharModalSelecaoItensCompra();
+    
+    // Recarrega o Kanban para atualizar as colunas
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
+    
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao retificar item:', err);
+    alert('Erro ao retificar item: ' + err.message);
+  }
+}
+
 // Fecha modal de seleção
 function fecharModalSelecaoItensCompra() {
   const modal = document.getElementById('modalSelecaoItensCompra');
@@ -17042,7 +17947,7 @@ async function concluirSelecaoItensCompra() {
     await abrirModalDetalhesPedidoCompras(numeroPedidoTemp);
     
     // Atualiza o kanban
-    renderComprasKanban();
+    // renderComprasKanban(); // REMOVIDO - Página não existe mais
     
   } catch (err) {
     console.error('[COMPRAS] Erro ao concluir seleção:', err);
@@ -17055,6 +17960,9 @@ window.abrirModalSelecaoItensCompra = abrirModalSelecaoItensCompra;
 window.fecharModalSelecaoItensCompra = fecharModalSelecaoItensCompra;
 window.toggleItemSelecaoCompra = toggleItemSelecaoCompra;
 window.concluirSelecaoItensCompra = concluirSelecaoItensCompra;
+window.retificarItemCompra = retificarItemCompra;
+window.fecharModalObservacaoRetificacao = fecharModalObservacaoRetificacao;
+window.confirmarRetificacao = confirmarRetificacao;
 
 // ========== FIM MODAL SELEÇÃO DE ITENS PARA COMPRA ==========
 
@@ -17975,8 +18883,31 @@ function renderizarCatalogoOmie(produtos) {
             ` : ''}
           </div>
           
-          <!-- Linha com Quantidade, Prazo e Carrinho -->
+          <!-- Linha com Editar, Quantidade, Prazo e Carrinho -->
           <div style="margin-top:auto;display:flex;gap:6px;align-items:stretch;">
+            <!-- Botão Editar -->
+            <button 
+              onclick="abrirModalEditarProduto('${produto.codigo}')" 
+              title="Editar produto"
+              style="
+                width:32px;
+                background:#fef3c7;
+                color:#d97706;
+                border:1px solid #fbbf24;
+                padding:6px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:14px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                flex-shrink:0;
+              "
+              onmouseover="this.style.background='#fde68a'"
+              onmouseout="this.style.background='#fef3c7'">
+              <i class="fa-solid fa-pencil"></i>
+            </button>
+
             <!-- Campo Quantidade -->
             <input 
               type="number" 
@@ -18059,10 +18990,12 @@ async function carregarDepartamentosCatalogo() {
     if (data.ok && data.departamentos) {
       window.catalogoDepartamentos = data.departamentos;
       
+      let valorAtual = ''; // Declarar no início da função
+      
       // Atualiza o select global de departamento
       const selectGlobal = document.getElementById('catalogoDepartamentoGlobal');
       if (selectGlobal) {
-        const valorAtual = selectGlobal.value;
+        valorAtual = selectGlobal.value;
         selectGlobal.innerHTML = '<option value="">Selecione...</option>' +
           data.departamentos.map(d => 
             `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`
@@ -18089,6 +19022,9 @@ async function carregarDepartamentosCatalogo() {
 function handleCatalogoDepartamentoChange(event) {
   atualizarCategoriasPorDepartamento(event.target.value, 'catalogoCentroCustoGlobal');
 }
+
+// Exporta função de edição de produto para o escopo global
+window.abrirModalEditarProduto = abrirModalEditarProduto;
 
 // Toggle campo de prazo no catálogo
 function togglePrazoCatalogo(codigo) {
@@ -18286,6 +19222,30 @@ function ampliarImagemProduto(urlImagem, infoProduto) {
 function fecharImagemAmpliada() {
   const modal = document.getElementById('modalImagemAmpliada');
   if (modal) modal.style.display = 'none';
+}
+
+// ===== EDIÇÃO DE PRODUTOS DO CATÁLOGO =====
+
+/**
+ * Abre a página de detalhes do produto ao clicar no ícone de lápis
+ * Navega para: Menu Lateral > Produtos > Lista de produtos > Produto selecionado
+ */
+function abrirModalEditarProduto(codigoProduto) {
+  try {
+    // Fecha o modal do catálogo
+    fecharModalCatalogoOmie();
+    
+    // Navega para a página do produto usando a função global
+    if (typeof window.openProdutoPorCodigo === 'function') {
+      window.openProdutoPorCodigo(codigoProduto);
+    } else {
+      console.error('[abrirModalEditarProduto] Função openProdutoPorCodigo não disponível');
+      alert('Erro ao abrir produto. Tente novamente.');
+    }
+  } catch (error) {
+    console.error('[abrirModalEditarProduto] Erro:', error);
+    alert('Erro ao abrir produto. Tente novamente.');
+  }
 }
 
 // ===== CONFIGURAÇÃO DE CATEGORIAS E DEPARTAMENTOS =====
@@ -19390,6 +20350,484 @@ async function loadComprasRecebimento() {
   }
 }
 
+// ========== Funções de Filtro de Kanbans ==========
+
+// Variável global para armazenar kanbans visíveis do usuário
+let kanbansVisiveis = [];
+
+// Lista de todos os kanbans disponíveis (deve corresponder aos statusColunas)
+const todosKanbans = [
+  'aguardando aprovação da requisição',
+  'aguardando cotação',
+  'cotado aguardando escolha',
+  'solicitado revisão',
+  'aguardando compra',
+  'compra realizada',
+  'faturada pelo fornecedor',
+  'recebido',
+  'concluído'
+];
+
+// Abre o modal de filtro de kanbans
+async function abrirModalFiltroKanbans() {
+  const modal = document.getElementById('modalFiltroKanbans');
+  if (!modal) return;
+  
+  // Carrega preferências do usuário
+  await carregarPreferenciasKanbans();
+  
+  // Popula checkboxes
+  const checkboxContainer = document.getElementById('listaFiltroKanbans');
+  if (!checkboxContainer) return;
+  
+  // Títulos personalizados
+  const titulosPersonalizados = {
+    'aguardando cotação': 'Cotação com compras',
+    'aguardando compra': 'Pedido de compra'
+  };
+  
+  // Badges identificadores para cada kanban
+  const badgesKanban = {
+    'aguardando aprovação da requisição': { texto: 'Operação Aprovador', cor: '#2563eb' },
+    'aguardando cotação': { texto: 'Operação Comprador', cor: '#059669' },
+    'cotado aguardando escolha': { texto: 'Ação Requisitante', cor: '#dc2626' },
+    'solicitado revisão': { texto: 'Ação Requisitante', cor: '#dc2626' },
+    'aguardando compra': { texto: 'Operação Comprador', cor: '#059669' },
+    'compra realizada': { texto: 'Ação Recebimento', cor: '#d97706' },
+    'faturada pelo fornecedor': { texto: 'Ação Recebimento', cor: '#d97706' },
+    'recebido': { texto: 'Setores de Liberação', cor: '#7c3aed' },
+    'concluído': { texto: '', cor: '' }
+  };
+  
+  checkboxContainer.innerHTML = todosKanbans.map(kanban => {
+    const tituloExibir = titulosPersonalizados[kanban] || (kanban.charAt(0).toUpperCase() + kanban.slice(1));
+    const checked = kanbansVisiveis.includes(kanban) ? 'checked' : '';
+    const badge = badgesKanban[kanban] || { texto: '', cor: '' };
+    
+    console.log('[FILTRO] Renderizando kanban:', kanban, 'badge:', badge); // Debug
+    
+    return `
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;border-radius:6px;transition:all 0.2s;border:1px solid transparent;background:transparent;" 
+             onmouseover="this.style.borderColor='#3b82f6';this.style.background='transparent'" 
+             onmouseout="this.style.borderColor='transparent';this.style.background='transparent'">
+        <input type="checkbox" value="${kanban}" ${checked} style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
+          <span style="font-size:14px;color:#ffffff;font-weight:500;">${tituloExibir}</span>
+          ${badge.texto ? `<span style="background:${badge.cor};color:white;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;width:fit-content;">${badge.texto}</span>` : ''}
+        </div>
+      </label>
+    `;
+  }).join('');
+  
+  modal.style.display = 'flex';
+}
+
+// Fecha o modal de filtro
+function fecharModalFiltroKanbans() {
+  const modal = document.getElementById('modalFiltroKanbans');
+  if (modal) modal.style.display = 'none';
+}
+
+// Carrega preferências de kanbans visíveis do servidor
+async function carregarPreferenciasKanbans() {
+  try {
+    const resp = await fetch('/api/compras/filtro-kanbans', {
+      credentials: 'include'
+    });
+    
+    if (!resp.ok) {
+      console.warn('[FILTRO] Erro ao carregar preferências, usando padrão');
+      kanbansVisiveis = [...todosKanbans]; // Todos visíveis por padrão
+      return;
+    }
+    
+    const data = await resp.json();
+    kanbansVisiveis = data.kanbans_visiveis || [...todosKanbans];
+    
+  } catch (err) {
+    console.error('[FILTRO] Erro ao carregar preferências:', err);
+    kanbansVisiveis = [...todosKanbans]; // Fallback: todos visíveis
+  }
+}
+
+// Salva preferências de kanbans visíveis no servidor
+async function salvarPreferenciasKanbans() {
+  try {
+    const checkboxes = document.querySelectorAll('#listaFiltroKanbans input[type="checkbox"]');
+    const selecionados = Array.from(checkboxes)
+      .filter(cb => cb.checked)
+      .map(cb => cb.value);
+    
+    const resp = await fetch('/api/compras/filtro-kanbans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ kanbans_visiveis: selecionados })
+    });
+    
+    if (!resp.ok) {
+      throw new Error('Falha ao salvar preferências');
+    }
+    
+    // Atualiza variável global
+    kanbansVisiveis = selecionados;
+    
+    // Aplica filtro visualmente
+    aplicarFiltroKanbans();
+    
+    // Fecha modal
+    fecharModalFiltroKanbans();
+    
+    // Feedback visual
+    const btn = document.querySelector('[onclick="abrirModalFiltroKanbans()"]');
+    if (btn) {
+      const originalBg = btn.style.background;
+      btn.style.background = '#10b981';
+      btn.style.color = 'white';
+      setTimeout(() => {
+        btn.style.background = originalBg;
+        btn.style.color = '';
+      }, 800);
+    }
+    
+  } catch (err) {
+    console.error('[FILTRO] Erro ao salvar preferências:', err);
+    alert('Erro ao salvar preferências de filtro. Tente novamente.');
+  }
+}
+
+// Aplica o filtro de kanbans (oculta/mostra colunas)
+function aplicarFiltroKanbans() {
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  if (!kanbanContainer) return;
+  
+  // Pega todas as colunas do kanban
+  const colunas = kanbanContainer.querySelectorAll('.kanban-column-minhas');
+  
+  colunas.forEach(coluna => {
+    // Pega o status normalizado diretamente do atributo data-status
+    const statusNormalizado = coluna.getAttribute('data-status');
+    if (!statusNormalizado) return;
+    
+    // Mostra ou oculta baseado na preferência do usuário
+    if (kanbansVisiveis.includes(statusNormalizado)) {
+      coluna.style.display = '';
+    } else {
+      coluna.style.display = 'none';
+    }
+  });
+}
+
+// Seleciona/desmarca todos os checkboxes
+function toggleSelecionarTodosKanbans() {
+  const checkboxes = document.querySelectorAll('#listaFiltroKanbans input[type="checkbox"]');
+  const todosMarcados = Array.from(checkboxes).every(cb => cb.checked);
+  
+  checkboxes.forEach(cb => {
+    cb.checked = !todosMarcados;
+  });
+}
+
+// ========== Modal de Aprovação de Requisições ==========
+async function abrirModalAprovacaoRequisicao() {
+  try {
+    // Busca todas as solicitações aguardando aprovação do usuário logado
+    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    if (!currentUser) {
+      alert('Usuário não identificado');
+      return;
+    }
+    
+    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar solicitações');
+    
+    const data = await resp.json();
+    const todasSolicitacoes = data.solicitacoes || [];
+    
+    // Filtra apenas as que estão aguardando aprovação
+    const itensAprovacao = todasSolicitacoes.filter(item => 
+      (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição'
+    );
+    
+    if (itensAprovacao.length === 0) {
+      alert('Nenhuma solicitação aguardando aprovação');
+      return;
+    }
+    
+    // Debug: verifica estrutura dos dados
+    console.log('[Modal Aprovação] Exemplo de item:', itensAprovacao[0]);
+    
+    // Agrupa por família (verifica múltiplos campos possíveis)
+    const itensPorFamilia = {};
+    itensAprovacao.forEach(item => {
+      const familia = item.familia_produto || item.familia_nome || item.familia || 'Sem família';
+      if (!itensPorFamilia[familia]) {
+        itensPorFamilia[familia] = [];
+      }
+      itensPorFamilia[familia].push(item);
+    });
+    
+    // Monta HTML da tabela agrupada por família
+    let tabelaHtml = '';
+    Object.keys(itensPorFamilia).sort().forEach((familia, familiaIdx) => {
+      const itensFamilia = itensPorFamilia[familia];
+      const totalQtd = itensFamilia.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0);
+      
+      tabelaHtml += `
+        <div style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <i class="fa-solid fa-layer-group" style="font-size:18px;"></i>
+              <span style="font-weight:700;font-size:15px;">${escapeHtml(familia)}</span>
+            </div>
+            <div style="display:flex;gap:16px;">
+              <div style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;">
+                <span style="font-size:11px;opacity:0.9;">Itens:</span>
+                <span style="font-weight:700;margin-left:4px;">${itensFamilia.length}</span>
+              </div>
+              <div style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;">
+                <span style="font-size:11px;opacity:0.9;">Qtd Total:</span>
+                <span style="font-weight:700;margin-left:4px;">${totalQtd}</span>
+              </div>
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+              <thead>
+                <tr style="background:#f3f4f6;border-bottom:2px solid #e5e7eb;">
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:60px;">ID</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Código</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Descrição</th>
+                  <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:80px;">Qtd</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Solicitante</th>
+                  <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Retorno Cotação</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Departamento</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:150px;">Objetivo Compra</th>
+                  <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itensFamilia.map((item, idx) => {
+                  const retornoCotacao = item.retorno_cotacao || 'N';
+                  const retornoTexto = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? 'SIM' : 'NÃO';
+                  const retornoCor = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? '#10b981' : '#ef4444';
+                  
+                  return `
+                    <tr style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
+                      <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
+                      <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
+                      <td style="padding:10px;color:#374151;max-width:250px;line-height:1.4;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
+                      <td style="padding:10px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;">${item.quantidade}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.solicitante || '-')}</td>
+                      <td style="padding:10px;text-align:center;">
+                        <span style="background:${retornoCor};color:white;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${retornoTexto}</span>
+                      </td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;max-width:150px;">${escapeHtml((item.objetivo_compra || '-').substring(0, 50))}${(item.objetivo_compra || '').length > 50 ? '...' : ''}</td>
+                      <td style="padding:10px;text-align:center;">
+                        <div style="display:flex;gap:6px;justify-content:center;">
+                          <button onclick="aprovarItemRequisicao(${item.id})" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
+                            <i class="fa-solid fa-check"></i>
+                          </button>
+                          <button onclick="retificarItemAprovacao(${item.id})" title="Solicitar retificação" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
+                            <i class="fa-solid fa-rotate-left"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    });
+    
+    // Cria e abre modal
+    const modalId = 'modalAprovacaoRequisicao';
+    let modal = document.getElementById(modalId);
+    
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = modalId;
+      modal.className = 'modal';
+      modal.style.display = 'none';
+      modal.style.zIndex = '10002';
+      document.body.appendChild(modal);
+    }
+    
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width:1400px;width:95%;max-height:90vh;overflow-y:auto;">
+        <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:20px;border-radius:8px 8px 0 0;">
+          <h3 style="margin:0;display:flex;align-items:center;gap:10px;font-size:18px;">
+            <i class="fa-solid fa-shield-check" style="font-size:22px;"></i>
+            <span>Aprovação de Requisições de Compra</span>
+          </h3>
+          <button class="modal-close" onclick="document.getElementById('${modalId}').style.display='none'" style="color:white;opacity:0.9;">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:24px;background:#f9fafb;">
+          
+          <div style="background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;padding:16px;margin-bottom:24px;">
+            <div style="display:flex;align-items:start;gap:12px;">
+              <i class="fa-solid fa-info-circle" style="color:#3b82f6;font-size:20px;margin-top:2px;"></i>
+              <div style="flex:1;">
+                <div style="font-weight:700;color:#1e40af;margin-bottom:6px;font-size:14px;">Instruções</div>
+                <div style="color:#1e40af;font-size:13px;line-height:1.6;">
+                  • Use o botão <i class="fa-solid fa-check" style="color:#10b981;"></i> para aprovar o item individualmente<br>
+                  • Use o botão <i class="fa-solid fa-rotate-left" style="color:#ef4444;"></i> para solicitar retificação do item<br>
+                  • Após revisar todos os itens, clique em "Aprovar Compra" para aprovar todos de uma vez
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          ${tabelaHtml}
+          
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px;background:white;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);margin-top:24px;">
+            <div style="display:flex;gap:24px;">
+              <div>
+                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Total de Itens</div>
+                <div style="font-size:24px;font-weight:700;color:#1f2937;">${itensAprovacao.length}</div>
+              </div>
+              <div>
+                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Quantidade Total</div>
+                <div style="font-size:24px;font-weight:700;color:#1f2937;">${itensAprovacao.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0)}</div>
+              </div>
+            </div>
+            <button onclick="aprovarTodasRequisicoes()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
+              <i class="fa-solid fa-check-circle" style="font-size:18px;"></i>
+              <span>Aprovar Compra</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    modal.style.display = 'flex';
+    
+  } catch (err) {
+    console.error('[Modal Aprovação] Erro:', err);
+    alert('Erro ao carregar solicitações para aprovação: ' + err.message);
+  }
+}
+
+// Função para aprovar um item individualmente
+async function aprovarItemRequisicao(itemId) {
+  if (!confirm('Deseja aprovar este item? Ele será movido para "Aguardando Compra".')) return;
+  
+  try {
+    // Muda status do item para "aguardando compra"
+    const resp = await fetch(`/api/compras/item/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'aguardando compra' })
+    });
+    
+    if (!resp.ok) throw new Error('Falha ao aprovar item');
+    
+    // Feedback visual
+    alert('Item aprovado com sucesso!');
+    
+    // Fecha o modal e recarrega os kanbans
+    document.getElementById('modalAprovacaoRequisicao').style.display = 'none';
+    await loadMinhasSolicitacoes();
+    
+  } catch (err) {
+    console.error('[Aprovação] Erro ao aprovar item:', err);
+    alert('Erro ao aprovar item: ' + err.message);
+  }
+}
+
+// Função auxiliar para adicionar mais um item igual
+function adicionarItemAprovacao(itemId) {
+  alert(`Funcionalidade "Adicionar item ${itemId}" será implementada em breve`);
+  // TODO: Implementar lógica para duplicar o item
+}
+
+// Função auxiliar para retificar um item (usa a mesma função do kanban de compras)
+function retificarItemAprovacao(itemId) {
+  // Chama a função existente de retificação passando null para o event
+  retificarItemCompra(itemId, null);
+}
+
+// Função para aprovar todas as requisições
+async function aprovarTodasRequisicoes() {
+  try {
+    // Busca todas as solicitações aguardando aprovação do usuário logado
+    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+    if (!currentUser) {
+      alert('Usuário não identificado');
+      return;
+    }
+    
+    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar solicitações');
+    
+    const data = await resp.json();
+    const todasSolicitacoes = data.solicitacoes || [];
+    
+    // Filtra apenas as que estão aguardando aprovação
+    const itensAprovacao = todasSolicitacoes.filter(item => 
+      (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição'
+    );
+    
+    if (itensAprovacao.length === 0) {
+      alert('Nenhuma solicitação aguardando aprovação');
+      return;
+    }
+    
+    if (!confirm(`Deseja aprovar ${itensAprovacao.length} item(ns)? Todos serão movidos para "Aguardando Compra".`)) return;
+    
+    // Atualiza status de todos os itens
+    let aprovados = 0;
+    let erros = 0;
+    
+    for (const item of itensAprovacao) {
+      try {
+        const respUpdate = await fetch(`/api/compras/item/${item.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'aguardando compra' })
+        });
+        
+        if (respUpdate.ok) {
+          aprovados++;
+        } else {
+          erros++;
+        }
+      } catch (err) {
+        console.error(`[Aprovação] Erro ao aprovar item ${item.id}:`, err);
+        erros++;
+      }
+    }
+    
+    // Feedback
+    if (erros === 0) {
+      alert(`✓ ${aprovados} item(ns) aprovado(s) com sucesso!`);
+    } else {
+      alert(`${aprovados} item(ns) aprovado(s), ${erros} erro(s).`);
+    }
+    
+    // Fecha o modal e recarrega os kanbans
+    document.getElementById('modalAprovacaoRequisicao').style.display = 'none';
+    await loadMinhasSolicitacoes();
+    
+  } catch (err) {
+    console.error('[Aprovação] Erro ao aprovar requisições:', err);
+    alert('Erro ao aprovar requisições: ' + err.message);
+  }
+}
+
+// Exporta funções de aprovação para o escopo global
+window.abrirModalAprovacaoRequisicao = abrirModalAprovacaoRequisicao;
+window.aprovarItemRequisicao = aprovarItemRequisicao;
+window.adicionarItemAprovacao = adicionarItemAprovacao;
+window.retificarItemAprovacao = retificarItemAprovacao;
+window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
+
 async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const wrapper = document.getElementById('minhasComprasWrapper');
@@ -19403,6 +20841,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
   
   wrapper.style.display = 'block';
   kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Carregando...</div>';
+  
+  // Carrega preferências de filtro do usuário antes de renderizar
+  await carregarPreferenciasKanbans();
   
   try {
     const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
@@ -19428,8 +20869,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
+      'aguardando aprovação da requisição': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição'),
       'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
       'cotado aguardando escolha': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado'),
+      'solicitado revisão': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar'),
       'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
       'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
       'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
@@ -19441,8 +20884,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     kanbanContainer.innerHTML = Object.keys(statusColunas).map((status, idx) => {
       const itens = statusColunas[status];
       const cores = {
+        'aguardando aprovação da requisição': { bg: '#9333ea', bgLight: '#f3e8ff', text: '#581c87', icon: 'fa-clock' },
         'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
         'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
+        'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
         'aguardando compra': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-cart-shopping' },
         'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
         'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
@@ -19451,9 +20896,83 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       };
       const cor = cores[status] || { bg: '#6b7280', bgLight: '#f3f4f6', text: '#374151', icon: 'fa-circle' };
       
+      // Define título personalizado para colunas específicas
+      const titulosPersonalizados = {
+        'aguardando cotação': 'Cotação com compras',
+        'aguardando compra': 'Pedido de compra'
+      };
+      const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
+      
+      // Define grupos de kanbans com características especiais
+      const kanbanAcaoRequisitante = ['cotado aguardando escolha', 'solicitado revisão']; // Ações do requisitante
+      const kanbanOperacaoAprovador = ['aguardando aprovação da requisição']; // Aprovador precisa aprovar
+      const kanbanOperacaoComprador = ['aguardando cotação', 'aguardando compra']; // Operações do comprador
+      const kanbanAcaoRecebimento = ['compra realizada', 'faturada pelo fornecedor']; // Ações do recebimento
+      const kanbanSetoresLiberacao = ['recebido']; // Setores precisam liberar
+      
+      const ehAcaoRequisitante = kanbanAcaoRequisitante.includes(status);
+      const ehOperacaoAprovador = kanbanOperacaoAprovador.includes(status);
+      const ehOperacaoComprador = kanbanOperacaoComprador.includes(status);
+      const ehAcaoRecebimento = kanbanAcaoRecebimento.includes(status);
+      const ehSetoresLiberacao = kanbanSetoresLiberacao.includes(status);
+      
+      // Define badge e estilo especial para cada grupo
+      let badgeIdentificacao = '';
+      let estilosExtras = '';
+      let bordaEspecial = '';
+      
+      if (ehAcaoRequisitante) {
+        // Kanbans onde o requisitante precisa tomar ação
+        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#dc2626 0%,#ef4444 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(220,38,38,0.3);"><i class="fa-solid fa-user-check" style="font-size:10px;"></i>Ação Requisitante</div>';
+        estilosExtras = 'background:linear-gradient(135deg,#fef2f2 0%,#ffffff 100%);';
+        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #dc2626;`;
+      } else if (ehOperacaoAprovador) {
+        // Kanban onde o aprovador precisa aprovar
+        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#2563eb 0%,#3b82f6 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(37,99,235,0.3);"><i class="fa-solid fa-shield-check" style="font-size:10px;"></i>Operação Aprovador</div>';
+        estilosExtras = 'background:linear-gradient(135deg,#eff6ff 0%,#ffffff 100%);';
+        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #2563eb;`;
+      } else if (ehOperacaoComprador) {
+        // Kanbans onde o comprador realiza operações (cotação, pedido)
+        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#059669 0%,#10b981 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(16,185,129,0.3);"><i class="fa-solid fa-briefcase" style="font-size:10px;"></i>Operação Comprador</div>';
+        estilosExtras = 'background:linear-gradient(135deg,#f0fdf4 0%,#ffffff 100%);';
+        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #059669;`;
+      } else if (ehAcaoRecebimento) {
+        // Kanbans onde o recebimento precisa agir
+        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#d97706 0%,#f59e0b 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(217,119,6,0.3);"><i class="fa-solid fa-box-check" style="font-size:10px;"></i>Ação Recebimento</div>';
+        estilosExtras = 'background:linear-gradient(135deg,#fffbeb 0%,#ffffff 100%);';
+        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #d97706;`;
+      } else if (ehSetoresLiberacao) {
+        // Kanban onde setores precisam liberar
+        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#7c3aed 0%,#8b5cf6 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(124,58,237,0.3);"><i class="fa-solid fa-unlock" style="font-size:10px;"></i>Setores de Liberação</div>';
+        estilosExtras = 'background:linear-gradient(135deg,#faf5ff 0%,#ffffff 100%);';
+        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #7c3aed;`;
+      } else {
+        bordaEspecial = 'border:1px solid #e5e7eb;';
+      }
+      
       // Status que devem ser agrupados por número do pedido Omie (cNumero)
       const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
       const deveAgrupar = statusAgrupados.includes(status);
+      
+      // Define se a coluna deve ter interação de clique (para abrir modal)
+      const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra'];
+      const ehClicavel = statusComClique.includes(status);
+      
+      // Define qual função onclick chamar para cada status clicável
+      const funcoesOnclick = {
+        'aguardando aprovação da requisição': 'abrirModalAprovacaoRequisicao()',
+        'aguardando cotação': 'abrirModalSelecaoItensCotacao()',
+        'aguardando compra': 'abrirModalSelecaoItensCompra()'
+      };
+      const funcaoOnclick = funcoesOnclick[status] || '';
+      
+      // Define a cor do hover para cada status
+      const coresHover = {
+        'aguardando aprovação da requisição': 'rgba(37,99,235,0.3)', // Azul
+        'aguardando cotação': 'rgba(251,191,36,0.3)', // Amarelo
+        'aguardando compra': 'rgba(16,185,129,0.3)'   // Verde
+      };
+      const corHover = coresHover[status] || 'rgba(0,0,0,0.1)';
       
       let cardsHtml = '';
       
@@ -19508,7 +21027,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           
           return `
             <div class="kanban-card" data-item-id="${item.id}" 
-              onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}')"
+              onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}', ${item.id})"
               style="
               background:#ffffff;
               border:1px solid #e5e7eb;
@@ -19541,6 +21060,17 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   <div style="font-size:11px;color:#374151;">${prazo}</div>
                 </div>
               </div>
+              ${(status === 'solicitado revisão' && item.observacao_retificacao) ? `
+                <div style="margin-top:8px;padding:8px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;" onclick="event.stopPropagation();">
+                  <div style="font-size:9px;color:#92400e;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
+                    <i class="fa-solid fa-comment-dots"></i>
+                    Motivo da Retificação
+                  </div>
+                  <div style="font-size:10px;color:#78350f;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
+                    ${escapeHtml(item.observacao_retificacao)}
+                  </div>
+                </div>
+              ` : ''}
               ${item.fornecedor_nome ? `
                 <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
                   <i class="fa-solid fa-building" style="margin-right:4px;"></i>
@@ -19553,20 +21083,26 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       }
       
       return `
-        <div class="kanban-column-minhas" data-status="${status}" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+        <div class="kanban-column-minhas" 
+          data-status="${status}" 
+          ${ehClicavel ? `onclick="${funcaoOnclick}" style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onmouseover="this.style.boxShadow='0 4px 16px ${corHover}';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'"` : `style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);"`}>
+          ${badgeIdentificacao}
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${cor.bg};">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
               <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
-              ${status.charAt(0).toUpperCase() + status.slice(1)}
+              ${tituloExibir}
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;${ehClicavel ? 'pointer-events:none;' : ''}">
             ${cardsHtml}
           </div>
         </div>
       `;
     }).join('');
+
+    // Aplica o filtro de kanbans visíveis após renderizar
+    aplicarFiltroKanbans();
 
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
@@ -19713,8 +21249,6 @@ async function submitComprasSolicitacao(ev) {
 }
 
 // Autocomplete de código/descrição usando /api/produtos/busca (produtos_omie)
-let comprasSearchTimeout = null;
-let comprasActiveUsers = [];
 async function buscarSugestoesCompras(term) {
   const statusEl = document.getElementById('comprasBuscaStatus');
   console.log('[COMPRAS] buscarSugestoesCompras → termo:', term);
@@ -21065,42 +22599,6 @@ async function markEstruturaButtons(containerEl) {
   st.textContent = `.perm-hidden{display:none!important}`;
   document.head.appendChild(st);
 })();
-
-// O que pode ficar visível quando DESLOGADO
-const PUBLIC_WHEN_LOGGED_OUT = [
-  '#menu-inicio',          // Início no topo
-  '#profile-icon',         // ícone usuário (abre login)
-  '#btn-login','#user-button','#btn-user','#login-btn' // fallbacks, se existirem
-];
-
-// **TUDO** que é controlado por login/permissão
-// Ajuste: botões dentro de .tab-header só serão controlados se tiverem a classe .perm-gated.
-// Isso evita esconder ações como "Adicionar" em abas onde não há nó explícito de permissão.
-const GATED_SELECTORS = [
-  // topo (qualquer item com id #menu-*)
-  'a[id^="menu-"]',
-  '.header .header-menu > .menu-link',
-
-  // abas internas (Produto, etc.)
-  '#produtoTabs .main-header .main-header-link',
-  '#kanbanTabs .main-header .main-header-link',
-  '#armazemTabs .main-header .main-header-link',
-
-  // lateral
-  '.side-menu-item',
-  '.left-side .side-menu a',
-  '.sidebar a',
-  '.menu-lateral a',
-
-  // genéricos
-  '.tab-header a',
-  '.tab-header button.perm-gated',
-  '[data-top]', '[data-menu]', '[data-submenu]'
-].join(',');
-
-function findGatedCandidates(){
-  return document.querySelectorAll(GATED_SELECTORS);
-}
 
 // Deslogado: esconde tudo e mostra só Início + Login
 function applyLoggedOutUI(){

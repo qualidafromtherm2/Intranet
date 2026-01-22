@@ -566,4 +566,219 @@ router.get('/familias', async (req, res) => {
   }
 });
 
+// ============================================================================
+// POST /api/produtos/sincronizar-completo
+// Sincroniza TODOS os produtos da Omie com streaming de progresso
+// Usa Server-Sent Events (SSE) para enviar atualizações em tempo real
+// ============================================================================
+router.post('/sincronizar-completo', async (req, res) => {
+  // Configura SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const REGISTROS_POR_PAGINA = 50;
+  const DELAY_ENTRE_PAGINAS_MS = 300;
+  const DELAY_ENTRE_PRODUTOS_MS = 50;
+  const MAX_RETRIES = 3;
+
+  const stats = {
+    total: 0,
+    processados: 0,
+    sucesso: 0,
+    erros: 0,
+    inicio: Date.now()
+  };
+
+  // Função para enviar eventos SSE
+  function enviarEvento(tipo, dados) {
+    res.write(`data: ${JSON.stringify({ tipo, ...dados })}\n\n`);
+  }
+
+  // Função de sleep
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Função para listar produtos (paginado)
+  async function listarProdutosOmie(pagina, tentativa = 1) {
+    const body = {
+      call: 'ListarProdutos',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        pagina,
+        registros_por_pagina: REGISTROS_POR_PAGINA,
+        apenas_importado_api: 'N',
+        filtrar_apenas_omiepdv: 'N'
+      }]
+    };
+
+    try {
+      const response = await httpFetch(OMIE_PROD_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (tentativa < MAX_RETRIES) {
+        enviarEvento('log', {
+          mensagem: `⚠️ Erro ao buscar página ${pagina}, tentativa ${tentativa}/${MAX_RETRIES}`,
+          nivel: 'warning'
+        });
+        await sleep(1000 * tentativa);
+        return listarProdutosOmie(pagina, tentativa + 1);
+      }
+      throw error;
+    }
+  }
+
+  // Função para processar um produto
+  async function processarProduto(produto, index, total) {
+    const codigoProduto = produto.codigo_produto;
+    const codigo = produto.codigo;
+    const descricao = produto.descricao || '';
+
+    try {
+      // Consulta detalhes completos do produto
+      const produtoCompleto = await consultarProdutoOmie({
+        codigo_produto: codigoProduto,
+        codigo: codigo
+      });
+
+      if (!produtoCompleto) {
+        enviarEvento('log', {
+          mensagem: `⏭️ Produto ${codigo} (${codigoProduto}) - payload vazio, pulando`,
+          nivel: 'warning'
+        });
+        stats.processados++;
+        return;
+      }
+
+      // Salva no banco
+      const obj = ensureIntegrationKey({ ...produtoCompleto });
+      await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+
+      stats.sucesso++;
+      stats.processados++;
+
+      // Envia progresso
+      enviarEvento('progresso', {
+        total: stats.total,
+        processados: stats.processados,
+        sucesso: stats.sucesso,
+        erros: stats.erros,
+        produto_atual: {
+          codigo,
+          codigo_produto: codigoProduto,
+          descricao
+        }
+      });
+
+    } catch (error) {
+      stats.erros++;
+      stats.processados++;
+
+      enviarEvento('log', {
+        mensagem: `❌ Erro ao processar ${codigo} (${codigoProduto}): ${error.message}`,
+        nivel: 'error'
+      });
+
+      enviarEvento('progresso', {
+        total: stats.total,
+        processados: stats.processados,
+        sucesso: stats.sucesso,
+        erros: stats.erros
+      });
+    }
+
+    await sleep(DELAY_ENTRE_PRODUTOS_MS);
+  }
+
+  // Processo principal
+  try {
+    enviarEvento('log', {
+      mensagem: '🚀 Iniciando sincronização completa de produtos...',
+      nivel: 'info'
+    });
+
+    // Busca primeira página para obter totais
+    enviarEvento('log', {
+      mensagem: '📊 Consultando total de produtos na Omie...',
+      nivel: 'info'
+    });
+
+    const primeiraPagina = await listarProdutosOmie(1);
+    const totalPaginas = Number(primeiraPagina.total_de_paginas || 1);
+    stats.total = Number(primeiraPagina.total_de_registros || 0);
+
+    enviarEvento('log', {
+      mensagem: `✓ Total: ${stats.total} produtos em ${totalPaginas} páginas`,
+      nivel: 'success'
+    });
+
+    const tempoEstimado = Math.ceil(
+      (totalPaginas * DELAY_ENTRE_PAGINAS_MS +
+       stats.total * (DELAY_ENTRE_PRODUTOS_MS + 200)) / 1000 / 60
+    );
+
+    enviarEvento('log', {
+      mensagem: `⏱️ Tempo estimado: ~${tempoEstimado} minutos`,
+      nivel: 'info'
+    });
+
+    enviarEvento('progresso', {
+      total: stats.total,
+      processados: 0,
+      sucesso: 0,
+      erros: 0
+    });
+
+    // Processa todas as páginas
+    for (let pagina = 1; pagina <= totalPaginas; pagina++) {
+      enviarEvento('log', {
+        mensagem: `📄 Processando página ${pagina}/${totalPaginas}...`,
+        nivel: 'info'
+      });
+
+      const resultado = pagina === 1 ? primeiraPagina : await listarProdutosOmie(pagina);
+      const produtos = resultado.produto_servico_cadastro || [];
+
+      for (const produto of produtos) {
+        await processarProduto(produto, stats.processados + 1, stats.total);
+      }
+
+      await sleep(DELAY_ENTRE_PAGINAS_MS);
+    }
+
+    // Finaliza
+    const duracao = ((Date.now() - stats.inicio) / 1000 / 60).toFixed(1);
+
+    enviarEvento('concluido', {
+      mensagem: `Sincronização concluída! ${stats.sucesso} produtos sincronizados em ${duracao} minutos.`,
+      total: stats.total,
+      processados: stats.processados,
+      sucesso: stats.sucesso,
+      erros: stats.erros,
+      duracao_minutos: duracao
+    });
+
+    res.end();
+
+  } catch (error) {
+    console.error('[POST /api/produtos/sincronizar-completo] Erro:', error);
+    
+    enviarEvento('erro', {
+      mensagem: `Erro fatal: ${error.message}`
+    });
+
+    res.end();
+  }
+});
+
 module.exports = router;

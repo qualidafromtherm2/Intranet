@@ -61,14 +61,6 @@
   data-nav-pos="top"
   data-nav-label="Registros"
   data-nav-selector="#menu-registros">Registros</a>
-
-  <a id="menu-compras"
-     class="menu-link" href="#"
-     data-target="comprasPane"
-     data-nav-key="top:compras"
-     data-nav-pos="top"
-     data-nav-label="Compras"
-     data-nav-selector="#menu-compras">Compras</a>
 </nav>
 
   <!-- Campo de busca -->
@@ -99,15 +91,15 @@
 
     <div class="wrapper">
       <!-- Menu lateral -->
-  <div class="left-side">
+  <div class="left-side" style="height: 100vh; overflow: visible;">
         
         <!-- Botão Hambúrguer do Menu Lateral -->
         <button class="sidebar-hamburger" id="sidebarHamburger" title="Menu lateral">
           <i class="fa-solid fa-bars"></i>
         </button>
 
-        <!-- Container do menu lateral (inicialmente colapsado) -->
-        <div class="sidebar-content collapsed" id="sidebarContent">
+        <!-- Container do menu lateral (inicialmente expandido) -->
+        <div class="sidebar-content" id="sidebarContent" style="overflow-y: scroll !important; height: 600px !important; display: block !important;">
 
 <div class="side-wrapper">
   <div class="side-title"
@@ -308,6 +300,28 @@
   </div>
 </div>
 
+<!-- Nova categoria: Sincronização -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:sincronizacao"
+       data-nav-pos="side"
+       data-nav-label="Sincronização">Sincronização</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-sincronizar-produtos"
+       class="menu-link"
+       data-nav-key="side:sincronizacao:produtos"
+       data-nav-parent="side:sincronizacao"
+       data-nav-pos="side"
+       data-nav-label="Sincronizar Produtos"
+       data-nav-selector="#menu-sincronizar-produtos">
+      <i class="fa-solid fa-sync" style="margin-right:8px;"></i>
+      Sincronizar Produtos
+    </a>
+  </div>
+</div>
+
         </div><!-- Fim do sidebar-content -->
 
       </div><!-- Fim do left-side -->
@@ -414,6 +428,10 @@
                   Minhas solicitações
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
+                  <button id="comprasFiltroKanbanBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Filtrar Kanbans">
+                    <i class="fa-solid fa-filter" style="font-size:18px;"></i>
+                    <span style="font-size:13px;font-weight:600;">Filtrar Kanbans</span>
+                  </button>
                   <button id="comprasExportarExcelMinhasBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Exportar para Excel">
                     <i class="fa-solid fa-file-excel" style="font-size:18px;"></i>
                     <span style="font-size:13px;font-weight:600;">Exportar Excel</span>
@@ -426,6 +444,47 @@
                 <!-- As colunas serão renderizadas via JavaScript -->
               </div>
 
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Filtro de Kanbans -->
+        <div id="modalFiltroKanbans" class="modal-overlay" style="display:none;">
+          <div class="modal-container" style="max-width:600px;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-filter" style="color:#3b82f6;"></i>
+                Filtrar Kanbans Visíveis
+              </h3>
+              <button id="modalFiltroKanbansFecharBtn" class="modal-close-btn" type="button">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <div style="background:#eff6ff;border:1px solid#3b82f6;border-radius:8px;padding:12px;margin-bottom:20px;">
+                <div style="display:flex;align-items:start;gap:10px;">
+                  <i class="fa-solid fa-info-circle" style="color:#3b82f6;font-size:18px;margin-top:2px;"></i>
+                  <div style="font-size:13px;color:#1e40af;line-height:1.5;">
+                    <strong>Como funciona:</strong><br>
+                    Desmarque os kanbans que você não deseja visualizar. Suas preferências serão salvas automaticamente e mantidas mesmo após atualizar a página.
+                  </div>
+                </div>
+              </div>
+              
+              <div id="listaFiltroKanbans" style="display:flex;flex-direction:column;gap:12px;">
+                <!-- Checkboxes serão inseridos dinamicamente -->
+              </div>
+              
+              <div style="display:flex;justify-content:space-between;gap:10px;margin-top:24px;padding-top:20px;border-top:1px solid #e5e7eb;">
+                <button id="filtroKanbanSelecionarTodos" class="content-button" type="button" style="background:#6b7280;color:white;flex:1;">
+                  <i class="fa-solid fa-check-double"></i>
+                  <span>Selecionar Todos</span>
+                </button>
+                <button id="filtroKanbanAplicar" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;flex:1;">
+                  <i class="fa-solid fa-check"></i>
+                  <span>Aplicar Filtro</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -570,118 +629,9 @@
           </div>
         </div>
 
-        <!-- Painel Compras: somente tabela de solicitações registradas (abre pelo menu Compras) -->
-        <div id="comprasPane" class="tab-pane" style="display:none;">
-          <div class="content-wrapper">
-            <div class="content-section" style="margin-top:0;">
-              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-table-columns" style="color:#0ea5e9;"></i>
-                  Kanban de Compras
-                </div>
-                <button id="comprasRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-rotate"></i>
-                  <span>Recarregar</span>
-                </button>
-              </div>
-              
-              <!-- Visualização Kanban -->
-              <div id="comprasKanbanView" style="margin-top:20px;">
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:12px;background:#f8fafc;border-radius:12px;">
-                  
-                  <!-- Coluna: Aguardando Cotação -->
-                  <div class="kanban-column" data-status="aguardando cotação" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onclick="abrirModalSelecaoItensCotacao()" onmouseover="this.style.boxShadow='0 4px 16px rgba(251,191,36,0.3)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #fbbf24;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#92400e;">
-                        <i class="fa-solid fa-hourglass-half" style="margin-right:6px;color:#fbbf24;"></i>
-                        Aguardando Cotação
-                      </h3>
-                      <span class="kanban-count" style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;pointer-events:none;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                  <!-- Coluna: Aguardando Compra -->
-                  <div class="kanban-column" data-status="aguardando compra" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onclick="abrirModalSelecaoItensCompra()" onmouseover="this.style.boxShadow='0 4px 16px rgba(16,185,129,0.3)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #10b981;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#065f46;">
-                        <i class="fa-solid fa-cart-shopping" style="margin-right:6px;color:#10b981;"></i>
-                        Aguardando Compra
-                      </h3>
-                      <span class="kanban-count" style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;pointer-events:none;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                  <!-- Coluna: Compra Realizada -->
-                  <div class="kanban-column" data-status="compra realizada" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #3b82f6;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#1e40af;">
-                        <i class="fa-solid fa-check-circle" style="margin-right:6px;color:#3b82f6;"></i>
-                        Compra Realizada
-                      </h3>
-                      <span class="kanban-count" style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                  <!-- Coluna: Faturada pelo Fornecedor -->
-                  <div class="kanban-column" data-status="faturada pelo fornecedor" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #f59e0b;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#92400e;">
-                        <i class="fa-solid fa-file-invoice-dollar" style="margin-right:6px;color:#f59e0b;"></i>
-                        Faturada pelo Fornecedor
-                      </h3>
-                      <span class="kanban-count" style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                  <!-- Coluna: Recebido -->
-                  <div class="kanban-column" data-status="recebido" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #8b5cf6;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#5b21b6;">
-                        <i class="fa-solid fa-box-open" style="margin-right:6px;color:#8b5cf6;"></i>
-                        Recebido
-                      </h3>
-                      <span class="kanban-count" style="background:#ede9fe;color:#5b21b6;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                  <!-- Coluna: Concluído -->
-                  <div class="kanban-column" data-status="concluído" style="background:white;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid #22c55e;">
-                      <h3 style="margin:0;font-size:15px;font-weight:700;color:#166534;">
-                        <i class="fa-solid fa-circle-check" style="margin-right:6px;color:#22c55e;"></i>
-                        Concluído
-                      </h3>
-                      <span class="kanban-count" style="background:#dcfce7;color:#166534;padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">0</span>
-                    </div>
-                    <div class="kanban-cards" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;">
-                      <!-- Cards serão inseridos aqui -->
-                    </div>
-                  </div>
-                  
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Modal Detalhes do Pedido -->
-        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;">
-          <div class="modal-content" style="max-width:900px;max-height:90vh;overflow-y:auto;">
+        <div id="modalDetalhesPedidoCompras" class="modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-file-invoice" style="color:#3b82f6;"></i>
@@ -699,8 +649,8 @@
         </div>
 
         <!-- Modal Seleção de Itens para Compra -->
-        <div id="modalSelecaoItensCompra" class="modal" style="display:none;">
-          <div class="modal-content" style="max-width:1100px;max-height:90vh;display:flex;flex-direction:column;">
+        <div id="modalSelecaoItensCompra" class="modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content" style="max-width:1600px;width:95%;max-height:90vh;display:flex;flex-direction:column;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-cart-plus" style="color:#10b981;"></i>
@@ -729,6 +679,58 @@
               <button id="btnConcluirSelecaoCompra" class="content-button" onclick="concluirSelecaoItensCompra()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:10px 20px;">
                 <i class="fa-solid fa-check"></i>
                 <span>Prosseguir com Compra</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Observação de Retificação -->
+        <div id="modalObservacaoRetificacao" class="modal" style="display:none;z-index:10005;">
+          <div class="modal-content" style="max-width:600px;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-wrench" style="color:#f59e0b;"></i>
+                <span>Solicitar Retificação</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalObservacaoRetificacao()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <div style="margin-bottom:16px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;">
+                <div style="display:flex;align-items:start;gap:8px;">
+                  <i class="fa-solid fa-info-circle" style="color:#92400e;margin-top:2px;"></i>
+                  <span style="font-size:13px;color:#92400e;">Por favor, informe o motivo da retificação. Esta informação ajudará na correção do item.</span>
+                </div>
+              </div>
+              
+              <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:13px;color:#374151;font-weight:600;margin-bottom:8px;">
+                  Motivo da Retificação <span style="color:#ef4444;">*</span>
+                </label>
+                <textarea 
+                  id="observacaoRetificacaoTexto"
+                  rows="4"
+                  placeholder="Descreva o motivo da retificação..."
+                  style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;min-height:100px;"
+                ></textarea>
+                <div id="observacaoRetificacaoError" style="display:none;margin-top:6px;color:#ef4444;font-size:12px;">
+                  <i class="fa-solid fa-exclamation-circle"></i>
+                  A observação é obrigatória
+                </div>
+              </div>
+              
+              <div style="font-size:11px;color:#6b7280;">
+                <strong>Item:</strong> <span id="observacaoRetificacaoItem"></span>
+              </div>
+            </div>
+            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+              <button class="btn-secondary" onclick="fecharModalObservacaoRetificacao()">Cancelar</button>
+              <button 
+                id="btnConfirmarRetificacao"
+                class="content-button" 
+                onclick="confirmarRetificacao()" 
+                style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:10px 20px;">
+                <i class="fa-solid fa-check"></i>
+                <span>Confirmar Retificação</span>
               </button>
             </div>
           </div>
@@ -1062,42 +1064,49 @@
           </div>
         </div>
 
-        <!-- Painel Recebimento: cópia da tabela de solicitações, filtrada por status "compra realizada" -->
+        <!-- Painel Recebimento: solicitações com status "compra realizada" -->
         <div id="recebimentoPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-section" style="margin-top:0;">
-              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-truck-ramp-box" style="color:#f59e0b;"></i>
-                  Recebimento (compra realizada)
+              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:20px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;">
+                    <i class="fa-solid fa-truck-ramp-box" style="color:#f59e0b;font-size:24px;"></i>
+                    <span>Recebimento de Compras</span>
+                  </div>
+                  <div id="recebimentoCount" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">0 itens</div>
                 </div>
-                <button id="recebimentoRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                <button id="recebimentoRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:10px 20px;border-radius:8px;display:flex;align-items:center;gap:8px;font-weight:500;border:none;cursor:pointer;transition:all 0.2s;">
                   <i class="fa-solid fa-rotate"></i>
-                  <span>Recarregar lista</span>
+                  <span>Recarregar</span>
                 </button>
               </div>
-              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
-                <table class="tabela padrao" style="min-width:1100px;">
-                  <thead>
-                    <tr>
-                      <th>Nº Pedido</th>
-                      <th>ID</th>
-                      <th>Código</th>
-                      <th>Descrição</th>
-                      <th>Qtd</th>
-                      <th>Solicitante</th>
-                      <th>Prazo solicitado</th>
-                      <th>Previsão de chegada</th>
-                      <th>Quem vai receber?</th>
-                      <th>Status</th>
-                      <th>Observação</th>
-                      <th>Criado em</th>
-                    </tr>
-                  </thead>
-                  <tbody id="recebimentoTbody">
-                    <tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
-                  </tbody>
-                </table>
+              
+              <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+                <div style="overflow-x:auto;">
+                  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                    <thead>
+                      <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;width:40px;"></th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Nº Pedido</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Solicitante</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Previsão</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Responsável</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Observação</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Criado em</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="recebimentoTbody">
+                      <tr>
+                        <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+                          <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
+                          <div>Carregando dados...</div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -1676,7 +1685,196 @@
             </table>
           </div>
         </div>
-      </div>            <div id="solicitacaoTransferencia" class="tab-pane" style="display:none;">
+      </div>
+
+      <!-- Painel Sincronização de Produtos -->
+      <div id="sincronizacaoProdutosPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-section">
+            <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+              <div class="content-section-title" style="display:flex;align-items:center;gap:12px;">
+                <i class="fa-solid fa-sync" style="color:#3b82f6;"></i>
+                Sincronização de Produtos - Omie
+              </div>
+              <button id="btnIniciarSincronizacao" class="content-button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
+                <i class="fa-solid fa-play"></i>
+                <span>Iniciar Sincronização Completa</span>
+              </button>
+            </div>
+
+            <!-- Card de Agendamento Automático -->
+            <div style="margin-bottom:24px;background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);border:2px solid #22c55e;border-radius:12px;padding:24px;">
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                <i class="fa-solid fa-clock" style="font-size:24px;color:#16a34a;"></i>
+                <div>
+                  <h3 style="margin:0;font-size:18px;font-weight:700;color:#166534;">Agendamento Automático</h3>
+                  <p style="margin:4px 0 0 0;font-size:13px;color:#15803d;">Configure para sincronizar automaticamente em dias e horários específicos</p>
+                </div>
+              </div>
+
+              <!-- Ativar/Desativar -->
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;padding:16px;background:white;border-radius:8px;border:2px solid #86efac;">
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;flex:1;">
+                  <input type="checkbox" id="agendamentoAtivo" style="width:24px;height:24px;cursor:pointer;accent-color:#22c55e;">
+                  <div>
+                    <div style="font-size:15px;font-weight:600;color:#166534;">Ativar Sincronização Automática</div>
+                    <div style="font-size:12px;color:#15803d;">Quando ativado, a sincronização será executada automaticamente</div>
+                  </div>
+                </label>
+                <div id="statusAgendamento" style="padding:8px 16px;border-radius:20px;font-size:12px;font-weight:600;background:#fef2f2;color:#991b1b;">
+                  <i class="fa-solid fa-circle-xmark"></i> Desativado
+                </div>
+              </div>
+
+              <!-- Configuração de dias e horário -->
+              <div id="configAgendamento" style="display:none;">
+                <div style="background:white;border-radius:8px;padding:20px;border:2px solid #86efac;">
+                  <!-- Dias da Semana -->
+                  <div style="margin-bottom:20px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#166534;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">
+                      <i class="fa-solid fa-calendar-days"></i> Dias da Semana
+                    </label>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;">
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="1" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Segunda</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="2" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Terça</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="3" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Quarta</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="4" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Quinta</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="5" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Sexta</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="6" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Sábado</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:12px;background:#f0fdf4;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all 0.2s;" class="dia-semana-label">
+                        <input type="checkbox" class="dia-semana" value="0" style="width:20px;height:20px;cursor:pointer;accent-color:#22c55e;">
+                        <span style="font-size:14px;font-weight:500;color:#166534;">Domingo</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Horário -->
+                  <div style="margin-bottom:20px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#166534;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">
+                      <i class="fa-solid fa-clock"></i> Horário de Execução
+                    </label>
+                    <input type="time" id="horarioAgendamento" style="padding:12px 16px;border:2px solid #86efac;border-radius:8px;font-size:16px;font-weight:600;color:#166534;width:200px;background:white;">
+                  </div>
+
+                  <!-- Botão Salvar -->
+                  <button id="btnSalvarAgendamento" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;border:none;padding:14px 32px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
+                    <i class="fa-solid fa-save"></i>
+                    <span>Salvar Configuração</span>
+                  </button>
+                </div>
+
+                <!-- Próxima Execução -->
+                <div id="proximaExecucao" style="margin-top:16px;padding:16px;background:white;border:2px solid #86efac;border-radius:8px;display:none;">
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <i class="fa-solid fa-calendar-check" style="font-size:20px;color:#16a34a;"></i>
+                    <div>
+                      <div style="font-size:12px;color:#15803d;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Próxima Sincronização</div>
+                      <div id="proximaExecucaoTexto" style="font-size:16px;font-weight:700;color:#166534;margin-top:4px;">-</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card de status -->
+            <div id="sincStatus" style="display:none;margin-bottom:20px;padding:20px;border-radius:12px;background:#f0f9ff;border:2px solid #3b82f6;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <i id="sincStatusIcon" class="fa-solid fa-spinner fa-spin" style="font-size:24px;color:#3b82f6;"></i>
+                  <div>
+                    <div id="sincStatusTitulo" style="font-size:16px;font-weight:700;color:#1e40af;margin-bottom:4px;">Iniciando...</div>
+                    <div id="sincStatusSubtitulo" style="font-size:13px;color:#3b82f6;">Aguarde enquanto preparamos a sincronização</div>
+                  </div>
+                </div>
+                <div id="sincTempoDecorrido" style="font-size:14px;font-weight:600;color:#3b82f6;"></div>
+              </div>
+
+              <!-- Barra de progresso -->
+              <div style="background:#e0f2fe;border-radius:8px;height:32px;overflow:hidden;position:relative;margin-bottom:12px;">
+                <div id="sincProgressBar" style="background:linear-gradient(90deg,#3b82f6 0%,#2563eb 100%);height:100%;width:0%;transition:width 0.3s ease;display:flex;align-items:center;justify-content:center;">
+                  <span id="sincProgressText" style="color:white;font-size:12px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,0.2);"></span>
+                </div>
+              </div>
+
+              <!-- Estatísticas -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid #bfdbfe;">
+                  <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total de Produtos</div>
+                  <div id="sincTotalProdutos" style="font-size:24px;font-weight:700;color:#1e40af;">-</div>
+                </div>
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid #bfdbfe;">
+                  <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Processados</div>
+                  <div id="sincProcessados" style="font-size:24px;font-weight:700;color:#3b82f6;">0</div>
+                </div>
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid #bfdbfe;">
+                  <div style="font-size:11px;color:#10b981;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">✓ Sucesso</div>
+                  <div id="sincSucesso" style="font-size:24px;font-weight:700;color:#10b981;">0</div>
+                </div>
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid #bfdbfe;">
+                  <div style="font-size:11px;color:#ef4444;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">✗ Erros</div>
+                  <div id="sincErros" style="font-size:24px;font-weight:700;color:#ef4444;">0</div>
+                </div>
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid #bfdbfe;">
+                  <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Faltam</div>
+                  <div id="sincFaltam" style="font-size:24px;font-weight:700;color:#64748b;">-</div>
+                </div>
+                <div style="background:white;padding:12px;border-radius:8px;border:1px solid#bfdbfe;">
+                  <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Tempo Estimado</div>
+                  <div id="sincTempoEstimado" style="font-size:18px;font-weight:700;color:#64748b;">-</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Log de atividades -->
+            <div id="sincLogWrapper" style="display:none;">
+              <h3 style="font-size:14px;font-weight:700;color:#1e293b;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-list"></i>
+                Log de Sincronização
+              </h3>
+              <div id="sincLog" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6;">
+                <div style="color:#64748b;font-style:italic;">Aguardando início da sincronização...</div>
+              </div>
+            </div>
+
+            <!-- Informações -->
+            <div style="margin-top:20px;padding:16px;background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;">
+              <div style="display:flex;gap:12px;">
+                <i class="fa-solid fa-info-circle" style="color:#f59e0b;font-size:20px;flex-shrink:0;"></i>
+                <div style="color:#92400e;font-size:13px;line-height:1.6;">
+                  <div style="font-weight:700;margin-bottom:8px;">Sobre a Sincronização Completa:</div>
+                  <ul style="margin:0;padding-left:20px;">
+                    <li>Sincroniza <strong>todos os produtos</strong> da Omie para o banco de dados local</li>
+                    <li>Consulta <strong>detalhes completos</strong> de cada produto individualmente</li>
+                    <li>Tempo estimado: <strong>30-60 minutos</strong> dependendo da quantidade de produtos</li>
+                    <li>Atualizações a cada <strong>50 produtos</strong> processados</li>
+                    <li>Após a sincronização, o webhook manterá tudo atualizado automaticamente</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="solicitacaoTransferencia" class="tab-pane" style="display:none;">
               <div class="content-wrapper">
                 <div class="content-section">
                   <div class="title-wrapper">
@@ -4295,6 +4493,879 @@ function attachDropZone(ul) {
     </div>
   </div>
 </div>
+
+<script>
+/* ============================================================================
+   AGENDAMENTO AUTOMÁTICO DE SINCRONIZAÇÃO
+   ============================================================================ */
+(() => {
+  const checkboxAtivo = document.getElementById('agendamentoAtivo');
+  const configDiv = document.getElementById('configAgendamento');
+  const statusDiv = document.getElementById('statusAgendamento');
+  const btnSalvar = document.getElementById('btnSalvarAgendamento');
+  const horarioInput = document.getElementById('horarioAgendamento');
+  const proximaExecucaoDiv = document.getElementById('proximaExecucao');
+  const proximaExecucaoTexto = document.getElementById('proximaExecucaoTexto');
+
+  // Carregar configuração ao iniciar
+  carregarConfiguracao();
+
+  // Event listener do checkbox ativar/desativar
+  if (checkboxAtivo) {
+    checkboxAtivo.addEventListener('change', function() {
+      if (this.checked) {
+        configDiv.style.display = 'block';
+        statusDiv.innerHTML = '<i class="fa-solid fa-circle-check"></i> Ativado';
+        statusDiv.style.background = '#dcfce7';
+        statusDiv.style.color = '#166534';
+      } else {
+        configDiv.style.display = 'none';
+        statusDiv.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Desativado';
+        statusDiv.style.background = '#fef2f2';
+        statusDiv.style.color = '#991b1b';
+        proximaExecucaoDiv.style.display = 'none';
+      }
+    });
+  }
+
+  // Estilo dos checkboxes de dias da semana
+  document.querySelectorAll('.dia-semana').forEach(checkbox => {
+    checkbox.addEventListener('change', function() {
+      const label = this.closest('.dia-semana-label');
+      if (this.checked) {
+        label.style.background = '#dcfce7';
+        label.style.borderColor = '#22c55e';
+      } else {
+        label.style.background = '#f0fdf4';
+        label.style.borderColor = '#e5e7eb';
+      }
+    });
+  });
+
+  // Salvar configuração
+  if (btnSalvar) {
+    btnSalvar.addEventListener('click', salvarConfiguracao);
+    btnSalvar.addEventListener('mouseenter', function() {
+      this.style.transform = 'scale(1.05)';
+      this.style.boxShadow = '0 4px 12px rgba(34, 197, 94, 0.4)';
+    });
+    btnSalvar.addEventListener('mouseleave', function() {
+      this.style.transform = 'scale(1)';
+      this.style.boxShadow = 'none';
+    });
+  }
+
+  async function carregarConfiguracao() {
+    try {
+      const response = await fetch('/api/sincronizacao/agendamento/config');
+      if (!response.ok) throw new Error('Erro ao carregar configuração');
+      
+      const config = await response.json();
+      
+      if (config.ativo) {
+        checkboxAtivo.checked = true;
+        configDiv.style.display = 'block';
+        statusDiv.innerHTML = '<i class="fa-solid fa-circle-check"></i> Ativado';
+        statusDiv.style.background = '#dcfce7';
+        statusDiv.style.color = '#166534';
+        
+        // Marcar dias da semana
+        if (config.dias_semana && Array.isArray(config.dias_semana)) {
+          config.dias_semana.forEach(dia => {
+            const checkbox = document.querySelector(`.dia-semana[value="${dia}"]`);
+            if (checkbox) {
+              checkbox.checked = true;
+              const label = checkbox.closest('.dia-semana-label');
+              label.style.background = '#dcfce7';
+              label.style.borderColor = '#22c55e';
+            }
+          });
+        }
+        
+        // Definir horário
+        if (config.horario) {
+          horarioInput.value = config.horario;
+        }
+        
+        // Mostrar próxima execução
+        if (config.proxima_execucao) {
+          mostrarProximaExecucao(config.proxima_execucao);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar configuração:', error);
+    }
+  }
+
+  async function salvarConfiguracao() {
+    const diasSelecionados = Array.from(document.querySelectorAll('.dia-semana:checked')).map(cb => parseInt(cb.value));
+    const horario = horarioInput.value;
+    const ativo = checkboxAtivo.checked;
+
+    if (ativo) {
+      if (diasSelecionados.length === 0) {
+        alert('Selecione pelo menos um dia da semana!');
+        return;
+      }
+      if (!horario) {
+        alert('Defina o horário de execução!');
+        return;
+      }
+    }
+
+    const config = {
+      ativo: ativo,
+      dias_semana: diasSelecionados,
+      horario: horario
+    };
+
+    try {
+      btnSalvar.disabled = true;
+      btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+      
+      const response = await fetch('/api/sincronizacao/agendamento/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+
+      if (!response.ok) throw new Error('Erro ao salvar configuração');
+      
+      const result = await response.json();
+      
+      btnSalvar.innerHTML = '<i class="fa-solid fa-check"></i> Salvo!';
+      btnSalvar.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+      
+      setTimeout(() => {
+        btnSalvar.innerHTML = '<i class="fa-solid fa-save"></i> Salvar Configuração';
+        btnSalvar.style.background = 'linear-gradient(135deg,#22c55e 0%,#16a34a 100%)';
+        btnSalvar.disabled = false;
+      }, 2000);
+
+      if (result.proxima_execucao) {
+        mostrarProximaExecucao(result.proxima_execucao);
+      }
+
+      alert('Configuração salva com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar:', error);
+      alert('Erro ao salvar configuração: ' + error.message);
+      btnSalvar.innerHTML = '<i class="fa-solid fa-save"></i> Salvar Configuração';
+      btnSalvar.disabled = false;
+    }
+  }
+
+  function mostrarProximaExecucao(dataISO) {
+    try {
+      const data = new Date(dataISO);
+      const dataFormatada = data.toLocaleDateString('pt-BR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      
+      proximaExecucaoTexto.textContent = dataFormatada;
+      proximaExecucaoDiv.style.display = 'block';
+    } catch (error) {
+      console.error('Erro ao formatar próxima execução:', error);
+    }
+  }
+})();
+
+/* ============================================================================
+   SINCRONIZAÇÃO DE PRODUTOS
+   ============================================================================ */
+(() => {
+  const btnIniciar = document.getElementById('btnIniciarSincronizacao');
+  const menuLink = document.getElementById('menu-sincronizar-produtos');
+  const painel = document.getElementById('sincronizacaoProdutosPane');
+  
+  // Elementos de UI
+  const sincStatus = document.getElementById('sincStatus');
+  const sincStatusIcon = document.getElementById('sincStatusIcon');
+  const sincStatusTitulo = document.getElementById('sincStatusTitulo');
+  const sincStatusSubtitulo = document.getElementById('sincStatusSubtitulo');
+  const sincProgressBar = document.getElementById('sincProgressBar');
+  const sincProgressText = document.getElementById('sincProgressText');
+  const sincTotalProdutos = document.getElementById('sincTotalProdutos');
+  const sincProcessados = document.getElementById('sincProcessados');
+  const sincSucesso = document.getElementById('sincSucesso');
+  const sincErros = document.getElementById('sincErros');
+  const sincFaltam = document.getElementById('sincFaltam');
+  const sincTempoEstimado = document.getElementById('sincTempoEstimado');
+  const sincTempoDecorrido = document.getElementById('sincTempoDecorrido');
+  const sincLog = document.getElementById('sincLog');
+  const sincLogWrapper = document.getElementById('sincLogWrapper');
+
+  let sincEmAndamento = false;
+  let inicioSincronizacao = null;
+  let intervalTempo = null;
+
+  // Adiciona log ao histórico
+  function addLog(texto, tipo = 'info') {
+    const timestamp = new Date().toLocaleTimeString('pt-BR');
+    const icone = {
+      info: '<i class="fa-solid fa-info-circle" style="color:#3b82f6;"></i>',
+      success: '<i class="fa-solid fa-check-circle" style="color:#10b981;"></i>',
+      error: '<i class="fa-solid fa-exclamation-circle" style="color:#ef4444;"></i>',
+      warning: '<i class="fa-solid fa-exclamation-triangle" style="color:#f59e0b;"></i>'
+    }[tipo] || '';
+
+    const cor = {
+      info: '#3b82f6',
+      success: '#10b981',
+      error: '#ef4444',
+      warning: '#f59e0b'
+    }[tipo] || '#64748b';
+
+    const div = document.createElement('div');
+    div.style.marginBottom = '8px';
+    div.style.paddingBottom = '8px';
+    div.style.borderBottom = '1px solid #e2e8f0';
+    div.innerHTML = `
+      <span style="color:#94a3b8;font-size:11px;">[${timestamp}]</span>
+      ${icone}
+      <span style="color:${cor};margin-left:6px;">${texto}</span>
+    `;
+    
+    sincLog.appendChild(div);
+    sincLog.scrollTop = sincLog.scrollHeight;
+  }
+
+  // Formata tempo decorrido
+  function formatarTempo(ms) {
+    const segundos = Math.floor(ms / 1000);
+    const minutos = Math.floor(segundos / 60);
+    const horas = Math.floor(minutos / 60);
+    
+    if (horas > 0) {
+      return `${horas}h ${minutos % 60}m ${segundos % 60}s`;
+    } else if (minutos > 0) {
+      return `${minutos}m ${segundos % 60}s`;
+    } else {
+      return `${segundos}s`;
+    }
+  }
+
+  // Atualiza tempo decorrido
+  function atualizarTempoDecorrido() {
+    if (!inicioSincronizacao) return;
+    const decorrido = Date.now() - inicioSincronizacao;
+    sincTempoDecorrido.textContent = formatarTempo(decorrido);
+  }
+
+  // Estima tempo restante
+  function estimarTempoRestante(processados, total) {
+    if (processados === 0 || !inicioSincronizacao) return '-';
+    const decorrido = Date.now() - inicioSincronizacao;
+    const mediaPorProduto = decorrido / processados;
+    const faltam = total - processados;
+    const estimativa = faltam * mediaPorProduto;
+    return formatarTempo(estimativa);
+  }
+
+  // Atualiza UI com progresso
+  function atualizarProgresso(dados) {
+    const { total, processados, sucesso, erros, produto_atual } = dados;
+    const faltam = total - processados;
+    const progresso = total > 0 ? (processados / total * 100).toFixed(1) : 0;
+
+    // Atualiza estatísticas
+    sincTotalProdutos.textContent = total.toLocaleString('pt-BR');
+    sincProcessados.textContent = processados.toLocaleString('pt-BR');
+    sincSucesso.textContent = sucesso.toLocaleString('pt-BR');
+    sincErros.textContent = erros.toLocaleString('pt-BR');
+    sincFaltam.textContent = faltam.toLocaleString('pt-BR');
+    
+    // Atualiza barra de progresso
+    sincProgressBar.style.width = progresso + '%';
+    sincProgressText.textContent = `${progresso}%`;
+
+    // Atualiza tempo estimado
+    sincTempoEstimado.textContent = estimarTempoRestante(processados, total);
+
+    // Atualiza título e subtítulo
+    if (processados < total) {
+      sincStatusTitulo.textContent = `Sincronizando... ${progresso}%`;
+      sincStatusSubtitulo.textContent = produto_atual 
+        ? `Processando: ${produto_atual.codigo} - ${(produto_atual.descricao || '').substring(0, 50)}...`
+        : `${processados} de ${total} produtos processados`;
+    }
+
+    // Adiciona log a cada 50 produtos
+    if (processados > 0 && processados % 50 === 0) {
+      addLog(`✓ Progresso: ${processados}/${total} produtos sincronizados (${progresso}%)`, 'success');
+    }
+  }
+
+  // Finaliza sincronização
+  function finalizarSincronizacao(sucesso, mensagem, dados = {}) {
+    sincEmAndamento = false;
+    
+    if (intervalTempo) {
+      clearInterval(intervalTempo);
+      intervalTempo = null;
+    }
+
+    sincStatusIcon.className = sucesso 
+      ? 'fa-solid fa-check-circle'
+      : 'fa-solid fa-exclamation-circle';
+    sincStatusIcon.style.color = sucesso ? '#10b981' : '#ef4444';
+
+    sincStatusTitulo.textContent = sucesso ? '✓ Sincronização Concluída!' : '✗ Erro na Sincronização';
+    sincStatusSubtitulo.textContent = mensagem;
+
+    sincProgressBar.style.width = sucesso ? '100%' : sincProgressBar.style.width;
+    sincProgressBar.style.background = sucesso 
+      ? 'linear-gradient(90deg,#10b981 0%,#059669 100%)'
+      : 'linear-gradient(90deg,#ef4444 0%,#dc2626 100%)';
+
+    btnIniciar.disabled = false;
+    btnIniciar.innerHTML = '<i class="fa-solid fa-sync"></i><span>Sincronizar Novamente</span>';
+
+    // Log final
+    if (sucesso && dados.processados) {
+      const duracao = formatarTempo(Date.now() - inicioSincronizacao);
+      addLog(`🎉 Sincronização concluída com sucesso! ${dados.processados} produtos em ${duracao}`, 'success');
+      if (dados.erros > 0) {
+        addLog(`⚠️ ${dados.erros} produtos com erro durante a sincronização`, 'warning');
+      }
+    } else {
+      addLog(`✗ ${mensagem}`, 'error');
+    }
+  }
+
+  // Inicia sincronização
+  async function iniciarSincronizacao() {
+    if (sincEmAndamento) {
+      alert('Já existe uma sincronização em andamento!');
+      return;
+    }
+
+    if (!confirm('Deseja iniciar a sincronização COMPLETA de produtos?\n\nEste processo pode levar de 30 a 60 minutos dependendo da quantidade de produtos.\n\nContinuar?')) {
+      return;
+    }
+
+    sincEmAndamento = true;
+    inicioSincronizacao = Date.now();
+
+    // Limpa e mostra UI
+    sincLog.innerHTML = '';
+    sincStatus.style.display = 'block';
+    sincLogWrapper.style.display = 'block';
+    
+    sincStatusIcon.className = 'fa-solid fa-spinner fa-spin';
+    sincStatusIcon.style.color = '#3b82f6';
+    sincStatusTitulo.textContent = 'Iniciando sincronização...';
+    sincStatusSubtitulo.textContent = 'Consultando total de produtos na Omie...';
+    
+    sincProgressBar.style.width = '0%';
+    sincProgressBar.style.background = 'linear-gradient(90deg,#3b82f6 0%,#2563eb 100%)';
+    sincProgressText.textContent = '0%';
+    
+    sincTotalProdutos.textContent = '-';
+    sincProcessados.textContent = '0';
+    sincSucesso.textContent = '0';
+    sincErros.textContent = '0';
+    sincFaltam.textContent = '-';
+    sincTempoEstimado.textContent = '-';
+
+    btnIniciar.disabled = true;
+    btnIniciar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Sincronizando...</span>';
+
+    addLog('🚀 Iniciando sincronização completa de produtos...', 'info');
+
+    // Inicia contador de tempo
+    intervalTempo = setInterval(atualizarTempoDecorrido, 1000);
+
+    try {
+      // Faz requisição para a API
+      const response = await fetch('/api/produtos/sincronizar-completo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro na requisição: ${response.status} ${response.statusText}`);
+      }
+
+      // Lê o stream de progresso
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const linhas = chunk.split('\n').filter(l => l.trim());
+        
+        for (const linha of linhas) {
+          if (linha.startsWith('data: ')) {
+            try {
+              const dados = JSON.parse(linha.substring(6));
+              
+              if (dados.tipo === 'progresso') {
+                atualizarProgresso(dados);
+              } else if (dados.tipo === 'concluido') {
+                finalizarSincronizacao(true, dados.mensagem, dados);
+              } else if (dados.tipo === 'erro') {
+                finalizarSincronizacao(false, dados.mensagem);
+              } else if (dados.tipo === 'log') {
+                addLog(dados.mensagem, dados.nivel || 'info');
+              }
+            } catch (e) {
+              console.error('Erro ao parsear dados:', e, linha);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Erro na sincronização:', error);
+      finalizarSincronizacao(false, `Erro: ${error.message}`);
+    }
+  }
+
+  // Event listeners
+  if (btnIniciar) {
+    btnIniciar.addEventListener('click', iniciarSincronizacao);
+  }
+
+  // Quando clicar no menu, mostra o painel
+  if (menuLink) {
+    menuLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      
+      // Esconde todos os painéis
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      
+      // Mostra o painel de sincronização
+      if (painel) {
+        painel.style.display = 'block';
+      }
+      
+      // Atualiza menu ativo
+      document.querySelectorAll('.menu-link').forEach(link => {
+        link.classList.remove('is-active');
+      });
+      menuLink.classList.add('is-active');
+    });
+  }
+})();
+</script>
+
+<!-- Script para carregar Recebimento (compra realizada) -->
+<script>
+(function() {
+  const btnRecarregar = document.getElementById('recebimentoRefreshBtn');
+  const tbody = document.getElementById('recebimentoTbody');
+  const countBadge = document.getElementById('recebimentoCount');
+  const menuRecebimento = document.getElementById('menu-recebimento');
+
+  // Função para carregar os dados de recebimento
+  async function carregarRecebimento() {
+    try {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
+            <div>Carregando dados...</div>
+          </td>
+        </tr>
+      `;
+
+      const response = await fetch('/api/compras/solicitacoes-recebimento');
+      if (!response.ok) {
+        throw new Error(`Erro HTTP: ${response.status}`);
+      }
+
+      const dados = await response.json();
+      console.log('📦 Dados recebidos:', dados);
+
+      if (!Array.isArray(dados) || dados.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+              <i class="fa-solid fa-inbox" style="font-size:48px;margin-bottom:10px;opacity:0.3;"></i>
+              <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Nenhum item para recebimento</div>
+              <div style="font-size:13px;">Não há solicitações com status "compra realizada"</div>
+            </td>
+          </tr>
+        `;
+        if (countBadge) countBadge.textContent = '0 itens';
+        return;
+      }
+
+      // Agrupar itens por cnumero (Nº Pedido)
+      const pedidosAgrupados = {};
+      dados.forEach(item => {
+        const pedido = item.cnumero || 'Sem Pedido';
+        if (!pedidosAgrupados[pedido]) {
+          pedidosAgrupados[pedido] = {
+            cnumero: item.cnumero,
+            solicitante: item.solicitante,
+            previsao_chegada: item.previsao_chegada,
+            resp_inspecao_recebimento: item.resp_inspecao_recebimento,
+            observacao: item.observacao,
+            created_at: item.created_at,
+            itens: []
+          };
+        }
+        pedidosAgrupados[pedido].itens.push(item);
+      });
+
+      tbody.innerHTML = '';
+      let totalItens = 0;
+
+      // Criar linhas agrupadas
+      Object.keys(pedidosAgrupados).forEach((pedidoNum, index) => {
+        const pedido = pedidosAgrupados[pedidoNum];
+        const numItens = pedido.itens.length;
+        totalItens += numItens;
+
+        // Formatar datas
+        const previsao = pedido.previsao_chegada
+          ? new Date(pedido.previsao_chegada).toLocaleDateString('pt-BR')
+          : '-';
+        
+        const criadoEm = pedido.created_at
+          ? new Date(pedido.created_at).toLocaleString('pt-BR', { 
+              day: '2-digit', 
+              month: '2-digit', 
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })
+          : '-';
+
+        // Linha do Pedido (grupo)
+        const trPedido = document.createElement('tr');
+        trPedido.className = 'pedido-grupo';
+        trPedido.style.backgroundColor = index % 2 === 0 ? '#f8fafc' : '#ffffff';
+        trPedido.style.cursor = 'pointer';
+        trPedido.style.transition = 'all 0.2s';
+        trPedido.dataset.pedido = pedidoNum;
+        trPedido.dataset.expandido = 'false';
+        
+        trPedido.innerHTML = `
+          <td style="padding:12px 16px;text-align:center;">
+            <i class="fa-solid fa-chevron-right" style="color:#64748b;font-size:12px;transition:transform 0.3s;"></i>
+          </td>
+          <td style="padding:12px 16px;font-weight:700;color:#0369a1 !important;white-space:nowrap;font-size:14px;">
+            ${pedido.cnumero || '-'}
+            <span style="margin-left:8px;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:11px;font-weight:600;">${numItens} ${numItens === 1 ? 'item' : 'itens'}</span>
+          </td>
+          <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.solicitante || '-'}</td>
+          <td style="padding:12px 16px;color:#334155 !important;white-space:nowrap;font-size:13px;">${previsao}</td>
+          <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.resp_inspecao_recebimento || '-'}</td>
+          <td style="padding:12px 16px;color:#475569 !important;font-size:12px;max-width:300px;">${pedido.observacao || '-'}</td>
+          <td style="padding:12px 16px;color:#64748b !important;font-size:11px;white-space:nowrap;">${criadoEm}</td>
+          <td style="padding:12px 16px;text-align:center;">
+            <button class="btn-receber-produto" data-pedido="${pedidoNum}" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:6px;margin:0 auto;">
+              <i class="fa-solid fa-clipboard-check"></i>
+              <span>Receber Produto</span>
+            </button>
+          </td>
+        `;
+
+        // Evento de clique para expandir/colapsar
+        trPedido.addEventListener('click', function() {
+          const expandido = this.dataset.expandido === 'true';
+          const icone = this.querySelector('i');
+          const itensLinhas = tbody.querySelectorAll(`tr[data-pedido-pai="${pedidoNum}"]`);
+          
+          if (expandido) {
+            // Colapsar
+            icone.style.transform = 'rotate(0deg)';
+            itensLinhas.forEach(tr => {
+              tr.style.maxHeight = tr.scrollHeight + 'px';
+              setTimeout(() => {
+                tr.style.maxHeight = '0';
+                tr.style.opacity = '0';
+              }, 10);
+              setTimeout(() => {
+                tr.style.display = 'none';
+              }, 300);
+            });
+            this.dataset.expandido = 'false';
+          } else {
+            // Expandir
+            icone.style.transform = 'rotate(90deg)';
+            itensLinhas.forEach(tr => {
+              tr.style.display = 'table-row';
+              setTimeout(() => {
+                tr.style.maxHeight = tr.scrollHeight + 'px';
+                tr.style.opacity = '1';
+              }, 10);
+            });
+            this.dataset.expandido = 'true';
+          }
+        });
+
+        trPedido.addEventListener('mouseenter', function() {
+          this.style.backgroundColor = '#e0f2fe';
+        });
+
+        trPedido.addEventListener('mouseleave', function() {
+          this.style.backgroundColor = index % 2 === 0 ? '#f8fafc' : '#ffffff';
+        });
+
+        tbody.appendChild(trPedido);
+
+        // Adicionar evento ao botão Receber Produto
+        const btnReceber = trPedido.querySelector('.btn-receber-produto');
+        btnReceber.addEventListener('click', (e) => {
+          e.stopPropagation(); // Evita que o clique expanda/colapse a linha
+          abrirModalRecebimento(pedidoNum, pedido);
+        });
+
+        btnReceber.addEventListener('mouseenter', function() {
+          this.style.transform = 'scale(1.05)';
+          this.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)';
+        });
+
+        btnReceber.addEventListener('mouseleave', function() {
+          this.style.transform = 'scale(1)';
+          this.style.boxShadow = 'none';
+        });
+
+        // Linhas de Itens (filhos - inicialmente ocultos)
+        pedido.itens.forEach((item, itemIndex) => {
+          const trItem = document.createElement('tr');
+          trItem.className = 'pedido-item';
+          trItem.dataset.pedidoPai = pedidoNum;
+          trItem.style.display = 'none';
+          trItem.style.backgroundColor = '#f1f5f9';
+          trItem.style.maxHeight = '0';
+          trItem.style.opacity = '0';
+          trItem.style.overflow = 'hidden';
+          trItem.style.transition = 'all 0.3s ease-out';
+          
+          trItem.innerHTML = `
+            <td style="padding:8px 16px;"></td>
+            <td colspan="6" style="padding:8px 16px;">
+              <div style="display:grid;grid-template-columns:80px 150px 1fr 80px;gap:16px;align-items:center;background:white;padding:12px 16px;border-radius:8px;border-left:3px solid #0ea5e9;">
+                <div>
+                  <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">ID</div>
+                  <div style="font-size:13px;color:#334155 !important;font-weight:500;">${item.id || '-'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">Código</div>
+                  <div style="font-family:monospace;font-size:13px;color:#1e293b !important;font-weight:600;">${item.produto_codigo || '-'}</div>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">Descrição</div>
+                  <div style="font-size:13px;color:#0f172a !important;">${item.produto_descricao || '-'}</div>
+                </div>
+                <div style="text-align:center;">
+                  <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
+                  <div style="font-size:14px;color:#15803d !important;font-weight:700;background:#f0fdf4;padding:4px 12px;border-radius:6px;display:inline-block;">${item.quantidade || 0}</div>
+                </div>
+              </div>
+            </td>
+          `;
+          
+          tbody.appendChild(trItem);
+        });
+      });
+
+      if (countBadge) {
+        countBadge.textContent = `${Object.keys(pedidosAgrupados).length} ${Object.keys(pedidosAgrupados).length === 1 ? 'pedido' : 'pedidos'} (${totalItens} ${totalItens === 1 ? 'item' : 'itens'})`;
+      }
+
+      console.log(`✅ ${Object.keys(pedidosAgrupados).length} pedidos carregados com ${totalItens} itens`);
+    } catch (error) {
+      console.error('❌ Erro ao carregar recebimento:', error);
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center;padding:40px;color:#ef4444;">
+            <i class="fa-solid fa-exclamation-triangle" style="font-size:48px;margin-bottom:10px;opacity:0.5;"></i>
+            <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Erro ao carregar dados</div>
+            <div style="font-size:13px;">${error.message}</div>
+          </td>
+        </tr>
+      `;
+    }
+  }
+
+  // Função para abrir modal de recebimento
+  function abrirModalRecebimento(pedidoNum, pedidoData) {
+    const modal = document.getElementById('modalRecebimentoProdutos');
+    const modalPedido = document.getElementById('modalRecebimentoPedido');
+    const modalItens = document.getElementById('modalRecebimentoItens');
+
+    if (!modal || !modalPedido || !modalItens) return;
+
+    // Atualizar cabeçalho
+    modalPedido.textContent = `Pedido: ${pedidoNum}`;
+
+    // Renderizar itens
+    modalItens.innerHTML = pedidoData.itens.map((item, index) => `
+      <div style="background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);border:2px solid #e2e8f0;border-radius:12px;padding:16px;display:flex;align-items:center;gap:16px;transition:all 0.2s;" onmouseenter="this.style.borderColor='#0ea5e9';this.style.boxShadow='0 4px 12px rgba(14,165,233,0.2)';" onmouseleave="this.style.borderColor='#e2e8f0';this.style.boxShadow='none';">
+        <div style="flex:1;display:grid;grid-template-columns:80px 150px 1fr 100px;gap:16px;align-items:center;">
+          <div>
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">ID</div>
+            <div style="font-size:14px;color:#334155;font-weight:600;">${item.id || '-'}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Código</div>
+            <div style="font-family:monospace;font-size:13px;color:#1e293b;font-weight:600;">${item.produto_codigo || '-'}</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+            <div style="font-size:14px;color:#0f172a;font-weight:500;">${item.produto_descricao || '-'}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Qtd</div>
+            <div style="font-size:16px;color:#15803d;font-weight:700;background:#f0fdf4;padding:6px 16px;border-radius:8px;display:inline-block;">${item.quantidade || 0}</div>
+          </div>
+        </div>
+        <button class="btn-receber-item" data-item-id="${item.id}" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;border:none;padding:12px 24px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:8px;white-space:nowrap;" onmouseenter="this.style.transform='scale(1.05)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.4)';" onmouseleave="this.style.transform='scale(1)';this.style.boxShadow='none';">
+          <i class="fa-solid fa-check-circle"></i>
+          <span>Receber</span>
+        </button>
+      </div>
+    `).join('');
+
+    // Adicionar eventos aos botões de receber item (por enquanto só alerta)
+    modalItens.querySelectorAll('.btn-receber-item').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const itemId = this.dataset.itemId;
+        alert(`Botão Receber clicado para item ID: ${itemId}\n(Funcionalidade será implementada)`);
+      });
+    });
+
+    // Mostrar modal com animação
+    modal.style.display = 'block';
+    setTimeout(() => {
+      modal.style.opacity = '1';
+      modal.querySelector('div > div').style.transform = 'translate(-50%, -50%) scale(1)';
+    }, 10);
+  }
+
+  // Event listener do botão recarregar (protegido contra duplicação)
+  if (btnRecarregar && !btnRecarregar.dataset.listenerAdded) {
+    btnRecarregar.dataset.listenerAdded = 'true';
+    btnRecarregar.addEventListener('click', carregarRecebimento);
+    btnRecarregar.addEventListener('mouseenter', function() {
+      this.style.transform = 'scale(1.05)';
+      this.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+    });
+    btnRecarregar.addEventListener('mouseleave', function() {
+      this.style.transform = 'scale(1)';
+      this.style.boxShadow = 'none';
+    });
+  }
+
+  // Event listener do menu lateral (protegido contra duplicação)
+  if (menuRecebimento && !menuRecebimento.dataset.listenerAdded) {
+    menuRecebimento.dataset.listenerAdded = 'true';
+    menuRecebimento.addEventListener('click', (e) => {
+      e.preventDefault();
+      
+      // Esconde todos os painéis
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      
+      // Mostra o painel de recebimento
+      const painelRecebimento = document.getElementById('recebimentoPane');
+      if (painelRecebimento) {
+        painelRecebimento.style.display = 'block';
+      }
+      
+      // Atualiza menu ativo
+      document.querySelectorAll('.menu-link').forEach(link => {
+        link.classList.remove('is-active');
+      });
+      menuRecebimento.classList.add('is-active');
+
+      // Carrega os dados
+      carregarRecebimento();
+    });
+  }
+})();
+</script>
+
+<!-- Modal de Recebimento de Produtos (posicionado fora de qualquer container) -->
+<div id="modalRecebimentoProdutos" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;backdrop-filter:blur(4px);opacity:0;transition:opacity 0.2s;">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.9);transition:transform 0.2s;background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-width:900px;width:90%;max-height:85vh;display:flex;flex-direction:column;">
+    <!-- Cabeçalho do Modal -->
+    <div style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #0ea5e9;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <i class="fa-solid fa-truck-ramp-box" style="font-size:28px;color:#f59e0b;"></i>
+        <div>
+          <h3 style="margin:0;font-size:20px;font-weight:600;">Receber Produtos</h3>
+          <p id="modalRecebimentoPedido" style="margin:4px 0 0 0;font-size:13px;color:#cbd5e1;">Pedido: -</p>
+        </div>
+      </div>
+      <button id="modalRecebimentoFechar" style="background:transparent;border:none;color:white;font-size:28px;cursor:pointer;padding:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:all 0.2s;">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    
+    <!-- Corpo do Modal com scroll -->
+    <div style="padding:24px;overflow-y:auto;flex:1;min-height:0;">
+      <div id="modalRecebimentoItens" style="display:flex;flex-direction:column;gap:12px;">
+        <!-- Itens serão inseridos aqui -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Configurar event listeners do modal de recebimento (após o modal estar no DOM)
+(function() {
+  // Função para fechar modal (global para ser acessada por outros scripts)
+  window.fecharModalRecebimento = function() {
+    const modal = document.getElementById('modalRecebimentoProdutos');
+    if (!modal) return;
+    
+    modal.style.opacity = '0';
+    const modalContent = modal.querySelector('div > div');
+    if (modalContent) {
+      modalContent.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    }
+    setTimeout(() => {
+      modal.style.display = 'none';
+    }, 200);
+  };
+
+  // Event listener do botão fechar modal
+  const btnFecharModal = document.getElementById('modalRecebimentoFechar');
+  if (btnFecharModal) {
+    btnFecharModal.addEventListener('click', window.fecharModalRecebimento);
+    btnFecharModal.addEventListener('mouseenter', function() {
+      this.style.backgroundColor = 'rgba(255,255,255,0.1)';
+    });
+    btnFecharModal.addEventListener('mouseleave', function() {
+      this.style.backgroundColor = 'transparent';
+    });
+  }
+
+  // Fechar modal ao clicar no fundo
+  const modal = document.getElementById('modalRecebimentoProdutos');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === this) {
+        window.fecharModalRecebimento();
+      }
+    });
+  }
+
+  // Fechar com tecla ESC
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      const modal = document.getElementById('modalRecebimentoProdutos');
+      if (modal && modal.style.display === 'block') {
+        window.fecharModalRecebimento();
+      }
+    }
+  });
+})();
+</script>
 
 </body>
 </html>

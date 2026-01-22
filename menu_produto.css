@@ -520,32 +520,82 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   left: 76px;
   top: 16px;
   width: 240px;
-  max-height: calc(100vh - 120px);
+  height: 600px !important;
+  max-height: 600px !important;
   background: rgba(30, 30, 30, 0.98);
   border: 2px solid var(--card-border-color);
   border-radius: 12px;
   padding: 20px;
+  padding-bottom: 10px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   backdrop-filter: blur(10px);
   z-index: 1000;
-  overflow-y: auto;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
   transition: all 0.3s ease;
+  display: block !important;
+}
+
+/* Customização da scrollbar do menu lateral */
+.sidebar-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+  margin: 8px 0;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.5);
+  border-radius: 3px;
+  transition: background 0.3s ease;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Para Firefox */
+.sidebar-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(59, 130, 246, 0.5) rgba(0, 0, 0, 0.2);
 }
 
 .light-mode .sidebar-content {
   background: rgba(255, 255, 255, 0.98);
 }
 
+/* Scrollbar no modo light */
+.light-mode .sidebar-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light-mode .sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.4);
+}
+
+.light-mode .sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.7);
+}
+
+.light-mode .sidebar-content {
+  scrollbar-color: rgba(59, 130, 246, 0.4) rgba(0, 0, 0, 0.05);
+}
+
 .sidebar-content.collapsed {
-  display: none;
+  visibility: hidden;
   opacity: 0;
   transform: translateX(-20px);
+  pointer-events: none;
 }
 
 .sidebar-content:not(.collapsed) {
-  display: block;
+  visibility: visible;
   opacity: 1;
   transform: translateX(0);
+  pointer-events: auto;
 }
 
 @media screen and (max-width: 945px) {
@@ -7657,3 +7707,4 @@ table.tabela td.num {
   animation: expandDown 0.3s ease;
 }
 
+/* Cache bust 1768834639 */
