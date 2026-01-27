@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Produtos</title>
+  <title>SGF</title>
   <!-- Font Awesome para os ícones das fotos -->
   <link
   rel="stylesheet"
@@ -418,14 +418,14 @@
               <div id="comprasFormStatus" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;"></div>
             </div>
 
-            <!-- Minhas solicitações (somente do usuário logado) -->
+            <!-- Kanban de compras (somente do usuário logado) -->
             <div id="minhasComprasWrapper" class="content-section" style="margin-top:16px;display:none;">
               
               <!-- Título e Botões de Ação -->
               <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
                 <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
                   <i class="fa-solid fa-user-check" style="color:#22c55e;"></i>
-                  Minhas solicitações
+                  Kanban de compras
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
                   <button id="comprasFiltroKanbanBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Filtrar Kanbans">
@@ -439,7 +439,7 @@
                 </div>
               </div>
 
-              <!-- Kanban de Minhas Solicitações -->
+              <!-- Kanban de Compras -->
               <div id="kanbanMinhasSolicitacoes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:20px;">
                 <!-- As colunas serão renderizadas via JavaScript -->
               </div>
@@ -570,6 +570,13 @@
                       <option value="">Selecione o responsável</option>
                     </select>
                   </div>
+                  <div class="form-field">
+                    <label for="modalComprasCategoriaCompra">Categoria da Compra *</label>
+                    <select id="modalComprasCategoriaCompra" required>
+                      <option value="">Selecione a categoria...</option>
+                      <!-- Será preenchido dinamicamente -->
+                    </select>
+                  </div>
                 </div>
                 
                 <!-- Campo Família do Produto em largura total -->
@@ -679,58 +686,6 @@
               <button id="btnConcluirSelecaoCompra" class="content-button" onclick="concluirSelecaoItensCompra()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:10px 20px;">
                 <i class="fa-solid fa-check"></i>
                 <span>Prosseguir com Compra</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Modal Observação de Retificação -->
-        <div id="modalObservacaoRetificacao" class="modal" style="display:none;z-index:10005;">
-          <div class="modal-content" style="max-width:600px;">
-            <div class="modal-header">
-              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-wrench" style="color:#f59e0b;"></i>
-                <span>Solicitar Retificação</span>
-              </h3>
-              <button class="modal-close" onclick="fecharModalObservacaoRetificacao()">&times;</button>
-            </div>
-            <div class="modal-body" style="padding:20px;">
-              <div style="margin-bottom:16px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;">
-                <div style="display:flex;align-items:start;gap:8px;">
-                  <i class="fa-solid fa-info-circle" style="color:#92400e;margin-top:2px;"></i>
-                  <span style="font-size:13px;color:#92400e;">Por favor, informe o motivo da retificação. Esta informação ajudará na correção do item.</span>
-                </div>
-              </div>
-              
-              <div style="margin-bottom:16px;">
-                <label style="display:block;font-size:13px;color:#374151;font-weight:600;margin-bottom:8px;">
-                  Motivo da Retificação <span style="color:#ef4444;">*</span>
-                </label>
-                <textarea 
-                  id="observacaoRetificacaoTexto"
-                  rows="4"
-                  placeholder="Descreva o motivo da retificação..."
-                  style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;min-height:100px;"
-                ></textarea>
-                <div id="observacaoRetificacaoError" style="display:none;margin-top:6px;color:#ef4444;font-size:12px;">
-                  <i class="fa-solid fa-exclamation-circle"></i>
-                  A observação é obrigatória
-                </div>
-              </div>
-              
-              <div style="font-size:11px;color:#6b7280;">
-                <strong>Item:</strong> <span id="observacaoRetificacaoItem"></span>
-              </div>
-            </div>
-            <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
-              <button class="btn-secondary" onclick="fecharModalObservacaoRetificacao()">Cancelar</button>
-              <button 
-                id="btnConfirmarRetificacao"
-                class="content-button" 
-                onclick="confirmarRetificacao()" 
-                style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:10px 20px;">
-                <i class="fa-solid fa-check"></i>
-                <span>Confirmar Retificação</span>
               </button>
             </div>
           </div>
@@ -997,6 +952,17 @@
                     style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
                     <option value="nao">Não</option>
                     <option value="sim">Sim</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-tags" style="color:#3b82f6;margin-right:4px;"></i>
+                    Categoria da Compra *
+                  </label>
+                  <select 
+                    id="catalogoCategoriaCompraGlobal"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                    <option value="">Selecione...</option>
                   </select>
                 </div>
               </div>
@@ -5366,6 +5332,58 @@ function attachDropZone(ul) {
   });
 })();
 </script>
+
+<!-- Modal Observação de Retificação (movido para o final do body para garantir z-index correto) -->
+<div id="modalObservacaoRetificacao" class="modal" style="display:none;position:fixed!important;z-index:10005!important;">
+  <div class="modal-content" style="max-width:600px;">
+    <div class="modal-header">
+      <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+        <i class="fa-solid fa-wrench" style="color:#f59e0b;"></i>
+        <span>Solicitar Retificação</span>
+      </h3>
+      <button class="modal-close" onclick="fecharModalObservacaoRetificacao()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:20px;">
+      <div style="margin-bottom:16px;padding:12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;">
+        <div style="display:flex;align-items:start;gap:8px;">
+          <i class="fa-solid fa-info-circle" style="color:#92400e;margin-top:2px;"></i>
+          <span style="font-size:13px;color:#92400e;">Por favor, informe o motivo da retificação. Esta informação ajudará na correção do item.</span>
+        </div>
+      </div>
+      
+      <div style="margin-bottom:16px;">
+        <label style="display:block;font-size:13px;color:#374151;font-weight:600;margin-bottom:8px;">
+          Motivo da Retificação <span style="color:#ef4444;">*</span>
+        </label>
+        <textarea 
+          id="observacaoRetificacaoTexto"
+          rows="4"
+          placeholder="Descreva o motivo da retificação..."
+          style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;min-height:100px;"
+        ></textarea>
+        <div id="observacaoRetificacaoError" style="display:none;margin-top:6px;color:#ef4444;font-size:12px;">
+          <i class="fa-solid fa-exclamation-circle"></i>
+          A observação é obrigatória
+        </div>
+      </div>
+      
+      <div style="font-size:11px;color:#6b7280;">
+        <strong>Item:</strong> <span id="observacaoRetificacaoItem"></span>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+      <button class="btn-secondary" onclick="fecharModalObservacaoRetificacao()">Cancelar</button>
+      <button 
+        id="btnConfirmarRetificacao"
+        class="content-button" 
+        onclick="confirmarRetificacao()" 
+        style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:10px 20px;">
+        <i class="fa-solid fa-check"></i>
+        <span>Confirmar Retificação</span>
+      </button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

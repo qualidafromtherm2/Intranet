@@ -11058,6 +11058,33 @@ app.get('/api/compras/usuarios', async (req, res) => {
   }
 });
 
+// GET /api/produtos-omie/buscar-codigo - Busca codigo_produto da tabela produtos_omie pelo codigo
+app.get('/api/produtos-omie/buscar-codigo', async (req, res) => {
+  try {
+    const { codigo } = req.query;
+    
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'Código é obrigatório' });
+    }
+    
+    const { rows } = await pool.query(`
+      SELECT codigo_produto
+      FROM public.produtos_omie
+      WHERE codigo = $1
+      LIMIT 1
+    `, [codigo]);
+    
+    if (rows.length === 0) {
+      return res.json({ ok: true, codigo_produto: null });
+    }
+    
+    res.json({ ok: true, codigo_produto: rows[0].codigo_produto });
+  } catch (err) {
+    console.error('[Produtos Omie] Erro ao buscar codigo_produto:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar codigo_produto' });
+  }
+});
+
 // POST /api/compras/pedido - Cria solicitações de compra (cada item independente, sem numero_pedido)
 app.post('/api/compras/pedido', async (req, res) => {
   try {
@@ -11092,7 +11119,10 @@ app.post('/api/compras/pedido', async (req, res) => {
           objetivo_compra,
           resp_inspecao_recebimento,
           retorno_cotacao,
-          codigo_produto_omie
+          codigo_produto_omie,
+          categoria_compra_codigo,
+          categoria_compra_nome,
+          codigo_omie
         } = item;
         
         if (!produto_codigo || !quantidade) {
@@ -11120,9 +11150,12 @@ app.post('/api/compras/pedido', async (req, res) => {
             resp_inspecao_recebimento,
             retorno_cotacao,
             codigo_produto_omie,
+            categoria_compra_codigo,
+            categoria_compra_nome,
+            codigo_omie,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -11138,7 +11171,10 @@ app.post('/api/compras/pedido', async (req, res) => {
           objetivo_compra || null,
           resp_inspecao_recebimento || solicitante,
           retorno_cotacao || null,
-          codigo_produto_omie || null
+          codigo_produto_omie || null,
+          categoria_compra_codigo || null,
+          categoria_compra_nome || null,
+          codigo_omie || null
         ]);
         
         idsInseridos.push(result.rows[0].id);
@@ -11259,10 +11295,17 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
     });
     
     if (!omieResp.ok) {
+      console.error(`[Imagem Fresca] Erro HTTP ${omieResp.status} ao consultar produto ${codigoProduto}`);
       return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
     }
     
     const omieData = await omieResp.json();
+    
+    // Verifica se houve erro na resposta da Omie
+    if (omieData.faultstring || omieData.faultcode) {
+      console.warn(`[Imagem Fresca] Erro Omie para produto ${codigoProduto}:`, omieData.faultstring);
+      return res.json({ ok: true, url_imagem: null }); // Produto não encontrado ou sem acesso
+    }
     
     // Atualiza URLs no banco se houver imagens
     if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
@@ -11285,10 +11328,11 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
       const primeiraImagem = omieData.imagens[0]?.url_imagem?.trim() || null;
       res.json({ ok: true, url_imagem: primeiraImagem });
     } else {
+      // Produto sem imagens
       res.json({ ok: true, url_imagem: null });
     }
   } catch (err) {
-    console.error('[Compras] Erro ao buscar imagem fresca:', err);
+    console.error('[Imagem Fresca] Erro ao buscar imagem:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem' });
   }
 });
@@ -11512,6 +11556,166 @@ app.post('/api/compras/filtro-kanbans', async (req, res) => {
   }
 });
 
+// POST /api/compras/aprovar-item/:id - Aprova item e cria requisição na Omie
+app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
+  try {
+    const itemId = Number(req.params.id);
+    if (!Number.isInteger(itemId)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    // Busca dados do item
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        objetivo_compra,
+        solicitante,
+        departamento,
+        categoria_compra_codigo,
+        previsao_chegada,
+        prazo_solicitado,
+        codigo_produto_omie,
+        codigo_omie,
+        retorno_cotacao
+      FROM compras.solicitacao_compras
+      WHERE id = $1
+    `, [itemId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const item = rows[0];
+    
+    // Validação: categoria_compra_codigo é obrigatória para Omie
+    if (!item.categoria_compra_codigo || item.categoria_compra_codigo.trim() === '') {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de aprovar.' 
+      });
+    }
+
+    // Verifica se veio uma cotação aprovada (do kanban "Cotado aguardando escolha")
+    const cotacaoAprovadaId = req.body?.cotacao_aprovada_id;
+    
+    // REGRA 1: Se veio com cotacao_aprovada_id → SEMPRE cria requisição na Omie (ignora retorno_cotacao)
+    // REGRA 2: Se retorno_cotacao = 'S' (sem cotação aprovada) → Apenas muda status para "aguardando cotação"
+    // REGRA 3: Se retorno_cotacao = 'N' → Cria requisição na Omie
+    
+    if (!cotacaoAprovadaId && item.retorno_cotacao === 'S') {
+      // Apenas atualiza status para "aguardando cotação" sem criar requisição na Omie
+      await pool.query(`
+        UPDATE compras.solicitacao_compras
+        SET 
+          status = 'aguardando cotação',
+          updated_at = NOW()
+        WHERE id = $1
+      `, [itemId]);
+      
+      console.log(`[Aprovar Item] Item ${itemId} aprovado - aguardando cotação (sem requisição Omie)`);
+      
+      return res.json({ 
+        ok: true, 
+        message: 'Item aprovado. Status: aguardando cotação'
+      });
+    }
+
+    // A partir daqui, cria requisição na Omie (retorno_cotacao = 'N' OU cotação aprovada)
+    // Gera número de pedido único
+    const agora = new Date();
+    const ano = agora.getFullYear();
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const dia = String(agora.getDate()).padStart(2, '0');
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const minuto = String(agora.getMinutes()).padStart(2, '0');
+    const segundo = String(agora.getSeconds()).padStart(2, '0');
+    const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
+    const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+
+    // Determina data de sugestão (dtSugestao): previsao_chegada > prazo_solicitado > data atual + 5 dias
+    let dtSugestao;
+    if (item.previsao_chegada) {
+      // Se previsao_chegada existe, usa ela (formato DD/MM/YYYY)
+      const dt = new Date(item.previsao_chegada);
+      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    } else if (item.prazo_solicitado) {
+      // Se prazo_solicitado existe, usa ele (formato DD/MM/YYYY)
+      const dt = new Date(item.prazo_solicitado);
+      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    } else {
+      // Se não tem nenhum, usa data atual + 5 dias
+      const dt = new Date();
+      dt.setDate(dt.getDate() + 5);
+      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    }
+
+    // Monta payload para Omie - IncluirReq
+    const requisicaoOmie = {
+      codIntReqCompra: numeroPedido,
+      codCateg: item.categoria_compra_codigo || '',
+      codProj: 0,
+      dtSugestao: dtSugestao,
+      obsReqCompra: '',
+      obsIntReqCompra: '',
+      ItensReqCompra: [
+        {
+          codProd: item.codigo_omie || null,  // Usa codigo_omie da tabela produtos_omie
+          obsItem: item.objetivo_compra || '',
+          precoUnit: 0,
+          qtde: parseFloat(item.quantidade) || 1
+        }
+      ]
+    };
+
+    console.log('[Aprovar Item] Enviando para Omie IncluirReq:', JSON.stringify(requisicaoOmie, null, 2));
+
+    // Envia para Omie
+    const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'IncluirReq',
+        app_key: process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param: [requisicaoOmie]
+      })
+    });
+
+    const omieResult = await omieResponse.json();
+    
+    if (!omieResponse.ok || omieResult.faultstring) {
+      console.error('[Aprovar Item] Erro Omie:', omieResult);
+      throw new Error(omieResult.faultstring || 'Erro ao criar requisição na Omie');
+    }
+
+    console.log('[Aprovar Item] Resposta Omie:', omieResult);
+
+    // Atualiza item no banco: status = "aguardando compra" (retorno_cotacao = 'N')
+    await pool.query(`
+      UPDATE compras.solicitacao_compras
+      SET 
+        status = 'aguardando compra',
+        numero_pedido = $1,
+        updated_at = NOW()
+      WHERE id = $2
+    `, [numeroPedido, itemId]);
+
+    res.json({ 
+      ok: true, 
+      message: 'Item aprovado e requisição criada na Omie',
+      numero_pedido: numeroPedido,
+      omie_response: omieResult
+    });
+
+  } catch (err) {
+    console.error('[Aprovar Item] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao aprovar item' });
+  }
+});
+
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
@@ -11535,11 +11739,16 @@ app.get('/api/compras/todas', async (req, res) => {
         fornecedor_nome,
         fornecedor_id,
         familia_produto,
+        retorno_cotacao,
+        categoria_compra_codigo,
+        categoria_compra_nome,
+        codigo_omie,
+        codigo_produto_omie,
         anexos,
-        created_at,
-        updated_at,
         cnumero AS "cNumero",
-        ncodped AS "nCodPed"
+        ncodped AS "nCodPed",
+        created_at,
+        updated_at
       FROM compras.solicitacao_compras
       ORDER BY created_at DESC
       LIMIT 1000
