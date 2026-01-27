@@ -10604,7 +10604,7 @@ function initComprasUI() {
   // Inicializa sistema de anexos
   initComprasAnexo();
 
-  // Inicializa filtro de status em "Minhas solicitações"
+  // Inicializa filtro de status em "Kanban de compras"
   setTimeout(() => initMinhasSolicitacoesFiltro(), 100);
 
   // Carrega usuários ativos para “Quem vai receber?”
@@ -12880,8 +12880,11 @@ async function abrirModalCompras() {
   // Garante que todos os campos estejam visíveis ao abrir o modal
   ocultarCamposComprasProdutoExistente(false);
   
-  // Carrega departamentos, centros de custo e usuários
-  await carregarDepartamentosECentros();
+  // Carrega departamentos, centros de custo, usuários e categorias de compra
+  await Promise.all([
+    carregarDepartamentosECentros(),
+    loadModalComprasCategoriasCompra()
+  ]);
   
   // Esconde spinner e mostra formulário
   if (spinner) spinner.style.display = 'none';
@@ -13065,6 +13068,43 @@ async function loadModalComprasResponsaveis() {
   }
 }
 
+// Carrega categorias de compra da Omie
+async function loadModalComprasCategoriasCompra() {
+  const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
+  const selectCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
+  
+  try {
+    const resp = await fetch('/api/compras/categorias');
+    if (!resp.ok) throw new Error('Erro ao buscar categorias');
+    
+    const data = await resp.json();
+    
+    if (data.ok && Array.isArray(data.categorias)) {
+      // Preenche select do modal de adicionar ao carrinho
+      if (selectCategoria) {
+        selectCategoria.innerHTML = '<option value="">Selecione a categoria...</option>' +
+          data.categorias.map(cat => 
+            `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
+          ).join('');
+      }
+      
+      // Preenche select do modal de catálogo Omie
+      if (selectCatalogoCategoria) {
+        selectCatalogoCategoria.innerHTML = '<option value="">Selecione...</option>' +
+          data.categorias.map(cat => 
+            `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
+          ).join('');
+      }
+      
+      console.log('[Categorias Compra] Carregadas:', data.categorias.length);
+    }
+  } catch (err) {
+    console.error('[Categorias Compra] Erro ao carregar:', err);
+    if (selectCategoria) selectCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
+    if (selectCatalogoCategoria) selectCatalogoCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
+  }
+}
+
 function fecharModalCompras() {
   const modal = document.getElementById('comprasModalOverlay');
   if (modal) modal.style.display = 'none';
@@ -13213,6 +13253,8 @@ async function adicionarItemCarrinho(ev) {
   const objetivoCompra = (document.getElementById('modalComprasObjetivo')?.value || '').trim();
   const responsavel = (document.getElementById('modalComprasResponsavel')?.value || '').trim();
   const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
+  const categoriaCompra = (document.getElementById('modalComprasCategoriaCompra')?.value || '').trim();
+  const categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
   
   // Verifica se o campo família está visível (produto novo) ou oculto (produto existente)
@@ -13264,6 +13306,23 @@ async function adicionarItemCarrinho(ev) {
     return;
   }
   
+  if (!categoriaCompra) {
+    alert('Selecione a categoria da compra');
+    return;
+  }
+  
+  // Busca codigo_produto da tabela produtos_omie usando o codigo do produto
+  let codigoOmie = null;
+  try {
+    const resOmie = await fetch(`/api/produtos-omie/buscar-codigo?codigo=${encodeURIComponent(codigo)}`);
+    if (resOmie.ok) {
+      const dataOmie = await resOmie.json();
+      codigoOmie = dataOmie.codigo_produto || null;
+    }
+  } catch (err) {
+    console.warn('Erro ao buscar codigo_produto da Omie:', err);
+  }
+  
   window.carrinhoCompras.push({
     produto_codigo: codigo,
     produto_descricao: descricao,
@@ -13275,9 +13334,12 @@ async function adicionarItemCarrinho(ev) {
     departamento: departamento,
     centro_custo: centroCusto,
     codigo_produto_omie: codigoProdutoOmie || null,
+    codigo_omie: codigoOmie,  // Novo campo: codigo_produto da tabela produtos_omie
     objetivo_compra: objetivoCompra || '',
     resp_inspecao_recebimento: responsavel || '',
-    retorno_cotacao: retornoCotacao
+    retorno_cotacao: retornoCotacao,
+    categoria_compra_codigo: categoriaCompra,
+    categoria_compra_nome: categoriaCompraTexto
   });
   
   renderCarrinhoCompras();
@@ -13382,9 +13444,9 @@ document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => 
 });
 
 // Botão de exportar Excel
-document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', async () => {
+document.getElementById('comprasExportarExcelMinhasBtn')?.addEventListener('click', async () => {
   try {
-    const btn = document.getElementById('comprasExportarExcelBtn');
+    const btn = document.getElementById('comprasExportarExcelMinhasBtn');
     const originalHtml = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Gerando...';
     btn.disabled = true;
@@ -13402,19 +13464,36 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
       return;
     }
     
-    // Prepara dados para Excel
+    // Prepara dados para Excel com TODAS as colunas da tabela
     const dadosExcel = solicitacoes.map(item => ({
+      'ID': item.id || '-',
       'Nº Pedido': item.numero_pedido || '-',
       'Código Produto': item.produto_codigo || '-',
-      'Descrição': item.produto_descricao || '-',
+      'Descrição Produto': item.produto_descricao || '-',
       'Quantidade': item.quantidade || 0,
-      'Status': item.status || '-',
-      'Solicitante': item.solicitante || '-',
       'Prazo Solicitado': item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-',
       'Previsão Chegada': item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-',
-      'Fornecedor': item.fornecedor_nome || '-',
+      'Status': item.status || '-',
       'Observação': item.observacao || '-',
-      'Criado em': item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '-'
+      'Observação Retificação': item.observacao_retificacao || '-',
+      'Solicitante': item.solicitante || '-',
+      'Resp. Inspeção/Recebimento': item.resp_inspecao_recebimento || '-',
+      'Departamento': item.departamento || '-',
+      'Centro de Custo': item.centro_custo || '-',
+      'Objetivo da Compra': item.objetivo_compra || '-',
+      'Fornecedor Nome': item.fornecedor_nome || '-',
+      'Fornecedor ID': item.fornecedor_id || '-',
+      'Família Produto': item.familia_produto || '-',
+      'Retorno Cotação': item.retorno_cotacao || '-',
+      'Categoria Compra Código': item.categoria_compra_codigo || '-',
+      'Categoria Compra Nome': item.categoria_compra_nome || '-',
+      'Código Omie': item.codigo_omie || '-',
+      'Código Produto Omie': item.codigo_produto_omie || '-',
+      'Anexos': item.anexos ? JSON.stringify(item.anexos) : '-',
+      'cNumero': item.cNumero || '-',
+      'nCodPed': item.nCodPed || '-',
+      'Criado em': item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '-',
+      'Atualizado em': item.updated_at ? new Date(item.updated_at).toLocaleString('pt-BR') : '-'
     }));
     
     // Converte para CSV
@@ -13445,8 +13524,8 @@ document.getElementById('comprasExportarExcelBtn')?.addEventListener('click', as
   } catch (err) {
     console.error('[Excel] Erro:', err);
     alert('Erro ao exportar para Excel.');
-    const btn = document.getElementById('comprasExportarExcelBtn');
-    btn.innerHTML = '<i class="fa-solid fa-file-excel" style="font-size:18px;margin-right:6px;"></i><span style="font-size:13px;font-weight:600;">Exportar Excel</span>';
+    const btn = document.getElementById('comprasExportarExcelMinhasBtn');
+    btn.innerHTML = '<i class="fa-solid fa-file-excel" style="font-size:18px;"></i><span style="font-size:13px;font-weight:600;">Exportar Excel</span>';
     btn.disabled = false;
   }
 });
@@ -16648,7 +16727,7 @@ window.marcarComoCotadoModal = marcarComoCotadoModal;
 window.abrirModalNovaCotacao = abrirModalNovaCotacao;
 window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 
-// Modal específico para "Minhas Solicitações" (visualização do usuário solicitante)
+// Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
@@ -16908,9 +16987,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             <button 
               onclick="enviarEscolhaMinhas('${item.id}')"
               style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;padding:12px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;"
-              title="Enviar escolha da cotação">
+              title="Aprovar cotação e criar requisição na Omie">
               <i class="fa-solid fa-paper-plane"></i>
-              Enviar Escolha
+              Aprovar e Criar Requisição
             </button>
           </div>
           ` : ''}
@@ -16927,7 +17006,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   }
 }
 
-// Funções auxiliares para o modal de Minhas Solicitações
+// Funções auxiliares para o modal de Kanban de compras
 // Armazena temporariamente as cotações aprovadas (estado visual) - permite múltiplas por item
 const cotacoesAprovadas = new Map(); // Map<itemId, Set<cotacaoId>>
 
@@ -16952,7 +17031,20 @@ function toggleAprovarCotacaoMinhas(itemId, cotacaoId) {
     btn.title = 'Aprovar esta cotação';
     cotacoesDoItem.delete(cotacaoId);
   } else {
-    // Aprovar (visual apenas) - permite múltiplas aprovações
+    // NOVA LÓGICA: Apenas UMA cotação pode ser aprovada por vez
+    // Desmarca todas as outras cotações antes de marcar esta
+    const todasCotacoes = document.querySelectorAll(`[id^="btn-aprovar-cotacao-${itemId}-"]`);
+    todasCotacoes.forEach(b => {
+      b.setAttribute('data-aprovado', 'false');
+      b.style.background = '#10b981';
+      b.innerHTML = '<i class="fa-solid fa-check"></i> Aprovar';
+      b.title = 'Aprovar esta cotação';
+    });
+    
+    // Limpa o Set
+    cotacoesDoItem.clear();
+    
+    // Aprovar apenas esta cotação
     btn.setAttribute('data-aprovado', 'true');
     btn.style.background = '#ef4444';
     btn.innerHTML = '<i class="fa-solid fa-times"></i> Cancelar';
@@ -16965,29 +17057,40 @@ async function enviarEscolhaMinhas(itemId) {
   const cotacoesDoItem = cotacoesAprovadas.get(itemId);
   
   if (!cotacoesDoItem || cotacoesDoItem.size === 0) {
-    alert('Por favor, aprove pelo menos uma cotação antes de enviar.');
+    alert('Por favor, aprove uma cotação antes de enviar.');
     return;
   }
   
-  const cotacoesAprovadaIds = Array.from(cotacoesDoItem);
+  // Deve ter exatamente UMA cotação aprovada
+  if (cotacoesDoItem.size !== 1) {
+    alert('Selecione apenas uma cotação para aprovar.');
+    return;
+  }
   
-  if (!confirm(`Deseja confirmar o envio de ${cotacoesAprovadaIds.length} cotação(ões) selecionada(s) para compra?`)) return;
+  const cotacaoId = Array.from(cotacoesDoItem)[0];
+  
+  if (!confirm('Deseja confirmar a cotação selecionada e criar a requisição na Omie?')) return;
   
   try {
-    // Atualiza o status do item para "aguardando compra"
-    const resp = await fetch(`/api/compras/item/${itemId}`, {
-      method: 'PUT',
+    // Chama o endpoint de aprovação que cria requisição na Omie
+    // (mesmo processo usado no kanban "Aprovação de Requisições de Compra" quando Retorno Cotação = Não)
+    const resp = await fetch(`/api/compras/aprovar-item/${itemId}`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ 
-        status: 'aguardando compra',
-        cotacoes_aprovadas_ids: cotacoesAprovadaIds
+        cotacao_aprovada_id: cotacaoId
       })
     });
     
-    if (!resp.ok) throw new Error('Erro ao enviar escolha');
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao criar requisição');
+    }
     
-    alert('Escolha enviada para compra com sucesso!');
+    const result = await resp.json();
+    
+    alert('Cotação aprovada e requisição criada na Omie com sucesso!');
     cotacoesAprovadas.delete(itemId);
     fecharModalDetalhesPedidoCompras();
     loadMinhasSolicitacoes();
@@ -17825,7 +17928,11 @@ async function retificarItemCompra(itemId, event) {
     
     // Abre modal
     const modal = document.getElementById('modalObservacaoRetificacao');
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.style.setProperty('position', 'fixed', 'important');
+      modal.style.setProperty('z-index', '10005', 'important'); // Garante prioridade máxima sobre o modal de aprovação
+    }
     
     // Foca no textarea
     setTimeout(() => {
@@ -17884,12 +17991,17 @@ async function confirmarRetificacao() {
     // Mostra mensagem de sucesso
     alert('Item enviado para retificação com sucesso!');
     
-    // Fecha os modais
+    // Fecha o modal de retificação
     fecharModalObservacaoRetificacao();
-    fecharModalSelecaoItensCompra();
     
-    // Recarrega o Kanban para atualizar as colunas
-    // renderComprasKanban(); // REMOVIDO - Página não existe mais
+    // Recarrega o modal de aprovação se ele estiver aberto
+    const modalAprovacao = document.getElementById('modalAprovacaoRequisicao');
+    if (modalAprovacao && modalAprovacao.style.display === 'flex') {
+      await abrirModalAprovacaoRequisicao();
+    }
+    
+    // Fecha modal de seleção se estiver aberto
+    fecharModalSelecaoItensCompra();
     
   } catch (err) {
     console.error('[COMPRAS] Erro ao retificar item:', err);
@@ -18774,6 +18886,9 @@ async function abrirModalCatalogoOmie() {
     // Carrega departamentos (que agora controla as categorias dinamicamente)
     await carregarDepartamentosCatalogo();
     
+    // Carrega categorias de compra da Omie
+    await loadModalComprasCategoriasCompra();
+    
   } catch (err) {
     console.error('[CATÁLOGO OMIE] Erro:', err);
     if (lista) {
@@ -18823,9 +18938,15 @@ function renderizarCatalogoOmie(produtos) {
         <i class="fa-solid fa-image" style="font-size:48px;"></i>
       </div>` :
       urlExpirada ? 
-      `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#f59e0b;flex-direction:column;gap:8px;" title="Imagem expirada - execute sincronização de imagens">
-        <i class="fa-solid fa-clock" style="font-size:32px;"></i>
-        <span style="font-size:10px;text-align:center;">URL expirada</span>
+      `<div 
+        id="img-expirada-${produto.codigo_produto}" 
+        data-codigo-produto="${produto.codigo_produto}"
+        data-codigo="${escapeHtml(produto.codigo)}"
+        data-descricao="${escapeHtml(produto.descricao)}"
+        style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#f59e0b;flex-direction:column;gap:8px;" 
+        title="Atualizando imagem...">
+        <i class="fa-solid fa-rotate fa-spin" style="font-size:32px;"></i>
+        <span style="font-size:10px;text-align:center;">Atualizando...</span>
       </div>` :
       `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#9ca3af;">
         <i class="fa-solid fa-image" style="font-size:48px;"></i>
@@ -18979,6 +19100,127 @@ function renderizarCatalogoOmie(produtos) {
       </div>
     `;
   }).join('');
+  
+  // Atualiza automaticamente todas as imagens expiradas em lote
+  setTimeout(() => atualizarImagensExpiradasEmLote(), 100);
+}
+
+// Atualiza automaticamente todas as imagens expiradas em lote (com controle de concorrência)
+async function atualizarImagensExpiradasEmLote() {
+  // Busca todos os containers de imagens expiradas
+  const containersExpirados = document.querySelectorAll('[id^="img-expirada-"]');
+  
+  if (containersExpirados.length === 0) {
+    console.log('[Catálogo] Nenhuma imagem expirada encontrada');
+    return;
+  }
+  
+  console.log(`[Catálogo] Iniciando atualização de ${containersExpirados.length} imagens expiradas em lotes...`);
+  
+  // Converte para array com dados necessários
+  const imagensParaAtualizar = Array.from(containersExpirados).map(container => ({
+    codigoProduto: container.dataset.codigoProduto,
+    codigo: container.dataset.codigo,
+    descricao: container.dataset.descricao
+  }));
+  
+  // Configuração de processamento em lotes
+  const TAMANHO_LOTE = 10; // Processa 10 imagens por vez
+  const DELAY_ENTRE_LOTES = 500; // 500ms entre cada lote
+  
+  let totalSucesso = 0;
+  let totalFalhas = 0;
+  
+  // Processa em lotes
+  for (let i = 0; i < imagensParaAtualizar.length; i += TAMANHO_LOTE) {
+    const lote = imagensParaAtualizar.slice(i, i + TAMANHO_LOTE);
+    const numeroLote = Math.floor(i / TAMANHO_LOTE) + 1;
+    const totalLotes = Math.ceil(imagensParaAtualizar.length / TAMANHO_LOTE);
+    
+    console.log(`[Catálogo] Processando lote ${numeroLote}/${totalLotes} (${lote.length} imagens)...`);
+    
+    // Processa o lote atual em paralelo
+    const promessasLote = lote.map(img => 
+      atualizarImagemExpirada(img.codigoProduto, img.codigo, img.descricao)
+    );
+    
+    const resultadosLote = await Promise.allSettled(promessasLote);
+    
+    // Contabiliza resultados do lote
+    const sucessoLote = resultadosLote.filter(r => r.status === 'fulfilled').length;
+    const falhasLote = resultadosLote.filter(r => r.status === 'rejected').length;
+    
+    totalSucesso += sucessoLote;
+    totalFalhas += falhasLote;
+    
+    console.log(`[Catálogo] Lote ${numeroLote}/${totalLotes}: ${sucessoLote} sucesso, ${falhasLote} falhas`);
+    
+    // Aguarda antes do próximo lote (exceto no último)
+    if (i + TAMANHO_LOTE < imagensParaAtualizar.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_ENTRE_LOTES));
+    }
+  }
+  
+  console.log(`[Catálogo] Atualização concluída: ${totalSucesso} sucesso, ${totalFalhas} falhas de ${imagensParaAtualizar.length} total`);
+}
+
+// Atualiza uma única imagem expirada
+async function atualizarImagemExpirada(codigoProduto, codigo, descricao) {
+  const container = document.getElementById(`img-expirada-${codigoProduto}`);
+  if (!container) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/imagem-fresca/${codigoProduto}`);
+    
+    if (!resp.ok) {
+      // Se erro 500, não joga exceção - apenas registra
+      if (resp.status === 500) {
+        console.warn(`[Catálogo] Produto ${codigoProduto} sem imagem disponível na Omie`);
+        container.innerHTML = `
+          <i class="fa-solid fa-image" style="font-size:32px;color:#9ca3af;"></i>
+          <span style="font-size:9px;color:#6b7280;">Sem imagem</span>
+        `;
+        return; // Retorna normalmente, não é erro crítico
+      }
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    
+    const data = await resp.json();
+    
+    if (data.url_imagem) {
+      // Substitui o container pela imagem
+      container.outerHTML = `
+        <img 
+          src="${data.url_imagem}" 
+          alt="${escapeHtml(descricao)}"
+          style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
+          onclick="ampliarImagemProduto('${data.url_imagem}', '${escapeHtml(codigo)} - ${escapeHtml(descricao)}');event.stopPropagation();"
+          onmouseover="this.style.transform='scale(1.05)'"
+          onmouseout="this.style.transform='scale(1)'"
+          onerror="this.style.display='none'"
+        />
+      `;
+      
+      // Atualiza o produto no cache
+      const produtoIndex = window.produtosCatalogoOmie?.findIndex(p => p.codigo_produto === codigoProduto);
+      if (produtoIndex >= 0 && window.produtosCatalogoOmie) {
+        window.produtosCatalogoOmie[produtoIndex].url_imagem = data.url_imagem;
+      }
+    } else {
+      // Produto sem imagem
+      container.innerHTML = `
+        <i class="fa-solid fa-image" style="font-size:32px;color:#9ca3af;"></i>
+        <span style="font-size:9px;color:#6b7280;">Sem imagem</span>
+      `;
+    }
+  } catch (err) {
+    console.error(`[Catálogo] Erro ao atualizar imagem ${codigoProduto}:`, err);
+    container.innerHTML = `
+      <i class="fa-solid fa-exclamation-triangle" style="font-size:28px;color:#ef4444;"></i>
+      <span style="font-size:9px;color:#dc2626;">Erro</span>
+    `;
+    throw err; // Re-lança para contabilizar como falha
+  }
 }
 
 // Carrega departamentos no select global do catálogo
@@ -19095,10 +19337,13 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const selectDeptGlobal = document.getElementById('catalogoDepartamentoGlobal');
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
+  const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
   
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
+  const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
+  const categoriaCompraTexto = selectCategoriaGlobal?.selectedOptions[0]?.text || '';
   
   // Validações dos campos globais
   if (!departamento) {
@@ -19110,6 +19355,12 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   if (!centroCusto) {
     alert('Selecione a categoria no topo do catálogo!');
     selectCCGlobal?.focus();
+    return;
+  }
+  
+  if (!categoriaCompra) {
+    alert('Selecione a categoria da compra no topo do catálogo!');
+    selectCategoriaGlobal?.focus();
     return;
   }
   
@@ -19127,9 +19378,10 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     return;
   }
   
-  // Busca o produto completo no catálogo para pegar a família
+  // Busca o produto completo no catálogo para pegar a família e o codigo_produto
   const produtoCatalogo = (window.produtosCatalogoOmie || []).find(p => p.codigo === codigo);
   const familiaDescricao = produtoCatalogo ? produtoCatalogo.descricao_familia : null;
+  const codigoOmie = produtoCatalogo ? produtoCatalogo.codigo_produto : null;
   
   // Adiciona direto ao carrinho com os dados globais
   window.carrinhoCompras.push({
@@ -19143,9 +19395,12 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     departamento: departamento,
     centro_custo: centroCusto,
     codigo_produto_omie: null,
+    codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
     objetivo_compra: 'Compra via catálogo Omie',
     resp_inspecao_recebimento: '',
-    retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N'
+    retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N',
+    categoria_compra_codigo: categoriaCompra,
+    categoria_compra_nome: categoriaCompraTexto
   });
   
   // Renderiza carrinho atualizado
@@ -19194,6 +19449,7 @@ function atualizarContadorCatalogo() {
   }
 }
 
+// Busca URL de imagem atualizada da Omie
 // Fecha modal do catálogo
 function fecharModalCatalogoOmie() {
   const modal = document.getElementById('modalCatalogoOmie');
@@ -19599,7 +19855,8 @@ async function abrirModalEditarCompra(item) {
     await Promise.all([
       loadModalComprasDepartamentos(),
       loadModalComprasCentrosCusto(),
-      loadModalComprasResponsaveis()
+      loadModalComprasResponsaveis(),
+      loadModalComprasCategoriasCompra()
     ]);
 
     // Preenche os campos do formulário com os dados do item
@@ -20358,9 +20615,9 @@ let kanbansVisiveis = [];
 // Lista de todos os kanbans disponíveis (deve corresponder aos statusColunas)
 const todosKanbans = [
   'aguardando aprovação da requisição',
+  'solicitado revisão',
   'aguardando cotação',
   'cotado aguardando escolha',
-  'solicitado revisão',
   'aguardando compra',
   'compra realizada',
   'faturada pelo fornecedor',
@@ -20653,7 +20910,7 @@ async function abrirModalAprovacaoRequisicao() {
       modal.id = modalId;
       modal.className = 'modal';
       modal.style.display = 'none';
-      modal.style.zIndex = '10002';
+      modal.style.setProperty('z-index', '10002', 'important');
       document.body.appendChild(modal);
     }
     
@@ -20705,6 +20962,7 @@ async function abrirModalAprovacaoRequisicao() {
     `;
     
     modal.style.display = 'flex';
+    modal.style.setProperty('z-index', '10002', 'important');
     
   } catch (err) {
     console.error('[Modal Aprovação] Erro:', err);
@@ -20714,25 +20972,29 @@ async function abrirModalAprovacaoRequisicao() {
 
 // Função para aprovar um item individualmente
 async function aprovarItemRequisicao(itemId) {
-  if (!confirm('Deseja aprovar este item? Ele será movido para "Aguardando Compra".')) return;
+  if (!confirm('Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".')) return;
   
   try {
-    // Muda status do item para "aguardando compra"
-    const resp = await fetch(`/api/compras/item/${itemId}`, {
-      method: 'PUT',
+    // Chama o endpoint que aprova o item e cria requisição na Omie
+    const resp = await fetch(`/api/compras/aprovar-item/${itemId}`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ status: 'aguardando compra' })
+      credentials: 'include'
     });
     
-    if (!resp.ok) throw new Error('Falha ao aprovar item');
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.error || 'Falha ao aprovar item');
+    }
+    
+    const resultado = await resp.json();
+    console.log('[Aprovação] Resultado:', resultado);
     
     // Feedback visual
-    alert('Item aprovado com sucesso!');
+    alert(`Item aprovado com sucesso!\nNúmero do Pedido: ${resultado.numero_pedido}\nRequisição criada na Omie.`);
     
-    // Fecha o modal e recarrega os kanbans
-    document.getElementById('modalAprovacaoRequisicao').style.display = 'none';
-    await loadMinhasSolicitacoes();
+    // Recarrega o modal de aprovação
+    await abrirModalAprovacaoRequisicao();
     
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
@@ -20870,9 +21132,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
       'aguardando aprovação da requisição': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição'),
+      'solicitado revisão': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar'),
       'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
       'cotado aguardando escolha': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado'),
-      'solicitado revisão': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar'),
       'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
       'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
       'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
@@ -20956,7 +21218,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Define se a coluna deve ter interação de clique (para abrir modal)
       const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra'];
-      const ehClicavel = statusComClique.includes(status);
+      const temItens = itens.length > 0;
+      const ehClicavel = statusComClique.includes(status) && temItens; // Só permite clique se houver itens
       
       // Define qual função onclick chamar para cada status clicável
       const funcoesOnclick = {
@@ -21082,10 +21345,17 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         }).join('');
       }
       
+      // Estilo visual diferente se o kanban estiver desabilitado (sem itens em kanbans clicáveis)
+      const podeSerClicavel = statusComClique.includes(status);
+      const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;cursor:not-allowed;' : '';
+      const cursorStyle = ehClicavel ? 'cursor:pointer;' : (podeSerClicavel ? 'cursor:not-allowed;' : '');
+      
       return `
         <div class="kanban-column-minhas" 
           data-status="${status}" 
-          ${ehClicavel ? `onclick="${funcaoOnclick}" style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;" onmouseover="this.style.boxShadow='0 4px 16px ${corHover}';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'"` : `style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);"`}>
+          ${ehClicavel ? `onclick="${funcaoOnclick}"` : ''} 
+          style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);${cursorStyle}transition:all 0.2s;${estiloDesabilitado}" 
+          ${ehClicavel ? `onmouseover="this.style.boxShadow='0 4px 16px ${corHover}';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'"` : ''}>
           ${badgeIdentificacao}
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${cor.bg};">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
@@ -21105,7 +21375,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     aplicarFiltroKanbans();
 
   } catch (err) {
-    console.error('[COMPRAS] Falha ao listar minhas solicitações:', err);
+    console.error('[COMPRAS] Falha ao listar kanban de compras:', err);
     kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#ef4444;font-size:14px;">Erro ao carregar suas solicitações.</div>';
   }
 }
