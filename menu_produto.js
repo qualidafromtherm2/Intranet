@@ -1274,9 +1274,36 @@ function renderAlmoxTable(arr) {
 }
 
 // Controle de botões que exigem login
+// Controla a visibilidade dos ícones do header (sino, carrinho, impressora, engrenagem)
+function toggleHeaderIcons(isLoggedIn) {
+  const bellWrapper = document.getElementById('notification-wrapper');
+  const cartIcon = document.getElementById('cart-icon');
+  const printIcon = document.getElementById('print-icon');
+  const configIcon = document.getElementById('config-icon');
+
+  if (isLoggedIn) {
+    // Mostra os ícones quando usuário está logado
+    if (bellWrapper) bellWrapper.style.display = 'block';
+    if (cartIcon) cartIcon.style.display = 'inline-block';
+    if (printIcon) printIcon.style.display = 'inline-block';
+    if (configIcon) configIcon.style.display = 'inline-block';
+  } else {
+    // Oculta os ícones quando usuário não está logado
+    if (bellWrapper) bellWrapper.style.display = 'none';
+    if (cartIcon) cartIcon.style.display = 'none';
+    if (printIcon) printIcon.style.display = 'none';
+    if (configIcon) configIcon.style.display = 'none';
+  }
+}
+
 function setAuthGroupState(isLoggedIn) {
   const group = document.querySelector('[data-auth-guard]');
-  if (!group) return;
+  
+  if (!group) {
+    // Mesmo sem o grupo, controla os ícones do header
+    toggleHeaderIcons(isLoggedIn);
+    return;
+  }
 
   const buttons = group.querySelectorAll('.requires-auth');
 
@@ -1294,6 +1321,9 @@ function setAuthGroupState(isLoggedIn) {
       btn.title = 'Faça login para usar esta função';
     }
   });
+  
+  // Controla os ícones do header baseado no login
+  toggleHeaderIcons(isLoggedIn);
 }
 
 // Intercepta cliques quando deslogado (evita navegação/JS acionar)
@@ -7503,6 +7533,8 @@ async function renderUserName() {
 // inicialização
 document.addEventListener('DOMContentLoaded', () => {
   try {
+    // Oculta os ícones inicialmente (serão exibidos após verificar login)
+    toggleHeaderIcons(false);
     installAuthClickGuard(); // instala o bloqueio de clique
     renderUserName();        // e já define o estado inicial (logged / not logged)
   } catch {}
@@ -10777,8 +10809,12 @@ function initMinhasSolicitacoesFiltro() {
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initComprasUI);
+  document.addEventListener('DOMContentLoaded', () => {
+    carregarConfiguracoes().catch(err => console.warn('[COMPRAS] Falha ao carregar configurações', err));
+  });
 } else {
   initComprasUI();
+  carregarConfiguracoes().catch(err => console.warn('[COMPRAS] Falha ao carregar configurações', err));
 }
 
 /* dentro do MESMO callback que já existe */
@@ -12606,10 +12642,19 @@ function renderCarrinhoCompras() {
   
   tbody.innerHTML = carrinho.map((item, idx) => {
     const prazoFmt = item.prazo_solicitado || '—';
+    const badgeRequisicaoDireta = item.requisicao_direta 
+      ? `<span style="display:inline-block;background:#0ea5e9;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px;" title="Este item será aprovado automaticamente após o envio">
+          <i class="fa-solid fa-bolt"></i> REQUISIÇÃO DIRETA
+         </span>`
+      : '';
+    
     return `
       <tr>
         <td>${window.escapeHtml(item.produto_codigo)}</td>
-        <td style="max-width:300px;">${window.escapeHtml(item.produto_descricao || '')}</td>
+        <td style="max-width:300px;">
+          ${window.escapeHtml(item.produto_descricao || '')}
+          ${badgeRequisicaoDireta}
+        </td>
         <td>${item.quantidade}</td>
         <td>${prazoFmt}</td>
         <td style="max-width:200px;">${window.escapeHtml(item.observacao || '')}</td>
@@ -12880,10 +12925,11 @@ async function abrirModalCompras() {
   // Garante que todos os campos estejam visíveis ao abrir o modal
   ocultarCamposComprasProdutoExistente(false);
   
-  // Carrega departamentos, centros de custo, usuários e categorias de compra
+  // Carrega departamentos, centros de custo, usuários, categorias de compra e responsáveis pela compra
   await Promise.all([
     carregarDepartamentosECentros(),
-    loadModalComprasCategoriasCompra()
+    loadModalComprasCategoriasCompra(),
+    loadModalComprasResponsavelCompra()
   ]);
   
   // Esconde spinner e mostra formulário
@@ -13105,10 +13151,264 @@ async function loadModalComprasCategoriasCompra() {
   }
 }
 
+// Carrega usuários ativos para o campo "Responsável pela compra"
+async function loadModalComprasResponsavelCompra() {
+  const selectResponsavelCompra = document.getElementById('modalComprasResponsavelCompra');
+  
+  try {
+    const resp = await fetch('/api/compras/usuarios');
+    const data = await resp.json();
+    
+    if (selectResponsavelCompra && data.ok) {
+      const usuarioLogado = window.__sessionUser?.username || '';
+      selectResponsavelCompra.innerHTML = '<option value="">Selecione o responsável...</option>' +
+        (data.usuarios || []).map(u => 
+          `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+        ).join('');
+      
+      // Define usuário logado como padrão
+      if (usuarioLogado) {
+        selectResponsavelCompra.value = usuarioLogado;
+      }
+      
+      console.log('[Responsável Compra] Usuários carregados:', data.usuarios?.length || 0);
+    }
+  } catch (err) {
+    console.error('[Responsável Compra] Erro ao carregar:', err);
+    if (selectResponsavelCompra) selectResponsavelCompra.innerHTML = '<option value="">Erro ao carregar</option>';
+  }
+}
+
 function fecharModalCompras() {
   const modal = document.getElementById('comprasModalOverlay');
   if (modal) modal.style.display = 'none';
 }
+
+// ================== CONFIGURAÇÃO RESPONSÁVEL POR CATEGORIA ==================
+
+// Cache global para configurações
+window.configResponsavelCategoria = [];
+
+// Abre modal de configuração
+async function abrirModalConfigResponsavel() {
+  const modal = document.getElementById('modalConfigResponsavelCategoria');
+  if (!modal) return;
+  
+  modal.style.display = 'flex';
+  
+  // Carrega dropdowns em paralelo
+  await Promise.all([
+    carregarCategoriasConfig(),
+    carregarResponsaveisConfig(),
+    carregarConfiguracoes()
+  ]);
+}
+
+// Fecha modal de configuração
+function fecharModalConfigResponsavel() {
+  const modal = document.getElementById('modalConfigResponsavelCategoria');
+  if (modal) modal.style.display = 'none';
+}
+
+// Carrega categorias da Omie no select de configuração
+async function carregarCategoriasConfig() {
+  const select = document.getElementById('configCategoriaCompra');
+  if (!select) return;
+  
+  try {
+    const resp = await fetch('/api/compras/categorias');
+    const data = await resp.json();
+    
+    if (data.ok && Array.isArray(data.categorias)) {
+      select.innerHTML = '<option value="">Selecione a categoria...</option>' +
+        data.categorias.map(cat => 
+          `<option value="${cat.codigo}" data-nome="${window.escapeHtml(cat.descricao)}">${window.escapeHtml(cat.descricao)}</option>`
+        ).join('');
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar categorias:', err);
+  }
+}
+
+// Carrega usuários no select de configuração
+async function carregarResponsaveisConfig() {
+  const select = document.getElementById('configResponsavel');
+  if (!select) return;
+  
+  try {
+    const resp = await fetch('/api/compras/usuarios');
+    const data = await resp.json();
+    
+    if (data.ok && Array.isArray(data.usuarios)) {
+      select.innerHTML = '<option value="">Selecione o responsável...</option>' +
+        data.usuarios.map(u => 
+          `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+        ).join('');
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar responsáveis:', err);
+  }
+}
+
+// Carrega configurações existentes
+async function carregarConfiguracoes() {
+  const container = document.getElementById('listaConfigsResponsavel');
+  if (!container) return;
+  
+  try {
+    const resp = await fetch('/api/compras/config-responsavel-categoria');
+    const data = await resp.json();
+    
+    if (data.ok && Array.isArray(data.configuracoes)) {
+      window.configResponsavelCategoria = data.configuracoes;
+      
+      if (data.configuracoes.length === 0) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:40px;color:#9ca3af;">
+            <i class="fa-solid fa-cog" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+            Nenhuma configuração cadastrada
+          </div>
+        `;
+      } else {
+        container.innerHTML = data.configuracoes.map(config => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:white;border:1px solid #e5e7eb;border-radius:6px;">
+            <div style="display:flex;align-items:center;gap:12px;flex:1;">
+              <i class="fa-solid fa-link" style="color:#3b82f6;"></i>
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:13px;color:#1f2937;">${window.escapeHtml(config.categoria_compra_nome)}</div>
+                <div style="font-size:12px;color:#6b7280;margin-top:2px;">
+                  <i class="fa-solid fa-user" style="color:#10b981;"></i>
+                  ${window.escapeHtml(config.responsavel_username)}
+                </div>
+              </div>
+            </div>
+            <button class="btn-remover-config content-button" data-config-id="${config.id}" style="background:#ef4444;color:white;padding:8px 12px;" title="Remover configuração">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
+        `).join('');
+        
+        // Adiciona event listeners aos botões de remover usando delegação de eventos
+        container.querySelectorAll('.btn-remover-config').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const configId = parseInt(btn.dataset.configId);
+            removerConfigResponsavel(configId);
+          });
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar configurações:', err);
+  }
+}
+
+// Adiciona nova configuração
+async function adicionarConfigResponsavel() {
+  const selectCategoria = document.getElementById('configCategoriaCompra');
+  const selectResponsavel = document.getElementById('configResponsavel');
+  
+  if (!selectCategoria || !selectResponsavel) return;
+  
+  const categoriaCodigo = selectCategoria.value;
+  const categoriaNome = selectCategoria.selectedOptions[0]?.dataset.nome || selectCategoria.selectedOptions[0]?.text || '';
+  const responsavelUsername = selectResponsavel.value;
+  
+  if (!categoriaCodigo || !responsavelUsername) {
+    alert('Selecione a categoria e o responsável');
+    return;
+  }
+  
+  try {
+    const resp = await fetch('/api/compras/config-responsavel-categoria', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        categoria_compra_codigo: categoriaCodigo,
+        categoria_compra_nome: categoriaNome,
+        responsavel_username: responsavelUsername
+      })
+    });
+    
+    const data = await resp.json();
+    
+    if (data.ok) {
+      // Recarrega lista
+      await carregarConfiguracoes();
+      
+      // Limpa campos
+      selectCategoria.value = '';
+      selectResponsavel.value = '';
+      
+      // Feedback visual
+      const btn = document.getElementById('btnAdicionarConfig');
+      if (btn) {
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Salvo!';
+        btn.style.background = '#10b981';
+        setTimeout(() => {
+          btn.innerHTML = originalHTML;
+          btn.style.background = 'linear-gradient(135deg,#22c55e 0%,#16a34a 100%)';
+        }, 2000);
+      }
+    } else {
+      alert('Erro ao salvar: ' + (data.error || 'Erro desconhecido'));
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao adicionar configuração:', err);
+    alert('Erro ao salvar configuração');
+  }
+}
+
+// Remove configuração
+async function removerConfigResponsavel(id) {
+  if (!confirm('Deseja remover esta configuração?')) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/config-responsavel-categoria/${id}`, {
+      method: 'DELETE'
+    });
+    
+    const data = await resp.json();
+    
+    if (data.ok) {
+      await carregarConfiguracoes();
+    } else {
+      alert('Erro ao remover: ' + (data.error || 'Erro desconhecido'));
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao remover configuração:', err);
+    alert('Erro ao remover configuração');
+  }
+}
+
+// Aplica responsável padrão baseado na categoria selecionada
+function aplicarResponsavelPadrao() {
+  const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
+  const selectResponsavel = document.getElementById('modalComprasResponsavelCompra');
+  
+  if (!selectCategoria || !selectResponsavel) return;
+  
+  const categoriaSelecionada = selectCategoria.value;
+  
+  if (!categoriaSelecionada) return;
+  
+  // Busca configuração para esta categoria
+  const config = window.configResponsavelCategoria.find(c => c.categoria_compra_codigo === categoriaSelecionada);
+  
+  if (config) {
+    // Aplica responsável padrão
+    selectResponsavel.value = config.responsavel_username;
+    console.log(`[Config] Responsável padrão aplicado: ${config.responsavel_username} para categoria ${config.categoria_compra_nome}`);
+  }
+}
+
+// Expõe funções globalmente para serem acessíveis via onclick (se necessário)
+window.abrirModalConfigResponsavel = abrirModalConfigResponsavel;
+window.fecharModalConfigResponsavel = fecharModalConfigResponsavel;
+window.adicionarConfigResponsavel = adicionarConfigResponsavel;
+window.removerConfigResponsavel = removerConfigResponsavel;
+
+// ================== FIM CONFIGURAÇÃO ==================
 
 // Gera código provisório caso o campo código esteja vazio e descrição preenchida
 // Agora é chamada APENAS ao clicar em "Adicionar ao carrinho"
@@ -13252,10 +13552,12 @@ async function adicionarItemCarrinho(ev) {
   const centroCusto = (document.getElementById('modalComprasCentroCusto')?.value || '').trim();
   const objetivoCompra = (document.getElementById('modalComprasObjetivo')?.value || '').trim();
   const responsavel = (document.getElementById('modalComprasResponsavel')?.value || '').trim();
+  const responsavelCompra = (document.getElementById('modalComprasResponsavelCompra')?.value || '').trim();
   const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
   const categoriaCompra = (document.getElementById('modalComprasCategoriaCompra')?.value || '').trim();
   const categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
+  const requisicaoDireta = document.getElementById('modalComprasRequisicaoDireta')?.checked || false;
   
   // Verifica se o campo família está visível (produto novo) ou oculto (produto existente)
   const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
@@ -13301,6 +13603,12 @@ async function adicionarItemCarrinho(ev) {
     return;
   }
   
+  // Valida responsável pela compra (sempre obrigatório)
+  if (!responsavelCompra) {
+    alert('Selecione o responsável pela compra');
+    return;
+  }
+  
   if (!retornoCotacao) {
     alert('Selecione se é necessário retorno das cotações realizadas');
     return;
@@ -13337,9 +13645,11 @@ async function adicionarItemCarrinho(ev) {
     codigo_omie: codigoOmie,  // Novo campo: codigo_produto da tabela produtos_omie
     objetivo_compra: objetivoCompra || '',
     resp_inspecao_recebimento: responsavel || '',
+    responsavel_pela_compra: responsavelCompra || '',
     retorno_cotacao: retornoCotacao,
     categoria_compra_codigo: categoriaCompra,
-    categoria_compra_nome: categoriaCompraTexto
+    categoria_compra_nome: categoriaCompraTexto,
+    requisicao_direta: requisicaoDireta  // Novo campo: requisição direta
   });
   
   renderCarrinhoCompras();
@@ -13397,9 +13707,73 @@ async function enviarPedidoCompras() {
       throw new Error(data.error || 'Erro ao enviar solicitações');
     }
     
-    if (statusEl) {
-      statusEl.style.background = '#22c55e';
-      statusEl.textContent = `✓ ${data.total_itens} solicitação(ões) enviada(s) com sucesso!`;
+    // Verifica se há itens com requisição direta para aprovar automaticamente
+    const itensComRequisicaoDireta = carrinho.filter(item => item.requisicao_direta === true);
+    
+    if (itensComRequisicaoDireta.length > 0 && data.ids && data.ids.length > 0) {
+      // Aprova automaticamente os itens com requisição direta
+      const idsRequisicaoDireta = [];
+      itensComRequisicaoDireta.forEach((item, index) => {
+        // Mapeia o índice do carrinho para o ID inserido
+        const itemIndex = carrinho.indexOf(item);
+        if (itemIndex >= 0 && data.ids[itemIndex]) {
+          idsRequisicaoDireta.push(data.ids[itemIndex]);
+        }
+      });
+      
+      if (idsRequisicaoDireta.length > 0) {
+        console.log(`[COMPRAS] Processando ${idsRequisicaoDireta.length} item(ns) com requisição direta...`);
+        
+        if (statusEl) {
+          statusEl.style.background = '#3b82f6';
+          statusEl.textContent = `Processando ${idsRequisicaoDireta.length} requisição(ões) direta(s)...`;
+        }
+        
+        // Aprova cada item com requisição direta
+        let aprovadosSucesso = 0;
+        let aprovadosErro = 0;
+        
+        for (const itemId of idsRequisicaoDireta) {
+          try {
+            const respAprov = await fetch(`/api/compras/aprovar-item/${itemId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const dataAprov = await respAprov.json();
+            
+            if (respAprov.ok && dataAprov.ok) {
+              aprovadosSucesso++;
+              console.log(`[COMPRAS] Item ${itemId} aprovado automaticamente (requisição direta)`);
+            } else {
+              aprovadosErro++;
+              console.error(`[COMPRAS] Erro ao aprovar item ${itemId}:`, dataAprov.error);
+            }
+          } catch (errAprov) {
+            aprovadosErro++;
+            console.error(`[COMPRAS] Erro ao aprovar item ${itemId}:`, errAprov);
+          }
+        }
+        
+        // Atualiza mensagem final
+        let mensagemFinal = `✓ ${data.total_itens} solicitação(ões) enviada(s)`;
+        if (aprovadosSucesso > 0) {
+          mensagemFinal += ` | ${aprovadosSucesso} requisição(ões) criada(s) na Omie`;
+        }
+        if (aprovadosErro > 0) {
+          mensagemFinal += ` | ${aprovadosErro} erro(s) na aprovação automática`;
+        }
+        
+        if (statusEl) {
+          statusEl.style.background = aprovadosErro > 0 ? '#f59e0b' : '#22c55e';
+          statusEl.textContent = mensagemFinal;
+        }
+      }
+    } else {
+      if (statusEl) {
+        statusEl.style.background = '#22c55e';
+        statusEl.textContent = `✓ ${data.total_itens} solicitação(ões) enviada(s) com sucesso!`;
+      }
     }
     
     window.carrinhoCompras = [];
@@ -13408,7 +13782,7 @@ async function enviarPedidoCompras() {
     setTimeout(() => {
       if (statusEl) statusEl.style.display = 'none';
       loadMinhasSolicitacoes();
-    }, 3000);
+    }, 5000);
     
   } catch (err) {
     console.error('[COMPRAS] Erro ao enviar solicitações:', err);
@@ -13429,6 +13803,24 @@ document.getElementById('modalComprasCancelarBtn')?.addEventListener('click', fe
 document.getElementById('comprasModalForm')?.addEventListener('submit', adicionarItemCarrinho);
 document.getElementById('comprasLimparCarrinhoBtn')?.addEventListener('click', limparCarrinhoCompras);
 document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoCompras);
+
+// Bind do botão de configuração de responsáveis
+document.getElementById('comprasConfigBtn')?.addEventListener('click', abrirModalConfigResponsavel);
+
+// Bind para auto-preencher responsável quando categoria é selecionada
+document.getElementById('modalComprasCategoriaCompra')?.addEventListener('change', aplicarResponsavelPadrao);
+
+// Binds do modal de configuração
+document.getElementById('modalConfigResponsavelFechar')?.addEventListener('click', fecharModalConfigResponsavel);
+document.getElementById('modalConfigResponsavelFecharBtn')?.addEventListener('click', fecharModalConfigResponsavel);
+document.getElementById('btnAdicionarConfig')?.addEventListener('click', adicionarConfigResponsavel);
+
+// Fecha modal de config ao clicar fora
+document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modalConfigResponsavelCategoria') {
+    fecharModalConfigResponsavel();
+  }
+});
 
 // Binds dos botões de filtro de kanbans
 document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', abrirModalFiltroKanbans);
@@ -19338,12 +19730,16 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
+  const textareaObservacaoGlobal = document.getElementById('catalogoObservacaoGlobal');
+  const checkboxRequisicaoDiretaGlobal = document.getElementById('catalogoRequisicaoDiretaGlobal');
   
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
   const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const categoriaCompraTexto = selectCategoriaGlobal?.selectedOptions[0]?.text || '';
+  const observacaoGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
+  const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   
   // Validações dos campos globais
   if (!departamento) {
@@ -19391,7 +19787,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     prazo_solicitado: prazo || null,
     familia_codigo: null,
     familia_nome: familiaDescricao,
-    observacao: '',
+    observacao: observacaoGlobal || '',
     departamento: departamento,
     centro_custo: centroCusto,
     codigo_produto_omie: null,
@@ -19400,7 +19796,8 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     resp_inspecao_recebimento: '',
     retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N',
     categoria_compra_codigo: categoriaCompra,
-    categoria_compra_nome: categoriaCompraTexto
+    categoria_compra_nome: categoriaCompraTexto,
+    requisicao_direta: requisicaoDiretaGlobal || false
   });
   
   // Renderiza carrinho atualizado
@@ -19930,6 +20327,7 @@ async function salvarEdicaoCompra(itemId) {
   const camposRetornoCotacao = document.getElementById('modalComprasRetornoCotacao');
   const camposPrazo = document.getElementById('modalComprasPrazo');
   const camposResponsavel = document.getElementById('modalComprasResponsavel');
+  const camposResponsavelCompra = document.getElementById('modalComprasResponsavelCompra');
   const camposObjetivo = document.getElementById('modalComprasObjetivo');
   const camposObservacao = document.getElementById('modalComprasObservacao');
 
@@ -19958,6 +20356,10 @@ async function salvarEdicaoCompra(itemId) {
     alert('Selecione um responsável pela inspeção de recebimento.');
     return;
   }
+  if (!camposResponsavelCompra?.value) {
+    alert('Selecione um responsável pela compra.');
+    return;
+  }
   if (!camposObjetivo?.value?.trim()) {
     alert('O objetivo da compra é obrigatório.');
     return;
@@ -19972,6 +20374,7 @@ async function salvarEdicaoCompra(itemId) {
     retorno_cotacao: camposRetornoCotacao.value,
     prazo_solicitado: camposPrazo?.value || null,
     resp_inspecao_recebimento: camposResponsavel.value,
+    responsavel_pela_compra: camposResponsavelCompra.value,
     objetivo_compra: camposObjetivo.value.trim(),
     observacao: camposObservacao?.value?.trim() || null
   };

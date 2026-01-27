@@ -2750,6 +2750,78 @@ app.get('/api/compras/categorias', async (req, res) => {
   }
 });
 
+// GET /api/compras/config-responsavel-categoria - Lista configurações de responsáveis por categoria
+app.get('/api/compras/config-responsavel-categoria', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, categoria_compra_codigo, categoria_compra_nome, responsavel_username, created_at, updated_at
+      FROM compras.config_responsavel_categoria
+      ORDER BY categoria_compra_nome
+    `);
+    
+    res.json({ ok: true, configuracoes: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar configurações:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/compras/config-responsavel-categoria - Adiciona/Atualiza configuração
+app.post('/api/compras/config-responsavel-categoria', express.json(), async (req, res) => {
+  try {
+    const { categoria_compra_codigo, categoria_compra_nome, responsavel_username } = req.body;
+    
+    if (!categoria_compra_codigo || !categoria_compra_nome || !responsavel_username) {
+      return res.status(400).json({ ok: false, error: 'Campos obrigatórios: categoria_compra_codigo, categoria_compra_nome, responsavel_username' });
+    }
+    
+    // Usa UPSERT (INSERT com ON CONFLICT UPDATE) para adicionar ou atualizar
+    const { rows } = await pool.query(`
+      INSERT INTO compras.config_responsavel_categoria (categoria_compra_codigo, categoria_compra_nome, responsavel_username, updated_at)
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (categoria_compra_codigo)
+      DO UPDATE SET 
+        categoria_compra_nome = EXCLUDED.categoria_compra_nome,
+        responsavel_username = EXCLUDED.responsavel_username,
+        updated_at = NOW()
+      RETURNING *
+    `, [categoria_compra_codigo, categoria_compra_nome, responsavel_username]);
+    
+    console.log(`[Compras] Configuração salva: ${categoria_compra_nome} → ${responsavel_username}`);
+    res.json({ ok: true, configuracao: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao salvar configuração:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/compras/config-responsavel-categoria/:id - Remove configuração
+app.delete('/api/compras/config-responsavel-categoria/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      DELETE FROM compras.config_responsavel_categoria
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Configuração não encontrada' });
+    }
+    
+    console.log(`[Compras] Configuração removida: ID ${id}`);
+    res.json({ ok: true, configuracao: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao remover configuração:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Endpoint para buscar famílias de produtos
 // Objetivo: Listar todas as famílias cadastradas no banco para seleção no modal de compras
 app.get('/api/compras/familias', async (req, res) => {
@@ -11118,11 +11190,13 @@ app.post('/api/compras/pedido', async (req, res) => {
           centro_custo,
           objetivo_compra,
           resp_inspecao_recebimento,
+          responsavel_pela_compra,
           retorno_cotacao,
           codigo_produto_omie,
           categoria_compra_codigo,
           categoria_compra_nome,
-          codigo_omie
+          codigo_omie,
+          requisicao_direta
         } = item;
         
         if (!produto_codigo || !quantidade) {
@@ -11148,14 +11222,16 @@ app.post('/api/compras/pedido', async (req, res) => {
             centro_custo,
             objetivo_compra,
             resp_inspecao_recebimento,
+            responsavel_pela_compra,
             retorno_cotacao,
             codigo_produto_omie,
             categoria_compra_codigo,
             categoria_compra_nome,
             codigo_omie,
+            requisicao_direta,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -11170,11 +11246,13 @@ app.post('/api/compras/pedido', async (req, res) => {
           centro_custo || null,
           objetivo_compra || null,
           resp_inspecao_recebimento || solicitante,
+          responsavel_pela_compra || null,
           retorno_cotacao || null,
           codigo_produto_omie || null,
           categoria_compra_codigo || null,
           categoria_compra_nome || null,
-          codigo_omie || null
+          codigo_omie || null,
+          requisicao_direta || false
         ]);
         
         idsInseridos.push(result.rows[0].id);
@@ -11652,6 +11730,29 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
       dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
     }
 
+    // Busca o CMC (Custo Médio de Compra) da tabela omie_estoque_posicao
+    let precoUnitario = 0;
+    if (item.codigo_omie) {
+      try {
+        const { rows: rowsEstoque } = await pool.query(`
+          SELECT cmc 
+          FROM public.omie_estoque_posicao 
+          WHERE omie_prod_id = $1
+          LIMIT 1
+        `, [item.codigo_omie]);
+        
+        if (rowsEstoque.length > 0 && rowsEstoque[0].cmc) {
+          precoUnitario = parseFloat(rowsEstoque[0].cmc) || 0;
+          console.log(`[Aprovar Item] CMC encontrado para produto ${item.codigo_omie}: R$ ${precoUnitario.toFixed(2)}`);
+        } else {
+          console.log(`[Aprovar Item] CMC não encontrado para produto ${item.codigo_omie}, usando preço 0`);
+        }
+      } catch (errCmc) {
+        console.error('[Aprovar Item] Erro ao buscar CMC:', errCmc);
+        // Continua com preço 0 em caso de erro
+      }
+    }
+
     // Monta payload para Omie - IncluirReq
     const requisicaoOmie = {
       codIntReqCompra: numeroPedido,
@@ -11664,7 +11765,7 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
         {
           codProd: item.codigo_omie || null,  // Usa codigo_omie da tabela produtos_omie
           obsItem: item.objetivo_compra || '',
-          precoUnit: 0,
+          precoUnit: precoUnitario,  // Usa o CMC da tabela omie_estoque_posicao
           qtde: parseFloat(item.quantidade) || 1
         }
       ]
@@ -11733,6 +11834,7 @@ app.get('/api/compras/todas', async (req, res) => {
         observacao_retificacao,
         solicitante,
         resp_inspecao_recebimento,
+        responsavel_pela_compra,
         departamento,
         centro_custo,
         objetivo_compra,
@@ -11744,6 +11846,7 @@ app.get('/api/compras/todas', async (req, res) => {
         categoria_compra_nome,
         codigo_omie,
         codigo_produto_omie,
+        requisicao_direta,
         anexos,
         cnumero AS "cNumero",
         ncodped AS "nCodPed",
@@ -11769,7 +11872,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
 
-    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna, cotacoes_aprovadas_ids } = req.body || {};
+    const { status, previsao_chegada, observacao, resp_inspecao_recebimento, responsavel_pela_compra, fornecedor_nome, fornecedor_id, categoria_compra, categoria_compra_codigo, anexos, cod_parc, qtde_parc, contato, contrato, obs_interna, cotacoes_aprovadas_ids } = req.body || {};
     
     const allowedStatus = [
       'pendente',
@@ -11854,6 +11957,11 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     if (typeof resp_inspecao_recebimento !== 'undefined') {
       fields.push(`resp_inspecao_recebimento = $${idx++}`);
       values.push(resp_inspecao_recebimento || null);
+    }
+    
+    if (typeof responsavel_pela_compra !== 'undefined') {
+      fields.push(`responsavel_pela_compra = $${idx++}`);
+      values.push(responsavel_pela_compra || null);
     }
     
     if (typeof fornecedor_nome !== 'undefined') {
