@@ -10647,6 +10647,44 @@ function initComprasUI() {
       loadMinhasSolicitacoes();
     })
     .catch(err => console.warn('[COMPRAS] Falha ao carregar usuários ativos', err));
+  
+  // Carrega status disponíveis para o select de etapas
+  carregarStatusCompras();
+}
+
+// Função para carregar status disponíveis
+async function carregarStatusCompras() {
+  try {
+    const resp = await fetch('/api/compras/status', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar status');
+    
+    const data = await resp.json();
+    const status = data.status || [];
+    
+    const select = document.getElementById('modalComprasStatus');
+    if (!select) return;
+    
+    // Limpa opções existentes
+    select.innerHTML = '';
+    
+    // Adiciona todos os status
+    status.forEach(s => {
+      const option = document.createElement('option');
+      option.value = s.nome;
+      option.textContent = s.nome;
+      
+      // Marca como selecionado se for o padrão
+      if (s.nome === 'aguardando aprovação da requisição') {
+        option.selected = true;
+      }
+      
+      select.appendChild(option);
+    });
+    
+    console.log('[COMPRAS] Status carregados:', status.length);
+  } catch (err) {
+    console.error('[COMPRAS] Erro ao carregar status:', err);
+  }
 }
 
 function initMinhasSolicitacoesFiltro() {
@@ -12627,6 +12665,11 @@ function renderCarrinhoCompras() {
   
   if (countEl) countEl.textContent = carrinho.length;
   
+  // Atualiza também o contador do catálogo Omie se existir
+  if (typeof atualizarContadorCatalogo === 'function') {
+    atualizarContadorCatalogo();
+  }
+  
   if (carrinho.length === 0) {
     // Oculta título e container quando vazio
     if (tituloCarrinho) tituloCarrinho.style.display = 'none';
@@ -13200,8 +13243,13 @@ async function abrirModalConfigResponsavel() {
   await Promise.all([
     carregarCategoriasConfig(),
     carregarResponsaveisConfig(),
-    carregarConfiguracoes()
+    carregarConfiguracoes(),
+    carregarDepartamentos(),
+    carregarPermissoesAcesso()
   ]);
+  
+  // Popula também o segundo select de responsáveis (para permissões)
+  await carregarResponsaveisConfigBotao();
 }
 
 // Fecha modal de configuração
@@ -13247,6 +13295,26 @@ async function carregarResponsaveisConfig() {
     }
   } catch (err) {
     console.error('[Config] Erro ao carregar responsáveis:', err);
+  }
+}
+
+// Carrega usuários no segundo select (para permissões de botões)
+async function carregarResponsaveisConfigBotao() {
+  const select = document.getElementById('configResponsavelBotao');
+  if (!select) return;
+  
+  try {
+    const resp = await fetch('/api/compras/usuarios');
+    const data = await resp.json();
+    
+    if (data.ok && Array.isArray(data.usuarios)) {
+      select.innerHTML = '<option value="">Selecione...</option>' +
+        data.usuarios.map(u => 
+          `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+        ).join('');
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar responsáveis do botão:', err);
   }
 }
 
@@ -13405,6 +13473,191 @@ function aplicarResponsavelPadrao() {
 // Expõe funções globalmente para serem acessíveis via onclick (se necessário)
 window.abrirModalConfigResponsavel = abrirModalConfigResponsavel;
 window.fecharModalConfigResponsavel = fecharModalConfigResponsavel;
+
+// ========== CONFIGURAÇÃO DE ACESSO AOS BOTÕES ==========
+
+// Carrega departamentos
+async function carregarDepartamentos() {
+  try {
+    const resp = await fetch('/api/compras/departamentos', { credentials: 'include' });
+    const data = await resp.json();
+    
+    if (data.ok) {
+      const select = document.getElementById('configDepartamento');
+      if (select) {
+        const optionsHTML = '<option value="">Selecione...</option>' +
+          data.departamentos.map(d => `<option value="${escapeHtml(d.nome)}">${escapeHtml(d.nome)}</option>`).join('');
+        select.innerHTML = optionsHTML;
+      }
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar departamentos:', err);
+  }
+}
+
+// Carrega permissões de acesso
+async function carregarPermissoesAcesso() {
+  try {
+    const resp = await fetch('/api/compras/config-acesso-botoes', { credentials: 'include' });
+    const data = await resp.json();
+    
+    if (data.ok) {
+      window.permissoesAcessoBotoes = data.permissoes || [];
+      renderizarListaPermissoes();
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao carregar permissões:', err);
+  }
+}
+
+// Renderiza lista de permissões
+function renderizarListaPermissoes() {
+  const lista = document.getElementById('listaPermissoesAcesso');
+  if (!lista) return;
+  
+  const permissoes = window.permissoesAcessoBotoes || [];
+  
+  if (permissoes.length === 0) {
+    lista.innerHTML = `
+      <div style="text-align:center;padding:40px;color:#9ca3af;">
+        <i class="fa-solid fa-shield-halved" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+        Nenhuma permissão cadastrada
+      </div>`;
+    return;
+  }
+  
+  lista.innerHTML = permissoes.map(p => {
+    const tipoBotaoLabel = p.tipo_botao === 'aprovacao' ? 'Aprovação' : 'Pedido de Compra';
+    const corBotao = p.tipo_botao === 'aprovacao' ? '#9333ea' : '#10b981';
+    
+    return `
+      <div style="
+        background:white;
+        padding:16px;
+        border-radius:6px;
+        border:1px solid #e5e7eb;
+        display:grid;
+        grid-template-columns:150px 1fr 1fr auto;
+        gap:16px;
+        align-items:center;
+      ">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:4px;height:40px;background:${corBotao};border-radius:4px;"></div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Tipo</div>
+            <div style="font-size:13px;color:#1f2937;font-weight:700;">${tipoBotaoLabel}</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Responsável</div>
+          <div style="font-size:13px;color:#1f2937;font-weight:600;">${escapeHtml(p.responsavel_username)}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:2px;">Departamento</div>
+          <div style="font-size:13px;color:#1f2937;font-weight:600;">${escapeHtml(p.departamento_nome)}</div>
+        </div>
+        <button 
+          onclick="removerPermissaoAcesso(${p.id})"
+          style="
+            background:#ef4444;
+            color:white;
+            border:none;
+            padding:8px 12px;
+            border-radius:6px;
+            cursor:pointer;
+            font-size:12px;
+            transition:all 0.2s;
+          "
+          onmouseover="this.style.background='#dc2626'"
+          onmouseout="this.style.background='#ef4444'">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// Adiciona nova permissão
+async function adicionarPermissaoAcesso() {
+  const selectTipo = document.getElementById('configTipoBotao');
+  const selectResponsavel = document.getElementById('configResponsavelBotao');
+  const selectDepartamento = document.getElementById('configDepartamento');
+  
+  const tipo = selectTipo?.value;
+  const responsavel = selectResponsavel?.value;
+  const departamento = selectDepartamento?.value;
+  
+  if (!tipo || !responsavel || !departamento) {
+    alert('Preencha todos os campos');
+    return;
+  }
+  
+  try {
+    const resp = await fetch('/api/compras/config-acesso-botoes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo_botao: tipo,
+        responsavel_username: responsavel,
+        departamento_nome: departamento
+      })
+    });
+    
+    const data = await resp.json();
+    
+    if (data.ok) {
+      await carregarPermissoesAcesso();
+      
+      // Limpa campos
+      selectTipo.value = '';
+      selectResponsavel.value = '';
+      selectDepartamento.value = '';
+      
+      // Feedback
+      const btn = document.getElementById('btnAdicionarPermissao');
+      if (btn) {
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Salvo!';
+        btn.style.background = '#10b981';
+        setTimeout(() => {
+          btn.innerHTML = originalHTML;
+          btn.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
+        }, 2000);
+      }
+    } else {
+      alert('Erro ao salvar: ' + (data.error || 'Erro desconhecido'));
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao adicionar permissão:', err);
+    alert('Erro ao salvar permissão');
+  }
+}
+
+// Remove permissão
+async function removerPermissaoAcesso(id) {
+  if (!confirm('Deseja remover esta permissão?')) return;
+  
+  try {
+    const resp = await fetch(`/api/compras/config-acesso-botoes/${id}`, {
+      method: 'DELETE'
+    });
+    
+    const data = await resp.json();
+    
+    if (data.ok) {
+      await carregarPermissoesAcesso();
+    } else {
+      alert('Erro ao remover: ' + (data.error || 'Erro desconhecido'));
+    }
+  } catch (err) {
+    console.error('[Config] Erro ao remover permissão:', err);
+    alert('Erro ao remover permissão');
+  }
+}
+
+// Expõe funções globalmente
+window.adicionarPermissaoAcesso = adicionarPermissaoAcesso;
+window.removerPermissaoAcesso = removerPermissaoAcesso;
 window.adicionarConfigResponsavel = adicionarConfigResponsavel;
 window.removerConfigResponsavel = removerConfigResponsavel;
 
@@ -13558,6 +13811,7 @@ async function adicionarItemCarrinho(ev) {
   const categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
   const requisicaoDireta = document.getElementById('modalComprasRequisicaoDireta')?.checked || false;
+  const statusPedido = (document.getElementById('modalComprasStatus')?.value || 'aguardando aprovação da requisição').trim();
   
   // Verifica se o campo família está visível (produto novo) ou oculto (produto existente)
   const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
@@ -13631,6 +13885,35 @@ async function adicionarItemCarrinho(ev) {
     console.warn('Erro ao buscar codigo_produto da Omie:', err);
   }
   
+  // Captura anexo se houver
+  let anexoData = null;
+  const inputAnexo = document.getElementById('modalComprasAnexo');
+  if (inputAnexo && inputAnexo.files && inputAnexo.files.length > 0) {
+    const file = inputAnexo.files[0];
+    try {
+      // Converte arquivo para base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]); // Remove o prefixo data:...;base64,
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      
+      anexoData = {
+        nome: file.name,
+        tipo: file.type,
+        tamanho: file.size,
+        base64: base64
+      };
+      
+      console.log('[Compras] Anexo capturado:', file.name, file.type);
+    } catch (err) {
+      console.error('[Compras] Erro ao processar anexo:', err);
+      alert('Erro ao processar o arquivo anexado. Tente novamente.');
+      return;
+    }
+  }
+  
   window.carrinhoCompras.push({
     produto_codigo: codigo,
     produto_descricao: descricao,
@@ -13649,7 +13932,9 @@ async function adicionarItemCarrinho(ev) {
     retorno_cotacao: retornoCotacao,
     categoria_compra_codigo: categoriaCompra,
     categoria_compra_nome: categoriaCompraTexto,
-    requisicao_direta: requisicaoDireta  // Novo campo: requisição direta
+    requisicao_direta: requisicaoDireta,  // Novo campo: requisição direta
+    status_pedido: statusPedido,  // Novo campo: etapa do pedido escolhida pelo usuário
+    anexo: anexoData  // Novo campo: anexo do item
   });
   
   renderCarrinhoCompras();
@@ -13707,22 +13992,11 @@ async function enviarPedidoCompras() {
       throw new Error(data.error || 'Erro ao enviar solicitações');
     }
     
-    // Verifica se há itens com requisição direta para aprovar automaticamente
-    const itensComRequisicaoDireta = carrinho.filter(item => item.requisicao_direta === true);
+    // Verifica se há itens com requisição direta (já criados com status "aguardando compra")
+    const idsRequisicaoDireta = data.ids_requisicao_direta || [];
     
-    if (itensComRequisicaoDireta.length > 0 && data.ids && data.ids.length > 0) {
-      // Aprova automaticamente os itens com requisição direta
-      const idsRequisicaoDireta = [];
-      itensComRequisicaoDireta.forEach((item, index) => {
-        // Mapeia o índice do carrinho para o ID inserido
-        const itemIndex = carrinho.indexOf(item);
-        if (itemIndex >= 0 && data.ids[itemIndex]) {
-          idsRequisicaoDireta.push(data.ids[itemIndex]);
-        }
-      });
-      
-      if (idsRequisicaoDireta.length > 0) {
-        console.log(`[COMPRAS] Processando ${idsRequisicaoDireta.length} item(ns) com requisição direta...`);
+    if (idsRequisicaoDireta.length > 0) {
+      console.log(`[COMPRAS] Processando ${idsRequisicaoDireta.length} item(ns) com requisição direta...`);
         
         if (statusEl) {
           statusEl.style.background = '#3b82f6';
@@ -13768,8 +14042,8 @@ async function enviarPedidoCompras() {
           statusEl.style.background = aprovadosErro > 0 ? '#f59e0b' : '#22c55e';
           statusEl.textContent = mensagemFinal;
         }
-      }
     } else {
+      // Nenhum item com requisição direta
       if (statusEl) {
         statusEl.style.background = '#22c55e';
         statusEl.textContent = `✓ ${data.total_itens} solicitação(ões) enviada(s) com sucesso!`;
@@ -13807,6 +14081,9 @@ document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', env
 // Bind do botão de configuração de responsáveis
 document.getElementById('comprasConfigBtn')?.addEventListener('click', abrirModalConfigResponsavel);
 
+// Bind do botão de histórico de compras
+document.getElementById('comprasHistoricoBtn')?.addEventListener('click', abrirModalHistoricoGeral);
+
 // Bind para auto-preencher responsável quando categoria é selecionada
 document.getElementById('modalComprasCategoriaCompra')?.addEventListener('change', aplicarResponsavelPadrao);
 
@@ -13814,6 +14091,7 @@ document.getElementById('modalComprasCategoriaCompra')?.addEventListener('change
 document.getElementById('modalConfigResponsavelFechar')?.addEventListener('click', fecharModalConfigResponsavel);
 document.getElementById('modalConfigResponsavelFecharBtn')?.addEventListener('click', fecharModalConfigResponsavel);
 document.getElementById('btnAdicionarConfig')?.addEventListener('click', adicionarConfigResponsavel);
+document.getElementById('btnAdicionarPermissao')?.addEventListener('click', adicionarPermissaoAcesso);
 
 // Fecha modal de config ao clicar fora
 document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('click', (e) => {
@@ -19294,6 +19572,12 @@ function renderizarCatalogoOmie(produtos) {
   const lista = document.getElementById('listaProdutosCatalogo');
   if (!lista) return;
   
+  // Atualiza contador de produtos exibidos
+  const contadorProdutos = document.getElementById('catalogoTotalProdutos');
+  if (contadorProdutos) {
+    contadorProdutos.textContent = produtos.length;
+  }
+  
   if (produtos.length === 0) {
     lista.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
     return;
@@ -19738,7 +20022,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
   const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const categoriaCompraTexto = selectCategoriaGlobal?.selectedOptions[0]?.text || '';
-  const observacaoGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
+  const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   
   // Validações dos campos globais
@@ -19787,12 +20071,12 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     prazo_solicitado: prazo || null,
     familia_codigo: null,
     familia_nome: familiaDescricao,
-    observacao: observacaoGlobal || '',
+    observacao: '',
     departamento: departamento,
     centro_custo: centroCusto,
     codigo_produto_omie: null,
     codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
-    objetivo_compra: 'Compra via catálogo Omie',
+    objetivo_compra: objetivoCompraGlobal || 'Compra via catálogo Omie',
     resp_inspecao_recebimento: '',
     retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N',
     categoria_compra_codigo: categoriaCompra,
@@ -21188,17 +21472,54 @@ function toggleSelecionarTodosKanbans() {
   });
 }
 
+// ========== Variável global para permissões de acesso ==========
+let permissoesAcessoCache = [];
+
+// Função para verificar se o usuário tem permissão para aprovar itens de um departamento
+function usuarioPodeAprovarDepartamento(departamento) {
+  // Pega username do usuário logado
+  const username = window.__sessionUser?.username || 
+                   document.getElementById('userNameDisplay')?.textContent?.trim() || '';
+  
+  if (!username) {
+    console.warn('[Permissões] Usuário não identificado');
+    return false;
+  }
+  
+  // Verifica se existe permissão para tipo_botao='aprovacao', username e departamento
+  const temPermissao = permissoesAcessoCache.some(p => 
+    p.tipo_botao === 'aprovacao' && 
+    p.responsavel_username === username && 
+    p.departamento_nome === departamento
+  );
+  
+  console.log(`[Permissões] User: ${username}, Depto: ${departamento}, Permissão: ${temPermissao}`);
+  return temPermissao;
+}
+
+// Carrega permissões de acesso do servidor
+async function carregarPermissoesAcessoParaAprovacao() {
+  try {
+    const resp = await fetch('/api/compras/config-acesso-botoes', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar permissões');
+    
+    const data = await resp.json();
+    permissoesAcessoCache = data.permissoes || [];
+    console.log('[Permissões] Permissões carregadas:', permissoesAcessoCache.length);
+  } catch (err) {
+    console.error('[Permissões] Erro ao carregar permissões:', err);
+    permissoesAcessoCache = [];
+  }
+}
+
 // ========== Modal de Aprovação de Requisições ==========
 async function abrirModalAprovacaoRequisicao() {
   try {
-    // Busca todas as solicitações aguardando aprovação do usuário logado
-    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-    if (!currentUser) {
-      alert('Usuário não identificado');
-      return;
-    }
+    // Carrega permissões de acesso antes de renderizar o modal
+    await carregarPermissoesAcessoParaAprovacao();
     
-    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    // Busca todas as solicitações aguardando aprovação (não apenas do usuário logado)
+    const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar solicitações');
     
     const data = await resp.json();
@@ -21216,6 +21537,8 @@ async function abrirModalAprovacaoRequisicao() {
     
     // Debug: verifica estrutura dos dados
     console.log('[Modal Aprovação] Exemplo de item:', itensAprovacao[0]);
+    console.log('[Modal Aprovação] Total de itens:', itensAprovacao.length);
+    console.log('[Modal Aprovação] Itens com anexos:', itensAprovacao.filter(i => i.anexos && i.anexos.length > 0).length);
     
     // Agrupa por família (verifica múltiplos campos possíveis)
     const itensPorFamilia = {};
@@ -21263,6 +21586,7 @@ async function abrirModalAprovacaoRequisicao() {
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Retorno Cotação</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Departamento</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:150px;">Objetivo Compra</th>
+                  <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:80px;">Anexos</th>
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Ações</th>
                 </tr>
               </thead>
@@ -21271,6 +21595,23 @@ async function abrirModalAprovacaoRequisicao() {
                   const retornoCotacao = item.retorno_cotacao || 'N';
                   const retornoTexto = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? 'SIM' : 'NÃO';
                   const retornoCor = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? '#10b981' : '#ef4444';
+                  
+                  // Processa anexos
+                  let anexosHtml = '-';
+                  if (item.anexos && Array.isArray(item.anexos) && item.anexos.length > 0) {
+                    const anexosJson = JSON.stringify(item.anexos).replace(/"/g, '&quot;');
+                    anexosHtml = `
+                      <button 
+                        onclick="exibirAnexosAprovacao(${item.id}, '${anexosJson}')" 
+                        title="Ver anexos (${item.anexos.length})"
+                        style="background:#3b82f6;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;"
+                        onmouseover="this.style.background='#2563eb';this.style.transform='scale(1.05)'"
+                        onmouseout="this.style.background='#3b82f6';this.style.transform='scale(1)'">
+                        <i class="fa-solid fa-paperclip"></i>
+                        <span>${item.anexos.length}</span>
+                      </button>
+                    `;
+                  }
                   
                   return `
                     <tr style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
@@ -21284,11 +21625,14 @@ async function abrirModalAprovacaoRequisicao() {
                       </td>
                       <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
                       <td style="padding:10px;color:#374151;font-size:11px;max-width:150px;">${escapeHtml((item.objetivo_compra || '-').substring(0, 50))}${(item.objetivo_compra || '').length > 50 ? '...' : ''}</td>
+                      <td style="padding:10px;text-align:center;">${anexosHtml}</td>
                       <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;">
+                          ${usuarioPodeAprovarDepartamento(item.departamento || '') ? `
                           <button onclick="aprovarItemRequisicao(${item.id})" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-check"></i>
                           </button>
+                          ` : '<span style="color:#9ca3af;font-size:11px;font-style:italic;">Sem permissão</span>'}
                           <button onclick="retificarItemAprovacao(${item.id})" title="Solicitar retificação" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-rotate-left"></i>
                           </button>
@@ -21411,23 +21755,470 @@ function adicionarItemAprovacao(itemId) {
   // TODO: Implementar lógica para duplicar o item
 }
 
+// ========== Modal de Histórico Geral de Compras ==========
+async function abrirModalHistoricoGeral() {
+  try {
+    // Busca histórico geral dos últimos 30 dias
+    const resp = await fetch('/api/compras/historico?dias=30&limit=200', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar histórico');
+    
+    const data = await resp.json();
+    const historico = data.historico || [];
+    
+    if (historico.length === 0) {
+      alert('Nenhum histórico encontrado.');
+      return;
+    }
+    
+    // Função para formatar data/hora
+    const formatarDataHora = (dataStr) => {
+      const data = new Date(dataStr);
+      return data.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+    
+    // Função para definir cor e ícone por tipo de operação
+    const getOperacaoStyle = (operacao) => {
+      switch(operacao) {
+        case 'INSERT': return { cor: '#10b981', icone: 'fa-plus', label: 'Novo' };
+        case 'UPDATE': return { cor: '#3b82f6', icone: 'fa-pen', label: 'Alteração' };
+        case 'DELETE': return { cor: '#ef4444', icone: 'fa-trash', label: 'Remoção' };
+        default: return { cor: '#6b7280', icone: 'fa-circle', label: operacao };
+      }
+    };
+    
+    // Agrupa histórico por solicitacao_id
+    const historicoPorItem = {};
+    historico.forEach(h => {
+      if (!historicoPorItem[h.solicitacao_id]) {
+        historicoPorItem[h.solicitacao_id] = [];
+      }
+      historicoPorItem[h.solicitacao_id].push(h);
+    });
+    
+    // Monta HTML do histórico agrupado por item
+    let historicoHtml = Object.keys(historicoPorItem).sort((a, b) => {
+      const ultimaA = historicoPorItem[a][0].created_at;
+      const ultimaB = historicoPorItem[b][0].created_at;
+      return new Date(ultimaB) - new Date(ultimaA);
+    }).map(solicitacaoId => {
+      const registros = historicoPorItem[solicitacaoId];
+      const primeiroRegistro = registros[0];
+      const descricaoItem = primeiroRegistro.descricao_item || `Item #${solicitacaoId}`;
+      
+      const registrosHtml = registros.map(h => {
+        const style = getOperacaoStyle(h.operacao);
+        const campoLabel = h.campo_alterado || 'Item completo';
+        
+        return `
+          <div style="border-left:3px solid ${style.cor};padding:8px 12px;margin-bottom:8px;background:#f9fafb;border-radius:4px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="background:${style.cor};color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                  <i class="fa-solid ${style.icone}" style="font-size:11px;"></i>
+                </div>
+                <span style="font-weight:600;color:#1f2937;font-size:12px;">${style.label}</span>
+                <span style="color:#6366f1;font-weight:600;font-size:11px;">${escapeHtml(campoLabel)}</span>
+              </div>
+              <div style="text-align:right;">
+                ${h.usuario ? `<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;">${escapeHtml(h.usuario)}</span>` : ''}
+                <div style="color:#9ca3af;font-size:10px;margin-top:2px;">${formatarDataHora(h.created_at)}</div>
+              </div>
+            </div>
+            
+            ${h.valor_anterior && h.valor_novo ? `
+              <div style="margin-left:30px;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:10px;">
+                <div style="color:#6b7280;">
+                  <strong>Antes:</strong> ${escapeHtml(h.valor_anterior.substring(0, 50))}${h.valor_anterior.length > 50 ? '...' : ''}
+                </div>
+                <div style="color:#059669;font-weight:600;">
+                  <strong>Depois:</strong> ${escapeHtml(h.valor_novo.substring(0, 50))}${h.valor_novo.length > 50 ? '...' : ''}
+                </div>
+              </div>
+            ` : h.valor_novo ? `
+              <div style="margin-left:30px;color:#059669;font-size:10px;font-weight:600;">
+                ${escapeHtml(h.valor_novo.substring(0, 100))}${h.valor_novo.length > 100 ? '...' : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+      
+      return `
+        <div style="margin-bottom:20px;border:2px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <i class="fa-solid fa-box" style="font-size:16px;"></i>
+              <div>
+                <div style="font-weight:700;font-size:14px;">${escapeHtml(descricaoItem)}</div>
+                <div style="font-size:10px;opacity:0.9;">ID: ${solicitacaoId} | ${registros.length} registro(s)</div>
+              </div>
+            </div>
+            ${primeiroRegistro.departamento ? `
+              <span style="background:rgba(255,255,255,0.2);padding:4px 8px;border-radius:4px;font-size:11px;">
+                ${escapeHtml(primeiroRegistro.departamento)}
+              </span>
+            ` : ''}
+          </div>
+          <div style="padding:12px;">
+            ${registrosHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Monta conteúdo do modal
+    const modalContent = `
+      <div style="padding:24px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #e5e7eb;">
+          <div style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;">
+            <i class="fa-solid fa-clock-rotate-left" style="font-size:24px;"></i>
+          </div>
+          <div style="flex:1;">
+            <h3 style="margin:0;font-size:20px;color:#1f2937;font-weight:700;">Histórico de Movimentações</h3>
+            <p style="margin:4px 0 0 0;color:#6b7280;font-size:13px;">Últimas alterações nos itens de compra (30 dias)</p>
+          </div>
+        </div>
+        
+        <div style="max-height:600px;overflow-y:auto;padding-right:8px;">
+          ${historicoHtml}
+        </div>
+        
+        <div style="margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
+          <span style="color:#6b7280;font-size:12px;">
+            <i class="fa-solid fa-info-circle"></i> ${historico.length} registro(s) | ${Object.keys(historicoPorItem).length} item(ns)
+          </span>
+          <button onclick="fecharModalHistoricoGeral()" style="background:#6366f1;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.2s;" onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='#6366f1'">
+            Fechar
+          </button>
+        </div>
+      </div>
+    `;
+    
+    // Cria e abre modal
+    const modalId = 'modalHistoricoGeralCompras';
+    let modal = document.getElementById(modalId);
+    
+    if (modal) {
+      modal.remove();
+    }
+    
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    modal.innerHTML = `
+      <div style="background:white;border-radius:12px;max-width:1200px;width:95%;max-height:90vh;overflow:hidden;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1),0 10px 10px -5px rgba(0,0,0,0.04);">
+        ${modalContent}
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Fecha ao clicar fora
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModalHistoricoGeral();
+    });
+    
+  } catch (err) {
+    console.error('[Histórico] Erro ao abrir histórico geral:', err);
+    alert('Erro ao carregar histórico: ' + err.message);
+  }
+}
+
+function fecharModalHistoricoGeral() {
+  const modal = document.getElementById('modalHistoricoGeralCompras');
+  if (modal) modal.remove();
+}
+
+// ========== Histórico de Item Específico (função mantida para uso futuro) ==========
+async function abrirHistoricoItem(itemId, descricaoItem) {
+  try {
+    // Busca histórico do item
+    const resp = await fetch(`/api/compras/historico/${itemId}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar histórico');
+    
+    const data = await resp.json();
+    const historico = data.historico || [];
+    
+    if (historico.length === 0) {
+      alert('Nenhum histórico encontrado para este item.');
+      return;
+    }
+    
+    // Função para formatar data/hora
+    const formatarDataHora = (dataStr) => {
+      const data = new Date(dataStr);
+      return data.toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+    
+    // Função para definir cor e ícone por tipo de operação
+    const getOperacaoStyle = (operacao) => {
+      switch(operacao) {
+        case 'INSERT': return { cor: '#10b981', icone: 'fa-plus', label: 'Novo' };
+        case 'UPDATE': return { cor: '#3b82f6', icone: 'fa-pen', label: 'Alteração' };
+        case 'DELETE': return { cor: '#ef4444', icone: 'fa-trash', label: 'Remoção' };
+        default: return { cor: '#6b7280', icone: 'fa-circle', label: operacao };
+      }
+    };
+    
+    // Monta HTML do histórico
+    let historicoHtml = historico.map(h => {
+      const style = getOperacaoStyle(h.operacao);
+      const campoLabel = h.campo_alterado || 'Item completo';
+      
+      return `
+        <div style="border-left:4px solid ${style.cor};padding:12px 16px;margin-bottom:12px;background:#f9fafb;border-radius:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="background:${style.cor};color:white;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                <i class="fa-solid ${style.icone}" style="font-size:14px;"></i>
+              </div>
+              <div>
+                <div style="font-weight:700;color:#1f2937;font-size:14px;">${style.label}</div>
+                <div style="color:#6b7280;font-size:11px;">${formatarDataHora(h.created_at)}</div>
+              </div>
+            </div>
+            ${h.usuario ? `<span style="background:#e0e7ff;color:#4f46e5;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:600;">${escapeHtml(h.usuario)}</span>` : ''}
+          </div>
+          
+          <div style="margin-left:40px;">
+            <div style="color:#374151;font-size:12px;margin-bottom:4px;">
+              <strong>Campo:</strong> <span style="color:#6366f1;font-weight:600;">${escapeHtml(campoLabel)}</span>
+            </div>
+            
+            ${h.valor_anterior ? `
+              <div style="color:#6b7280;font-size:11px;margin-bottom:2px;">
+                <strong>Antes:</strong> ${escapeHtml(h.valor_anterior)}
+              </div>
+            ` : ''}
+            
+            ${h.valor_novo ? `
+              <div style="color:#059669;font-size:11px;font-weight:600;">
+                <strong>Depois:</strong> ${escapeHtml(h.valor_novo)}
+              </div>
+            ` : ''}
+            
+            ${h.status_item ? `
+              <div style="color:#9ca3af;font-size:10px;margin-top:4px;">
+                Status: <span style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">${escapeHtml(h.status_item)}</span>
+                ${h.departamento ? ` | Depto: ${escapeHtml(h.departamento)}` : ''}
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Monta conteúdo do modal
+    const modalContent = `
+      <div style="padding:24px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #e5e7eb;">
+          <div style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;">
+            <i class="fa-solid fa-clock-rotate-left" style="font-size:24px;"></i>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:20px;color:#1f2937;font-weight:700;">Histórico do Item</h3>
+            <p style="margin:4px 0 0 0;color:#6b7280;font-size:13px;">${escapeHtml(descricaoItem)}</p>
+          </div>
+        </div>
+        
+        <div style="max-height:500px;overflow-y:auto;padding-right:8px;">
+          ${historicoHtml}
+        </div>
+        
+        <div style="margin-top:20px;padding-top:16px;border-top:2px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
+          <span style="color:#6b7280;font-size:12px;">
+            <i class="fa-solid fa-info-circle"></i> Total de ${historico.length} registro(s)
+          </span>
+          <button onclick="fecharModalHistoricoItem()" style="background:#6366f1;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.2s;" onmouseover="this.style.background='#4f46e5'" onmouseout="this.style.background='#6366f1'">
+            Fechar
+          </button>
+        </div>
+      </div>
+    `;
+    
+    // Cria e abre modal
+    const modalId = 'modalHistoricoItem';
+    let modal = document.getElementById(modalId);
+    
+    if (modal) {
+      modal.remove();
+    }
+    
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    modal.innerHTML = `
+      <div style="background:white;border-radius:12px;max-width:800px;width:90%;max-height:90vh;overflow:hidden;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1),0 10px 10px -5px rgba(0,0,0,0.04);">
+        ${modalContent}
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Fecha ao clicar fora
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) fecharModalHistoricoItem();
+    });
+    
+  } catch (err) {
+    console.error('[Histórico] Erro ao abrir histórico:', err);
+    alert('Erro ao carregar histórico do item: ' + err.message);
+  }
+}
+
+function fecharModalHistoricoItem() {
+  const modal = document.getElementById('modalHistoricoItem');
+  if (modal) modal.remove();
+}
+
 // Função auxiliar para retificar um item (usa a mesma função do kanban de compras)
 function retificarItemAprovacao(itemId) {
   // Chama a função existente de retificação passando null para o event
   retificarItemCompra(itemId, null);
 }
 
+// Função para exibir anexos de um item de aprovação
+function exibirAnexosAprovacao(itemId, anexosStr) {
+  console.log('[Anexos] Chamada da função com itemId:', itemId, 'anexosStr type:', typeof anexosStr);
+  
+  // Faz o parse da string JSON
+  let anexos;
+  try {
+    if (typeof anexosStr === 'string') {
+      console.log('[Anexos] Fazendo parse da string:', anexosStr.substring(0, 100));
+      anexos = JSON.parse(anexosStr.replace(/&quot;/g, '"'));
+    } else {
+      anexos = anexosStr;
+    }
+    console.log('[Anexos] Parse bem-sucedido:', anexos);
+  } catch (err) {
+    console.error('[Anexos] Erro ao fazer parse:', err);
+    console.error('[Anexos] String recebida:', anexosStr);
+    alert('Erro ao carregar anexos: ' + err.message);
+    return;
+  }
+  
+  if (!anexos || !Array.isArray(anexos) || anexos.length === 0) {
+    console.log('[Anexos] Nenhum anexo válido encontrado');
+    alert('Este item não possui anexos');
+    return;
+  }
+  
+  console.log('[Anexos] Total de anexos:', anexos.length);
+  
+  // Função helper para escapar HTML
+  const escapeHtml = (text) => {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;')
+               .replace(/</g, '&lt;')
+               .replace(/>/g, '&gt;')
+               .replace(/"/g, '&quot;')
+               .replace(/'/g, '&#039;');
+  };
+  
+  // Cria HTML dos anexos
+  const anexosHtml = anexos.map((anexo, idx) => {
+    const icone = anexo.tipo?.includes('pdf') ? 'fa-file-pdf' : 
+                  anexo.tipo?.includes('image') ? 'fa-file-image' : 
+                  anexo.tipo?.includes('word') ? 'fa-file-word' : 
+                  anexo.tipo?.includes('excel') || anexo.tipo?.includes('spreadsheet') ? 'fa-file-excel' : 
+                  'fa-file';
+    
+    const cor = anexo.tipo?.includes('pdf') ? '#ef4444' : 
+                anexo.tipo?.includes('image') ? '#10b981' : 
+                anexo.tipo?.includes('word') ? '#3b82f6' : 
+                anexo.tipo?.includes('excel') ? '#059669' : 
+                '#6b7280';
+    
+    return `
+      <div style="background:white;border:2px solid #e5e7eb;border-radius:8px;padding:16px;display:flex;align-items:center;gap:12px;transition:all 0.2s;cursor:pointer;" 
+           onmouseover="this.style.borderColor='#3b82f6';this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.2)'" 
+           onmouseout="this.style.borderColor='#e5e7eb';this.style.transform='translateY(0)';this.style.boxShadow='none'"
+           onclick="window.open('${anexo.url}', '_blank')">
+        <div style="width:48px;height:48px;background:${cor}15;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <i class="fa-solid ${icone}" style="font-size:24px;color:${cor};"></i>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;color:#1f2937;font-size:14px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</div>
+          <div style="font-size:11px;color:#6b7280;">${anexo.tipo || 'Arquivo'}</div>
+        </div>
+        <div style="padding:8px 16px;background:#3b82f6;color:white;border-radius:6px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-external-link-alt"></i>
+          <span>Abrir</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  // Cria modal
+  const modalId = 'modalAnexosAprovacao';
+  let modal = document.getElementById(modalId);
+  
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.display = 'none';
+    modal.style.setProperty('z-index', '10003', 'important');
+    document.body.appendChild(modal);
+  }
+  
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:700px;width:90%;max-height:80vh;overflow-y:auto;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:20px;border-radius:8px 8px 0 0;">
+        <h3 style="margin:0;display:flex;align-items:center;gap:10px;font-size:18px;">
+          <i class="fa-solid fa-paperclip" style="font-size:20px;"></i>
+          <span>Anexos do Item #${itemId}</span>
+        </h3>
+        <button class="modal-close" onclick="document.getElementById('${modalId}').style.display='none'" style="color:white;opacity:0.9;">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:24px;background:#f9fafb;">
+        <div style="background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;padding:16px;margin-bottom:20px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <i class="fa-solid fa-info-circle" style="color:#3b82f6;font-size:20px;"></i>
+            <div style="color:#1e40af;font-size:13px;line-height:1.6;">
+              Clique em qualquer anexo para abrir em uma nova aba
+            </div>
+          </div>
+        </div>
+        
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${anexosHtml}
+        </div>
+        
+        <div style="margin-top:20px;padding-top:20px;border-top:2px solid #e5e7eb;text-align:center;color:#6b7280;font-size:12px;">
+          Total de ${anexos.length} anexo(s)
+        </div>
+      </div>
+    </div>
+  `;
+  
+  console.log('[Anexos] Modal criado, exibindo...');
+  modal.style.display = 'flex';
+  modal.style.setProperty('z-index', '10003', 'important');
+  console.log('[Anexos] Modal exibido com sucesso');
+}
+
+// Expõe a função no escopo global para uso em onclick
+window.exibirAnexosAprovacao = exibirAnexosAprovacao;
+
 // Função para aprovar todas as requisições
 async function aprovarTodasRequisicoes() {
   try {
-    // Busca todas as solicitações aguardando aprovação do usuário logado
-    const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-    if (!currentUser) {
-      alert('Usuário não identificado');
-      return;
-    }
-    
-    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    // Busca todas as solicitações aguardando aprovação (não apenas do usuário logado)
+    const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar solicitações');
     
     const data = await resp.json();
@@ -21511,7 +22302,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
   await carregarPreferenciasKanbans();
   
   try {
-    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    // Busca todas as solicitações (não apenas as do usuário)
+    const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
     let lista = data.solicitacoes || [];
@@ -21563,7 +22355,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Define título personalizado para colunas específicas
       const titulosPersonalizados = {
-        'aguardando cotação': 'Cotação com compras',
+        'aguardando aprovação da requisição': 'Aprovação',
+        'solicitado revisão': 'Revisão',
+        'aguardando cotação': 'Cotação',
+        'cotado aguardando escolha': 'Cotado',
         'aguardando compra': 'Pedido de compra'
       };
       const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
@@ -21693,7 +22488,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           
           return `
             <div class="kanban-card" data-item-id="${item.id}" 
-              onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}', ${item.id})"
               style="
               background:#ffffff;
               border:1px solid #e5e7eb;
@@ -21702,10 +22496,35 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               transition:all 0.2s;
               box-shadow:0 1px 3px rgba(0,0,0,0.1);
               flex-shrink:0;
-              cursor:pointer;
-            "
-            onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';this.style.transform='translateY(-2px)'"
-            onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';this.style.transform='translateY(0)'">
+              position:relative;
+            ">
+              <!-- Botão de Visualizar -->
+              <button 
+                onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}', ${item.id})"
+                style="
+                  position:absolute;
+                  top:8px;
+                  right:8px;
+                  background:#3b82f6;
+                  color:white;
+                  border:none;
+                  border-radius:6px;
+                  padding:6px 10px;
+                  font-size:11px;
+                  font-weight:600;
+                  cursor:pointer;
+                  display:flex;
+                  align-items:center;
+                  gap:4px;
+                  z-index:10;
+                  transition:all 0.2s;
+                "
+                onmouseover="this.style.background='#2563eb';this.style.transform='scale(1.05)'"
+                onmouseout="this.style.background='#3b82f6';this.style.transform='scale(1)'">
+                <i class="fa-solid fa-eye"></i>
+                Ver
+              </button>
+              
               <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
                 <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
                 ${mostrarNumeroPedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${numeroPedidoExibir}</div>` : ''}
@@ -21727,7 +22546,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 </div>
               </div>
               ${(status === 'solicitado revisão' && item.observacao_retificacao) ? `
-                <div style="margin-top:8px;padding:8px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;" onclick="event.stopPropagation();">
+                <div style="margin-top:8px;padding:8px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;">
                   <div style="font-size:9px;color:#92400e;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
                     <i class="fa-solid fa-comment-dots"></i>
                     Motivo da Retificação
@@ -21750,24 +22569,51 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Estilo visual diferente se o kanban estiver desabilitado (sem itens em kanbans clicáveis)
       const podeSerClicavel = statusComClique.includes(status);
-      const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;cursor:not-allowed;' : '';
-      const cursorStyle = ehClicavel ? 'cursor:pointer;' : (podeSerClicavel ? 'cursor:not-allowed;' : '');
+      const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;' : '';
+      
+      // Botão "Abrir Tudo" para kanbans clicáveis
+      const botaoAbrirTudo = ehClicavel ? `
+        <button 
+          onclick="${funcaoOnclick}"
+          style="
+            background:linear-gradient(135deg,${cor.bg} 0%,${cor.bg}dd 100%);
+            color:white;
+            border:none;
+            border-radius:6px;
+            padding:6px 12px;
+            font-size:11px;
+            font-weight:600;
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+            box-shadow:0 2px 4px rgba(0,0,0,0.1);
+            transition:all 0.2s;
+            margin-left:8px;
+          "
+          onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.2)'"
+          onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
+          <i class="fa-solid fa-folder-open"></i>
+          Abrir Tudo
+        </button>
+      ` : '';
       
       return `
         <div class="kanban-column-minhas" 
           data-status="${status}" 
-          ${ehClicavel ? `onclick="${funcaoOnclick}"` : ''} 
-          style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);${cursorStyle}transition:all 0.2s;${estiloDesabilitado}" 
-          ${ehClicavel ? `onmouseover="this.style.boxShadow='0 4px 16px ${corHover}';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';this.style.transform='translateY(0)'"` : ''}>
-          ${badgeIdentificacao}
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:3px solid ${cor.bg};">
+          style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:all 0.2s;${estiloDesabilitado}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            ${badgeIdentificacao}
+            ${botaoAbrirTudo}
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-top:3px solid ${cor.bg};padding-top:12px;">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
               <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
               ${tituloExibir}
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;${ehClicavel ? 'pointer-events:none;' : ''}">
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;overflow-x:hidden;padding-right:4px;">
             ${cardsHtml}
           </div>
         </div>

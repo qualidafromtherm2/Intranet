@@ -1,0 +1,23 @@
+                                                Tabela "compras.historico_solicitacao_compras"
+     Coluna     |            Tipo             | Ordenação | Pode ser nulo |                              Padrão                               
+----------------+-----------------------------+-----------+---------------+-------------------------------------------------------------------
+ id             | integer                     |           | not null      | nextval('compras.historico_solicitacao_compras_id_seq'::regclass)
+ solicitacao_id | integer                     |           | not null      | 
+ operacao       | text                        |           | not null      | 
+ campo_alterado | text                        |           |               | 
+ valor_anterior | text                        |           |               | 
+ valor_novo     | text                        |           |               | 
+ usuario        | text                        |           |               | 
+ descricao_item | text                        |           |               | 
+ status_item    | text                        |           |               | 
+ departamento   | text                        |           |               | 
+ created_at     | timestamp without time zone |           |               | now()
+Índices:
+    "historico_solicitacao_compras_pkey" PRIMARY KEY, btree (id)
+    "idx_historico_created_at" btree (created_at DESC)
+    "idx_historico_operacao" btree (operacao)
+    "idx_historico_solicitacao_id" btree (solicitacao_id)
+    "idx_historico_usuario" btree (usuario)
+Restrições de verificação:
+    "historico_solicitacao_compras_operacao_check" CHECK (operacao = ANY (ARRAY['INSERT'::text, 'UPDATE'::text, 'DELETE'::text]))
+

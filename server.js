@@ -1394,7 +1394,12 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
         quem_recebe,
         solicitante,
         status,
-        criado_em
+        criado_em,
+        anexos,
+        familia_produto,
+        retorno_cotacao,
+        departamento,
+        objetivo_compra
       FROM compras.solicitacao_compras
       ORDER BY criado_em DESC, id DESC;
     `);
@@ -2822,6 +2827,212 @@ app.delete('/api/compras/config-responsavel-categoria/:id', async (req, res) => 
   }
 });
 
+// ======== CONFIGURAÇÃO DE ACESSO AOS BOTÕES ========
+
+// GET /api/compras/config-acesso-botoes - Lista permissões de acesso aos botões
+app.get('/api/compras/config-acesso-botoes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT * FROM compras.config_acesso_botoes
+      ORDER BY tipo_botao, departamento_nome, responsavel_username
+    `);
+    
+    console.log(`[Compras] Listando ${rows.length} permissões de acesso`);
+    res.json({ ok: true, permissoes: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar permissões:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/compras/config-acesso-botoes - Adiciona permissão de acesso
+app.post('/api/compras/config-acesso-botoes', express.json(), async (req, res) => {
+  try {
+    const { tipo_botao, responsavel_username, departamento_nome } = req.body;
+    
+    if (!tipo_botao || !responsavel_username || !departamento_nome) {
+      return res.status(400).json({ ok: false, error: 'Dados incompletos' });
+    }
+    
+    if (!['aprovacao', 'pedido_compra'].includes(tipo_botao)) {
+      return res.status(400).json({ ok: false, error: 'Tipo de botão inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      INSERT INTO compras.config_acesso_botoes (tipo_botao, responsavel_username, departamento_nome)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (tipo_botao, responsavel_username, departamento_nome) DO NOTHING
+      RETURNING *
+    `, [tipo_botao, responsavel_username, departamento_nome]);
+    
+    if (rows.length === 0) {
+      return res.status(409).json({ ok: false, error: 'Permissão já existe' });
+    }
+    
+    console.log(`[Compras] Permissão adicionada: ${tipo_botao} - ${responsavel_username} - ${departamento_nome}`);
+    res.json({ ok: true, permissao: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao adicionar permissão:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/compras/config-acesso-botoes/:id - Remove permissão
+app.delete('/api/compras/config-acesso-botoes/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      DELETE FROM compras.config_acesso_botoes
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Permissão não encontrada' });
+    }
+    
+    console.log(`[Compras] Permissão removida: ID ${id}`);
+    res.json({ ok: true, permissao: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao remover permissão:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/compras/departamentos - Lista departamentos
+app.get('/api/compras/departamentos', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT nome FROM configuracoes.departamento
+      ORDER BY nome
+    `);
+    
+    console.log(`[Compras] Listando ${rows.length} departamentos`);
+    res.json({ ok: true, departamentos: rows });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar departamentos:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ========== ENDPOINTS DE HISTÓRICO DE SOLICITAÇÕES ==========
+
+// GET /api/compras/historico/resumo - Estatísticas do histórico (DEVE VIR ANTES DO :id)
+app.get('/api/compras/historico/resumo', async (req, res) => {
+  try {
+    const { dias = 30 } = req.query;
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        operacao,
+        campo_alterado,
+        COUNT(*) as total,
+        COUNT(DISTINCT solicitacao_id) as itens_afetados,
+        COUNT(DISTINCT usuario) as usuarios_distintos
+      FROM compras.historico_solicitacao_compras
+      WHERE created_at >= NOW() - INTERVAL '${parseInt(dias)} days'
+      GROUP BY operacao, campo_alterado
+      ORDER BY total DESC
+    `);
+    
+    console.log(`[Compras] Resumo do histórico: ${rows.length} tipos de operações`);
+    res.json({ ok: true, resumo: rows });
+  } catch (err) {
+    console.error(`[Compras] Erro ao gerar resumo do histórico:`, err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/compras/historico - Lista histórico com filtros opcionais (DEVE VIR ANTES DO :id)
+app.get('/api/compras/historico', async (req, res) => {
+  try {
+    const { usuario, operacao, dias = 30, limit = 100 } = req.query;
+    
+    let query = `
+      SELECT 
+        id,
+        solicitacao_id,
+        operacao,
+        campo_alterado,
+        valor_anterior,
+        valor_novo,
+        usuario,
+        descricao_item,
+        status_item,
+        departamento,
+        created_at
+      FROM compras.historico_solicitacao_compras
+      WHERE created_at >= NOW() - INTERVAL '${parseInt(dias)} days'
+    `;
+    
+    const params = [];
+    let paramIndex = 1;
+    
+    if (usuario) {
+      query += ` AND usuario = $${paramIndex}`;
+      params.push(usuario);
+      paramIndex++;
+    }
+    
+    if (operacao) {
+      query += ` AND operacao = $${paramIndex}`;
+      params.push(operacao.toUpperCase());
+      paramIndex++;
+    }
+    
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
+    params.push(parseInt(limit));
+    
+    const { rows } = await pool.query(query, params);
+    
+    console.log(`[Compras] Histórico geral: ${rows.length} registros (últimos ${dias} dias)`);
+    res.json({ ok: true, historico: rows });
+  } catch (err) {
+    console.error(`[Compras] Erro ao buscar histórico geral:`, err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/compras/historico/:solicitacaoId - Busca histórico de um item específico (DEVE VIR POR ÚLTIMO)
+app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
+  try {
+    const { solicitacaoId } = req.params;
+    
+    if (!solicitacaoId || isNaN(solicitacaoId)) {
+      return res.status(400).json({ ok: false, error: 'ID da solicitação inválido' });
+    }
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        solicitacao_id,
+        operacao,
+        campo_alterado,
+        valor_anterior,
+        valor_novo,
+        usuario,
+        descricao_item,
+        status_item,
+        departamento,
+        created_at
+      FROM compras.historico_solicitacao_compras
+      WHERE solicitacao_id = $1
+      ORDER BY created_at DESC
+    `, [solicitacaoId]);
+    
+    console.log(`[Compras] Histórico da solicitação ${solicitacaoId}: ${rows.length} registros`);
+    res.json({ ok: true, historico: rows });
+  } catch (err) {
+    console.error(`[Compras] Erro ao buscar histórico:`, err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Endpoint para buscar famílias de produtos
 // Objetivo: Listar todas as famílias cadastradas no banco para seleção no modal de compras
 app.get('/api/compras/familias', async (req, res) => {
@@ -4215,6 +4426,9 @@ function getDirs(tipo = 'Expedicao') {
 
 
 app.use('/etiquetas', express.static(etiquetasRoot));
+
+// Servir anexos de compras
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ——————————————————————————————
 // proteger rotas de etiquetas com token
@@ -11196,16 +11410,68 @@ app.post('/api/compras/pedido', async (req, res) => {
           categoria_compra_codigo,
           categoria_compra_nome,
           codigo_omie,
-          requisicao_direta
+          requisicao_direta,
+          status_pedido,
+          anexo
         } = item;
         
         if (!produto_codigo || !quantidade) {
           throw new Error('Cada item precisa ter produto_codigo e quantidade');
         }
         
-        // Define status inicial como 'aguardando aprovação da requisição'
-        // Todas as solicitações devem passar por aprovação antes de seguir o fluxo
-        const statusInicial = 'aguardando aprovação da requisição';
+        // Usa o status enviado pelo frontend, ou define baseado em requisicao_direta se não informado
+        // Se status_pedido foi informado: usa ele
+        // Se requisicao_direta = true: vai direto para "aguardando compra"
+        // Se requisicao_direta = false: vai para "aguardando aprovação da requisição"
+        const statusInicial = status_pedido || (requisicao_direta === true ? 'aguardando compra' : 'aguardando aprovação da requisição');
+        
+        // Se o usuário alterou manualmente o status (status_pedido existe), não deve criar requisição automática
+        const deveCriarRequisicaoAutomatica = requisicao_direta === true && !status_pedido;
+        
+        console.log(`[Compras] Item ${produto_codigo} - Status Pedido: ${status_pedido} - Requisição Direta: ${requisicao_direta} - Criar Req Auto: ${deveCriarRequisicaoAutomatica} - Status Final: ${statusInicial}`);
+        
+        // Processa anexo se houver
+        let anexosArray = null;
+        if (anexo && anexo.base64) {
+          try {
+            const fs = require('fs').promises;
+            const path = require('path');
+            
+            // Converte base64 para buffer
+            const buffer = Buffer.from(anexo.base64, 'base64');
+            
+            // Diretório para salvar anexos
+            const anexosDir = path.join(__dirname, 'uploads', 'compras-anexos');
+            
+            // Cria diretório se não existir
+            await fs.mkdir(anexosDir, { recursive: true });
+            
+            // Gera nome único para o arquivo
+            const timestamp = Date.now();
+            const nomeArquivoSanitizado = anexo.nome.replace(/[^a-zA-Z0-9.-]/g, '_');
+            const fileName = `${timestamp}_${nomeArquivoSanitizado}`;
+            const filePath = path.join(anexosDir, fileName);
+            
+            // Salva arquivo no servidor
+            await fs.writeFile(filePath, buffer);
+            
+            // URL para acessar o arquivo (servido como estático)
+            const fileUrl = `/uploads/compras-anexos/${fileName}`;
+            
+            anexosArray = [{
+              nome: anexo.nome,
+              url: fileUrl,
+              tipo: anexo.tipo,
+              tamanho: anexo.tamanho,
+              data_upload: new Date().toISOString()
+            }];
+            
+            console.log(`[Compras] Anexo salvo localmente: ${anexo.nome} -> ${fileUrl}`);
+          } catch (errAnexo) {
+            console.error('[Compras] Erro ao processar anexo:', errAnexo);
+            // Continua sem o anexo
+          }
+        }
         
         // Insere item sem numero_pedido (NULL) - será preenchido em etapa posterior
         const result = await client.query(`
@@ -11229,9 +11495,10 @@ app.post('/api/compras/pedido', async (req, res) => {
             categoria_compra_nome,
             codigo_omie,
             requisicao_direta,
+            anexos,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -11252,20 +11519,45 @@ app.post('/api/compras/pedido', async (req, res) => {
           categoria_compra_codigo || null,
           categoria_compra_nome || null,
           codigo_omie || null,
-          requisicao_direta || false
+          requisicao_direta || false,
+          anexosArray ? JSON.stringify(anexosArray) : null
         ]);
         
         idsInseridos.push(result.rows[0].id);
+        
+        // Armazena informação de requisição direta para processamento posterior
+        // Só marca para criação automática se requisicao_direta = true E status_pedido não foi informado manualmente
+        if (deveCriarRequisicaoAutomatica) {
+          // Marca que este item precisa ser processado automaticamente
+          idsInseridos[idsInseridos.length - 1] = {
+            id: result.rows[0].id,
+            requisicao_direta: true
+          };
+        } else {
+          idsInseridos[idsInseridos.length - 1] = {
+            id: result.rows[0].id,
+            requisicao_direta: false
+          };
+        }
       }
       
       await client.query('COMMIT');
       
-      console.log(`[Compras] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsInseridos.join(', ')}`);
+      // Extrai apenas os IDs para log e resposta
+      const idsSimples = idsInseridos.map(item => typeof item === 'object' ? item.id : item);
+      const idsRequisicaoDireta = idsInseridos.filter(item => typeof item === 'object' && item.requisicao_direta === true).map(item => item.id);
+      
+      console.log(`[Compras] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsSimples.join(', ')}`);
+      
+      if (idsRequisicaoDireta.length > 0) {
+        console.log(`[Compras] ${idsRequisicaoDireta.length} item(ns) marcado(s) para requisição direta (aguardando compra)`);
+      }
       
       res.json({
         ok: true,
         total_itens: itens.length,
-        ids: idsInseridos
+        ids: idsSimples,
+        ids_requisicao_direta: idsRequisicaoDireta
       });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -11549,7 +11841,8 @@ app.get('/api/compras/minhas', async (req, res) => {
         created_at,
         updated_at,
         cnumero AS "cNumero",
-        ncodped AS "nCodPed"
+        ncodped AS "nCodPed",
+        anexos
       FROM compras.solicitacao_compras
       WHERE solicitante = $1
       ORDER BY created_at DESC
@@ -11657,7 +11950,9 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
         prazo_solicitado,
         codigo_produto_omie,
         codigo_omie,
-        retorno_cotacao
+        retorno_cotacao,
+        observacao,
+        resp_inspecao_recebimento
       FROM compras.solicitacao_compras
       WHERE id = $1
     `, [itemId]);
@@ -11753,13 +12048,22 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
       }
     }
 
+    // Monta obsReqCompra formatado com todos os dados
+    const solicitante = item.solicitante || '';
+    const respInspecao = item.resp_inspecao_recebimento || '';
+    const observacao = item.observacao || '';
+    const objetivoCompra = item.objetivo_compra || '';
+    const codigoOmie = item.codigo_omie || '';
+    
+    const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmie}\nObjetivo da Compra: ${objetivoCompra}\nObservação: ${observacao}`.trim();
+
     // Monta payload para Omie - IncluirReq
     const requisicaoOmie = {
       codIntReqCompra: numeroPedido,
       codCateg: item.categoria_compra_codigo || '',
       codProj: 0,
       dtSugestao: dtSugestao,
-      obsReqCompra: '',
+      obsReqCompra: obsReqCompra,
       obsIntReqCompra: '',
       ItensReqCompra: [
         {
@@ -11794,20 +12098,28 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
 
     console.log('[Aprovar Item] Resposta Omie:', omieResult);
 
-    // Atualiza item no banco: status = "aguardando compra" (retorno_cotacao = 'N')
+    // Extrai valores da resposta Omie
+    const codReqCompra = omieResult.codReqCompra || null;
+    const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
+
+    // Atualiza item no banco: status = "aguardando compra", numero_pedido e ncodped
     await pool.query(`
       UPDATE compras.solicitacao_compras
       SET 
         status = 'aguardando compra',
         numero_pedido = $1,
+        ncodped = $2,
         updated_at = NOW()
-      WHERE id = $2
-    `, [numeroPedido, itemId]);
+      WHERE id = $3
+    `, [codIntReqCompra, codReqCompra, itemId]);
+
+    console.log(`[Aprovar Item] Item ${itemId} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
 
     res.json({ 
       ok: true, 
       message: 'Item aprovado e requisição criada na Omie',
-      numero_pedido: numeroPedido,
+      numero_pedido: codIntReqCompra,
+      ncodped: codReqCompra,
       omie_response: omieResult
     });
 
