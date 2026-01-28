@@ -256,19 +256,3 @@
  TAB ...................................... Complete filename & cycle.
  SHIFT-TAB ...................... ESC-TAB   Complete filename & reverse cycle.
  ctrl-L ................................... Complete filename, list all.
-                                                   Tabela "compras.config_acesso_botoes"
-        Coluna        |            Tipo             | Ordenação | Pode ser nulo |                          Padrão                          
-----------------------+-----------------------------+-----------+---------------+----------------------------------------------------------
- id                   | integer                     |           | not null      | nextval('compras.config_acesso_botoes_id_seq'::regclass)
- tipo_botao           | text                        |           | not null      | 
- responsavel_username | text                        |           | not null      | 
- departamento_nome    | text                        |           | not null      | 
- data_criacao         | timestamp without time zone |           |               | now()
-Índices:
-    "config_acesso_botoes_pkey" PRIMARY KEY, btree (id)
-    "config_acesso_botoes_tipo_botao_responsavel_username_depart_key" UNIQUE CONSTRAINT, btree (tipo_botao, responsavel_username, departamento_nome)
-    "idx_config_acesso_responsavel" btree (responsavel_username)
-    "idx_config_acesso_tipo" btree (tipo_botao)
-Restrições de verificação:
-    "config_acesso_botoes_tipo_botao_check" CHECK (tipo_botao = ANY (ARRAY['aprovacao'::text, 'pedido_compra'::text]))
-

@@ -428,16 +428,17 @@
                   Kanban de compras
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                  <button id="comprasFiltroKanbanBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Filtrar Kanbans">
-                    <i class="fa-solid fa-filter" style="font-size:18px;"></i>
-                    <span style="font-size:13px;font-weight:600;">Filtrar Kanbans</span>
+                  <button id="comprasFiltroKanbanBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Filtrar Kanbans">
+                    <i class="fa-solid fa-filter" style="font-size:20px;"></i>
                   </button>
-                  <button id="comprasExportarExcelMinhasBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;" title="Exportar para Excel">
-                    <i class="fa-solid fa-file-excel" style="font-size:18px;"></i>
-                    <span style="font-size:13px;font-weight:600;">Exportar Excel</span>
+                  <button id="comprasExportarExcelMinhasBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Exportar para Excel">
+                    <i class="fa-solid fa-file-excel" style="font-size:20px;"></i>
                   </button>
-                  <button id="comprasConfigBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Configurar responsáveis por categoria">
+                  <button id="comprasConfigBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Configuração de Compras">
                     <i class="fa-solid fa-cog" style="font-size:20px;"></i>
+                  </button>
+                  <button id="comprasHistoricoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Histórico de Movimentações">
+                    <i class="fa-solid fa-clock-rotate-left" style="font-size:20px;"></i>
                   </button>
                 </div>
               </div>
@@ -593,13 +594,28 @@
                   </div>
                 </div>
                 
-                <!-- Campo Família do Produto em largura total -->
-                <div class="form-field" style="margin-bottom:16px;">
-                  <label for="modalComprasFamilia">Família do Produto <span id="familiaObrigatorioIndicador" style="color:#ef4444;display:none;">*</span></label>
-                  <select id="modalComprasFamilia" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
-                    <option value="">Selecione a família...</option>
-                    <!-- Será preenchido dinamicamente -->
-                  </select>
+                <!-- Campos Família do Produto e Etapas do Pedido lado a lado -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                  <!-- Campo Família do Produto -->
+                  <div class="form-field">
+                    <label for="modalComprasFamilia">Família do Produto <span id="familiaObrigatorioIndicador" style="color:#ef4444;display:none;">*</span></label>
+                    <select id="modalComprasFamilia" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+                      <option value="">Selecione a família...</option>
+                      <!-- Será preenchido dinamicamente -->
+                    </select>
+                  </div>
+                  
+                  <!-- Campo Etapas do Pedido -->
+                  <div class="form-field">
+                    <label for="modalComprasStatus">
+                      <i class="fa-solid fa-list-check" style="margin-right:6px;color:#3b82f6;"></i>
+                      Etapas do Pedido *
+                    </label>
+                    <select id="modalComprasStatus" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
+                      <option value="aguardando aprovação da requisição">aguardando aprovação da requisição</option>
+                      <!-- Será preenchido dinamicamente -->
+                    </select>
+                  </div>
                 </div>
                 
                 <!-- Campo Objetivo da compra em largura total -->
@@ -666,49 +682,110 @@
 
         <!-- Modal Configuração Responsáveis por Categoria -->
         <div id="modalConfigResponsavelCategoria" class="modal-overlay" style="display:none;">
-          <div class="modal-container" style="max-width:800px;">
+          <div class="modal-container" style="max-width:900px;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-cog" style="color:#f59e0b;"></i>
-                Configurar Responsáveis por Categoria
+                Configuração de Compras
               </h3>
               <button class="modal-close" id="modalConfigResponsavelFechar">&times;</button>
             </div>
             <div class="modal-body" style="padding:24px;">
               
-              <!-- Formulário para adicionar configuração -->
-              <div style="background:#f9fafb;padding:20px;border-radius:8px;margin-bottom:20px;">
-                <h4 style="margin:0 0 16px 0;font-size:14px;color:#374151;">Nova Configuração</h4>
-                <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
-                  <div class="form-field">
-                    <label for="configCategoriaCompra">Categoria da Compra *</label>
-                    <select id="configCategoriaCompra" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                      <option value="">Selecione a categoria...</option>
-                      <!-- Será preenchido dinamicamente -->
-                    </select>
+              <!-- Seção 1: Responsável por Categoria -->
+              <div style="background:#f3f4f6;padding:16px;border-radius:8px;margin-bottom:24px;">
+                <h4 style="margin:0 0 16px 0;font-size:15px;color:#1f2937;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-user-tag" style="color:#3b82f6;"></i>
+                  Responsável por Categoria
+                </h4>
+              
+                <!-- Formulário para adicionar configuração -->
+                <div style="background:#f9fafb;padding:20px;border-radius:8px;margin-bottom:20px;border:2px solid #e5e7eb;">
+                  <h5 style="margin:0 0 16px 0;font-size:13px;color:#374151;">Nova Configuração</h5>
+                  <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
+                    <div class="form-field">
+                      <label for="configCategoriaCompra">Categoria da Compra *</label>
+                      <select id="configCategoriaCompra" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        <option value="">Selecione a categoria...</option>
+                        <!-- Será preenchido dinamicamente -->
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label for="configResponsavel">Responsável pela compra *</label>
+                      <select id="configResponsavel" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        <option value="">Selecione o responsável...</option>
+                        <!-- Será preenchido dinamicamente -->
+                      </select>
+                    </div>
+                    <button id="btnAdicionarConfig" class="content-button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;padding:10px 20px;height:44px;">
+                      <i class="fa-solid fa-plus"></i>
+                      <span>Adicionar</span>
+                    </button>
                   </div>
-                  <div class="form-field">
-                    <label for="configResponsavel">Responsável pela compra *</label>
-                    <select id="configResponsavel" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                      <option value="">Selecione o responsável...</option>
-                      <!-- Será preenchido dinamicamente -->
-                    </select>
+                </div>
+
+                <!-- Lista de configurações existentes -->
+                <div>
+                  <h5 style="margin:0 0 12px 0;font-size:13px;color:#374151;">Configurações Ativas</h5>
+                  <div id="listaConfigsResponsavel" style="display:flex;flex-direction:column;gap:8px;">
+                    <!-- Será preenchido dinamicamente -->
+                    <div style="text-align:center;padding:40px;color:#9ca3af;">
+                      <i class="fa-solid fa-cog" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+                      Nenhuma configuração cadastrada
+                    </div>
                   </div>
-                  <button id="btnAdicionarConfig" class="content-button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;padding:10px 20px;height:44px;">
-                    <i class="fa-solid fa-plus"></i>
-                    <span>Adicionar</span>
-                  </button>
                 </div>
               </div>
 
-              <!-- Lista de configurações existentes -->
-              <div>
-                <h4 style="margin:0 0 12px 0;font-size:14px;color:#374151;">Configurações Ativas</h4>
-                <div id="listaConfigsResponsavel" style="display:flex;flex-direction:column;gap:8px;">
-                  <!-- Será preenchido dinamicamente -->
-                  <div style="text-align:center;padding:40px;color:#9ca3af;">
-                    <i class="fa-solid fa-cog" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
-                    Nenhuma configuração cadastrada
+              <!-- Seção 2: Acesso aos Botões -->
+              <div style="background:#eff6ff;padding:16px;border-radius:8px;">
+                <h4 style="margin:0 0 16px 0;font-size:15px;color:#1f2937;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-shield-halved" style="color:#3b82f6;"></i>
+                  Permissões de Acesso aos Botões
+                </h4>
+                
+                <!-- Formulário para adicionar permissão -->
+                <div style="background:#ffffff;padding:20px;border-radius:8px;margin-bottom:20px;border:2px solid #dbeafe;">
+                  <h5 style="margin:0 0 16px 0;font-size:13px;color:#374151;">Nova Permissão</h5>
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;">
+                    <div class="form-field">
+                      <label for="configTipoBotao">Tipo de Botão *</label>
+                      <select id="configTipoBotao" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        <option value="">Selecione...</option>
+                        <option value="aprovacao">Aprovação</option>
+                        <option value="pedido_compra">Pedido de Compra</option>
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label for="configResponsavelBotao">Responsável *</label>
+                      <select id="configResponsavelBotao" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        <option value="">Selecione...</option>
+                        <!-- Será preenchido dinamicamente -->
+                      </select>
+                    </div>
+                    <div class="form-field">
+                      <label for="configDepartamento">Departamento *</label>
+                      <select id="configDepartamento" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                        <option value="">Selecione...</option>
+                        <!-- Será preenchido dinamicamente -->
+                      </select>
+                    </div>
+                    <button id="btnAdicionarPermissao" class="content-button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:10px 20px;height:44px;">
+                      <i class="fa-solid fa-plus"></i>
+                      <span>Adicionar</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Lista de permissões existentes -->
+                <div>
+                  <h5 style="margin:0 0 12px 0;font-size:13px;color:#374151;">Permissões Ativas</h5>
+                  <div id="listaPermissoesAcesso" style="display:flex;flex-direction:column;gap:8px;">
+                    <!-- Será preenchido dinamicamente -->
+                    <div style="text-align:center;padding:40px;color:#9ca3af;">
+                      <i class="fa-solid fa-shield-halved" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+                      Nenhuma permissão cadastrada
+                    </div>
                   </div>
                 </div>
               </div>
@@ -951,9 +1028,15 @@
                 <span>Catálogo de Produtos Omie</span>
               </h3>
               <div style="display:flex;align-items:center;gap:12px;">
-                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:8px 16px;border-radius:20px;font-size:13px;font-weight:700;transition:transform 0.2s ease;">
-                  <i class="fa-solid fa-shopping-cart"></i>
-                  <span id="catalogoNumeroItens">0</span>
+                <div style="display:flex;align-items:center;gap:8px;background:#3b82f6;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;box-shadow:0 2px 8px rgba(59,130,246,0.3);">
+                  <i class="fa-solid fa-boxes-stacked" style="font-size:16px;"></i>
+                  <span id="catalogoTotalProdutos" style="min-width:20px;text-align:center;">0</span>
+                  <span style="font-size:12px;font-weight:600;opacity:0.9;">produtos</span>
+                </div>
+                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;transition:transform 0.2s ease;box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+                  <i class="fa-solid fa-shopping-cart" style="font-size:16px;"></i>
+                  <span id="catalogoNumeroItens" style="min-width:20px;text-align:center;">0</span>
+                  <span style="font-size:12px;font-weight:600;opacity:0.9;">itens</span>
                 </div>
                 <button class="modal-close" onclick="fecharModalCatalogoOmie()">&times;</button>
               </div>
@@ -1050,16 +1133,16 @@
                   </select>
                 </div>
                 
-                <!-- Campo Observação em largura completa (3 colunas) -->
+                <!-- Campo Objetivo da Compra em largura completa (3 colunas) -->
                 <div style="grid-column:span 3;">
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-comment" style="color:#3b82f6;margin-right:4px;"></i>
-                    Observação
+                    <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
+                    Objetivo da Compra
                   </label>
                   <textarea 
                     id="catalogoObservacaoGlobal"
                     rows="2"
-                    placeholder="Detalhes adicionais que serão aplicados a todos os itens..."
+                    placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
                     style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
                 </div>
                 
