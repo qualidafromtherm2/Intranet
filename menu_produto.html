@@ -1168,8 +1168,14 @@
               </div>
             </div>
             <div class="modal-body" style="padding:20px;">
+              <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                <button id="catalogoFiltrosToggle" type="button" class="catalogo-filtros-toggle" onclick="toggleFiltrosCatalogo()">
+                  <i class="fa-solid fa-filter"></i>
+                  <span>Mostrar filtros</span>
+                </button>
+              </div>
               <!-- Filtros -->
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;margin-bottom:16px;">
+              <div id="catalogoFiltrosContainer" class="catalogo-filtros-container is-collapsed" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;margin-bottom:16px;">
                 <div>
                   <label style="display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Buscar Produto</label>
                   <input 
@@ -1283,7 +1289,7 @@
                     placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
                     style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
                 </div>
-                
+
                 <!-- Checkbox Requisição Direta em largura completa -->
                 <div style="grid-column:span 4;">
                   <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#e0f2fe;border:2px solid #0ea5e9;border-radius:6px;transition:all 0.2s;">
@@ -1297,6 +1303,20 @@
                     ⚡ Se marcado, TODOS os itens adicionados serão automaticamente enviados para a Omie após o envio da solicitação
                   </small>
                 </div>
+
+                <!-- Checkbox Não incluir quantidade (abaixo de Requisição Direta) -->
+                <div style="grid-column:span 4;">
+                  <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#f1f5f9;border:2px solid #64748b;border-radius:6px;transition:all 0.2s;" id="labelNaoIncluirQuantidade">
+                    <input type="checkbox" id="catalogoNaoIncluirQuantidade" style="width:20px;height:20px;cursor:pointer;">
+                    <span style="font-weight:700;color:#334155;font-size:13px;">
+                      <i class="fa-solid fa-ban" style="margin-right:6px;"></i>
+                      Não incluir quantidade
+                    </span>
+                  </label>
+                  <small style="display:block;margin-top:8px;margin-left:30px;color:#64748b;font-size:12px;">
+                    Se marcado, a quantidade será ignorada e o campo ficará vazio no carrinho. ⚠️ Desabilitado quando Requisição Direta está ativa.
+                  </small>
+                </div>
               </div>
               
               <!-- Lista de Produtos -->
@@ -1308,7 +1328,7 @@
         </div>
 
         <!-- Modal Lightbox para Ampliar Imagem -->
-        <div id="modalImagemAmpliada" class="modal" style="display:none;z-index:10002;" onclick="fecharImagemAmpliada()">
+        <div id="modalImagemAmpliada" class="modal" style="display:none;z-index:10050;" onclick="fecharImagemAmpliada()">
           <div style="
             width:100%;
             height:100%;

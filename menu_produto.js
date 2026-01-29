@@ -10562,6 +10562,7 @@ let comprasAnexoAtual = null;
 function initComprasAnexo() {
   const inputFile = document.getElementById('modalComprasAnexo');
   const btnAnexo = document.getElementById('modalComprasAnexoBtn');
+  const iconAnexoCategoria = document.getElementById('modalComprasAnexoIconCategoria');
   const preview = document.getElementById('modalComprasAnexoPreview');
   const nomeArquivo = document.getElementById('modalComprasAnexoNome');
   const btnRemover = document.getElementById('modalComprasAnexoRemover');
@@ -10570,6 +10571,13 @@ function initComprasAnexo() {
   
   // Clique no botão abre seletor de arquivo
   btnAnexo.addEventListener('click', () => inputFile.click());
+
+  // Clique no ícone da Categoria abre seletor de arquivo
+  iconAnexoCategoria?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputFile.click();
+  });
   
   // Quando arquivo é selecionado
   inputFile.addEventListener('change', (e) => {
@@ -12434,6 +12442,9 @@ async function abrirModalDia(dayKey, info){
   }
   
   modal.style.display = 'flex';
+
+  // Filtros iniciam recolhidos
+  toggleFiltrosCatalogo(false);
   btnClose.onclick = () => { modal.style.display = 'none'; };
   modal.onclick = (ev) => { if (ev.target === modal) modal.style.display = 'none'; };
 }
@@ -12919,13 +12930,16 @@ function renderModalCarrinhoCompras() {
       }
     }
     
+    // Prepara strings para onclick ANTES de stringify
+    const infoProdutoTexto = `${window.escapeHtml(item.produto_codigo)} - ${window.escapeHtml(item.produto_descricao)}`;
+    
     // HTML da imagem do produto
     const imgHtml = temImagem && !urlExpirada ? 
       `<img 
         src="${item.url_imagem}" 
         alt="${window.escapeHtml(item.produto_descricao)}"
         style="width:100%;height:100%;object-fit:cover;border-radius:6px;cursor:zoom-in;"
-        onclick="if(typeof ampliarImagemProduto === 'function') ampliarImagemProduto('${item.url_imagem}', '${window.escapeHtml(item.produto_codigo)} - ${window.escapeHtml(item.produto_descricao)}');event.stopPropagation();"
+        onclick='if(typeof ampliarImagemProduto === "function") ampliarImagemProduto(${JSON.stringify(item.url_imagem)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
       />
       <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#d1d5db;border-radius:6px;background:#f9fafb;">
@@ -13268,10 +13282,13 @@ function renderModalCarrinhoLista() {
                       item.url_imagem.trim() && 
                       (item.url_imagem.startsWith('http://') || item.url_imagem.startsWith('https://'));
     
+    // Prepara string para onclick ANTES de stringify
+    const infoProdutoTexto = window.escapeHtml(item.produto_codigo);
+    
     const imgHtml = temImagem ? 
       `<img src="${item.url_imagem}" alt="${window.escapeHtml(item.produto_descricao)}" 
             style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:zoom-in;"
-            onclick="if(typeof ampliarImagemProduto === 'function') ampliarImagemProduto('${item.url_imagem}', '${window.escapeHtml(item.produto_codigo)}');event.stopPropagation();"
+            onclick='if(typeof ampliarImagemProduto === "function") ampliarImagemProduto(${JSON.stringify(item.url_imagem)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
             onerror="this.style.display='none';">` :
       `<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;border-radius:4px;">
         <i class="fa-solid fa-image" style="color:#d1d5db;font-size:16px;"></i>
@@ -19176,12 +19193,15 @@ function renderizarListaSelecaoItens(itens) {
         }
       }
       
+      // Prepara strings para onclick ANTES de stringify
+      const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
+      
       const imgHtml = imgUrl && !urlExpirada ? 
         `<img 
           src="${imgUrl}" 
           alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
           style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
-          onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+          onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
           onerror="this.style.display='none'"
         />` :
         urlExpirada ?
@@ -19783,12 +19803,15 @@ function renderizarListaSelecaoCotacao(itens) {
         }
       }
       
+      // Prepara strings para onclick ANTES de stringify
+      const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
+      
       const imgHtml = imgUrl && !urlExpirada ? 
         `<img 
           src="${imgUrl}" 
           alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
           style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
-          onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+          onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
           onerror="this.style.display='none'"
         />` :
         urlExpirada ?
@@ -20007,13 +20030,16 @@ function abrirModalInserirCotacoes(itens) {
       }
     }
     
+    // Prepara strings para onclick ANTES de stringify
+    const infoProdutoTexto = `${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}`;
+    
     // HTML da imagem ou ícone fallback
     const imgHtml = imgUrl && !urlExpirada ? 
       `<img 
         src="${imgUrl}" 
         alt="${escapeHtml(item.descricao || item.produto_descricao || '')}"
         style="width:50px;height:50px;object-fit:contain;border-radius:6px;background:#f9fafb;padding:4px;cursor:zoom-in;"
-        onclick="ampliarImagemProduto('${imgUrl}', '${escapeHtml(codigoProduto || '')} - ${escapeHtml(item.descricao || item.produto_descricao || '')}');event.stopPropagation();"
+        onclick='ampliarImagemProduto(${JSON.stringify(imgUrl)}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
         onerror="this.style.display='none'"
       />` :
       urlExpirada ?
@@ -20493,6 +20519,47 @@ async function abrirModalCatalogoOmie() {
       lista.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar catálogo</div>';
     }
   }
+  
+  // Adiciona event listeners para validar interação entre Requisição Direta e Não incluir quantidade
+  inicializarValidacaoCatalogoCheckboxes();
+}
+
+// Função para validar interação entre Requisição Direta e Não incluir quantidade
+function inicializarValidacaoCatalogoCheckboxes() {
+  const checkboxRequisicaoDireta = document.getElementById('catalogoRequisicaoDiretaGlobal');
+  const checkboxNaoIncluirQuantidade = document.getElementById('catalogoNaoIncluirQuantidade');
+  const labelNaoIncluirQuantidade = document.getElementById('labelNaoIncluirQuantidade');
+  
+  if (!checkboxRequisicaoDireta || !checkboxNaoIncluirQuantidade) return;
+  
+  // Event listener para Requisição Direta
+  checkboxRequisicaoDireta.addEventListener('change', function() {
+    if (this.checked) {
+      // Se marcar Requisição Direta, desabilita e desmarca Não incluir quantidade
+      checkboxNaoIncluirQuantidade.disabled = true;
+      checkboxNaoIncluirQuantidade.checked = false;
+      labelNaoIncluirQuantidade.style.opacity = '0.5';
+      labelNaoIncluirQuantidade.style.cursor = 'not-allowed';
+      labelNaoIncluirQuantidade.style.pointerEvents = 'none';
+      console.log('[Catálogo] Requisição Direta ativada - Não incluir quantidade desabilitada');
+    } else {
+      // Se desmarcar Requisição Direta, habilita Não incluir quantidade
+      checkboxNaoIncluirQuantidade.disabled = false;
+      labelNaoIncluirQuantidade.style.opacity = '1';
+      labelNaoIncluirQuantidade.style.cursor = 'pointer';
+      labelNaoIncluirQuantidade.style.pointerEvents = 'auto';
+      console.log('[Catálogo] Requisição Direta desativada - Não incluir quantidade habilitada');
+    }
+  });
+  
+  // Inicializa estado inicial baseado em Requisição Direta
+  if (checkboxRequisicaoDireta.checked) {
+    checkboxNaoIncluirQuantidade.disabled = true;
+    checkboxNaoIncluirQuantidade.checked = false;
+    labelNaoIncluirQuantidade.style.opacity = '0.5';
+    labelNaoIncluirQuantidade.style.cursor = 'not-allowed';
+    labelNaoIncluirQuantidade.style.pointerEvents = 'none';
+  }
 }
 
 // Renderiza produtos do catálogo
@@ -20528,12 +20595,15 @@ function renderizarCatalogoOmie(produtos) {
       }
     }
     
+    // Prepara string para onclick ANTES de stringify
+    const infoProdutoTexto = `${produto.codigo} - ${produto.descricao || ''}`;
+    
     const imgHtml = temImagem && !urlExpirada ? 
       `<img 
         src="${produto.url_imagem}" 
         alt="${escapeHtml(produto.descricao)}"
         style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
-        onclick="ampliarImagemProduto('${produto.url_imagem}', '${escapeHtml(produto.codigo)} - ${escapeHtml(produto.descricao)}');event.stopPropagation();"
+        onclick='ampliarImagemProduto(${JSON.stringify(produto.url_imagem || '')}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
         onmouseover="this.style.transform='scale(1.05)'"
         onmouseout="this.style.transform='scale(1)'"
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
@@ -20793,12 +20863,13 @@ async function atualizarImagemExpirada(codigoProduto, codigo, descricao) {
     
     if (data.url_imagem) {
       // Substitui o container pela imagem
+      const infoTexto = `${codigo} - ${descricao}`;
       container.outerHTML = `
         <img 
           src="${data.url_imagem}" 
           alt="${escapeHtml(descricao)}"
           style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
-          onclick="ampliarImagemProduto('${data.url_imagem}', '${escapeHtml(codigo)} - ${escapeHtml(descricao)}');event.stopPropagation();"
+          onclick='ampliarImagemProduto(${JSON.stringify(data.url_imagem)}, ${JSON.stringify(infoTexto)});event.stopPropagation();'
           onmouseover="this.style.transform='scale(1.05)'"
           onmouseout="this.style.transform='scale(1)'"
           onerror="this.style.display='none'"
@@ -20945,6 +21016,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const selectNPGlobal = document.getElementById('catalogoNPGlobal');
   const textareaObservacaoGlobal = document.getElementById('catalogoObservacaoGlobal');
   const checkboxRequisicaoDiretaGlobal = document.getElementById('catalogoRequisicaoDiretaGlobal');
+  const checkboxNaoIncluirQuantidade = document.getElementById('catalogoNaoIncluirQuantidade');
   
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
@@ -20959,6 +21031,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const npValue = selectNPGlobal ? selectNPGlobal.value : 'A';
   const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
+  const naoIncluirQuantidade = checkboxNaoIncluirQuantidade ? checkboxNaoIncluirQuantidade.checked : false;
   
   console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
   // Validações dos campos globais
@@ -20985,13 +21058,17 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const inputPrazo = document.getElementById(`catalogo-prazo-${codigo}`);
   const prazoContainer = document.getElementById(`catalogo-prazo-container-${codigo}`);
   
-  const quantidade = inputQtd ? parseInt(inputQtd.value) || 1 : 1;
+  let quantidade = inputQtd ? parseInt(inputQtd.value) || 1 : 1;
   const prazo = (prazoContainer && prazoContainer.style.display !== 'none' && inputPrazo) ? inputPrazo.value : '';
   
   // Validações
-  if (quantidade < 1) {
-    alert('Quantidade deve ser maior que zero!');
-    return;
+  if (naoIncluirQuantidade) {
+    quantidade = '';
+  } else {
+    if (quantidade < 1) {
+      alert('Quantidade deve ser maior que zero!');
+      return;
+    }
   }
   
   // Busca o produto completo no catálogo para pegar a família e o codigo_produto
@@ -21000,27 +21077,49 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const codigoOmie = produtoCatalogo ? produtoCatalogo.codigo_produto : null;
   const urlImagem = produtoCatalogo ? produtoCatalogo.url_imagem : null;
   
-  // Adiciona direto ao carrinho com os dados globais
-  window.carrinhoCompras.push({
-    produto_codigo: codigo,
-    produto_descricao: descricao,
-    quantidade: quantidade,
-    prazo_solicitado: prazo || null,
-    familia_codigo: null,
-    familia_nome: familiaDescricao,
-    observacao: '',
-    departamento: departamento,
-    centro_custo: centroCusto,
-    codigo_produto_omie: null,
-    codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
-    url_imagem: urlImagem,  // Adiciona URL da imagem do produto
-    objetivo_compra: objetivoCompraGlobal || 'Compra via catálogo Omie',
-    resp_inspecao_recebimento: '',
-    retorno_cotacao: retornoCotacoesTexto || (retornoCotacoes === 'sim' ? 'Sim' : 'Não'),
-    categoria_compra: categoriaCompra || '',  // Usar o código da opção selecionada (obrigatório para Omie)
-    np: npValue,  // Novo campo NP
-    requisicao_direta: requisicaoDiretaGlobal || false
+  // Se o item já existe no carrinho com as mesmas configurações, soma a quantidade
+  const retornoCotacaoFinal = retornoCotacoesTexto || (retornoCotacoes === 'sim' ? 'Sim' : 'Não');
+  const objetivoFinal = objetivoCompraGlobal || 'Compra via catálogo Omie';
+  const existente = (window.carrinhoCompras || []).find(item => {
+    return item.produto_codigo === codigo &&
+      (item.departamento || '') === departamento &&
+      (item.objetivo_compra || '') === objetivoFinal &&
+      (item.categoria_compra || '') === (categoriaCompra || '') &&
+      (item.resp_inspecao_recebimento || '') === '' &&
+      (item.np || 'A') === npValue &&
+      (item.retorno_cotacao || '') === retornoCotacaoFinal &&
+      (item.requisicao_direta === (requisicaoDiretaGlobal || false));
   });
+
+  if (existente) {
+    if (naoIncluirQuantidade) {
+      existente.quantidade = '';
+    } else {
+      existente.quantidade = (parseFloat(existente.quantidade) || 0) + quantidade;
+    }
+  } else {
+    // Adiciona direto ao carrinho com os dados globais
+    window.carrinhoCompras.push({
+      produto_codigo: codigo,
+      produto_descricao: descricao,
+      quantidade: quantidade,
+      prazo_solicitado: prazo || null,
+      familia_codigo: null,
+      familia_nome: familiaDescricao,
+      observacao: '',
+      departamento: departamento,
+      centro_custo: centroCusto,
+      codigo_produto_omie: null,
+      codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
+      url_imagem: urlImagem,  // Adiciona URL da imagem do produto
+      objetivo_compra: objetivoFinal,
+      resp_inspecao_recebimento: '',
+      retorno_cotacao: retornoCotacaoFinal,
+      categoria_compra: categoriaCompra || '',  // Usar o código da opção selecionada (obrigatório para Omie)
+      np: npValue,  // Novo campo NP
+      requisicao_direta: requisicaoDiretaGlobal || false
+    });
+  }
   
   // Renderiza carrinho atualizado
   renderCarrinhoCompras();
@@ -21045,7 +21144,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   }
   
   // Reseta campos do card
-  if (inputQtd) inputQtd.value = 1;
+  if (inputQtd) inputQtd.value = naoIncluirQuantidade ? '' : 1;
   if (prazoContainer && prazoContainer.style.display !== 'none') {
     togglePrazoCatalogo(codigo);
   }
@@ -21126,10 +21225,31 @@ function fecharModalCatalogoOmie() {
   if (modal) modal.style.display = 'none';
 }
 
+function toggleFiltrosCatalogo(forceOpen) {
+  const container = document.getElementById('catalogoFiltrosContainer');
+  const toggleBtn = document.getElementById('catalogoFiltrosToggle');
+  if (!container || !toggleBtn) return;
+
+  const shouldCollapse = typeof forceOpen === 'boolean'
+    ? !forceOpen
+    : !container.classList.contains('is-collapsed');
+
+  container.classList.toggle('is-collapsed', shouldCollapse);
+  const icon = toggleBtn.querySelector('i');
+  const label = toggleBtn.querySelector('span');
+  if (icon) icon.className = shouldCollapse ? 'fa-solid fa-filter' : 'fa-solid fa-filter-circle-xmark';
+  if (label) label.textContent = shouldCollapse ? 'Mostrar filtros' : 'Recolher filtros';
+}
+
 // Abre modal de imagem ampliada
 function ampliarImagemProduto(urlImagem, infoProduto) {
   const modal = document.getElementById('modalImagemAmpliada');
   const img = document.getElementById('imagemAmpliada');
+  if (!modal || !img) return;
+  if (!urlImagem) {
+    console.warn('[Catálogo] Imagem indisponível para ampliar:', infoProduto || 'sem info');
+    return;
+  }
   
   img.src = urlImagem;
   modal.style.display = 'flex';
@@ -21477,6 +21597,7 @@ window.ampliarImagemProduto = ampliarImagemProduto;
 window.fecharImagemAmpliada = fecharImagemAmpliada;
 window.selecionarProdutoCatalogo = selecionarProdutoCatalogo;
 window.togglePrazoCatalogo = togglePrazoCatalogo;
+window.toggleFiltrosCatalogo = toggleFiltrosCatalogo;
 
 // Exporta funções de configuração
 window.abrirPainelConfiguracaoCateg = abrirPainelConfiguracaoCateg;
@@ -22622,7 +22743,17 @@ async function abrirModalAprovacaoRequisicao() {
                       <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
                       <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
                       <td style="padding:10px;color:#374151;max-width:250px;line-height:1.4;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
-                      <td style="padding:10px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;">${item.quantidade}</td>
+                      <td style="padding:10px;text-align:center;">
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value="${item.quantidade || ''}"
+                          style="width:70px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;"
+                          onkeydown="if(event.key==='Enter'){this.blur();}"
+                          onblur="atualizarQuantidadeItemAprovacao(${item.id}, this)"
+                        />
+                      </td>
                       <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.solicitante || '-')}</td>
                       <td style="padding:10px;text-align:center;">
                         <span style="background:${retornoCor};color:white;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${retornoTexto}</span>
@@ -22750,6 +22881,37 @@ async function aprovarItemRequisicao(itemId) {
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
     alert('Erro ao aprovar item: ' + err.message);
+  }
+}
+
+// Atualiza a quantidade de um item direto no modal de aprovação
+async function atualizarQuantidadeItemAprovacao(itemId, input) {
+  try {
+    const valor = input?.value;
+    const quantidade = Number(valor);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      alert('Quantidade inválida. Use um valor maior que zero.');
+      await abrirModalAprovacaoRequisicao();
+      return;
+    }
+    
+    const resp = await fetch(`/api/compras/solicitacoes/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ quantidade })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({}));
+      throw new Error(error.error || 'Falha ao atualizar quantidade');
+    }
+    
+    // Recarrega o modal para atualizar totais e agrupamentos
+    await abrirModalAprovacaoRequisicao();
+  } catch (err) {
+    console.error('[Aprovação] Erro ao atualizar quantidade:', err);
+    alert('Erro ao atualizar quantidade: ' + err.message);
   }
 }
 
@@ -23287,6 +23449,7 @@ window.aprovarItemRequisicao = aprovarItemRequisicao;
 window.adicionarItemAprovacao = adicionarItemAprovacao;
 window.retificarItemAprovacao = retificarItemAprovacao;
 window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
+window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 
 async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
