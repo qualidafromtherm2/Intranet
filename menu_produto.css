@@ -4095,6 +4095,37 @@ ul#comprasList li ,
   font-weight: 600;
 }
 
+/* Filtros do catálogo Omie */
+.catalogo-filtros-toggle {
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.catalogo-filtros-toggle:hover {
+  background: #0f172a;
+}
+
+.catalogo-filtros-container {
+  transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+
+.catalogo-filtros-container.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0 !important;
+  overflow: hidden;
+}
+
 /* Estilos para inputs e selects do modal de compras */
 #comprasModalForm input[type="text"],
 #comprasModalForm input[type="number"],

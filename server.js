@@ -1418,7 +1418,8 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const { status, prazo_estipulado, quem_recebe } = req.body || {};
+    const { status, prazo_estipulado, quem_recebe, quantidade } = req.body || {};
+    
     const allowedStatus = [
       'aguardando aprovação',
       'aguardando cotação',
@@ -1453,6 +1454,16 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
       values.push(quem_recebe || null);
     }
 
+    // Permite atualizar quantidade
+    if (typeof quantidade !== 'undefined') {
+      const quantidadeNum = Number(quantidade);
+      if (!Number.isFinite(quantidadeNum) || quantidadeNum <= 0) {
+        return res.status(400).json({ error: 'Quantidade inválida' });
+      }
+      fields.push(`quantidade = $${idx++}`);
+      values.push(quantidadeNum);
+    }
+    
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
 
     await client.query('CREATE SCHEMA IF NOT EXISTS compras');
@@ -11424,20 +11435,31 @@ app.post('/api/compras/pedido', async (req, res) => {
           anexo
         } = item;
         
-        if (!produto_codigo || !quantidade) {
-          throw new Error('Cada item precisa ter produto_codigo e quantidade');
+        // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
+        if (!produto_codigo || quantidade === undefined || quantidade === null) {
+          throw new Error('Cada item precisa ter produto_codigo');
         }
         
-        // Usa o status enviado pelo frontend, ou define baseado em requisicao_direta se não informado
-        // Se status_pedido foi informado: usa ele
-        // Se requisicao_direta = true: vai direto para "aguardando compra"
-        // Se requisicao_direta = false: vai para "aguardando aprovação da requisição"
-        const statusInicial = status_pedido || (requisicao_direta === true ? 'aguardando compra' : 'aguardando aprovação da requisição');
+        // Define status baseado no checkbox "Requisição Direta":
+        // - requisicao_direta = true (marcado) → "aguardando compra"
+        // - requisicao_direta = false/undefined (desmarcado) → "aguardando aprovação da requisição"
+        let statusInicial;
+        if (status_pedido) {
+          // Se status foi informado manualmente pelo usuário, usa ele
+          statusInicial = status_pedido;
+        } else {
+          // Define baseado no checkbox Requisição Direta
+          if (requisicao_direta === true) {
+            statusInicial = 'aguardando compra';
+          } else {
+            statusInicial = 'aguardando aprovação da requisição';
+          }
+        }
         
-        // Se o usuário alterou manualmente o status (status_pedido existe), não deve criar requisição automática
+        // Marca para criação automática na Omie se requisicao_direta estiver marcado
         const deveCriarRequisicaoAutomatica = requisicao_direta === true && !status_pedido;
         
-        console.log(`[Compras] Item ${produto_codigo} - Status Pedido: ${status_pedido} - Requisição Direta: ${requisicao_direta} - Criar Req Auto: ${deveCriarRequisicaoAutomatica} - Status Final: ${statusInicial}`);
+        console.log(`[Compras] Item ${produto_codigo} - Requisição Direta: ${requisicao_direta} - Status Final: ${statusInicial}`);
         
         // Processa anexo se houver
         let anexosArray = null;
@@ -11512,7 +11534,7 @@ app.post('/api/compras/pedido', async (req, res) => {
         `, [
           produto_codigo,
           produto_descricao || '',
-          quantidade,
+          quantidade === '' ? null : quantidade, // Converte quantidade vazia para NULL
           prazo_solicitado || null,
           familia_nome || null,
           statusInicial,
@@ -11623,14 +11645,22 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           status_pedido
         } = item;
         
-        if (!produto_codigo || !quantidade) {
-          throw new Error('Cada item precisa ter produto_codigo e quantidade');
+        // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
+        if (!produto_codigo || quantidade === undefined || quantidade === null) {
+          throw new Error('Cada item precisa ter produto_codigo');
         }
         
-        // Define status inicial: "aguardando compra" se Requisição Direta=Sim, senão "aguardando aprovação da requisição"
-        const statusInicial = requisicao_direta === true ? 'aguardando compra' : 'aguardando aprovação da requisição';
+        // Define status baseado no checkbox "Requisição Direta":
+        // - requisicao_direta = true (marcado) → "aguardando compra"
+        // - requisicao_direta = false/undefined (desmarcado) → "aguardando aprovação da requisição"
+        let statusInicial;
+        if (requisicao_direta === true) {
+          statusInicial = 'aguardando compra';
+        } else {
+          statusInicial = 'aguardando aprovação da requisição';
+        }
         
-        console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta: ${requisicao_direta}`);
+        console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta: ${requisicao_direta} - Status: ${statusInicial}`);
         
         // Insere item na solicitacao_compras com os campos corretos
         const result = await client.query(`
@@ -11656,7 +11686,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         `, [
           produto_codigo,
           produto_descricao || '',
-          quantidade,
+          quantidade === '' ? null : quantidade, // Converte quantidade vazia para NULL
           prazo_solicitado || null,
           statusInicial,
           observacao || '',
@@ -11673,7 +11703,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         const itemId = result.rows[0].id;
         idsInseridos.push(itemId);
         
-        // Se Requisição Direta = Sim, marca para criar requisição na Omie
+        // Se checkbox Requisição Direta estiver marcado, marca para criar na Omie
         if (requisicao_direta === true) {
           idsRequisicaoDireta.push(itemId);
         }

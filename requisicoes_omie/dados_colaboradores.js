@@ -612,6 +612,7 @@ async function showPermissoes(userId, username) {
         <div style="padding:24px 8px;opacity:.7;text-align:center">Carregando permissões…</div>
       </div>
       <div class="colab-perm-footer">
+        <button id="permToggleTodos" class="colab-perm-btn" style="margin-right:auto;">Desmarcar Todos</button>
         <button id="permSalvar" class="colab-perm-btn primary">Salvar alterações</button>
       </div>
     </div>`;
@@ -702,7 +703,36 @@ async function showPermissoes(userId, username) {
   renderSection('Menu lateral', buildTree(byPos.side));
   renderSection('Menu superior', buildTree(byPos.top));
 
-  // 5) Salvar
+  // 5) Botão Marcar/Desmarcar Todos
+  const btnToggleTodos = $.querySelector('#permToggleTodos');
+  let todosEstaoMarcados = true; // Estado inicial: assume que há checkboxes marcados
+  
+  // Atualiza o texto do botão baseado no estado atual dos checkboxes
+  function atualizarTextoBotao() {
+    const cbs = $.querySelectorAll('.perm-cb');
+    const marcados = Array.from(cbs).filter(cb => cb.checked).length;
+    todosEstaoMarcados = marcados > 0;
+    btnToggleTodos.textContent = todosEstaoMarcados ? 'Desmarcar Todos' : 'Marcar Todos';
+  }
+  
+  // Handler do botão toggle
+  btnToggleTodos.onclick = () => {
+    const cbs = $.querySelectorAll('.perm-cb');
+    // Se tem pelo menos um marcado, desmarca tudo; senão marca tudo
+    const deveTodosEstarMarcados = !todosEstaoMarcados;
+    cbs.forEach(cb => { cb.checked = deveTodosEstarMarcados; });
+    atualizarTextoBotao();
+  };
+  
+  // Atualiza o texto do botão ao carregar
+  atualizarTextoBotao();
+  
+  // Monitora mudanças individuais nos checkboxes para atualizar o texto do botão
+  $.querySelectorAll('.perm-cb').forEach(cb => {
+    cb.addEventListener('change', () => atualizarTextoBotao());
+  });
+
+  // 6) Salvar
   $.querySelector('#permSalvar').onclick = async () => {
     const cbs = $.querySelectorAll('.perm-cb');
     const overrides = [];
