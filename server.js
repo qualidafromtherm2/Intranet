@@ -2701,6 +2701,7 @@ app.get('/api/compras/parcelas', async (req, res) => {
 app.get('/api/compras/categorias', async (req, res) => {
   try {
     console.log('[API /api/compras/categorias] Buscando categorias da Omie...');
+    console.log('[API /api/compras/categorias] Sessão:', req.session?.user?.username || 'sem sessão');
     
     // Busca categorias usando a API correta da Omie
     // Endpoint: /api/v1/geral/categorias/ - ListarCategorias
@@ -2717,6 +2718,10 @@ app.get('/api/compras/categorias', async (req, res) => {
         }]
       })
     });
+    
+    if (!response.ok) {
+      throw new Error(`Omie API retornou status ${response.status}`);
+    }
     
     const data = await response.json();
     
@@ -2750,8 +2755,12 @@ app.get('/api/compras/categorias', async (req, res) => {
       categorias 
     });
   } catch (err) {
-    console.error('[API /api/compras/categorias] Erro:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[API /api/compras/categorias] Erro detalhado:', {
+      message: err.message,
+      stack: err.stack,
+      name: err.name
+    });
+    res.status(500).json({ ok: false, error: err.message, details: err.toString() });
   }
 });
 
@@ -11570,6 +11579,337 @@ app.post('/api/compras/pedido', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message || 'Erro ao criar solicitações' });
   }
 });
+
+// POST /api/compras/solicitacao - Cria solicitações agrupadas por NP (do modal de carrinho)
+app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
+  try {
+    const { itens } = req.body || {};
+    
+    // Obtém usuário da sessão
+    const solicitante = req.session?.user?.username || req.session?.user?.id || 'sistema';
+    
+    console.log('[Compras-Solicitacao] Recebido:', { totalItens: itens?.length, primeiroItem: itens?.[0] });
+    if (!Array.isArray(itens) || itens.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum item no carrinho' });
+    }
+
+    const client = await pool.connect();
+    const idsInseridos = [];
+    const idsRequisicaoDireta = [];
+    
+    try {
+      await client.query('BEGIN');
+      
+      for (const item of itens) {
+        const {
+          produto_codigo,
+          produto_descricao,
+          quantidade,
+          prazo_solicitado,
+          familia_codigo,
+          familia_nome,
+          observacao,
+          departamento,
+          centro_custo,
+          objetivo_compra,
+          resp_inspecao_recebimento,
+          responsavel_pela_compra,
+          retorno_cotacao,
+          codigo_produto_omie,
+          categoria_compra,
+          codigo_omie,
+          requisicao_direta,
+          np,
+          status_pedido
+        } = item;
+        
+        if (!produto_codigo || !quantidade) {
+          throw new Error('Cada item precisa ter produto_codigo e quantidade');
+        }
+        
+        // Define status inicial: "aguardando compra" se Requisição Direta=Sim, senão "aguardando aprovação da requisição"
+        const statusInicial = requisicao_direta === true ? 'aguardando compra' : 'aguardando aprovação da requisição';
+        
+        console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta: ${requisicao_direta}`);
+        
+        // Insere item na solicitacao_compras com os campos corretos
+        const result = await client.query(`
+          INSERT INTO compras.solicitacao_compras (
+            produto_codigo,
+            produto_descricao,
+            quantidade,
+            prazo_solicitado,
+            status,
+            observacao,
+            solicitante,
+            departamento,
+            objetivo_compra,
+            categoria_compra_codigo,
+            retorno_cotacao,
+            resp_inspecao_recebimento,
+            codigo_produto_omie,
+            codigo_omie,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          RETURNING id
+        `, [
+          produto_codigo,
+          produto_descricao || '',
+          quantidade,
+          prazo_solicitado || null,
+          statusInicial,
+          observacao || '',
+          solicitante,
+          departamento || null,
+          objetivo_compra || null,
+          categoria_compra || null, // categoria_compra_codigo - usa o código recebido do frontend
+          retorno_cotacao || null,
+          resp_inspecao_recebimento || solicitante,
+          codigo_produto_omie || null,
+          codigo_omie || null
+        ]);
+        
+        const itemId = result.rows[0].id;
+        idsInseridos.push(itemId);
+        
+        // Se Requisição Direta = Sim, marca para criar requisição na Omie
+        if (requisicao_direta === true) {
+          idsRequisicaoDireta.push(itemId);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      console.log(`[Compras-Solicitacao] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsInseridos.join(', ')}`);
+      console.log(`[Compras-Solicitacao] ${idsRequisicaoDireta.length} item(ns) com Requisição Direta para processar na Omie`);
+      
+      // APÓS inserir todos os itens no banco, processa os com Requisição Direta na Omie
+      // Agrupa os items de requisição direta por NP
+      const itensFiltrados = itens.filter((_, idx) => idsRequisicaoDireta.includes(idsInseridos[idx]));
+      
+      // Mapa para agrupar por NP
+      const gruposNP = {};
+      itensFiltrados.forEach((item, idx) => {
+        const np = item.np || 'A';
+        if (!gruposNP[np]) {
+          gruposNP[np] = [];
+        }
+        gruposNP[np].push({
+          item: item,
+          idDb: idsInseridos[idx]
+        });
+      });
+      
+      // Processa cada grupo de NP
+      for (const [np, itemsGroup] of Object.entries(gruposNP)) {
+        try {
+          await processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante);
+        } catch (errOmie) {
+          console.error(`[Compras-Solicitacao] Erro ao processar requisição Omie para NP ${np}:`, errOmie);
+          // Continua processando os outros grupos mesmo se um falhar
+        }
+      }
+      
+      res.json({
+        ok: true,
+        total_itens: itens.length,
+        ids: idsInseridos,
+        ids_requisicao_direta: idsRequisicaoDireta,
+        solicitante: solicitante
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[Compras-Solicitacao] Erro ao criar solicitações:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao criar solicitações' });
+  }
+});
+
+// ========== GERENCIADOR DE RATE LIMITING PARA API OMIE ==========
+// Objetivo: Respeitar o limite de 3 requisições por minuto da Omie
+// Mantém histórico das requisições e aguarda se necessário antes de enviar
+class OmieRateLimiter {
+  constructor(maxRequisicoes = 3, intervaloMinutos = 1) {
+    this.maxRequisicoes = maxRequisicoes;           // 3 requisições
+    this.intervaloMs = intervaloMinutos * 60 * 1000; // 60 segundos em ms
+    this.requisicoes = [];                           // Array com timestamps das requisições
+  }
+
+  /**
+   * Aguarda se necessário e marca uma nova requisição
+   * Antes de enviar para Omie, chame este método
+   */
+  async aguardarDisponibilidade() {
+    const agora = Date.now();
+    
+    // Remove requisições mais antigas que o intervalo
+    this.requisicoes = this.requisicoes.filter(timestamp => {
+      return agora - timestamp < this.intervaloMs;
+    });
+
+    // Se já atingiu o limite, aguarda
+    if (this.requisicoes.length >= this.maxRequisicoes) {
+      const tempoMaisAntigo = this.requisicoes[0];
+      const tempoEspera = this.intervaloMs - (agora - tempoMaisAntigo);
+      
+      console.log(`[Omie-RateLimit] Limite atingido (${this.requisicoes.length}/${this.maxRequisicoes}). Aguardando ${Math.ceil(tempoEspera / 1000)}s antes de enviar...`);
+      
+      await new Promise(resolve => setTimeout(resolve, tempoEspera));
+      
+      // Após aguardar, remove requisições expiradas
+      this.requisicoes = this.requisicoes.filter(timestamp => {
+        return Date.now() - timestamp < this.intervaloMs;
+      });
+    }
+
+    // Registra nova requisição
+    this.requisicoes.push(Date.now());
+    console.log(`[Omie-RateLimit] Enviando requisição (${this.requisicoes.length}/${this.maxRequisicoes}). Próxima disponível em 60s.`);
+  }
+}
+
+// Instância global do gerenciador de rate limiting
+const omieRateLimiter = new OmieRateLimiter(3, 1); // 3 requisições por 1 minuto
+
+// FUNÇÃO AUXILIAR: Processa requisição direta na Omie para um grupo de itens com mesmo NP
+async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) {
+  if (!itemsGroup || itemsGroup.length === 0) return;
+  
+  const np = itemsGroup[0].item.np || 'A';
+  console.log(`[Compras-Solicitacao-Omie] Processando ${itemsGroup.length} itens para NP: ${np}`);
+  
+  // Gera número de pedido único
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  const hora = String(agora.getHours()).padStart(2, '0');
+  const minuto = String(agora.getMinutes()).padStart(2, '0');
+  const segundo = String(agora.getSeconds()).padStart(2, '0');
+  const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
+  const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+  
+  // Monta itens para Omie
+  const itensOmie = [];
+  
+  for (const itemGroup of itemsGroup) {
+    const item = itemGroup.item;
+    const idDb = itemGroup.idDb;
+    
+    // Busca CMC do produto
+    let precoUnitario = 0;
+    if (item.codigo_omie) {
+      try {
+        const { rows } = await client.query(`
+          SELECT cmc FROM public.omie_estoque_posicao 
+          WHERE omie_prod_id = $1 LIMIT 1
+        `, [item.codigo_omie]);
+        
+        if (rows.length > 0 && rows[0].cmc) {
+          precoUnitario = parseFloat(rows[0].cmc) || 0;
+          console.log(`[Compras-Solicitacao-Omie] CMC encontrado para ${item.codigo_omie}: R$ ${precoUnitario}`);
+        }
+      } catch (err) {
+        console.warn(`[Compras-Solicitacao-Omie] Erro ao buscar CMC para ${item.codigo_omie}:`, err.message);
+      }
+    }
+    
+    // Determina data de sugestão
+    let dtSugestao;
+    if (item.prazo_solicitado) {
+      const dt = new Date(item.prazo_solicitado);
+      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    } else {
+      const dt = new Date();
+      dt.setDate(dt.getDate() + 5);
+      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    }
+    
+    itensOmie.push({
+      codProd: item.codigo_omie || null,
+      obsItem: item.objetivo_compra || '',
+      precoUnit: precoUnitario,
+      qtde: parseFloat(item.quantidade) || 1,
+      idDb: idDb,
+      dtSugestao: dtSugestao,
+      respInspecao: item.resp_inspecao_recebimento || solicitante,
+      observacao: item.observacao || ''
+    });
+  }
+  
+  // Monta observação formatada com dados do primeiro item (usada para toda a requisição)
+  const primeiroItem = itemsGroup[0].item;
+  const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${primeiroItem.resp_inspecao_recebimento || solicitante}\nNPST: ${numeroPedido}\nNPOM: ${primeiroItem.codigo_omie || ''}\nNP: ${np}\nObjetivo da Compra: ${primeiroItem.objetivo_compra || ''}\nObservação: ${primeiroItem.observacao || ''}`.trim();
+  
+  // Pega a categoria de compra do primeiro item (todos do mesmo NP devem ter a mesma categoria)
+  // Nota: primeiroItem vem do array do frontend, onde o campo é "categoria_compra", não "categoria_compra_codigo"
+  const categoriaCompra = primeiroItem.categoria_compra || '';
+  console.log(`[Compras-Solicitacao-Omie] Item recebido:`, primeiroItem);
+  console.log(`[Compras-Solicitacao-Omie] Categoria da compra (NP ${np}): Código="${categoriaCompra}" | Campo="categoria_compra"`);
+  
+  // Monta payload para Omie - IncluirReq (seguindo o padrão do aprovar-item)
+  const requisicaoOmie = {
+    codIntReqCompra: numeroPedido,
+    codCateg: categoriaCompra,
+    dtSugestao: itensOmie[0].dtSugestao,
+    obsReqCompra: obsReqCompra,
+    obsIntReqCompra: '',
+    ItensReqCompra: itensOmie.map(it => ({
+      codProd: it.codProd,
+      obsItem: it.obsItem,
+      precoUnit: it.precoUnit,
+      qtde: it.qtde
+    }))
+  };
+  
+  console.log(`[Compras-Solicitacao-Omie] Enviando para Omie IncluirReq (NP: ${np}):`, JSON.stringify(requisicaoOmie, null, 2));
+  
+  // Aguarda disponibilidade respeitando rate limit da Omie (3 requisições por minuto)
+  await omieRateLimiter.aguardarDisponibilidade();
+  
+  // Envia para Omie
+  const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'IncluirReq',
+      app_key: process.env.OMIE_APP_KEY,
+      app_secret: process.env.OMIE_APP_SECRET,
+      param: [requisicaoOmie]
+    })
+  });
+  
+  const omieResult = await omieResponse.json();
+  
+  if (!omieResponse.ok || omieResult.faultstring) {
+    console.error(`[Compras-Solicitacao-Omie] Erro Omie para NP ${np}:`, omieResult);
+    throw new Error(omieResult.faultstring || `Erro ao criar requisição Omie para NP ${np}`);
+  }
+  
+  console.log(`[Compras-Solicitacao-Omie] Resposta Omie para NP ${np}:`, omieResult);
+  
+  // Atualiza todos os itens deste grupo no banco
+  const codReqCompra = omieResult.codReqCompra || null;
+  const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
+  
+  for (const itemGroup of itemsGroup) {
+    await client.query(`
+      UPDATE compras.solicitacao_compras
+      SET 
+        numero_pedido = $1,
+        ncodped = $2,
+        updated_at = NOW()
+      WHERE id = $3
+    `, [codIntReqCompra, codReqCompra, itemGroup.idDb]);
+    
+    console.log(`[Compras-Solicitacao-Omie] Item ${itemGroup.idDb} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
+  }
+}
 
 // POST /api/compras/agrupar-itens - Agrupa itens selecionados com um numero_pedido
 app.post('/api/compras/agrupar-itens', express.json(), async (req, res) => {

@@ -12654,6 +12654,7 @@ function setupComprasExpandListeners() {
 function renderCarrinhoCompras() {
   const tbody = document.getElementById('comprasCarrinhoTbody');
   const countEl = document.getElementById('comprasCarrinhoCount');
+  const badgeEl = document.getElementById('carrinhoCountBadge');
   const btnLimpar = document.getElementById('comprasLimparCarrinhoBtn');
   const btnEnviar = document.getElementById('comprasEnviarPedidoBtn');
   const tituloCarrinho = document.getElementById('comprasTituloCarrinho');
@@ -12664,6 +12665,12 @@ function renderCarrinhoCompras() {
   const carrinho = window.carrinhoCompras || [];
   
   if (countEl) countEl.textContent = carrinho.length;
+  
+  // Atualiza o badge do botão Abrir Carrinho
+  if (badgeEl) {
+    badgeEl.textContent = carrinho.length;
+    badgeEl.style.display = carrinho.length > 0 ? 'flex' : 'none';
+  }
   
   // Atualiza também o contador do catálogo Omie se existir
   if (typeof atualizarContadorCatalogo === 'function') {
@@ -12721,6 +12728,883 @@ function renderCarrinhoCompras() {
     });
   });
 }
+
+// ========== MODAL DO CARRINHO DE COMPRAS ==========
+
+// Variável global para controlar modo de visualização (cards ou lista)
+window.carrinhoViewMode = 'grade'; // 'grade' ou 'lista'
+
+// Variável global para armazenar usuários ativos
+window.usuariosAtivos = [];
+
+// Obtém o nome do usuário logado
+function obterUsuarioLogado() {
+  return (document.getElementById('userNameDisplay')?.textContent || '').trim() || 
+         window.__sessionUser?.username || 
+         '';
+}
+
+// Abre o modal do carrinho e sincroniza com os dados atuais
+window.abrirModalCarrinhoCompras = async function() {
+  const modal = document.getElementById('modalCarrinhoCompras');
+  if (!modal) return;
+  
+  // Carrega usuários ativos se ainda não foram carregados
+  if (window.usuariosAtivos.length === 0) {
+    await carregarUsuariosAtivos();
+  }
+  
+  // Sincroniza os dados do carrinho no modal
+  renderModalCarrinhoCompras();
+  
+  // Adiciona evento ao selector de NP
+  const selectFiltro = document.getElementById('filtroCarrinhoNP');
+  if (selectFiltro) {
+    selectFiltro.addEventListener('change', () => {
+      if (window.carrinhoViewMode === 'cards') {
+        renderModalCarrinhoCompras();
+      } else {
+        renderModalCarrinhoLista();
+      }
+    });
+  }
+  
+  // Exibe o modal
+  modal.style.display = 'flex';
+  setTimeout(() => modal.classList.add('active'), 10);
+}
+
+// Fecha o modal do carrinho
+function fecharModalCarrinhoCompras() {
+  const modal = document.getElementById('modalCarrinhoCompras');
+  if (!modal) return;
+  
+  modal.classList.remove('active');
+  setTimeout(() => {
+    modal.style.display = 'none';
+  }, 300);
+}
+
+// Carrega lista de usuários ativos
+async function carregarUsuariosAtivos() {
+  try {
+    const response = await fetch('/api/compras/usuarios');
+    if (!response.ok) throw new Error('Erro ao carregar usuários');
+    const data = await response.json();
+    window.usuariosAtivos = data.usuarios || [];
+  } catch (err) {
+    console.error('[CARRINHO] Erro ao carregar usuários:', err);
+    window.usuariosAtivos = [];
+  }
+}
+
+// Alterna entre visualização de cards e lista
+function toggleCarrinhoView() {
+  const cardsContainer = document.getElementById('modalCarrinhoCards');
+  const listaContainer = document.getElementById('modalCarrinhoLista');
+  const iconView = document.getElementById('iconViewToggle');
+  const textView = document.getElementById('textViewToggle');
+  
+  if (!cardsContainer || !listaContainer) return;
+  
+  if (window.carrinhoViewMode === 'cards') {
+    // Muda para lista
+    window.carrinhoViewMode = 'lista';
+    cardsContainer.style.display = 'none';
+    listaContainer.style.display = 'block';
+    if (iconView) iconView.className = 'fa-solid fa-grip';
+    if (textView) textView.textContent = 'Grade';
+    renderModalCarrinhoLista();
+  } else {
+    // Muda para cards
+    window.carrinhoViewMode = 'cards';
+    cardsContainer.style.display = 'grid';
+    listaContainer.style.display = 'none';
+    if (iconView) iconView.className = 'fa-solid fa-table-cells';
+    if (textView) textView.textContent = 'Lista';
+    renderModalCarrinhoCompras();
+  }
+}
+
+// Obtém lista de grupos de NP no carrinho
+function obterGruposNP() {
+  const carrinho = window.carrinhoCompras || [];
+  const grupos = new Set();
+  carrinho.forEach(item => {
+    if (item.np) {
+      grupos.add(item.np);
+    }
+  });
+  return Array.from(grupos).sort();
+}
+
+// Filtra itens do carrinho por NP
+function filtrarCarrinhoPorNP(npSelecionado) {
+  const carrinho = window.carrinhoCompras || [];
+  if (!npSelecionado) {
+    return carrinho;
+  }
+  return carrinho.filter(item => item.np === npSelecionado);
+}
+
+// Atualiza select de filtro de NP
+function atualizarSelectFiltroNP() {
+  const selectFiltro = document.getElementById('filtroCarrinhoNP');
+  if (!selectFiltro) return;
+  
+  const grupos = obterGruposNP();
+  const valorAtual = selectFiltro.value;
+  
+  selectFiltro.innerHTML = '<option value="">Todos</option>' + 
+    grupos.map(np => `<option value="${np}">${np}</option>`).join('');
+  
+  // Mantém seleção anterior se ainda existir
+  if (valorAtual && grupos.includes(valorAtual)) {
+    selectFiltro.value = valorAtual;
+  } else {
+    selectFiltro.value = '';
+  }
+}
+
+// Renderiza a tabela do carrinho dentro do modal
+function renderModalCarrinhoCompras() {
+  const cardsContainer = document.getElementById('modalCarrinhoCards');
+  const countEl = document.getElementById('modalCarrinhoCount');
+  const btnLimpar = document.getElementById('modalComprasLimparCarrinhoBtn');
+  const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
+  
+  if (!cardsContainer) return;
+  
+  const carrinho = window.carrinhoCompras || [];
+  const selectFiltro = document.getElementById('filtroCarrinhoNP');
+  const npSelecionado = selectFiltro ? selectFiltro.value : '';
+  const carrinhoFiltrado = filtrarCarrinhoPorNP(npSelecionado);
+  const solicitante = (document.getElementById('userNameDisplay')?.textContent || '').trim() 
+    || window.__sessionUser?.username || 'Usuário';
+  
+  if (countEl) countEl.textContent = carrinho.length;
+  
+  // Atualiza select de NP
+  atualizarSelectFiltroNP();
+  
+  if (carrinhoFiltrado.length === 0) {
+    cardsContainer.innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:var(--inactive-color);">
+        <i class="fa-solid fa-cart-shopping" style="font-size:40px;opacity:0.2;display:block;margin-bottom:12px;"></i>
+        <div style="font-size:14px;font-weight:500;">${carrinho.length === 0 ? 'Carrinho vazio' : 'Nenhum item neste grupo'}</div>
+        <div style="font-size:12px;margin-top:6px;">${carrinho.length === 0 ? 'Clique em "Abrir Catálogo" para adicionar produtos' : ''}</div>
+      </div>`;
+    if (btnLimpar) btnLimpar.style.display = 'none';
+    if (btnEnviar) btnEnviar.style.display = 'none';
+    return;
+  }
+  
+  cardsContainer.innerHTML = carrinhoFiltrado.map((item, idx) => {
+    const itemSolicitante = item.solicitante || solicitante;
+    const temAnexo = item.anexo ? true : false;
+    
+    // Verifica se tem imagem do produto
+    const temImagem = item.url_imagem && 
+                      item.url_imagem.trim() && 
+                      (item.url_imagem.startsWith('http://') || item.url_imagem.startsWith('https://'));
+    
+    // Verifica se URL está expirada (parâmetro Expires)
+    let urlExpirada = false;
+    if (temImagem && item.url_imagem.includes('Expires=')) {
+      const match = item.url_imagem.match(/Expires=(\d+)/);
+      if (match) {
+        const expiresTimestamp = parseInt(match[1]);
+        const agora = Math.floor(Date.now() / 1000);
+        urlExpirada = expiresTimestamp < agora;
+      }
+    }
+    
+    // HTML da imagem do produto
+    const imgHtml = temImagem && !urlExpirada ? 
+      `<img 
+        src="${item.url_imagem}" 
+        alt="${window.escapeHtml(item.produto_descricao)}"
+        style="width:100%;height:100%;object-fit:cover;border-radius:6px;cursor:zoom-in;"
+        onclick="if(typeof ampliarImagemProduto === 'function') ampliarImagemProduto('${item.url_imagem}', '${window.escapeHtml(item.produto_codigo)} - ${window.escapeHtml(item.produto_descricao)}');event.stopPropagation();"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+      />
+      <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#d1d5db;border-radius:6px;background:#f9fafb;">
+        <i class="fa-solid fa-image" style="font-size:24px;"></i>
+      </div>` :
+      `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#d1d5db;border-radius:6px;background:#f9fafb;">
+        <i class="fa-solid fa-image" style="font-size:24px;"></i>
+      </div>`;
+    
+    return `
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;" 
+           onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" 
+           onmouseout="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.05)';">
+        
+        <!-- Cabeçalho do Card com Foto -->
+        <div style="display:flex;gap:10px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f3f4f6;">
+          
+          <!-- Foto do Produto -->
+          <div style="width:60px;height:60px;flex-shrink:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;background:#f9fafb;">
+            ${imgHtml}
+          </div>
+          
+          <!-- Informações do Produto -->
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
+              <span style="background:#3b82f6;color:white;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;">
+                NP: ${window.escapeHtml(item.np || 'N/A')}
+              </span>
+              <span style="font-size:11px;font-weight:600;color:#6b7280;">
+                ${window.escapeHtml(item.produto_codigo)}
+              </span>
+              ${item.requisicao_direta ? `<span style="background:#0ea5e9;color:white;padding:1px 4px;border-radius:3px;font-size:9px;font-weight:600;"><i class="fa-solid fa-bolt"></i> DIRETA</span>` : ''}
+            </div>
+            <div style="font-size:11px;font-weight:600;color:#111827;line-height:1.2;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;word-break:break-word;max-width:100%;">
+              ${window.escapeHtml(item.produto_descricao || 'Sem descrição')}
+            </div>
+          </div>
+          
+          <!-- Botão Remover -->
+          <button class="modal-remover-item-btn" data-idx="${idx}" 
+                  style="background:#ef4444;color:white;border:none;width:24px;height:24px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+                  title="Remover item">
+            <i class="fa-solid fa-trash" style="font-size:11px;"></i>
+          </button>
+        </div>
+        
+        <!-- Campos Editáveis -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;font-size:11px;">
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;">
+              <i class="fa-solid fa-boxes-stacked" style="margin-right:3px;font-size:10px;"></i>Quantidade
+            </label>
+            <input type="number" class="carrinho-input-quantidade" data-idx="${idx}" 
+                   value="${item.quantidade}" min="1"
+                   style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;font-weight:600;">
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;">
+              <i class="fa-solid fa-calendar-days" style="margin-right:3px;font-size:10px;"></i>Prazo Solicitado
+            </label>
+            <input type="date" class="carrinho-input-prazo" data-idx="${idx}" 
+                   value="${item.prazo_solicitado || ''}"
+                   style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+          </div>
+          
+        </div>
+        
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:11px;">
+          
+          <div style="display:flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-user" style="color:#3b82f6;width:12px;font-size:10px;"></i>
+            <span style="color:#6b7280;font-weight:500;min-width:70px;">Solicitante:</span>
+            <span style="color:#111827;font-weight:600;font-size:10px;">${window.escapeHtml(itemSolicitante)}</span>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-building" style="color:#8b5cf6;width:12px;font-size:10px;"></i>Departamento
+            </label>
+            <select class="carrinho-input-departamento" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              <option value="Produção" ${item.departamento === 'Produção' ? 'selected' : ''}>Produção</option>
+              <option value="Qualidade" ${item.departamento === 'Qualidade' ? 'selected' : ''}>Qualidade</option>
+              <option value="Manutenção" ${item.departamento === 'Manutenção' ? 'selected' : ''}>Manutenção</option>
+              <option value="Compras" ${item.departamento === 'Compras' ? 'selected' : ''}>Compras</option>
+              <option value="Administrativo" ${item.departamento === 'Administrativo' ? 'selected' : ''}>Administrativo</option>
+              <option value="Comercial" ${item.departamento === 'Comercial' ? 'selected' : ''}>Comercial</option>
+              <option value="Financeiro" ${item.departamento === 'Financeiro' ? 'selected' : ''}>Financeiro</option>
+              <option value="Logística" ${item.departamento === 'Logística' ? 'selected' : ''}>Logística</option>
+            </select>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-bullseye" style="color:#f59e0b;width:12px;font-size:10px;"></i>Objetivo de Compra
+            </label>
+            <input type="text" class="carrinho-input-objetivo" data-idx="${idx}" 
+                   value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Digite o objetivo"
+                   style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-tag" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria
+            </label>
+            <select class="carrinho-input-categoria" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              <option value="">Selecione...</option>
+              ${(window.categoriasCompra || []).map(cat => 
+                `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
+              ).join('')}
+            </select>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-user-tie" style="color:#14b8a6;width:12px;font-size:10px;"></i>Responsável
+            </label>
+            <select class="carrinho-input-responsavel" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              <option value="">Selecione...</option>
+              ${window.usuariosAtivos.map(u => {
+                const usuarioLogado = obterUsuarioLogado();
+                const responsavelAtual = item.responsavel_pela_compra || usuarioLogado;
+                return `<option value="${window.escapeHtml(u.username)}" ${responsavelAtual === u.username ? 'selected' : ''}>${window.escapeHtml(u.username)}</option>`;
+              }).join('')}
+            </select>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-sort-alpha-down" style="color:#8b5cf6;width:12px;font-size:10px;"></i>NP
+            </label>
+            <select class="carrinho-input-np" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              ${(() => {
+                const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+                return alfabeto.map(letra => `<option value="${letra}" ${item.np === letra ? 'selected' : ''}>${letra}</option>`).join('');
+              })()}
+            </select>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-reply" style="color:#6366f1;width:12px;font-size:10px;"></i>Retorno Cotação
+            </label>
+            <select class="carrinho-input-retorno" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              <option value="Sim" ${item.retorno_cotacao === 'Sim' ? 'selected' : ''}>Sim</option>
+              <option value="Não" ${item.retorno_cotacao === 'Não' ? 'selected' : ''}>Não</option>
+            </select>
+          </div>
+          
+          <div>
+            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+              <i class="fa-solid fa-bolt" style="color:#f97316;width:12px;font-size:10px;"></i>Requisição Direta
+            </label>
+            <select class="carrinho-input-requisicao" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              <option value="true" ${item.requisicao_direta ? 'selected' : ''}>Sim</option>
+              <option value="false" ${!item.requisicao_direta ? 'selected' : ''}>Não</option>
+            </select>
+          </div>
+          
+          ${temAnexo ? `
+          <div style="background:#dbeafe;padding:4px 8px;border-radius:4px;margin-top:2px;">
+            <i class="fa-solid fa-paperclip" style="color:#2563eb;font-size:10px;margin-right:4px;"></i>
+            <span style="color:#1e40af;font-weight:600;font-size:10px;">
+              ${window.escapeHtml(item.anexo.nome)}
+            </span>
+          </div>
+          ` : ''}
+          
+        </div>
+        
+      </div>`;
+  }).join('');
+  
+  if (btnLimpar) btnLimpar.style.display = 'inline-flex';
+  if (btnEnviar) btnEnviar.style.display = 'inline-flex';
+  
+  // Bind botões de remover no modal
+  cardsContainer.querySelectorAll('.modal-remover-item-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      if (confirm('Deseja remover este item do carrinho?')) {
+        window.carrinhoCompras.splice(idx, 1);
+        renderModalCarrinhoCompras();
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  // Bind inputs editáveis - atualiza carrinho em tempo real
+  cardsContainer.querySelectorAll('.carrinho-input-quantidade').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      const valor = parseFloat(e.target.value) || 1;
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].quantidade = valor;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-prazo').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].prazo_solicitado = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-departamento').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].departamento = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-objetivo').forEach(input => {
+    input.addEventListener('blur', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].objetivo_compra = e.target.value.trim();
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-categoria').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].categoria_compra = e.target.value.trim();
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-np').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].np = e.target.value;
+        atualizarSelectFiltroNP();
+        renderModalCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-responsavel').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].responsavel_pela_compra = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-retorno').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].retorno_cotacao = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  cardsContainer.querySelectorAll('.carrinho-input-requisicao').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].requisicao_direta = e.target.value === 'true';
+        renderModalCarrinhoCompras(); // Re-renderiza para atualizar o badge
+        renderCarrinhoCompras();
+      }
+    });
+  });
+}
+
+// Limpar carrinho do modal
+function limparCarrinhoModal() {
+  if (!confirm('Deseja realmente limpar todo o carrinho?')) return;
+  window.carrinhoCompras = [];
+  renderModalCarrinhoCompras();
+  renderModalCarrinhoLista();
+  renderCarrinhoCompras();
+}
+
+// Renderiza visualização em lista (tabela) do carrinho
+function renderModalCarrinhoLista() {
+  const tbody = document.getElementById('modalCarrinhoListaTbody');
+  if (!tbody) return;
+  
+  const carrinho = window.carrinhoCompras || [];
+  const selectFiltro = document.getElementById('filtroCarrinhoNP');
+  const npSelecionado = selectFiltro ? selectFiltro.value : '';
+  const carrinhoFiltrado = filtrarCarrinhoPorNP(npSelecionado);
+  
+  // Atualiza select de NP
+  atualizarSelectFiltroNP();
+  
+  if (carrinho.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="12" style="text-align:center;padding:40px;color:var(--inactive-color);">
+          <i class="fa-solid fa-cart-shopping" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+          Carrinho vazio
+        </td>
+      </tr>`;
+    return;
+  }
+  
+  if (carrinhoFiltrado.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="12" style="text-align:center;padding:40px;color:var(--inactive-color);">
+          <i class="fa-solid fa-filter" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+          Nenhum item neste grupo
+        </td>
+      </tr>`;
+    return;
+  }
+  
+  tbody.innerHTML = carrinhoFiltrado.map((item, filterIdx) => {
+    // Encontra o índice real do item no carrinho completo
+    const idx = window.carrinhoCompras.indexOf(item);
+    // Verifica se tem imagem
+    const temImagem = item.url_imagem && 
+                      item.url_imagem.trim() && 
+                      (item.url_imagem.startsWith('http://') || item.url_imagem.startsWith('https://'));
+    
+    const imgHtml = temImagem ? 
+      `<img src="${item.url_imagem}" alt="${window.escapeHtml(item.produto_descricao)}" 
+            style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:zoom-in;"
+            onclick="if(typeof ampliarImagemProduto === 'function') ampliarImagemProduto('${item.url_imagem}', '${window.escapeHtml(item.produto_codigo)}');event.stopPropagation();"
+            onerror="this.style.display='none';">` :
+      `<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;border-radius:4px;">
+        <i class="fa-solid fa-image" style="color:#d1d5db;font-size:16px;"></i>
+      </div>`;
+    
+    return `
+      <tr>
+        <td style="position:sticky;left:0;z-index:9;background:#1f2937;text-align:center;padding:8px;">${imgHtml}</td>
+        <td style="position:sticky;left:50px;z-index:9;background:#374151;font-weight:600;color:#ffffff;padding:8px;">${window.escapeHtml(item.produto_codigo)}</td>
+        <td style="position:sticky;left:130px;z-index:9;background:#374151;padding:8px;max-width:150px;">
+          <div style="font-weight:600;color:#ffffff;margin-bottom:2px;font-size:11px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;word-break:break-word;">${window.escapeHtml(item.produto_descricao || '')}</div>
+          ${item.requisicao_direta ? '<span style="background:#0ea5e9;color:white;padding:1px 4px;border-radius:3px;font-size:9px;font-weight:600;"><i class="fa-solid fa-bolt"></i> DIRETA</span>' : ''}
+        </td>
+        <td>
+          <input type="number" class="lista-input-quantidade" data-idx="${idx}" value="${item.quantidade}" min="1"
+                 style="width:60px;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+        </td>
+        <td>
+          <input type="date" class="lista-input-prazo" data-idx="${idx}" value="${item.prazo_solicitado || ''}"
+                 style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+        </td>
+        <td>
+          <select class="lista-input-departamento" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="Produção" ${item.departamento === 'Produção' ? 'selected' : ''}>Produção</option>
+            <option value="Qualidade" ${item.departamento === 'Qualidade' ? 'selected' : ''}>Qualidade</option>
+            <option value="Manutenção" ${item.departamento === 'Manutenção' ? 'selected' : ''}>Manutenção</option>
+            <option value="Compras" ${item.departamento === 'Compras' ? 'selected' : ''}>Compras</option>
+            <option value="Administrativo" ${item.departamento === 'Administrativo' ? 'selected' : ''}>Administrativo</option>
+            <option value="Comercial" ${item.departamento === 'Comercial' ? 'selected' : ''}>Comercial</option>
+            <option value="Financeiro" ${item.departamento === 'Financeiro' ? 'selected' : ''}>Financeiro</option>
+            <option value="Logística" ${item.departamento === 'Logística' ? 'selected' : ''}>Logística</option>
+          </select>
+        </td>
+        <td>
+          <input type="text" class="lista-input-objetivo" data-idx="${idx}" 
+                 value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Objetivo"
+                 style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+        </td>
+        <td>
+          <select class="lista-input-categoria" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="">Selecione...</option>
+            ${(window.categoriasCompra || []).map(cat => 
+              `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
+            ).join('')}
+          </select>
+        </td>
+        <td>
+          <select class="lista-input-np" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            ${(() => {
+              const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+              return alfabeto.map(letra => `<option value="${letra}" ${item.np === letra ? 'selected' : ''}>${letra}</option>`).join('');
+            })()}
+          </select>
+        </td>
+        <td>
+          <select class="lista-input-retorno" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="Sim" ${item.retorno_cotacao === 'Sim' ? 'selected' : ''}>Sim</option>
+            <option value="Não" ${item.retorno_cotacao === 'Não' ? 'selected' : ''}>Não</option>
+          </select>
+        </td>
+        <td>
+          <select class="lista-input-requisicao" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="true" ${item.requisicao_direta ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!item.requisicao_direta ? 'selected' : ''}>Não</option>
+          </select>
+        </td>
+        <td>
+          <select class="lista-input-responsavel" data-idx="${idx}"
+                  style="width:100%;padding:4px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="">Selecione...</option>
+            ${window.usuariosAtivos.map(u => {
+              const usuarioLogado = obterUsuarioLogado();
+              const responsavelAtual = item.responsavel_pela_compra || usuarioLogado;
+              return `<option value="${window.escapeHtml(u.username)}" ${responsavelAtual === u.username ? 'selected' : ''}>${window.escapeHtml(u.username)}</option>`;
+            }).join('')}
+          </select>
+        </td>
+        <td style="text-align:center;">
+          <button class="lista-remover-item-btn" data-idx="${idx}" 
+                  style="background:#ef4444;color:white;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;"
+                  title="Remover">
+            <i class="fa-solid fa-trash" style="font-size:11px;"></i>
+          </button>
+        </td>
+      </tr>`;
+  }).join('');
+  
+  // Event listeners para os inputs da lista
+  tbody.querySelectorAll('.lista-input-quantidade').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      const valor = parseFloat(e.target.value) || 1;
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].quantidade = valor;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-prazo').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].prazo_solicitado = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-departamento').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].departamento = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].objetivo_compra_nome = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].objetivo_compra_nome = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-categoria').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].categoria_compra = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-np').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].np = e.target.value;
+        atualizarSelectFiltroNP();
+        renderModalCarrinhoLista();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-retorno').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].retorno_cotacao = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-requisicao').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].requisicao_direta = e.target.value === 'true';
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-input-responsavel').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      if (window.carrinhoCompras[idx]) {
+        window.carrinhoCompras[idx].responsavel_pela_compra = e.target.value;
+        renderCarrinhoCompras();
+      }
+    });
+  });
+  
+  tbody.querySelectorAll('.lista-remover-item-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      if (confirm('Deseja remover este item do carrinho?')) {
+        window.carrinhoCompras.splice(idx, 1);
+        renderModalCarrinhoLista();
+        renderModalCarrinhoCompras();
+        renderCarrinhoCompras();
+      }
+    });
+  });
+}
+
+// Enviar pedido do modal
+async function enviarPedidoModal() {
+  const carrinho = window.carrinhoCompras || [];
+  if (carrinho.length === 0) {
+    alert('Carrinho vazio!');
+    return;
+  }
+  
+  const statusEl = document.getElementById('modalComprasFormStatus');
+  const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
+  
+  try {
+    if (btnEnviar) btnEnviar.disabled = true;
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#fef3c7';
+      statusEl.style.color = '#92400e';
+      statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando solicitação...';
+    }
+    
+    // Separar itens: com requisição direta e sem requisição direta
+    const itensComRequisicao = carrinho.filter(item => item.requisicao_direta === true);
+    const itensSemRequisicao = carrinho.filter(item => item.requisicao_direta !== true);
+    
+    // Se há itens com requisição direta, agrupá-los por NP
+    const gruposNP = {};
+    itensComRequisicao.forEach(item => {
+      const np = item.np || 'A';
+      if (!gruposNP[np]) {
+        gruposNP[np] = [];
+      }
+      gruposNP[np].push(item);
+    });
+    
+    // Criar lista de solicitações: uma por grupo de NP (requisição direta) + uma para os demais
+    const solicitacoes = [];
+    
+    // Adicionar grupos de NP com requisição direta
+    Object.entries(gruposNP).forEach(([np, itens]) => {
+      solicitacoes.push({ itens, np, requisicaoDireta: true });
+    });
+    
+    // Adicionar itens sem requisição direta como uma solicitação única
+    if (itensSemRequisicao.length > 0) {
+      solicitacoes.push({ itens: itensSemRequisicao, np: null, requisicaoDireta: false });
+    }
+    
+    console.log(`[Compras] Enviando ${solicitacoes.length} solicitação(ões):`, solicitacoes);
+    
+    // Enviar todas as solicitações
+    let respostasOk = 0;
+    let respostasErro = 0;
+    const erros = [];
+    
+    for (let i = 0; i < solicitacoes.length; i++) {
+      const sol = solicitacoes[i];
+      const descricao = sol.requisicaoDireta 
+        ? `Solicitação ${i+1} (NP: ${sol.np}, ${sol.itens.length} itens com Requisição Direta)`
+        : `Solicitação ${i+1} (${sol.itens.length} itens sem Requisição Direta)`;
+      
+      try {
+        const response = await fetch('/api/compras/solicitacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itens: sol.itens })
+        });
+        
+        const result = await response.json();
+        
+        if (result.ok) {
+          respostasOk++;
+          console.log(`[Compras] ✓ ${descricao} enviada com sucesso`);
+        } else {
+          respostasErro++;
+          const msgErro = result.error || 'Erro desconhecido';
+          erros.push(`${descricao}: ${msgErro}`);
+          console.error(`[Compras] ✗ ${descricao}: ${msgErro}`);
+        }
+      } catch (err) {
+        respostasErro++;
+        erros.push(`${descricao}: ${err.message}`);
+        console.error(`[Compras] ✗ ${descricao}:`, err);
+      }
+    }
+    
+    // Atualizar status
+    if (statusEl) {
+      if (respostasErro === 0) {
+        statusEl.style.background = '#d1fae5';
+        statusEl.style.color = '#065f46';
+        statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${respostasOk} solicitação(ões) enviada(s) com sucesso!`;
+      } else {
+        statusEl.style.background = '#fee2e2';
+        statusEl.style.color = '#991b1b';
+        const erroTexto = erros.length > 0 ? `<br><small>${erros.join('<br>')}</small>` : '';
+        statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle"></i> ${respostasOk} de ${solicitacoes.length} solicitação(ões) enviada(s)${erroTexto}`;
+      }
+    }
+    
+    // Limpar carrinho e fechar modal se todas foram enviadas com sucesso
+    if (respostasErro === 0) {
+      window.carrinhoCompras = [];
+      
+      setTimeout(() => {
+        renderModalCarrinhoCompras();
+        renderCarrinhoCompras();
+        fecharModalCarrinhoCompras();
+        if (typeof recarregarKanbanMinhasCompras === 'function') {
+          recarregarKanbanMinhasCompras();
+        }
+      }, 1500);
+    }
+  } catch (err) {
+    console.error('Erro ao enviar pedido:', err);
+    if (statusEl) {
+      statusEl.style.background = '#fee2e2';
+      statusEl.style.color = '#991b1b';
+      statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle"></i> Erro: ${err.message}`;
+    }
+  } finally {
+    if (btnEnviar) btnEnviar.disabled = false;
+  }
+}
+
+// ========== FIM DO MODAL DO CARRINHO ==========
 
 // ========== SISTEMA DE FORNECEDORES ==========
 
@@ -13163,12 +14047,19 @@ async function loadModalComprasCategoriasCompra() {
   const selectCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
   
   try {
-    const resp = await fetch('/api/compras/categorias');
-    if (!resp.ok) throw new Error('Erro ao buscar categorias');
+    const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      console.error('[Categorias Compra] Erro HTTP:', resp.status, errorText);
+      throw new Error(`Erro ao buscar categorias: ${resp.status}`);
+    }
     
     const data = await resp.json();
     
     if (data.ok && Array.isArray(data.categorias)) {
+      // Armazena categorias em variável global para usar no carrinho
+      window.categoriasCompra = data.categorias;
+      
       // Preenche select do modal de adicionar ao carrinho
       if (selectCategoria) {
         selectCategoria.innerHTML = '<option value="">Selecione a categoria...</option>' +
@@ -13938,6 +14829,7 @@ async function adicionarItemCarrinho(ev) {
   });
   
   renderCarrinhoCompras();
+  renderModalCarrinhoCompras(); // Atualiza também o modal se estiver aberto
   fecharModalCompras();
 }
 
@@ -14079,10 +14971,38 @@ document.getElementById('comprasLimparCarrinhoBtn')?.addEventListener('click', l
 document.getElementById('comprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoCompras);
 
 // Bind do botão de configuração de responsáveis
-document.getElementById('comprasConfigBtn')?.addEventListener('click', abrirModalConfigResponsavel);
+document.getElementById('comprasConfigBtn')?.addEventListener('click', () => {
+  fecharModalComprasAcoes();
+  abrirModalConfigResponsavel();
+});
 
 // Bind do botão de histórico de compras
-document.getElementById('comprasHistoricoBtn')?.addEventListener('click', abrirModalHistoricoGeral);
+document.getElementById('comprasHistoricoBtn')?.addEventListener('click', () => {
+  fecharModalComprasAcoes();
+  abrirModalHistoricoGeral();
+});
+
+// Bind do botão para abrir modal do carrinho
+document.getElementById('comprasAbrirCarrinhoBtn')?.addEventListener('click', abrirModalCarrinhoCompras);
+
+// Binds do modal do carrinho
+document.getElementById('modalCarrinhoFecharBtn')?.addEventListener('click', fecharModalCarrinhoCompras);
+document.getElementById('modalComprasLimparCarrinhoBtn')?.addEventListener('click', limparCarrinhoModal);
+document.getElementById('modalComprasEnviarPedidoBtn')?.addEventListener('click', enviarPedidoModal);
+document.getElementById('modalComprasAbrirCatalogoBtn')?.addEventListener('click', abrirModalCatalogoOmie);
+document.getElementById('modalCarrinhoToggleViewBtn')?.addEventListener('click', toggleCarrinhoView);
+
+// Toggle de campos avançados no modal de compras
+document.getElementById('comprasCamposExtrasToggle')?.addEventListener('click', () => {
+  setCamposExtrasCollapsed(!comprasCamposColapsados);
+});
+
+// Fecha modal do carrinho ao clicar fora
+document.getElementById('modalCarrinhoCompras')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modalCarrinhoCompras') {
+    fecharModalCarrinhoCompras();
+  }
+});
 
 // Bind para auto-preencher responsável quando categoria é selecionada
 document.getElementById('modalComprasCategoriaCompra')?.addEventListener('change', aplicarResponsavelPadrao);
@@ -14101,10 +15021,22 @@ document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('cl
 });
 
 // Binds dos botões de filtro de kanbans
-document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', abrirModalFiltroKanbans);
+document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () => {
+  fecharModalComprasAcoes();
+  abrirModalFiltroKanbans();
+});
 document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', fecharModalFiltroKanbans);
 document.getElementById('filtroKanbanSelecionarTodos')?.addEventListener('click', toggleSelecionarTodosKanbans);
 document.getElementById('filtroKanbanAplicar')?.addEventListener('click', salvarPreferenciasKanbans);
+
+// Binds do menu hamburger de ações do Kanban
+document.getElementById('comprasAcoesHamburgerBtn')?.addEventListener('click', abrirModalComprasAcoes);
+document.getElementById('modalComprasAcoesFecharBtn')?.addEventListener('click', fecharModalComprasAcoes);
+document.getElementById('modalComprasAcoes')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modalComprasAcoes') {
+    fecharModalComprasAcoes();
+  }
+});
 
 // Fecha modal ao clicar fora
 document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => {
@@ -14115,6 +15047,7 @@ document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => 
 
 // Botão de exportar Excel
 document.getElementById('comprasExportarExcelMinhasBtn')?.addEventListener('click', async () => {
+  fecharModalComprasAcoes();
   try {
     const btn = document.getElementById('comprasExportarExcelMinhasBtn');
     const originalHtml = btn.innerHTML;
@@ -14321,62 +15254,49 @@ document.getElementById('comprasExportarExcelMinhasBtn')?.addEventListener('clic
 
 // Função para ocultar/mostrar campos quando produto existente é selecionado
 function ocultarCamposComprasProdutoExistente(ocultar) {
-  // Família
-  const familiaField = document.getElementById('modalComprasFamilia')?.closest('.form-field');
-  const familiaInput = document.getElementById('modalComprasFamilia');
-  
-  // Objetivo da compra
-  const objetivoField = document.getElementById('modalComprasObjetivo')?.closest('.form-field');
-  const objetivoInput = document.getElementById('modalComprasObjetivo');
-  
-  // Anexo
-  const anexoField = document.querySelector('label[for="modalComprasAnexo"]')?.closest('.form-field');
-  
-  // Observação
-  const observacaoField = document.getElementById('modalComprasObservacao')?.closest('.form-field');
-  
-  // Responsável
-  const responsavelField = document.getElementById('modalComprasResponsavel')?.closest('.form-field');
-  const responsavelInput = document.getElementById('modalComprasResponsavel');
-  
-  const camposParaOcultar = [familiaField, objetivoField, anexoField, observacaoField, responsavelField].filter(Boolean);
-  
-  camposParaOcultar.forEach(campo => {
-    if (campo) {
-      campo.style.display = ocultar ? 'none' : '';
-    }
+  setCamposExtrasCollapsed(ocultar);
+}
+
+let comprasCamposColapsados = false;
+
+function setCamposExtrasCollapsed(colapsar) {
+  comprasCamposColapsados = !!colapsar;
+
+  document.querySelectorAll('.compras-campo-colapsavel').forEach((campo) => {
+    campo.classList.toggle('is-collapsed', comprasCamposColapsados);
   });
-  
+
+  const toggleBtn = document.getElementById('comprasCamposExtrasToggle');
+  if (toggleBtn) {
+    const icon = toggleBtn.querySelector('i');
+    const label = toggleBtn.querySelector('span');
+    if (icon) {
+      icon.className = comprasCamposColapsados ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-up';
+    }
+    if (label) {
+      label.textContent = comprasCamposColapsados ? 'Expandir campos avançados' : 'Recolher campos avançados';
+    }
+  }
+
   // Gerencia atributo required dos campos
+  const objetivoInput = document.getElementById('modalComprasObjetivo');
   if (objetivoInput) {
-    if (ocultar) {
+    if (comprasCamposColapsados) {
       objetivoInput.removeAttribute('required');
-      objetivoInput.value = 'Reposição de estoque'; // Valor padrão quando oculto
+      if (!objetivoInput.value) objetivoInput.value = 'Reposição de estoque';
     } else {
       objetivoInput.setAttribute('required', 'required');
     }
   }
-  
-  if (responsavelInput) {
-    if (ocultar) {
-      responsavelInput.removeAttribute('required');
-      // Preenche com usuário logado se disponível
-      const usuarioLogado = window.__sessionUser?.username || '';
-      if (usuarioLogado) responsavelInput.value = usuarioLogado;
-    } else {
-      responsavelInput.setAttribute('required', 'required');
-    }
-  }
-  
-  // Se estiver ocultando, limpa anexo e observação (mas mantém objetivo e responsável com valores padrão)
-  if (ocultar) {
+
+  // Se estiver colapsando, limpa anexo e observação
+  if (comprasCamposColapsados) {
     const observacao = document.getElementById('modalComprasObservacao');
     const anexoInput = document.getElementById('modalComprasAnexo');
-    
+
     if (observacao) observacao.value = '';
     if (anexoInput) anexoInput.value = '';
-    
-    // Limpa visualização de anexo se houver
+
     const anexoPreview = document.getElementById('modalComprasAnexoPreview');
     if (anexoPreview) anexoPreview.style.display = 'none';
   }
@@ -19534,12 +20454,26 @@ async function abrirModalCatalogoOmie() {
   // Inicializa contador de carrinho
   atualizarContadorCatalogo();
   
+  // Atualiza opções de NP baseado no carrinho
+  atualizarOpcoesNP();
+  
   try {
-    // Busca produtos da Omie
-    const resp = await fetch('/api/compras/catalogo-omie', { credentials: 'include' });
-    if (!resp.ok) throw new Error('Erro ao carregar catálogo');
+    // OTIMIZAÇÃO: Carrega departamentos e categorias IMEDIATAMENTE em paralelo (antes dos produtos)
+    // Isso torna os campos Departamento e Categoria disponíveis instantaneamente
+    const promessasDepartamentosECategorias = Promise.all([
+      carregarDepartamentosCatalogo(),
+      loadModalComprasCategoriasCompra()
+    ]);
     
-    const data = await resp.json();
+    // Busca produtos da Omie em paralelo com departamentos/categorias
+    const [_, respProdutos] = await Promise.all([
+      promessasDepartamentosECategorias,
+      fetch('/api/compras/catalogo-omie', { credentials: 'include' })
+    ]);
+    
+    if (!respProdutos.ok) throw new Error('Erro ao carregar catálogo');
+    
+    const data = await respProdutos.json();
     window.produtosCatalogoOmie = data.produtos || [];
     
     // Popula select de famílias
@@ -19552,12 +20486,6 @@ async function abrirModalCatalogoOmie() {
     
     // Renderiza produtos
     renderizarCatalogoOmie(window.produtosCatalogoOmie);
-    
-    // Carrega departamentos (que agora controla as categorias dinamicamente)
-    await carregarDepartamentosCatalogo();
-    
-    // Carrega categorias de compra da Omie
-    await loadModalComprasCategoriasCompra();
     
   } catch (err) {
     console.error('[CATÁLOGO OMIE] Erro:', err);
@@ -20014,17 +20942,25 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
+  const selectNPGlobal = document.getElementById('catalogoNPGlobal');
   const textareaObservacaoGlobal = document.getElementById('catalogoObservacaoGlobal');
   const checkboxRequisicaoDiretaGlobal = document.getElementById('catalogoRequisicaoDiretaGlobal');
   
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   const retornoCotacoes = selectRetornoGlobal ? selectRetornoGlobal.value : 'nao';
+  const retornoCotacoesTexto = (selectRetornoGlobal && selectRetornoGlobal.selectedOptions && selectRetornoGlobal.selectedOptions[0]) 
+    ? (selectRetornoGlobal.selectedOptions[0].text || '') 
+    : '';
   const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
-  const categoriaCompraTexto = selectCategoriaGlobal?.selectedOptions[0]?.text || '';
+  const categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0]) 
+    ? (selectCategoriaGlobal.selectedOptions[0].text || '') 
+    : '';
+  const npValue = selectNPGlobal ? selectNPGlobal.value : 'A';
   const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   
+  console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
   // Validações dos campos globais
   if (!departamento) {
     alert('Selecione o departamento no topo do catálogo!');
@@ -20062,6 +20998,7 @@ function selecionarProdutoCatalogo(codigo, descricao) {
   const produtoCatalogo = (window.produtosCatalogoOmie || []).find(p => p.codigo === codigo);
   const familiaDescricao = produtoCatalogo ? produtoCatalogo.descricao_familia : null;
   const codigoOmie = produtoCatalogo ? produtoCatalogo.codigo_produto : null;
+  const urlImagem = produtoCatalogo ? produtoCatalogo.url_imagem : null;
   
   // Adiciona direto ao carrinho com os dados globais
   window.carrinhoCompras.push({
@@ -20076,19 +21013,24 @@ function selecionarProdutoCatalogo(codigo, descricao) {
     centro_custo: centroCusto,
     codigo_produto_omie: null,
     codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
+    url_imagem: urlImagem,  // Adiciona URL da imagem do produto
     objetivo_compra: objetivoCompraGlobal || 'Compra via catálogo Omie',
     resp_inspecao_recebimento: '',
-    retorno_cotacao: retornoCotacoes === 'sim' ? 'S' : 'N',
-    categoria_compra_codigo: categoriaCompra,
-    categoria_compra_nome: categoriaCompraTexto,
+    retorno_cotacao: retornoCotacoesTexto || (retornoCotacoes === 'sim' ? 'Sim' : 'Não'),
+    categoria_compra: categoriaCompra || '',  // Usar o código da opção selecionada (obrigatório para Omie)
+    np: npValue,  // Novo campo NP
     requisicao_direta: requisicaoDiretaGlobal || false
   });
   
   // Renderiza carrinho atualizado
   renderCarrinhoCompras();
+  renderModalCarrinhoCompras(); // Atualiza também o modal se estiver aberto
   
   // Atualiza contador no modal do catálogo
   atualizarContadorCatalogo();
+  
+  // Atualiza opções de NP para refletir novo item adicionado
+  atualizarOpcoesNP();
   
   // Feedback visual
   const btn = event?.target?.closest('button');
@@ -20129,6 +21071,53 @@ function atualizarContadorCatalogo() {
     }
   }
 }
+
+// Atualiza opções de NP dinamicamente (mostra próxima letra apenas se a anterior foi usada)
+function atualizarOpcoesNP() {
+  const selectNP = document.getElementById('catalogoNPGlobal');
+  if (!selectNP) return;
+  
+  // Busca todas as letras NP já usadas no carrinho
+  const npUsados = (window.carrinhoCompras || [])
+    .map(item => item.np)
+    .filter(np => np && np.length === 1)
+    .map(np => np.toUpperCase());
+  
+  // Descobre qual é a última letra usada
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  let ultimaLetraUsada = '';
+  
+  for (let i = alfabeto.length - 1; i >= 0; i--) {
+    if (npUsados.includes(alfabeto[i])) {
+      ultimaLetraUsada = alfabeto[i];
+      break;
+    }
+  }
+  
+  // Determina quais opções mostrar
+  let opcoesDisponiveis = [];
+  if (!ultimaLetraUsada || ultimaLetraUsada === '') {
+    // Nenhuma letra foi usada ainda, mostrar apenas A e B
+    opcoesDisponiveis = ['A', 'B'];
+  } else {
+    // Encontra o índice da última letra usada
+    const indiceUltima = alfabeto.indexOf(ultimaLetraUsada);
+    // Mostra todas as letras até a próxima após a última usada
+    opcoesDisponiveis = alfabeto.slice(0, Math.min(indiceUltima + 2, alfabeto.length));
+  }
+  
+  // Atualiza o select
+  const valorAtual = selectNP.value;
+  selectNP.innerHTML = opcoesDisponiveis
+    .map(letra => `<option value="${letra}">${letra}</option>`)
+    .join('');
+  
+  // Mantém valor selecionado se ainda estiver disponível
+  if (opcoesDisponiveis.includes(valorAtual)) {
+    selectNP.value = valorAtual;
+  }
+}
+
 
 // Busca URL de imagem atualizada da Omie
 // Fecha modal do catálogo
@@ -21291,6 +22280,21 @@ async function loadComprasRecebimento() {
   } catch (err) {
     console.error('[recebimento] carregar', err);
     tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Erro ao carregar dados.</td></tr>';
+  }
+}
+
+// ========== Modal de Ações do Kanban (Hamburger) ==========
+function abrirModalComprasAcoes() {
+  const modal = document.getElementById('modalComprasAcoes');
+  if (modal) {
+    modal.style.display = 'flex';
+  }
+}
+
+function fecharModalComprasAcoes() {
+  const modal = document.getElementById('modalComprasAcoes');
+  if (modal) {
+    modal.style.display = 'none';
   }
 }
 
@@ -26387,3 +27391,36 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
     setTimeout(() => clearInterval(interval), 5000);
   }
 })();
+
+// ========== VERIFICAÇÃO DE LOGIN AO CARREGAR A PÁGINA ==========
+// Objetivo: Verificar autenticação via API antes de renderizar a página
+// Se não estiver logado, abre o modal de login
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    // Chama endpoint de status de autenticação (mais rápido e confiável)
+    const response = await fetch('/api/auth/status', { credentials: 'include' });
+    const statusData = response.ok ? await response.json() : { loggedIn: false };
+    
+    console.log('[LOGIN CHECK] Status de autenticação:', statusData.loggedIn ? 'Logado' : 'Deslogado');
+    
+    // Se não está logado, abre o modal de login
+    if (!statusData.loggedIn) {
+      console.log('[LOGIN CHECK] Usuário deslogado, abrindo modal de login');
+      
+      // Aguarda a função openLoginModal estar disponível
+      const waitForLoginModal = setInterval(() => {
+        if (typeof window.openLoginModal === 'function') {
+          clearInterval(waitForLoginModal);
+          window.openLoginModal();
+        }
+      }, 50);
+      
+      // Timeout de 2 segundos para evitar loop infinito
+      setTimeout(() => clearInterval(waitForLoginModal), 2000);
+    } else {
+      console.log('[LOGIN CHECK] Usuário logado como:', statusData.user?.username || statusData.user?.id);
+    }
+  } catch (err) {
+    console.error('[LOGIN CHECK] Erro ao verificar autenticação:', err);
+  }
+});

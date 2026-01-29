@@ -4021,6 +4021,80 @@ ul#comprasList li ,
   padding: 24px;
 }
 
+/* Campos avançados do modal de compras */
+.compras-campos-toggle {
+  background: #111827;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.compras-campos-toggle:hover {
+  background: #0f172a;
+}
+
+.compras-campo-colapsavel {
+  max-height: 500px;
+  opacity: 1;
+  transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.2s ease, padding 0.2s ease;
+}
+
+.compras-campo-colapsavel.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 0 !important;
+}
+
+/* Modal de ações do Kanban (hamburger) */
+.compras-acoes-modal {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  width: min(520px, 92vw);
+}
+
+.compras-acoes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compras-acao-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #1f2937;
+  color: #e5e7eb;
+}
+
+.compras-acao-btn i {
+  font-size: 18px;
+  width: 20px;
+  text-align: center;
+}
+
+.compras-acao-btn:hover {
+  background: #0f172a;
+}
+
+.compras-acao-text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
 /* Estilos para inputs e selects do modal de compras */
 #comprasModalForm input[type="text"],
 #comprasModalForm input[type="number"],

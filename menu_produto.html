@@ -368,22 +368,11 @@
           <div class="content-wrapper">
             <div class="content-section">
               <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;">
-                <div id="comprasTituloCarrinho" class="content-section-title" style="display:none;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-cart-shopping" style="color:#f59e0b;"></i>
-                  Meu Carrinho de Compras
-                </div>
-                <div style="display:flex;gap:8px;">
-                  <button id="comprasAbrirModalBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Adicionar produto ao carrinho">
-                    <i class="fa-solid fa-cart-plus" style="font-size:20px;"></i>
-                  </button>
-                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Abrir catálogo Omie">
-                    <i class="fa-solid fa-book" style="font-size:18px;"></i>
-                  </button>
-                </div>
+                <div></div>
               </div>
 
-              <!-- Lista do carrinho -->
-              <div id="comprasCarrinhoContainer" style="margin-top:16px;display:none;">
+              <!-- Lista do carrinho - MOVIDA PARA MODAL -->
+              <div id="comprasCarrinhoContainer" style="margin-top:16px;display:none;visibility:hidden;height:0;overflow:hidden;">
                 <div style="font-size:14px;color:var(--inactive-color);margin-bottom:12px;">Itens no carrinho (<span id="comprasCarrinhoCount">0</span>)</div>
                 <div class="tabela-wrapper" style="overflow:auto;">
                   <table class="tabela padrao" style="min-width:900px;">
@@ -404,8 +393,8 @@
                 </div>
               </div>
 
-              <!-- Botão enviar pedido -->
-              <div style="margin-top:20px;display:flex;justify-content:flex-end;gap:12px;">
+              <!-- Botão enviar pedido - MOVIDO PARA MODAL -->
+              <div style="margin-top:20px;display:none;visibility:hidden;height:0;overflow:hidden;justify-content:flex-end;gap:12px;">
                 <button id="comprasLimparCarrinhoBtn" class="content-button" type="button" style="background:var(--button-inactive);color:var(--inactive-color);display:none;">
                   <i class="fa-solid fa-trash"></i>
                   <span>Limpar carrinho</span>
@@ -428,17 +417,18 @@
                   Kanban de compras
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                  <button id="comprasFiltroKanbanBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Filtrar Kanbans">
-                    <i class="fa-solid fa-filter" style="font-size:20px;"></i>
+                  <button id="comprasAbrirModalBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Adicionar produto ao carrinho">
+                    <i class="fa-solid fa-cart-plus" style="font-size:20px;"></i>
                   </button>
-                  <button id="comprasExportarExcelMinhasBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Exportar para Excel">
-                    <i class="fa-solid fa-file-excel" style="font-size:20px;"></i>
+                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Abrir catálogo Omie">
+                    <i class="fa-solid fa-book" style="font-size:18px;"></i>
                   </button>
-                  <button id="comprasConfigBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Configuração de Compras">
-                    <i class="fa-solid fa-cog" style="font-size:20px;"></i>
+                  <button id="comprasAbrirCarrinhoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;position:relative;" title="Abrir Carrinho de Compras">
+                    <i class="fa-solid fa-cart-shopping" style="font-size:20px;"></i>
+                    <span id="carrinhoCountBadge" style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:white;border-radius:50%;width:20px;height:20px;display:none;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid white;">0</span>
                   </button>
-                  <button id="comprasHistoricoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Histórico de Movimentações">
-                    <i class="fa-solid fa-clock-rotate-left" style="font-size:20px;"></i>
+                  <button id="comprasAcoesHamburgerBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0f172a 0%,#1f2937 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Mais ações">
+                    <i class="fa-solid fa-bars" style="font-size:20px;"></i>
                   </button>
                 </div>
               </div>
@@ -448,6 +438,38 @@
                 <!-- As colunas serão renderizadas via JavaScript -->
               </div>
 
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Ações do Kanban (Hamburger) -->
+        <div id="modalComprasAcoes" class="modal-overlay" style="display:none;z-index:10020;">
+          <div class="modal-container compras-acoes-modal">
+            <div class="modal-header">
+              <div style="font-weight:600;color:#e5e7eb;">Ações do Kanban</div>
+              <button id="modalComprasAcoesFecharBtn" class="modal-close-btn" type="button">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div class="modal-body">
+              <div id="comprasAcoesContainer" class="compras-acoes-grid">
+                <button id="comprasFiltroKanbanBtn" class="content-button compras-acao-btn" type="button" title="Filtrar Kanbans">
+                  <i class="fa-solid fa-filter"></i>
+                  <span class="compras-acao-text">Filtrar Kanban</span>
+                </button>
+                <button id="comprasExportarExcelMinhasBtn" class="content-button compras-acao-btn" type="button" title="Exportar para Excel">
+                  <i class="fa-solid fa-file-excel"></i>
+                  <span class="compras-acao-text">Exportar para Excel</span>
+                </button>
+                <button id="comprasConfigBtn" class="content-button compras-acao-btn" type="button" title="Configuração de Compras">
+                  <i class="fa-solid fa-cog"></i>
+                  <span class="compras-acao-text">Configuração de Compras</span>
+                </button>
+                <button id="comprasHistoricoBtn" class="content-button compras-acao-btn" type="button" title="Histórico de Movimentações">
+                  <i class="fa-solid fa-clock-rotate-left"></i>
+                  <span class="compras-acao-text">Histórico de Movimentações</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -493,6 +515,102 @@
           </div>
         </div>
 
+        <!-- Modal Carrinho de Compras -->
+        <div id="modalCarrinhoCompras" class="modal-overlay" style="display:none;z-index:10030;">
+          <div class="modal-container" style="max-width:1400px;width:95%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-cart-shopping" style="color:#f59e0b;"></i>
+                Meu Carrinho de Compras
+              </h3>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 12px;border-radius:6px;">
+                  <label style="font-size:11px;font-weight:600;color:#6b7280;">NP:</label>
+                  <select id="filtroCarrinhoNP" style="padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;background:white;cursor:pointer;">
+                    <option value="">Todos</option>
+                  </select>
+                </div>
+                <button id="modalCarrinhoToggleViewBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:white;display:flex;align-items:center;gap:6px;padding:8px 12px;" title="Alternar visualização">
+                  <i class="fa-solid fa-table-cells" id="iconViewToggle" style="font-size:14px;"></i>
+                  <span id="textViewToggle" style="font-size:12px;font-weight:600;">Lista</span>
+                </button>
+                <button id="modalCarrinhoFecharBtn" class="modal-close-btn" type="button">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <!-- Contador de itens -->
+              <div style="font-size:14px;color:var(--inactive-color);margin-bottom:16px;">
+                <i class="fa-solid fa-cart-shopping" style="margin-right:6px;"></i>
+                Itens no carrinho: <strong style="color:var(--primary-color);font-size:16px;"><span id="modalCarrinhoCount">0</span></strong>
+              </div>
+
+              <!-- Container de Cards do carrinho -->
+              <div id="modalCarrinhoCards" style="overflow:auto;max-height:500px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;">
+                <!-- Cards serão renderizados via JavaScript -->
+                <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--inactive-color);">
+                  <i class="fa-solid fa-cart-shopping" style="font-size:48px;opacity:0.2;display:block;margin-bottom:16px;"></i>
+                  <div style="font-size:16px;font-weight:500;">Carrinho vazio</div>
+                  <div style="font-size:14px;margin-top:8px;">Clique em "Abrir Catálogo" para adicionar produtos</div>
+                </div>
+              </div>
+
+              <!-- Container da Lista (Tabela) do carrinho -->
+              <div id="modalCarrinhoLista" style="overflow:auto;max-height:500px;display:none;">
+                <table class="tabela padrao" style="min-width:1600px;font-size:11px;border-collapse:separate;border-spacing:0;">
+                  <thead>
+                    <tr>
+                      <th style="position:sticky;left:0;z-index:10;background:#1f2937;width:50px;">Foto</th>
+                      <th style="position:sticky;left:50px;z-index:10;background:#1f2937;width:80px;">Código</th>
+                      <th style="position:sticky;left:130px;z-index:10;background:#1f2937;width:150px;">Descrição</th>
+                      <th style="width:60px;">Qtd</th>
+                      <th style="width:100px;">Prazo</th>
+                      <th style="width:90px;">Depto</th>
+                      <th style="width:100px;">Objetivo</th>
+                      <th style="width:100px;">Categoria</th>
+                      <th style="width:60px;">NP</th>
+                      <th style="width:110px;">Retorno</th>
+                      <th style="width:80px;">Requisição</th>
+                      <th style="width:110px;">Responsável</th>
+                      <th style="width:60px;">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="modalCarrinhoListaTbody">
+                    <tr>
+                      <td colspan="13" style="text-align:center;padding:40px;color:var(--inactive-color);">
+                        <i class="fa-solid fa-cart-shopping" style="font-size:32px;opacity:0.3;display:block;margin-bottom:12px;"></i>
+                        Carrinho vazio
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Botões de ação -->
+              <div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button id="modalComprasAbrirCatalogoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
+                  <i class="fa-solid fa-book"></i>
+                  <span>Abrir Catálogo</span>
+                </button>
+                <div style="display:flex;gap:12px;">
+                  <button id="modalComprasLimparCarrinhoBtn" class="content-button" type="button" style="background:var(--button-inactive);color:var(--inactive-color);display:none;">
+                    <i class="fa-solid fa-trash"></i>
+                    <span>Limpar carrinho</span>
+                  </button>
+                  <button id="modalComprasEnviarPedidoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;display:none;">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>Enviar solicitação</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Status de envio -->
+              <div id="modalComprasFormStatus" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal adicionar produto ao carrinho -->
         <div id="comprasModalOverlay" class="modal-overlay" style="display:none;">
           <div class="modal-container" style="max-width:900px;">
@@ -533,6 +651,7 @@
                   <label for="modalComprasDescricao">Descrição</label>
                   <input id="modalComprasDescricao" type="text" placeholder="Preenchido automaticamente ou digite manualmente" />
                 </div>
+
                 
                 <!-- Grid de 3 colunas: Quantidade, Departamento, Categoria -->
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -597,7 +716,7 @@
                 <!-- Campos Família do Produto e Etapas do Pedido lado a lado -->
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
                   <!-- Campo Família do Produto -->
-                  <div class="form-field">
+                  <div class="form-field compras-campo-colapsavel">
                     <label for="modalComprasFamilia">Família do Produto <span id="familiaObrigatorioIndicador" style="color:#ef4444;display:none;">*</span></label>
                     <select id="modalComprasFamilia" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;background:white;">
                       <option value="">Selecione a família...</option>
@@ -617,15 +736,22 @@
                     </select>
                   </div>
                 </div>
+
+                <div class="compras-campos-toggle-wrapper" style="margin:-6px 0 12px;display:flex;justify-content:flex-end;">
+                  <button id="comprasCamposExtrasToggle" type="button" class="compras-campos-toggle">
+                    <i class="fa-solid fa-chevron-up"></i>
+                    <span>Recolher campos avançados</span>
+                  </button>
+                </div>
                 
                 <!-- Campo Objetivo da compra em largura total -->
-                <div class="form-field" style="margin-bottom:16px;">
+                <div class="form-field compras-campo-colapsavel" style="margin-bottom:16px;">
                   <label for="modalComprasObjetivo">Objetivo da compra *</label>
                   <input id="modalComprasObjetivo" type="text" required placeholder="Ex: Reposição de estoque, novo projeto, etc." style="width:100%;" />
                 </div>
                 
                 <!-- Campo Anexo -->
-                <div class="form-field" style="margin-bottom:16px;">
+                <div class="form-field compras-campo-colapsavel" style="margin-bottom:16px;">
                   <label for="modalComprasAnexo" style="display:flex;align-items:center;gap:8px;">
                     <i class="fa-solid fa-paperclip"></i>
                     Anexar arquivo (opcional)
@@ -647,7 +773,7 @@
                 </div>
                 
                 <!-- Campo Observação em largura total -->
-                <div class="form-field">
+                <div class="form-field compras-campo-colapsavel">
                   <label for="modalComprasObservacao">Observação</label>
                   <textarea id="modalComprasObservacao" rows="3" placeholder="Detalhes adicionais" style="width:100%;"></textarea>
                 </div>
@@ -1020,7 +1146,7 @@
         </div>
 
         <!-- Modal Catálogo Omie -->
-        <div id="modalCatalogoOmie" class="modal" style="display:none;z-index:10001;">
+        <div id="modalCatalogoOmie" class="modal" style="display:none;z-index:10020;">
           <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
@@ -1033,7 +1159,7 @@
                   <span id="catalogoTotalProdutos" style="min-width:20px;text-align:center;">0</span>
                   <span style="font-size:12px;font-weight:600;opacity:0.9;">produtos</span>
                 </div>
-                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;transition:transform 0.2s ease;box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;transition:transform 0.2s ease;box-shadow:0 2px 8px rgba(16,185,129,0.3);cursor:pointer;" title="Clique para abrir o carrinho" onclick="abrirModalCarrinhoCompras()">
                   <i class="fa-solid fa-shopping-cart" style="font-size:16px;"></i>
                   <span id="catalogoNumeroItens" style="min-width:20px;text-align:center;">0</span>
                   <span style="font-size:12px;font-weight:600;opacity:0.9;">itens</span>
@@ -1086,7 +1212,7 @@
               </div>
               
               <!-- Configurações Globais -->
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
                 <div>
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
                     <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
@@ -1123,6 +1249,18 @@
                 </div>
                 <div>
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-sort-alpha-down" style="color:#3b82f6;margin-right:4px;"></i>
+                    NP
+                  </label>
+                  <select 
+                    id="catalogoNPGlobal"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                  </select>
+                </div>
+                <div style="grid-column:span 4;">
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
                     <i class="fa-solid fa-tags" style="color:#3b82f6;margin-right:4px;"></i>
                     Categoria da Compra *
                   </label>
@@ -1133,8 +1271,8 @@
                   </select>
                 </div>
                 
-                <!-- Campo Objetivo da Compra em largura completa (3 colunas) -->
-                <div style="grid-column:span 3;">
+                <!-- Campo Objetivo da Compra em largura completa (4 colunas) -->
+                <div style="grid-column:span 4;">
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
                     <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
                     Objetivo da Compra
@@ -1147,7 +1285,7 @@
                 </div>
                 
                 <!-- Checkbox Requisição Direta em largura completa -->
-                <div style="grid-column:span 3;">
+                <div style="grid-column:span 4;">
                   <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#e0f2fe;border:2px solid #0ea5e9;border-radius:6px;transition:all 0.2s;">
                     <input type="checkbox" id="catalogoRequisicaoDiretaGlobal" style="width:20px;height:20px;cursor:pointer;">
                     <span style="font-weight:700;color:#0369a1;font-size:13px;">
@@ -4264,7 +4402,7 @@ function attachDropZone(ul) {
   width: 100%;
   height: 100%;
   background: rgba(0, 0, 0, 0.7);
-  z-index: 9999;
+  z-index: 10010;
   align-items: center;
   justify-content: center;
 }
@@ -4378,6 +4516,27 @@ function attachDropZone(ul) {
 .form-group select[size]::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
 }
+
+/* Estilo da scrollbar horizontal do modal de carrinho */
+#modalCarrinhoLista::-webkit-scrollbar {
+  height: 12px;
+}
+#modalCarrinhoLista::-webkit-scrollbar-track {
+  background: #1f2937;
+  border-radius: 6px;
+}
+#modalCarrinhoLista::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 6px;
+  border: 2px solid #1f2937;
+}
+#modalCarrinhoLista::-webkit-scrollbar-thumb:hover {
+  background: #d1d5db;
+}
+#modalCarrinhoLista {
+  scrollbar-color: #9ca3af #1f2937;
+}
+
 .familia-id-display {
   margin-top: 8px;
   font-size: 0.9rem;
