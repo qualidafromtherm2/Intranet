@@ -165,9 +165,71 @@ router.get('/permissoes', async (req, res) => {
   }
 });
 
+// POST /auth/tema - atualiza preferência de tema do usuário logado
+router.post('/tema', express.json(), async (req, res) => {
+  try {
+    if (!req.session.user?.id) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const { theme } = req.body || {};
+    
+    // Validar tema
+    if (!['dark', 'light'].includes(theme)) {
+      return res.status(400).json({ error: 'Tema inválido. Use "dark" ou "light"' });
+    }
+
+    const userId = req.session.user.id;
+
+    // Atualiza no banco de dados
+    const updateResult = await pool.query(
+      `UPDATE public.auth_user 
+       SET theme_preference = $1 
+       WHERE id = $2 
+       RETURNING theme_preference`,
+      [theme, userId]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+
+    // Atualiza na sessão
+    req.session.user.theme_preference = theme;
+    req.session.save(() => {
+      res.json({ ok: true, theme });
+    });
+  } catch (err) {
+    console.error('[auth/tema]', err);
+    res.status(500).json({ error: 'Falha ao atualizar tema' });
+  }
+});
+
+// GET /auth/tema - recupera preferência de tema do usuário logado
+router.get('/tema', async (req, res) => {
+  try {
+    if (!req.session.user?.id) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const userId = req.session.user.id;
+    const { rows } = await pool.query(
+      `SELECT theme_preference FROM public.auth_user WHERE id = $1`,
+      [userId]
+    );
+
+    const theme = rows[0]?.theme_preference || 'dark';
+    res.json({ theme });
+  } catch (err) {
+    console.error('[auth/tema]', err);
+    res.status(500).json({ error: 'Falha ao recuperar tema' });
+  }
+});
+
 router.post('/logout', (req, res) => {
   try { req.session.destroy(() => res.json({ ok: true })); }
   catch { res.json({ ok: true }); }
 });
 
 module.exports = router;
+
