@@ -2387,14 +2387,14 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       // Extrai nCodPed do webhook - pode estar em vários lugares
       const cabecalho = event.cabecalho_consulta || event.cabecalho || {};
       
-      const nCodPed = event.nCodPed || 
+      const nCodPed = cabecalho.nCodPed ||        // PRIORIDADE: dentro do cabecalho primeiro
+                      cabecalho.n_cod_ped ||
+                      event.nCodPed || 
                       event.n_cod_ped || 
                       body.nCodPed ||
                       body.n_cod_ped ||
                       event.codigo_pedido ||
-                      body.codigo_pedido ||
-                      cabecalho.nCodPed ||
-                      cabecalho.n_cod_ped;
+                      body.codigo_pedido;
       
       if (!nCodPed) {
         console.warn('[webhooks/omie/pedidos-compra] Webhook sem nCodPed:', JSON.stringify(body));
