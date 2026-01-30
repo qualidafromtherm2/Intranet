@@ -15277,6 +15277,60 @@ document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('cl
 });
 
 // Binds dos botões de filtro de kanbans
+document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('comprasAtualizarKanbansBtn');
+  if (!btn) return;
+  
+  try {
+    // Mostra feedback visual
+    const icon = btn.querySelector('i');
+    const originalIcon = icon ? icon.className : '';
+    if (icon) {
+      icon.className = 'fa-solid fa-spinner fa-spin';
+    }
+    btn.disabled = true;
+    
+    // Fecha o modal de ações
+    fecharModalComprasAcoes();
+    
+    console.log('[Kanbans] Atualizando todos os kanbans...');
+    
+    // Recarrega os kanbans
+    await loadMinhasSolicitacoes();
+    
+    console.log('[Kanbans] Todos os kanbans atualizados com sucesso!');
+    
+    // Restaura ícone original
+    if (icon) {
+      icon.className = originalIcon;
+    }
+    btn.disabled = false;
+    
+    // Feedback visual de sucesso
+    if (icon) {
+      icon.className = 'fa-solid fa-check';
+      btn.style.backgroundColor = '#10b981';
+      btn.style.color = '#fff';
+      
+      setTimeout(() => {
+        if (icon) icon.className = originalIcon;
+        btn.style.backgroundColor = '';
+        btn.style.color = '';
+      }, 1500);
+    }
+    
+  } catch (err) {
+    console.error('[Kanbans] Erro ao atualizar kanbans:', err);
+    alert('Erro ao atualizar kanbans. Tente novamente.');
+    
+    const icon = btn.querySelector('i');
+    if (icon) {
+      icon.className = 'fa-solid fa-rotate';
+    }
+    btn.disabled = false;
+  }
+});
+
 document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () => {
   fecharModalComprasAcoes();
   abrirModalFiltroKanbans();
