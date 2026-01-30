@@ -223,6 +223,15 @@ img {
   border-radius: 50%;
   z-index: 3;
   cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dark-light:hover {
+  transform: scale(1.1);
+  box-shadow: -1px 5px 12px -1px rgba(0, 0, 0, 0.3);
 }
 .dark-light svg {
   width: 24px;

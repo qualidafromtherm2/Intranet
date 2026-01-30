@@ -28557,3 +28557,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('[LOGIN CHECK] Erro ao verificar autenticação:', err);
   }
 });
+
+// ========== TOGGLE TEMA CLARO/ESCURO ==========
+// Objetivo: Alternar entre modo claro e escuro ao clicar no botão dark-light
+document.addEventListener('DOMContentLoaded', () => {
+  const darkLightBtn = document.querySelector('.dark-light');
+  
+  if (!darkLightBtn) {
+    console.warn('[DARK-LIGHT] Botão .dark-light não encontrado no DOM');
+    return;
+  }
+  
+  // Recupera preferência armazenada do localStorage
+  const savedMode = localStorage.getItem('themeMode') || 'dark';
+  if (savedMode === 'light') {
+    document.documentElement.classList.add('light-mode');
+  }
+  
+  // Adiciona evento de clique
+  darkLightBtn.addEventListener('click', () => {
+    const isDark = !document.documentElement.classList.contains('light-mode');
+    
+    if (isDark) {
+      // Mudar para modo claro
+      document.documentElement.classList.add('light-mode');
+      localStorage.setItem('themeMode', 'light');
+      console.log('[DARK-LIGHT] Mudou para modo claro');
+    } else {
+      // Mudar para modo escuro
+      document.documentElement.classList.remove('light-mode');
+      localStorage.setItem('themeMode', 'dark');
+      console.log('[DARK-LIGHT] Mudou para modo escuro');
+    }
+  });
+});
