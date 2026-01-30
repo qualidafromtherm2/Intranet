@@ -269,6 +269,38 @@ img {
   background-color: rgba(255, 255, 255, 0.94);
 }
 
+/* Ícones em modo claro */
+.light-mode i {
+  color: #1f2937;
+}
+
+.light-mode .fa-solid,
+.light-mode .fa-regular,
+.light-mode .fa-light,
+.light-mode .fa-thin,
+.light-mode .fa-duotone,
+.light-mode [class*="fa-"] {
+  color: #1f2937 !important;
+}
+
+/* Ícones específicos que precisam ser claros em modo claro */
+.light-mode .header-profile i {
+  color: #6b7280;
+}
+
+.light-mode .menu-link i {
+  color: #1f2937;
+}
+
+.light-mode .content-button i,
+.light-mode button i {
+  color: inherit;
+}
+
+.light-mode .notification i {
+  color: #6b7280;
+}
+
 body.light-mode:before,
 body.light-mode .video-bg:before {
   content: "";
@@ -536,6 +568,11 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   transition: all 0.3s ease;
   font-size: 20px;
   position: relative;
+}
+
+.light-mode .sidebar-hamburger {
+  color: #1f2937;
+}
   z-index: 1001;
 }
 
