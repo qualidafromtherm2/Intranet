@@ -166,11 +166,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Checa imediatamente
   updateAllProfilePhotos();
 
-  // 2) Carrega e injeta o HTML do formulário
+  // 2) Mostra loading no overlay enquanto carrega o HTML
+  overlay.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;min-height:420px;">
+      <div style="text-align:center;color:#666;">
+        <svg width="48" height="48" viewBox="0 0 50 50" style="margin-bottom:12px;">
+          <circle cx="25" cy="25" r="20" fill="none" stroke="#6a5cff" stroke-width="4" stroke-linecap="round" 
+                  stroke-dasharray="31.415,31.415" transform="rotate(0 25 25)">
+            <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" 
+                              dur="1s" repeatCount="indefinite"/>
+          </circle>
+        </svg>
+        <p>Carregando...</p>
+      </div>
+    </div>
+  `;
+
+  // 3) Carrega e injeta o HTML do formulário
   const html = await fetch('login/login.html', { credentials: 'include' }).then(r => r.text());
   overlay.innerHTML = html;
+  
+  // 4) IMPORTANTE: Botão começa DESABILITADO com spinner
+  const btnEntrar = overlay.querySelector('#btnEntrar');
+  if (btnEntrar) {
+    btnEntrar.disabled = true;
+    const btnText = btnEntrar.querySelector('.btn-text');
+    const spinner = btnEntrar.querySelector('.spinner');
+    if (btnText) btnText.style.display = 'none';
+    if (spinner) spinner.style.display = 'inline-block';
+  }
 
-  // 3) Agora sim podemos selecionar os elementos do form
+  // 5) Agora sim podemos selecionar os elementos do form
   const form        = overlay.querySelector('#formSignIn');
 
   // painéis “logado” / “deslogado”
@@ -484,6 +510,16 @@ if (st.loggedIn && st.user) {
     divNotLogged.style.display = 'block';
     divLogged.style.display    = 'none';
     moverDadosParaEsquerda();
+  }
+  
+  // ✅ HABILITA O BOTÃO ENTRAR AGORA QUE TUDO ESTÁ PRONTO
+  const btnEntrarFinal = overlay.querySelector('#btnEntrar');
+  if (btnEntrarFinal) {
+    btnEntrarFinal.disabled = false;
+    const btnTextFinal = btnEntrarFinal.querySelector('.btn-text');
+    const spinnerFinal = btnEntrarFinal.querySelector('.spinner');
+    if (btnTextFinal) btnTextFinal.style.display = '';
+    if (spinnerFinal) spinnerFinal.style.display = 'none';
   }
 
   // 9) Abrir/fechar modal (usa sua função existente)
