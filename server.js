@@ -2422,6 +2422,35 @@ app.post('/api/compras/requisicoes-omie/sync', express.json(), async (req, res) 
   }
 });
 
+// ============================================================================
+// Endpoint para criar/atualizar uma requisição manualmente (dados diretos)
+// ============================================================================
+app.post('/api/compras/requisicoes-omie/upsert', express.json(), async (req, res) => {
+  try {
+    const requisicao = req.body || {};
+
+    if (!requisicao.codReqCompra && !requisicao.cod_req_compra) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: 'codReqCompra é obrigatório' 
+      });
+    }
+
+    console.log(`[API /api/compras/requisicoes-omie/upsert] Inserindo requisição: ${requisicao.codReqCompra || requisicao.cod_req_compra}`);
+    
+    await upsertRequisicaoCompra(requisicao, 'manual-api');
+
+    res.json({ 
+      ok: true, 
+      cod_req_compra: requisicao.codReqCompra || requisicao.cod_req_compra,
+      msg: 'Requisição inserida/atualizada com sucesso'
+    });
+  } catch (err) {
+    console.error('[API /api/compras/requisicoes-omie/upsert] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Endpoint para testar o que a API da Omie retorna
 app.get('/api/compras/pedidos-omie/teste-api', async (req, res) => {
   try {
@@ -10633,6 +10662,31 @@ async function ensureComprasSchema() {
         ON compras.solicitacao_compras(status);
     `);
     
+    // Migration: Corrigir tipo de n_qtde_parc de INTEGER para BIGINT
+    // Motivo: Omie envia IDs grandes que não cabem em INTEGER (máximo ~2 bilhões)
+    try {
+      const typeCheck = await pool.query(`
+        SELECT data_type FROM information_schema.columns 
+        WHERE table_schema = 'compras' 
+        AND table_name = 'pedidos_omie' 
+        AND column_name = 'n_qtde_parc'
+      `);
+      
+      if (typeCheck.rows.length > 0 && typeCheck.rows[0].data_type === 'integer') {
+        console.log('[Compras] Migrando n_qtde_parc de INTEGER para BIGINT...');
+        await pool.query(`
+          ALTER TABLE compras.pedidos_omie 
+          ALTER COLUMN n_qtde_parc TYPE BIGINT USING n_qtde_parc::BIGINT
+        `);
+        console.log('[Compras] ✓ Migração de n_qtde_parc concluída');
+      }
+    } catch (migErr) {
+      // Tabela pode não existir ainda, é ok
+      if (!migErr.message.includes('does not exist')) {
+        console.error('[Compras] Erro na migração de n_qtde_parc:', migErr.message);
+      }
+    }
+    
     console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
   } catch (e) {
     console.error('[Compras] Erro ao criar schema:', e);
@@ -11379,12 +11433,51 @@ async function syncRequisicoesCompraOmie(filtros = {}) {
     const DELAY_MS = 350; // ~3 req/s
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // Se foi informado codReqCompra/codIntReqCompra, sincroniza apenas esse registro
+    const filtroCodReqCompra = filtros.codReqCompra || filtros.cod_req_compra;
+    const filtroCodIntReqCompra = filtros.codIntReqCompra || filtros.cod_int_req_compra;
+    if (filtroCodReqCompra || filtroCodIntReqCompra) {
+      const paramConsulta = filtroCodReqCompra
+        ? { codReqCompra: parseInt(filtroCodReqCompra) }
+        : { codIntReqCompra: String(filtroCodIntReqCompra) };
+
+      console.log(`[RequisicoesCompra] Sincronizando requisição específica: ${filtroCodReqCompra || filtroCodIntReqCompra}`);
+
+      const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarReq',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [paramConsulta]
+        })
+      });
+      await sleep(DELAY_MS);
+      console.log(`[RequisicoesCompra] Aguardando ${DELAY_MS}ms (limite Omie)`);
+
+      if (!detalhesResponse.ok) {
+        const errorText = await detalhesResponse.text();
+        console.error(`[RequisicoesCompra] Erro ao consultar requisição ${filtroCodReqCompra || filtroCodIntReqCompra}: ${detalhesResponse.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${detalhesResponse.status}`);
+      }
+
+      const requisicaoCompleta = await detalhesResponse.json();
+      await upsertRequisicaoCompra(requisicaoCompleta, 'sync');
+
+      console.log(`[RequisicoesCompra] ✓ Requisição ${filtroCodReqCompra || filtroCodIntReqCompra} sincronizada com sucesso`);
+      return { ok: true, total: 1 };
+    }
+
     while (continuar) {
       const param = {
         pagina: pagina,
         registros_por_pagina: 50,
         ...filtros
       };
+
+      // NÃO aplicar filtro de apenas_importado_api
+      // Isso permite trazer TODAS as requisições, não apenas as importadas via API
 
       const body = {
         call: 'PesquisarReq',

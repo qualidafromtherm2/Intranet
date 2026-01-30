@@ -1,0 +1,80 @@
+                                       pg_get_functiondef                                        
+-------------------------------------------------------------------------------------------------
+ CREATE OR REPLACE FUNCTION public._pedido_insert_item(p_codigo_pedido bigint, item jsonb)      +
+  RETURNS void                                                                                  +
+  LANGUAGE plpgsql                                                                              +
+ AS $function$                                                                                  +
+ DECLARE                                                                                        +
+     ide jsonb := item->'ide';                                                                  +
+     prod jsonb := item->'produto';                                                             +
+     seq integer;                                                                               +
+ BEGIN                                                                                          +
+     IF prod IS NULL THEN                                                                       +
+       RETURN;                                                                                  +
+     END IF;                                                                                    +
+                                                                                                +
+     seq := NULLIF(ide->>'codigo_item', '')::integer;                                           +
+                                                                                                +
+     INSERT INTO public.pedidos_venda_itens (                                                   +
+         codigo_pedido,                                                                         +
+         codigo_item,                                                                           +
+         codigo_item_integracao,                                                                +
+         sequencial,                                                                            +
+         codigo,                                                                                +
+         codigo_produto,                                                                        +
+         codigo_produto_integracao,                                                             +
+         descricao,                                                                             +
+         unidade,                                                                               +
+         quantidade,                                                                            +
+         valor_unitario,                                                                        +
+         valor_mercadoria,                                                                      +
+         valor_desconto,                                                                        +
+         valor_total,                                                                           +
+         cfop,                                                                                  +
+         ncm,                                                                                   +
+         situacao,                                                                              +
+         dados_item,                                                                            +
+         updated_at                                                                             +
+     ) VALUES (                                                                                 +
+         p_codigo_pedido,                                                                       +
+         COALESCE(ide->>'codigo_item', ''),                                                     +
+         ide->>'codigo_item_integracao',                                                        +
+         COALESCE(seq, 0),                                                                      +
+         prod->>'codigo',                                                                       +
+         prod->>'codigo_produto',                                                               +
+         prod->>'codigo_produto_integracao',                                                    +
+         prod->>'descricao',                                                                    +
+         prod->>'unidade',                                                                      +
+         public._util_to_numeric(prod->>'quantidade'),                                          +
+         public._util_to_numeric(prod->>'valor_unitario'),                                      +
+         public._util_to_numeric(prod->>'valor_mercadoria'),                                    +
+         public._util_to_numeric(prod->>'valor_desconto'),                                      +
+         public._util_to_numeric(prod->>'valor_total'),                                         +
+         prod->>'cfop',                                                                         +
+         prod->>'ncm',                                                                          +
+         prod->>'situacao',                                                                     +
+         item,                                                                                  +
+         now()                                                                                  +
+     )                                                                                          +
+     ON CONFLICT (codigo_pedido, COALESCE(sequencial,0), COALESCE(codigo_item,'')) DO UPDATE SET+
+         codigo_item_integracao = EXCLUDED.codigo_item_integracao,                              +
+         codigo                = EXCLUDED.codigo,                                               +
+         codigo_produto        = EXCLUDED.codigo_produto,                                       +
+         codigo_produto_integracao = EXCLUDED.codigo_produto_integracao,                        +
+         descricao             = EXCLUDED.descricao,                                            +
+         unidade               = EXCLUDED.unidade,                                              +
+         quantidade            = EXCLUDED.quantidade,                                           +
+         valor_unitario        = EXCLUDED.valor_unitario,                                       +
+         valor_mercadoria      = EXCLUDED.valor_mercadoria,                                     +
+         valor_desconto        = EXCLUDED.valor_desconto,                                       +
+         valor_total           = EXCLUDED.valor_total,                                          +
+         cfop                  = EXCLUDED.cfop,                                                 +
+         ncm                   = EXCLUDED.ncm,                                                  +
+         situacao              = EXCLUDED.situacao,                                             +
+         dados_item            = EXCLUDED.dados_item,                                           +
+         updated_at            = now();                                                         +
+ END;                                                                                           +
+ $function$                                                                                     +
+ 
+(1 linha)
+
