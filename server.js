@@ -11399,7 +11399,7 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
   try {
     // 1. Busca etapa e fornecedor do pedido
     const pedidoResult = await pool.query(
-      'SELECT c_etapa, n_cod_for FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      'SELECT c_etapa, n_cod_for, c_numero FROM compras.pedidos_omie WHERE n_cod_ped = $1',
       [nCodPed]
     );
     
@@ -11410,6 +11410,7 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     
     const etapa = pedidoResult.rows[0].c_etapa;
     const codFornecedor = pedidoResult.rows[0].n_cod_for;
+    const numeroPedido = pedidoResult.rows[0].c_numero;
     
     if (!etapa) {
       console.warn(`[sincronizarPedido] Pedido ${nCodPed} sem etapa definida`);
@@ -11472,9 +11473,10 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
             fornecedor_id = $2,
             fornecedor_nome = $3,
             contato = $4,
+            cnumero = $5,
             updated_at = NOW()
-        WHERE ncodped = $5`;
-      updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, nCodPed];
+        WHERE ncodped = $6`;
+      updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, numeroPedido || null, nCodPed];
     } else {
       // Outras etapas: atualiza apenas status
       updateQuery = `
@@ -11489,7 +11491,7 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     
     if (result.rowCount > 0) {
       if (etapa === '10' && codFornecedor) {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}"`);
+        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}", cnumero="${updateParams[4]}"`);
       } else {
         console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}"`);
       }
