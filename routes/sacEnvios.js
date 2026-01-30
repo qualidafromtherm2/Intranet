@@ -628,4 +628,128 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
   }
 });
 
+// Endpoint para editar observação
+router.patch('/solicitacoes/:id/observacao', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  const observacao = String(req.body?.observacao || '').trim();
+
+  try {
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET observacao = $1
+        WHERE id = $2
+      RETURNING id, observacao`,
+      [observacao, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, observacao: r.rows[0].observacao });
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar observação:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao atualizar observação.' });
+  }
+});
+
+// Endpoint para editar status livre (qualquer valor)
+router.patch('/solicitacoes/:id/status-livre', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  const status = String(req.body?.status || '').trim();
+  if (!status) {
+    return res.status(400).json({ ok: false, error: 'Status não pode ser vazio.' });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET status = $1
+        WHERE id = $2
+      RETURNING id, status`,
+      [status, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, status: r.rows[0].status });
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar status livre:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
+  }
+});
+
+// Endpoint para editar quantidade dentro do campo conteudo (JSON)
+router.patch('/solicitacoes/:id/quantidade', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  const conteudoNovo = req.body?.conteudo;
+  if (!conteudoNovo) {
+    return res.status(400).json({ ok: false, error: 'Conteúdo não fornecido.' });
+  }
+
+  try {
+    // Validar se é um JSON válido
+    const conteudoStr = typeof conteudoNovo === 'string' ? conteudoNovo : JSON.stringify(conteudoNovo);
+    JSON.parse(conteudoStr); // Valida o JSON
+
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET conteudo = $1
+        WHERE id = $2
+      RETURNING id, conteudo`,
+      [conteudoStr, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, conteudo: r.rows[0].conteudo });
+  } catch (err) {
+    console.error('[SAC] erro ao atualizar quantidade:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao atualizar quantidade.' });
+  }
+});
+
+// Endpoint para excluir (marcar status como "Excluído")
+router.delete('/solicitacoes/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE envios.solicitacoes
+          SET status = 'Excluído'
+        WHERE id = $1
+      RETURNING id, status`,
+      [id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+    }
+
+    return res.json({ ok: true, status: r.rows[0].status });
+  } catch (err) {
+    console.error('[SAC] erro ao excluir registro:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao excluir registro.' });
+  }
+});
+
 module.exports = router;

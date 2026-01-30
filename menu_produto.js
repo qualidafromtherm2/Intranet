@@ -5105,7 +5105,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   
   // Detecta se é a tabela do painel "Envio de mercadoria" (que tem a coluna Requisitante)
   const isEnvioMercadoriaPane = bodyEl === envioMercadoriaTabelaBodyPane;
-  const numCols = isEnvioMercadoriaPane ? 8 : 7; // 8 colunas para Envio de Mercadoria, 7 para SAC
+  const numCols = isEnvioMercadoriaPane ? 8 : 8; // Ambas têm 8 colunas agora (SAC tem coluna Ações)
   
   if (!titleOnly) {
     bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>`;
@@ -5219,6 +5219,18 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
+        // Botões de Ação (Editar e Excluir)
+        const acoesButtons = `
+          <button class="content-button btn-sac-editar" data-id="${r.id}" data-obs="${(obs || '').replace(/"/g, '&quot;')}" data-status="${status}" data-conteudo="${(r.conteudo || '').replace(/"/g, '&quot;')}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <span>Editar</span>
+          </button>
+          <button class="content-button btn-sac-excluir" data-id="${r.id}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;">
+            <i class="fa-solid fa-trash"></i>
+            <span>Excluir</span>
+          </button>
+        `;
+        
         return `
           <tr>
             <td>${r.id}</td>
@@ -5228,13 +5240,15 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelect}</td>
             <td>${buttons || '—'}</td>
+            <td style="white-space:nowrap;">${acoesButtons}</td>
           </tr>`;
       }
     }).join('');
     preencherStatusRastreio(bodyEl);
   } catch (err) {
     console.error('[SAC] erro ao carregar tabela', err);
-    bodyEl.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
+    const numCols = bodyEl === envioMercadoriaTabelaBodyPane ? 8 : 8; // 8 colunas para ambas agora (SAC tem coluna Ações)
+    bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
   }
 }
 
@@ -5457,6 +5471,187 @@ document.addEventListener('change', async (ev) => {
     sel.value = anterior;
   } finally {
     sel.disabled = false;
+  }
+});
+
+// ========== MODAL DE EDIÇÃO DE ENVIO SAC ==========
+const sacEditModal = document.getElementById('sacEditModal');
+const sacEditModalClose = document.getElementById('sacEditModalClose');
+const sacEditCancelBtn = document.getElementById('sacEditCancelBtn');
+const sacEditSaveBtn = document.getElementById('sacEditSaveBtn');
+const sacEditId = document.getElementById('sacEditId');
+const sacEditObservacao = document.getElementById('sacEditObservacao');
+const sacEditStatus = document.getElementById('sacEditStatus');
+const sacEditConteudoOriginal = document.getElementById('sacEditConteudoOriginal');
+const sacEditQuantidadeContainer = document.getElementById('sacEditQuantidadeContainer');
+
+// Função para abrir o modal de edição
+function abrirModalEdicaoSAC(id, observacao, status, conteudoRaw) {
+  sacEditId.value = id;
+  sacEditObservacao.value = observacao === '—' ? '' : observacao;
+  sacEditStatus.value = status;
+  sacEditConteudoOriginal.value = conteudoRaw;
+  
+  // Parse do conteúdo JSON para criar os campos de quantidade
+  sacEditQuantidadeContainer.innerHTML = '';
+  
+  if (conteudoRaw && conteudoRaw !== '—') {
+    try {
+      const items = JSON.parse(conteudoRaw);
+      if (Array.isArray(items) && items.length > 0) {
+        items.forEach((item, idx) => {
+          const div = document.createElement('div');
+          div.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);';
+          div.innerHTML = `
+            <label style="flex:1;font-size:13px;color:var(--inactive-color);">${item.conteudo}</label>
+            <input type="number" min="1" class="sac-qtd-input" data-idx="${idx}" value="${item.quantidade}" style="width:80px;padding:6px;border:1px solid var(--border-color);border-radius:6px;background:var(--content-bg);color:var(--content-title-color);text-align:center;" />
+          `;
+          sacEditQuantidadeContainer.appendChild(div);
+        });
+      }
+    } catch (err) {
+      console.warn('[SAC] Erro ao parsear conteúdo:', err);
+      sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Formato de conteúdo inválido para edição.</div>';
+    }
+  } else {
+    sacEditQuantidadeContainer.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Nenhum item disponível.</div>';
+  }
+  
+  sacEditModal.style.display = 'flex';
+}
+
+// Função para fechar o modal de edição
+function fecharModalEdicaoSAC() {
+  sacEditModal.style.display = 'none';
+}
+
+// Event listeners para fechar o modal
+sacEditModalClose?.addEventListener('click', fecharModalEdicaoSAC);
+sacEditCancelBtn?.addEventListener('click', fecharModalEdicaoSAC);
+sacEditModal?.addEventListener('click', (e) => {
+  if (e.target === sacEditModal) fecharModalEdicaoSAC();
+});
+
+// Event listener para salvar as edições
+sacEditSaveBtn?.addEventListener('click', async () => {
+  const id = sacEditId.value;
+  if (!id) return;
+  
+  const novaObservacao = sacEditObservacao.value.trim();
+  const novoStatus = sacEditStatus.value.trim();
+  const conteudoOriginalStr = sacEditConteudoOriginal.value;
+  
+  // Coleta as novas quantidades
+  const qtdInputs = document.querySelectorAll('.sac-qtd-input');
+  let novoConteudo = null;
+  
+  if (conteudoOriginalStr && conteudoOriginalStr !== '—') {
+    try {
+      const items = JSON.parse(conteudoOriginalStr);
+      if (Array.isArray(items)) {
+        qtdInputs.forEach(input => {
+          const idx = parseInt(input.dataset.idx);
+          const novaQtd = input.value.trim();
+          if (items[idx]) {
+            items[idx].quantidade = novaQtd;
+          }
+        });
+        novoConteudo = JSON.stringify(items);
+      }
+    } catch (err) {
+      console.warn('[SAC] Erro ao processar conteúdo:', err);
+    }
+  }
+  
+  sacEditSaveBtn.disabled = true;
+  
+  try {
+    // 1. Atualizar observação
+    const respObs = await fetch(`/api/sac/solicitacoes/${id}/observacao`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observacao: novaObservacao })
+    });
+    if (!respObs.ok) throw new Error('Erro ao atualizar observação');
+    
+    // 2. Atualizar status livre
+    const respStatus = await fetch(`/api/sac/solicitacoes/${id}/status-livre`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: novoStatus })
+    });
+    if (!respStatus.ok) throw new Error('Erro ao atualizar status');
+    
+    // 3. Atualizar quantidade (se houver conteúdo)
+    if (novoConteudo) {
+      const respQtd = await fetch(`/api/sac/solicitacoes/${id}/quantidade`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conteudo: novoConteudo })
+      });
+      if (!respQtd.ok) throw new Error('Erro ao atualizar quantidade');
+    }
+    
+    alert('Registro atualizado com sucesso!');
+    fecharModalEdicaoSAC();
+    
+    // Recarrega a tabela
+    carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true });
+  } catch (err) {
+    console.error('[SAC] Erro ao salvar edição:', err);
+    alert('Não foi possível salvar as alterações. ' + (err?.message || ''));
+  } finally {
+    sacEditSaveBtn.disabled = false;
+  }
+});
+
+// Event listener para os botões "Editar"
+document.addEventListener('click', (e) => {
+  const btnEditar = e.target.closest('.btn-sac-editar');
+  if (btnEditar) {
+    e.preventDefault();
+    const id = btnEditar.dataset.id;
+    const obs = btnEditar.dataset.obs.replace(/&quot;/g, '"');
+    const status = btnEditar.dataset.status;
+    const conteudo = btnEditar.dataset.conteudo.replace(/&quot;/g, '"');
+    abrirModalEdicaoSAC(id, obs, status, conteudo);
+  }
+});
+
+// Event listener para os botões "Excluir"
+document.addEventListener('click', async (e) => {
+  const btnExcluir = e.target.closest('.btn-sac-excluir');
+  if (btnExcluir) {
+    e.preventDefault();
+    const id = btnExcluir.dataset.id;
+    
+    if (!confirm('Tem certeza que deseja excluir este registro? O status será alterado para "Excluído".')) {
+      return;
+    }
+    
+    btnExcluir.disabled = true;
+    
+    try {
+      const resp = await fetch(`/api/sac/solicitacoes/${id}`, {
+        method: 'DELETE'
+      });
+      const data = await resp.json().catch(() => ({}));
+      
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || 'Falha ao excluir');
+      }
+      
+      alert('Registro excluído com sucesso!');
+      
+      // Remove a linha da tabela
+      const row = btnExcluir.closest('tr');
+      if (row) row.remove();
+    } catch (err) {
+      console.error('[SAC] Erro ao excluir registro:', err);
+      alert('Não foi possível excluir o registro. ' + (err?.message || ''));
+    } finally {
+      btnExcluir.disabled = false;
+    }
   }
 });
 

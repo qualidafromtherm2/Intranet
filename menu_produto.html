@@ -1407,13 +1407,66 @@
                         <th>Conteúdo</th>
                         <th>Status</th>
                         <th>Anexos</th>
+                        <th>Ações</th>
                       </tr>
                     </thead>
                     <tbody id="sacTabelaBody">
-                      <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                      <tr><td colspan="8" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal de Edição de Envio (SAC) -->
+        <div id="sacEditModal" class="modal-overlay" style="display:none;">
+          <div class="modal-container" style="max-width:600px;width:90%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-pen-to-square" style="color:#0ea5e9;"></i>
+                Editar Envio
+              </h3>
+              <button class="modal-close-btn" id="sacEditModalClose" type="button">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+              <input type="hidden" id="sacEditId" />
+              <input type="hidden" id="sacEditConteudoOriginal" />
+              
+              <div class="form-field" style="margin-bottom:16px;">
+                <label for="sacEditObservacao">Observação</label>
+                <textarea id="sacEditObservacao" rows="3" style="width:100%;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);"></textarea>
+              </div>
+
+              <div class="form-field" style="margin-bottom:16px;">
+                <label for="sacEditStatus">Status</label>
+                <select id="sacEditStatus" style="width:100%;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
+                  <option value="Pendente">Pendente</option>
+                  <option value="Em separação">Em separação</option>
+                  <option value="Aguardando correios">Aguardando correios</option>
+                  <option value="Enviado">Enviado</option>
+                  <option value="Finalizado">Finalizado</option>
+                  <option value="Excluído">Excluído</option>
+                </select>
+              </div>
+
+              <div class="form-field" style="margin-bottom:16px;">
+                <label>Quantidade dos Itens</label>
+                <div id="sacEditQuantidadeContainer" style="display:flex;flex-direction:column;gap:8px;">
+                  <!-- Itens de quantidade serão inseridos aqui dinamicamente -->
+                </div>
+              </div>
+
+              <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+                <button id="sacEditCancelBtn" class="content-button" style="background:#6b7280;color:white;">
+                  Cancelar
+                </button>
+                <button id="sacEditSaveBtn" class="content-button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                  Salvar
+                </button>
               </div>
             </div>
           </div>
