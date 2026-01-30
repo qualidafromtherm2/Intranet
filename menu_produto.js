@@ -5136,11 +5136,23 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
       return;
     }
-    bodyEl.innerHTML = rows.map(r => {
+    
+    // Filtra registros excluídos na tabela "Envios registrados"
+    const filteredRows = isEnvioMercadoriaPane 
+      ? rows.filter(r => (r.status || '').toLowerCase() !== 'excluído')
+      : rows;
+    
+    if (!filteredRows.length) {
+      bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
+      return;
+    }
+    
+    bodyEl.innerHTML = filteredRows.map(r => {
       const dataFmt = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '—';
       const usuario = r.usuario || '—'; // Campo requisitante (usuário que criou o registro)
       const obs = r.observacao || '—';
-      const status = normalizeSacStatus(r.status);
+      const statusRaw = r.status || 'Pendente'; // Status bruto do banco de dados
+      const status = normalizeSacStatus(statusRaw); // Status normalizado para as opções predefinidas
       const etiqueta = r.etiqueta_url || r.etiqueta || '';
       const declaracao = r.declaracao_url || r.declaracao || '';
       const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
@@ -5198,14 +5210,25 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
         etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${etiqueta}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
         declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${declaracao}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
       ].filter(Boolean).join(' ');
-      const statusSelect = `
+      
+      // Select de status para Tabela "Envios registrados" (COM status real do banco)
+      const statusSelectEnvioMercadoria = `
         <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
-          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === status ? 'selected' : ''}>${opt}</option>`).join('')}
+          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
+          ${!sacStatusOptions.includes(statusRaw) ? `<option value="${statusRaw}" selected>${statusRaw}</option>` : ''}
+        </select>`;
+      
+      // Select de status para Tabela "Registro de envios" (SAC) (COM status real do banco)
+      const statusSelectSac = `
+        <select class="sac-status-select" data-id="${r.id}" style="padding:6px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-title-color);">
+          ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
+          ${!sacStatusOptions.includes(statusRaw) ? `<option value="${statusRaw}" selected>${statusRaw}</option>` : ''}
         </select>`;
       
       // Renderiza com ou sem a coluna Requisitante, dependendo da tabela
       if (isEnvioMercadoriaPane) {
         // Tabela "Envios registrados" (menu lateral) - COM coluna Requisitante
+        // Usa status real do banco de dados
         return `
           <tr>
             <td>${r.id}</td>
@@ -5214,14 +5237,14 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
-            <td>${statusSelect}</td>
+            <td>${statusSelectEnvioMercadoria}</td>
             <td>${buttons || '—'}</td>
           </tr>`;
       } else {
         // Tabela "Registro de envios" (painel SAC) - SEM coluna Requisitante
         // Botões de Ação (Editar e Excluir)
         const acoesButtons = `
-          <button class="content-button btn-sac-editar" data-id="${r.id}" data-obs="${(obs || '').replace(/"/g, '&quot;')}" data-status="${status}" data-conteudo="${(r.conteudo || '').replace(/"/g, '&quot;')}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+          <button class="content-button btn-sac-editar" data-id="${r.id}" data-obs="${(obs || '').replace(/"/g, '&quot;')}" data-status="${statusRaw}" data-conteudo="${(r.conteudo || '').replace(/"/g, '&quot;')}" style="padding:4px 8px;font-size:12px;display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
             <i class="fa-solid fa-pen-to-square"></i>
             <span>Editar</span>
           </button>
@@ -5238,7 +5261,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
-            <td>${statusSelect}</td>
+            <td>${statusSelectSac}</td>
             <td>${buttons || '—'}</td>
             <td style="white-space:nowrap;">${acoesButtons}</td>
           </tr>`;
