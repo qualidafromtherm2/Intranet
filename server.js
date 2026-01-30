@@ -2209,7 +2209,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
   async (req, res) => {
     try {
       const body = req.body || {};
-      const event = body.event || body;
+      // event deve ser um objeto, não uma string
+      const event = (typeof body.event === 'object' ? body.event : null) || body;
       
       // Log do webhook recebido
       console.log('[webhooks/omie/pedidos-compra] Webhook recebido:', JSON.stringify(body, null, 2));
@@ -2295,13 +2296,45 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           })
         });
 
+        let requisicao = null;
+        
         if (!responseReq.ok) {
           const errorText = await responseReq.text();
           console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie (requisicao): ${responseReq.status} - ${errorText}`);
-          throw new Error(`Omie API retornou ${responseReq.status}`);
+          
+          // Se a API retornou erro e temos os dados no webhook, usamos o fallback
+          if (event.cabecalho_consulta || body.requisicaoCadastro) {
+            console.log('[webhooks/omie/pedidos-compra] Usando dados do webhook como fallback após erro da API');
+            requisicao = {
+              requisicaoCadastro: {
+                ...body.requisicaoCadastro,
+                ...event.cabecalho_consulta,
+                nCodPed: codReqCompra,
+                cCodIntPed: codIntReqCompra
+              }
+            };
+          } else {
+            throw new Error(`Omie API retornou ${responseReq.status} e não há dados no webhook para fallback`);
+          }
+        } else {
+          requisicao = await responseReq.json();
         }
-
-        const requisicao = await responseReq.json();
+        
+        // Se a API não retornou os dados esperados, usamos os dados do webhook
+        if (!requisicao.requisicaoCadastro && event.cabecalho_consulta) {
+          console.log('[webhooks/omie/pedidos-compra] API retornou dados incompletos, usando dados do webhook');
+          requisicao = {
+            requisicaoCadastro: event.cabecalho_consulta
+          };
+        }
+        
+        // Se recebemos cabecalho_consulta no webhook, mesclamos com os dados da API
+        if (event.cabecalho_consulta && requisicao.requisicaoCadastro) {
+          // Adiciona/sobrescreve numero e etapa do webhook
+          requisicao.requisicaoCadastro.cNumero = event.cabecalho_consulta.cNumero;
+          requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa;
+        }
+        
         await upsertRequisicaoCompra(requisicao, topic);
 
         const acaoReq = topic.includes('Incluida') ? 'incluida' : 'alterada';
@@ -2441,24 +2474,65 @@ app.post('/api/compras/requisicoes-omie/upsert', express.json(), async (req, res
   try {
     const requisicao = req.body || {};
 
-    if (!requisicao.codReqCompra && !requisicao.cod_req_compra) {
+    // Aceita codReqCompra, cod_req_compra, nCodPed, ou qualquer variação
+    const hasCodReqCompra = requisicao.codReqCompra 
+      || requisicao.cod_req_compra 
+      || requisicao.nCodPed
+      || requisicao.n_cod_ped;
+    
+    if (!hasCodReqCompra) {
       return res.status(400).json({ 
         ok: false, 
-        error: 'codReqCompra é obrigatório' 
+        error: 'codReqCompra/nCodPed é obrigatório' 
       });
     }
 
-    console.log(`[API /api/compras/requisicoes-omie/upsert] Inserindo requisição: ${requisicao.codReqCompra || requisicao.cod_req_compra}`);
+    // Normaliza o nome do campo
+    if (!requisicao.codReqCompra && requisicao.nCodPed) {
+      requisicao.codReqCompra = requisicao.nCodPed;
+    } else if (!requisicao.codReqCompra && requisicao.n_cod_ped) {
+      requisicao.codReqCompra = requisicao.n_cod_ped;
+    } else if (!requisicao.codReqCompra && requisicao.cod_req_compra) {
+      requisicao.codReqCompra = requisicao.cod_req_compra;
+    }
+
+    console.log(`[API /api/compras/requisicoes-omie/upsert] Inserindo requisição: ${requisicao.codReqCompra}`);
     
     await upsertRequisicaoCompra(requisicao, 'manual-api');
 
     res.json({ 
       ok: true, 
-      cod_req_compra: requisicao.codReqCompra || requisicao.cod_req_compra,
+      cod_req_compra: requisicao.codReqCompra,
       msg: 'Requisição inserida/atualizada com sucesso'
     });
   } catch (err) {
     console.error('[API /api/compras/requisicoes-omie/upsert] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint GET para verificar requisição
+app.get('/api/compras/requisicoes-omie/get', async (req, res) => {
+  try {
+    const { codReqCompra, nCodPed } = req.query;
+    const cod = codReqCompra || nCodPed;
+    
+    if (!cod) {
+      return res.status(400).json({ ok: false, error: 'codReqCompra ou nCodPed obrigatório' });
+    }
+
+    const result = await pool.query(
+      'SELECT cod_req_compra, cod_int_req_compra, numero, etapa, created_at, updated_at FROM compras.requisicoes_omie WHERE cod_req_compra = $1 LIMIT 1',
+      [cod]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ ok: false, msg: 'Requisição não encontrada' });
+    }
+
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[API /api/compras/requisicoes-omie/get] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -10699,6 +10773,40 @@ async function ensureComprasSchema() {
       }
     }
     
+    // Migration: Adicionar colunas numero e etapa na tabela requisicoes_omie
+    // Objetivo: Armazenar número do pedido e etapa do processo vindo do webhook Omie
+    try {
+      await pool.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'compras' 
+            AND table_name = 'requisicoes_omie' 
+            AND column_name = 'numero'
+          ) THEN
+            ALTER TABLE compras.requisicoes_omie 
+            ADD COLUMN numero VARCHAR(50);
+          END IF;
+          
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'compras' 
+            AND table_name = 'requisicoes_omie' 
+            AND column_name = 'etapa'
+          ) THEN
+            ALTER TABLE compras.requisicoes_omie 
+            ADD COLUMN etapa VARCHAR(50);
+          END IF;
+        END $$;
+      `);
+      console.log('[Compras] ✓ Colunas numero e etapa verificadas/criadas em requisicoes_omie');
+    } catch (migErr) {
+      if (!migErr.message.includes('does not exist')) {
+        console.warn('[Compras] Aviso na migração de colunas numero/etapa:', migErr.message);
+      }
+    }
+    
     console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
   } catch (e) {
     console.error('[Compras] Erro ao criar schema:', e);
@@ -11200,8 +11308,8 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
     const itens = req.ItensReqCompra || req.itens_req_compra || [];
     const statusInfo = requisicao?.status || requisicao?.rcStatus || req?.rcStatus || {};
 
-    const codReqCompra = req.codReqCompra || req.cod_req_compra || statusInfo.codReqCompra || statusInfo.cod_req_compra;
-    const codIntReqCompra = req.codIntReqCompra || req.cod_int_req_compra || statusInfo.codIntReqCompra || statusInfo.cod_int_req_compra || null;
+    const codReqCompra = req.codReqCompra || req.cod_req_compra || req.nCodPed || statusInfo.codReqCompra || statusInfo.cod_req_compra;
+    const codIntReqCompra = req.codIntReqCompra || req.cod_int_req_compra || req.cCodIntPed || statusInfo.codIntReqCompra || statusInfo.cod_int_req_compra || null;
 
     if (!codReqCompra) {
       throw new Error('codReqCompra não encontrado na requisição');
@@ -11211,14 +11319,14 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
       INSERT INTO compras.requisicoes_omie (
         cod_req_compra, cod_int_req_compra, cod_categ, cod_proj,
         dt_sugestao, obs_req_compra, obs_int_req_compra,
-        cod_status, desc_status,
+        cod_status, desc_status, numero, etapa,
         evento_webhook, data_webhook, updated_at
       )
       VALUES (
         $1, $2, $3, $4,
         $5, $6, $7,
-        $8, $9,
-        $10, NOW(), NOW()
+        $8, $9, $10, $11,
+        $12, NOW(), NOW()
       )
       ON CONFLICT (cod_req_compra) DO UPDATE SET
         cod_int_req_compra = EXCLUDED.cod_int_req_compra,
@@ -11229,6 +11337,8 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
         obs_int_req_compra = EXCLUDED.obs_int_req_compra,
         cod_status = EXCLUDED.cod_status,
         desc_status = EXCLUDED.desc_status,
+        numero = EXCLUDED.numero,
+        etapa = EXCLUDED.etapa,
         evento_webhook = EXCLUDED.evento_webhook,
         data_webhook = NOW(),
         updated_at = NOW()
@@ -11242,6 +11352,8 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
       req.obsIntReqCompra || req.obs_int_req_compra || null,
       statusInfo.cCodStatus || statusInfo.c_cod_status || null,
       statusInfo.cDesStatus || statusInfo.c_des_status || null,
+      req.cNumero || req.c_numero || null,
+      req.cEtapa || req.c_etapa || null,
       eventoWebhook
     ]);
 
