@@ -11431,14 +11431,50 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     let updateParams;
     
     if (etapa === '10' && codFornecedor) {
-      // Etapa 10: atualiza status E fornecedor_id
+      // Etapa 10: busca dados do fornecedor na API Omie
+      let fornecedorNome = null;
+      let fornecedorContato = null;
+      
+      try {
+        console.log(`[sincronizarPedido] Buscando dados do fornecedor ${codFornecedor} na API Omie...`);
+        
+        const fornecedorResp = await fetch('https://app.omie.com.br/api/v1/geral/clientes/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            call: 'ConsultarCliente',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{
+              codigo_cliente_omie: parseInt(codFornecedor)
+            }]
+          })
+        });
+        
+        if (fornecedorResp.ok) {
+          const fornecedorData = await fornecedorResp.json();
+          fornecedorNome = fornecedorData.nome_fantasia || fornecedorData.razao_social || null;
+          fornecedorContato = fornecedorData.contato || null;
+          
+          console.log(`[sincronizarPedido] Dados do fornecedor obtidos: nome="${fornecedorNome}", contato="${fornecedorContato}"`);
+        } else {
+          const errorText = await fornecedorResp.text();
+          console.warn(`[sincronizarPedido] Erro ao buscar fornecedor na API Omie: ${fornecedorResp.status} - ${errorText}`);
+        }
+      } catch (err) {
+        console.warn(`[sincronizarPedido] Falha ao consultar fornecedor na API Omie:`, err.message);
+      }
+      
+      // Atualiza status, fornecedor_id, fornecedor_nome e contato
       updateQuery = `
         UPDATE compras.solicitacao_compras 
         SET status = $1, 
             fornecedor_id = $2,
+            fornecedor_nome = $3,
+            contato = $4,
             updated_at = NOW()
-        WHERE ncodped = $3`;
-      updateParams = [descricaoEtapa, codFornecedor, nCodPed];
+        WHERE ncodped = $5`;
+      updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, nCodPed];
     } else {
       // Outras etapas: atualiza apenas status
       updateQuery = `
@@ -11452,8 +11488,11 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
     const result = await pool.query(updateQuery, updateParams);
     
     if (result.rowCount > 0) {
-      const logFornecedor = (etapa === '10' && codFornecedor) ? `, fornecedor_id=${codFornecedor}` : '';
-      console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}"${logFornecedor}`);
+      if (etapa === '10' && codFornecedor) {
+        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}"`);
+      } else {
+        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}"`);
+      }
     } else {
       console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
     }
