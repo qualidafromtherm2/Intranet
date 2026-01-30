@@ -2216,6 +2216,88 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       
       // Campos que podem vir no webhook da Omie
       const topic = body.topic || event.topic || '';  // Ex: "CompraProduto.Incluida"
+      const isRequisicaoTopic = topic.startsWith('RequisicaoProduto.');
+
+      // ====== Tratamento de Requisições de Compra (RequisicaoProduto.*) ======
+      if (isRequisicaoTopic) {
+        const codReqCompra = event.codReqCompra
+          || event.cod_req_compra
+          || body.codReqCompra
+          || body.cod_req_compra
+          || event.nCodReq
+          || event.nCodReqCompra
+          || body.nCodReq
+          || body.nCodReqCompra;
+
+        const codIntReqCompra = event.codIntReqCompra
+          || event.cod_int_req_compra
+          || body.codIntReqCompra
+          || body.cod_int_req_compra;
+
+        if (!codReqCompra && !codIntReqCompra) {
+          console.warn('[webhooks/omie/pedidos-compra] Webhook sem codReqCompra/codIntReqCompra:', JSON.stringify(body));
+          return res.json({ ok: true, msg: 'Sem codReqCompra/codIntReqCompra para processar' });
+        }
+
+        console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para requisição ${codReqCompra || codIntReqCompra}`);
+
+        // Se for exclusão, apenas marca como inativo
+        if (topic.includes('Excluida') || event.excluido || body.excluido) {
+          if (codReqCompra) {
+            await pool.query(`
+              UPDATE compras.requisicoes_omie
+              SET inativo = true,
+                  evento_webhook = $1,
+                  data_webhook = NOW(),
+                  updated_at = NOW()
+              WHERE cod_req_compra = $2
+            `, [topic, codReqCompra]);
+          } else {
+            await pool.query(`
+              UPDATE compras.requisicoes_omie
+              SET inativo = true,
+                  evento_webhook = $1,
+                  data_webhook = NOW(),
+                  updated_at = NOW()
+              WHERE cod_int_req_compra = $2
+            `, [topic, codIntReqCompra]);
+          }
+
+          console.log(`[webhooks/omie/pedidos-compra] Requisição ${codReqCompra || codIntReqCompra} marcada como inativa (excluída)`);
+          return res.json({ ok: true, cod_req_compra: codReqCompra || null, cod_int_req_compra: codIntReqCompra || null, acao: 'excluida', atualizado: true });
+        }
+
+        // Para inclusão/alteração, busca dados completos na API da Omie
+        const param = codReqCompra
+          ? { codReqCompra: parseInt(codReqCompra) }
+          : { codIntReqCompra: String(codIntReqCompra) };
+
+        const responseReq = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            call: 'ConsultarReq',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [param]
+          })
+        });
+
+        if (!responseReq.ok) {
+          const errorText = await responseReq.text();
+          console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie (requisicao): ${responseReq.status} - ${errorText}`);
+          throw new Error(`Omie API retornou ${responseReq.status}`);
+        }
+
+        const requisicao = await responseReq.json();
+        await upsertRequisicaoCompra(requisicao, topic);
+
+        const acaoReq = topic.includes('Incluida') ? 'incluida' : 'alterada';
+        console.log(`[webhooks/omie/pedidos-compra] Requisição ${codReqCompra || codIntReqCompra} ${acaoReq} com sucesso`);
+
+        return res.json({ ok: true, cod_req_compra: codReqCompra || null, cod_int_req_compra: codIntReqCompra || null, acao: acaoReq, atualizado: true });
+      }
+
       const nCodPed = event.nCodPed || 
                       event.n_cod_ped || 
                       body.nCodPed ||
@@ -2319,6 +2401,23 @@ app.post('/api/compras/pedidos-omie/sync', express.json(), async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[API /api/compras/pedidos-omie/sync] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// Endpoint para sincronizar todas as requisições de compra da Omie manualmente
+// ============================================================================
+app.post('/api/compras/requisicoes-omie/sync', express.json(), async (req, res) => {
+  try {
+    const filtros = req.body || {};
+
+    console.log('[API] Iniciando sincronização de requisições de compra da Omie...');
+    const result = await syncRequisicoesCompraOmie(filtros);
+
+    res.json(result);
+  } catch (err) {
+    console.error('[API /api/compras/requisicoes-omie/sync] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -11019,6 +11118,101 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
   }
 }
 
+// ============================================================================
+// Upsert de uma requisição de compra no banco (tabelas no schema compras)
+// ============================================================================
+async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const req = requisicao?.requisicaoCadastro
+      || requisicao?.requisicao_cadastro
+      || requisicao
+      || {};
+
+    const itens = req.ItensReqCompra || req.itens_req_compra || [];
+    const statusInfo = requisicao?.status || requisicao?.rcStatus || req?.rcStatus || {};
+
+    const codReqCompra = req.codReqCompra || req.cod_req_compra || statusInfo.codReqCompra || statusInfo.cod_req_compra;
+    const codIntReqCompra = req.codIntReqCompra || req.cod_int_req_compra || statusInfo.codIntReqCompra || statusInfo.cod_int_req_compra || null;
+
+    if (!codReqCompra) {
+      throw new Error('codReqCompra não encontrado na requisição');
+    }
+
+    await client.query(`
+      INSERT INTO compras.requisicoes_omie (
+        cod_req_compra, cod_int_req_compra, cod_categ, cod_proj,
+        dt_sugestao, obs_req_compra, obs_int_req_compra,
+        cod_status, desc_status,
+        evento_webhook, data_webhook, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4,
+        $5, $6, $7,
+        $8, $9,
+        $10, NOW(), NOW()
+      )
+      ON CONFLICT (cod_req_compra) DO UPDATE SET
+        cod_int_req_compra = EXCLUDED.cod_int_req_compra,
+        cod_categ = EXCLUDED.cod_categ,
+        cod_proj = EXCLUDED.cod_proj,
+        dt_sugestao = EXCLUDED.dt_sugestao,
+        obs_req_compra = EXCLUDED.obs_req_compra,
+        obs_int_req_compra = EXCLUDED.obs_int_req_compra,
+        cod_status = EXCLUDED.cod_status,
+        desc_status = EXCLUDED.desc_status,
+        evento_webhook = EXCLUDED.evento_webhook,
+        data_webhook = NOW(),
+        updated_at = NOW()
+    `, [
+      codReqCompra,
+      codIntReqCompra,
+      req.codCateg || req.cod_categ || null,
+      req.codProj || req.cod_proj || null,
+      convertOmieDate(req.dtSugestao || req.dt_sugestao),
+      req.obsReqCompra || req.obs_req_compra || null,
+      req.obsIntReqCompra || req.obs_int_req_compra || null,
+      statusInfo.cCodStatus || statusInfo.c_cod_status || null,
+      statusInfo.cDesStatus || statusInfo.c_des_status || null,
+      eventoWebhook
+    ]);
+
+    await client.query('DELETE FROM compras.requisicoes_omie_itens WHERE cod_req_compra = $1', [codReqCompra]);
+
+    if (Array.isArray(itens) && itens.length > 0) {
+      for (const item of itens) {
+        await client.query(`
+          INSERT INTO compras.requisicoes_omie_itens (
+            cod_req_compra, cod_item, cod_int_item,
+            cod_prod, cod_int_prod, qtde, preco_unit, obs_item
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [
+          codReqCompra,
+          item.codItem || item.cod_item || null,
+          item.codIntItem || item.cod_int_item || null,
+          item.codProd || item.cod_prod || null,
+          item.codIntProd || item.cod_int_prod || null,
+          item.qtde || item.qtde_item || null,
+          item.precoUnit || item.preco_unit || null,
+          item.obsItem || item.obs_item || null
+        ]);
+      }
+    }
+
+    await client.query('COMMIT');
+    console.log(`[RequisicoesCompra] ✓ Requisição ${codReqCompra} sincronizada com sucesso`);
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[RequisicoesCompra] ✗ Erro ao fazer upsert da requisição:', e);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // Gera número único de pedido (formato: YYYYMMDD-HHMMSS-RANDOM)
 function gerarNumeroPedido() {
   const now = new Date();
@@ -11167,6 +11361,129 @@ async function syncPedidosCompraOmie(filtros = {}) {
     return { ok: true, total: totalSincronizados };
   } catch (e) {
     console.error('[PedidosCompra] ✗ Erro na sincronização:', e);
+    return { ok: false, error: e.message };
+  }
+}
+
+// ============================================================================
+// Sincroniza todas as requisições de compra da Omie para o banco de dados
+// Respeita limite de ~3 requisições/segundo (Omie)
+// ============================================================================
+async function syncRequisicoesCompraOmie(filtros = {}) {
+  try {
+    console.log('[RequisicoesCompra] Iniciando sincronização com Omie...');
+    let pagina = 1;
+    let totalSincronizados = 0;
+    let continuar = true;
+
+    const DELAY_MS = 350; // ~3 req/s
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    while (continuar) {
+      const param = {
+        pagina: pagina,
+        registros_por_pagina: 50,
+        ...filtros
+      };
+
+      const body = {
+        call: 'PesquisarReq',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [param]
+      };
+
+      console.log(`[RequisicoesCompra] Buscando página ${pagina}...`);
+
+      const response = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      await sleep(DELAY_MS);
+      console.log(`[RequisicoesCompra] Aguardando ${DELAY_MS}ms (limite Omie)`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[RequisicoesCompra] Erro na API Omie: ${response.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+
+      const data = await response.json();
+      const requisicoesRaw = data.requisicaoCadastro || data.requisicao_cadastro || data.requisicoes || [];
+      const requisicoes = Array.isArray(requisicoesRaw) ? requisicoesRaw : [requisicoesRaw];
+      const totalPaginas = data.total_de_paginas || data.totalDePaginas || 1;
+      const totalRegistros = data.total_de_registros || data.totalDeRegistros || 0;
+
+      console.log(`[RequisicoesCompra] Página ${pagina}/${totalPaginas} - ${requisicoes.length} requisições (Total na Omie: ${totalRegistros})`);
+
+      if (!requisicoes.length) {
+        continuar = false;
+        break;
+      }
+
+      for (const reqResumo of requisicoes) {
+        try {
+          const posAtual = totalSincronizados + 1;
+          const codReqCompra = reqResumo.codReqCompra || reqResumo.cod_req_compra;
+          const codIntReqCompra = reqResumo.codIntReqCompra || reqResumo.cod_int_req_compra;
+
+          if (!codReqCompra && !codIntReqCompra) {
+            console.warn('[RequisicoesCompra] Requisição sem codReqCompra/codIntReqCompra, pulando:', reqResumo);
+            continue;
+          }
+
+          const paramConsulta = codReqCompra
+            ? { codReqCompra: parseInt(codReqCompra) }
+            : { codIntReqCompra: String(codIntReqCompra) };
+
+          const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              call: 'ConsultarReq',
+              app_key: OMIE_APP_KEY,
+              app_secret: OMIE_APP_SECRET,
+              param: [paramConsulta]
+            })
+          });
+          await sleep(DELAY_MS);
+          console.log(`[RequisicoesCompra] Aguardando ${DELAY_MS}ms (limite Omie)`);
+
+          if (!detalhesResponse.ok) {
+            const errorText = await detalhesResponse.text();
+            console.error(`[RequisicoesCompra] Erro ao consultar requisição ${codReqCompra || codIntReqCompra}: ${detalhesResponse.status} - ${errorText}`);
+            continue;
+          }
+
+          const requisicaoCompleta = await detalhesResponse.json();
+
+          await upsertRequisicaoCompra(requisicaoCompleta, 'sync');
+          totalSincronizados++;
+
+          if (totalSincronizados % 5 === 0) {
+            console.log(`[RequisicoesCompra] Progresso: ${totalSincronizados} requisições sincronizadas (página ${pagina}/${totalPaginas})`);
+          }
+
+          if (totalSincronizados % 10 === 0) {
+            console.log(`[RequisicoesCompra] ✓ Progresso: ${totalSincronizados} requisições sincronizadas...`);
+          }
+        } catch (reqErr) {
+          console.error('[RequisicoesCompra] Erro ao processar requisição:', reqErr);
+        }
+      }
+
+      if (pagina >= totalPaginas) {
+        continuar = false;
+      } else {
+        pagina++;
+      }
+    }
+
+    console.log(`[RequisicoesCompra] ✓✓✓ Sincronização concluída: ${totalSincronizados} requisições sincronizadas com sucesso!`);
+    return { ok: true, total: totalSincronizados };
+  } catch (e) {
+    console.error('[RequisicoesCompra] ✗ Erro na sincronização:', e);
     return { ok: false, error: e.message };
   }
 }
