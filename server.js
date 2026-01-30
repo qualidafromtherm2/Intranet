@@ -2220,19 +2220,31 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 
       // ====== Tratamento de Requisições de Compra (RequisicaoProduto.*) ======
       if (isRequisicaoTopic) {
+        // Extrai dados do cabecalho_consulta se existir
+        const cabecalho = event.cabecalho_consulta || event.cabecalho || {};
+        
         const codReqCompra = event.codReqCompra
           || event.cod_req_compra
           || body.codReqCompra
           || body.cod_req_compra
           || event.nCodReq
           || event.nCodReqCompra
+          || event.nCodPed
           || body.nCodReq
-          || body.nCodReqCompra;
+          || body.nCodReqCompra
+          || body.nCodPed
+          || cabecalho.nCodPed;
 
         const codIntReqCompra = event.codIntReqCompra
           || event.cod_int_req_compra
           || body.codIntReqCompra
-          || body.cod_int_req_compra;
+          || body.cod_int_req_compra
+          || event.cCodIntReqCompra
+          || event.cCodIntPed
+          || body.cCodIntReqCompra
+          || body.cCodIntPed
+          || cabecalho.cCodIntReqCompra
+          || cabecalho.cCodIntPed;
 
         if (!codReqCompra && !codIntReqCompra) {
           console.warn('[webhooks/omie/pedidos-compra] Webhook sem codReqCompra/codIntReqCompra:', JSON.stringify(body));
