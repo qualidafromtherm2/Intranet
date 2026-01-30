@@ -2209,8 +2209,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
   async (req, res) => {
     try {
       const body = req.body || {};
-      // event deve ser um objeto, não uma string
-      const event = (typeof body.event === 'object' ? body.event : null) || body;
+      // event pode ser body.event, body.evento, ou o próprio body
+      const event = body.evento || (typeof body.event === 'object' ? body.event : null) || body;
       
       // Log do webhook recebido
       console.log('[webhooks/omie/pedidos-compra] Webhook recebido:', JSON.stringify(body, null, 2));
