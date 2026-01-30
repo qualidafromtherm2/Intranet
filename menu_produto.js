@@ -19442,24 +19442,24 @@ async function abrirModalSelecaoItensCompra() {
   }
 }
 
-// Renderiza lista de itens para seleção, agrupados por família de produto
+// Renderiza lista de itens para seleção, agrupados por número do pedido (cnumero)
 function renderizarListaSelecaoItens(itens) {
   const container = document.getElementById('listaItensSelecaoCompra');
   if (!container) return;
   
-  // Agrupa itens por familia_produto
-  const itensPorFamilia = {};
+  // Agrupa itens por cnumero (número do pedido)
+  const itensPorPedido = {};
   itens.forEach(item => {
-    const familia = item.familia_produto || 'Sem Família';
-    if (!itensPorFamilia[familia]) {
-      itensPorFamilia[familia] = [];
+    const cnumero = item.cnumero || 'Sem Pedido';
+    if (!itensPorPedido[cnumero]) {
+      itensPorPedido[cnumero] = [];
     }
-    itensPorFamilia[familia].push(item);
+    itensPorPedido[cnumero].push(item);
   });
   
-  // Renderiza cada grupo de família
-  const html = Object.keys(itensPorFamilia).sort().map(familia => {
-    const itensGrupo = itensPorFamilia[familia];
+  // Renderiza cada grupo de pedido
+  const html = Object.keys(itensPorPedido).sort().map(cnumero => {
+    const itensGrupo = itensPorPedido[cnumero];
     
     const itensHtml = itensGrupo.map(item => {
       const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
@@ -19678,7 +19678,7 @@ function renderizarListaSelecaoItens(itens) {
     return `
       <div style="margin-bottom:24px;">
         <div style="
-          background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);
+          background:linear-gradient(135deg,${cnumero === 'Sem Pedido' ? '#ef4444 0%,#dc2626 100%' : '#3b82f6 0%,#2563eb 100%'});
           color:white;
           padding:12px 16px;
           border-radius:8px;
@@ -19688,16 +19688,17 @@ function renderizarListaSelecaoItens(itens) {
           display:flex;
           align-items:center;
           gap:10px;
-          box-shadow:0 2px 8px rgba(59,130,246,0.3);
+          box-shadow:0 2px 8px rgba(${cnumero === 'Sem Pedido' ? '239,68,68' : '59,130,246'},0.3);
         ">
-          <i class="fa-solid fa-layer-group"></i>
-          <span>${escapeHtml(familia)}</span>
+          <i class="fa-solid ${cnumero === 'Sem Pedido' ? 'fa-exclamation-triangle' : 'fa-file-invoice'}"></i>
+          <span>${cnumero === 'Sem Pedido' ? 'Sem Pedido' : `Pedido Nº ${escapeHtml(cnumero)}`}</span>
           <span style="
             background:rgba(255,255,255,0.2);
             padding:4px 10px;
             border-radius:12px;
             font-size:12px;
             margin-left:auto;
+          ">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
           ">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
         </div>
         <div style="display:grid;gap:12px;padding-left:8px;">
