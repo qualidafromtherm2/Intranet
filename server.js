@@ -2401,6 +2401,19 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         return res.json({ ok: true, msg: 'Sem nCodPed para processar' });
       }
       
+      // ===== DEDUPLICAÇÃO: Verifica se já processamos este messageId =====
+      const messageId = body.messageId;
+      if (messageId) {
+        const checkDupe = await pool.query(
+          'SELECT 1 FROM compras.pedidos_omie WHERE evento_webhook_message_id = $1',
+          [messageId]
+        );
+        if (checkDupe.rows.length > 0) {
+          console.log(`[webhooks/omie/pedidos-compra] ⚠ Webhook duplicado ignorado (messageId: ${messageId})`);
+          return res.json({ ok: true, msg: 'Webhook duplicado - já processado' });
+        }
+      }
+      
       console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para pedido ${nCodPed}`);
       
       // Se for exclusão ou cancelamento, apenas marca como inativo no banco
@@ -2409,10 +2422,11 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           UPDATE compras.pedidos_omie 
           SET inativo = true, 
               evento_webhook = $1,
+              evento_webhook_message_id = $2,
               data_webhook = NOW(),
               updated_at = NOW()
-          WHERE n_cod_ped = $2
-        `, [topic, nCodPed]);
+          WHERE n_cod_ped = $3
+        `, [topic, messageId || null, nCodPed]);
         
         const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
         console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} marcado como inativo (${acao})`);
@@ -2425,35 +2439,10 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         });
       }
       
-      // Para inclusão, alteração, encerramento ou mudança de etapa, busca dados completos na API da Omie
-      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          call: 'ConsultarPedCompra',
-          app_key: OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param: [{
-            nCodPed: parseInt(nCodPed)
-          }]
-        })
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
-        throw new Error(`Omie API retornou ${response.status}`);
-      }
-      
-      const pedido = await response.json();
-      
-      // Atualiza no banco
-      await upsertPedidoCompra(pedido, topic);
-      
+      // ===== RESPOSTA ASSÍNCRONA: Responde imediatamente para evitar timeout =====
       const acao = topic.includes('Incluida') ? 'incluido' : 
                    topic.includes('Encerrada') ? 'encerrado' :
                    topic.includes('EtapaAlterada') ? 'etapa alterada' : 'alterado';
-      console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com sucesso`);
       
       res.json({ 
         ok: true, 
@@ -2461,6 +2450,43 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         acao: acao,
         atualizado: true 
       });
+      
+      // ===== PROCESSAMENTO EM BACKGROUND =====
+      // Para inclusão, alteração, encerramento ou mudança de etapa, busca dados completos na API da Omie
+      (async () => {
+        try {
+          const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              call: 'ConsultarPedCompra',
+              app_key: OMIE_APP_KEY,
+              app_secret: OMIE_APP_SECRET,
+              param: [{
+                nCodPed: parseInt(nCodPed)
+              }]
+            })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
+            return;
+          }
+          
+          const pedido = await response.json();
+          
+          // Atualiza no banco com messageId
+          await upsertPedidoCompra(pedido, topic, messageId);
+          
+          // Sincroniza com solicitacao_compras
+          await sincronizarPedidoComSolicitacao(nCodPed);
+          
+          console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com sucesso`);
+        } catch (err) {
+          console.error(`[webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido ${nCodPed}:`, err);
+        }
+      })();
     } catch (err) {
       console.error('[webhooks/omie/pedidos-compra] erro:', err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
@@ -11123,7 +11149,7 @@ function convertOmieDate(omieDate) {
   return null;
 }
 
-async function upsertPedidoCompra(pedido, eventoWebhook = '') {
+async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -11152,7 +11178,7 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
         c_cod_categ, n_cod_compr, c_contato, c_contrato,
         n_cod_cc, n_cod_int_cc, n_cod_proj,
         c_num_pedido, c_obs, c_obs_int, c_email_aprovador,
-        evento_webhook, data_webhook, updated_at
+        evento_webhook, evento_webhook_message_id, data_webhook, updated_at
       )
       VALUES (
         $1, $2, $3,
@@ -11163,7 +11189,7 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
         $15, $16, $17, $18,
         $19, $20, $21,
         $22, $23, $24, $25,
-        $26, NOW(), NOW()
+        $26, $27, NOW(), NOW()
       )
       ON CONFLICT (n_cod_ped) DO UPDATE SET
         c_cod_int_ped = EXCLUDED.c_cod_int_ped,
@@ -11191,6 +11217,7 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
         c_obs_int = EXCLUDED.c_obs_int,
         c_email_aprovador = EXCLUDED.c_email_aprovador,
         evento_webhook = EXCLUDED.evento_webhook,
+        evento_webhook_message_id = EXCLUDED.evento_webhook_message_id,
         data_webhook = NOW(),
         updated_at = NOW()
     `, [
@@ -11219,7 +11246,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
       cabecalho.cObs || cabecalho.c_obs || null,
       cabecalho.cObsInt || cabecalho.c_obs_int || null,
       cabecalho.cEmailAprovador || cabecalho.c_email_aprovador || null,
-      eventoWebhook
+      eventoWebhook,
+      messageId
     ]);
     
     // 2. Remove produtos antigos e insere novos
@@ -11361,6 +11389,77 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '') {
     throw e;
   } finally {
     client.release();
+  }
+}
+
+// ============================================================================
+// Sincroniza pedido Omie com solicitacao_compras
+// ============================================================================
+async function sincronizarPedidoComSolicitacao(nCodPed) {
+  try {
+    // 1. Busca etapa e fornecedor do pedido
+    const pedidoResult = await pool.query(
+      'SELECT c_etapa, n_cod_for FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      [nCodPed]
+    );
+    
+    if (pedidoResult.rows.length === 0) {
+      console.warn(`[sincronizarPedido] Pedido ${nCodPed} não encontrado em pedidos_omie`);
+      return;
+    }
+    
+    const etapa = pedidoResult.rows[0].c_etapa;
+    const codFornecedor = pedidoResult.rows[0].n_cod_for;
+    
+    if (!etapa) {
+      console.warn(`[sincronizarPedido] Pedido ${nCodPed} sem etapa definida`);
+      return;
+    }
+    
+    // 2. Busca descrição da etapa
+    const etapaResult = await pool.query(
+      'SELECT descricao_padrao FROM compras.etapas_pedido_compra WHERE codigo = $1',
+      [etapa]
+    );
+    
+    const descricaoEtapa = etapaResult.rows.length > 0 
+      ? etapaResult.rows[0].descricao_padrao 
+      : `Etapa ${etapa}`;
+    
+    // 3. Atualiza solicitacao_compras
+    let updateQuery;
+    let updateParams;
+    
+    if (etapa === '10' && codFornecedor) {
+      // Etapa 10: atualiza status E cod_int_fornecedor
+      updateQuery = `
+        UPDATE compras.solicitacao_compras 
+        SET status = $1, 
+            cod_int_fornecedor = $2,
+            updated_at = NOW()
+        WHERE ncodped = $3`;
+      updateParams = [descricaoEtapa, codFornecedor, nCodPed];
+    } else {
+      // Outras etapas: atualiza apenas status
+      updateQuery = `
+        UPDATE compras.solicitacao_compras 
+        SET status = $1,
+            updated_at = NOW()
+        WHERE ncodped = $2`;
+      updateParams = [descricaoEtapa, nCodPed];
+    }
+    
+    const result = await pool.query(updateQuery, updateParams);
+    
+    if (result.rowCount > 0) {
+      const logFornecedor = (etapa === '10' && codFornecedor) ? `, cod_int_fornecedor=${codFornecedor}` : '';
+      console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}"${logFornecedor}`);
+    } else {
+      console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
+    }
+    
+  } catch (err) {
+    console.error(`[sincronizarPedido] ✗ Erro ao sincronizar pedido ${nCodPed}:`, err);
   }
 }
 
