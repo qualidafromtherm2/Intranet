@@ -28560,7 +28560,60 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ========== TOGGLE TEMA CLARO/ESCURO ==========
 // Objetivo: Alternar entre modo claro e escuro ao clicar no botão dark-light
-document.addEventListener('DOMContentLoaded', () => {
+// Salva preferência no banco de dados por usuário
+
+// Função para aplicar tema
+function aplicarTema(theme) {
+  if (theme === 'light') {
+    document.documentElement.classList.add('light-mode');
+  } else {
+    document.documentElement.classList.remove('light-mode');
+  }
+}
+
+// Função para salvar tema no servidor
+async function salvarTemaNoServidor(theme) {
+  try {
+    const resp = await fetch('/api/auth/tema', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ theme })
+    });
+    
+    if (!resp.ok) {
+      console.warn('[DARK-LIGHT] Falha ao salvar tema no servidor:', resp.status);
+    } else {
+      console.log('[DARK-LIGHT] Tema salvo no servidor:', theme);
+    }
+  } catch (err) {
+    console.warn('[DARK-LIGHT] Erro ao salvar tema:', err);
+  }
+}
+
+// Carregar tema ao iniciar
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    // Tenta carregar do servidor (se estiver logado)
+    const resp = await fetch('/api/auth/tema', { credentials: 'include' });
+    if (resp.ok) {
+      const data = await resp.json();
+      aplicarTema(data.theme);
+      console.log('[DARK-LIGHT] Tema carregado do servidor:', data.theme);
+    } else {
+      // Fallback: usar localStorage se não estiver logado
+      const savedMode = localStorage.getItem('themeMode') || 'dark';
+      aplicarTema(savedMode);
+      console.log('[DARK-LIGHT] Tema carregado do localStorage:', savedMode);
+    }
+  } catch (err) {
+    // Fallback: usar localStorage em caso de erro
+    const savedMode = localStorage.getItem('themeMode') || 'dark';
+    aplicarTema(savedMode);
+    console.log('[DARK-LIGHT] Tema carregado do localStorage (fallback):', savedMode);
+  }
+
+  // Adiciona evento de clique no botão
   const darkLightBtn = document.querySelector('.dark-light');
   
   if (!darkLightBtn) {
@@ -28568,26 +28621,20 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
   
-  // Recupera preferência armazenada do localStorage
-  const savedMode = localStorage.getItem('themeMode') || 'dark';
-  if (savedMode === 'light') {
-    document.documentElement.classList.add('light-mode');
-  }
-  
-  // Adiciona evento de clique
-  darkLightBtn.addEventListener('click', () => {
+  darkLightBtn.addEventListener('click', async () => {
     const isDark = !document.documentElement.classList.contains('light-mode');
+    const novoTema = isDark ? 'light' : 'dark';
     
-    if (isDark) {
-      // Mudar para modo claro
-      document.documentElement.classList.add('light-mode');
-      localStorage.setItem('themeMode', 'light');
-      console.log('[DARK-LIGHT] Mudou para modo claro');
-    } else {
-      // Mudar para modo escuro
-      document.documentElement.classList.remove('light-mode');
-      localStorage.setItem('themeMode', 'dark');
-      console.log('[DARK-LIGHT] Mudou para modo escuro');
-    }
+    // Aplica tema localmente
+    aplicarTema(novoTema);
+    
+    // Salva no servidor
+    await salvarTemaNoServidor(novoTema);
+    
+    // Fallback: salva no localStorage também
+    localStorage.setItem('themeMode', novoTema);
+    
+    const mensagem = novoTema === 'light' ? 'Mudou para modo claro' : 'Mudou para modo escuro';
+    console.log('[DARK-LIGHT]', mensagem);
   });
 });
