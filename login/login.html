@@ -235,6 +235,22 @@ label:has(#rememberMe) {
         </div>
 
         <div id="overlayLoggedIn" style="display: none;">
+          <!-- Campo de Foto de Perfil (acima de "Olá, seja bem vindo") -->
+          <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:20px;">
+            <div id="profilePhotoContainer" style="position:relative;width:120px;height:120px;margin-bottom:12px;cursor:pointer;" title="Clique para alterar a foto">
+              <img id="profilePhoto" src="" alt="Foto de perfil" style="width:100%;height:100%;border-radius:50%;object-fit:cover;border:4px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,0.15);background:#f3f4f6;display:none;" />
+              <div id="profilePhotoPlaceholder" style="width:100%;height:100%;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;border:4px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+                <i class="fa-solid fa-user" style="font-size:48px;color:#fff;"></i>
+              </div>
+              <!-- Ícone de câmera para indicar que é clicável -->
+              <div style="position:absolute;bottom:5px;right:5px;width:32px;height:32px;background:#667eea;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                <i class="fa-solid fa-camera" style="font-size:14px;color:#fff;"></i>
+              </div>
+            </div>
+            <input type="file" id="profilePhotoInput" accept="image/*" style="display:none;" />
+            <span id="profilePhotoStatus" style="font-size:11px;color:#667eea;min-height:16px;"></span>
+          </div>
+          
           <h1>Olá, seja bem vindo</h1>
           <p id="nomeUsuarioOverlay">Fulano</p>
           <button class="ghost" id="btnOverlayLogout">Deslogar</button>

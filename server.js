@@ -4533,15 +4533,47 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
     
     const { createClient } = require('@supabase/supabase-js');
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
-    const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+    // Usa as credenciais corretas do .env (service_role para upload no backend)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('[Supabase Upload] Credenciais não configuradas no .env');
+      return res.status(500).json({ error: 'Supabase não configurado' });
+    }
     
     const supabase = createClient(supabaseUrl, supabaseKey);
     
+    const bucketName = 'compras-anexos';
     const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
     
+    // Verifica se o bucket existe, se não existir, cria
+    try {
+      const { data: buckets } = await supabase.storage.listBuckets();
+      const bucketExists = buckets?.some(b => b.name === bucketName);
+      
+      if (!bucketExists) {
+        console.log(`[Supabase] Criando bucket '${bucketName}'...`);
+        const { error: createError } = await supabase.storage.createBucket(bucketName, {
+          public: true,
+          fileSizeLimit: 10485760, // 10MB
+          allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+        });
+        
+        if (createError) {
+          console.error('[Supabase] Erro ao criar bucket:', createError);
+          // Continua tentando fazer upload mesmo se falhar ao criar
+        } else {
+          console.log(`[Supabase] Bucket '${bucketName}' criado com sucesso`);
+        }
+      }
+    } catch (bucketError) {
+      console.warn('[Supabase] Erro ao verificar/criar bucket:', bucketError.message);
+      // Continua com o upload de qualquer forma
+    }
+    
     const { data, error } = await supabase.storage
-      .from('compras-anexos')
+      .from(bucketName)
       .upload(filePath, req.file.buffer, {
         contentType: req.file.mimetype,
         upsert: false
@@ -4554,7 +4586,7 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     
     // Gera URL pública
     const { data: publicData } = supabase.storage
-      .from('compras-anexos')
+      .from(bucketName)
       .getPublicUrl(filePath);
     
     res.json({ 
@@ -11461,43 +11493,73 @@ app.post('/api/compras/pedido', async (req, res) => {
         
         console.log(`[Compras] Item ${produto_codigo} - Requisição Direta: ${requisicao_direta} - Status Final: ${statusInicial}`);
         
-        // Processa anexo se houver
+        // Processa anexo se houver - SALVA NO SUPABASE
         let anexosArray = null;
         if (anexo && anexo.base64) {
           try {
-            const fs = require('fs').promises;
-            const path = require('path');
+            const { createClient } = require('@supabase/supabase-js');
+            const supabaseUrl = process.env.SUPABASE_URL;
+            const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+            
+            if (!supabaseUrl || !supabaseKey) {
+              throw new Error('Credenciais do Supabase não configuradas');
+            }
+            
+            const supabase = createClient(supabaseUrl, supabaseKey);
             
             // Converte base64 para buffer
             const buffer = Buffer.from(anexo.base64, 'base64');
             
-            // Diretório para salvar anexos
-            const anexosDir = path.join(__dirname, 'uploads', 'compras-anexos');
-            
-            // Cria diretório se não existir
-            await fs.mkdir(anexosDir, { recursive: true });
-            
             // Gera nome único para o arquivo
             const timestamp = Date.now();
             const nomeArquivoSanitizado = anexo.nome.replace(/[^a-zA-Z0-9.-]/g, '_');
-            const fileName = `${timestamp}_${nomeArquivoSanitizado}`;
-            const filePath = path.join(anexosDir, fileName);
+            const filePath = `compras/${timestamp}_${nomeArquivoSanitizado}`;
             
-            // Salva arquivo no servidor
-            await fs.writeFile(filePath, buffer);
+            const bucketName = 'compras-anexos';
             
-            // URL para acessar o arquivo (servido como estático)
-            const fileUrl = `/uploads/compras-anexos/${fileName}`;
+            // Verifica se o bucket existe, se não, cria
+            try {
+              const { data: buckets } = await supabase.storage.listBuckets();
+              const bucketExists = buckets?.some(b => b.name === bucketName);
+              
+              if (!bucketExists) {
+                console.log(`[Compras] Criando bucket '${bucketName}' no Supabase...`);
+                await supabase.storage.createBucket(bucketName, {
+                  public: true,
+                  fileSizeLimit: 10485760,
+                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+                });
+              }
+            } catch (bucketError) {
+              console.warn('[Compras] Aviso ao verificar bucket:', bucketError.message);
+            }
+            
+            // Upload para o Supabase
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(filePath, buffer, {
+                contentType: anexo.tipo,
+                upsert: false
+              });
+            
+            if (uploadError) {
+              throw new Error(`Erro no upload Supabase: ${uploadError.message}`);
+            }
+            
+            // Gera URL pública
+            const { data: publicData } = supabase.storage
+              .from(bucketName)
+              .getPublicUrl(filePath);
             
             anexosArray = [{
               nome: anexo.nome,
-              url: fileUrl,
+              url: publicData.publicUrl,
               tipo: anexo.tipo,
               tamanho: anexo.tamanho,
               data_upload: new Date().toISOString()
             }];
             
-            console.log(`[Compras] Anexo salvo localmente: ${anexo.nome} -> ${fileUrl}`);
+            console.log(`[Compras] Anexo salvo no Supabase: ${anexo.nome} -> ${publicData.publicUrl}`);
           } catch (errAnexo) {
             console.error('[Compras] Erro ao processar anexo:', errAnexo);
             // Continua sem o anexo
@@ -11642,7 +11704,8 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           codigo_omie,
           requisicao_direta,
           np,
-          status_pedido
+          status_pedido,
+          anexo  // ← ADICIONADO: Captura anexo do item
         } = item;
         
         // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
@@ -11662,6 +11725,93 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         
         console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta: ${requisicao_direta} - Status: ${statusInicial}`);
         
+        // Processa anexo(s) se houver - SALVA NO SUPABASE
+        let anexosArray = null;
+        if (anexo) {
+          try {
+            const { createClient } = require('@supabase/supabase-js');
+            const supabaseUrl = process.env.SUPABASE_URL;
+            const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+            
+            if (!supabaseUrl || !supabaseKey) {
+              throw new Error('Credenciais do Supabase não configuradas');
+            }
+            
+            const supabase = createClient(supabaseUrl, supabaseKey);
+            const bucketName = 'compras-anexos';
+            
+            // Verifica se o bucket existe, se não, cria
+            try {
+              const { data: buckets } = await supabase.storage.listBuckets();
+              const bucketExists = buckets?.some(b => b.name === bucketName);
+              
+              if (!bucketExists) {
+                console.log(`[Compras-Solicitacao] Criando bucket '${bucketName}' no Supabase...`);
+                await supabase.storage.createBucket(bucketName, {
+                  public: true,
+                  fileSizeLimit: 10485760,
+                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+                });
+              }
+            } catch (bucketError) {
+              console.warn('[Compras-Solicitacao] Aviso ao verificar bucket:', bucketError.message);
+            }
+            
+            // Normaliza para array (pode vir como objeto único ou array)
+            const anexosParaProcessar = Array.isArray(anexo) ? anexo : [anexo];
+            anexosArray = [];
+            
+            // Processa cada anexo
+            for (const arq of anexosParaProcessar) {
+              if (!arq.base64) continue;
+              
+              // Converte base64 para buffer
+              const buffer = Buffer.from(arq.base64, 'base64');
+              
+              // Gera nome único para o arquivo
+              const timestamp = Date.now();
+              const nomeArquivoSanitizado = arq.nome.replace(/[^a-zA-Z0-9.-]/g, '_');
+              const filePath = `compras/${timestamp}_${nomeArquivoSanitizado}`;
+              
+              // Upload para o Supabase
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from(bucketName)
+                .upload(filePath, buffer, {
+                  contentType: arq.tipo,
+                  upsert: false
+                });
+              
+              if (uploadError) {
+                console.error(`[Compras-Solicitacao] Erro no upload de ${arq.nome}:`, uploadError.message);
+                continue;
+              }
+              
+              // Gera URL pública
+              const { data: publicData } = supabase.storage
+                .from(bucketName)
+                .getPublicUrl(filePath);
+              
+              anexosArray.push({
+                nome: arq.nome,
+                url: publicData.publicUrl,
+                tipo: arq.tipo,
+                tamanho: arq.tamanho,
+                data_upload: new Date().toISOString()
+              });
+              
+              console.log(`[Compras-Solicitacao] Anexo salvo: ${arq.nome} -> ${publicData.publicUrl}`);
+            }
+            
+            // Se nenhum anexo foi processado com sucesso, define como null
+            if (anexosArray.length === 0) {
+              anexosArray = null;
+            }
+          } catch (errAnexo) {
+            console.error('[Compras-Solicitacao] Erro ao processar anexos:', errAnexo);
+            anexosArray = null;
+          }
+        }
+        
         // Insere item na solicitacao_compras com os campos corretos
         const result = await client.query(`
           INSERT INTO compras.solicitacao_compras (
@@ -11679,9 +11829,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             resp_inspecao_recebimento,
             codigo_produto_omie,
             codigo_omie,
+            anexos,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -11697,7 +11848,8 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           retorno_cotacao || null,
           resp_inspecao_recebimento || solicitante,
           codigo_produto_omie || null,
-          codigo_omie || null
+          codigo_omie || null,
+          anexosArray ? JSON.stringify(anexosArray) : null  // ← ADICIONADO: Salva anexos no banco
         ]);
         
         const itemId = result.rows[0].id;
@@ -12578,8 +12730,14 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       try {
         const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
-        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+        
+        if (!supabaseUrl || !supabaseKey) {
+          console.error('[Supabase] Credenciais não configuradas');
+          throw new Error('Supabase não configurado');
+        }
+        
         const supabase = createClient(supabaseUrl, supabaseKey);
         
         anexosUrls = [];
@@ -12840,8 +12998,14 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       try {
         const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = process.env.SUPABASE_URL || 'https://ycmphrzqozxmzlqfxpca.supabase.co';
-        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InljbXBocnpxb3p4bXpscWZ4cGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzEzNTIyOTAsImV4cCI6MjA0NjkyODI5MH0.KHCQiFVq30MBq1DPp7snlz0xqZs61aEhZl5AE42-O3E';
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+        
+        if (!supabaseUrl || !supabaseKey) {
+          console.error('[Supabase] Credenciais não configuradas');
+          throw new Error('Supabase não configurado');
+        }
+        
         const supabase = createClient(supabaseUrl, supabaseKey);
         
         // Busca cotação para pegar solicitacao_id

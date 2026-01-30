@@ -104,6 +104,67 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Disponibiliza globalmente para outros módulos
     window.openLoginModal = () => overlay.classList.add('is-active');
   }
+  
+  // 📸 Monitor ATIVO para atualizar foto do profile-icon E do modal
+  const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+  
+  let lastPhotoUrl = null;
+  
+  function updateAllProfilePhotos() {
+    const profileIcon = document.getElementById('profile-icon');
+    const profilePhoto = document.getElementById('profilePhoto');
+    const profilePhotoPlaceholder = document.getElementById('profilePhotoPlaceholder');
+    
+    const currentPhotoUrl = window.__sessionUser?.foto_perfil_url || null;
+    
+    // Só atualiza se a foto mudou
+    if (currentPhotoUrl !== lastPhotoUrl) {
+      console.log('[updateAllProfilePhotos] Foto mudou de', lastPhotoUrl, 'para', currentPhotoUrl);
+      lastPhotoUrl = currentPhotoUrl;
+      
+      if (currentPhotoUrl) {
+        console.log('[updateAllProfilePhotos] Aplicando foto do usuário:', currentPhotoUrl);
+        
+        // Atualiza o ícone do header
+        if (profileIcon) {
+          profileIcon.src = currentPhotoUrl;
+        }
+        
+        // Atualiza a foto no modal de login
+        if (profilePhoto) {
+          profilePhoto.src = currentPhotoUrl;
+          profilePhoto.style.display = 'block';
+        }
+        if (profilePhotoPlaceholder) {
+          profilePhotoPlaceholder.style.display = 'none';
+        }
+      } else {
+        console.log('[updateAllProfilePhotos] Aplicando imagem padrão');
+        
+        // Atualiza o ícone do header com imagem padrão
+        if (profileIcon) {
+          profileIcon.src = defaultImage;
+        }
+        
+        // Mostra placeholder no modal
+        if (profilePhoto) {
+          profilePhoto.style.display = 'none';
+        }
+        if (profilePhotoPlaceholder) {
+          profilePhotoPlaceholder.style.display = 'flex';
+        }
+      }
+    }
+  }
+  
+  // Monitor constante (verifica a cada 500ms)
+  setInterval(updateAllProfilePhotos, 500);
+  
+  // Também escuta o evento auth:changed
+  window.addEventListener('auth:changed', updateAllProfilePhotos);
+  
+  // Checa imediatamente
+  updateAllProfilePhotos();
 
   // 2) Carrega e injeta o HTML do formulário
   const html = await fetch('login/login.html', { credentials: 'include' }).then(r => r.text());
@@ -165,24 +226,201 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uiNCod         = overlay.querySelector('#uiNCod');
   const uiNCodConta    = overlay.querySelector('#uiNCodConta');
   const uiNCodVend     = overlay.querySelector('#uiNCodVend');
+  
+  // Elementos da foto de perfil
+  const profilePhotoContainer = overlay.querySelector('#profilePhotoContainer');
+  const profilePhoto = overlay.querySelector('#profilePhoto');
+  const profilePhotoPlaceholder = overlay.querySelector('#profilePhotoPlaceholder');
+  const profilePhotoInput = overlay.querySelector('#profilePhotoInput');
+  const profilePhotoStatus = overlay.querySelector('#profilePhotoStatus');
 
   /* =========================================================
-   *  Carrega dados do colaborador (dummy por enquanto)
+   *  Carrega dados do colaborador (incluindo foto de perfil)
    * ========================================================= */
-  async function loadUserInfo(username) {
+  async function loadUserInfo(userOrId) {
     try {
-      // mostra painel “logado”
+      // mostra painel "logado"
       divNotLogged.style.display = 'none';
       divLogged.style.display    = 'block';
+      
+      // Se recebeu um objeto user completo, usa o username/id dele
+      const username = typeof userOrId === 'object' ? (userOrId.username || userOrId.id) : userOrId;
       nomeUsuarioSpan.textContent = username || '';
 
-      // apenas consulta status (mantém coerência visual)
+      // consulta status e foto de perfil
       const stResp = await fetch(`${BASE}/api/auth/status`, { credentials: 'include' });
       const js     = stResp.ok ? await stResp.json() : { loggedIn:false };
-      // (campos de perfil ficam vazios até migrarmos 100% pro SQL)
+      
+      console.log('[loadUserInfo] Dados do usuário:', js.user);
+      
+      // Carrega foto de perfil se disponível
+      if (js.loggedIn && js.user) {
+        loadProfilePhoto(js.user.id);
+        // Atualiza também o profile-icon do header usando o foto_perfil_url do objeto
+        updateHeaderProfileIconFromUser(js.user);
+      }
 
     } catch (err) {
       console.warn('[loadUserInfo]', err);
+    }
+  }
+  
+  /* =========================================================
+   *  Carrega e exibe foto de perfil do usuário
+   * ========================================================= */
+  async function loadProfilePhoto(userId) {
+    try {
+      const resp = await fetch(`${BASE}/api/users/${userId}/foto-perfil`, { credentials: 'include' });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.foto_perfil_url) {
+          profilePhoto.src = data.foto_perfil_url;
+          profilePhoto.style.display = 'block';
+          profilePhotoPlaceholder.style.display = 'none';
+        } else {
+          // Sem foto, mostra placeholder
+          profilePhoto.style.display = 'none';
+          profilePhotoPlaceholder.style.display = 'flex';
+        }
+      }
+    } catch (err) {
+      console.warn('[loadProfilePhoto]', err);
+      // Em caso de erro, mantém placeholder
+      profilePhoto.style.display = 'none';
+      profilePhotoPlaceholder.style.display = 'flex';
+    }
+  }
+  
+  /* =========================================================
+   *  Atualiza foto do profile-icon no header DIRETAMENTE do objeto user
+   * ========================================================= */
+  function updateHeaderProfileIconFromUser(user) {
+    const profileIcon = document.getElementById('profile-icon');
+    if (!profileIcon) {
+      console.warn('[updateHeaderProfileIconFromUser] profile-icon não encontrado');
+      return;
+    }
+    
+    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    
+    console.log('[updateHeaderProfileIconFromUser] User:', user);
+    console.log('[updateHeaderProfileIconFromUser] foto_perfil_url:', user?.foto_perfil_url);
+    
+    // Se tem foto, usa a foto do usuário; senão usa a imagem padrão
+    const fotoUrl = user?.foto_perfil_url || defaultImage;
+    console.log('[updateHeaderProfileIconFromUser] Setando imagem no header:', fotoUrl);
+    profileIcon.src = fotoUrl;
+  }
+  
+  /* =========================================================
+   *  Atualiza foto do profile-icon no header (versão com API)
+   * ========================================================= */
+  async function updateHeaderProfileIcon(userId) {
+    const profileIcon = document.getElementById('profile-icon');
+    if (!profileIcon) {
+      console.warn('[updateHeaderProfileIcon] profile-icon não encontrado');
+      return;
+    }
+    
+    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    
+    console.log('[updateHeaderProfileIcon] Buscando foto para userId:', userId);
+    
+    try {
+      const resp = await fetch(`${BASE}/api/users/${userId}/foto-perfil`, { credentials: 'include' });
+      console.log('[updateHeaderProfileIcon] Resposta da API:', resp.status, resp.ok);
+      
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('[updateHeaderProfileIcon] Dados recebidos:', data);
+        
+        // Se tem foto, usa a foto do usuário; senão usa a imagem padrão
+        const fotoUrl = data.foto_perfil_url || defaultImage;
+        console.log('[updateHeaderProfileIcon] Setando imagem:', fotoUrl);
+        profileIcon.src = fotoUrl;
+      } else {
+        console.warn('[updateHeaderProfileIcon] Erro na API, usando imagem padrão');
+        // Se erro na API, usa imagem padrão
+        profileIcon.src = defaultImage;
+      }
+    } catch (err) {
+      console.error('[updateHeaderProfileIcon] Erro:', err);
+      // Em caso de erro, usa imagem padrão
+      profileIcon.src = defaultImage;
+    }
+  }
+  
+  /* =========================================================
+   *  Upload de foto de perfil para Supabase
+   * ========================================================= */
+  async function uploadProfilePhoto(file) {
+    try {
+      profilePhotoStatus.textContent = 'Enviando foto...';
+      profilePhotoStatus.style.color = '#667eea';
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', `profile-photos/${Date.now()}_${file.name}`);
+      
+      const uploadResp = await fetch(`${BASE}/api/upload/supabase`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+      
+      if (!uploadResp.ok) {
+        throw new Error('Falha ao fazer upload da foto');
+      }
+      
+      const uploadData = await uploadResp.json();
+      
+      if (!uploadData.url) {
+        throw new Error('URL da foto não retornada');
+      }
+      
+      // Salva URL no banco de dados
+      const userId = window.__sessionUser?.id;
+      if (!userId) {
+        throw new Error('Usuário não identificado');
+      }
+      
+      const saveResp = await fetch(`${BASE}/api/users/${userId}/foto-perfil`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ foto_perfil_url: uploadData.url })
+      });
+      
+      if (!saveResp.ok) {
+        throw new Error('Falha ao salvar URL da foto');
+      }
+      
+      // Atualiza imagem na interface
+      profilePhoto.src = uploadData.url;
+      profilePhoto.style.display = 'block';
+      profilePhotoPlaceholder.style.display = 'none';
+      
+      // Atualiza também o profile-icon do header
+      const profileIcon = document.getElementById('profile-icon');
+      if (profileIcon) {
+        profileIcon.src = uploadData.url;
+      }
+      
+      profilePhotoStatus.textContent = 'Foto atualizada!';
+      profilePhotoStatus.style.color = '#10b981';
+      
+      setTimeout(() => {
+        profilePhotoStatus.textContent = '';
+      }, 3000);
+      
+    } catch (err) {
+      console.error('[uploadProfilePhoto]', err);
+      profilePhotoStatus.textContent = 'Erro ao enviar foto';
+      profilePhotoStatus.style.color = '#ef4444';
+      
+      setTimeout(() => {
+        profilePhotoStatus.textContent = '';
+      }, 3000);
     }
   }
 
@@ -192,6 +430,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (savedU) inpUser.value = savedU;
   if (savedP) inpPass.value = savedP;
   if (savedU && savedP && chkRemember) chkRemember.checked = true;
+  
+  // 5) Event listeners para foto de perfil
+  if (profilePhotoContainer && profilePhotoInput) {
+    // Abre seletor de arquivo ao clicar no container
+    profilePhotoContainer.addEventListener('click', () => {
+      profilePhotoInput.click();
+    });
+    
+    // Processa arquivo selecionado
+    profilePhotoInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        // Valida tipo de arquivo
+        if (!file.type.startsWith('image/')) {
+          alert('Por favor, selecione uma imagem válida');
+          return;
+        }
+        
+        // Valida tamanho (máx 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+          alert('A imagem deve ter no máximo 5MB');
+          return;
+        }
+        
+        await uploadProfilePhoto(file);
+      }
+      
+      // Limpa input para permitir selecionar o mesmo arquivo novamente
+      e.target.value = '';
+    });
+  }
 
   // 8) Ao abrir a página, checa sessão e configura a UI
   const st = await fetch(`${BASE}/api/auth/status`, { credentials: 'include' })
@@ -205,7 +474,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 if (st.loggedIn && st.user) {
     form.style.display = 'none';
     try { await updateMessageCount?.(); } catch {}
-    await loadUserInfo(st.user.id);
+    // Passa o objeto user completo para poder usar foto_perfil_url
+    await loadUserInfo(st.user);
     moverDadosParaDireita();
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
@@ -354,6 +624,13 @@ function bindLogout(btn) {
     if (usr) { usr.readOnly = false; usr.value = ''; }
     if (pwd) { pwd.readOnly = false; pwd.value = ''; }
     if (chk) { chk.checked = false; }
+
+    // Reset da foto de perfil para imagem padrão
+    const profileIcon = document.getElementById('profile-icon');
+    const defaultImage = 'https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png';
+    if (profileIcon) {
+      profileIcon.src = defaultImage;
+    }
 
     // estado global + evento
     window.__sessionUser = null;

@@ -4794,7 +4794,9 @@ li.duplicado::after{
   border-radius:50%;
   object-fit:cover;
   border:2px solid var(--theme-color);
-  /* *** REMOVA o “margin-left:22px;” que estava duplicado *** */
+  margin-left:22px;
+  flex-shrink:0;
+  position:relative;
 }
 .profile-img { cursor: pointer; }
 

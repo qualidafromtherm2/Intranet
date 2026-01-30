@@ -375,4 +375,61 @@ router.get('/me/messages', requireLogin, async (req, res) => {
   }
 });
 
+/* ----------------- 7) Endpoint para obter foto de perfil ----------------- */
+router.get('/:id/foto-perfil', requireLogin, async (req, res) => {
+  try {
+    console.log('[GET /:id/foto-perfil] Buscando foto para ID:', req.params.id);
+    const uid = await idFromParam(req.params.id);
+    if (!uid) {
+      console.log('[GET /:id/foto-perfil] ID não encontrado');
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    
+    console.log('[GET /:id/foto-perfil] UID convertido:', uid);
+    const { rows } = await pool.query(
+      'SELECT foto_perfil_url FROM public.auth_user WHERE id = $1',
+      [uid]
+    );
+    
+    console.log('[GET /:id/foto-perfil] Resultado da query:', rows);
+    
+    if (!rows.length) {
+      console.log('[GET /:id/foto-perfil] Usuário não encontrado no banco');
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    
+    const fotoUrl = rows[0].foto_perfil_url || null;
+    console.log('[GET /:id/foto-perfil] Retornando foto_perfil_url:', fotoUrl);
+    res.json({ foto_perfil_url: fotoUrl });
+  } catch (e) {
+    console.error('[GET /:id/foto-perfil] erro:', e);
+    res.status(500).json({ error: 'Erro ao buscar foto de perfil' });
+  }
+});
+
+/* ----------------- 8) Endpoint para atualizar foto de perfil ----------------- */
+router.put('/:id/foto-perfil', requireLogin, selfOrManage, async (req, res) => {
+  try {
+    const uid = await idFromParam(req.params.id);
+    if (!uid) return res.status(404).json({ error: 'Usuário não encontrado' });
+    
+    const { foto_perfil_url } = req.body || {};
+    
+    // Valida URL (básico)
+    if (foto_perfil_url && !foto_perfil_url.startsWith('http')) {
+      return res.status(400).json({ error: 'URL inválida' });
+    }
+    
+    await pool.query(
+      'UPDATE public.auth_user SET foto_perfil_url = $1, updated_at = NOW() WHERE id = $2',
+      [foto_perfil_url || null, uid]
+    );
+    
+    res.json({ ok: true, foto_perfil_url: foto_perfil_url || null });
+  } catch (e) {
+    console.error('[PUT /:id/foto-perfil] erro:', e);
+    res.status(500).json({ error: 'Erro ao atualizar foto de perfil' });
+  }
+});
+
 module.exports = router;
