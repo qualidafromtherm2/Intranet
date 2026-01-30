@@ -2298,6 +2298,32 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 
         let requisicao = null;
         
+        // Função auxiliar para mapear campos do cabecalho_consulta para nomes esperados
+        const mapearCabecalhoParaRequisicao = (cabecalho) => {
+          if (!cabecalho) return {};
+          
+          return {
+            nCodPed: cabecalho.nCodPed,
+            cCodIntPed: cabecalho.cCodIntPed,
+            cNumero: cabecalho.cNumero,
+            cEtapa: cabecalho.cEtapa,
+            // Mapeamento: cCodCateg → codCateg
+            codCateg: cabecalho.cCodCateg || null,
+            // Mapeamento: nCodProj → codProj
+            codProj: cabecalho.nCodProj || null,
+            // Mapeamento: dDtPrevisao → dtSugestao
+            dtSugestao: cabecalho.dDtPrevisao || null,
+            // Mapeamento: cObs → obsReqCompra
+            obsReqCompra: cabecalho.cObs || null,
+            // Mapeamento: cObsInt → obsIntReqCompra
+            obsIntReqCompra: cabecalho.cObsInt || null,
+            // Outros campos úteis
+            nCodCC: cabecalho.nCodCC || null,
+            nCodCompr: cabecalho.nCodCompr || null,
+            nCodFor: cabecalho.nCodFor || null
+          };
+        };
+        
         if (!responseReq.ok) {
           const errorText = await responseReq.text();
           console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie (requisicao): ${responseReq.status} - ${errorText}`);
@@ -2305,10 +2331,14 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           // Se a API retornou erro e temos os dados no webhook, usamos o fallback
           if (event.cabecalho_consulta || body.requisicaoCadastro) {
             console.log('[webhooks/omie/pedidos-compra] Usando dados do webhook como fallback após erro da API');
+            
+            // Mapeia os campos do cabecalho_consulta para os nomes esperados
+            const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
+            
             requisicao = {
               requisicaoCadastro: {
                 ...body.requisicaoCadastro,
-                ...event.cabecalho_consulta,
+                ...dadosMapeados,
                 nCodPed: codReqCompra,
                 cCodIntPed: codIntReqCompra
               }
@@ -2323,16 +2353,26 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         // Se a API não retornou os dados esperados, usamos os dados do webhook
         if (!requisicao.requisicaoCadastro && event.cabecalho_consulta) {
           console.log('[webhooks/omie/pedidos-compra] API retornou dados incompletos, usando dados do webhook');
+          
+          // Mapeia os campos do cabecalho_consulta para os nomes esperados
+          const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
+          
           requisicao = {
-            requisicaoCadastro: event.cabecalho_consulta
+            requisicaoCadastro: dadosMapeados
           };
         }
         
         // Se recebemos cabecalho_consulta no webhook, mesclamos com os dados da API
         if (event.cabecalho_consulta && requisicao.requisicaoCadastro) {
-          // Adiciona/sobrescreve numero e etapa do webhook
-          requisicao.requisicaoCadastro.cNumero = event.cabecalho_consulta.cNumero;
-          requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa;
+          // Mapeia e mescla os campos do webhook com os da API
+          const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
+          
+          // Sobrescreve campos específicos do webhook (prioridade para webhook)
+          requisicao.requisicaoCadastro.cNumero = dadosMapeados.cNumero;
+          requisicao.requisicaoCadastro.cEtapa = dadosMapeados.cEtapa;
+          requisicao.requisicaoCadastro.codCateg = dadosMapeados.codCateg || requisicao.requisicaoCadastro.codCateg;
+          requisicao.requisicaoCadastro.dtSugestao = dadosMapeados.dtSugestao || requisicao.requisicaoCadastro.dtSugestao;
+          requisicao.requisicaoCadastro.obsReqCompra = dadosMapeados.obsReqCompra || requisicao.requisicaoCadastro.obsReqCompra;
         }
         
         await upsertRequisicaoCompra(requisicao, topic);
@@ -2343,12 +2383,18 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         return res.json({ ok: true, cod_req_compra: codReqCompra || null, cod_int_req_compra: codIntReqCompra || null, acao: acaoReq, atualizado: true });
       }
 
+      // ====== Tratamento de Pedidos de Compra (CompraProduto.*) ======
+      // Extrai nCodPed do webhook - pode estar em vários lugares
+      const cabecalho = event.cabecalho_consulta || event.cabecalho || {};
+      
       const nCodPed = event.nCodPed || 
                       event.n_cod_ped || 
                       body.nCodPed ||
                       body.n_cod_ped ||
                       event.codigo_pedido ||
-                      body.codigo_pedido;
+                      body.codigo_pedido ||
+                      cabecalho.nCodPed ||
+                      cabecalho.n_cod_ped;
       
       if (!nCodPed) {
         console.warn('[webhooks/omie/pedidos-compra] Webhook sem nCodPed:', JSON.stringify(body));
@@ -2522,7 +2568,7 @@ app.get('/api/compras/requisicoes-omie/get', async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT cod_req_compra, cod_int_req_compra, numero, etapa, created_at, updated_at FROM compras.requisicoes_omie WHERE cod_req_compra = $1 LIMIT 1',
+      'SELECT * FROM compras.requisicoes_omie WHERE cod_req_compra = $1 LIMIT 1',
       [cod]
     );
 
@@ -2533,6 +2579,32 @@ app.get('/api/compras/requisicoes-omie/get', async (req, res) => {
     res.json({ ok: true, data: result.rows[0] });
   } catch (err) {
     console.error('[API /api/compras/requisicoes-omie/get] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint GET para consultar pedido específico
+app.get('/api/compras/pedidos-omie/get', async (req, res) => {
+  try {
+    const { nCodPed, n_cod_ped } = req.query;
+    const cod = nCodPed || n_cod_ped;
+    
+    if (!cod) {
+      return res.status(400).json({ ok: false, error: 'nCodPed obrigatório' });
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM compras.pedidos_omie WHERE n_cod_ped = $1 LIMIT 1',
+      [cod]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ ok: false, msg: 'Pedido não encontrado' });
+    }
+
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[API /api/compras/pedidos-omie/get] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
