@@ -11478,13 +11478,14 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
         WHERE ncodped = $6`;
       updateParams = [descricaoEtapa, codFornecedor, fornecedorNome, fornecedorContato, numeroPedido || null, nCodPed];
     } else {
-      // Outras etapas: atualiza apenas status
+      // Outras etapas: atualiza status e cnumero
       updateQuery = `
         UPDATE compras.solicitacao_compras 
         SET status = $1,
+            cnumero = $2,
             updated_at = NOW()
-        WHERE ncodped = $2`;
-      updateParams = [descricaoEtapa, nCodPed];
+        WHERE ncodped = $3`;
+      updateParams = [descricaoEtapa, numeroPedido || null, nCodPed];
     }
     
     const result = await pool.query(updateQuery, updateParams);
@@ -11493,7 +11494,7 @@ async function sincronizarPedidoComSolicitacao(nCodPed) {
       if (etapa === '10' && codFornecedor) {
         console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", fornecedor_id=${codFornecedor}, fornecedor_nome="${updateParams[2]}", contato="${updateParams[3]}", cnumero="${updateParams[4]}"`);
       } else {
-        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}"`);
+        console.log(`[sincronizarPedido] ✓ Solicitação atualizada: ncodped=${nCodPed}, etapa ${etapa} → status="${descricaoEtapa}", cnumero="${updateParams[1]}"`);
       }
     } else {
       console.warn(`[sincronizarPedido] ⚠ Nenhuma solicitação encontrada com ncodped=${nCodPed}`);
