@@ -3691,7 +3691,7 @@ ul#comprasList li ,
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
   color: #fff;
-  height: 100%;         /* ocupa toda altura disponível do container pai */
+  height: calc(100% - 12px); /* ocupa toda altura menos o padding-bottom do container */
 }
 
 /* Scrollbar horizontal do container do kanban */
