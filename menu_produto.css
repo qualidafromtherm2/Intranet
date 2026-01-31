@@ -816,6 +816,11 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   /* permite que filhos em flex/grids não estourem a largura */
   min-width: 0;
 }
+
+/* Ajusta o topo do painel de compras para reduzir espaço vazio */
+#comprasFormPane .content-wrapper {
+  padding-top: 12px;
+}
 @media screen and (max-width: 510px) {
   .content-wrapper {
     margin: 0;
