@@ -3696,7 +3696,8 @@ ul#comprasList li ,
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
   color: #fff;
-  height: calc(100% - 12px); /* ocupa toda altura menos o padding-bottom do container */
+  height: 100%;
+  box-sizing: border-box;
 }
 
 /* Scrollbar horizontal do container do kanban */
@@ -3754,11 +3755,11 @@ ul#comprasList li ,
   min-height: 0;       /* <— muito importante */
   overflow-y: auto;
   margin: 0;
-  padding: 6px 6px 16px 6px;
+  padding: 6px 6px 24px 6px;
   list-style: none;
   /* Sem max-height fixo - usa o espaço disponível */
   box-sizing: border-box;
-  scroll-padding-bottom: 16px;
+  scroll-padding-bottom: 24px;
 }
 
 /* ─── Barra de scroll interna ─── */
