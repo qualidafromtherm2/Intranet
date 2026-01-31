@@ -24418,6 +24418,39 @@ window.retificarItemAprovacao = retificarItemAprovacao;
 window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
 window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 
+// Função para ajustar dinamicamente a altura do kanban
+function ajustarAlturaKanban() {
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  
+  if (!wrapper || !kanbanContainer) return;
+  
+  // Calcula a altura disponível
+  const contentWrapper = wrapper.closest('.content-wrapper');
+  if (!contentWrapper) return;
+  
+  // Pega a altura da janela menos o espaço ocupado pelo header e padding
+  const viewportHeight = window.innerHeight;
+  const contentWrapperRect = contentWrapper.getBoundingClientRect();
+  const wrapperRect = wrapper.getBoundingClientRect();
+  
+  // Calcula altura disponível: altura da viewport - topo do wrapper - padding inferior (aproximadamente 100px para margem de segurança)
+  const alturaDisponivel = viewportHeight - wrapperRect.top - 100;
+  
+  // Define a altura do container do kanban
+  if (alturaDisponivel > 200) {
+    kanbanContainer.style.height = `${alturaDisponivel}px`;
+  }
+}
+
+// Reajusta ao redimensionar a janela
+window.addEventListener('resize', () => {
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  if (wrapper && wrapper.style.display !== 'none') {
+    ajustarAlturaKanban();
+  }
+});
+
 async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const wrapper = document.getElementById('minhasComprasWrapper');
@@ -24429,8 +24462,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     return;
   }
   
-  wrapper.style.display = 'block';
+  wrapper.style.display = 'flex';
   kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Carregando...</div>';
+  
+  // Ajusta a altura do kanban para ocupar todo o espaço disponível
+  ajustarAlturaKanban();
   
   // Carrega preferências de filtro do usuário antes de renderizar
   await carregarPreferenciasKanbans();
