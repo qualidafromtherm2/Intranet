@@ -24422,21 +24422,19 @@ window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 function ajustarAlturaKanban() {
   const wrapper = document.getElementById('minhasComprasWrapper');
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
-  
+
   if (!wrapper || !kanbanContainer) return;
-  
-  // Calcula a altura disponível
+
+  // Calcula a altura disponível até o final do content-wrapper
   const contentWrapper = wrapper.closest('.content-wrapper');
   if (!contentWrapper) return;
-  
-  // Pega a altura da janela menos o espaço ocupado pelo header e padding
-  const viewportHeight = window.innerHeight;
+
   const contentWrapperRect = contentWrapper.getBoundingClientRect();
-  const wrapperRect = wrapper.getBoundingClientRect();
-  
-  // Calcula altura disponível: altura da viewport - topo do wrapper - padding inferior (aproximadamente 100px para margem de segurança)
-  const alturaDisponivel = viewportHeight - wrapperRect.top - 30;
-  
+  const containerRect = kanbanContainer.getBoundingClientRect();
+
+  // Altura disponível = fim do content-wrapper - topo do kanban - folga mínima
+  const alturaDisponivel = Math.floor(contentWrapperRect.bottom - containerRect.top - 8);
+
   // Define a altura do container do kanban
   if (alturaDisponivel > 200) {
     kanbanContainer.style.height = `${alturaDisponivel}px`;
