@@ -24435,7 +24435,7 @@ function ajustarAlturaKanban() {
   const wrapperRect = wrapper.getBoundingClientRect();
   
   // Calcula altura disponível: altura da viewport - topo do wrapper - padding inferior (aproximadamente 100px para margem de segurança)
-  const alturaDisponivel = viewportHeight - wrapperRect.top - 100;
+  const alturaDisponivel = viewportHeight - wrapperRect.top - 30;
   
   // Define a altura do container do kanban
   if (alturaDisponivel > 200) {
