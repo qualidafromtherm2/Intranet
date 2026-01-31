@@ -3691,7 +3691,8 @@ ul#comprasList li ,
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
   color: #fff;
-  max-height: 78vh;
+  height: calc(100vh - 200px); /* altura até o limite inferior */
+  max-height: calc(100vh - 200px);
 }
 
 /* Scrollbar horizontal do container do kanban */
@@ -3751,7 +3752,7 @@ ul#comprasList li ,
   margin: 0;
   padding: 6px;
   list-style: none;
-  max-height: calc(78vh - 56px);
+  max-height: calc(100vh - 250px); /* ajustado para ocupar altura total */
 }
 
 /* ─── Barra de scroll interna ─── */
