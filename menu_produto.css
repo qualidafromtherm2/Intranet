@@ -3680,7 +3680,10 @@ ul#comprasList li ,
 }
 /* ─── Cada coluna ocupa espaço na largura e faz scroll interno ─── */
 .kanban-column {
-  flex: 0 0 200px;      /* largura reduzida para caber 7 colunas */
+  flex: 0 0 200px;      /* largura fixa - não cresce nem diminui */
+  min-width: 200px;     /* garante largura mínima */
+  max-width: 200px;     /* garante largura máxima */
+  width: 200px;         /* largura definida */
   display: flex;
   flex-direction: column;
   min-height: 0;        /* <— habilita scroll no conteúdo */
@@ -3689,6 +3692,39 @@ ul#comprasList li ,
   border-radius: 8px;
   color: #fff;
   max-height: 78vh;
+}
+
+/* Scrollbar horizontal do container do kanban */
+.kanban-container::-webkit-scrollbar {
+  height: 10px;
+}
+
+.kanban-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+}
+
+.kanban-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  transition: background 0.3s;
+}
+
+.kanban-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Modo claro */
+.light-mode .kanban-container::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light-mode .kanban-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.light-mode .kanban-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.5);
 }
 /* ─── Cabeçalho sticky ─── */
 .kanban-header {
