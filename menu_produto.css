@@ -3676,7 +3676,7 @@ ul#comprasList li ,
   justify-content: center;
   /* garante que cada coluna fique alinhada ao topo */
   align-items: flex-start;
-  margin-top: 16px; /* ajuste o valor a gosto (px, rem, etc.) */
+  margin-top: 0px; /* Remove margem superior para ocupar mais espaço */
 }
 /* ─── Cada coluna ocupa espaço na largura e faz scroll interno ─── */
 .kanban-column {
