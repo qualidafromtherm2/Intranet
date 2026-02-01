@@ -2378,7 +2378,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         await upsertRequisicaoCompra(requisicao, topic);
 
         const acaoReq = topic.includes('Incluida') ? 'incluida' : 'alterada';
-        console.log(`[webhooks/omie/pedidos-compra] Requisição ${codReqCompra || codIntReqCompra} ${acaoReq} com sucesso`);
+        console.log(`[webhooks/omie/pedidos-compra] ✅ Requisição ${codReqCompra || codIntReqCompra} ${acaoReq} com sucesso`);
+        console.log(`[webhooks/omie/pedidos-compra] 📦 Itens processados: ${requisicao?.requisicaoCadastro?.ItensReqCompra?.length || requisicao?.requisicaoCadastro?.itens_req_compra?.length || 0}`);
 
         return res.json({ ok: true, cod_req_compra: codReqCompra || null, cod_int_req_compra: codIntReqCompra || null, acao: acaoReq, atualizado: true });
       }
@@ -11573,6 +11574,8 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
     await client.query('DELETE FROM compras.requisicoes_omie_itens WHERE cod_req_compra = $1', [codReqCompra]);
 
     if (Array.isArray(itens) && itens.length > 0) {
+      console.log(`[RequisicoesCompra] 📝 Inserindo ${itens.length} itens na requisição ${codReqCompra}`);
+      
       for (const item of itens) {
         await client.query(`
           INSERT INTO compras.requisicoes_omie_itens (
@@ -11591,6 +11594,9 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
           item.obsItem || item.obs_item || null
         ]);
       }
+      console.log(`[RequisicoesCompra] ✓ ${itens.length} itens inseridos com sucesso`);
+    } else {
+      console.log(`[RequisicoesCompra] ⚠ Nenhum item encontrado na requisição ${codReqCompra}`);
     }
 
     await client.query('COMMIT');
@@ -13909,7 +13915,7 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
     const { status, observacao_retificacao, usuario_comentario } = req.body;
     
     // Valida status
-    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar'];
+    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar', 'aguardando aprovação da requisição'];
     if (!status || !statusValidos.includes(status)) {
       return res.status(400).json({ 
         ok: false, 
