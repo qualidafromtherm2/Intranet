@@ -18628,7 +18628,7 @@ window.abrirModalNovaCotacao = abrirModalNovaCotacao;
 window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
-async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId = null) {
+async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
   const modal = document.getElementById('modalDetalhesPedidoCompras');
   const modalBody = document.getElementById('modalPedidoBody');
   const modalTitulo = document.getElementById('modalPedidoTitulo');
@@ -18650,9 +18650,14 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     // Busca itens por diferentes critérios
     let itensPedido;
     
-    // Se tiver itemId específico, busca por ele
-    if (itemId) {
-      itensPedido = listaCompleta.filter(item => item.id == itemId);
+    // Se tiver itemIds específicos, busca por todos eles
+    if (itemIds) {
+      // Converte para array de IDs (pode ser string com vírgulas ou número único)
+      const idsArray = typeof itemIds === 'string' && itemIds.includes(',')
+        ? itemIds.split(',').map(id => parseInt(id.trim()))
+        : [parseInt(itemIds)];
+      
+      itensPedido = listaCompleta.filter(item => idsArray.includes(item.id));
     }
     // Se numero_pedido for válido, busca por ele
     else if (numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' && numeroPedido !== '') {
@@ -18859,9 +18864,9 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             <button 
               onclick="voltarParaAguardandoCompra('${item.id}')"
               style="display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
-              title="Voltar para Aguardando Compra">
-              <i class="fa-solid fa-arrow-left"></i>
-              Voltar para Aguardando Compra
+              title="Retificar">
+              <i class="fa-solid fa-check-circle"></i>
+              Retificar
             </button>
             <div style="display:flex;gap:8px;">
               <button 
@@ -19032,12 +19037,12 @@ async function voltarParaAguardandoCompra(itemId) {
   
   // Valida se o comentário foi preenchido
   if (!novoComentario) {
-    alert('Por favor, adicione um comentário antes de voltar o item para Aguardando Compra.');
+    alert('Por favor, adicione um comentário antes de retificar o item.');
     if (textarea) textarea.focus();
     return;
   }
   
-  if (!confirm('Deseja realmente voltar este item para "Aguardando Compra"?')) return;
+  if (!confirm('Deseja realmente retificar este item?')) return;
   
   // Pega o nome do usuário logado
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || 'User').trim();
@@ -19048,7 +19053,7 @@ async function voltarParaAguardandoCompra(itemId) {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ 
-        status: 'aguardando compra',
+        status: 'aguardando aprovação da requisição',
         observacao_retificacao: novoComentario,
         usuario_comentario: currentUser
       })
@@ -19059,7 +19064,7 @@ async function voltarParaAguardandoCompra(itemId) {
       throw new Error(error.error || 'Erro ao atualizar status');
     }
     
-    alert('Item movido para "Aguardando Compra" com sucesso!');
+    alert('Item retificado com sucesso!');
     fecharModalDetalhesPedidoCompras();
     loadMinhasSolicitacoes();
   } catch (err) {
@@ -23412,6 +23417,12 @@ async function abrirModalFiltroKanbans() {
   // Carrega preferências do usuário
   await carregarPreferenciasKanbans();
   
+  // Carrega preferência de mostrar kanbans vazios
+  const checkboxVazios = document.getElementById('mostrarKanbansVazios');
+  if (checkboxVazios) {
+    checkboxVazios.checked = localStorage.getItem('mostrarKanbansVazios') === 'true';
+  }
+  
   // Popula checkboxes
   const checkboxContainer = document.getElementById('listaFiltroKanbans');
   if (!checkboxContainer) return;
@@ -23494,6 +23505,12 @@ async function salvarPreferenciasKanbans() {
       .filter(cb => cb.checked)
       .map(cb => cb.value);
     
+    // Salva preferência de mostrar kanbans vazios no localStorage
+    const checkboxVazios = document.getElementById('mostrarKanbansVazios');
+    if (checkboxVazios) {
+      localStorage.setItem('mostrarKanbansVazios', checkboxVazios.checked);
+    }
+    
     const resp = await fetch('/api/compras/filtro-kanbans', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -23537,6 +23554,9 @@ function aplicarFiltroKanbans() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   if (!kanbanContainer) return;
   
+  // Verifica se deve mostrar kanbans vazios
+  const mostrarVazios = localStorage.getItem('mostrarKanbansVazios') === 'true';
+  
   // Pega todas as colunas do kanban
   const colunas = kanbanContainer.querySelectorAll('.kanban-column-minhas');
   
@@ -23545,11 +23565,20 @@ function aplicarFiltroKanbans() {
     const statusNormalizado = coluna.getAttribute('data-status');
     if (!statusNormalizado) return;
     
-    // Mostra ou oculta baseado na preferência do usuário
-    if (kanbansVisiveis.includes(statusNormalizado)) {
-      coluna.style.display = '';
-    } else {
+    // Pega a quantidade de itens no kanban
+    const countElement = coluna.querySelector('.kanban-count-minhas');
+    const count = countElement ? parseInt(countElement.textContent) || 0 : 0;
+    
+    // Lógica de exibição:
+    // 1. Se o kanban não está na lista de visíveis: oculta
+    // 2. Se está na lista de visíveis mas tem 0 itens e "mostrarVazios" está desativado: oculta
+    // 3. Caso contrário: mostra
+    if (!kanbansVisiveis.includes(statusNormalizado)) {
       coluna.style.display = 'none';
+    } else if (count === 0 && !mostrarVazios) {
+      coluna.style.display = 'none';
+    } else {
+      coluna.style.display = '';
     }
   });
 }
@@ -24551,27 +24580,27 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       if (ehAcaoRequisitante) {
         // Kanbans onde o requisitante precisa tomar ação
-        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#dc2626 0%,#ef4444 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(220,38,38,0.3);"><i class="fa-solid fa-user-check" style="font-size:10px;"></i>Ação Requisitante</div>';
+        badgeIdentificacao = '';
         estilosExtras = 'background:linear-gradient(135deg,#fef2f2 0%,#ffffff 100%);';
         bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #dc2626;`;
       } else if (ehOperacaoAprovador) {
         // Kanban onde o aprovador precisa aprovar
-        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#2563eb 0%,#3b82f6 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(37,99,235,0.3);"><i class="fa-solid fa-shield-check" style="font-size:10px;"></i>Operação Aprovador</div>';
+        badgeIdentificacao = '';
         estilosExtras = 'background:linear-gradient(135deg,#eff6ff 0%,#ffffff 100%);';
         bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #2563eb;`;
       } else if (ehOperacaoComprador) {
         // Kanbans onde o comprador realiza operações (cotação, pedido)
-        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#059669 0%,#10b981 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(16,185,129,0.3);"><i class="fa-solid fa-briefcase" style="font-size:10px;"></i>Operação Comprador</div>';
+        badgeIdentificacao = '';
         estilosExtras = 'background:linear-gradient(135deg,#f0fdf4 0%,#ffffff 100%);';
         bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #059669;`;
       } else if (ehAcaoRecebimento) {
         // Kanbans onde o recebimento precisa agir
-        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#d97706 0%,#f59e0b 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(217,119,6,0.3);"><i class="fa-solid fa-box-check" style="font-size:10px;"></i>Ação Recebimento</div>';
+        badgeIdentificacao = '';
         estilosExtras = 'background:linear-gradient(135deg,#fffbeb 0%,#ffffff 100%);';
         bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #d97706;`;
       } else if (ehSetoresLiberacao) {
         // Kanban onde setores precisam liberar
-        badgeIdentificacao = '<div style="background:linear-gradient(135deg,#7c3aed 0%,#8b5cf6 100%);color:white;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 4px rgba(124,58,237,0.3);"><i class="fa-solid fa-unlock" style="font-size:10px;"></i>Setores de Liberação</div>';
+        badgeIdentificacao = '';
         estilosExtras = 'background:linear-gradient(135deg,#faf5ff 0%,#ffffff 100%);';
         bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #7c3aed;`;
       } else {
@@ -24607,55 +24636,78 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       if (itens.length === 0) {
         cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
-      } else if (deveAgrupar) {
-        // Agrupa itens por cNumero (número do pedido Omie)
+      } else {
+        // Agrupa itens por cNumero para todos os kanbans
         const grupos = {};
         itens.forEach(item => {
-          const chave = item.cNumero || 'sem_pedido';
+          const chave = item.cNumero || item.cnumero || 'sem_pedido';
           if (!grupos[chave]) grupos[chave] = [];
           grupos[chave].push(item);
         });
         
-        // Renderiza cada grupo
+        // Renderiza cada grupo (card único por cnumero)
         cardsHtml = Object.keys(grupos).map(cNumero => {
           const itensGrupo = grupos[cNumero];
-          return `
-            <div 
-              onclick="abrirModalPedidoAgrupado('${cNumero}', ${JSON.stringify(itensGrupo.map(i => i.id)).replace(/"/g, '&quot;')})"
-              style="
-                margin-bottom:12px;
-                border:2px solid ${cor.bg};
-                border-radius:8px;
-                overflow:hidden;
-                background:linear-gradient(135deg,${cor.bg} 0%,${cor.bg}ee 100%);
-                color:white;
-                padding:12px 16px;
-                font-weight:600;
-                font-size:13px;
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                cursor:pointer;
-                transition:all 0.2s;
-                box-shadow:0 2px 4px rgba(0,0,0,0.1);
-              "
-              onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
-              onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.1)'">
-              <span><i class="fa-solid fa-file-invoice"></i> Pedido: ${cNumero !== 'sem_pedido' ? cNumero : 'Não gerado'}</span>
-              <span style="background:rgba(255,255,255,0.25);padding:4px 12px;border-radius:12px;font-size:12px;font-weight:700;">${itensGrupo.length} ${itensGrupo.length === 1 ? 'item' : 'itens'}</span>
-            </div>
-          `;
-        }).join('');
-      } else {
-        // Renderização normal (sem agrupamento)
-        cardsHtml = itens.map(item => {
-          const prazo = item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-';
-          // Para "Aguardando Compra", não exibe numero_pedido
-          const mostrarNumeroPedido = status !== 'aguardando compra' && (item.cNumero || item.numero_pedido);
-          const numeroPedidoExibir = item.cNumero || item.numero_pedido;
+          const primeiroItem = itensGrupo[0];
+          const totalItens = itensGrupo.length;
+          
+          // Lista de todos os IDs do grupo para passar ao modal
+          const todosIds = itensGrupo.map(i => i.id).join(',');
+          
+          // Lista todos os produtos do grupo
+          const listaProdutos = itensGrupo.map((item, itemIdx) => {
+            const codigo = item.produto_codigo || '-';
+            const desc = item.produto_descricao || item.descricao || '-';
+            const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${cNumero}-${itemIdx}`;
+            return `
+              <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+                <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+                <div>
+                  <div 
+                    class="desc-truncada"
+                    data-tooltip-id="${tooltipId}"
+                    style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                    onmouseover="
+                      event.stopPropagation();
+                      const tooltipId = this.getAttribute('data-tooltip-id');
+                      let tooltip = document.getElementById(tooltipId);
+                      if (!tooltip) {
+                        tooltip = document.createElement('div');
+                        tooltip.id = tooltipId;
+                        tooltip.className = 'tooltip-descricao';
+                        tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                        tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                        document.body.appendChild(tooltip);
+                      }
+                      tooltip.style.display='block';
+                      tooltip.style.visibility='hidden';
+                      setTimeout(() => {
+                        const rect = this.getBoundingClientRect();
+                        const tooltipHeight = tooltip.offsetHeight;
+                        tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                        tooltip.style.left = rect.left + 'px';
+                        tooltip.style.visibility='visible';
+                      }, 0);
+                    "
+                    onmouseout="
+                      event.stopPropagation();
+                      const tooltipId = this.getAttribute('data-tooltip-id');
+                      const tooltip = document.getElementById(tooltipId);
+                      if (tooltip) tooltip.style.display='none';
+                    "
+                    onclick="event.stopPropagation();">
+                    ${escapeHtml(desc)}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
           
           return `
-            <div class="kanban-card" data-item-id="${item.id}" 
+            <div class="kanban-card" 
+              data-item-id="${primeiroItem.id}"
+              data-todos-ids="${todosIds}"
+              onclick="abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')"
               style="
               background:#ffffff;
               border:1px solid #e5e7eb;
@@ -24665,71 +24717,18 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               box-shadow:0 1px 3px rgba(0,0,0,0.1);
               flex-shrink:0;
               position:relative;
-            ">
-              <!-- Botão de Visualizar -->
-              <button 
-                onclick="abrirModalDetalhesPedidoMinhas('${item.numero_pedido}', '${status}', ${item.id})"
-                style="
-                  position:absolute;
-                  top:8px;
-                  right:8px;
-                  background:#3b82f6;
-                  color:white;
-                  border:none;
-                  border-radius:6px;
-                  padding:6px 10px;
-                  font-size:11px;
-                  font-weight:600;
-                  cursor:pointer;
-                  display:flex;
-                  align-items:center;
-                  gap:4px;
-                  z-index:10;
-                  transition:all 0.2s;
-                "
-                onmouseover="this.style.background='#2563eb';this.style.transform='scale(1.05)'"
-                onmouseout="this.style.background='#3b82f6';this.style.transform='scale(1)'">
-                <i class="fa-solid fa-eye"></i>
-                Ver
-              </button>
+              cursor:pointer;
+            "
+            onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+            onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
               
-              <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
-                <div style="font-size:10px;color:#6b7280;background:#f3f4f6;padding:2px 6px;border-radius:4px;">ID: ${item.id}</div>
-                ${mostrarNumeroPedido ? `<div style="font-weight:600;color:#3b82f6;font-size:11px;">Pedido: ${numeroPedidoExibir}</div>` : ''}
+              ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
+              
+              <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
+                ${escapeHtml(primeiroItem.cNumero || primeiroItem.cnumero || '-')}
               </div>
-              <div style="font-size:12px;color:#374151;margin-bottom:6px;font-weight:600;">
-                ${escapeHtml(item.produto_codigo || '-')}
-              </div>
-              <div style="font-size:11px;color:#6b7280;margin-bottom:8px;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
-                ${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 80))}${(item.descricao || item.produto_descricao || '').length > 80 ? '...' : ''}
-              </div>
-              <div style="display:flex;gap:8px;margin-bottom:8px;">
-                <div style="flex:1;">
-                  <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
-                  <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
-                </div>
-                <div style="flex:1;">
-                  <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
-                  <div style="font-size:11px;color:#374151;">${prazo}</div>
-                </div>
-              </div>
-              ${(status === 'solicitado revisão' && item.observacao_retificacao) ? `
-                <div style="margin-top:8px;padding:8px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;">
-                  <div style="font-size:9px;color:#92400e;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
-                    <i class="fa-solid fa-comment-dots"></i>
-                    Motivo da Retificação
-                  </div>
-                  <div style="font-size:10px;color:#78350f;line-height:1.4;max-height:40px;overflow:hidden;text-overflow:ellipsis;">
-                    ${escapeHtml(item.observacao_retificacao)}
-                  </div>
-                </div>
-              ` : ''}
-              ${item.fornecedor_nome ? `
-                <div style="font-size:10px;color:#6b7280;margin-top:6px;padding-top:6px;border-top:1px solid #f3f4f6;">
-                  <i class="fa-solid fa-building" style="margin-right:4px;"></i>
-                  ${escapeHtml(item.fornecedor_nome)}
-                </div>
-              ` : ''}
+              
+              ${listaProdutos}
             </div>
           `;
         }).join('');
@@ -24769,19 +24768,19 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       return `
         <div class="kanban-column-minhas" 
           data-status="${status}" 
-          style="${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:all 0.2s;${estiloDesabilitado}">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            ${badgeIdentificacao}
-            ${botaoAbrirTudo}
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-top:3px solid ${cor.bg};padding-top:12px;">
+          style="flex:1;min-width:200px;${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:all 0.2s;${estiloDesabilitado}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;padding-top:0px;">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
               <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
               ${tituloExibir}
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
-          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;height:200px;overflow-y:auto;overflow-x:hidden;padding-right:4px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;">
+            ${badgeIdentificacao}
+            ${botaoAbrirTudo}
+          </div>
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;max-height:500px;overflow-y:auto;overflow-x:hidden;padding-right:4px;">
             ${cardsHtml}
           </div>
         </div>

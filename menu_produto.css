@@ -3755,7 +3755,7 @@ ul#comprasList li ,
   min-height: 0;       /* <— muito importante */
   overflow-y: auto;
   margin: 0;
-  padding: 6px 6px 50px 6px;
+  padding: 6px 6px 200px 6px;
   list-style: none;
   /* Sem max-height fixo - usa o espaço disponível */
   box-sizing: border-box;
