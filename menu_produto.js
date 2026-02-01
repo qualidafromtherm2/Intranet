@@ -24524,6 +24524,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         isRequisicao: true,
         ...req
       }));
+      
+      // DEBUG: Log para verificar requisição específica
+      const req2337 = requisicoes.find(r => r.cod_req_compra === '10816583034');
+      if (req2337) {
+        console.log('[DEBUG] Requisição 10816583034 encontrada:', req2337);
+      }
+      
       lista = [...lista, ...requisicoes];
     }
     
@@ -24542,6 +24549,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       ...item,
       statusNormalizado: (item.status || '').toLowerCase().trim()
     }));
+    
+    // DEBUG: Verificar requisição 10816583034
+    const item2337 = itensComStatusNormalizado.find(i => i.cod_req_compra === '10816583034');
+    if (item2337) {
+      console.log('[DEBUG] Status normalizado da requisição 10816583034:', item2337.status, '->', item2337.statusNormalizado);
+    }
     
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
@@ -24695,54 +24708,60 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           
           // Para requisições, renderiza os itens da requisição com produtos
           let listaProdutos = '';
-          if (primeiroItem.isRequisicao && primeiroItem.itens && primeiroItem.itens.length > 0) {
-            listaProdutos = primeiroItem.itens.map((item, itemIdx) => {
-              const codigo = item.produto_codigo || item.cod_prod || '-';
-              const desc = item.produto_descricao || 'Sem descrição';
-              const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
-              return `
-                <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
-                  <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
-                  <div>
-                    <div 
-                      class="desc-truncada"
-                      data-tooltip-id="${tooltipId}"
-                      style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
-                      onmouseover="
-                        event.stopPropagation();
-                        const tooltipId = this.getAttribute('data-tooltip-id');
-                        let tooltip = document.getElementById(tooltipId);
-                        if (!tooltip) {
-                          tooltip = document.createElement('div');
-                          tooltip.id = tooltipId;
-                          tooltip.className = 'tooltip-descricao';
-                          tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
-                          tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
-                          document.body.appendChild(tooltip);
-                        }
-                        tooltip.style.display='block';
-                        tooltip.style.visibility='hidden';
-                        setTimeout(() => {
-                          const rect = this.getBoundingClientRect();
-                          const tooltipHeight = tooltip.offsetHeight;
-                          tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
-                          tooltip.style.left = rect.left + 'px';
-                          tooltip.style.visibility='visible';
-                        }, 0);
-                      "
-                      onmouseout="
-                        event.stopPropagation();
-                        const tooltipId = this.getAttribute('data-tooltip-id');
-                        const tooltip = document.getElementById(tooltipId);
-                        if (tooltip) tooltip.style.display='none';
-                      "
-                      onclick="event.stopPropagation();">
-                      ${escapeHtml(desc)}
+          if (primeiroItem.isRequisicao) {
+            // Se a requisição tem itens, renderiza eles
+            if (primeiroItem.itens && primeiroItem.itens.length > 0) {
+              listaProdutos = primeiroItem.itens.map((item, itemIdx) => {
+                const codigo = item.produto_codigo || item.cod_prod || '-';
+                const desc = item.produto_descricao || 'Sem descrição';
+                const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
+                return `
+                  <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+                    <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+                    <div>
+                      <div 
+                        class="desc-truncada"
+                        data-tooltip-id="${tooltipId}"
+                        style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                        onmouseover="
+                          event.stopPropagation();
+                          const tooltipId = this.getAttribute('data-tooltip-id');
+                          let tooltip = document.getElementById(tooltipId);
+                          if (!tooltip) {
+                            tooltip = document.createElement('div');
+                            tooltip.id = tooltipId;
+                            tooltip.className = 'tooltip-descricao';
+                            tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                            tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                            document.body.appendChild(tooltip);
+                          }
+                          tooltip.style.display='block';
+                          tooltip.style.visibility='hidden';
+                          setTimeout(() => {
+                            const rect = this.getBoundingClientRect();
+                            const tooltipHeight = tooltip.offsetHeight;
+                            tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                            tooltip.style.left = rect.left + 'px';
+                            tooltip.style.visibility='visible';
+                          }, 0);
+                        "
+                        onmouseout="
+                          event.stopPropagation();
+                          const tooltipId = this.getAttribute('data-tooltip-id');
+                          const tooltip = document.getElementById(tooltipId);
+                          if (tooltip) tooltip.style.display='none';
+                        "
+                        onclick="event.stopPropagation();">
+                        ${escapeHtml(desc)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              `;
-            }).join('');
+                `;
+              }).join('');
+            } else {
+              // Requisição sem itens - mostra mensagem
+              listaProdutos = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Sem itens cadastrados</div>';
+            }
           } else {
             // Para solicitações normais
             listaProdutos = itensGrupo.map((item, itemIdx) => {
