@@ -2386,10 +2386,27 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             requisicao = await buscarRequisicaoComRetry();
             
             // Se recebemos cabecalho_consulta no webhook, mesclamos com os dados da API
-            if (event.cabecalho_consulta && requisicao?.requisicaoCadastro) {
+            if (event.cabecalho_consulta) {
+              // Garante que requisicaoCadastro existe
+              if (!requisicao) requisicao = {};
+              if (!requisicao.requisicaoCadastro) requisicao.requisicaoCadastro = {};
+              
               // Sobrescreve campos específicos do webhook (prioridade para webhook)
-              requisicao.requisicaoCadastro.cNumero = event.cabecalho_consulta.cNumero || requisicao.requisicaoCadastro.cNumero;
-              requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa || requisicao.requisicaoCadastro.cEtapa;
+              // cNumero e cEtapa vêm do webhook e têm prioridade
+              if (event.cabecalho_consulta.cNumero) {
+                requisicao.requisicaoCadastro.cNumero = event.cabecalho_consulta.cNumero;
+              }
+              if (event.cabecalho_consulta.cEtapa) {
+                requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa;
+              }
+              
+              // Garante que nCodPed e cCodIntPed estejam definidos
+              if (!requisicao.requisicaoCadastro.nCodPed && event.cabecalho_consulta.nCodPed) {
+                requisicao.requisicaoCadastro.nCodPed = event.cabecalho_consulta.nCodPed;
+              }
+              if (!requisicao.requisicaoCadastro.cCodIntPed && event.cabecalho_consulta.cCodIntPed) {
+                requisicao.requisicaoCadastro.cCodIntPed = event.cabecalho_consulta.cCodIntPed;
+              }
             }
             
             await upsertRequisicaoCompra(requisicao, topic);
@@ -13470,6 +13487,151 @@ app.get('/api/compras/todas', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// GET /api/compras/requisicoes - Lista requisições sem pedidos de compra correspondentes
+app.get('/api/compras/requisicoes', async (req, res) => {
+  try {
+    // Objetivo: Retornar requisições que ainda não têm pedidos de compra
+    // Busca requisições que não têm correspondência em compras.pedidos_omie
+    console.log('[Compras/Requisições] Iniciando busca de requisições...');
+    
+    const { rows: requisicoes } = await pool.query(`
+      SELECT DISTINCT
+        ro.cod_req_compra,
+        ro.cod_int_req_compra,
+        ro.numero,
+        ro.inativo,
+        ro.created_at,
+        ro.updated_at
+      FROM compras.requisicoes_omie ro
+      WHERE ro.inativo = false
+        AND NOT EXISTS (
+          SELECT 1 FROM compras.pedidos_omie po 
+          WHERE po.n_cod_ped = ro.cod_req_compra
+        )
+      ORDER BY ro.created_at DESC
+      LIMIT 1000
+    `);
+    
+    console.log(`[Compras/Requisições] Encontradas ${requisicoes.length} requisições`);
+
+    // Para cada requisição, buscar os itens com dados dos produtos
+    const requisicoemComItens = await Promise.all(
+      requisicoes.map(async (req_header) => {
+        const { rows: itens } = await pool.query(`
+          SELECT 
+            roi.cod_req_compra,
+            roi.cod_item,
+            roi.cod_prod,
+            roi.qtde,
+            roi.preco_unit,
+            roi.obs_item,
+            po.codigo AS produto_codigo,
+            po.descricao AS produto_descricao
+          FROM compras.requisicoes_omie_itens roi
+          LEFT JOIN public.produtos_omie po ON po.codigo_produto = roi.cod_prod
+          WHERE roi.cod_req_compra = $1
+          ORDER BY roi.cod_item
+        `, [req_header.cod_req_compra]);
+
+        return {
+          ...req_header,
+          itens: itens
+        };
+      })
+    );
+    
+    console.log(`[Compras/Requisições] Retornando ${requisicoemComItens.length} requisições com itens`);
+
+    res.json({ ok: true, requisicoes: requisicoemComItens });
+  } catch (err) {
+    console.error('[Compras/Requisições] Erro ao listar requisições:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar requisições' });
+  }
+});
+
+// POST /api/compras/requisicoes/sincronizar - Sincroniza requisições pendentes (atualiza numero)
+app.post('/api/compras/requisicoes/sincronizar', async (req, res) => {
+  try {
+    console.log('[Compras/Requisições/Sync] Iniciando sincronização de requisições...');
+    
+    // Busca requisições sem numero
+    const { rows: requisicoesSemNumero } = await pool.query(`
+      SELECT cod_req_compra, cod_int_req_compra
+      FROM compras.requisicoes_omie
+      WHERE inativo = false AND numero IS NULL
+      ORDER BY created_at DESC
+      LIMIT 20
+    `);
+    
+    console.log(`[Compras/Requisições/Sync] Encontradas ${requisicoesSemNumero.length} requisições sem numero`);
+    
+    let sucessos = 0;
+    let erros = 0;
+    
+    // Para cada requisição, busca dados completos da API
+    for (const req of requisicoesSemNumero) {
+      try {
+        const param = { codReqCompra: parseInt(req.cod_req_compra) };
+        
+        const response = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            call: 'ConsultarReq',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [param]
+          })
+        });
+        
+        if (!response.ok) {
+          console.error(`[Compras/Requisições/Sync] Erro na API para ${req.cod_req_compra}: ${response.status}`);
+          erros++;
+          continue;
+        }
+        
+        const data = await response.json();
+        const reqData = data?.requisicaoCadastro || {};
+        
+        // Atualiza apenas o campo numero se encontrado
+        if (reqData.cNumero) {
+          await pool.query(`
+            UPDATE compras.requisicoes_omie
+            SET numero = $1, updated_at = NOW()
+            WHERE cod_req_compra = $2
+          `, [reqData.cNumero, req.cod_req_compra]);
+          
+          console.log(`[Compras/Requisições/Sync] ✓ Requisição ${req.cod_req_compra} atualizada com numero: ${reqData.cNumero}`);
+          sucessos++;
+        } else {
+          console.log(`[Compras/Requisições/Sync] ⚠ Requisição ${req.cod_req_compra} não tem cNumero na API`);
+        }
+        
+        // Delay para não sobrecarregar API da Omie
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+      } catch (err) {
+        console.error(`[Compras/Requisições/Sync] Erro ao processar ${req.cod_req_compra}:`, err);
+        erros++;
+      }
+    }
+    
+    console.log(`[Compras/Requisições/Sync] Sincronização concluída: ${sucessos} sucessos, ${erros} erros`);
+    
+    res.json({ 
+      ok: true, 
+      total: requisicoesSemNumero.length,
+      sucessos,
+      erros,
+      message: `Sincronizadas ${sucessos} de ${requisicoesSemNumero.length} requisições`
+    });
+    
+  } catch (err) {
+    console.error('[Compras/Requisições/Sync] Erro na sincronização:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao sincronizar requisições' });
   }
 });
 

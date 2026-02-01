@@ -23403,6 +23403,7 @@ const todosKanbans = [
   'aguardando cotação',
   'cotado aguardando escolha',
   'aguardando compra',
+  'aguardando compra preparação',
   'compra realizada',
   'faturada pelo fornecedor',
   'recebido',
@@ -23430,6 +23431,7 @@ async function abrirModalFiltroKanbans() {
   // Títulos personalizados
   const titulosPersonalizados = {
     'aguardando cotação': 'Cotação com compras',
+    'aguardando compra preparação': 'Requisições',
     'aguardando compra': 'Pedido de compra'
   };
   
@@ -23440,6 +23442,7 @@ async function abrirModalFiltroKanbans() {
     'cotado aguardando escolha': { texto: 'Ação Requisitante', cor: '#dc2626' },
     'solicitado revisão': { texto: 'Ação Requisitante', cor: '#dc2626' },
     'aguardando compra': { texto: 'Operação Comprador', cor: '#059669' },
+    'aguardando compra preparação': { texto: 'Operação Comprador', cor: '#059669' },
     'compra realizada': { texto: 'Ação Recebimento', cor: '#d97706' },
     'faturada pelo fornecedor': { texto: 'Ação Recebimento', cor: '#d97706' },
     'recebido': { texto: 'Setores de Liberação', cor: '#7c3aed' },
@@ -24505,6 +24508,25 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     const data = await resp.json();
     let lista = data.solicitacoes || [];
     
+    // Busca requisições sem pedidos de compra
+    const respReq = await fetch(`/api/compras/requisicoes`, { credentials: 'include' });
+    let requisicoes = [];
+    if (respReq.ok) {
+      const dataReq = await respReq.json();
+      requisicoes = (dataReq.requisicoes || []).map(req => ({
+        id: `req_${req.cod_req_compra}`,
+        numero_pedido: req.numero || req.cod_int_req_compra,
+        cnumero: req.numero,
+        cod_req_compra: req.cod_req_compra,
+        cod_int_req_compra: req.cod_int_req_compra,
+        status: 'aguardando compra preparação',
+        statusNormalizado: 'aguardando compra preparação',
+        isRequisicao: true,
+        ...req
+      }));
+      lista = [...lista, ...requisicoes];
+    }
+    
     // Aplica filtro de status se fornecido
     if (filtroStatus && filtroStatus.length > 0) {
       lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
@@ -24527,6 +24549,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'solicitado revisão': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar'),
       'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
       'cotado aguardando escolha': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado'),
+      'aguardando compra preparação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação'),
       'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
       'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
       'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
@@ -24543,6 +24566,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
         'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
         'aguardando compra': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-cart-shopping' },
+        'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' },
         'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
         'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
         'recebido': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-box-open' },
@@ -24556,6 +24580,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'solicitado revisão': 'Revisão',
         'aguardando cotação': 'Cotação',
         'cotado aguardando escolha': 'Cotado',
+        'aguardando compra preparação': 'Requisições',
         'aguardando compra': 'Pedido de compra'
       };
       const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
@@ -24563,7 +24588,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       // Define grupos de kanbans com características especiais
       const kanbanAcaoRequisitante = ['cotado aguardando escolha', 'solicitado revisão']; // Ações do requisitante
       const kanbanOperacaoAprovador = ['aguardando aprovação da requisição']; // Aprovador precisa aprovar
-      const kanbanOperacaoComprador = ['aguardando cotação', 'aguardando compra']; // Operações do comprador
+      const kanbanOperacaoComprador = ['aguardando cotação', 'aguardando compra preparação', 'aguardando compra']; // Operações do comprador
       const kanbanAcaoRecebimento = ['compra realizada', 'faturada pelo fornecedor']; // Ações do recebimento
       const kanbanSetoresLiberacao = ['recebido']; // Setores precisam liberar
       
@@ -24612,7 +24637,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const deveAgrupar = statusAgrupados.includes(status);
       
       // Define se a coluna deve ter interação de clique (para abrir modal)
-      const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra'];
+      const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra preparação', 'aguardando compra'];
       const temItens = itens.length > 0;
       const ehClicavel = statusComClique.includes(status) && temItens; // Só permite clique se houver itens
       
@@ -24620,6 +24645,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const funcoesOnclick = {
         'aguardando aprovação da requisição': 'abrirModalAprovacaoRequisicao()',
         'aguardando cotação': 'abrirModalSelecaoItensCotacao()',
+        'aguardando compra preparação': 'abrirModalSelecaoItensCompra()',
         'aguardando compra': 'abrirModalSelecaoItensCompra()'
       };
       const funcaoOnclick = funcoesOnclick[status] || '';
@@ -24628,6 +24654,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const coresHover = {
         'aguardando aprovação da requisição': 'rgba(37,99,235,0.3)', // Azul
         'aguardando cotação': 'rgba(251,191,36,0.3)', // Amarelo
+        'aguardando compra preparação': 'rgba(16,185,129,0.3)',   // Verde
         'aguardando compra': 'rgba(16,185,129,0.3)'   // Verde
       };
       const corHover = coresHover[status] || 'rgba(0,0,0,0.1)';
@@ -24637,71 +24664,135 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       if (itens.length === 0) {
         cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
       } else {
-        // Agrupa itens por cNumero para todos os kanbans
-        const grupos = {};
-        itens.forEach(item => {
-          const chave = item.cNumero || item.cnumero || 'sem_pedido';
-          if (!grupos[chave]) grupos[chave] = [];
-          grupos[chave].push(item);
-        });
+        // Para requisições, agrupa diferente (por requisição em vez de cNumero)
+        const isRequisicao = status === 'aguardando compra preparação' && itens.length > 0 && itens[0].isRequisicao;
         
-        // Renderiza cada grupo (card único por cnumero)
-        cardsHtml = Object.keys(grupos).map(cNumero => {
-          const itensGrupo = grupos[cNumero];
+        let grupos = {};
+        if (isRequisicao) {
+          // Para requisições: cada requisição é um grupo
+          itens.forEach(item => {
+            const chave = item.cod_req_compra || item.id;
+            if (!grupos[chave]) grupos[chave] = [];
+            grupos[chave].push(item);
+          });
+        } else {
+          // Para solicitações: agrupa por cNumero
+          itens.forEach(item => {
+            const chave = item.cNumero || item.cnumero || 'sem_pedido';
+            if (!grupos[chave]) grupos[chave] = [];
+            grupos[chave].push(item);
+          });
+        }
+        
+        // Renderiza cada grupo (card único por cnumero ou requisição)
+        cardsHtml = Object.keys(grupos).map(chaveGrupo => {
+          const itensGrupo = grupos[chaveGrupo];
           const primeiroItem = itensGrupo[0];
           const totalItens = itensGrupo.length;
           
           // Lista de todos os IDs do grupo para passar ao modal
           const todosIds = itensGrupo.map(i => i.id).join(',');
           
-          // Lista todos os produtos do grupo
-          const listaProdutos = itensGrupo.map((item, itemIdx) => {
-            const codigo = item.produto_codigo || '-';
-            const desc = item.produto_descricao || item.descricao || '-';
-            const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${cNumero}-${itemIdx}`;
-            return `
-              <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
-                <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
-                <div>
-                  <div 
-                    class="desc-truncada"
-                    data-tooltip-id="${tooltipId}"
-                    style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
-                    onmouseover="
-                      event.stopPropagation();
-                      const tooltipId = this.getAttribute('data-tooltip-id');
-                      let tooltip = document.getElementById(tooltipId);
-                      if (!tooltip) {
-                        tooltip = document.createElement('div');
-                        tooltip.id = tooltipId;
-                        tooltip.className = 'tooltip-descricao';
-                        tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
-                        tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
-                        document.body.appendChild(tooltip);
-                      }
-                      tooltip.style.display='block';
-                      tooltip.style.visibility='hidden';
-                      setTimeout(() => {
-                        const rect = this.getBoundingClientRect();
-                        const tooltipHeight = tooltip.offsetHeight;
-                        tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
-                        tooltip.style.left = rect.left + 'px';
-                        tooltip.style.visibility='visible';
-                      }, 0);
-                    "
-                    onmouseout="
-                      event.stopPropagation();
-                      const tooltipId = this.getAttribute('data-tooltip-id');
-                      const tooltip = document.getElementById(tooltipId);
-                      if (tooltip) tooltip.style.display='none';
-                    "
-                    onclick="event.stopPropagation();">
-                    ${escapeHtml(desc)}
+          // Para requisições, renderiza os itens da requisição com produtos
+          let listaProdutos = '';
+          if (primeiroItem.isRequisicao && primeiroItem.itens && primeiroItem.itens.length > 0) {
+            listaProdutos = primeiroItem.itens.map((item, itemIdx) => {
+              const codigo = item.produto_codigo || item.cod_prod || '-';
+              const desc = item.produto_descricao || 'Sem descrição';
+              const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
+              return `
+                <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+                  <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+                  <div>
+                    <div 
+                      class="desc-truncada"
+                      data-tooltip-id="${tooltipId}"
+                      style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                      onmouseover="
+                        event.stopPropagation();
+                        const tooltipId = this.getAttribute('data-tooltip-id');
+                        let tooltip = document.getElementById(tooltipId);
+                        if (!tooltip) {
+                          tooltip = document.createElement('div');
+                          tooltip.id = tooltipId;
+                          tooltip.className = 'tooltip-descricao';
+                          tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                          tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                          document.body.appendChild(tooltip);
+                        }
+                        tooltip.style.display='block';
+                        tooltip.style.visibility='hidden';
+                        setTimeout(() => {
+                          const rect = this.getBoundingClientRect();
+                          const tooltipHeight = tooltip.offsetHeight;
+                          tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                          tooltip.style.left = rect.left + 'px';
+                          tooltip.style.visibility='visible';
+                        }, 0);
+                      "
+                      onmouseout="
+                        event.stopPropagation();
+                        const tooltipId = this.getAttribute('data-tooltip-id');
+                        const tooltip = document.getElementById(tooltipId);
+                        if (tooltip) tooltip.style.display='none';
+                      "
+                      onclick="event.stopPropagation();">
+                      ${escapeHtml(desc)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            `;
-          }).join('');
+              `;
+            }).join('');
+          } else {
+            // Para solicitações normais
+            listaProdutos = itensGrupo.map((item, itemIdx) => {
+              const codigo = item.produto_codigo || '-';
+              const desc = item.produto_descricao || item.descricao || '-';
+              const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
+              return `
+                <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+                  <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+                  <div>
+                    <div 
+                      class="desc-truncada"
+                      data-tooltip-id="${tooltipId}"
+                      style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                      onmouseover="
+                        event.stopPropagation();
+                        const tooltipId = this.getAttribute('data-tooltip-id');
+                        let tooltip = document.getElementById(tooltipId);
+                        if (!tooltip) {
+                          tooltip = document.createElement('div');
+                          tooltip.id = tooltipId;
+                          tooltip.className = 'tooltip-descricao';
+                          tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                          tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                          document.body.appendChild(tooltip);
+                        }
+                        tooltip.style.display='block';
+                        tooltip.style.visibility='hidden';
+                        setTimeout(() => {
+                          const rect = this.getBoundingClientRect();
+                          const tooltipHeight = tooltip.offsetHeight;
+                          tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                          tooltip.style.left = rect.left + 'px';
+                          tooltip.style.visibility='visible';
+                        }, 0);
+                      "
+                      onmouseout="
+                        event.stopPropagation();
+                        const tooltipId = this.getAttribute('data-tooltip-id');
+                        const tooltip = document.getElementById(tooltipId);
+                        if (tooltip) tooltip.style.display='none';
+                      "
+                      onclick="event.stopPropagation();">
+                      ${escapeHtml(desc)}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
           
           return `
             <div class="kanban-card" 
@@ -24725,7 +24816,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
               <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
-                ${escapeHtml(primeiroItem.cNumero || primeiroItem.cnumero || '-')}
+                ${escapeHtml(primeiroItem.numero_pedido || primeiroItem.cNumero || '-')}
               </div>
               
               ${listaProdutos}
