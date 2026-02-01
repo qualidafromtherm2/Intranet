@@ -2281,22 +2281,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         }
 
         // Para inclusão/alteração, busca dados completos na API da Omie
-        const param = codReqCompra
-          ? { codReqCompra: parseInt(codReqCompra) }
-          : { codIntReqCompra: String(codIntReqCompra) };
-
-        const responseReq = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            call: 'ConsultarReq',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [param]
-          })
-        });
-
-        let requisicao = null;
+        // Implementa retry com delay pois a Omie pode demorar para processar os itens
         
         // Função auxiliar para mapear campos do cabecalho_consulta para nomes esperados
         const mapearCabecalhoParaRequisicao = (cabecalho) => {
@@ -2307,72 +2292,97 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
             cCodIntPed: cabecalho.cCodIntPed,
             cNumero: cabecalho.cNumero,
             cEtapa: cabecalho.cEtapa,
-            // Mapeamento: cCodCateg → codCateg
             codCateg: cabecalho.cCodCateg || null,
-            // Mapeamento: nCodProj → codProj
             codProj: cabecalho.nCodProj || null,
-            // Mapeamento: dDtPrevisao → dtSugestao
             dtSugestao: cabecalho.dDtPrevisao || null,
-            // Mapeamento: cObs → obsReqCompra
             obsReqCompra: cabecalho.cObs || null,
-            // Mapeamento: cObsInt → obsIntReqCompra
             obsIntReqCompra: cabecalho.cObsInt || null,
-            // Outros campos úteis
             nCodCC: cabecalho.nCodCC || null,
             nCodCompr: cabecalho.nCodCompr || null,
             nCodFor: cabecalho.nCodFor || null
           };
         };
         
-        if (!responseReq.ok) {
-          const errorText = await responseReq.text();
-          console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie (requisicao): ${responseReq.status} - ${errorText}`);
-          
-          // Se a API retornou erro e temos os dados no webhook, usamos o fallback
-          if (event.cabecalho_consulta || body.requisicaoCadastro) {
-            console.log('[webhooks/omie/pedidos-compra] Usando dados do webhook como fallback após erro da API');
+        const param = codReqCompra
+          ? { codReqCompra: parseInt(codReqCompra) }
+          : { codIntReqCompra: String(codIntReqCompra) };
+
+        let requisicao = null;
+        let tentativa = 0;
+        const maxTentativas = 4; // 4 tentativas = 0s, 5s, 10s, 15s
+        const delayEntreTentativas = 5000; // 5 segundos
+
+        // Função para buscar requisição da API com retry
+        const buscarRequisicaoComRetry = async () => {
+          while (tentativa < maxTentativas) {
+            tentativa++;
             
-            // Mapeia os campos do cabecalho_consulta para os nomes esperados
-            const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
-            
-            requisicao = {
-              requisicaoCadastro: {
-                ...body.requisicaoCadastro,
-                ...dadosMapeados,
-                nCodPed: codReqCompra,
-                cCodIntPed: codIntReqCompra
+            if (tentativa > 1) {
+              console.log(`[webhooks/omie/pedidos-compra] 🔄 Tentativa ${tentativa}/${maxTentativas} após ${(tentativa - 1) * 5}s de delay...`);
+              await new Promise(resolve => setTimeout(resolve, delayEntreTentativas));
+            }
+
+            const responseReq = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                call: 'ConsultarReq',
+                app_key: OMIE_APP_KEY,
+                app_secret: OMIE_APP_SECRET,
+                param: [param]
+              })
+            });
+
+            if (!responseReq.ok) {
+              const errorText = await responseReq.text();
+              console.error(`[webhooks/omie/pedidos-compra] ❌ Erro na API Omie (tentativa ${tentativa}): ${responseReq.status} - ${errorText}`);
+              
+              // Se for a última tentativa e temos dados no webhook, usa fallback
+              if (tentativa === maxTentativas && (event.cabecalho_consulta || body.requisicaoCadastro)) {
+                console.log('[webhooks/omie/pedidos-compra] Usando dados do webhook como fallback após todas tentativas');
+                const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
+                return {
+                  requisicaoCadastro: {
+                    ...body.requisicaoCadastro,
+                    ...dadosMapeados,
+                    nCodPed: codReqCompra,
+                    cCodIntPed: codIntReqCompra
+                  }
+                };
               }
-            };
-          } else {
-            throw new Error(`Omie API retornou ${responseReq.status} e não há dados no webhook para fallback`);
+              continue; // Tenta novamente
+            }
+
+            const reqData = await responseReq.json();
+            const itens = reqData?.requisicaoCadastro?.ItensReqCompra || reqData?.requisicaoCadastro?.itens_req_compra || [];
+            
+            // Se encontrou itens, retorna sucesso
+            if (itens.length > 0) {
+              console.log(`[webhooks/omie/pedidos-compra] ✅ ${itens.length} item(ns) encontrado(s) na tentativa ${tentativa}`);
+              return reqData;
+            }
+            
+            // Se não tem itens e não é a última tentativa, tenta novamente
+            if (tentativa < maxTentativas) {
+              console.log(`[webhooks/omie/pedidos-compra] ⚠️ Nenhum item encontrado na tentativa ${tentativa}, aguardando para tentar novamente...`);
+              continue;
+            }
+            
+            // Última tentativa sem itens - usa fallback do webhook se disponível
+            console.log('[webhooks/omie/pedidos-compra] ⚠️ Nenhum item encontrado após todas tentativas');
+            return reqData;
           }
-        } else {
-          requisicao = await responseReq.json();
-        }
-        
-        // Se a API não retornou os dados esperados, usamos os dados do webhook
-        if (!requisicao.requisicaoCadastro && event.cabecalho_consulta) {
-          console.log('[webhooks/omie/pedidos-compra] API retornou dados incompletos, usando dados do webhook');
           
-          // Mapeia os campos do cabecalho_consulta para os nomes esperados
-          const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
-          
-          requisicao = {
-            requisicaoCadastro: dadosMapeados
-          };
-        }
+          throw new Error('Máximo de tentativas atingido sem sucesso');
+        };
+
+        requisicao = await buscarRequisicaoComRetry();
         
         // Se recebemos cabecalho_consulta no webhook, mesclamos com os dados da API
-        if (event.cabecalho_consulta && requisicao.requisicaoCadastro) {
-          // Mapeia e mescla os campos do webhook com os da API
-          const dadosMapeados = mapearCabecalhoParaRequisicao(event.cabecalho_consulta);
-          
+        if (event.cabecalho_consulta && requisicao?.requisicaoCadastro) {
           // Sobrescreve campos específicos do webhook (prioridade para webhook)
-          requisicao.requisicaoCadastro.cNumero = dadosMapeados.cNumero;
-          requisicao.requisicaoCadastro.cEtapa = dadosMapeados.cEtapa;
-          requisicao.requisicaoCadastro.codCateg = dadosMapeados.codCateg || requisicao.requisicaoCadastro.codCateg;
-          requisicao.requisicaoCadastro.dtSugestao = dadosMapeados.dtSugestao || requisicao.requisicaoCadastro.dtSugestao;
-          requisicao.requisicaoCadastro.obsReqCompra = dadosMapeados.obsReqCompra || requisicao.requisicaoCadastro.obsReqCompra;
+          requisicao.requisicaoCadastro.cNumero = event.cabecalho_consulta.cNumero || requisicao.requisicaoCadastro.cNumero;
+          requisicao.requisicaoCadastro.cEtapa = event.cabecalho_consulta.cEtapa || requisicao.requisicaoCadastro.cEtapa;
         }
         
         await upsertRequisicaoCompra(requisicao, topic);
