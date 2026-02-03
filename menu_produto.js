@@ -10857,6 +10857,7 @@ function initComprasUI() {
     // renderComprasKanban(); // REMOVIDO - Página não existe mais
   });
   attachComprasAutocomplete();
+  attachDescricaoBreveAutocomplete();
   console.log('[COMPRAS] initComprasUI -> autocomplete e eventos registrados');
 
   // Inicializa sistema de anexos
@@ -15335,7 +15336,7 @@ document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () 
   fecharModalComprasAcoes();
   abrirModalFiltroKanbans();
 });
-document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', fecharModalFiltroKanbans);
+document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', salvarPreferenciasKanbans);
 document.getElementById('filtroKanbanSelecionarTodos')?.addEventListener('click', toggleSelecionarTodosKanbans);
 document.getElementById('filtroKanbanAplicar')?.addEventListener('click', salvarPreferenciasKanbans);
 
@@ -15348,10 +15349,15 @@ document.getElementById('modalComprasAcoes')?.addEventListener('click', (e) => {
   }
 });
 
+document.getElementById('comprasAcoesContainer')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (btn) kanbanAcoesAlteradas = true;
+});
+
 // Fecha modal ao clicar fora
 document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => {
   if (e.target.id === 'modalFiltroKanbans') {
-    fecharModalFiltroKanbans();
+    salvarPreferenciasKanbans();
   }
 });
 
@@ -23377,6 +23383,7 @@ async function loadComprasRecebimento() {
 }
 
 // ========== Modal de Ações do Kanban (Hamburger) ==========
+let kanbanAcoesAlteradas = false;
 function abrirModalComprasAcoes() {
   const modal = document.getElementById('modalComprasAcoes');
   if (modal) {
@@ -23389,12 +23396,67 @@ function fecharModalComprasAcoes() {
   if (modal) {
     modal.style.display = 'none';
   }
+
+  if (kanbanAcoesAlteradas) {
+    kanbanAcoesAlteradas = false;
+    loadMinhasSolicitacoes();
+  }
 }
 
 // ========== Funções de Filtro de Kanbans ==========
 
 // Variável global para armazenar kanbans visíveis do usuário
 let kanbansVisiveis = [];
+const DATA_LIMITE_PADRAO = '2026-02-01';
+
+function formatarDataLimite(valor) {
+  if (!valor) return '';
+  const texto = String(valor).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    const [y, m, d] = texto.split('-');
+    return `${d}/${m}/${y.slice(-2)}`;
+  }
+  return texto;
+}
+
+function normalizarDataLimite(valor) {
+  const texto = String(valor || '').trim();
+  if (!texto) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+  const match = texto.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);
+  if (!match) return '';
+  const dia = match[1];
+  const mes = match[2];
+  const ano = match[3].length === 2 ? `20${match[3]}` : match[3];
+  return `${ano}-${mes}-${dia}`;
+}
+
+function obterDatasLimiteKanban() {
+  try {
+    const raw = localStorage.getItem('kanbanDatasLimite');
+    const data = raw ? JSON.parse(raw) : {};
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function salvarDatasLimiteKanban(map) {
+  localStorage.setItem('kanbanDatasLimite', JSON.stringify(map || {}));
+}
+
+// Lê do localStorage quais kanbans podem aparecer mesmo com zero itens
+function obterKanbansVaziosVisiveis() {
+  const raw = localStorage.getItem('kanbansVaziosVisiveis');
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
+  } catch (err) {
+    console.warn('[FILTRO] Erro ao ler kanbans vazios:', err);
+    return [];
+  }
+}
 
 // Lista de todos os kanbans disponíveis (deve corresponder aos statusColunas)
 const todosKanbans = [
@@ -23418,15 +23480,14 @@ async function abrirModalFiltroKanbans() {
   // Carrega preferências do usuário
   await carregarPreferenciasKanbans();
   
-  // Carrega preferência de mostrar kanbans vazios
-  const checkboxVazios = document.getElementById('mostrarKanbansVazios');
-  if (checkboxVazios) {
-    checkboxVazios.checked = localStorage.getItem('mostrarKanbansVazios') === 'true';
-  }
+  // Carrega preferência de kanbans que podem aparecer vazios
+  const kanbansVaziosVisiveis = obterKanbansVaziosVisiveis();
   
   // Popula checkboxes
   const checkboxContainer = document.getElementById('listaFiltroKanbans');
   if (!checkboxContainer) return;
+
+  const datasLimite = obterDatasLimiteKanban();
   
   // Títulos personalizados
   const titulosPersonalizados = {
@@ -23451,23 +23512,144 @@ async function abrirModalFiltroKanbans() {
   
   checkboxContainer.innerHTML = todosKanbans.map(kanban => {
     const tituloExibir = titulosPersonalizados[kanban] || (kanban.charAt(0).toUpperCase() + kanban.slice(1));
-    const checked = kanbansVisiveis.includes(kanban) ? 'checked' : '';
+    const checkedVazio = kanbansVaziosVisiveis.includes(kanban) ? 'checked' : '';
+    const checkedVisivel = (kanbansVisiveis.includes(kanban) || checkedVazio) ? 'checked' : '';
     const badge = badgesKanban[kanban] || { texto: '', cor: '' };
-    
-    console.log('[FILTRO] Renderizando kanban:', kanban, 'badge:', badge); // Debug
-    
+
+    const dataLimite = datasLimite[kanban] || DATA_LIMITE_PADRAO;
+    const dataLimiteExibir = formatarDataLimite(dataLimite);
+
     return `
-      <label style="display:flex;align-items:center;gap:10px;padding:10px;cursor:pointer;border-radius:6px;transition:all 0.2s;border:1px solid transparent;background:transparent;" 
-             onmouseover="this.style.borderColor='#3b82f6';this.style.background='transparent'" 
-             onmouseout="this.style.borderColor='transparent';this.style.background='transparent'">
-        <input type="checkbox" value="${kanban}" ${checked} style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
-        <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
+      <div data-kanban="${kanban}" style="display:grid;grid-template-columns:1fr 110px 160px 120px;gap:10px;align-items:center;padding:10px;border-radius:6px;transition:all 0.2s;border:1px solid transparent;background:transparent;" 
+           onmouseover="this.style.borderColor='#3b82f6';this.style.background='transparent'" 
+           onmouseout="this.style.borderColor='transparent';this.style.background='transparent'">
+        <div style="display:flex;flex-direction:column;gap:4px;">
           <span style="font-size:14px;color:#ffffff;font-weight:500;">${tituloExibir}</span>
           ${badge.texto ? `<span style="background:${badge.cor};color:white;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;width:fit-content;">${badge.texto}</span>` : ''}
         </div>
-      </label>
+        <label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" class="kanban-visivel-checkbox" value="${kanban}" ${checkedVisivel} style="width:18px;height:18px;cursor:pointer;">
+          <span style="font-size:12px;color:#e5e7eb;">Visível</span>
+        </label>
+        <label style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" class="kanban-vazio-checkbox" value="${kanban}" ${checkedVazio} style="width:18px;height:18px;cursor:pointer;">
+          <span style="font-size:12px;color:#e5e7eb;">Mesmo vazio</span>
+        </label>
+        <div style="display:flex;justify-content:center;">
+          <div style="position:relative;width:100%;max-width:120px;">
+            <input type="text" class="kanban-data-limite" data-kanban="${kanban}" value="${dataLimiteExibir}" placeholder="dd/mm/aa" style="width:100%;padding:6px 28px 6px 8px;border:1px solid #1e293b;border-radius:6px;background:#0f172a;color:#e5e7eb;font-size:12px;box-sizing:border-box;">
+            <button type="button" class="kanban-data-limite-btn" data-kanban="${kanban}" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#93c5fd;cursor:pointer;padding:2px;">
+              <i class="fa-solid fa-calendar"></i>
+            </button>
+            <input type="date" class="kanban-data-limite-picker" data-kanban="${kanban}" value="${dataLimite}" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+          </div>
+        </div>
+      </div>
     `;
   }).join('');
+
+  // Bind do ícone de calendário e sincronização com input de texto
+  const botoesData = checkboxContainer.querySelectorAll('.kanban-data-limite-btn');
+  const pickersData = checkboxContainer.querySelectorAll('.kanban-data-limite-picker');
+  const inputsTexto = checkboxContainer.querySelectorAll('.kanban-data-limite');
+  const inputGlobal = document.getElementById('kanbanDataLimiteGlobal');
+  const inputGlobalBtn = document.getElementById('kanbanDataLimiteGlobalBtn');
+  const inputGlobalPicker = document.getElementById('kanbanDataLimiteGlobalPicker');
+
+  const abrirPicker = (picker) => {
+    if (!picker) return;
+    try {
+      if (typeof picker.showPicker === 'function') {
+        picker.showPicker();
+        return;
+      }
+    } catch (_) {
+      // fallback abaixo
+    }
+    picker.focus();
+    picker.click();
+  };
+
+  botoesData.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const kanban = btn.getAttribute('data-kanban');
+      const picker = checkboxContainer.querySelector(`.kanban-data-limite-picker[data-kanban="${kanban}"]`);
+      abrirPicker(picker);
+    });
+  });
+
+  pickersData.forEach(picker => {
+    picker.addEventListener('change', () => {
+      const kanban = picker.getAttribute('data-kanban');
+      const input = checkboxContainer.querySelector(`.kanban-data-limite[data-kanban="${kanban}"]`);
+      if (!input) return;
+      input.value = formatarDataLimite(picker.value);
+    });
+  });
+
+  inputsTexto.forEach(input => {
+    input.addEventListener('change', () => {
+      const kanban = input.getAttribute('data-kanban');
+      const picker = checkboxContainer.querySelector(`.kanban-data-limite-picker[data-kanban="${kanban}"]`);
+      if (!picker) return;
+      const normalizada = normalizarDataLimite(input.value);
+      picker.value = normalizada || '';
+    });
+  });
+
+  const aplicarDataGlobal = (valor) => {
+    const normalizada = normalizarDataLimite(valor);
+    const valorExibir = formatarDataLimite(normalizada || DATA_LIMITE_PADRAO);
+
+    if (inputGlobal) inputGlobal.value = valorExibir;
+    if (inputGlobalPicker) inputGlobalPicker.value = normalizada || '';
+
+    inputsTexto.forEach(input => {
+      input.value = valorExibir;
+      const kanban = input.getAttribute('data-kanban');
+      const picker = checkboxContainer.querySelector(`.kanban-data-limite-picker[data-kanban="${kanban}"]`);
+      if (picker) picker.value = normalizada || '';
+    });
+  };
+
+  if (inputGlobal) {
+    inputGlobal.value = formatarDataLimite(DATA_LIMITE_PADRAO);
+    inputGlobal.addEventListener('change', () => aplicarDataGlobal(inputGlobal.value));
+  }
+
+  if (inputGlobalBtn && inputGlobalPicker) {
+    inputGlobalBtn.addEventListener('click', () => {
+      abrirPicker(inputGlobalPicker);
+    });
+
+    inputGlobalPicker.addEventListener('change', () => {
+      aplicarDataGlobal(inputGlobalPicker.value);
+    });
+  }
+
+  // Regras de consistência entre visível e vazio
+  const visivelCheckboxes = checkboxContainer.querySelectorAll('.kanban-visivel-checkbox');
+  const vazioCheckboxes = checkboxContainer.querySelectorAll('.kanban-vazio-checkbox');
+
+  vazioCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        const row = cb.closest('[data-kanban]');
+        const visivel = row?.querySelector('.kanban-visivel-checkbox');
+        if (visivel) visivel.checked = true;
+      }
+    });
+  });
+
+  visivelCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (!cb.checked) {
+        const row = cb.closest('[data-kanban]');
+        const vazio = row?.querySelector('.kanban-vazio-checkbox');
+        if (vazio) vazio.checked = false;
+      }
+    });
+  });
   
   modal.style.display = 'flex';
 }
@@ -23503,16 +23685,35 @@ async function carregarPreferenciasKanbans() {
 // Salva preferências de kanbans visíveis no servidor
 async function salvarPreferenciasKanbans() {
   try {
-    const checkboxes = document.querySelectorAll('#listaFiltroKanbans input[type="checkbox"]');
-    const selecionados = Array.from(checkboxes)
+    const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
+    const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
+    const inputsDataLimite = document.querySelectorAll('#listaFiltroKanbans .kanban-data-limite');
+
+    let selecionados = Array.from(checkboxesVisivel)
       .filter(cb => cb.checked)
       .map(cb => cb.value);
-    
-    // Salva preferência de mostrar kanbans vazios no localStorage
-    const checkboxVazios = document.getElementById('mostrarKanbansVazios');
-    if (checkboxVazios) {
-      localStorage.setItem('mostrarKanbansVazios', checkboxVazios.checked);
-    }
+
+    let vaziosSelecionados = Array.from(checkboxesVazio)
+      .filter(cb => cb.checked)
+      .map(cb => cb.value);
+
+    // Regra: se está marcado como "mesmo vazio", obrigatoriamente deve estar visível
+    const visiveisSet = new Set(selecionados);
+    vaziosSelecionados.forEach(kanban => visiveisSet.add(kanban));
+    selecionados = Array.from(visiveisSet);
+    vaziosSelecionados = vaziosSelecionados.filter(kanban => visiveisSet.has(kanban));
+
+    // Salva preferência de kanbans que podem aparecer vazios no localStorage
+    localStorage.setItem('kanbansVaziosVisiveis', JSON.stringify(vaziosSelecionados));
+
+    // Salva datas limite por kanban no localStorage
+    const datasLimite = {};
+    inputsDataLimite.forEach(input => {
+      const kanban = input.getAttribute('data-kanban');
+      const valor = normalizarDataLimite(input.value) || DATA_LIMITE_PADRAO;
+      if (kanban) datasLimite[kanban] = valor;
+    });
+    salvarDatasLimiteKanban(datasLimite);
     
     const resp = await fetch('/api/compras/filtro-kanbans', {
       method: 'POST',
@@ -23530,6 +23731,9 @@ async function salvarPreferenciasKanbans() {
     
     // Aplica filtro visualmente
     aplicarFiltroKanbans();
+
+    // Recarrega os kanbans para aplicar datas limite
+    await loadMinhasSolicitacoes();
     
     // Fecha modal
     fecharModalFiltroKanbans();
@@ -23557,8 +23761,8 @@ function aplicarFiltroKanbans() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   if (!kanbanContainer) return;
   
-  // Verifica se deve mostrar kanbans vazios
-  const mostrarVazios = localStorage.getItem('mostrarKanbansVazios') === 'true';
+  // Verifica quais kanbans podem aparecer vazios
+  const kanbansVaziosVisiveis = obterKanbansVaziosVisiveis();
   
   // Pega todas as colunas do kanban
   const colunas = kanbanContainer.querySelectorAll('.kanban-column-minhas');
@@ -23578,7 +23782,7 @@ function aplicarFiltroKanbans() {
     // 3. Caso contrário: mostra
     if (!kanbansVisiveis.includes(statusNormalizado)) {
       coluna.style.display = 'none';
-    } else if (count === 0 && !mostrarVazios) {
+    } else if (count === 0 && !kanbansVaziosVisiveis.includes(statusNormalizado)) {
       coluna.style.display = 'none';
     } else {
       coluna.style.display = '';
@@ -23586,14 +23790,38 @@ function aplicarFiltroKanbans() {
   });
 }
 
+function filtrarItensPorDataLimite(status, itens) {
+  const datasLimite = obterDatasLimiteKanban();
+  const limite = datasLimite[status] || DATA_LIMITE_PADRAO;
+  if (!limite) return itens;
+
+  const limiteNormalizado = normalizarDataLimite(limite) || DATA_LIMITE_PADRAO;
+  const limiteDate = new Date(`${limiteNormalizado}T00:00:00`);
+  if (Number.isNaN(limiteDate.getTime())) return itens;
+
+  return itens.filter(item => {
+    if (!item.d_inc_data) return true;
+    const dataItem = new Date(item.d_inc_data);
+    if (Number.isNaN(dataItem.getTime())) return true;
+    return dataItem >= limiteDate;
+  });
+}
+
 // Seleciona/desmarca todos os checkboxes
 function toggleSelecionarTodosKanbans() {
-  const checkboxes = document.querySelectorAll('#listaFiltroKanbans input[type="checkbox"]');
-  const todosMarcados = Array.from(checkboxes).every(cb => cb.checked);
+  const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
+  const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
+  const todosMarcados = Array.from(checkboxesVisivel).every(cb => cb.checked);
   
-  checkboxes.forEach(cb => {
+  checkboxesVisivel.forEach(cb => {
     cb.checked = !todosMarcados;
   });
+
+  if (todosMarcados) {
+    checkboxesVazio.forEach(cb => {
+      cb.checked = false;
+    });
+  }
 }
 
 // ========== Variável global para permissões de acesso ==========
@@ -24506,7 +24734,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
-    let lista = data.solicitacoes || [];
+    // Objetivo: remover status que serão substituídos pelos dados da tabela pedidos_omie
+    let lista = (data.solicitacoes || []).filter(item => {
+      const status = (item.status || '').toLowerCase();
+      return status !== 'aguardando compra' && status !== 'compra realizada';
+    });
     
     // Busca requisições sem pedidos de compra
     const respReq = await fetch(`/api/compras/requisicoes`, { credentials: 'include' });
@@ -24534,6 +24766,65 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       lista = [...lista, ...requisicoes];
     }
     
+    // Busca pedidos de compra da tabela pedidos_omie (c_etapa = '10')
+    const respPed = await fetch(`/api/compras/pedidos-compra`, { credentials: 'include' });
+    let pedidosCompra = [];
+    if (respPed.ok) {
+      const dataPed = await respPed.json();
+      console.log('[DEBUG] Pedidos de compra recebidos da API:', dataPed.pedidos);
+      pedidosCompra = (dataPed.pedidos || []).map(ped => ({
+        ...ped,
+        id: `ped_${ped.n_cod_ped}`,
+        numero_pedido: ped.numero,
+        numero: ped.numero, // c_numero com 4 dígitos
+        n_cod_ped: ped.n_cod_ped,
+        fornecedor_nome: ped.fornecedor_nome,
+        status: 'aguardando compra',
+        statusNormalizado: 'aguardando compra',
+        isPedidoCompra: true
+      }));
+      
+      console.log('[DEBUG] Pedidos mapeados:', pedidosCompra);
+      lista = [...lista, ...pedidosCompra];
+    }
+    
+    // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15')
+    console.log('[DEBUG] Buscando compras realizadas...');
+    const respCompra = await fetch(`/api/compras/compras-realizadas`, { credentials: 'include' });
+    console.log('[DEBUG] Resposta do fetch compras realizadas:', respCompra.status, respCompra.ok);
+    let comprasRealizadas = [];
+    if (respCompra.ok) {
+      const dataCompra = await respCompra.json();
+      console.log('[DEBUG] Compras realizadas recebidas da API:', dataCompra.compras);
+      // Objetivo: no kanban "Compra realizada", usar apenas c_numero numérico (não c_cod_int_ped)
+      comprasRealizadas = (dataCompra.compras || []).map(comp => {
+        const cNumero = String(comp.c_numero || comp.numero || '').trim();
+        const cNumeroValido = /^\d+$/.test(cNumero) ? cNumero : '';
+
+        return {
+          ...comp,
+          id: `comp_${comp.n_cod_ped}`,
+          numero_pedido: cNumeroValido || comp.n_cod_ped,
+          numero: cNumeroValido || comp.n_cod_ped,
+          c_numero: cNumeroValido,
+          n_cod_ped: comp.n_cod_ped,
+          fornecedor_nome: comp.fornecedor_nome,
+          status: 'compra realizada',
+          statusNormalizado: 'compra realizada',
+          isCompraRealizada: true
+        };
+      });
+      
+      console.log('[DEBUG] Compras realizadas mapeadas:', comprasRealizadas);
+      console.log('[DEBUG] Total de compras realizadas:', comprasRealizadas.length);
+      if (comprasRealizadas.length > 0) {
+        console.log('[DEBUG] Primeira compra realizada:', comprasRealizadas[0]);
+      }
+      lista = [...lista, ...comprasRealizadas];
+    }
+    
+    console.log('[DEBUG] Lista total após adicionar compras realizadas:', lista.length);
+    
     // Aplica filtro de status se fornecido
     if (filtroStatus && filtroStatus.length > 0) {
       lista = lista.filter(item => filtroStatus.includes((item.status || 'pendente').toLowerCase()));
@@ -24549,6 +24840,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       ...item,
       statusNormalizado: (item.status || '').toLowerCase().trim()
     }));
+
     
     // DEBUG: Verificar requisição 10816583034
     const item2337 = itensComStatusNormalizado.find(i => i.cod_req_compra === '10816583034');
@@ -24558,17 +24850,19 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
-      'aguardando aprovação da requisição': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição'),
-      'solicitado revisão': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar'),
-      'aguardando cotação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação'),
-      'cotado aguardando escolha': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado'),
-      'aguardando compra preparação': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação'),
-      'aguardando compra': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra'),
-      'compra realizada': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada'),
-      'faturada pelo fornecedor': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor'),
-      'recebido': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido'),
-      'concluído': itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido')
+      'aguardando aprovação da requisição': filtrarItensPorDataLimite('aguardando aprovação da requisição', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição')),
+      'solicitado revisão': filtrarItensPorDataLimite('solicitado revisão', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar')),
+      'aguardando cotação': filtrarItensPorDataLimite('aguardando cotação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação')),
+      'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
+      'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
+      'aguardando compra': filtrarItensPorDataLimite('aguardando compra', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra')),
+      'compra realizada': filtrarItensPorDataLimite('compra realizada', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada')),
+      'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor')),
+      'recebido': filtrarItensPorDataLimite('recebido', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido')),
+      'concluído': filtrarItensPorDataLimite('concluído', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido'))
     };
+    
+    console.log('[DEBUG] Compras realizadas no statusColunas:', statusColunas['compra realizada'].length);
 
     // Renderiza colunas do kanban
     kanbanContainer.innerHTML = Object.keys(statusColunas).map((status, idx) => {
@@ -24677,10 +24971,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       if (itens.length === 0) {
         cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
       } else {
-        // Para requisições, agrupa diferente (por requisição em vez de cNumero)
+        // Para requisições, pedidos de compra e compras realizadas, agrupa diferente
         const isRequisicao = status === 'aguardando compra preparação' && itens.length > 0 && itens[0].isRequisicao;
+        const isPedidoCompra = status === 'aguardando compra' && itens.length > 0 && itens[0].isPedidoCompra;
+        const isCompraRealizada = status === 'compra realizada' && itens.length > 0 && itens[0].isCompraRealizada;
         
         let grupos = {};
+        let usarArrayDireto = false;
+        let gruposArrayOrdenado = [];
+        
         if (isRequisicao) {
           // Para requisições: cada requisição é um grupo
           itens.forEach(item => {
@@ -24688,6 +24987,36 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             if (!grupos[chave]) grupos[chave] = [];
             grupos[chave].push(item);
           });
+        } else if (isPedidoCompra || isCompraRealizada) {
+          // Para pedidos de compra e compras realizadas: agrupa por numero (c_numero)
+          // MANTÉM A ORDEM DO ARRAY ORIGINAL (já vem ordenado do backend)
+          const gruposArray = [];
+          const gruposVistos = new Set();
+          
+          itens.forEach(item => {
+            // Objetivo: somente no kanban "Compra realizada" considerar c_numero numérico
+            let chave;
+            if (isCompraRealizada) {
+              const cNumero = String(item.c_numero || '').trim();
+              chave = /^\d+$/.test(cNumero) ? cNumero : `sem_numero_${item.id}`;
+            } else {
+              chave = item.numero || item.n_cod_ped || 'sem_numero';
+            }
+            
+            if (!gruposVistos.has(chave)) {
+              gruposVistos.add(chave);
+              gruposArray.push({ chave, itens: [item] });
+            } else {
+              // Adiciona ao grupo existente
+              const grupo = gruposArray.find(g => g.chave === chave);
+              if (grupo) grupo.itens.push(item);
+            }
+          });
+          
+          // MANTÉM COMO ARRAY ao invés de converter para objeto
+          // Isso preserva a ordem garantida pelo backend
+          usarArrayDireto = true;
+          gruposArrayOrdenado = gruposArray;
         } else {
           // Para solicitações: agrupa por cNumero
           itens.forEach(item => {
@@ -24698,8 +25027,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         }
         
         // Renderiza cada grupo (card único por cnumero ou requisição)
-        cardsHtml = Object.keys(grupos).map(chaveGrupo => {
-          const itensGrupo = grupos[chaveGrupo];
+        cardsHtml = (usarArrayDireto ? gruposArrayOrdenado.map(g => ({ chave: g.chave, itens: g.itens })) : Object.keys(grupos).map(chave => ({ chave, itens: grupos[chave] }))).map(({ chave: chaveGrupo, itens: itensGrupo }) => {
           const primeiroItem = itensGrupo[0];
           const totalItens = itensGrupo.length;
           
@@ -24762,6 +25090,60 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               // Requisição sem itens - mostra mensagem
               listaProdutos = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Sem itens cadastrados</div>';
             }
+          } else if (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) {
+            // Renderiza pedidos de compra e compras realizadas da tabela pedidos_omie
+            if (primeiroItem.itens && primeiroItem.itens.length > 0) {
+              listaProdutos = primeiroItem.itens.map((item, itemIdx) => {
+                const codigo = item.produto_codigo || '-';
+                const desc = item.produto_descricao || 'Sem descrição';
+                const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
+                return `
+                  <div style="margin-bottom:4px;padding-bottom:4px;${primeiroItem.itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+                    <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+                    <div>
+                      <div 
+                        class="desc-truncada"
+                        data-tooltip-id="${tooltipId}"
+                        style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                        onmouseover="
+                          event.stopPropagation();
+                          const tooltipId = this.getAttribute('data-tooltip-id');
+                          let tooltip = document.getElementById(tooltipId);
+                          if (!tooltip) {
+                            tooltip = document.createElement('div');
+                            tooltip.id = tooltipId;
+                            tooltip.className = 'tooltip-descricao';
+                            tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                            tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                            document.body.appendChild(tooltip);
+                          }
+                          tooltip.style.display='block';
+                          tooltip.style.visibility='hidden';
+                          setTimeout(() => {
+                            const rect = this.getBoundingClientRect();
+                            const tooltipHeight = tooltip.offsetHeight;
+                            tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                            tooltip.style.left = rect.left + 'px';
+                            tooltip.style.visibility='visible';
+                          }, 0);
+                        "
+                        onmouseout="
+                          event.stopPropagation();
+                          const tooltipId = this.getAttribute('data-tooltip-id');
+                          const tooltip = document.getElementById(tooltipId);
+                          if (tooltip) tooltip.style.display='none';
+                        "
+                        onclick="event.stopPropagation();">
+                        ${escapeHtml(desc)}
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('');
+            } else {
+              // Pedido sem itens - mostra mensagem
+              listaProdutos = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Sem produtos cadastrados</div>';
+            }
           } else {
             // Para solicitações normais
             listaProdutos = itensGrupo.map((item, itemIdx) => {
@@ -24813,6 +25195,26 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             }).join('');
           }
           
+          // Função para determinar cor da borda baseado no padrão de c_cod_int_ped
+          const determinCorBorda = (codIntPed) => {
+            if (!codIntPed || codIntPed.trim() === '') {
+              // Vazio = vermelho
+              return '#ef4444';
+            }
+            // Verifica se inicia com ano (formato YYYYMMDD-...)
+            const regex = /^\d{8}-/;
+            if (regex.test(codIntPed)) {
+              // Inicia com ano = verde (padrão)
+              return '#10b981';
+            }
+            // Outros padrões = amarelo
+            return '#eab308';
+          };
+          
+          const corBorda = (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) 
+            ? determinCorBorda(primeiroItem.c_cod_int_ped) 
+            : '#e5e7eb';
+          
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
@@ -24820,7 +25222,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               onclick="abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')"
               style="
               background:#ffffff;
-              border:1px solid #e5e7eb;
+              border:2px solid ${corBorda};
               border-radius:8px;
               padding:12px;
               transition:all 0.2s;
@@ -24835,8 +25237,30 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
               <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
-                ${escapeHtml(primeiroItem.numero_pedido || primeiroItem.cNumero || '-')}
+                ${escapeHtml(
+                  primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
+                  primeiroItem.isCompraRealizada ? ((/^\d+$/.test(String(primeiroItem.c_numero || '').trim()))
+                    ? primeiroItem.c_numero
+                    : '-') :
+                  primeiroItem.isRequisicao ? (primeiroItem.cnumero || primeiroItem.numero_pedido || '-') :
+                  (primeiroItem.numero_pedido || primeiroItem.cNumero || '-')
+                )}
               </div>
+              
+              ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.fornecedor_nome ? `
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
+                  <i class="fa-solid fa-building" style="margin-right:4px;color:#9ca3af;"></i>
+                  ${escapeHtml(primeiroItem.fornecedor_nome)}
+                </div>
+              ` : ''}
+              
+              ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.d_inc_data ? `
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;align-items:center;">
+                  <i class="fa-solid fa-calendar-plus" style="margin-right:4px;color:#f59e0b;"></i>
+                  <span style="font-weight:600;">Data:</span>
+                  <span style="margin-left:4px;">${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                </div>
+              ` : ''}
               
               ${listaProdutos}
             </div>
@@ -24848,8 +25272,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const podeSerClicavel = statusComClique.includes(status);
       const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;' : '';
       
-      // Botão "Abrir Tudo" para kanbans clicáveis
-      const botaoAbrirTudo = ehClicavel ? `
+      // Botão "Abrir Tudo" para kanbans clicáveis (exceto Requisições)
+      const botaoAbrirTudo = (ehClicavel && status !== 'aguardando compra preparação') ? `
         <button 
           onclick="${funcaoOnclick}"
           style="
@@ -25084,6 +25508,131 @@ async function buscarSugestoesCompras(term) {
     console.error('[COMPRAS] buscarSugestoesCompras → erro fetch', err);
     return [];
   }
+}
+
+// Autocomplete da descrição breve do pedido (listbox) usando /api/produtos/busca
+let descricaoBreveSearchTimeout = null;
+
+async function buscarSugestoesDescricaoBreve(term) {
+  try {
+    const resp = await fetch('/api/produtos/busca', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ q: term })
+    });
+    if (!resp.ok) {
+      console.warn('[CATALOGO] buscarSugestoesDescricaoBreve → resposta não OK:', resp.status, resp.statusText);
+      return [];
+    }
+    const data = await resp.json();
+    return Array.isArray(data.itens) ? data.itens : [];
+  } catch (err) {
+    console.error('[CATALOGO] buscarSugestoesDescricaoBreve → erro fetch', err);
+    return [];
+  }
+}
+
+function attachDescricaoBreveAutocomplete() {
+  const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const lista = document.getElementById('catalogoDescricaoLista');
+  if (!input || !lista) return;
+
+  const esc = (val) => String(val ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch] || ch));
+
+  // Objetivo: quando o usuário escolhe uma sugestão, mudar para "Sim" e abrir o item no catálogo
+  const abrirItemCatalogoPorDescricao = (descricaoSelecionada) => {
+    if (!descricaoSelecionada) return;
+
+    const selectCadastro = document.getElementById('catalogoPossuiCadastroOmie');
+    if (selectCadastro) {
+      selectCadastro.value = 'sim';
+    }
+
+    // Atualiza UI para modo "Sim" e carrega catálogo
+    toggleCamposCatalogoOmie();
+
+    const aplicarFiltro = () => {
+      const inputBusca = document.getElementById('catalogoBuscaProduto');
+      if (inputBusca) {
+        inputBusca.value = descricaoSelecionada;
+      }
+      filtrarCatalogoOmie();
+    };
+
+    // Se catálogo já carregou, aplica filtro; senão, espera carregar
+    if (Array.isArray(window.produtosCatalogoOmie) && window.produtosCatalogoOmie.length) {
+      aplicarFiltro();
+    } else {
+      let tentativas = 0;
+      const timer = setInterval(() => {
+        tentativas += 1;
+        if (Array.isArray(window.produtosCatalogoOmie) && window.produtosCatalogoOmie.length) {
+          clearInterval(timer);
+          aplicarFiltro();
+        } else if (tentativas >= 20) {
+          clearInterval(timer);
+          aplicarFiltro();
+        }
+      }, 300);
+    }
+  };
+
+  const limparLista = () => {
+    lista.innerHTML = '';
+    lista.style.display = 'none';
+  };
+
+  input.addEventListener('input', () => {
+    const term = input.value.trim();
+    if (descricaoBreveSearchTimeout) clearTimeout(descricaoBreveSearchTimeout);
+
+    if (term.length < 2) {
+      limparLista();
+      return;
+    }
+
+    descricaoBreveSearchTimeout = setTimeout(async () => {
+      const itens = await buscarSugestoesDescricaoBreve(term);
+      const descricoes = Array.from(new Set(
+        itens.map(it => String(it.descricao || '').trim()).filter(Boolean)
+      ));
+
+      if (!descricoes.length) {
+        limparLista();
+        return;
+      }
+
+      lista.innerHTML = descricoes.slice(0, 60)
+        .map(desc => `<li data-value="${esc(desc)}">${esc(desc)}</li>`)
+        .join('');
+      lista.style.display = 'block';
+    }, 220);
+  });
+
+  lista.addEventListener('mousedown', (event) => {
+    const item = event.target.closest('li[data-value]');
+    if (!item) return;
+    const valor = item.getAttribute('data-value');
+    input.value = valor;
+    limparLista();
+    abrirItemCatalogoPorDescricao(valor);
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(limparLista, 150);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (event.target !== input && !lista.contains(event.target)) {
+      limparLista();
+    }
+  });
 }
 
 function attachComprasAutocomplete() {
