@@ -2322,7 +2322,7 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
 
 // ——— WEBHOOK DE CATEGORIAS DA OMIE ———
 // Eventos: Categoria.Incluida, Categoria.Alterada
-app.post(['/webhooks/omie/categorias', '/api/webhooks/omie/categorias'],
+app.post(['/webhooks/omie/categorias', '/api/webhooks/omie/categorias', '/webhooks/omie/categorias/', '/api/webhooks/omie/categorias/'],
   chkOmieToken,
   express.json(),
   async (req, res) => {
