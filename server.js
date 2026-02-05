@@ -1539,6 +1539,96 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
       return res.status(400).json({ error: 'produto_codigo não informado' });
     }
 
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const incrementarCodigoProvisorio = (codigo) => {
+      const match = String(codigo || '').match(/(CODPROV\s*-\s*)(\d{1,})/i);
+      if (!match) return null;
+      const prefixo = match[1];
+      const numero = parseInt(match[2], 10);
+      if (!Number.isFinite(numero)) return null;
+      const proximo = String(numero + 1).padStart(match[2].length, '0');
+      return `${prefixo}${proximo}`;
+    };
+
+    // Comentário: se não tiver codigo_omie, cadastra produto na Omie antes de seguir
+    if (!item.codigo_omie) {
+      let codigoAtual = produtoCodigo;
+      let cadastroOk = null;
+
+      for (let tent = 0; tent < 20; tent++) {
+        const descricaoAtual = tent > 0 ? `${produtoDescricao} ${codigoAtual}` : produtoDescricao;
+        const cadastro = await cadastrarProdutoNaOmie(codigoAtual, descricaoAtual);
+        if (cadastro.ok) {
+          cadastroOk = cadastro;
+          if (descricaoAtual !== produtoDescricao) {
+            await pool.query(
+              `UPDATE compras.solicitacao_compras
+               SET produto_descricao = $1
+               WHERE id = $2`,
+              [descricaoAtual, id]
+            );
+            item.produto_descricao = descricaoAtual;
+          }
+          break;
+        }
+
+        const msgErro = String(cadastro.error || '');
+        const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
+        const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+        const proximoCodigo = incrementarCodigoProvisorio(codigoAtual);
+
+        if ((!ehJaCadastrado && !ehDescricaoDuplicada) || !proximoCodigo) {
+          return res.status(500).json({ error: cadastro.error || 'Erro ao cadastrar produto na Omie' });
+        }
+
+        codigoAtual = proximoCodigo;
+      }
+
+      if (!cadastroOk) {
+        return res.status(500).json({ error: 'Não foi possível gerar um código provisório disponível' });
+      }
+
+      // Atualiza produto_codigo na solicitação se o código mudou
+      if (codigoAtual !== produtoCodigo) {
+        await pool.query(
+          `UPDATE compras.solicitacao_compras
+           SET produto_codigo = $1
+           WHERE id = $2`,
+          [codigoAtual, id]
+        );
+        item.produto_codigo = codigoAtual;
+      }
+
+      // Aguarda o webhook popular o produto na tabela produtos_omie
+      let codigoOmieEncontrado = null;
+      for (let i = 0; i < 10; i++) {
+        const { rows: prodRows } = await pool.query(
+          `SELECT codigo_produto
+           FROM public.produtos_omie
+           WHERE codigo = $1 OR codigo_produto_integracao = $1
+           LIMIT 1`,
+          [codigoAtual]
+        );
+        if (prodRows.length > 0) {
+          codigoOmieEncontrado = prodRows[0].codigo_produto;
+          break;
+        }
+        await sleep(2000);
+      }
+
+      if (codigoOmieEncontrado) {
+        item.codigo_omie = codigoOmieEncontrado;
+        await pool.query(
+          `UPDATE compras.solicitacao_compras
+           SET codigo_omie = $1
+           WHERE id = $2`,
+          [codigoOmieEncontrado, id]
+        );
+      }
+    }
+
+    // Comentário: consulta produto na Omie se ainda não houver codigo_omie
     const consultarProdutoOmie = async (param) => {
       return withRetry(() => omieCall('https://app.omie.com.br/api/v1/geral/produtos/', {
         call: 'ConsultarProduto',
@@ -1548,35 +1638,32 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
       }));
     };
 
-    let omieProduto = null;
-    let encontrado = false;
+    if (!item.codigo_omie) {
+      let omieProduto = null;
+      let encontrado = false;
 
-    try {
-      omieProduto = await consultarProdutoOmie({ codigo: produtoCodigo });
-      encontrado = !(omieProduto?.faultstring || omieProduto?.faultcode);
-    } catch (e) {
-      console.warn('[Compras] ConsultarProduto (codigo) falhou:', e?.message || e);
-    }
-
-    if (!encontrado) {
       try {
-        omieProduto = await consultarProdutoOmie({ codigo_produto_integracao: produtoCodigo });
+        omieProduto = await consultarProdutoOmie({ codigo: produtoCodigo });
         encontrado = !(omieProduto?.faultstring || omieProduto?.faultcode);
       } catch (e) {
-        console.warn('[Compras] ConsultarProduto (codigo_produto_integracao) falhou:', e?.message || e);
+        console.warn('[Compras] ConsultarProduto (codigo) falhou:', e?.message || e);
       }
-    }
 
-    if (!encontrado) {
-      const cadastro = await cadastrarProdutoNaOmie(produtoCodigo, produtoDescricao);
-      if (!cadastro.ok) {
-        return res.status(500).json({ error: cadastro.error || 'Erro ao cadastrar produto na Omie' });
+      if (!encontrado) {
+        try {
+          omieProduto = await consultarProdutoOmie({ codigo_produto_integracao: produtoCodigo });
+          encontrado = !(omieProduto?.faultstring || omieProduto?.faultcode);
+        } catch (e) {
+          console.warn('[Compras] ConsultarProduto (codigo_produto_integracao) falhou:', e?.message || e);
+        }
       }
-    } else {
-      try {
-        await sincronizarProdutoParaPostgres(omieProduto);
-      } catch (syncErr) {
-        console.warn('[Compras] Erro ao sincronizar produto Omie:', syncErr?.message || syncErr);
+
+      if (encontrado) {
+        try {
+          await sincronizarProdutoParaPostgres(omieProduto);
+        } catch (syncErr) {
+          console.warn('[Compras] Erro ao sincronizar produto Omie:', syncErr?.message || syncErr);
+        }
       }
     }
 
@@ -13083,7 +13170,8 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto) {
       return { ok: true, codigo_produto: data.codigo_produto };
     } else {
       console.error(`❌ Erro ao cadastrar produto:`, data);
-      return { ok: false, error: data.descricao_status || 'Erro desconhecido' };
+      const erroDetalhado = data.faultstring || data.descricao_status || 'Erro desconhecido';
+      return { ok: false, error: erroDetalhado };
     }
   } catch (err) {
     console.error(`❌ Erro na função cadastrarProdutoNaOmie:`, err.message);

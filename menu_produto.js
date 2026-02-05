@@ -18518,10 +18518,16 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
       throw new Error('Resposta inválida do servidor');
     }
     
-    // Preenche o select com as categorias
+    // Preenche o select com as categorias (ordem alfabética)
     select.innerHTML = '<option value="">Selecione uma categoria...</option>';
     
-    data.categorias.forEach(cat => {
+    const categoriasOrdenadas = [...data.categorias].sort((a, b) => {
+      const da = (a.descricao || '').toString();
+      const db = (b.descricao || '').toString();
+      return da.localeCompare(db, 'pt-BR', { sensitivity: 'base' });
+    });
+    
+    categoriasOrdenadas.forEach(cat => {
       const option = document.createElement('option');
       option.value = cat.codigo;
       option.textContent = cat.descricao;
@@ -19061,6 +19067,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           </button>
           <button 
             onclick="enviarCotadoEscolhaParaCompra()"
+            id="btn-enviar-requisicao-cotado-escolha"
             style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-paper-plane"></i>
             <span>Enviar requisição</span>
@@ -19695,7 +19702,14 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
 // Comentário: envia item do modal para aguardando compra
 async function enviarCotadoEscolhaParaCompra() {
   if (!window.cotadoEscolhaItemId) return;
+  const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
+  const originalHtml = btn ? btn.innerHTML : '';
   try {
+    if (btn) {
+      btn.disabled = true;
+      btn.style.cursor = 'not-allowed';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
+    }
     const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}/enviar-requisicao`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -19713,6 +19727,11 @@ async function enviarCotadoEscolhaParaCompra() {
   } catch (err) {
     console.error('[COTADO ESCOLHA] Erro ao enviar:', err);
     alert('Erro ao enviar: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = originalHtml;
+    }
   }
 }
 
