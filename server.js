@@ -1497,6 +1497,128 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
   }
 });
 
+// Envia requisição do item cotado (garante produto na Omie)
+app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ error: 'Credenciais Omie não configuradas' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT 
+        id,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        objetivo_compra,
+        solicitante,
+        departamento,
+        categoria_compra_codigo,
+        previsao_chegada,
+        prazo_solicitado,
+        codigo_produto_omie,
+        codigo_omie,
+        retorno_cotacao,
+        observacao,
+        resp_inspecao_recebimento
+       FROM compras.solicitacao_compras
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: 'Solicitação não encontrada' });
+
+    const item = rows[0];
+    const produtoCodigo = String(item.produto_codigo || '').trim();
+    const produtoDescricao = String(item.produto_descricao || '').trim() || `Produto ${produtoCodigo}`;
+
+    if (!produtoCodigo) {
+      return res.status(400).json({ error: 'produto_codigo não informado' });
+    }
+
+    const consultarProdutoOmie = async (param) => {
+      return withRetry(() => omieCall('https://app.omie.com.br/api/v1/geral/produtos/', {
+        call: 'ConsultarProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [param]
+      }));
+    };
+
+    let omieProduto = null;
+    let encontrado = false;
+
+    try {
+      omieProduto = await consultarProdutoOmie({ codigo: produtoCodigo });
+      encontrado = !(omieProduto?.faultstring || omieProduto?.faultcode);
+    } catch (e) {
+      console.warn('[Compras] ConsultarProduto (codigo) falhou:', e?.message || e);
+    }
+
+    if (!encontrado) {
+      try {
+        omieProduto = await consultarProdutoOmie({ codigo_produto_integracao: produtoCodigo });
+        encontrado = !(omieProduto?.faultstring || omieProduto?.faultcode);
+      } catch (e) {
+        console.warn('[Compras] ConsultarProduto (codigo_produto_integracao) falhou:', e?.message || e);
+      }
+    }
+
+    if (!encontrado) {
+      const cadastro = await cadastrarProdutoNaOmie(produtoCodigo, produtoDescricao);
+      if (!cadastro.ok) {
+        return res.status(500).json({ error: cadastro.error || 'Erro ao cadastrar produto na Omie' });
+      }
+    } else {
+      try {
+        await sincronizarProdutoParaPostgres(omieProduto);
+      } catch (syncErr) {
+        console.warn('[Compras] Erro ao sincronizar produto Omie:', syncErr?.message || syncErr);
+      }
+    }
+
+    // Comentário: garante codigo_omie salvo na solicitação
+    if (!item.codigo_omie) {
+      try {
+        const { rows: prodRows } = await pool.query(
+          `SELECT codigo_produto
+           FROM public.produtos_omie
+           WHERE codigo = $1 OR codigo_produto_integracao = $1
+           LIMIT 1`,
+          [produtoCodigo]
+        );
+        if (prodRows.length > 0) {
+          item.codigo_omie = prodRows[0].codigo_produto;
+          await pool.query(
+            `UPDATE compras.solicitacao_compras
+             SET codigo_omie = $1
+             WHERE id = $2`,
+            [item.codigo_omie, id]
+          );
+        }
+      } catch (e) {
+        console.warn('[Compras] Não foi possível atualizar codigo_omie:', e?.message || e);
+      }
+    }
+
+    const { codReqCompra, codIntReqCompra, omieResult } = await criarRequisicaoOmieParaItem(item, id);
+
+    return res.json({
+      ok: true,
+      message: 'Requisição criada na Omie',
+      numero_pedido: codIntReqCompra,
+      ncodped: codReqCompra,
+      omie_response: omieResult
+    });
+  } catch (err) {
+    console.error('[API] POST /api/compras/solicitacoes/:id/enviar-requisicao erro:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Falha ao enviar requisição' });
+  }
+});
+
 // Lista usuários ativos (para “Quem vai receber?”)
 app.get('/api/users/ativos', async (_req, res) => {
   try {
@@ -2193,6 +2315,90 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       });
     } catch (err) {
       console.error('[webhooks/omie/produtos] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+// ——— WEBHOOK DE CATEGORIAS DA OMIE ———
+// Eventos: Categoria.Incluida, Categoria.Alterada
+app.post(['/webhooks/omie/categorias', '/api/webhooks/omie/categorias'],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+      const event = body.event || body;
+      const topic = body.topic || event.topic || '';
+
+      console.log('[webhooks/omie/categorias] Webhook recebido:', JSON.stringify(body, null, 2));
+
+      const codigoCategoria = event.codigo || event.codigo_categoria || body.codigo || body.codigo_categoria;
+
+      if (!codigoCategoria) {
+        console.warn('[webhooks/omie/categorias] Webhook sem codigo:', JSON.stringify(body));
+        // fallback: sincroniza tudo
+        await syncListarCategoriasOmie();
+        return res.json({ ok: true, msg: 'Sem codigo, sincronizado full' });
+      }
+
+      console.log(`[webhooks/omie/categorias] Processando evento "${topic}" para categoria ${codigoCategoria}`);
+
+      // Consulta categoria na Omie
+      const response = await fetch('https://app.omie.com.br/api/v1/geral/categorias/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarCategoria',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{
+            codigo: String(codigoCategoria)
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[webhooks/omie/categorias] Erro na API Omie: ${response.status} - ${errorText}`);
+        throw new Error(`Omie API retornou ${response.status}`);
+      }
+
+      const categoria = await response.json();
+      if (categoria.faultstring) {
+        throw new Error(categoria.faultstring);
+      }
+
+      await pool.query(
+        `INSERT INTO configuracoes."ListarCategorias"
+         (codigo, descricao, conta_despesa, conta_inativa, categoria_superior, natureza, tipo_categoria, codigo_dre, raw, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         ON CONFLICT (codigo) DO UPDATE SET
+           descricao = EXCLUDED.descricao,
+           conta_despesa = EXCLUDED.conta_despesa,
+           conta_inativa = EXCLUDED.conta_inativa,
+           categoria_superior = EXCLUDED.categoria_superior,
+           natureza = EXCLUDED.natureza,
+           tipo_categoria = EXCLUDED.tipo_categoria,
+           codigo_dre = EXCLUDED.codigo_dre,
+           raw = EXCLUDED.raw,
+           updated_at = NOW()`,
+        [
+          categoria.codigo,
+          categoria.descricao,
+          categoria.conta_despesa,
+          categoria.conta_inativa,
+          categoria.categoria_superior,
+          categoria.natureza,
+          categoria.tipo_categoria,
+          categoria.codigo_dre,
+          categoria
+        ]
+      );
+
+      res.json({ ok: true, codigo: categoria.codigo, acao: topic || 'atualizado' });
+    } catch (err) {
+      console.error('[webhooks/omie/categorias] erro:', err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   }
@@ -3275,16 +3481,17 @@ app.get('/api/compras/parcelas', async (req, res) => {
   }
 });
 
-// Endpoint para buscar categorias de compra da Omie
-// Objetivo: Listar categorias de despesa ativas para uso no módulo de compras
-// Filtra apenas categorias que são conta de despesa (S) e não estão inativas (N)
-app.get('/api/compras/categorias', async (req, res) => {
-  try {
-    console.log('[API /api/compras/categorias] Buscando categorias da Omie...');
-    console.log('[API /api/compras/categorias] Sessão:', req.session?.user?.username || 'sem sessão');
-    
-    // Busca categorias usando a API correta da Omie
-    // Endpoint: /api/v1/geral/categorias/ - ListarCategorias
+// Comentário: sincroniza categorias da Omie para configuracoes.categoria_compra
+async function syncCategoriasCompraOmie() {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('Credenciais Omie não configuradas');
+  }
+
+  const categorias = [];
+  let pagina = 1;
+  let totalPaginas = 1;
+
+  while (pagina <= totalPaginas) {
     const response = await fetch('https://app.omie.com.br/api/v1/geral/categorias/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3293,54 +3500,196 @@ app.get('/api/compras/categorias', async (req, res) => {
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param: [{
-          pagina: 1,
+          pagina,
           registros_por_pagina: 500
         }]
       })
     });
-    
+
     if (!response.ok) {
       throw new Error(`Omie API retornou status ${response.status}`);
     }
-    
+
     const data = await response.json();
-    
-    // Verifica se houve erro na resposta da Omie
     if (data.faultstring) {
       throw new Error(data.faultstring);
     }
-    
-    console.log('[API /api/compras/categorias] Total de categorias retornadas:', data.total_de_registros);
-    
-    // Filtra categorias:
-    // - conta_despesa: "S" (apenas contas de despesa)
-    // - conta_inativa: "N" (apenas contas ativas)
-    // - categoria_superior: "2.01" (categoria específica)
-    const categorias = (data.categoria_cadastro || [])
-      .filter(cat => {
-        return cat.conta_despesa === 'S' && 
-               cat.conta_inativa === 'N' && 
-               cat.categoria_superior === '2.01';
-      })
-      .map(cat => ({
-        codigo: cat.codigo,
-        descricao: cat.descricao
-      }));
-    
-    console.log('[API /api/compras/categorias] Categorias filtradas (despesa ativa):', categorias.length);
-    
-    res.json({ 
-      ok: true, 
-      total: categorias.length,
-      categorias 
-    });
+
+    const lista = data.categoria_cadastro || [];
+    categorias.push(...lista);
+
+    totalPaginas = Number(data.total_de_paginas || 1);
+    pagina++;
+  }
+
+  const filtradas = categorias.filter(cat => {
+    return cat.conta_despesa === 'S' && cat.conta_inativa === 'N' && cat.categoria_superior === '2.01';
+  });
+
+  if (filtradas.length === 0) {
+    return { total: 0 };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const cat of filtradas) {
+      await client.query(
+        `INSERT INTO configuracoes.categoria_compra
+         (codigo, descricao, conta_despesa, conta_inativa, categoria_superior, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (codigo) DO UPDATE SET
+           descricao = EXCLUDED.descricao,
+           conta_despesa = EXCLUDED.conta_despesa,
+           conta_inativa = EXCLUDED.conta_inativa,
+           categoria_superior = EXCLUDED.categoria_superior,
+           updated_at = NOW()` ,
+        [
+          cat.codigo,
+          cat.descricao,
+          cat.conta_despesa,
+          cat.conta_inativa,
+          cat.categoria_superior
+        ]
+      );
+    }
+    await client.query('COMMIT');
   } catch (err) {
-    console.error('[API /api/compras/categorias] Erro detalhado:', {
-      message: err.message,
-      stack: err.stack,
-      name: err.name
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { total: filtradas.length };
+}
+
+// Comentário: sincroniza ListarCategorias da Omie para configuracoes."ListarCategorias"
+async function syncListarCategoriasOmie() {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('Credenciais Omie não configuradas');
+  }
+
+  const categorias = [];
+  let pagina = 1;
+  let totalPaginas = 1;
+
+  while (pagina <= totalPaginas) {
+    const response = await fetch('https://app.omie.com.br/api/v1/geral/categorias/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ListarCategorias',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          pagina,
+          registros_por_pagina: 500
+        }]
+      })
     });
-    res.status(500).json({ ok: false, error: err.message, details: err.toString() });
+
+    if (!response.ok) {
+      throw new Error(`Omie API retornou status ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.faultstring) {
+      throw new Error(data.faultstring);
+    }
+
+    const lista = data.categoria_cadastro || [];
+    categorias.push(...lista);
+
+    totalPaginas = Number(data.total_de_paginas || 1);
+    pagina++;
+  }
+
+  if (categorias.length === 0) {
+    return { total: 0 };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const cat of categorias) {
+      await client.query(
+        `INSERT INTO configuracoes."ListarCategorias"
+         (codigo, descricao, conta_despesa, conta_inativa, categoria_superior, natureza, tipo_categoria, codigo_dre, raw, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+         ON CONFLICT (codigo) DO UPDATE SET
+           descricao = EXCLUDED.descricao,
+           conta_despesa = EXCLUDED.conta_despesa,
+           conta_inativa = EXCLUDED.conta_inativa,
+           categoria_superior = EXCLUDED.categoria_superior,
+           natureza = EXCLUDED.natureza,
+           tipo_categoria = EXCLUDED.tipo_categoria,
+           codigo_dre = EXCLUDED.codigo_dre,
+           raw = EXCLUDED.raw,
+           updated_at = NOW()` ,
+        [
+          cat.codigo,
+          cat.descricao,
+          cat.conta_despesa,
+          cat.conta_inativa,
+          cat.categoria_superior,
+          cat.natureza,
+          cat.tipo_categoria,
+          cat.codigo_dre,
+          cat
+        ]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  return { total: categorias.length };
+}
+
+// Endpoint para sincronizar categorias da Omie
+app.post('/api/compras/categorias/sync', async (_req, res) => {
+  try {
+    const result = await syncCategoriasCompraOmie();
+    res.json({ ok: true, total: result.total });
+  } catch (err) {
+    console.error('[API /api/compras/categorias/sync] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint para buscar categorias de compra (cache em configuracoes)
+app.get('/api/compras/categorias', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT codigo, descricao
+       FROM configuracoes.categoria_compra
+       ORDER BY descricao ASC`
+    );
+
+    // Se não houver dados, tenta sincronizar uma vez
+    if (rows.length === 0) {
+      try {
+        await syncCategoriasCompraOmie();
+        const { rows: rows2 } = await pool.query(
+          `SELECT codigo, descricao
+           FROM configuracoes.categoria_compra
+           ORDER BY descricao ASC`
+        );
+        return res.json({ ok: true, total: rows2.length, categorias: rows2 });
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: e.message });
+      }
+    }
+
+    res.json({ ok: true, total: rows.length, categorias: rows });
+  } catch (err) {
+    console.error('[API /api/compras/categorias] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -10960,6 +11309,50 @@ async function ensureComprasSchema() {
         END IF;
       END $$;
     `);
+
+    // Migration: Adiciona coluna produto_codigo se não existir e faz backfill
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND column_name = 'produto_codigo'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          ADD COLUMN produto_codigo TEXT;
+
+          -- Backfill inicial com base na solicitacao_compras
+          UPDATE compras.cotacoes c
+          SET produto_codigo = s.produto_codigo
+          FROM compras.solicitacao_compras s
+          WHERE s.id = c.solicitacao_id;
+        END IF;
+      END $$;
+    `);
+
+    // Migration: Adiciona coluna numero_pedido se não existir e faz backfill
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND column_name = 'numero_pedido'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          ADD COLUMN numero_pedido TEXT;
+
+          -- Backfill inicial com base na solicitacao_compras
+          UPDATE compras.cotacoes c
+          SET numero_pedido = s.numero_pedido
+          FROM compras.solicitacao_compras s
+          WHERE s.id = c.solicitacao_id;
+        END IF;
+      END $$;
+    `);
     
     // Cria schema configuracoes se não existir
     await pool.query(`CREATE SCHEMA IF NOT EXISTS configuracoes`);
@@ -10973,6 +11366,41 @@ async function ensureComprasSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Cria tabela de categorias de compra (sync Omie)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.categoria_compra (
+        codigo TEXT PRIMARY KEY,
+        descricao TEXT,
+        conta_despesa TEXT,
+        conta_inativa TEXT,
+        categoria_superior TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Cria tabela ListarCategorias (espelho Omie)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes."ListarCategorias" (
+        codigo TEXT PRIMARY KEY,
+        descricao TEXT,
+        conta_despesa TEXT,
+        conta_inativa TEXT,
+        categoria_superior TEXT,
+        natureza TEXT,
+        tipo_categoria TEXT,
+        codigo_dre TEXT,
+        raw JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Popula tabela ListarCategorias na inicialização
+    try {
+      await syncListarCategoriasOmie();
+    } catch (e) {
+      console.warn('[Sync ListarCategorias] Falha ao popular na inicialização:', e?.message || e);
+    }
     
     // Insere departamentos padrão se não existirem
     await pool.query(`
@@ -13875,6 +14303,196 @@ app.post('/api/compras/filtro-kanbans', async (req, res) => {
 });
 
 // POST /api/compras/aprovar-item/:id - Aprova item e cria requisição na Omie
+// Comentário: helper para criar a requisição na Omie e atualizar status/local
+async function criarRequisicaoOmieParaItem(item, itemId) {
+  // Validação: categoria_compra_codigo é obrigatória para Omie
+  if (!item.categoria_compra_codigo || item.categoria_compra_codigo.trim() === '') {
+    const err = new Error('Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de aprovar.');
+    err.status = 400;
+    throw err;
+  }
+
+  // Comentário: inclui no campo observacao o resumo das cotações (formato padrão)
+  try {
+    // 1) Busca cotações do item (e por numero_pedido se existir)
+    let numeroPedidoRef = item.numero_pedido || null;
+    const { rows: cotacoesItem } = await pool.query(
+      `SELECT id, fornecedor_nome, valor_cotado, anexos, numero_pedido
+       FROM compras.cotacoes
+       WHERE solicitacao_id = $1
+         AND status_aprovacao = 'aprovado'`,
+      [itemId]
+    );
+
+    if (!numeroPedidoRef && cotacoesItem.length > 0) {
+      const np = cotacoesItem
+        .map(r => String(r.numero_pedido || '').trim())
+        .find(v => v);
+      if (np) numeroPedidoRef = np;
+    }
+
+    let cotacoesPorNumero = [];
+    if (numeroPedidoRef) {
+      const { rows: rowsNumero } = await pool.query(
+        `SELECT id, fornecedor_nome, valor_cotado, anexos
+         FROM compras.cotacoes
+         WHERE numero_pedido = $1
+           AND status_aprovacao = 'aprovado'`,
+        [numeroPedidoRef]
+      );
+      cotacoesPorNumero = rowsNumero || [];
+    }
+
+    const cotacoesMap = new Map();
+    [...cotacoesItem, ...cotacoesPorNumero].forEach(c => {
+      if (!c || typeof c.id === 'undefined' || c.id === null) return;
+      const key = String(c.id);
+      if (!cotacoesMap.has(key)) cotacoesMap.set(key, c);
+    });
+    const cotacoes = Array.from(cotacoesMap.values());
+
+    const formatarAnexo = (anexos) => {
+      if (!anexos) return '-';
+      let lista = anexos;
+      if (typeof lista === 'string') {
+        try { lista = JSON.parse(lista); } catch { return lista; }
+      }
+      if (!Array.isArray(lista) || lista.length === 0) return '-';
+      const primeiro = lista[0];
+      if (typeof primeiro === 'string') return primeiro;
+      return primeiro?.url || primeiro?.path || '-';
+    };
+
+    const linhas = cotacoes.map(c => {
+      const valor = (c.valor_cotado !== null && typeof c.valor_cotado !== 'undefined') ? c.valor_cotado : '-';
+      return [
+        `Cotação: ${c.id}`,
+        `Fornecedor: ${c.fornecedor_nome || '-'}`,
+        `Valor cotado: ${valor}`,
+        `Anexo: ${formatarAnexo(c.anexos)}`
+      ].join('\n');
+    });
+
+    if (linhas.length > 0) {
+      const novaObservacao = linhas.join('\n\n');
+      const observacaoAtual = String(item.observacao || '').trim();
+      if (observacaoAtual !== novaObservacao) {
+        await pool.query(
+          `UPDATE compras.solicitacao_compras
+           SET observacao = $1
+           WHERE id = $2`,
+          [novaObservacao, itemId]
+        );
+      }
+      item.observacao = novaObservacao;
+    }
+  } catch (e) {
+    console.warn('[Compras] Falha ao incluir resumo das cotações no campo observacao:', e?.message || e);
+  }
+
+  // Gera número de pedido único
+  const agora = new Date();
+  const ano = agora.getFullYear();
+  const mes = String(agora.getMonth() + 1).padStart(2, '0');
+  const dia = String(agora.getDate()).padStart(2, '0');
+  const hora = String(agora.getHours()).padStart(2, '0');
+  const minuto = String(agora.getMinutes()).padStart(2, '0');
+  const segundo = String(agora.getSeconds()).padStart(2, '0');
+  const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
+  const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+
+  // Determina data de sugestão (dtSugestao): previsao_chegada > prazo_solicitado > data atual + 5 dias
+  let dtSugestao;
+  if (item.previsao_chegada) {
+    const dt = new Date(item.previsao_chegada);
+    dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+  } else if (item.prazo_solicitado) {
+    const dt = new Date(item.prazo_solicitado);
+    dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+  } else {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + 5);
+    dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+  }
+
+  // Busca o CMC (Custo Médio de Compra) da tabela omie_estoque_posicao
+  let precoUnitario = 0;
+  if (item.codigo_omie) {
+    try {
+      const { rows: rowsEstoque } = await pool.query(`
+        SELECT cmc 
+        FROM public.omie_estoque_posicao 
+        WHERE omie_prod_id = $1
+        LIMIT 1
+      `, [item.codigo_omie]);
+      if (rowsEstoque.length > 0 && rowsEstoque[0].cmc) {
+        precoUnitario = parseFloat(rowsEstoque[0].cmc) || 0;
+      }
+    } catch (errCmc) {
+      console.error('[Aprovar Item] Erro ao buscar CMC:', errCmc);
+    }
+  }
+
+  const solicitante = item.solicitante || '';
+  const respInspecao = item.resp_inspecao_recebimento || '';
+  const observacao = '';
+  const objetivoCompra = item.objetivo_compra || '';
+  const codigoOmie = item.codigo_omie || '';
+  const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmie}\nObjetivo da Compra: ${objetivoCompra}`.trim();
+
+  // Monta payload para Omie - IncluirReq
+  const requisicaoOmie = {
+    codIntReqCompra: numeroPedido,
+    codCateg: item.categoria_compra_codigo || '',
+    codProj: 0,
+    dtSugestao: dtSugestao,
+    obsReqCompra: obsReqCompra,
+    obsIntReqCompra: item.observacao || '',
+    ItensReqCompra: [
+      {
+        codProd: item.codigo_omie || item.codigo_produto_omie || null,
+        obsItem: item.objetivo_compra || '',
+        precoUnit: precoUnitario,
+        qtde: parseFloat(item.quantidade) || 1
+      }
+    ]
+  };
+
+  console.log('[Aprovar Item] Enviando para Omie IncluirReq:', JSON.stringify(requisicaoOmie, null, 2));
+
+  const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'IncluirReq',
+      app_key: process.env.OMIE_APP_KEY,
+      app_secret: process.env.OMIE_APP_SECRET,
+      param: [requisicaoOmie]
+    })
+  });
+
+  const omieResult = await omieResponse.json();
+  if (!omieResponse.ok || omieResult.faultstring) {
+    console.error('[Aprovar Item] Erro Omie:', omieResult);
+    throw new Error(omieResult.faultstring || 'Erro ao criar requisição na Omie');
+  }
+
+  const codReqCompra = omieResult.codReqCompra || null;
+  const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
+
+  await pool.query(`
+    UPDATE compras.solicitacao_compras
+    SET 
+      status = 'Requisição',
+      numero_pedido = $1,
+      ncodped = $2,
+      updated_at = NOW()
+    WHERE id = $3
+  `, [codIntReqCompra, codReqCompra, itemId]);
+
+  return { codReqCompra, codIntReqCompra, omieResult };
+}
+
 app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
   try {
     const itemId = Number(req.params.id);
@@ -13921,11 +14539,13 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
     // Verifica se veio uma cotação aprovada (do kanban "Cotado aguardando escolha")
     const cotacaoAprovadaId = req.body?.cotacao_aprovada_id;
     
-    // REGRA 1: Se veio com cotacao_aprovada_id → SEMPRE cria requisição na Omie (ignora retorno_cotacao)
-    // REGRA 2: Se retorno_cotacao = 'S' (sem cotação aprovada) → Apenas muda status para "aguardando cotação"
-    // REGRA 3: Se retorno_cotacao = 'N' → Cria requisição na Omie
+    // REGRA 1: Se retorno_cotacao indica "sim" → Apenas muda status para "aguardando cotação" (não cria requisição Omie)
+    // REGRA 2: Caso contrário, se veio com cotacao_aprovada_id → Cria requisição na Omie
+    // REGRA 3: Caso contrário → Cria requisição na Omie
+    const retornoCotacao = String(item.retorno_cotacao || '').trim().toLowerCase();
+    const retornoCotacaoSim = ['s', 'sim', 'yes', 'true', '1'].includes(retornoCotacao);
     
-    if (!cotacaoAprovadaId && item.retorno_cotacao === 'S') {
+    if (retornoCotacaoSim) {
       // Apenas atualiza status para "aguardando cotação" sem criar requisição na Omie
       await pool.query(`
         UPDATE compras.solicitacao_compras
@@ -13944,126 +14564,10 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
     }
 
     // A partir daqui, cria requisição na Omie (retorno_cotacao = 'N' OU cotação aprovada)
-    // Gera número de pedido único
-    const agora = new Date();
-    const ano = agora.getFullYear();
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const dia = String(agora.getDate()).padStart(2, '0');
-    const hora = String(agora.getHours()).padStart(2, '0');
-    const minuto = String(agora.getMinutes()).padStart(2, '0');
-    const segundo = String(agora.getSeconds()).padStart(2, '0');
-    const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
-    const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+    const { codReqCompra, codIntReqCompra, omieResult } = await criarRequisicaoOmieParaItem(item, itemId);
 
-    // Determina data de sugestão (dtSugestao): previsao_chegada > prazo_solicitado > data atual + 5 dias
-    let dtSugestao;
-    if (item.previsao_chegada) {
-      // Se previsao_chegada existe, usa ela (formato DD/MM/YYYY)
-      const dt = new Date(item.previsao_chegada);
-      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
-    } else if (item.prazo_solicitado) {
-      // Se prazo_solicitado existe, usa ele (formato DD/MM/YYYY)
-      const dt = new Date(item.prazo_solicitado);
-      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
-    } else {
-      // Se não tem nenhum, usa data atual + 5 dias
-      const dt = new Date();
-      dt.setDate(dt.getDate() + 5);
-      dtSugestao = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
-    }
-
-    // Busca o CMC (Custo Médio de Compra) da tabela omie_estoque_posicao
-    let precoUnitario = 0;
-    if (item.codigo_omie) {
-      try {
-        const { rows: rowsEstoque } = await pool.query(`
-          SELECT cmc 
-          FROM public.omie_estoque_posicao 
-          WHERE omie_prod_id = $1
-          LIMIT 1
-        `, [item.codigo_omie]);
-        
-        if (rowsEstoque.length > 0 && rowsEstoque[0].cmc) {
-          precoUnitario = parseFloat(rowsEstoque[0].cmc) || 0;
-          console.log(`[Aprovar Item] CMC encontrado para produto ${item.codigo_omie}: R$ ${precoUnitario.toFixed(2)}`);
-        } else {
-          console.log(`[Aprovar Item] CMC não encontrado para produto ${item.codigo_omie}, usando preço 0`);
-        }
-      } catch (errCmc) {
-        console.error('[Aprovar Item] Erro ao buscar CMC:', errCmc);
-        // Continua com preço 0 em caso de erro
-      }
-    }
-
-    // Monta obsReqCompra formatado com todos os dados
-    const solicitante = item.solicitante || '';
-    const respInspecao = item.resp_inspecao_recebimento || '';
-    const observacao = item.observacao || '';
-    const objetivoCompra = item.objetivo_compra || '';
-    const codigoOmie = item.codigo_omie || '';
-    
-    const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmie}\nObjetivo da Compra: ${objetivoCompra}\nObservação: ${observacao}`.trim();
-
-    // Monta payload para Omie - IncluirReq
-    const requisicaoOmie = {
-      codIntReqCompra: numeroPedido,
-      codCateg: item.categoria_compra_codigo || '',
-      codProj: 0,
-      dtSugestao: dtSugestao,
-      obsReqCompra: obsReqCompra,
-      obsIntReqCompra: '',
-      ItensReqCompra: [
-        {
-          codProd: item.codigo_omie || null,  // Usa codigo_omie da tabela produtos_omie
-          obsItem: item.objetivo_compra || '',
-          precoUnit: precoUnitario,  // Usa o CMC da tabela omie_estoque_posicao
-          qtde: parseFloat(item.quantidade) || 1
-        }
-      ]
-    };
-
-    console.log('[Aprovar Item] Enviando para Omie IncluirReq:', JSON.stringify(requisicaoOmie, null, 2));
-
-    // Envia para Omie
-    const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        call: 'IncluirReq',
-        app_key: process.env.OMIE_APP_KEY,
-        app_secret: process.env.OMIE_APP_SECRET,
-        param: [requisicaoOmie]
-      })
-    });
-
-    const omieResult = await omieResponse.json();
-    
-    if (!omieResponse.ok || omieResult.faultstring) {
-      console.error('[Aprovar Item] Erro Omie:', omieResult);
-      throw new Error(omieResult.faultstring || 'Erro ao criar requisição na Omie');
-    }
-
-    console.log('[Aprovar Item] Resposta Omie:', omieResult);
-
-    // Extrai valores da resposta Omie
-    const codReqCompra = omieResult.codReqCompra || null;
-    const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
-
-    // Atualiza item no banco: status = "Requisição", numero_pedido e ncodped
-    await pool.query(`
-      UPDATE compras.solicitacao_compras
-      SET 
-        status = 'Requisição',
-        numero_pedido = $1,
-        ncodped = $2,
-        updated_at = NOW()
-      WHERE id = $3
-    `, [codIntReqCompra, codReqCompra, itemId]);
-
-    console.log(`[Aprovar Item] Item ${itemId} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
-
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       message: 'Item aprovado e requisição criada na Omie',
       numero_pedido: codIntReqCompra,
       ncodped: codReqCompra,
@@ -14072,7 +14576,7 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
 
   } catch (err) {
     console.error('[Aprovar Item] Erro:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Erro ao aprovar item' });
+    res.status(err.status || 500).json({ ok: false, error: err.message || 'Erro ao aprovar item' });
   }
 });
 
@@ -14794,29 +15298,101 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
     }
     
-    // Processa anexos se houver
+    // Processa anexos se houver - SALVA NO SUPABASE
     let anexosUrls = null;
     if (anexos && Array.isArray(anexos) && anexos.length > 0) {
       console.log(`[Cotações] Processando ${anexos.length} anexos para solicitacao_id ${solicitacao_id}`);
-      
-      // Salva os anexos diretamente como base64 no JSONB (sem Supabase por enquanto)
-      anexosUrls = anexos.map(anexo => ({
-        nome: anexo.nome,
-        tipo: anexo.tipo || 'application/octet-stream',
-        tamanho: anexo.tamanho || 0,
-        base64: anexo.base64
-      }));
-      
-      console.log(`[Cotações] ${anexosUrls.length} anexos salvos como base64`);
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+
+        if (!supabaseUrl || !supabaseKey) {
+          throw new Error('Credenciais do Supabase não configuradas');
+        }
+
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        const bucketName = 'compras-anexos';
+
+        // Verifica se o bucket existe, se não, cria
+        try {
+          const { data: buckets } = await supabase.storage.listBuckets();
+          const bucketExists = buckets?.some(b => b.name === bucketName);
+          if (!bucketExists) {
+            console.log(`[Cotações] Criando bucket '${bucketName}' no Supabase...`);
+            await supabase.storage.createBucket(bucketName, {
+              public: true,
+              fileSizeLimit: 10485760,
+              allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+            });
+          }
+        } catch (bucketError) {
+          console.warn('[Cotações] Aviso ao verificar bucket:', bucketError.message);
+        }
+
+        anexosUrls = [];
+        for (const anexo of anexos) {
+          if (!anexo?.base64) continue;
+
+          const buffer = Buffer.from(anexo.base64, 'base64');
+          const timestamp = Date.now();
+          const nomeArquivoSanitizado = (anexo.nome || 'anexo').replace(/[^a-zA-Z0-9.-]/g, '_');
+          const filePath = `cotacoes/${solicitacao_id}/${timestamp}_${nomeArquivoSanitizado}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(filePath, buffer, {
+              contentType: anexo.tipo || 'application/octet-stream',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error(`[Cotações] Erro no upload de ${anexo.nome}:`, uploadError.message);
+            continue;
+          }
+
+          const { data: publicData } = supabase.storage
+            .from(bucketName)
+            .getPublicUrl(filePath);
+
+          anexosUrls.push({
+            nome: anexo.nome,
+            url: publicData.publicUrl,
+            tipo: anexo.tipo || 'application/octet-stream',
+            tamanho: anexo.tamanho || 0,
+            data_upload: new Date().toISOString()
+          });
+        }
+
+        if (anexosUrls.length === 0) {
+          anexosUrls = null;
+        }
+      } catch (errAnexo) {
+        console.error('[Cotações] Erro ao processar anexos:', errAnexo);
+        anexosUrls = null;
+      }
     }
     
+    // Busca produto_codigo da solicitação para amarrar a cotação
+    const { rows: rowsSolic } = await pool.query(`
+      SELECT produto_codigo, numero_pedido
+      FROM compras.solicitacao_compras
+      WHERE id = $1
+      LIMIT 1
+    `, [solicitacao_id]);
+
+    const produtoCodigo = rowsSolic[0]?.produto_codigo || null;
+    const numeroPedido = rowsSolic[0]?.numero_pedido || null;
+
     const { rows } = await pool.query(`
       INSERT INTO compras.cotacoes 
-        (solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `, [
       solicitacao_id,
+      produtoCodigo,
+      numeroPedido,
       fornecedor_nome,
       fornecedor_id || null,
       valor_cotado || null,
@@ -14856,6 +15432,27 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
   } catch (err) {
     console.error('[Cotações] Erro ao listar cotações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar cotações' });
+  }
+});
+
+// GET /api/compras/cotacoes-por-produto/:produto_codigo - Lista cotações por produto_codigo
+app.get('/api/compras/cotacoes-por-produto/:produto_codigo', async (req, res) => {
+  try {
+    const produtoCodigo = String(req.params.produto_codigo || '').trim();
+    if (!produtoCodigo) {
+      return res.status(400).json({ ok: false, error: 'produto_codigo inválido' });
+    }
+
+    const { rows } = await pool.query(`
+      SELECT * FROM compras.cotacoes
+      WHERE produto_codigo = $1
+      ORDER BY criado_em DESC
+    `, [produtoCodigo]);
+
+    res.json(rows);
+  } catch (err) {
+    console.error('[Cotações] Erro ao listar por produto_codigo:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar cotações por produto' });
   }
 });
 
