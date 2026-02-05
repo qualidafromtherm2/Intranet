@@ -2330,7 +2330,6 @@ app.post([
   '/webhooks/omie/categorias.',
   '/api/webhooks/omie/categorias.'
 ],
-  chkOmieToken,
   express.json(),
   async (req, res) => {
     try {
