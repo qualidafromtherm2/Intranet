@@ -763,6 +763,44 @@
           </div>
         </div>
 
+        <!-- Modal Detalhes do Item (Cotado aguardando escolha) -->
+        <div id="modalCotadoEscolhaItem" class="modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content" style="max-width:1200px;width:95%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-clipboard-check" style="color:#8b5cf6;"></i>
+                <span id="modalCotadoEscolhaTitulo">Detalhes do Item Cotado</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalCotadoEscolhaItem()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalCotadoEscolhaBody" style="padding:20px;">
+              <!-- Conteúdo será inserido dinamicamente -->
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" onclick="fecharModalCotadoEscolhaItem()">Fechar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Kanban Cotação -->
+        <div id="modalCotacaoKanban" class="modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content" style="max-width:1200px;width:95%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-file-invoice-dollar" style="color:#fbbf24;"></i>
+                <span id="modalCotacaoKanbanTitulo">Cotação</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalCotacaoKanban()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalCotacaoKanbanBody" style="padding:20px;">
+              <!-- Conteúdo será inserido dinamicamente -->
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" onclick="fecharModalCotacaoKanban()">Fechar</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal Seleção de Itens para Compra -->
         <div id="modalSelecaoItensCompra" class="modal" style="display:none;justify-content:center;align-items:center;">
           <div class="modal-content" style="max-width:1600px;width:95%;max-height:90vh;display:flex;flex-direction:column;">

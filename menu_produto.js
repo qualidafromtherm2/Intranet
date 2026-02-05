@@ -18647,11 +18647,16 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
   
   try {
-    // Busca apenas os itens do usuário logado
-    const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
-    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
-    const data = await resp.json();
-    const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    // Comentário: tenta usar o cache do kanban para evitar lista vazia
+    let listaCompleta = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+
+    if (!listaCompleta.length) {
+      // Busca apenas os itens do usuário logado
+      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+      const data = await resp.json();
+      listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    }
     
     // Busca itens por diferentes critérios
     let itensPedido;
@@ -18664,6 +18669,16 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         : [parseInt(itemIds)];
       
       itensPedido = listaCompleta.filter(item => idsArray.includes(item.id));
+      
+      // Fallback: se não encontrou no cache/minhas, busca em /api/compras/todas
+      if (itensPedido.length === 0) {
+        const respAll = await fetch('/api/compras/todas', { credentials: 'include' });
+        if (respAll.ok) {
+          const dataAll = await respAll.json();
+          const todosItens = Array.isArray(dataAll.solicitacoes) ? dataAll.solicitacoes : [];
+          itensPedido = todosItens.filter(item => idsArray.includes(item.id));
+        }
+      }
     }
     // Se numero_pedido for válido, busca por ele
     else if (numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' && numeroPedido !== '') {
@@ -18917,6 +18932,840 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   }
 }
 
+// Comentário: modal específico para o kanban "Cotado aguardando escolha" (detalhes do item)
+async function abrirModalCotadoEscolhaItem(itemId) {
+  const modal = document.getElementById('modalCotadoEscolhaItem');
+  const modalBody = document.getElementById('modalCotadoEscolhaBody');
+  const modalTitulo = document.getElementById('modalCotadoEscolhaTitulo');
+  if (!modal || !modalBody || !modalTitulo) return;
+
+  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#8b5cf6;"></i><br><br>Carregando...</div>';
+  modal.style.display = 'flex';
+
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+
+  try {
+    // Comentário: tenta localizar primeiro no cache do kanban
+    const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+    let item = cacheItens.find(i => String(i.id) === String(itemId));
+
+    // Fallback: busca os itens do usuário logado e filtra pelo ID
+    if (!item) {
+      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+      const data = await resp.json();
+      const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+      item = listaCompleta.find(i => String(i.id) === String(itemId));
+    }
+
+    if (!item) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Item não encontrado.</div>';
+      return;
+    }
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const statusAtual = (item.status || 'cotado').toString().toLowerCase().trim();
+    const statusTitulo = statusAtual === 'aguardando cotação'
+      ? 'Aguardando cotação'
+      : 'Cotado aguardando escolha';
+    modalTitulo.textContent = `Item ${item.id} - ${statusTitulo}`;
+
+    // Comentário: inicializa estado do modal do item cotado
+    window.cotadoEscolhaItem = item;
+    window.cotadoEscolhaItemId = item.id;
+    window.cotadoEscolhaCotacoesDb = [];
+
+    // Comentário: renderiza apenas detalhes do item + cotações registradas
+    let anexosItem = item.anexos;
+    if (typeof anexosItem === 'string') {
+      try {
+        anexosItem = JSON.parse(anexosItem);
+      } catch (e) {
+        anexosItem = [];
+      }
+    }
+    if (!Array.isArray(anexosItem)) anexosItem = [];
+    const anexosItemHtml = anexosItem.length > 0 ? `
+      <div style="margin-top:8px;">
+        <div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+          ${anexosItem.map((anexo, idx) => {
+            const nome = anexo?.nome || `Anexo ${idx + 1}`;
+            const url = anexo?.url || anexo?.path || '#';
+            return `
+              <a 
+                href="${url}" 
+                target="_blank" 
+                style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;">
+                <i class=\"fa-solid fa-paperclip\" style=\"color:#3b82f6;\"></i>
+                <span>${escapeHtml(nome)}</span>
+              </a>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+    const html = `
+      <!-- Detalhes do Item -->
+      <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
+          <i class="fa-solid fa-clipboard-check"></i>
+          Detalhes do Item
+        </h4>
+        <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
+          <div><strong>ID:</strong> ${item.id}</div>
+          <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
+          <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
+          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
+          <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
+          <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
+          <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
+          <div><strong>Retorno Cotação:</strong> ${escapeHtml(item.retorno_cotacao || '-')}</div>
+          ${anexosItemHtml}
+        </div>
+      </div>
+
+      <!-- Cotações Registradas -->
+      <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;">
+        <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+        Cotações Registradas
+      </h4>
+      <div id="listaCotacoesRegistradasCotadoEscolha" style="display:grid;gap:12px;">
+        <div style="text-align:center;padding:30px;color:#9ca3af;font-size:13px;background:#f9fafb;border-radius:6px;border:2px dashed #d1d5db;">
+          Nenhuma cotação registrada ainda
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:16px;border-top:1px solid #e5e7eb;margin-top:16px;gap:8px;flex-wrap:wrap;">
+        <button class="btn-secondary" onclick="fecharModalCotadoEscolhaItem()">
+          <i class="fa-solid fa-times"></i>
+          Fechar
+        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button 
+            onclick="retificarCotadoEscolha()"
+            style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-rotate-left"></i>
+            <span>Retificar</span>
+          </button>
+          <button 
+            onclick="cancelarCotadoEscolha()"
+            style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-ban"></i>
+            <span>Cancelar</span>
+          </button>
+          <button 
+            onclick="enviarCotadoEscolhaParaCompra()"
+            style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>Enviar requisição</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    modalBody.innerHTML = html;
+
+    // Comentário: carrega cotações do banco usando produto_codigo
+    const produtoCodigo = (item.produto_codigo || '').toString().trim();
+    if (produtoCodigo) {
+      try {
+        const respCot = await fetch(`/api/compras/cotacoes-por-produto/${encodeURIComponent(produtoCodigo)}`, { credentials: 'include' });
+        if (respCot.ok) {
+          const cotacoes = await respCot.json();
+          window.cotadoEscolhaCotacoesDb = Array.isArray(cotacoes) ? cotacoes : [];
+        }
+      } catch (e) {
+        console.error('[COTADO ESCOLHA] Erro ao buscar cotações:', e);
+      }
+    }
+
+    renderizarCotacoesRegistradasCotadoEscolha();
+  } catch (err) {
+    console.error('[MODAL COTADO ESCOLHA] Erro:', err);
+    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.</div>';
+  }
+}
+
+// Comentário: fecha o modal de item cotado aguardando escolha
+function fecharModalCotadoEscolhaItem() {
+  const modal = document.getElementById('modalCotadoEscolhaItem');
+  if (modal) modal.style.display = 'none';
+  window.cotadoEscolhaItem = null;
+  window.cotadoEscolhaItemId = null;
+  window.cotadoEscolhaCotacoesDb = [];
+}
+
+// Comentário: modal específico do kanban "Cotação"
+async function abrirModalCotacaoKanban(itemId) {
+  const modal = document.getElementById('modalCotacaoKanban');
+  const modalBody = document.getElementById('modalCotacaoKanbanBody');
+  const modalTitulo = document.getElementById('modalCotacaoKanbanTitulo');
+  if (!modal || !modalBody || !modalTitulo) return;
+
+  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#fbbf24;"></i><br><br>Carregando...</div>';
+  modal.style.display = 'flex';
+
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+
+  try {
+    const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+    let item = cacheItens.find(i => String(i.id) === String(itemId));
+
+    if (!item) {
+      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+      const data = await resp.json();
+      const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+      item = listaCompleta.find(i => String(i.id) === String(itemId));
+    }
+
+    if (!item) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Item não encontrado.</div>';
+      return;
+    }
+
+    window.cotacaoKanbanItem = item;
+    window.cotacaoKanbanItemId = item.id;
+    window.cotacaoKanbanAnexos = [];
+    window.cotacaoKanbanCotacoes = [];
+
+    modalTitulo.textContent = `Cotação - Item ${item.id}`;
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const html = `
+      <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
+          <i class="fa-solid fa-clipboard-check"></i>
+          Detalhes do Item
+        </h4>
+        <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
+          <div><strong>ID:</strong> ${item.id}</div>
+          <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
+          <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
+          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
+          <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
+        </div>
+      </div>
+
+      <div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:20px;">
+        <h4 style="margin:0 0 16px 0;font-size:14px;font-weight:700;color:#1f2937;">
+          <i class="fa-solid fa-edit" style="color:#fbbf24;"></i>
+          Registrar Nova Cotação
+        </h4>
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Fornecedor *</label>
+          <input 
+            type="text" 
+            id="cotacaoKanbanFornecedor"
+            placeholder="Nome do fornecedor..."
+            style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+          />
+        </div>
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Valor Unitário (R$) *</label>
+          <input 
+            type="number" 
+            id="cotacaoKanbanValor"
+            placeholder="0.00"
+            step="0.01"
+            min="0"
+            style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+          />
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Anexos (opcional)</label>
+          <input 
+            type="file" 
+            id="cotacaoKanbanAnexo"
+            accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
+            onchange="adicionarAnexoCotacaoKanban()"
+            style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+          />
+          <div id="listaAnexosCotacaoKanban" style="margin-top:10px;display:grid;gap:6px;"></div>
+        </div>
+        <button 
+          onclick="registrarCotacaoKanban()"
+          style="width:100%;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
+          <i class="fa-solid fa-plus"></i>
+          Registrar Cotação
+        </button>
+      </div>
+
+      <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;">
+        <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+        Cotações Registradas
+      </h4>
+      <div id="listaCotacoesRegistradasKanban" style="display:grid;gap:12px;margin-bottom:16px;">
+        <div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;align-items:center;padding-top:16px;border-top:1px solid #e5e7eb;">
+        <button 
+          onclick="enviarCotacoesKanban()"
+          style="background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);color:#000;padding:12px 28px;border:none;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-paper-plane"></i>
+          <span>Enviar Cotações</span>
+        </button>
+      </div>
+    `;
+
+    modalBody.innerHTML = html;
+    await carregarCotacoesKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro:', err);
+    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.</div>';
+  }
+}
+
+function fecharModalCotacaoKanban() {
+  const modal = document.getElementById('modalCotacaoKanban');
+  if (modal) modal.style.display = 'none';
+  window.cotacaoKanbanItem = null;
+  window.cotacaoKanbanItemId = null;
+  window.cotacaoKanbanAnexos = [];
+  window.cotacaoKanbanCotacoes = [];
+}
+
+window.adicionarAnexoCotacaoKanban = function() {
+  const anexoInput = document.getElementById('cotacaoKanbanAnexo');
+  if (!anexoInput || !anexoInput.files[0]) return;
+
+  const file = anexoInput.files[0];
+  const anexoId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+  if (!window.cotacaoKanbanAnexos) window.cotacaoKanbanAnexos = [];
+  window.cotacaoKanbanAnexos.push({
+    id: anexoId,
+    file: file,
+    nome: file.name,
+    tipo: file.type,
+    tamanho: file.size
+  });
+
+  renderizarListaAnexosCotacaoKanban();
+  anexoInput.value = '';
+};
+
+function renderizarListaAnexosCotacaoKanban() {
+  const listaContainer = document.getElementById('listaAnexosCotacaoKanban');
+  if (!listaContainer) return;
+
+  if (!window.cotacaoKanbanAnexos || window.cotacaoKanbanAnexos.length === 0) {
+    listaContainer.innerHTML = '';
+    return;
+  }
+
+  const html = window.cotacaoKanbanAnexos.map(anexo => {
+    const tamanhoKB = (anexo.tamanho / 1024).toFixed(1);
+    return `
+      <div style="display:flex;align-items:center;gap:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:8px 10px;">
+        <i class="fa-solid fa-paperclip" style="color:#0284c7;font-size:12px;"></i>
+        <span style="flex:1;font-size:12px;color:#0c4a6e;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">
+          ${escapeHtml(anexo.nome)}
+        </span>
+        <span style="font-size:11px;color:#0369a1;">${tamanhoKB} KB</span>
+        <button 
+          onclick="removerAnexoCotacaoKanban('${anexo.id}')"
+          style="background:transparent;color:#ef4444;border:none;padding:4px;border-radius:4px;font-size:14px;cursor:pointer;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;"
+          title="Remover anexo"
+          onmouseover="this.style.background='#fee2e2'"
+          onmouseout="this.style.background='transparent'">
+          <i class="fa-solid fa-times"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  listaContainer.innerHTML = html;
+}
+
+window.removerAnexoCotacaoKanban = function(anexoId) {
+  if (!window.cotacaoKanbanAnexos) return;
+  window.cotacaoKanbanAnexos = window.cotacaoKanbanAnexos.filter(a => a.id !== anexoId);
+  renderizarListaAnexosCotacaoKanban();
+};
+
+async function registrarCotacaoKanban() {
+  if (!window.cotacaoKanbanItemId) return;
+  const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
+  const valor = parseFloat(document.getElementById('cotacaoKanbanValor').value || '0');
+
+  if (!fornecedor) {
+    alert('Preencha o fornecedor');
+    return;
+  }
+  if (!valor || valor <= 0) {
+    alert('Preencha um valor válido');
+    return;
+  }
+
+  try {
+    let anexosArray = null;
+    if (window.cotacaoKanbanAnexos && window.cotacaoKanbanAnexos.length > 0) {
+      anexosArray = [];
+      for (const anexo of window.cotacaoKanbanAnexos) {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(anexo.file);
+        });
+        anexosArray.push({
+          nome: anexo.nome,
+          tipo: anexo.tipo,
+          tamanho: anexo.tamanho,
+          base64: base64
+        });
+      }
+    }
+
+    const resp = await fetch('/api/compras/cotacoes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        solicitacao_id: window.cotacaoKanbanItemId,
+        fornecedor_nome: fornecedor,
+        valor_cotado: valor,
+        anexos: anexosArray
+      })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao salvar cotação');
+    }
+
+    document.getElementById('cotacaoKanbanValor').value = '';
+    window.cotacaoKanbanAnexos = [];
+    renderizarListaAnexosCotacaoKanban();
+    await carregarCotacoesKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao registrar:', err);
+    alert('Erro ao registrar cotação: ' + err.message);
+  }
+}
+
+async function carregarCotacoesKanban() {
+  if (!window.cotacaoKanbanItemId) return;
+  const container = document.getElementById('listaCotacoesRegistradasKanban');
+  if (!container) return;
+
+  try {
+    const resp = await fetch(`/api/compras/cotacoes/${window.cotacaoKanbanItemId}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao carregar cotações');
+    const cotacoes = await resp.json();
+    window.cotacaoKanbanCotacoes = Array.isArray(cotacoes) ? cotacoes : [];
+
+    if (window.cotacaoKanbanCotacoes.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
+      return;
+    }
+
+    const html = window.cotacaoKanbanCotacoes.map(cotacao => {
+      const observacaoTexto = cotacao.observacao || '';
+      let anexosHtml = '';
+      if (cotacao.anexos) {
+        const anexosArray = Array.isArray(cotacao.anexos) ? cotacao.anexos : [];
+        const listaAnexos = anexosArray.map(a => a?.nome).filter(a => a);
+        if (listaAnexos.length > 0) {
+          anexosHtml = `
+            <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+              <strong><i class="fa-solid fa-paperclip"></i> Anexos:</strong>
+              <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:4px;">
+                ${anexosArray.map((anexo, idx) => {
+                  const nome = anexo?.nome || `Anexo ${idx + 1}`;
+                  const url = anexo?.url || '';
+                  const tipo = anexo?.tipo || 'application/octet-stream';
+                  const base64 = anexo?.base64 || '';
+                  const href = url || (base64 ? `data:${tipo};base64,${base64}` : '#');
+                  return `
+                    <a href="${href}" target="_blank" style="color:#0284c7;text-decoration:underline;">• ${escapeHtml(nome)}</a>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      return `
+        <div style="background:white;border:2px solid #10b981;border-radius:8px;padding:12px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:start;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+              <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(cotacao.fornecedor_nome || '-')}</span>
+            </div>
+            <div style="font-size:11px;color:#6b7280;">
+              <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || 0).toFixed(2)}
+            </div>
+            ${anexosHtml}
+
+            <div style="margin-top:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+              <div style="font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Observações</div>
+              <div style="font-size:12px;color:#374151;white-space:pre-wrap;">${escapeHtml(observacaoTexto || 'Sem observações.')}</div>
+            </div>
+
+            <div style="margin-top:8px;">
+              <textarea
+                id="obs-cotacao-${cotacao.id}"
+                placeholder="Adicionar nova observação..."
+                style="width:100%;min-height:60px;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;resize:vertical;"></textarea>
+              <button
+                onclick="adicionarObservacaoCotacaoKanban(${cotacao.id})"
+                style="margin-top:6px;background:#3b82f6;color:white;border:none;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-plus"></i>
+                Adicionar observação
+              </button>
+            </div>
+          </div>
+          <button
+            onclick="excluirCotacaoKanban(${cotacao.id})"
+            title="Excluir cotação"
+            style="background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = html;
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao listar:', err);
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px;">Erro ao carregar cotações.</div>';
+  }
+}
+
+async function adicionarObservacaoCotacaoKanban(cotacaoId) {
+  const textarea = document.getElementById(`obs-cotacao-${cotacaoId}`);
+  const novoTexto = (textarea?.value || '').trim();
+  if (!novoTexto) {
+    alert('Digite uma observação.');
+    return;
+  }
+
+  const user = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  const agora = new Date().toLocaleString('pt-BR');
+  const cotacaoAtual = window.cotacaoKanbanCotacoes.find(c => c.id === cotacaoId);
+  const historicoAtual = (cotacaoAtual?.observacao || '').trim();
+  const novaEntrada = `[${agora} - ${user || 'Usuário'}] ${novoTexto}`;
+  const observacaoAtualizada = historicoAtual ? `${historicoAtual}\n${novaEntrada}` : novaEntrada;
+
+  try {
+    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ observacao: observacaoAtualizada })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar observação');
+    }
+    await carregarCotacoesKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao adicionar observação:', err);
+    alert('Erro ao adicionar observação: ' + err.message);
+  }
+}
+
+async function excluirCotacaoKanban(cotacaoId) {
+  if (!confirm('Excluir esta cotação?')) return;
+  try {
+    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao excluir cotação');
+    }
+    await carregarCotacoesKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao excluir:', err);
+    alert('Erro ao excluir cotação: ' + err.message);
+  }
+}
+
+async function enviarCotacoesKanban() {
+  if (!window.cotacaoKanbanItemId) return;
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${window.cotacaoKanbanItemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'cotado' })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar status');
+    }
+    alert('Cotações enviadas com sucesso! Status atualizado para "cotado".');
+    fecharModalCotacaoKanban();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao enviar:', err);
+    alert('Erro ao enviar cotações: ' + err.message);
+  }
+}
+function renderizarCotacoesRegistradasCotadoEscolha() {
+  const container = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
+  if (!container) return;
+
+  if (!window.cotadoEscolhaCotacoesDb || window.cotadoEscolhaCotacoesDb.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
+    return;
+  }
+
+  const item = window.cotadoEscolhaItem || {};
+  const html = window.cotadoEscolhaCotacoesDb.map((cotacao) => {
+    const statusAprovacao = (cotacao.status_aprovacao || 'pendente').toString().toLowerCase();
+    const aprovado = statusAprovacao === 'aprovado';
+    const observacaoTexto = cotacao.observacao || '';
+    let anexosHtml = '';
+    if (cotacao.anexos) {
+      const anexosArray = Array.isArray(cotacao.anexos) ? cotacao.anexos : [];
+      const listaAnexos = anexosArray.map(a => a?.nome).filter(a => a);
+      if (listaAnexos.length > 0) {
+        anexosHtml = `
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+            <strong><i class="fa-solid fa-paperclip"></i> Anexos:</strong>
+            <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:4px;">
+                ${anexosArray.map((anexo, idx) => {
+                  const nome = anexo?.nome || `Anexo ${idx + 1}`;
+                  const url = anexo?.url || '';
+                  const tipo = anexo?.tipo || 'application/octet-stream';
+                  const base64 = anexo?.base64 || '';
+                  const href = url || (base64 ? `data:${tipo};base64,${base64}` : '#');
+                  return `
+                    <a href="${href}" target="_blank" style="color:#0284c7;text-decoration:underline;">• ${escapeHtml(nome)}</a>
+                  `;
+                }).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div style="background:white;border:2px solid #10b981;border-radius:8px;padding:12px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <i class="fa-solid fa-check-circle" style="color:#10b981;"></i>
+            <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || `Item ${cotacao.item_id}`)}</span>
+            <span style="font-size:10px;padding:2px 6px;border-radius:10px;background:${aprovado ? '#dcfce7' : '#fef3c7'};color:${aprovado ? '#166534' : '#92400e'};font-weight:700;text-transform:uppercase;">
+              ${escapeHtml(statusAprovacao)}
+            </span>
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">
+            <strong>Fornecedor:</strong> ${escapeHtml(cotacao.fornecedor_nome || cotacao.fornecedor || '-')}
+          </div>
+          <div style="font-size:11px;color:#6b7280;">
+            <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || cotacao.valor_unitario || 0).toFixed(2)}
+          </div>
+          ${anexosHtml}
+
+          <div style="margin-top:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
+            <div style="font-size:11px;color:#6b7280;font-weight:600;margin-bottom:6px;">Observações</div>
+            <div style="font-size:12px;color:#374151;white-space:pre-wrap;">${escapeHtml(observacaoTexto || 'Sem observações.')}</div>
+          </div>
+
+          <div style="margin-top:8px;">
+            <textarea
+              id="obs-cotado-${cotacao.id}"
+              placeholder="Adicionar nova observação..."
+              style="width:100%;min-height:60px;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;resize:vertical;"></textarea>
+            <button
+              onclick="adicionarObservacaoCotadoEscolha(${cotacao.id})"
+              style="margin-top:6px;background:#3b82f6;color:white;border:none;padding:6px 10px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-plus"></i>
+              Adicionar observação
+            </button>
+          </div>
+        </div>
+        <button 
+          id="btn-aprovar-cotacao-${cotacao.id}"
+          onclick="aprovarCotacaoCotadoEscolha(${cotacao.id})"
+          title="${aprovado ? 'Cancelar aprovação' : 'Aprovar cotação'}"
+          style="background:${aprovado ? '#f97316' : '#10b981'};color:#ffffff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-check"></i>
+          ${aprovado ? 'Cancelar aprovação' : 'Aprovar'}
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
+}
+
+// Comentário: aprova uma cotação no modal "Cotado aguardando escolha"
+async function aprovarCotacaoCotadoEscolha(cotacaoId) {
+  if (!cotacaoId) return;
+  const btn = document.getElementById(`btn-aprovar-cotacao-${cotacaoId}`);
+  const originalHtml = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.style.cursor = 'not-allowed';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Atualizando...';
+  }
+  try {
+    const cotacaoAtual = window.cotadoEscolhaCotacoesDb.find(c => c.id === cotacaoId);
+    const statusAtual = (cotacaoAtual?.status_aprovacao || 'pendente').toString().toLowerCase();
+    const novoStatus = statusAtual === 'aprovado' ? 'pendente' : 'aprovado';
+    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: novoStatus })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao aprovar cotação');
+    }
+
+    const data = await resp.json();
+    const idx = window.cotadoEscolhaCotacoesDb.findIndex(c => c.id === data.cotacao?.id);
+    if (idx !== -1) {
+      window.cotadoEscolhaCotacoesDb[idx].status_aprovacao = data.cotacao.status_aprovacao;
+    }
+
+    renderizarCotacoesRegistradasCotadoEscolha();
+  } catch (err) {
+    console.error('[COTADO ESCOLHA] Erro ao aprovar cotação:', err);
+    alert('Erro ao aprovar cotação: ' + err.message);
+    if (btn && originalHtml) {
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+
+async function adicionarObservacaoCotadoEscolha(cotacaoId) {
+  const textarea = document.getElementById(`obs-cotado-${cotacaoId}`);
+  const novoTexto = (textarea?.value || '').trim();
+  if (!novoTexto) {
+    alert('Digite uma observação.');
+    return;
+  }
+
+  const user = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  const agora = new Date().toLocaleString('pt-BR');
+  const cotacaoAtual = window.cotadoEscolhaCotacoesDb.find(c => c.id === cotacaoId);
+  const historicoAtual = (cotacaoAtual?.observacao || '').trim();
+  const novaEntrada = `[${agora} - ${user || 'Usuário'}] ${novoTexto}`;
+  const observacaoAtualizada = historicoAtual ? `${historicoAtual}\n${novaEntrada}` : novaEntrada;
+
+  try {
+    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ observacao: observacaoAtualizada })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar observação');
+    }
+
+    const idx = window.cotadoEscolhaCotacoesDb.findIndex(c => c.id === cotacaoId);
+    if (idx !== -1) {
+      window.cotadoEscolhaCotacoesDb[idx].observacao = observacaoAtualizada;
+    }
+    renderizarCotacoesRegistradasCotadoEscolha();
+  } catch (err) {
+    console.error('[COTADO ESCOLHA] Erro ao adicionar observação:', err);
+    alert('Erro ao adicionar observação: ' + err.message);
+  }
+}
+
+// Comentário: envia item do modal para aguardando compra
+async function enviarCotadoEscolhaParaCompra() {
+  if (!window.cotadoEscolhaItemId) return;
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}/enviar-requisicao`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include'
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar status');
+    }
+    alert('Requisição enviada e status atualizado para "aguardando compra".');
+    fecharModalCotadoEscolhaItem();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[COTADO ESCOLHA] Erro ao enviar:', err);
+    alert('Erro ao enviar: ' + err.message);
+  }
+}
+
+// Comentário: retifica item para aguardando cotação
+async function retificarCotadoEscolha() {
+  if (!window.cotadoEscolhaItemId) return;
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'aguardando cotação' })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar status');
+    }
+    alert('Status atualizado para "aguardando cotação".');
+    fecharModalCotadoEscolhaItem();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[COTADO ESCOLHA] Erro ao retificar:', err);
+    alert('Erro ao retificar: ' + err.message);
+  }
+}
+
+// Comentário: cancela item para compra cancelada
+async function cancelarCotadoEscolha() {
+  if (!window.cotadoEscolhaItemId) return;
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'compra cancelada' })
+    });
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar status');
+    }
+    alert('Status atualizado para "compra cancelada".');
+    fecharModalCotadoEscolhaItem();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[COTADO ESCOLHA] Erro ao cancelar:', err);
+    alert('Erro ao cancelar: ' + err.message);
+  }
+}
+
 // Funções auxiliares para o modal de Kanban de compras
 // Armazena temporariamente as cotações aprovadas (estado visual) - permite múltiplas por item
 const cotacoesAprovadas = new Map(); // Map<itemId, Set<cotacaoId>>
@@ -19081,6 +19930,21 @@ async function voltarParaAguardandoCompra(itemId) {
 
 window.abrirModalDetalhesPedidoMinhas = abrirModalDetalhesPedidoMinhas;
 window.toggleAprovarCotacaoMinhas = toggleAprovarCotacaoMinhas;
+window.abrirModalCotadoEscolhaItem = abrirModalCotadoEscolhaItem;
+window.fecharModalCotadoEscolhaItem = fecharModalCotadoEscolhaItem;
+window.aprovarCotacaoCotadoEscolha = aprovarCotacaoCotadoEscolha;
+window.adicionarObservacaoCotadoEscolha = adicionarObservacaoCotadoEscolha;
+window.enviarCotadoEscolhaParaCompra = enviarCotadoEscolhaParaCompra;
+window.retificarCotadoEscolha = retificarCotadoEscolha;
+window.cancelarCotadoEscolha = cancelarCotadoEscolha;
+window.abrirModalCotacaoKanban = abrirModalCotacaoKanban;
+window.fecharModalCotacaoKanban = fecharModalCotacaoKanban;
+window.registrarCotacaoKanban = registrarCotacaoKanban;
+window.adicionarAnexoCotacaoKanban = adicionarAnexoCotacaoKanban;
+window.removerAnexoCotacaoKanban = removerAnexoCotacaoKanban;
+window.enviarCotacoesKanban = enviarCotacoesKanban;
+window.adicionarObservacaoCotacaoKanban = adicionarObservacaoCotacaoKanban;
+window.excluirCotacaoKanban = excluirCotacaoKanban;
 window.enviarEscolhaMinhas = enviarEscolhaMinhas;
 window.editarItemMinhas = editarItemMinhas;
 window.excluirItemMinhas = excluirItemMinhas;
@@ -20006,6 +20870,12 @@ async function abrirModalSelecaoItensCotacao() {
   spinner.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10003;background:rgba(0,0,0,0.8);padding:30px 40px;border-radius:12px;color:white;font-size:16px;font-weight:600;display:flex;align-items:center;gap:12px;';
   spinner.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i> Carregando itens...';
   document.body.appendChild(spinner);
+
+  // Comentário: helper para remover o spinner em qualquer retorno
+  const removerSpinner = () => {
+    const spinnerEl = document.getElementById('spinnerCotacao');
+    if (spinnerEl) document.body.removeChild(spinnerEl);
+  };
   
   try {
     const modal = document.getElementById('modalSelecaoItensCotacao');
@@ -20027,11 +20897,14 @@ async function abrirModalSelecaoItensCotacao() {
       }
     }
     
-    // Busca itens com status "aguardando cotação"
-    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
-    if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
-    const data = await resp.json();
-    const todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    // Busca itens com status "aguardando cotação" (usa cache do kanban quando disponível)
+    let todosItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+    if (!todosItens.length) {
+      const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+      const data = await resp.json();
+      todosItens = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    }
     
     const itensAguardandoCotacao = todosItens.filter(item => 
       (item.status || '').toLowerCase().trim() === 'aguardando cotação'
@@ -20039,6 +20912,7 @@ async function abrirModalSelecaoItensCotacao() {
     
     if (itensAguardandoCotacao.length === 0) {
       alert('Não há itens aguardando cotação no momento.');
+      removerSpinner();
       return;
     }
     
@@ -20052,15 +20926,13 @@ async function abrirModalSelecaoItensCotacao() {
     modal.style.display = 'flex';
     
     // Remove spinner
-    const spinnerEl = document.getElementById('spinnerCotacao');
-    if (spinnerEl) document.body.removeChild(spinnerEl);
+    removerSpinner();
   } catch (err) {
     console.error('[COTAÇÃO] Erro ao abrir modal de seleção:', err);
     alert('Erro ao carregar itens: ' + err.message);
     
     // Remove spinner em caso de erro
-    const spinnerEl = document.getElementById('spinnerCotacao');
-    if (spinnerEl) document.body.removeChild(spinnerEl);
+    removerSpinner();
   }
 }
 
@@ -20230,6 +21102,16 @@ function toggleItemSelecaoCotacao(itemId) {
   }
   
   // Atualiza visual
+  const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+  if (cacheItens.length) {
+    atualizarContadorSelecaoCotacao();
+    const itensAguardandoCotacao = cacheItens.filter(i => 
+      (i.status || '').toLowerCase().trim() === 'aguardando cotação'
+    );
+    renderizarListaSelecaoCotacao(itensAguardandoCotacao);
+    return;
+  }
+
   fetch('/api/compras/todas', { credentials: 'include' })
     .then(resp => resp.json())
     .then(data => {
@@ -24841,6 +25723,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       statusNormalizado: (item.status || '').toLowerCase().trim()
     }));
 
+    // Comentário: mantém cache dos itens para uso em modais do kanban
+    window.kanbanMinhasItens = itensComStatusNormalizado;
+
     
     // DEBUG: Verificar requisição 10816583034
     const item2337 = itensComStatusNormalizado.find(i => i.cod_req_compra === '10816583034');
@@ -24944,6 +25829,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const deveAgrupar = statusAgrupados.includes(status);
       
       // Define se a coluna deve ter interação de clique (para abrir modal)
+      // "cotado aguardando escolha" será aberto pelo clique no item (sem botão Abrir Tudo)
       const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra preparação', 'aguardando compra'];
       const temItens = itens.length > 0;
       const ehClicavel = statusComClique.includes(status) && temItens; // Só permite clique se houver itens
@@ -24961,6 +25847,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const coresHover = {
         'aguardando aprovação da requisição': 'rgba(37,99,235,0.3)', // Azul
         'aguardando cotação': 'rgba(251,191,36,0.3)', // Amarelo
+        'cotado aguardando escolha': 'rgba(139,92,246,0.3)', // Roxo
         'aguardando compra preparação': 'rgba(16,185,129,0.3)',   // Verde
         'aguardando compra': 'rgba(16,185,129,0.3)'   // Verde
       };
@@ -25018,9 +25905,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           usarArrayDireto = true;
           gruposArrayOrdenado = gruposArray;
         } else {
-          // Para solicitações: agrupa por cNumero
+          // Para solicitações: agrupa por numero_pedido (nos kanbans "Cotação" e "Cotado") ou cNumero nos demais
           itens.forEach(item => {
-            const chave = item.cNumero || item.cnumero || 'sem_pedido';
+            const chave = (status === 'aguardando cotação' || status === 'cotado aguardando escolha')
+              ? (item.numero_pedido || 'sem_pedido')
+              : (item.cNumero || item.cnumero || 'sem_pedido');
             if (!grupos[chave]) grupos[chave] = [];
             grupos[chave].push(item);
           });
@@ -25214,12 +26103,19 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const corBorda = (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) 
             ? determinCorBorda(primeiroItem.c_cod_int_ped) 
             : '#e5e7eb';
+
+          // Comentário: no kanban "cotado aguardando escolha" e "aguardando cotação", o clique abre modal específico
+          const onclickCard = status === 'cotado aguardando escolha'
+            ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
+            : (status === 'aguardando cotação'
+              ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
+              : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`);
           
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
               data-todos-ids="${todosIds}"
-              onclick="abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')"
+              onclick="${onclickCard}"
               style="
               background:#ffffff;
               border:2px solid ${corBorda};
@@ -25273,7 +26169,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;' : '';
       
       // Botão "Abrir Tudo" para kanbans clicáveis (exceto Requisições)
-      const botaoAbrirTudo = (ehClicavel && status !== 'aguardando compra preparação') ? `
+      const botaoAbrirTudo = (ehClicavel && status !== 'aguardando compra preparação' && status !== 'aguardando cotação') ? `
         <button 
           onclick="${funcaoOnclick}"
           style="
