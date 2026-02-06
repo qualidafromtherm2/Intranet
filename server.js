@@ -10012,13 +10012,15 @@ function buildStamp(prefix, req) {
 // estáticos unificados (CSS/JS/img) — antes das rotas HTML
 app.use(express.static(path.join(__dirname), {
   etag: false,                 // evita servir HTML por engano via cache
-  maxAge: '1h',
+  maxAge: 0,
   setHeaders: (res, p) => {
     if (p.endsWith('.webmanifest')) {
       res.setHeader('Content-Type', 'application/manifest+json');
     }
-    if (p.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
+    if (p.endsWith('.html') || p.endsWith('.js') || p.endsWith('.css')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
     }
   }
 }));
@@ -10029,6 +10031,9 @@ app.use(express.static(path.join(__dirname), {
 // ────────────────────────────────────────────
 // Isso não intercepta /menu_produto.js, /requisicoes_omie/xx.js, etc.
 app.get(['/', '/menu_produto.html', '/kanban/*'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'menu_produto.html'));
 });
 
