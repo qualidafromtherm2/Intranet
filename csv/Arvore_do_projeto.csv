@@ -14,13 +14,9 @@ pm2 restart intranet_api --env pg
 pm2 save
 
 "Reinicia, verifica se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
-# 1) Esvaziar os arquivos de log (sem apagar o processo)
+
 pm2 flush
-
-# 2) Reiniciar o serviço
 pm2 restart intranet_api
-
-# 3) Tailar só o que surgir a partir de agora
 pm2 logs intranet_api
 
 

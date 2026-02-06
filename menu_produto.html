@@ -1088,37 +1088,6 @@
                   </select>
                 </div>
 
-                <!-- Campo Descrição breve do pedido (sempre visível, oculta apenas quando Sim) -->
-                <div id="catalogoCampoDescricao" style="grid-column:span 3;position:relative;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
-                    Descrição breve do pedido.
-                  </label>
-                  <input 
-                    type="text"
-                    id="catalogoDescricaoNaoCadastrado"
-                    autocomplete="off"
-                    placeholder="Digite uma descrição breve do produto..."
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
-                  <ul id="catalogoDescricaoLista" aria-label="Sugestões de descrição"></ul>
-                </div>
-                
-                <!-- Campo Quantidade (sempre visível, oculta apenas quando Sim) -->
-                <div id="catalogoCampoQuantidade" style="grid-column:span 1;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-hashtag" style="color:#3b82f6;margin-right:4px;"></i>
-                    Quantidade *
-                  </label>
-                  <input 
-                    type="number"
-                    id="catalogoQuantidadeNaoCadastrado"
-                    min="1"
-                    value="1"
-                    placeholder="Qtd"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;height:52px;"
-                  />
-                </div>
-                
                 <!-- Linha 3: Objetivo da Compra + Observação para recebimento (2 colunas cada) -->
                 <div style="grid-column:span 2;">
                   <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
@@ -1141,6 +1110,37 @@
                     rows="2"
                     placeholder="Observações sobre o recebimento do produto..."
                     style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
+                </div>
+
+                <!-- Campo Descrição breve do pedido (sempre visível, oculta apenas quando Sim) -->
+                <div id="catalogoCampoDescricao" style="grid-column:span 3;position:relative;">
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
+                    Descrição breve do pedido.
+                  </label>
+                  <input 
+                    type="text"
+                    id="catalogoDescricaoNaoCadastrado"
+                    autocomplete="off"
+                    placeholder="Digite uma descrição breve do produto..."
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
+                  <ul id="catalogoDescricaoLista" aria-label="Sugestões de descrição"></ul>
+                </div>
+
+                <!-- Campo Quantidade (sempre visível, oculta apenas quando Sim) -->
+                <div id="catalogoCampoQuantidade" style="grid-column:span 1;">
+                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
+                    <i class="fa-solid fa-hashtag" style="color:#3b82f6;margin-right:4px;"></i>
+                    Quantidade *
+                  </label>
+                  <input 
+                    type="number"
+                    id="catalogoQuantidadeNaoCadastrado"
+                    min="1"
+                    value="1"
+                    placeholder="Qtd"
+                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;height:52px;"
+                  />
                 </div>
 
                 <!-- Linha com Checkboxes: Requisição Direta + Não incluir quantidade (2 colunas cada) -->
