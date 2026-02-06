@@ -6,6 +6,7 @@ const API_BASE = window.location.origin; // já serve https://intranet-30av.onre
 
 // Silencia todos os logs de debug do chat que começam com "[CHAT]"
 ;(function silenceChatLogs(){
+  let respostasErro = 0;
   try {
     const _log = console.log.bind(console);
     const _warn = console.warn.bind(console);
@@ -12795,7 +12796,7 @@ function showComprasSubTab(subtabId) {
   }
 }
 
-function openComprasFormTab() {
+async function openComprasFormTab() {
   try {
     console.log('[COMPRAS] Abrindo painel de compras...');
     const formPane = document.getElementById('comprasFormPane');
@@ -12828,6 +12829,7 @@ function openComprasFormTab() {
     console.log('[COMPRAS] Chamando showOnlyInMain...');
     window.showOnlyInMain?.(formPane);
     console.log('[COMPRAS] Renderizando carrinho...');
+    await carregarCarrinhoComprasDoBanco();
     renderCarrinhoCompras();
     console.log('[COMPRAS] Carregando minhas solicitações...');
     loadMinhasSolicitacoes();
@@ -12853,6 +12855,101 @@ if (typeof escapeHtml === 'undefined') {
 
 // Array global do carrinho
 window.carrinhoCompras = window.carrinhoCompras || [];
+
+// Registra item do carrinho no banco com status "carrinho"
+async function registrarItemCarrinhoNoBanco(item) {
+  try {
+    const resp = await fetch('/api/compras/carrinho', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(item)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok || !data.id) {
+      throw new Error(data.error || `Erro ao registrar carrinho (${resp.status})`);
+    }
+    return { id: data.id, grupo_requisicao: data.grupo_requisicao || null };
+  } catch (err) {
+    console.error('[CARRINHO] Falha ao registrar item no banco:', err);
+    return null;
+  }
+}
+
+// Atualiza item do carrinho no banco
+async function atualizarItemCarrinhoNoBanco(item) {
+  const idDb = Number(item?.id_db);
+  if (!Number.isFinite(idDb) || idDb <= 0) return;
+  try {
+    await fetch(`/api/compras/carrinho/${idDb}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(item)
+    });
+  } catch (err) {
+    console.warn('[CARRINHO] Falha ao atualizar item no banco:', err);
+  }
+}
+
+// Remove item do carrinho no banco
+async function removerItemCarrinhoNoBanco(item) {
+  const idDb = Number(item?.id_db);
+  if (!Number.isFinite(idDb) || idDb <= 0) return;
+  try {
+    await fetch(`/api/compras/carrinho/${idDb}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+  } catch (err) {
+    console.warn('[CARRINHO] Falha ao remover item no banco:', err);
+  }
+}
+
+// Carrega itens do carrinho do banco (apenas do solicitante logado)
+async function carregarCarrinhoComprasDoBanco() {
+  try {
+    const resp = await fetch('/api/compras/carrinho', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      throw new Error(data.error || 'Erro ao carregar carrinho');
+    }
+
+    const itens = Array.isArray(data.itens) ? data.itens : [];
+    window.carrinhoCompras = itens.map(item => ({
+      id_db: item.id,
+      produto_codigo: item.produto_codigo,
+      produto_descricao: item.produto_descricao,
+      quantidade: item.quantidade ?? '',
+      prazo_solicitado: item.prazo_solicitado,
+      familia_nome: item.familia_produto,
+      observacao: item.observacao,
+      observacao_reprovacao: item.observacao_reprovacao,
+      solicitante: item.solicitante,
+      departamento: item.departamento,
+      centro_custo: item.centro_custo,
+      objetivo_compra: item.objetivo_compra,
+      resp_inspecao_recebimento: item.resp_inspecao_recebimento,
+      responsavel_pela_compra: item.responsavel_pela_compra,
+      retorno_cotacao: item.retorno_cotacao,
+      codigo_produto_omie: item.codigo_produto_omie,
+      categoria_compra: item.categoria_compra_codigo,
+      categoria_compra_codigo: item.categoria_compra_codigo,
+      categoria_compra_nome: item.categoria_compra_nome,
+      codigo_omie: item.codigo_omie,
+      requisicao_direta: item.requisicao_direta,
+      grupo_requisicao: item.grupo_requisicao || null,
+      np: item.grupo_requisicao || item.np || null,
+      anexo: item.anexos || null
+    }));
+
+    renderCarrinhoCompras();
+    renderModalCarrinhoCompras();
+    renderModalCarrinhoLista();
+  } catch (err) {
+    console.warn('[CARRINHO] Falha ao carregar itens do banco:', err);
+  }
+}
 
 // Função global para configurar event listeners de expandir/colapsar nas tabelas de compras
 function setupComprasExpandListeners() {
@@ -12951,8 +13048,10 @@ function renderCarrinhoCompras() {
   
   // Bind botões de remover
   tbody.querySelectorAll('[data-idx]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      const item = window.carrinhoCompras[idx];
+      await removerItemCarrinhoNoBanco(item);
       window.carrinhoCompras.splice(idx, 1);
       renderCarrinhoCompras();
     });
@@ -12985,6 +13084,8 @@ window.abrirModalCarrinhoCompras = async function() {
   }
   
   // Sincroniza os dados do carrinho no modal
+  await carregarCarrinhoComprasDoBanco();
+  await carregarGruposRequisicaoDisponiveis();
   renderModalCarrinhoCompras();
   
   // Adiciona evento ao selector de NP
@@ -13097,7 +13198,14 @@ function renderModalCarrinhoCompras() {
     return;
   }
   
-  cardsContainer.innerHTML = carrinhoFiltrado.map((item, idx) => {
+  // Agrupa por NP e renderiza em grupos separados
+  const obterIdxCarrinho = (item, fallbackIdx) => {
+    const idxGlobal = (window.carrinhoCompras || []).indexOf(item);
+    return idxGlobal >= 0 ? idxGlobal : fallbackIdx;
+  };
+  
+  const renderItemCarrinhoCard = (item, fallbackIdx) => {
+    const idx = obterIdxCarrinho(item, fallbackIdx);
     const itemSolicitante = item.solicitante || solicitante;
     const temAnexo = item.anexo ? true : false;
     
@@ -13136,13 +13244,30 @@ function renderModalCarrinhoCompras() {
         <i class="fa-solid fa-image" style="font-size:24px;"></i>
       </div>`;
     
+    const npExibicao = item.grupo_requisicao || item.np || '';
+    const gruposDisponiveis = Array.isArray(window.gruposRequisicaoDisponiveis)
+      ? window.gruposRequisicaoDisponiveis
+      : [];
+    const gruposUnicos = Array.from(new Set([
+      npExibicao,
+      ...gruposDisponiveis
+    ].filter(Boolean)));
+    const opcoesGrupo = (gruposUnicos.length ? gruposUnicos : ['']);
+    const opcoesGrupoHtml = opcoesGrupo.map(grupo => {
+      const label = grupo || 'Sem grupo';
+      const selected = grupo === npExibicao ? 'selected' : '';
+      return `<option value="${grupo}" ${selected}>${label}</option>`;
+    }).join('');
     return `
-      <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;gap:12px;" 
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;flex-direction:column;gap:12px;" 
            onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" 
            onmouseout="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.05)';">
         
-        <!-- Lado Esquerdo: Foto e Info -->
-        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+        <!-- Linha superior: informações e controles -->
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          
+          <!-- Lado Esquerdo: Foto e Info -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
           
           <!-- Cabeçalho com Foto e Descrição -->
           <div style="display:flex;gap:10px;">
@@ -13156,7 +13281,7 @@ function renderModalCarrinhoCompras() {
             <div style="flex:1;min-width:0;">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
                 <span style="background:#3b82f6;color:white;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;">
-                  NP: ${window.escapeHtml(item.np || 'N/A')}
+                  NP: ${window.escapeHtml(npExibicao || 'N/A')}
                 </span>
                 <span style="font-size:11px;font-weight:600;color:#6b7280;">
                   ${window.escapeHtml(item.produto_codigo)}
@@ -13170,128 +13295,10 @@ function renderModalCarrinhoCompras() {
             </div>
           </div>
           
-          <!-- Campos Expandíveis -->
-          <div class="carrinho-detalhes-expandiveis" data-idx="${idx}" style="display:none;flex-direction:column;gap:4px;font-size:11px;padding-top:8px;border-top:1px solid #f3f4f6;">
+          </div><!-- fim lado esquerdo -->
           
-            <div>
-            <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;">
-              <i class="fa-solid fa-calendar-days" style="margin-right:3px;font-size:10px;"></i>Prazo Solicitado
-            </label>
-            <input type="date" class="carrinho-input-prazo" data-idx="${idx}" 
-                   value="${item.prazo_solicitado || ''}"
-                   style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-          </div>
-          
-          <div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
-            <i class="fa-solid fa-user" style="color:#3b82f6;width:12px;font-size:10px;"></i>
-            <span style="color:#6b7280;font-weight:500;min-width:70px;">Solicitante:</span>
-            <span style="color:#111827;font-weight:600;font-size:10px;">${window.escapeHtml(itemSolicitante)}</span>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-building" style="color:#8b5cf6;width:12px;font-size:10px;"></i>Departamento
-            </label>
-            <select class="carrinho-input-departamento" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              <option value="Produção" ${item.departamento === 'Produção' ? 'selected' : ''}>Produção</option>
-              <option value="Qualidade" ${item.departamento === 'Qualidade' ? 'selected' : ''}>Qualidade</option>
-              <option value="Manutenção" ${item.departamento === 'Manutenção' ? 'selected' : ''}>Manutenção</option>
-              <option value="Compras" ${item.departamento === 'Compras' ? 'selected' : ''}>Compras</option>
-              <option value="Administrativo" ${item.departamento === 'Administrativo' ? 'selected' : ''}>Administrativo</option>
-              <option value="Comercial" ${item.departamento === 'Comercial' ? 'selected' : ''}>Comercial</option>
-              <option value="Financeiro" ${item.departamento === 'Financeiro' ? 'selected' : ''}>Financeiro</option>
-              <option value="Logística" ${item.departamento === 'Logística' ? 'selected' : ''}>Logística</option>
-            </select>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-bullseye" style="color:#f59e0b;width:12px;font-size:10px;"></i>Objetivo de Compra
-            </label>
-            <input type="text" class="carrinho-input-objetivo" data-idx="${idx}" 
-                   value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Digite o objetivo"
-                   style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-tag" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria
-            </label>
-            <select class="carrinho-input-categoria" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              <option value="">Selecione...</option>
-              ${(window.categoriasCompra || []).map(cat => 
-                `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
-              ).join('')}
-            </select>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-user-tie" style="color:#14b8a6;width:12px;font-size:10px;"></i>Responsável
-            </label>
-            <select class="carrinho-input-responsavel" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              <option value="">Selecione...</option>
-              ${window.usuariosAtivos.map(u => {
-                const usuarioLogado = obterUsuarioLogado();
-                const responsavelAtual = item.responsavel_pela_compra || usuarioLogado;
-                return `<option value="${window.escapeHtml(u.username)}" ${responsavelAtual === u.username ? 'selected' : ''}>${window.escapeHtml(u.username)}</option>`;
-              }).join('')}
-            </select>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-sort-alpha-down" style="color:#8b5cf6;width:12px;font-size:10px;"></i>NP
-            </label>
-            <select class="carrinho-input-np" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              ${(() => {
-                const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-                return alfabeto.map(letra => `<option value="${letra}" ${item.np === letra ? 'selected' : ''}>${letra}</option>`).join('');
-              })()}
-            </select>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-reply" style="color:#6366f1;width:12px;font-size:10px;"></i>Retorno Cotação
-            </label>
-            <select class="carrinho-input-retorno" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              <option value="Sim" ${item.retorno_cotacao === 'Sim' ? 'selected' : ''}>Sim</option>
-              <option value="Não" ${item.retorno_cotacao === 'Não' ? 'selected' : ''}>Não</option>
-            </select>
-          </div>
-          
-          <div>
-            <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-              <i class="fa-solid fa-bolt" style="color:#f97316;width:12px;font-size:10px;"></i>Requisição Direta
-            </label>
-            <select class="carrinho-input-requisicao" data-idx="${idx}"
-                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-              <option value="true" ${item.requisicao_direta ? 'selected' : ''}>Sim</option>
-              <option value="false" ${!item.requisicao_direta ? 'selected' : ''}>Não</option>
-            </select>
-          </div>
-          
-          ${temAnexo ? `
-          <div style="background:#dbeafe;padding:4px 8px;border-radius:4px;margin-top:2px;">
-            <i class="fa-solid fa-paperclip" style="color:#2563eb;font-size:10px;margin-right:4px;"></i>
-            <span style="color:#1e40af;font-weight:600;font-size:10px;">
-              ${window.escapeHtml(item.anexo.nome)}
-            </span>
-          </div>
-          ` : ''}
-          
-          </div><!-- fim carrinho-detalhes-expandiveis -->
-        
-        </div><!-- fim lado esquerdo -->
-        
-        <!-- Lado Direito: Quantidade e Botões na MESMA LINHA -->
-        <div style="display:flex;gap:6px;align-items:flex-end;">
+          <!-- Lado Direito: Quantidade e Botões na MESMA LINHA -->
+          <div style="display:flex;gap:6px;align-items:flex-end;">
           
           <!-- Campo Quantidade -->
           <div style="width:90px;">
@@ -13310,15 +13317,169 @@ function renderModalCarrinhoCompras() {
                   title="Remover item">
             <i class="fa-solid fa-trash" style="font-size:12px;"></i>
           </button>
-          <button class="carrinho-toggle-detalhes-btn" data-idx="${idx}"
-                  style="background:#3b82f6;color:white;border:none;width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;"
-                  onmouseover="this.style.background='#2563eb';" onmouseout="this.style.background='#3b82f6';"
-                  title="Expandir/Recolher detalhes">
-            <i class="fa-solid fa-chevron-down" style="font-size:12px;"></i>
-          </button>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            ${item.observacao_reprovacao ? `
+              <div
+                title="${window.escapeHtml(item.observacao_reprovacao)}"
+                style="font-size:14px;color:#f59e0b;cursor:help;line-height:1;"
+              >
+                <i class="fa-solid fa-triangle-exclamation"></i>
+              </div>
+            ` : ''}
+            <button class="carrinho-toggle-detalhes-btn" data-idx="${idx}"
+                    style="background:#3b82f6;color:white;border:none;width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;"
+                    onmouseover="this.style.background='#2563eb';" onmouseout="this.style.background='#3b82f6';"
+                    title="Expandir/Recolher detalhes">
+              <i class="fa-solid fa-chevron-down" style="font-size:12px;"></i>
+            </button>
+          </div>
           
-        </div><!-- fim lado direito -->
+          </div><!-- fim lado direito -->
+        </div><!-- fim linha superior -->
         
+        <!-- Campos Expandíveis (sempre em coluna única) -->
+        <div class="carrinho-detalhes-expandiveis" data-idx="${idx}" style="display:none;flex-direction:column;gap:4px;font-size:11px;padding-top:8px;border-top:1px solid #f3f4f6;">
+        
+          <div>
+          <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;">
+            <i class="fa-solid fa-calendar-days" style="margin-right:3px;font-size:10px;"></i>Prazo Solicitado
+          </label>
+          <input type="date" class="carrinho-input-prazo" data-idx="${idx}" 
+                 value="${item.prazo_solicitado || ''}"
+                 style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+        </div>
+        
+        <div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
+          <i class="fa-solid fa-user" style="color:#3b82f6;width:12px;font-size:10px;"></i>
+          <span style="color:#6b7280;font-weight:500;min-width:70px;">Solicitante:</span>
+          <span style="color:#111827;font-weight:600;font-size:10px;">${window.escapeHtml(itemSolicitante)}</span>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-building" style="color:#8b5cf6;width:12px;font-size:10px;"></i>Departamento
+          </label>
+          <select class="carrinho-input-departamento" data-idx="${idx}"
+                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="Produção" ${item.departamento === 'Produção' ? 'selected' : ''}>Produção</option>
+            <option value="Qualidade" ${item.departamento === 'Qualidade' ? 'selected' : ''}>Qualidade</option>
+            <option value="Manutenção" ${item.departamento === 'Manutenção' ? 'selected' : ''}>Manutenção</option>
+            <option value="Compras" ${item.departamento === 'Compras' ? 'selected' : ''}>Compras</option>
+            <option value="Administrativo" ${item.departamento === 'Administrativo' ? 'selected' : ''}>Administrativo</option>
+            <option value="Comercial" ${item.departamento === 'Comercial' ? 'selected' : ''}>Comercial</option>
+            <option value="Financeiro" ${item.departamento === 'Financeiro' ? 'selected' : ''}>Financeiro</option>
+            <option value="Logística" ${item.departamento === 'Logística' ? 'selected' : ''}>Logística</option>
+          </select>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-bullseye" style="color:#f59e0b;width:12px;font-size:10px;"></i>Objetivo de Compra
+          </label>
+          <input type="text" class="carrinho-input-objetivo" data-idx="${idx}" 
+                 value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Digite o objetivo"
+                 style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-tag" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria
+          </label>
+          <select class="carrinho-input-categoria" data-idx="${idx}"
+                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="">Selecione...</option>
+            ${(window.categoriasCompra || []).map(cat => 
+              `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
+            ).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-user-tie" style="color:#14b8a6;width:12px;font-size:10px;"></i>Responsável
+          </label>
+          <select class="carrinho-input-responsavel" data-idx="${idx}"
+                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="">Selecione...</option>
+            ${window.usuariosAtivos.map(u => {
+              const usuarioLogado = obterUsuarioLogado();
+              const responsavelAtual = item.responsavel_pela_compra || usuarioLogado;
+              return `<option value="${window.escapeHtml(u.username)}" ${responsavelAtual === u.username ? 'selected' : ''}>${window.escapeHtml(u.username)}</option>`;
+            }).join('')}
+          </select>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-sort-alpha-down" style="color:#8b5cf6;width:12px;font-size:10px;"></i>NP
+          </label>
+            <select class="carrinho-input-np" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+              ${opcoesGrupoHtml}
+            </select>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-reply" style="color:#6366f1;width:12px;font-size:10px;"></i>Retorno Cotação
+          </label>
+          <select class="carrinho-input-retorno" data-idx="${idx}"
+                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="Sim" ${item.retorno_cotacao === 'Sim' ? 'selected' : ''}>Sim</option>
+            <option value="Não" ${item.retorno_cotacao === 'Não' ? 'selected' : ''}>Não</option>
+          </select>
+        </div>
+        
+        <div>
+          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+            <i class="fa-solid fa-bolt" style="color:#f97316;width:12px;font-size:10px;"></i>Requisição Direta
+          </label>
+          <select class="carrinho-input-requisicao" data-idx="${idx}"
+                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            <option value="true" ${item.requisicao_direta ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!item.requisicao_direta ? 'selected' : ''}>Não</option>
+          </select>
+        </div>
+        
+        ${temAnexo ? `
+        <div style="background:#dbeafe;padding:4px 8px;border-radius:4px;margin-top:2px;">
+          <i class="fa-solid fa-paperclip" style="color:#2563eb;font-size:10px;margin-right:4px;"></i>
+          <span style="color:#1e40af;font-weight:600;font-size:10px;">
+            ${window.escapeHtml(item.anexo.nome)}
+          </span>
+        </div>
+        ` : ''}
+        
+        </div><!-- fim carrinho-detalhes-expandiveis -->
+      
+      </div>`;
+  };
+  
+  const gruposNP = carrinhoFiltrado.reduce((acc, item, idx) => {
+    const chave = item.grupo_requisicao || item.np || 'Sem NP';
+    if (!acc[chave]) acc[chave] = [];
+    acc[chave].push({ item, idx });
+    return acc;
+  }, {});
+  
+  const ordemGrupos = Object.keys(gruposNP).sort((a, b) => {
+    if (a === 'Sem NP') return 1;
+    if (b === 'Sem NP') return -1;
+    return a.localeCompare(b);
+  });
+  
+  cardsContainer.innerHTML = ordemGrupos.map((np) => {
+    const itensGrupo = gruposNP[np] || [];
+    const cardsHtml = itensGrupo.map(({ item, idx }) => renderItemCarrinhoCard(item, idx)).join('');
+    return `
+      <div style="grid-column:1/-1;border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#f9fafb;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:12px;font-weight:700;color:#111827;">Grupo NP: ${window.escapeHtml(np)}</div>
+          <div style="font-size:11px;color:#6b7280;">${itensGrupo.length} item(ns)</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${cardsHtml}
+        </div>
       </div>`;
   }).join('');
   
@@ -13348,9 +13509,11 @@ function renderModalCarrinhoCompras() {
   
   // Bind botões de remover no modal
   cardsContainer.querySelectorAll('.modal-remover-item-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       if (confirm('Deseja remover este item do carrinho?')) {
+        const item = window.carrinhoCompras[idx];
+        await removerItemCarrinhoNoBanco(item);
         window.carrinhoCompras.splice(idx, 1);
         renderModalCarrinhoCompras();
         renderCarrinhoCompras();
@@ -13360,61 +13523,69 @@ function renderModalCarrinhoCompras() {
   
   // Bind inputs editáveis - atualiza carrinho em tempo real
   cardsContainer.querySelectorAll('.carrinho-input-quantidade').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       const valor = parseFloat(e.target.value) || 1;
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].quantidade = valor;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-prazo').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].prazo_solicitado = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-departamento').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].departamento = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-objetivo').forEach(input => {
-    input.addEventListener('blur', (e) => {
+    input.addEventListener('blur', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].objetivo_compra = e.target.value.trim();
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-categoria').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].categoria_compra = e.target.value.trim();
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-np').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
-        window.carrinhoCompras[idx].np = e.target.value;
+        window.carrinhoCompras[idx].grupo_requisicao = e.target.value || null;
+        window.carrinhoCompras[idx].np = e.target.value || null;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
+        await carregarGruposRequisicaoDisponiveis();
         atualizarSelectFiltroNP();
         renderModalCarrinhoCompras();
       }
@@ -13422,30 +13593,33 @@ function renderModalCarrinhoCompras() {
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-responsavel').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].responsavel_pela_compra = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-retorno').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].retorno_cotacao = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   cardsContainer.querySelectorAll('.carrinho-input-requisicao').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].requisicao_direta = e.target.value === 'true';
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderModalCarrinhoCompras(); // Re-renderiza para atualizar o badge
         renderCarrinhoCompras();
       }
@@ -13456,6 +13630,8 @@ function renderModalCarrinhoCompras() {
 // Limpar carrinho do modal
 function limparCarrinhoModal() {
   if (!confirm('Deseja realmente limpar todo o carrinho?')) return;
+  const itens = window.carrinhoCompras || [];
+  itens.forEach(item => removerItemCarrinhoNoBanco(item));
   window.carrinhoCompras = [];
   renderModalCarrinhoCompras();
   renderModalCarrinhoLista();
@@ -13606,71 +13782,78 @@ function renderModalCarrinhoLista() {
   
   // Event listeners para os inputs da lista
   tbody.querySelectorAll('.lista-input-quantidade').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       const valor = parseFloat(e.target.value) || 1;
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].quantidade = valor;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-prazo').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].prazo_solicitado = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-departamento').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].departamento = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].objetivo_compra_nome = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].objetivo_compra_nome = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-categoria').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].categoria_compra = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-np').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].np = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         atualizarSelectFiltroNP();
         renderModalCarrinhoLista();
       }
@@ -13678,39 +13861,44 @@ function renderModalCarrinhoLista() {
   });
   
   tbody.querySelectorAll('.lista-input-retorno').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].retorno_cotacao = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-requisicao').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].requisicao_direta = e.target.value === 'true';
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-input-responsavel').forEach(input => {
-    input.addEventListener('change', (e) => {
+    input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
       if (window.carrinhoCompras[idx]) {
         window.carrinhoCompras[idx].responsavel_pela_compra = e.target.value;
+        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
         renderCarrinhoCompras();
       }
     });
   });
   
   tbody.querySelectorAll('.lista-remover-item-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.getAttribute('data-idx'), 10);
       if (confirm('Deseja remover este item do carrinho?')) {
+        const item = window.carrinhoCompras[idx];
+        await removerItemCarrinhoNoBanco(item);
         window.carrinhoCompras.splice(idx, 1);
         renderModalCarrinhoLista();
         renderModalCarrinhoCompras();
@@ -13730,9 +13918,16 @@ async function enviarPedidoModal() {
   
   const statusEl = document.getElementById('modalComprasFormStatus');
   const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
+  const originalBtnHtml = btnEnviar ? btnEnviar.innerHTML : '';
+  let respostasErro = 0;
   
   try {
-    if (btnEnviar) btnEnviar.disabled = true;
+    // Comentário: segue o mesmo fluxo do botão "Enviar requisição" do modal Cotado
+    if (btnEnviar) {
+      btnEnviar.disabled = true;
+      btnEnviar.style.cursor = 'not-allowed';
+      btnEnviar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
+    }
     if (statusEl) {
       statusEl.style.display = 'block';
       statusEl.style.background = '#fef3c7';
@@ -13771,7 +13966,7 @@ async function enviarPedidoModal() {
     
     // Enviar todas as solicitações
     let respostasOk = 0;
-    let respostasErro = 0;
+    respostasErro = 0;
     const erros = [];
     
     for (let i = 0; i < solicitacoes.length; i++) {
@@ -13818,11 +14013,19 @@ async function enviarPedidoModal() {
         statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle"></i> ${respostasOk} de ${solicitacoes.length} solicitação(ões) enviada(s)${erroTexto}`;
       }
     }
+
+    // Comentário: restaura o botão após concluir o envio
+    if (btnEnviar) {
+      btnEnviar.disabled = false;
+      btnEnviar.style.cursor = 'pointer';
+      btnEnviar.innerHTML = originalBtnHtml;
+    }
     
-    // Limpar carrinho e fechar modal se todas foram enviadas com sucesso
+    // Comentário: sucesso total segue o mesmo padrão do modal Cotado (alerta + fechar)
     if (respostasErro === 0) {
       window.carrinhoCompras = [];
       
+      alert('Solicitação(ões) enviada(s) com sucesso.');
       setTimeout(() => {
         renderModalCarrinhoCompras();
         renderCarrinhoCompras();
@@ -13839,8 +14042,11 @@ async function enviarPedidoModal() {
       statusEl.style.color = '#991b1b';
       statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle"></i> Erro: ${err.message}`;
     }
-  } finally {
-    if (btnEnviar) btnEnviar.disabled = false;
+    if (btnEnviar) {
+      btnEnviar.disabled = false;
+      btnEnviar.style.cursor = 'pointer';
+      btnEnviar.innerHTML = originalBtnHtml;
+    }
   }
 }
 
@@ -14293,7 +14499,7 @@ async function loadModalComprasResponsaveis() {
 // Carrega categorias de compra da Omie
 async function loadModalComprasCategoriasCompra() {
   const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
-  const selectCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
+  const hiddenCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
   
   try {
     const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
@@ -14317,12 +14523,9 @@ async function loadModalComprasCategoriasCompra() {
           ).join('');
       }
       
-      // Preenche select do modal de catálogo Omie
+      // Preenche select do modal de catálogo Omie (Categoria da Compra)
       if (selectCatalogoCategoria) {
-        selectCatalogoCategoria.innerHTML = '<option value="">Selecione...</option>' +
-          data.categorias.map(cat => 
-            `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
-          ).join('');
+        await carregarCategoriaCompraDropdown();
       }
       
       console.log('[Categorias Compra] Carregadas:', data.categorias.length);
@@ -14330,7 +14533,10 @@ async function loadModalComprasCategoriasCompra() {
   } catch (err) {
     console.error('[Categorias Compra] Erro ao carregar:', err);
     if (selectCategoria) selectCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
-    if (selectCatalogoCategoria) selectCatalogoCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
+    if (selectCatalogoCategoria) {
+      const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
+      if (dropdown) dropdown.innerHTML = '<div style="padding:8px;color:#ef4444;font-size:12px;">Erro ao carregar</div>';
+    }
   }
 }
 
@@ -15057,7 +15263,7 @@ async function adicionarItemCarrinho(ev) {
     }
   }
   
-  window.carrinhoCompras.push({
+  const novoItemCarrinho = {
     produto_codigo: codigo,
     produto_descricao: descricao,
     quantidade,
@@ -15078,12 +15284,26 @@ async function adicionarItemCarrinho(ev) {
     requisicao_direta: requisicaoDireta,  // Novo campo: requisição direta
     status_pedido: statusPedido,  // Novo campo: etapa do pedido escolhida pelo usuário
     anexo: anexoData  // Novo campo: anexo do item
-  });
+  };
+
+  const registro = await registrarItemCarrinhoNoBanco(novoItemCarrinho);
+  if (!registro?.id) {
+    alert('Erro ao registrar o item no carrinho. Tente novamente.');
+    return;
+  }
+
+  novoItemCarrinho.id_db = registro.id;
+  if (registro.grupo_requisicao) {
+    novoItemCarrinho.grupo_requisicao = registro.grupo_requisicao;
+    novoItemCarrinho.np = registro.grupo_requisicao;
+  }
+  window.carrinhoCompras.push(novoItemCarrinho);
   
   console.log('[Compras] Item adicionado ao carrinho:', {
     produto_codigo: codigo,
     tem_anexo: anexoData ? 'SIM' : 'NÃO',
-    anexo_nome: anexoData ? anexoData.nome : null
+    anexo_nome: anexoData ? anexoData.nome : null,
+    id_db: registro.id
   });
   
   renderCarrinhoCompras();
@@ -15094,6 +15314,8 @@ async function adicionarItemCarrinho(ev) {
 // Limpa carrinho
 function limparCarrinhoCompras() {
   if (!confirm('Deseja limpar todos os itens do carrinho?')) return;
+  const itens = window.carrinhoCompras || [];
+  itens.forEach(item => removerItemCarrinhoNoBanco(item));
   window.carrinhoCompras = [];
   renderCarrinhoCompras();
 }
@@ -18519,7 +18741,7 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
     }
     
     // Preenche o select com as categorias (ordem alfabética)
-    select.innerHTML = '<option value="">Selecione uma categoria...</option>';
+    select.innerHTML = '';
     
     const categoriasOrdenadas = [...data.categorias].sort((a, b) => {
       const da = (a.descricao || '').toString();
@@ -18527,6 +18749,7 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
       return da.localeCompare(db, 'pt-BR', { sensitivity: 'base' });
     });
     
+    const categoriaPadraoCodigo = '2.14.94';
     categoriasOrdenadas.forEach(cat => {
       const option = document.createElement('option');
       option.value = cat.codigo;
@@ -18535,10 +18758,21 @@ async function loadCategoriasCompraModal(numeroPedido, categoriaSelecionada = nu
       // Seleciona a categoria atual se houver
       if (categoriaSelecionada && cat.codigo == categoriaSelecionada) {
         option.selected = true;
+      } else if (!categoriaSelecionada && cat.codigo === categoriaPadraoCodigo) {
+        option.selected = true;
       }
       
       select.appendChild(option);
     });
+
+    if (!categoriaSelecionada) {
+      const existePadrao = categoriasOrdenadas.some(cat => cat.codigo === categoriaPadraoCodigo);
+      if (existePadrao) {
+        select.value = categoriaPadraoCodigo;
+      } else if (select.options.length > 0) {
+        select.selectedIndex = 0;
+      }
+    }
     
     console.log('[CATEGORIAS] Carregadas:', data.categorias.length, 'categorias');
     
@@ -18638,6 +18872,7 @@ window.loadCotacoesItemModal = loadCotacoesItemModal;
 window.marcarComoCotadoModal = marcarComoCotadoModal;
 window.abrirModalNovaCotacao = abrirModalNovaCotacao;
 window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
+window.aprovarGrupoRequisicao = aprovarGrupoRequisicao;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
@@ -18669,12 +18904,15 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     
     // Se tiver itemIds específicos, busca por todos eles
     if (itemIds) {
-      // Converte para array de IDs (pode ser string com vírgulas ou número único)
-      const idsArray = typeof itemIds === 'string' && itemIds.includes(',')
-        ? itemIds.split(',').map(id => parseInt(id.trim()))
-        : [parseInt(itemIds)];
+      // Converte para array de IDs (mantém strings como "req_"/"ped_" e números)
+      const idsArray = (typeof itemIds === 'string'
+        ? itemIds.split(',')
+        : [String(itemIds)]
+      )
+        .map(id => String(id).trim())
+        .filter(id => id && id !== 'undefined' && id !== 'null');
       
-      itensPedido = listaCompleta.filter(item => idsArray.includes(item.id));
+      itensPedido = listaCompleta.filter(item => idsArray.includes(String(item.id)));
       
       // Fallback: se não encontrou no cache/minhas, busca em /api/compras/todas
       if (itensPedido.length === 0) {
@@ -18682,7 +18920,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         if (respAll.ok) {
           const dataAll = await respAll.json();
           const todosItens = Array.isArray(dataAll.solicitacoes) ? dataAll.solicitacoes : [];
-          itensPedido = todosItens.filter(item => idsArray.includes(item.id));
+          itensPedido = todosItens.filter(item => idsArray.includes(String(item.id)));
         }
       }
     }
@@ -21687,6 +21925,7 @@ async function abrirModalCatalogoOmie() {
   atualizarContadorCatalogo();
   
   // Atualiza opções de NP baseado no carrinho
+  await carregarGruposRequisicaoDisponiveis();
   atualizarOpcoesNP();
   
   // Define valor padrão como "Não"
@@ -22512,7 +22751,7 @@ window.categoriasPorDepartamento = {
 // Carrega categorias de compra da Omie
 async function loadModalComprasCategoriasCompra() {
   const selectCategoria = document.getElementById('modalComprasCategoriaCompra');
-  const selectCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
+  const hiddenCatalogoCategoria = document.getElementById('catalogoCategoriaCompraGlobal');
   
   try {
     const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
@@ -22536,12 +22775,9 @@ async function loadModalComprasCategoriasCompra() {
           ).join('');
       }
       
-      // Preenche select do modal de catálogo Omie
-      if (selectCatalogoCategoria) {
-        selectCatalogoCategoria.innerHTML = '<option value="">Selecione...</option>' +
-          data.categorias.map(cat => 
-            `<option value="${cat.codigo}">${window.escapeHtml(cat.descricao)}</option>`
-          ).join('');
+      // Preenche dropdown do catálogo Omie (Categoria da Compra)
+      if (hiddenCatalogoCategoria) {
+        await carregarCategoriaCompraDropdown();
       }
       
       console.log('[Categorias Compra] Carregadas:', data.categorias.length);
@@ -22549,7 +22785,10 @@ async function loadModalComprasCategoriasCompra() {
   } catch (err) {
     console.error('[Categorias Compra] Erro ao carregar:', err);
     if (selectCategoria) selectCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
-    if (selectCatalogoCategoria) selectCatalogoCategoria.innerHTML = '<option value="">Erro ao carregar</option>';
+    if (hiddenCatalogoCategoria) {
+      const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
+      if (dropdown) dropdown.innerHTML = '<div style="padding:8px;color:#ef4444;font-size:12px;">Erro ao carregar</div>';
+    }
   }
 }
 
@@ -22577,6 +22816,140 @@ function handleCatalogoDepartamentoChange(event) {
 window.abrirModalEditarProduto = abrirModalEditarProduto;
 window.atualizarCategoriasPorDepartamento = atualizarCategoriasPorDepartamento;
 window.handleCatalogoDepartamentoChange = handleCatalogoDepartamentoChange;
+
+// Carrega categorias da tabela ListarCategorias para o dropdown recolhível
+async function carregarCategoriaCompraDropdown() {
+  const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
+  const btnText = document.getElementById('catalogoCategoriaCompraBtnText');
+  const hiddenInput = document.getElementById('catalogoCategoriaCompraGlobal');
+  if (!dropdown || !btnText || !hiddenInput) return;
+
+  dropdown.innerHTML = '<div style="padding:8px;color:#64748b;font-size:12px;">Carregando...</div>';
+
+  const respCat = await fetch('/api/compras/categorias-listar', { credentials: 'include' });
+  if (!respCat.ok) throw new Error('Erro ao buscar categorias');
+  const dataCat = await respCat.json();
+  const categorias = Array.isArray(dataCat.categorias) ? dataCat.categorias : [];
+  console.log('[Catálogo] categorias-listar total:', categorias.length);
+
+  if (categorias.length === 0) {
+    dropdown.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:12px;">Nenhuma categoria encontrada</div>';
+    return;
+  }
+
+  const map = new Map();
+  categorias.forEach(c => map.set(String(c.codigo), c));
+  const filhosPorPai = new Map();
+  categorias.forEach(c => {
+    const pai = c.categoria_superior ? String(c.categoria_superior) : null;
+    if (!filhosPorPai.has(pai)) filhosPorPai.set(pai, []);
+    filhosPorPai.get(pai).push(c);
+  });
+
+  const topLevel = categorias.filter(c => {
+    const pai = c.categoria_superior ? String(c.categoria_superior) : null;
+    return !pai || !map.has(pai);
+  });
+
+  const ordenar = (a, b) => String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR', { sensitivity: 'base' });
+  dropdown.innerHTML = '';
+
+  const criarItem = (cat, nivel = 0) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.style.cssText = `width:100%;text-align:left;padding:6px 8px;border:none;background:transparent;font-size:12px;cursor:pointer;border-radius:4px;margin-left:${nivel * 12}px;`;
+    btn.onmouseover = () => { btn.style.background = '#f1f5f9'; };
+    btn.onmouseout = () => { btn.style.background = 'transparent'; };
+    btn.textContent = `${cat.codigo} - ${cat.descricao}`;
+    btn.addEventListener('click', () => {
+      hiddenInput.value = String(cat.codigo);
+      hiddenInput.setAttribute('data-label', `${cat.codigo} - ${cat.descricao}`);
+      btnText.textContent = `${cat.codigo} - ${cat.descricao}`;
+      dropdown.style.display = 'none';
+    });
+    return btn;
+  };
+
+  const renderGrupo = (grupo) => {
+    const grupoOrdenado = [...grupo].sort(ordenar);
+    grupoOrdenado.forEach(nivel1 => {
+      const nivel2List = (filhosPorPai.get(String(nivel1.codigo)) || []).sort(ordenar);
+      const detailsNivel1 = document.createElement('details');
+      detailsNivel1.style.cssText = 'padding:4px 0;';
+      const summaryNivel1 = document.createElement('summary');
+      summaryNivel1.textContent = `${nivel1.codigo} - ${nivel1.descricao}`;
+      summaryNivel1.style.cssText = 'cursor:pointer;list-style:none;padding:6px 8px;font-size:12px;font-weight:700;color:#1f2937;border-radius:4px;text-transform:uppercase;';
+      summaryNivel1.onmouseover = () => { summaryNivel1.style.background = '#f1f5f9'; };
+      summaryNivel1.onmouseout = () => { summaryNivel1.style.background = 'transparent'; };
+      detailsNivel1.appendChild(summaryNivel1);
+
+      const groupNivel1 = document.createElement('div');
+      groupNivel1.style.cssText = 'padding-left:8px;display:grid;gap:2px;';
+
+      if (nivel2List.length === 0) {
+        groupNivel1.appendChild(criarItem(nivel1, 0));
+      } else {
+        nivel2List.forEach(nivel2 => {
+          const nivel3List = (filhosPorPai.get(String(nivel2.codigo)) || []).sort(ordenar);
+          if (nivel3List.length > 0) {
+            const details = document.createElement('details');
+            details.style.cssText = 'padding:4px 0;';
+            const summary = document.createElement('summary');
+            summary.textContent = `${nivel2.codigo} - ${nivel2.descricao}`;
+            summary.style.cssText = 'cursor:pointer;list-style:none;padding:6px 8px;font-size:12px;font-weight:600;color:#1f2937;border-radius:4px;';
+            summary.onmouseover = () => { summary.style.background = '#f8fafc'; };
+            summary.onmouseout = () => { summary.style.background = 'transparent'; };
+            details.appendChild(summary);
+            const group = document.createElement('div');
+            group.style.cssText = 'padding-left:8px;display:grid;gap:2px;';
+            nivel3List.forEach(nivel3 => group.appendChild(criarItem(nivel3, 1)));
+            details.appendChild(group);
+            groupNivel1.appendChild(details);
+          } else {
+            groupNivel1.appendChild(criarItem(nivel2, 0));
+          }
+        });
+      }
+
+      detailsNivel1.appendChild(groupNivel1);
+      dropdown.appendChild(detailsNivel1);
+    });
+  };
+
+  if (topLevel.length > 0) {
+    renderGrupo(topLevel);
+  } else {
+    const nivel2List = (filhosPorPai.get(null) || categorias).sort(ordenar);
+    nivel2List.forEach(nivel2 => dropdown.appendChild(criarItem(nivel2, 0)));
+  }
+
+  const categoriaPadraoCodigo = '2.14.94';
+  if (!hiddenInput.value) {
+    const categoriaPadrao = map.get(categoriaPadraoCodigo);
+    if (categoriaPadrao) {
+      hiddenInput.value = String(categoriaPadrao.codigo);
+      hiddenInput.setAttribute('data-label', `${categoriaPadrao.codigo} - ${categoriaPadrao.descricao}`);
+      btnText.textContent = `${categoriaPadrao.codigo} - ${categoriaPadrao.descricao}`;
+    }
+  }
+}
+
+// Toggle dropdown do catálogo (Categoria da Compra)
+document.addEventListener('click', (e) => {
+  const wrapper = document.getElementById('catalogoCategoriaCompraWrapper');
+  const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
+  if (!wrapper || !dropdown) return;
+  if (!wrapper.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
+
+document.getElementById('catalogoCategoriaCompraBtn')?.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
+  if (!dropdown) return;
+  e.preventDefault();
+  dropdown.style.display = dropdown.style.display === 'none' || !dropdown.style.display ? 'block' : 'none';
+});
 
 // Toggle campo de prazo no catálogo
 function togglePrazoCatalogo(codigo) {
@@ -22666,8 +23039,11 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0]) 
     ? (selectCategoriaGlobal.selectedOptions[0].text || '') 
-    : '';
-  const npValue = selectNPGlobal ? selectNPGlobal.value : 'A';
+    : (selectCategoriaGlobal?.getAttribute('data-label') || '');
+  const grupoPedidoValor = selectNPGlobal ? selectNPGlobal.value : 'unica';
+  const grupoRequisicaoSelecionado = (!grupoPedidoValor || grupoPedidoValor === 'unica')
+    ? null
+    : grupoPedidoValor;
   const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   const naoIncluirQuantidade = checkboxNaoIncluirQuantidade ? checkboxNaoIncluirQuantidade.checked : false;
@@ -22808,7 +23184,7 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       (item.objetivo_compra || '') === objetivoFinal &&
       (item.categoria_compra || '') === (categoriaCompra || '') &&
       (item.resp_inspecao_recebimento || '') === '' &&
-      (item.np || 'A') === npValue &&
+      (item.grupo_requisicao || item.np || null) === grupoRequisicaoSelecionado &&
       (item.retorno_cotacao || '') === retornoCotacaoFinal &&
       (item.requisicao_direta === (requisicaoDiretaGlobal || false));
   });
@@ -22819,9 +23195,10 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     } else {
       existente.quantidade = (parseFloat(existente.quantidade) || 0) + quantidade;
     }
+    await atualizarItemCarrinhoNoBanco(existente);
   } else {
     // Adiciona direto ao carrinho com os dados globais
-    window.carrinhoCompras.push({
+    const novoItemCarrinho = {
       produto_codigo: codigo,
       produto_descricao: descricao,
       quantidade: quantidade,
@@ -22838,11 +23215,27 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       resp_inspecao_recebimento: '',
       retorno_cotacao: retornoCotacaoFinal,
       categoria_compra: categoriaCompra || '',  // Usar o código da opção selecionada (obrigatório para Omie)
-      np: npValue,  // Novo campo NP
+      categoria_compra_codigo: categoriaCompra || '',
+      categoria_compra_nome: categoriaCompraTexto || '',
+      grupo_requisicao: grupoRequisicaoSelecionado,
+      np: grupoRequisicaoSelecionado,
       requisicao_direta: requisicaoDiretaGlobal || false,
       status_pedido: etapasPedido || null,  // Etapas do pedido (se não cadastrado)
       anexo: anexoData  // Anexo (se não cadastrado)
-    });
+    };
+
+    const registro = await registrarItemCarrinhoNoBanco(novoItemCarrinho);
+    if (!registro?.id) {
+      alert('Erro ao registrar o item no carrinho. Tente novamente.');
+      return;
+    }
+
+    novoItemCarrinho.id_db = registro.id;
+    if (registro.grupo_requisicao) {
+      novoItemCarrinho.grupo_requisicao = registro.grupo_requisicao;
+      novoItemCarrinho.np = registro.grupo_requisicao;
+    }
+    window.carrinhoCompras.push(novoItemCarrinho);
   }
   
   // Renderiza carrinho atualizado
@@ -22852,7 +23245,8 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   // Atualiza contador no modal do catálogo
   atualizarContadorCatalogo();
   
-  // Atualiza opções de NP para refletir novo item adicionado
+  // Atualiza opções do grupo de pedido para refletir novo item adicionado
+  await carregarGruposRequisicaoDisponiveis();
   atualizarOpcoesNP();
   
   // Limpa anexos acumulados se houver anexos
@@ -23046,49 +23440,43 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
 // Exporta função para escopo global
 window.adicionarProdutoNaoCadastradoAoCarrinho = adicionarProdutoNaoCadastradoAoCarrinho;
 
-// Atualiza opções de NP dinamicamente (mostra próxima letra apenas se a anterior foi usada)
+// Comentário: carrega grupos de pedido disponíveis (status aguardando aprovação ou carrinho)
+async function carregarGruposRequisicaoDisponiveis() {
+  try {
+    const resp = await fetch('/api/compras/grupos-requisicao', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao carregar grupos');
+    const grupos = Array.isArray(data.grupos) ? data.grupos.filter(Boolean) : [];
+    window.gruposRequisicaoDisponiveis = grupos;
+  } catch (err) {
+    console.warn('[CATÁLOGO] Falha ao carregar grupos de pedido:', err.message || err);
+    window.gruposRequisicaoDisponiveis = [];
+  }
+}
+
+// Comentário: atualiza opções do grupo de pedido no catálogo
 function atualizarOpcoesNP() {
   const selectNP = document.getElementById('catalogoNPGlobal');
   if (!selectNP) return;
-  
-  // Busca todas as letras NP já usadas no carrinho
-  const npUsados = (window.carrinhoCompras || [])
-    .map(item => item.np)
-    .filter(np => np && np.length === 1)
-    .map(np => np.toUpperCase());
-  
-  // Descobre qual é a última letra usada
-  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  let ultimaLetraUsada = '';
-  
-  for (let i = alfabeto.length - 1; i >= 0; i--) {
-    if (npUsados.includes(alfabeto[i])) {
-      ultimaLetraUsada = alfabeto[i];
-      break;
-    }
-  }
-  
-  // Determina quais opções mostrar
-  let opcoesDisponiveis = [];
-  if (!ultimaLetraUsada || ultimaLetraUsada === '') {
-    // Nenhuma letra foi usada ainda, mostrar apenas A e B
-    opcoesDisponiveis = ['A', 'B'];
-  } else {
-    // Encontra o índice da última letra usada
-    const indiceUltima = alfabeto.indexOf(ultimaLetraUsada);
-    // Mostra todas as letras até a próxima após a última usada
-    opcoesDisponiveis = alfabeto.slice(0, Math.min(indiceUltima + 2, alfabeto.length));
-  }
-  
-  // Atualiza o select
+
+  const grupos = Array.isArray(window.gruposRequisicaoDisponiveis)
+    ? window.gruposRequisicaoDisponiveis
+    : [];
+
   const valorAtual = selectNP.value;
-  selectNP.innerHTML = opcoesDisponiveis
-    .map(letra => `<option value="${letra}">${letra}</option>`)
+  const opcoes = ['unica', ...grupos];
+
+  selectNP.innerHTML = opcoes
+    .map(valor => {
+      const label = valor === 'unica' ? 'Requisição unica' : valor;
+      return `<option value="${valor}">${label}</option>`;
+    })
     .join('');
-  
-  // Mantém valor selecionado se ainda estiver disponível
-  if (opcoesDisponiveis.includes(valorAtual)) {
+
+  if (opcoes.includes(valorAtual)) {
     selectNP.value = valorAtual;
+  } else {
+    selectNP.value = 'unica';
   }
 }
 
@@ -24793,37 +25181,48 @@ async function abrirModalAprovacaoRequisicao() {
     console.log('[Modal Aprovação] Total de itens:', itensAprovacao.length);
     console.log('[Modal Aprovação] Itens com anexos:', itensAprovacao.filter(i => i.anexos && i.anexos.length > 0).length);
     
-    // Agrupa por família (verifica múltiplos campos possíveis)
-    const itensPorFamilia = {};
+    // Agrupa por grupo_requisicao
+    const itensPorGrupoRequisicao = {};
     itensAprovacao.forEach(item => {
-      const familia = item.familia_produto || item.familia_nome || item.familia || 'Sem família';
-      if (!itensPorFamilia[familia]) {
-        itensPorFamilia[familia] = [];
+      const grupoRequisicao = item.grupo_requisicao || 'Sem grupo';
+      if (!itensPorGrupoRequisicao[grupoRequisicao]) {
+        itensPorGrupoRequisicao[grupoRequisicao] = [];
       }
-      itensPorFamilia[familia].push(item);
+      itensPorGrupoRequisicao[grupoRequisicao].push(item);
     });
     
-    // Monta HTML da tabela agrupada por família
+    // Monta HTML da tabela agrupada por grupo_requisicao
     let tabelaHtml = '';
-    Object.keys(itensPorFamilia).sort().forEach((familia, familiaIdx) => {
-      const itensFamilia = itensPorFamilia[familia];
-      const totalQtd = itensFamilia.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0);
+    Object.keys(itensPorGrupoRequisicao).sort().forEach((grupoRequisicao, grupoIdx) => {
+      const itensGrupo = itensPorGrupoRequisicao[grupoRequisicao];
+      const totalQtd = itensGrupo.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0);
+      const itensPermitidos = itensGrupo.filter(i => usuarioPodeAprovarDepartamento(i.departamento || ''));
+      const idsPermitidos = itensPermitidos.map(i => i.id).join(',');
+      const totalSemPermissao = itensGrupo.length - itensPermitidos.length;
+      const grupoRequisicaoEncoded = encodeURIComponent(grupoRequisicao);
       
       tabelaHtml += `
         <div style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
           <div style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
             <div style="display:flex;align-items:center;gap:10px;">
               <i class="fa-solid fa-layer-group" style="font-size:18px;"></i>
-              <span style="font-weight:700;font-size:15px;">${escapeHtml(familia)}</span>
+              <span style="font-weight:700;font-size:15px;">${escapeHtml(grupoRequisicao)}</span>
             </div>
             <div style="display:flex;gap:16px;">
+              ${idsPermitidos ? `
+              <button
+                type="button"
+                title="Comprar requisição ${escapeHtml(grupoRequisicao)}"
+                onclick="aprovarGrupoRequisicao('${idsPermitidos}', '${grupoRequisicaoEncoded}', ${totalSemPermissao})"
+                style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"
+              >
+                <i class="fa-solid fa-cart-shopping"></i>
+                <span>Comprar requisição ${escapeHtml(grupoRequisicao)}</span>
+              </button>
+              ` : '<span style="font-size:11px;opacity:0.8;">Sem permissão</span>'}
               <div style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;">
                 <span style="font-size:11px;opacity:0.9;">Itens:</span>
-                <span style="font-weight:700;margin-left:4px;">${itensFamilia.length}</span>
-              </div>
-              <div style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;">
-                <span style="font-size:11px;opacity:0.9;">Qtd Total:</span>
-                <span style="font-weight:700;margin-left:4px;">${totalQtd}</span>
+                <span style="font-weight:700;margin-left:4px;">${itensGrupo.length}</span>
               </div>
             </div>
           </div>
@@ -24844,7 +25243,7 @@ async function abrirModalAprovacaoRequisicao() {
                 </tr>
               </thead>
               <tbody>
-                ${itensFamilia.map((item, idx) => {
+                ${itensGrupo.map((item, idx) => {
                   const retornoCotacao = item.retorno_cotacao || 'N';
                   const retornoTexto = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? 'SIM' : 'NÃO';
                   const retornoCor = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? '#10b981' : '#ef4444';
@@ -24896,7 +25295,7 @@ async function abrirModalAprovacaoRequisicao() {
                             <i class="fa-solid fa-check"></i>
                           </button>
                           ` : '<span style="color:#9ca3af;font-size:11px;font-style:italic;">Sem permissão</span>'}
-                          <button onclick="retificarItemAprovacao(${item.id})" title="Solicitar retificação" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
+                          <button onclick="abrirModalReprovacao(${item.id})" title="Reprovar (voltar para carrinho)" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-rotate-left"></i>
                           </button>
                         </div>
@@ -24942,8 +25341,7 @@ async function abrirModalAprovacaoRequisicao() {
                 <div style="font-weight:700;color:#1e40af;margin-bottom:6px;font-size:14px;">Instruções</div>
                 <div style="color:#1e40af;font-size:13px;line-height:1.6;">
                   • Use o botão <i class="fa-solid fa-check" style="color:#10b981;"></i> para aprovar o item individualmente<br>
-                  • Use o botão <i class="fa-solid fa-rotate-left" style="color:#ef4444;"></i> para solicitar retificação do item<br>
-                  • Após revisar todos os itens, clique em "Aprovar Compra" para aprovar todos de uma vez
+                  • Use o botão <i class="fa-solid fa-rotate-left" style="color:#ef4444;"></i> para reprovar e voltar o item ao carrinho
                 </div>
               </div>
             </div>
@@ -24951,22 +25349,6 @@ async function abrirModalAprovacaoRequisicao() {
           
           ${tabelaHtml}
           
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px;background:white;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);margin-top:24px;">
-            <div style="display:flex;gap:24px;">
-              <div>
-                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Total de Itens</div>
-                <div style="font-size:24px;font-weight:700;color:#1f2937;">${itensAprovacao.length}</div>
-              </div>
-              <div>
-                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Quantidade Total</div>
-                <div style="font-size:24px;font-weight:700;color:#1f2937;">${itensAprovacao.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0)}</div>
-              </div>
-            </div>
-            <button onclick="aprovarTodasRequisicoes()" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,0.3);transition:all 0.2s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'" onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
-              <i class="fa-solid fa-check-circle" style="font-size:18px;"></i>
-              <span>Aprovar Compra</span>
-            </button>
-          </div>
         </div>
       </div>
     `;
@@ -25010,6 +25392,64 @@ async function aprovarItemRequisicao(itemId) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
     alert('Erro ao aprovar item: ' + err.message);
   }
+}
+
+// Função para aprovar todos os itens de um grupo (comprar requisição)
+async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', totalSemPermissao = 0) {
+  const grupoRequisicao = grupoRequisicaoEncoded ? decodeURIComponent(grupoRequisicaoEncoded) : 'Grupo';
+  const ids = (itemIdsCsv || '')
+    .split(',')
+    .map(id => String(id).trim())
+    .filter(id => id && id !== 'undefined' && id !== 'null');
+  
+  if (!ids.length) {
+    alert('Nenhum item com permissão para aprovação neste grupo.');
+    return;
+  }
+  
+  const avisoSemPermissao = totalSemPermissao > 0
+    ? `\n\n${totalSemPermissao} item(ns) sem permissão não serão aprovados.`
+    : '';
+  
+  const confirma = confirm(
+    `Deseja aprovar todos os itens do grupo "${grupoRequisicao}"?` +
+    '\nIsso criará requisições na Omie e moverá os itens para "Pedido de compra".' +
+    avisoSemPermissao
+  );
+  if (!confirma) return;
+  
+  try {
+    const resp = await fetch('/api/compras/aprovar-grupo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ids })
+    });
+    
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({}));
+      throw new Error(error.error || 'Falha ao aprovar itens do grupo');
+    }
+    
+    const resultado = await resp.json();
+    const itensRequisicao = resultado.itens_requisicao || [];
+    const itensCotacao = resultado.itens_aguardando_cotacao || [];
+    
+    let mensagem = `Aprovação do grupo "${grupoRequisicao}" concluída.`;
+    if (resultado.numero_pedido) {
+      mensagem += `\n\nRequisição criada: ${resultado.numero_pedido}`;
+    }
+    mensagem += `\n\nItens em requisição: ${itensRequisicao.length}`;
+    if (itensCotacao.length > 0) {
+      mensagem += `\nItens aguardando cotação: ${itensCotacao.length}`;
+    }
+    
+    alert(mensagem);
+  } catch (err) {
+    console.error('[Aprovar Grupo] Erro:', err);
+    alert('Erro ao aprovar itens do grupo: ' + err.message);
+  }
+  await abrirModalAprovacaoRequisicao();
 }
 
 // Atualiza a quantidade de um item direto no modal de aprovação
@@ -25377,10 +25817,93 @@ function fecharModalHistoricoItem() {
   if (modal) modal.remove();
 }
 
-// Função auxiliar para retificar um item (usa a mesma função do kanban de compras)
-function retificarItemAprovacao(itemId) {
-  // Chama a função existente de retificação passando null para o event
-  retificarItemCompra(itemId, null);
+// Abre modal para informar motivo da reprovação
+function abrirModalReprovacao(itemId) {
+  window.itemReprovacaoId = itemId;
+  const modalId = 'modalReprovacaoAprovacao';
+  let modal = document.getElementById(modalId);
+
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.display = 'none';
+    modal.style.setProperty('z-index', '10003', 'important');
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:600px;width:90%;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px;border-radius:8px 8px 0 0;">
+        <h3 style="margin:0;display:flex;align-items:center;gap:10px;font-size:16px;">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>Reprovar Item #${itemId}</span>
+        </h3>
+        <button class="modal-close" onclick="fecharModalReprovacao()" style="color:white;opacity:0.9;">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:20px;background:#f9fafb;">
+        <div style="font-size:13px;color:#374151;margin-bottom:10px;">
+          Informe o motivo da reprovação (obrigatório):
+        </div>
+        <textarea id="reprovacaoTexto" rows="4" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;resize:vertical;font-size:13px;" placeholder="Descreva o motivo..."></textarea>
+        <div id="reprovacaoError" style="color:#ef4444;font-size:12px;margin-top:8px;display:none;">Motivo é obrigatório.</div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
+          <button onclick="fecharModalReprovacao()" style="background:#e5e7eb;color:#374151;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Cancelar</button>
+          <button onclick="confirmarReprovacao()" style="background:#ef4444;color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;">Reprovar</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+}
+
+function fecharModalReprovacao() {
+  const modal = document.getElementById('modalReprovacaoAprovacao');
+  if (modal) modal.style.display = 'none';
+  const textarea = document.getElementById('reprovacaoTexto');
+  const errorDiv = document.getElementById('reprovacaoError');
+  if (textarea) textarea.value = '';
+  if (errorDiv) errorDiv.style.display = 'none';
+  window.itemReprovacaoId = null;
+}
+
+async function confirmarReprovacao() {
+  const textarea = document.getElementById('reprovacaoTexto');
+  const errorDiv = document.getElementById('reprovacaoError');
+  const itemId = window.itemReprovacaoId;
+
+  if (!textarea || !itemId) return;
+  const motivo = textarea.value.trim();
+  if (!motivo) {
+    if (errorDiv) errorDiv.style.display = 'block';
+    textarea.focus();
+    return;
+  }
+
+  await reprovarItemAprovacao(itemId, motivo);
+  fecharModalReprovacao();
+}
+
+// Reprova item e devolve para o carrinho
+async function reprovarItemAprovacao(itemId, motivo) {
+  try {
+    const usuario = window.__sessionUser?.username || window.__sessionUser?.id || '';
+    const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'carrinho', observacao_reprovacao: motivo, usuario_comentario: usuario })
+    });
+    if (!resp.ok) {
+      const error = await resp.json();
+      throw new Error(error.error || 'Erro ao reprovar item');
+    }
+    await abrirModalAprovacaoRequisicao();
+  } catch (err) {
+    console.error('[Aprovação] Erro ao reprovar item:', err);
+    alert('Erro ao reprovar item: ' + err.message);
+  }
 }
 
 // Função para exibir anexos de um item de aprovação
@@ -25575,7 +26098,10 @@ async function aprovarTodasRequisicoes() {
 window.abrirModalAprovacaoRequisicao = abrirModalAprovacaoRequisicao;
 window.aprovarItemRequisicao = aprovarItemRequisicao;
 window.adicionarItemAprovacao = adicionarItemAprovacao;
-window.retificarItemAprovacao = retificarItemAprovacao;
+window.abrirModalReprovacao = abrirModalReprovacao;
+window.fecharModalReprovacao = fecharModalReprovacao;
+window.confirmarReprovacao = confirmarReprovacao;
+window.reprovarItemAprovacao = reprovarItemAprovacao;
 window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
 window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 
