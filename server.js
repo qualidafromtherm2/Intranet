@@ -1423,7 +1423,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const { status, prazo_estipulado, quem_recebe, quantidade } = req.body || {};
+    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao } = req.body || {};
     
     const allowedStatus = [
       'aguardando aprovação',
@@ -1467,6 +1467,14 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
       }
       fields.push(`quantidade = $${idx++}`);
       values.push(quantidadeNum);
+    }
+
+    if (typeof grupo_requisicao !== 'undefined') {
+      const novoGrupo = (String(grupo_requisicao).trim() === '__novo__')
+        ? gerarNumeroGrupoRequisicao()
+        : (grupo_requisicao ? String(grupo_requisicao).trim() : null);
+      fields.push(`grupo_requisicao = $${idx++}`);
+      values.push(novoGrupo);
     }
     
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });

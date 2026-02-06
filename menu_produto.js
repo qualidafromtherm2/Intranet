@@ -12853,6 +12853,13 @@ if (typeof escapeHtml === 'undefined') {
   };
 }
 
+if (typeof linkifyText === 'undefined') {
+  window.linkifyText = function(text) {
+    const safeText = window.escapeHtml(String(text ?? ''));
+    return safeText.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  };
+}
+
 // Array global do carrinho
 window.carrinhoCompras = window.carrinhoCompras || [];
 
@@ -18873,6 +18880,7 @@ window.marcarComoCotadoModal = marcarComoCotadoModal;
 window.abrirModalNovaCotacao = abrirModalNovaCotacao;
 window.adicionarCotacaoComSpinner = adicionarCotacaoComSpinner;
 window.aprovarGrupoRequisicao = aprovarGrupoRequisicao;
+window.atualizarGrupoRequisicaoItem = atualizarGrupoRequisicaoItem;
 
 // Modal específico para "Kanban de compras" (visualização do usuário solicitante)
 async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemIds = null) {
@@ -19398,6 +19406,7 @@ async function abrirModalCotacaoKanban(itemId) {
           <div><strong>ID:</strong> ${item.id}</div>
           <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
           <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
+          <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
           <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
           <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
         </div>
@@ -25181,6 +25190,14 @@ async function abrirModalAprovacaoRequisicao() {
     console.log('[Modal Aprovação] Total de itens:', itensAprovacao.length);
     console.log('[Modal Aprovação] Itens com anexos:', itensAprovacao.filter(i => i.anexos && i.anexos.length > 0).length);
     
+    // Lista de grupos disponíveis (aguardando aprovação)
+    const gruposDisponiveis = Array.from(new Set(
+      itensAprovacao
+        .map(item => String(item.grupo_requisicao || '').trim())
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    window.gruposRequisicaoDisponiveisAprovacao = gruposDisponiveis;
+
     // Agrupa por grupo_requisicao
     const itensPorGrupoRequisicao = {};
     itensAprovacao.forEach(item => {
@@ -25238,6 +25255,7 @@ async function abrirModalAprovacaoRequisicao() {
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Retorno Cotação</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Departamento</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:150px;">Objetivo Compra</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:180px;">Número da requisição</th>
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:80px;">Anexos</th>
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Ações</th>
                 </tr>
@@ -25247,6 +25265,7 @@ async function abrirModalAprovacaoRequisicao() {
                   const retornoCotacao = item.retorno_cotacao || 'N';
                   const retornoTexto = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? 'SIM' : 'NÃO';
                   const retornoCor = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? '#10b981' : '#ef4444';
+                  const grupoAtual = item.grupo_requisicao || 'Sem grupo';
                   
                   // Processa anexos
                   let anexosHtml = '-';
@@ -25265,6 +25284,15 @@ async function abrirModalAprovacaoRequisicao() {
                     `;
                   }
                   
+                  const grupoAtualValor = String(item.grupo_requisicao || '').trim();
+                  const grupoAtualLabel = grupoAtualValor || 'Sem grupo';
+                  const gruposAlternativos = gruposDisponiveis.filter(g => g !== grupoAtualValor);
+                  const opcoesGrupoHtml = [
+                    `<option value="${escapeHtml(grupoAtualValor)}" selected>${escapeHtml(grupoAtualLabel)}</option>`,
+                    `<option value="__novo__">Novo grupo de requisição</option>`,
+                    ...gruposAlternativos.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`)
+                  ].join('');
+
                   return `
                     <tr style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
                       <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
@@ -25287,6 +25315,15 @@ async function abrirModalAprovacaoRequisicao() {
                       </td>
                       <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
                       <td style="padding:10px;color:#374151;font-size:11px;max-width:150px;">${escapeHtml((item.objetivo_compra || '-').substring(0, 50))}${(item.objetivo_compra || '').length > 50 ? '...' : ''}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">
+                        <select
+                          id="grupo-requisicao-select-${item.id}"
+                          data-valor-original="${escapeHtml(grupoAtualValor)}"
+                          onchange="atualizarGrupoRequisicaoItem(${item.id}, this)"
+                          style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;background:white;">
+                          ${opcoesGrupoHtml}
+                        </select>
+                      </td>
                       <td style="padding:10px;text-align:center;">${anexosHtml}</td>
                       <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;">
@@ -25392,6 +25429,95 @@ async function aprovarItemRequisicao(itemId) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
     alert('Erro ao aprovar item: ' + err.message);
   }
+}
+
+// Atualiza grupo_requisicao do item no modal de aprovação
+async function atualizarGrupoRequisicaoItem(itemId, selectEl) {
+  if (!selectEl) return;
+  const valorSelecionado = String(selectEl.value || '').trim();
+
+  selectEl.disabled = true;
+  const originalText = selectEl.options[selectEl.selectedIndex]?.text || '';
+
+  try {
+    const resp = await fetch(`/api/compras/solicitacoes/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ grupo_requisicao: valorSelecionado || null })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.success) {
+      throw new Error(data.error || 'Falha ao atualizar grupo de requisição');
+    }
+
+    const novoGrupo = String(data.solicitacao?.grupo_requisicao || valorSelecionado || '').trim();
+    const labelGrupo = novoGrupo || 'Sem grupo';
+
+    const span = document.getElementById(`grupo-requisicao-text-${itemId}`);
+    if (span) span.textContent = labelGrupo;
+
+    if (novoGrupo) {
+      atualizarOpcoesGrupoRequisicaoTodos(novoGrupo, itemId);
+    }
+
+    rebuildSelectGrupoRequisicao(selectEl, novoGrupo, itemId);
+
+    await abrirModalAprovacaoRequisicao();
+  } catch (err) {
+    console.error('[Aprovação] Erro ao atualizar grupo de requisição:', err);
+    alert('Erro ao atualizar grupo de requisição: ' + err.message);
+    selectEl.value = selectEl.getAttribute('data-valor-original') || '';
+  } finally {
+    selectEl.disabled = false;
+  }
+}
+
+function rebuildSelectGrupoRequisicao(selectEl, grupoAtual, itemId) {
+  if (!selectEl) return;
+  const valorAtual = String(grupoAtual || '').trim();
+  const labelAtual = valorAtual || 'Sem grupo';
+  const grupos = Array.isArray(window.gruposRequisicaoDisponiveisAprovacao)
+    ? window.gruposRequisicaoDisponiveisAprovacao
+    : [];
+  const gruposAlternativos = grupos.filter(g => g !== valorAtual);
+
+  selectEl.innerHTML = [
+    `<option value="${escapeHtml(valorAtual)}" selected>${escapeHtml(labelAtual)}</option>`,
+    `<option value="__novo__">Novo grupo de requisição</option>`,
+    ...gruposAlternativos.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`)
+  ].join('');
+
+  selectEl.setAttribute('data-valor-original', valorAtual);
+}
+
+function atualizarOpcoesGrupoRequisicaoTodos(novoGrupo, itemIdAtual) {
+  const grupo = String(novoGrupo || '').trim();
+  if (!grupo) return;
+
+  const lista = Array.isArray(window.gruposRequisicaoDisponiveisAprovacao)
+    ? window.gruposRequisicaoDisponiveisAprovacao
+    : [];
+  if (!lista.includes(grupo)) {
+    lista.push(grupo);
+    lista.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    window.gruposRequisicaoDisponiveisAprovacao = lista;
+  }
+
+  document.querySelectorAll('[id^="grupo-requisicao-select-"]').forEach(selectEl => {
+    const itemId = Number(String(selectEl.id).replace('grupo-requisicao-select-', ''));
+    if (itemId === Number(itemIdAtual)) return;
+    const valorAtual = String(selectEl.value || '').trim();
+    const labelAtual = valorAtual || 'Sem grupo';
+    const gruposAlternativos = window.gruposRequisicaoDisponiveisAprovacao.filter(g => g !== valorAtual);
+    selectEl.innerHTML = [
+      `<option value="${escapeHtml(valorAtual)}" selected>${escapeHtml(labelAtual)}</option>`,
+      `<option value="__novo__">Novo grupo de requisição</option>`,
+      ...gruposAlternativos.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`)
+    ].join('');
+    selectEl.setAttribute('data-valor-original', valorAtual);
+  });
 }
 
 // Função para aprovar todos os itens de um grupo (comprar requisição)
