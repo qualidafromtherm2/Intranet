@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS qualidade.pir (
     id              BIGSERIAL PRIMARY KEY,
     id_omie         BIGINT NOT NULL,
     codigo          TEXT NOT NULL,
-    item_verificado TEXT NOT NULL,
+    frequencia      INTEGER NOT NULL,
     o_que_verificar TEXT NOT NULL,
     foto_url        TEXT,
     criado_em       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -29,7 +29,7 @@ COMMENT ON TABLE qualidade.pir IS 'Tabela de Plano de Inspeção e Recebimento -
 COMMENT ON COLUMN qualidade.pir.id IS 'ID sequencial único';
 COMMENT ON COLUMN qualidade.pir.id_omie IS 'ID do produto no sistema Omie';
 COMMENT ON COLUMN qualidade.pir.codigo IS 'Código do produto';
-COMMENT ON COLUMN qualidade.pir.item_verificado IS 'Item que deve ser verificado';
+COMMENT ON COLUMN qualidade.pir.frequencia IS 'Frequência de inspeção (percentual)';
 COMMENT ON COLUMN qualidade.pir.o_que_verificar IS 'Descrição do que deve ser verificado';
 COMMENT ON COLUMN qualidade.pir.foto_url IS 'URL da foto armazenada no Supabase (pasta PIR)';
 COMMENT ON COLUMN qualidade.pir.criado_em IS 'Data e hora de criação do registro';

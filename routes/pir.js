@@ -9,7 +9,7 @@ router.get('/:id_omie', async (req, res) => {
     const { id_omie } = req.params;
     
     const result = await dbQuery(
-      `SELECT id, id_omie, codigo, item_verificado, o_que_verificar, 
+      `SELECT id, id_omie, codigo, frequencia, o_que_verificar, 
               foto_url, criado_em, atualizado_em
        FROM qualidade.pir
        WHERE id_omie = $1
@@ -30,7 +30,7 @@ router.get('/item/:id', async (req, res) => {
     const { id } = req.params;
     
     const result = await dbQuery(
-      `SELECT id, id_omie, codigo, item_verificado, o_que_verificar, 
+      `SELECT id, id_omie, codigo, frequencia, o_que_verificar, 
               foto_url, criado_em, atualizado_em
        FROM qualidade.pir
        WHERE id = $1`,
@@ -51,18 +51,22 @@ router.get('/item/:id', async (req, res) => {
 // Criar novo item PIR
 router.post('/', async (req, res) => {
   try {
-    const { id_omie, codigo, item_verificado, o_que_verificar, foto_url } = req.body;
+    const { id_omie, codigo, frequencia, o_que_verificar, foto_url } = req.body;
+    const frequenciaNum = Number(frequencia);
     
-    if (!id_omie || !codigo || !item_verificado || !o_que_verificar) {
-      return res.status(400).json({ error: 'Campos obrigatórios: id_omie, codigo, item_verificado, o_que_verificar' });
+    if (!id_omie || !codigo || !frequenciaNum || !o_que_verificar) {
+      return res.status(400).json({ error: 'Campos obrigatórios: id_omie, codigo, frequencia, o_que_verificar' });
+    }
+    if (![10, 50, 100].includes(frequenciaNum)) {
+      return res.status(400).json({ error: 'Frequência inválida. Use 10, 50 ou 100.' });
     }
     
     const result = await dbQuery(
       `INSERT INTO qualidade.pir 
-       (id_omie, codigo, item_verificado, o_que_verificar, foto_url)
+       (id_omie, codigo, frequencia, o_que_verificar, foto_url)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [id_omie, codigo, item_verificado, o_que_verificar, foto_url || null]
+      [id_omie, codigo, frequenciaNum, o_que_verificar, foto_url || null]
     );
     
     res.status(201).json(result.rows[0]);
@@ -76,21 +80,25 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { item_verificado, o_que_verificar, foto_url } = req.body;
+    const { frequencia, o_que_verificar, foto_url } = req.body;
+    const frequenciaNum = Number(frequencia);
     
-    if (!item_verificado || !o_que_verificar) {
-      return res.status(400).json({ error: 'Campos obrigatórios: item_verificado, o_que_verificar' });
+    if (!frequenciaNum || !o_que_verificar) {
+      return res.status(400).json({ error: 'Campos obrigatórios: frequencia, o_que_verificar' });
+    }
+    if (![10, 50, 100].includes(frequenciaNum)) {
+      return res.status(400).json({ error: 'Frequência inválida. Use 10, 50 ou 100.' });
     }
     
     const result = await dbQuery(
-      `UPDATE qualidade.pir
-       SET item_verificado = $1,
+        `UPDATE qualidade.pir
+         SET frequencia = $1,
            o_que_verificar = $2,
            foto_url = $3,
            atualizado_em = NOW()
-       WHERE id = $4
-       RETURNING *`,
-      [item_verificado, o_que_verificar, foto_url || null, id]
+         WHERE id = $4
+         RETURNING *`,
+        [frequenciaNum, o_que_verificar, foto_url || null, id]
     );
     
     if (result.rows.length === 0) {
