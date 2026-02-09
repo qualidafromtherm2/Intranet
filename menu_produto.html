@@ -99,7 +99,7 @@
         </button>
 
         <!-- Container do menu lateral (inicialmente expandido) -->
-        <div class="sidebar-content" id="sidebarContent" style="overflow-y: scroll !important; height: 600px !important; display: block !important;">
+        <div class="sidebar-content collapsed" id="sidebarContent" style="overflow-y: scroll !important; height: 600px !important;">
 
 <div class="side-wrapper">
   <div class="side-title"
@@ -252,6 +252,28 @@
        data-nav-selector="#menu-envio-mercadoria">
       <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
       Envio de mercadoria
+    </a>
+  </div>
+</div>
+
+<!-- Nova categoria: Qualidade (antes do SAC) -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Qualidade">Qualidade</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-qualidade-fabrica"
+       class="menu-link"
+       data-nav-key="side:qualidade:fabrica"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Qualidade fabrica"
+       data-nav-selector="#menu-qualidade-fabrica">
+      <i class="fa-solid fa-clipboard-check" style="margin-right:8px;"></i>
+      Qualidade fabrica
     </a>
   </div>
 </div>
@@ -1408,6 +1430,104 @@
             </div>
           </div>
         </div>
+
+          <!-- Painel Qualidade Fábrica: atalhos principais -->
+          <div id="qualidadeFabricaPane" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section" style="margin-top:0;">
+                <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-clipboard-check" style="color:#14b8a6;"></i>
+                    Qualidade fábrica
+                  </div>
+                  <div style="color:var(--inactive-color);font-size:13px;">Ações rápidas de qualidade.</div>
+                </div>
+
+                <!-- Botões principais da Qualidade -->
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
+                  <button id="qualidadeCriarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>Criar</span>
+                  </button>
+                  <button id="qualidadeRelatorioBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;">
+                    <i class="fa-solid fa-file-lines"></i>
+                    <span>Relatório</span>
+                  </button>
+                </div>
+
+                <!-- Formulário de Inspeção (Qualidade) -->
+                <div id="qualidadeInspecaoForm" style="display:block;margin-top:16px;">
+                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                      <i class="fa-solid fa-magnifying-glass" style="color:#22c55e;"></i>
+                      <div style="font-weight:600;">Registro de inspeção</div>
+                    </div>
+
+                    <div class="qualidade-inspecao-top" style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
+                      <div class="form-field">
+                        <label>Imagem do produto</label>
+                        <div id="qualidadeImagemProdutoPlaceholder" class="qualidade-imagem-box" style="display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;border:1px dashed var(--border-color);border-radius:10px;color:var(--inactive-color);min-height:200px;">
+                          <i class="fa-solid fa-image"></i>
+                          <span>Imagem do produto (definição futura)</span>
+                        </div>
+                      </div>
+
+                      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                        <div class="form-field" style="position:relative;">
+                          <label for="qualidadeProdutoBusca">Pesquisar produto</label>
+                          <input id="qualidadeProdutoBusca" type="text" placeholder="Digite código ou descrição" autocomplete="off" style="width:100%;" />
+                          <ul id="qualidadeProdutoSugestoes" style="display:none;position:absolute;z-index:9999;left:0;right:0;top:100%;margin-top:6px;background:#0f172a;border:1px solid #1f2937;border-radius:10px;height:280px;max-height:280px;overflow-y:auto;padding:6px 0;box-shadow:0 12px 30px rgba(0,0,0,0.45);color:#f9fafb;list-style:none;margin-left:0;margin-right:0;display:block;justify-content:flex-start;cursor:default;">
+                          </ul>
+                        </div>
+
+                        <div class="form-field">
+                          <label for="qualidadeCodProduto">Cod_produto</label>
+                          <input id="qualidadeCodProduto" type="text" placeholder="Informe o código do produto" style="width:100%;" />
+                        </div>
+
+                        <div class="form-field">
+                          <label for="qualidadeDescricaoProduto">Descrição</label>
+                          <input id="qualidadeDescricaoProduto" type="text" placeholder="Descrição do produto" style="width:100%;" />
+                        </div>
+
+                        <input id="qualidadeFrequencia" type="hidden" />
+                        <input id="qualidadeCodigoProdutoReal" type="hidden" />
+
+                        <div class="form-field" style="position:relative;">
+                          <label for="qualidadeNfe">NFe</label>
+                          <input id="qualidadeNfe" class="qualidade-nfe-input" type="text" placeholder="Número da NFe" style="width:100%;" />
+                          <ul id="qualidadeNfeLista" style="display:none;position:absolute;z-index:9999;left:0;right:0;top:100%;margin-top:6px;background:#0f172a;border:1px solid #1f2937;border-radius:10px;max-height:220px;overflow-y:auto;padding:6px 0;box-shadow:0 12px 30px rgba(0,0,0,0.45);color:#f9fafb;list-style:none;margin-left:0;margin-right:0;display:block;justify-content:flex-start;cursor:default;">
+                          </ul>
+                        </div>
+
+                        <div class="form-field">
+                          <label for="qualidadeQuantidadeOk">Quantidade ok</label>
+                          <input id="qualidadeQuantidadeOk" type="number" min="0" placeholder="0" style="width:100%;" />
+                        </div>
+                        <div class="form-field">
+                          <label for="qualidadeQuantidadeNok">Quantidade nok</label>
+                          <input id="qualidadeQuantidadeNok" type="number" min="0" placeholder="0" style="width:100%;" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="form-field" style="grid-column:1 / -1;margin-top:12px;">
+                      <label>Carretel de imagem</label>
+                      <div id="qualidadeCarretelImagemPlaceholder" style="display:flex;align-items:center;gap:10px;padding:12px;border:1px dashed var(--border-color);border-radius:10px;color:var(--inactive-color);">
+                        <i class="fa-solid fa-film"></i>
+                        <span>Carretel de imagens (definição futura)</span>
+                      </div>
+                    </div>
+
+                    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+                      <button id="qualidadeInspecaoCancelarBtn" class="content-button" type="button" style="background:#6b7280;color:white;">Cancelar</button>
+                      <button id="qualidadeInspecaoRegistrarBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">Registrar</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
         <!-- Painel SAC: Solicitação de envio (apenas anexos por enquanto) -->
         <div id="sacSolicitacaoEnvioPane" class="tab-pane" style="display:none;">
@@ -2892,7 +3012,7 @@
                     <thead>
                       <tr style="background-color: var(--button-bg); color: var(--button-color);">
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Código</th>
-                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Item Verificado</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Frequência</th>
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">O que Verificar</th>
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Local de Verificação</th>
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Prioridade</th>
@@ -2931,7 +3051,7 @@
                     <thead>
                       <tr style="background-color: var(--button-bg); color: var(--button-color);">
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Código</th>
-                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Item Verificado</th>
+                        <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">Frequência</th>
                         <th style="padding: 12px; text-align: left; border: 1px solid var(--border-color);">O que Verificar</th>
                         <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Foto</th>
                         <th style="padding: 12px; text-align: center; border: 1px solid var(--border-color); width: 100px;">Ações</th>

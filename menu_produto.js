@@ -4924,6 +4924,543 @@ document.getElementById('menu-recebimento')?.addEventListener('click', async e =
   // await loadComprasRecebimento(); // COMENTADO - usando nova implementação inline no HTML
 });
 
+// QUALIDADE: abre painel de Qualidade Fábrica
+const qualidadeFabricaMenuLink = document.getElementById('menu-qualidade-fabrica');
+if (qualidadeFabricaMenuLink) {
+  qualidadeFabricaMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    qualidadeFabricaMenuLink.classList.add('is-active');
+    showMainTab('qualidadeFabricaPane');
+  });
+}
+
+// QUALIDADE: formulário de inspeção (UI inicial)
+const qualidadeInspecaoBtn = document.getElementById('qualidadeInspecaoBtn');
+const qualidadeCriarBtn = document.getElementById('qualidadeCriarBtn');
+const qualidadeRelatorioBtn = document.getElementById('qualidadeRelatorioBtn');
+const qualidadeInspecaoForm = document.getElementById('qualidadeInspecaoForm');
+const qualidadeInspecaoRegistrarBtn = document.getElementById('qualidadeInspecaoRegistrarBtn');
+const qualidadeInspecaoCancelarBtn = document.getElementById('qualidadeInspecaoCancelarBtn');
+const qualidadeProdutoBusca = document.getElementById('qualidadeProdutoBusca');
+const qualidadeProdutoSugestoes = document.getElementById('qualidadeProdutoSugestoes');
+const qualidadeCodProduto = document.getElementById('qualidadeCodProduto');
+const qualidadeDescricaoProduto = document.getElementById('qualidadeDescricaoProduto');
+const qualidadeFrequencia = document.getElementById('qualidadeFrequencia');
+const qualidadeCodigoProdutoReal = document.getElementById('qualidadeCodigoProdutoReal');
+const qualidadePirListaConteudo = document.getElementById('qualidadePirListaConteudo');
+const qualidadeImagemProdutoPlaceholder = document.getElementById('qualidadeImagemProdutoPlaceholder');
+const qualidadeCarretelImagemPlaceholder = document.getElementById('qualidadeCarretelImagemPlaceholder');
+const qualidadeNfe = document.getElementById('qualidadeNfe');
+const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
+const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
+const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
+
+function renderQualidadePirLista(itens = []) {
+  if (!qualidadePirListaConteudo) return;
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+  const formatarFrequencia = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    return raw.includes('%') ? raw : `${raw}%`;
+  };
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) {
+    qualidadePirListaConteudo.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Nenhum plano de inspeção encontrado.</div>';
+    if (qualidadeFrequencia) qualidadeFrequencia.value = '';
+    return;
+  }
+  qualidadePirListaConteudo.innerHTML = lista.map((item) => {
+    const freq = item?.frequencia ?? '';
+    const oQue = item?.o_que_verificar ?? '';
+    return `
+      <div style="display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:start;">
+        <input type="text" value="${escapeHtml(formatarFrequencia(freq))}" readonly style="width:100%;" />
+        <textarea rows="2" readonly style="width:100%;resize:vertical;">${escapeHtml(oQue)}</textarea>
+      </div>
+    `;
+  }).join('');
+  if (qualidadeFrequencia) {
+    const primeiro = lista[0]?.frequencia;
+    qualidadeFrequencia.value = primeiro == null ? '' : String(primeiro);
+  }
+}
+
+function renderQualidadeImagemProduto(url) {
+  if (!qualidadeImagemProdutoPlaceholder) return;
+  const imageUrl = String(url || '').trim();
+  if (!imageUrl) {
+    qualidadeImagemProdutoPlaceholder.innerHTML = '<i class="fa-solid fa-image"></i><span>Imagem do produto não encontrada</span>';
+    return;
+  }
+  qualidadeImagemProdutoPlaceholder.innerHTML = `
+    <img src="${imageUrl}" alt="Imagem do produto" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;" />
+  `;
+}
+
+// Qualidade: exibe estado de carregamento no carretel de imagens
+function renderQualidadeCarretelLoading() {
+  if (!qualidadeCarretelImagemPlaceholder) return;
+  qualidadeCarretelImagemPlaceholder.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:12px;color:var(--inactive-color);">
+      <i class="fa-solid fa-spinner fa-spin"></i>
+      <span>Carregando imagens...</span>
+    </div>
+  `;
+}
+
+// Qualidade: popula listbox de NFe no mesmo formato do Pesquisar produto
+function renderQualidadeNfeList(itens = []) {
+  if (!qualidadeNfeLista || !qualidadeNfe) return;
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) {
+    qualidadeNfeLista.innerHTML = '<li style="padding:6px 10px;color:#e5e7eb;">Nenhum resultado</li>';
+    qualidadeNfeLista.style.display = 'block';
+    return;
+  }
+  qualidadeNfeLista.innerHTML = lista.map((nfe) => {
+    const valor = String(nfe || '').trim();
+    if (!valor) return '';
+    return `
+      <li data-nfe="${valor}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #1f2937;line-height:1.2;color:#f9fafb;background:#0f172a;height:auto;display:block;align-items:initial;font-size:13px;">
+        <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${valor}</div>
+        <div style="font-size:12px;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">NFe localizada</div>
+      </li>
+    `;
+  }).join('');
+  qualidadeNfeLista.style.display = 'block';
+
+  qualidadeNfeLista.querySelectorAll('li').forEach((li) => {
+    li.addEventListener('mousedown', () => {
+      qualidadeNfe.value = li.dataset.nfe || '';
+      qualidadeNfeLista.style.display = 'none';
+    });
+    li.addEventListener('mouseenter', () => { li.style.background = '#1f2937'; });
+    li.addEventListener('mouseleave', () => { li.style.background = '#0f172a'; });
+  });
+}
+
+// Qualidade: busca as 3 NFe mais recentes para o produto
+async function carregarQualidadeNfeList(codigoProduto) {
+  if (!codigoProduto) {
+    renderQualidadeNfeList([]);
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/qualidade/nfe-por-produto/${encodeURIComponent(codigoProduto)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const itens = Array.isArray(data?.itens) ? data.itens : [];
+    renderQualidadeNfeList(itens);
+  } catch (err) {
+    console.error('[QUALIDADE] falha ao carregar NFe', err);
+    renderQualidadeNfeList([]);
+  }
+}
+
+// Qualidade: fecha listbox de NFe ao clicar fora
+document.addEventListener('click', (e) => {
+  if (!qualidadeNfeLista || !qualidadeNfe) return;
+  if (qualidadeNfeLista.contains(e.target) || e.target === qualidadeNfe) return;
+  qualidadeNfeLista.style.display = 'none';
+});
+
+// Qualidade: abre imagem do PIR em tela cheia
+function openQualidadePirModal({ url, titulo, frequencia, oQue }) {
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.background = 'rgba(0,0,0,0.85)';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.style.zIndex = '9999';
+
+  const wrap = document.createElement('div');
+  wrap.style.maxWidth = '92vw';
+  wrap.style.maxHeight = '92vh';
+  wrap.style.display = 'flex';
+  wrap.style.flexDirection = 'column';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '12px';
+
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = titulo || 'Imagem PIR';
+  img.style.maxWidth = '92vw';
+  img.style.maxHeight = '80vh';
+  img.style.objectFit = 'contain';
+  img.style.borderRadius = '10px';
+  img.style.background = '#000';
+
+  const caption = document.createElement('div');
+  caption.style.color = '#e5e7eb';
+  caption.style.textAlign = 'center';
+  caption.style.fontSize = '14px';
+  caption.innerHTML = `
+    <div style="font-weight:600;">${titulo || 'Imagem PIR'}</div>
+    <div style="color:#cbd5f5;">Frequência: ${frequencia || '—'} | O que verificar: ${oQue || '—'}</div>
+  `;
+
+  wrap.appendChild(img);
+  wrap.appendChild(caption);
+  overlay.appendChild(wrap);
+  overlay.addEventListener('click', () => document.body.removeChild(overlay));
+  document.body.appendChild(overlay);
+}
+
+function renderQualidadeCarretelPir(itens = []) {
+  // Qualidade: carretel no mesmo layout do módulo de fotos do produto
+  if (!qualidadeCarretelImagemPlaceholder) return;
+  const lista = Array.isArray(itens) ? itens : [];
+  const vistos = new Set();
+  const itensComFoto = lista
+    .map((item, index) => ({
+      index,
+      foto_url: String(item?.foto_url || '').trim(),
+      frequencia: item?.frequencia ?? '',
+      o_que_verificar: item?.o_que_verificar ?? ''
+    }))
+    .filter(item => item.foto_url)
+    .filter((item) => {
+      if (vistos.has(item.foto_url)) return false;
+      vistos.add(item.foto_url);
+      return true;
+    });
+
+  if (!itensComFoto.length) {
+    qualidadeCarretelImagemPlaceholder.innerHTML = '<i class="fa-solid fa-film"></i><span>Sem imagens no carretel</span>';
+    return;
+  }
+
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+  const formatarFrequencia = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    return raw.includes('%') ? raw : `${raw}%`;
+  };
+
+  qualidadeCarretelImagemPlaceholder.innerHTML = `
+    <div class="options" data-qualidade-carretel="1">
+      ${itensComFoto.map((item, i) => {
+        const titulo = `Foto PIR ${i + 1}`;
+        const freq = formatarFrequencia(item.frequencia) || '—';
+        const oQue = String(item.o_que_verificar || '').trim() || 'Sem descrição';
+        return `
+          <div class="option${i === 0 ? ' active' : ''}" style="--optionBackground:url(${escapeHtml(item.foto_url)})" data-index="${i}">
+            <div class="shadow"></div>
+            <div class="label">
+              <div class="info">
+                <div class="main">${escapeHtml(titulo)}</div>
+                <div class="sub">Frequência: ${escapeHtml(freq)}<br>O que verificar: ${escapeHtml(oQue)}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  const container = qualidadeCarretelImagemPlaceholder.querySelector('.options');
+  if (!container) return;
+  container.querySelectorAll('.option').forEach((opt) => {
+    opt.addEventListener('click', () => {
+      container.querySelectorAll('.option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      const idx = Number(opt.dataset.index || 0);
+      const item = itensComFoto[idx];
+      if (item?.foto_url) {
+        const freq = formatarFrequencia(item.frequencia) || '—';
+        const oQue = String(item.o_que_verificar || '').trim() || '—';
+        openQualidadePirModal({
+          url: item.foto_url,
+          titulo: `Foto PIR ${idx + 1}`,
+          frequencia: freq,
+          oQue
+        });
+      }
+    });
+  });
+}
+
+async function carregarQualidadeImagemProduto(codigoProduto) {
+  if (!codigoProduto) {
+    renderQualidadeImagemProduto('');
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/produtos/imagem/${encodeURIComponent(codigoProduto)}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderQualidadeImagemProduto(data?.url_imagem || '');
+  } catch (err) {
+    console.error('[QUALIDADE] falha ao carregar imagem do produto', err);
+    renderQualidadeImagemProduto('');
+  }
+}
+
+async function carregarQualidadePirItens(idOmie) {
+  if (!idOmie) {
+    renderQualidadePirLista([]);
+    renderQualidadeCarretelPir([]);
+    return;
+  }
+  renderQualidadeCarretelLoading();
+  try {
+    const resp = await fetch(`/api/pir/${encodeURIComponent(idOmie)}`, { credentials: 'include' });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderQualidadePirLista(data);
+    renderQualidadeCarretelPir(data);
+  } catch (err) {
+    console.error('[QUALIDADE] falha ao carregar PIR', err);
+    if (qualidadeFrequencia) qualidadeFrequencia.value = '';
+    renderQualidadeCarretelPir([]);
+  }
+}
+
+function abrirFormularioInspecaoQualidade() {
+  if (!qualidadeInspecaoForm) return;
+  qualidadeInspecaoForm.style.display = 'block';
+}
+
+function fecharFormularioInspecaoQualidade() {
+  if (!qualidadeInspecaoForm) return;
+  qualidadeInspecaoForm.style.display = 'block';
+}
+
+// Qualidade: limpa campos do registro de inspeção
+function resetFormularioInspecaoQualidade() {
+  if (qualidadeProdutoBusca) qualidadeProdutoBusca.value = '';
+  if (qualidadeCodProduto) qualidadeCodProduto.value = '';
+  if (qualidadeDescricaoProduto) qualidadeDescricaoProduto.value = '';
+  if (qualidadeNfe) qualidadeNfe.value = '';
+  if (qualidadeQuantidadeOk) qualidadeQuantidadeOk.value = '';
+  if (qualidadeQuantidadeNok) qualidadeQuantidadeNok.value = '';
+  if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = '';
+  if (qualidadeFrequencia) qualidadeFrequencia.value = '';
+  renderQualidadeImagemProduto('');
+  renderQualidadeCarretelPir([]);
+  renderQualidadeNfeList([]);
+  if (qualidadeNfeLista) qualidadeNfeLista.style.display = 'none';
+}
+
+qualidadeInspecaoCancelarBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  resetFormularioInspecaoQualidade();
+});
+
+qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  // Qualidade: registra inspeção na tabela qualidade.produtos_liberado
+  const frequenciaRaw = qualidadeFrequencia?.value?.trim() || '';
+  const frequenciaFormatada = frequenciaRaw && !frequenciaRaw.includes('%') ? `${frequenciaRaw}%` : frequenciaRaw;
+  const quantidadeOkRaw = qualidadeQuantidadeOk?.value;
+  const payload = {
+    cod_produto: qualidadeCodProduto?.value?.trim() || '',
+    nfe: qualidadeNfe?.value?.trim() || '',
+    frequencia: frequenciaFormatada,
+    quantidade_ok: Number(qualidadeQuantidadeOk?.value || 0),
+    quantidade_nok: qualidadeQuantidadeNok?.value === '' ? null : Number(qualidadeQuantidadeNok?.value || 0)
+  };
+
+  if (!payload.cod_produto) {
+    alert('Informe o Cod_produto.');
+    return;
+  }
+  if (!payload.nfe) {
+    alert('NFe é obrigatória.');
+    return;
+  }
+  if (quantidadeOkRaw === '' || Number.isNaN(payload.quantidade_ok)) {
+    alert('Quantidade ok é obrigatória.');
+    return;
+  }
+
+  qualidadeInspecaoRegistrarBtn.disabled = true;
+  qualidadeInspecaoRegistrarBtn.textContent = 'Registrando...';
+  fetch('/api/qualidade/produtos-liberado', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload)
+  })
+    .then(async (resp) => {
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || 'Falha ao registrar inspeção');
+      }
+      alert('Registro de inspeção salvo com sucesso.');
+      resetFormularioInspecaoQualidade();
+    })
+    .catch((err) => {
+      console.error('[QUALIDADE] erro ao registrar inspeção', err);
+      alert(err?.message || 'Erro ao registrar inspeção.');
+    })
+    .finally(() => {
+      qualidadeInspecaoRegistrarBtn.disabled = false;
+      qualidadeInspecaoRegistrarBtn.textContent = 'Registrar';
+    });
+});
+
+// Qualidade: botão Criar abre PIR do produto seguindo o fluxo padrão do produto
+qualidadeCriarBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const codigo = qualidadeCodProduto?.value?.trim() || '';
+  if (!codigo) {
+    alert('Informe o Cod_produto para abrir o PIR.');
+    return;
+  }
+
+  const abrirTabPir = () => {
+    const pirCard = document.querySelector('#produtoTabs .main-header .nav-card[data-target="listaPIR"]');
+    if (pirCard) {
+      pirCard.click();
+      return true;
+    }
+    return false;
+  };
+
+  try {
+    if (typeof window.openProdutoPorCodigo === 'function') {
+      await window.openProdutoPorCodigo(codigo);
+    } else if (typeof window.loadDadosProduto === 'function') {
+      await window.loadDadosProduto(codigo);
+    }
+
+    if (typeof window.setPCPProdutoCodigo === 'function') {
+      window.setPCPProdutoCodigo(codigo);
+    }
+
+    if (!abrirTabPir()) {
+      setTimeout(abrirTabPir, 200);
+    }
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao abrir PIR', err);
+    alert('Erro ao abrir PIR do produto.');
+  }
+});
+
+// Qualidade: botão Relatório exporta XLSX da tabela qualidade.produtos_liberado
+qualidadeRelatorioBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const btn = qualidadeRelatorioBtn;
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando...</span>';
+    }
+    const resp = await fetch('/api/qualidade/produtos-liberado', { credentials: 'include' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const rows = Array.isArray(data?.itens) ? data.itens : [];
+    if (!rows.length) {
+      alert('Nenhum registro encontrado.');
+      return;
+    }
+    if (typeof XLSX === 'undefined') {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Falha ao carregar biblioteca XLSX'));
+        document.head.appendChild(script);
+      });
+    }
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'produtos_liberado');
+    XLSX.writeFile(workbook, 'qualidade_produtos_liberado.xlsx');
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao exportar relatório', err);
+    alert('Erro ao exportar relatório.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-file-lines"></i><span>Relatório</span>';
+    }
+  }
+});
+
+// QUALIDADE: autocomplete de produto (codigo/descricao) usando /api/produtos/busca
+function initQualidadeProdutoAutocomplete() {
+  if (!qualidadeProdutoBusca || !qualidadeProdutoSugestoes) return;
+
+  let searchTimeout = null;
+
+  const limparLista = () => {
+    qualidadeProdutoSugestoes.innerHTML = '';
+    qualidadeProdutoSugestoes.style.display = 'none';
+  };
+
+  const renderLista = (itens) => {
+    if (!itens.length) {
+      qualidadeProdutoSugestoes.innerHTML = '<li style="padding:6px 10px;color:#e5e7eb;">Nenhum resultado</li>';
+      qualidadeProdutoSugestoes.style.display = 'block';
+      return;
+    }
+
+    qualidadeProdutoSugestoes.innerHTML = itens.map(it => `
+      <li data-codigo="${it.codigo}" data-descricao="${(it.descricao || '').replace(/"/g, '&quot;')}" data-codigo-produto="${it.codigo_produto || ''}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #1f2937;line-height:1.2;color:#f9fafb;background:#0f172a;height:auto;display:block;align-items:initial;font-size:13px;">
+        <div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.codigo}</div>
+        <div style="font-size:12px;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.descricao || ''}</div>
+      </li>
+    `).join('');
+    qualidadeProdutoSugestoes.style.display = 'block';
+
+    qualidadeProdutoSugestoes.querySelectorAll('li').forEach(li => {
+      li.addEventListener('mousedown', () => {
+        if (qualidadeCodProduto) qualidadeCodProduto.value = li.dataset.codigo || '';
+        if (qualidadeDescricaoProduto) qualidadeDescricaoProduto.value = li.dataset.descricao || '';
+        if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = li.dataset.codigoProduto || '';
+        carregarQualidadePirItens(li.dataset.codigoProduto || '');
+        carregarQualidadeImagemProduto(li.dataset.codigoProduto || '');
+        carregarQualidadeNfeList(li.dataset.codigoProduto || '');
+        limparLista();
+      });
+      li.addEventListener('mouseenter', () => { li.style.background = '#1f2937'; });
+      li.addEventListener('mouseleave', () => { li.style.background = '#0f172a'; });
+    });
+  };
+
+  const buscar = () => {
+    const term = qualidadeProdutoBusca.value.trim();
+    if (searchTimeout) clearTimeout(searchTimeout);
+    if (term.length < 3) {
+      limparLista();
+      return;
+    }
+    searchTimeout = setTimeout(async () => {
+      const itens = await buscarSugestoesCompras(term);
+      renderLista(itens);
+    }, 220);
+  };
+
+  qualidadeProdutoBusca.addEventListener('input', buscar);
+  qualidadeProdutoBusca.addEventListener('focus', buscar);
+  qualidadeProdutoBusca.addEventListener('click', buscar);
+
+  document.addEventListener('click', (e) => {
+    if (!qualidadeProdutoSugestoes.contains(e.target) && e.target !== qualidadeProdutoBusca) {
+      limparLista();
+    }
+  });
+}
+
+initQualidadeProdutoAutocomplete();
+
 // SAC: abre painel de solicitação de envio e permite anexar até 2 arquivos
 const sacMenuLink = document.getElementById('menu-sac-solicitacao-envio');
 if (sacMenuLink) {
@@ -29923,7 +30460,7 @@ function renderizarTabelaPIR(itens) {
     
     tr.innerHTML = `
       <td style="padding: 10px; border: 1px solid var(--border-color);">${item.codigo || ''}</td>
-      <td style="padding: 10px; border: 1px solid var(--border-color);">${item.item_verificado || ''}</td>
+      <td style="padding: 10px; border: 1px solid var(--border-color);">${item.frequencia != null ? `${item.frequencia}%` : ''}</td>
       <td style="padding: 10px; border: 1px solid var(--border-color);">${item.o_que_verificar || ''}</td>
       <td style="padding: 10px; border: 1px solid var(--border-color); text-align: center;">${fotoHtml}</td>
       <td style="padding: 10px; border: 1px solid var(--border-color); text-align: center;">
@@ -29982,7 +30519,12 @@ async function adicionarNovaLinhaPIR() {
   tr.innerHTML = `
     <td style="padding: 10px; border: 1px solid var(--border-color);">${codigo}</td>
     <td style="padding: 10px; border: 1px solid var(--border-color);">
-      <input type="text" id="pirItemVerificado" placeholder="Item verificado" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);" />
+      <select id="pirFrequencia" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);">
+        <option value="">Selecione...</option>
+        <option value="10">10%</option>
+        <option value="50">50%</option>
+        <option value="100">100%</option>
+      </select>
     </td>
     <td style="padding: 10px; border: 1px solid var(--border-color);">
       <input type="text" id="pirOQueVerificar" placeholder="O que verificar" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);" />
@@ -30031,15 +30573,15 @@ async function adicionarNovaLinhaPIR() {
     }
   });
   
-  document.getElementById('pirItemVerificado').focus();
+  document.getElementById('pirFrequencia').focus();
 }
 
 // Salvar novo item PIR
 async function salvarNovoItemPIR() {
-  const itemVerificado = document.getElementById('pirItemVerificado').value.trim();
+  const frequencia = Number(document.getElementById('pirFrequencia').value);
   const oQueVerificar = document.getElementById('pirOQueVerificar').value.trim();
   
-  if (!itemVerificado || !oQueVerificar) {
+  if (!frequencia || !oQueVerificar) {
     alert('Preencha todos os campos obrigatórios');
     return;
   }
@@ -30051,7 +30593,7 @@ async function salvarNovoItemPIR() {
     const dados = {
       id_omie,
       codigo,
-      item_verificado: itemVerificado,
+      frequencia: frequencia,
       o_que_verificar: oQueVerificar
     };
     
@@ -30109,7 +30651,12 @@ async function editarItemPIR(id) {
         tr.innerHTML = `
           <td style="padding: 10px; border: 1px solid var(--border-color);">${item.codigo}</td>
           <td style="padding: 10px; border: 1px solid var(--border-color);">
-            <input type="text" id="editPirItemVerificado" value="${item.item_verificado || ''}" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);" />
+            <select id="editPirFrequencia" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);">
+              <option value="">Selecione...</option>
+              <option value="10" ${Number(item.frequencia) === 10 ? 'selected' : ''}>10%</option>
+              <option value="50" ${Number(item.frequencia) === 50 ? 'selected' : ''}>50%</option>
+              <option value="100" ${Number(item.frequencia) === 100 ? 'selected' : ''}>100%</option>
+            </select>
           </td>
           <td style="padding: 10px; border: 1px solid var(--border-color);">
             <input type="text" id="editPirOQueVerificar" value="${item.o_que_verificar || ''}" style="width:100%; padding:6px; border:1px solid var(--border-color); background:var(--content-bg); color:var(--content-color);" />
@@ -30159,16 +30706,16 @@ async function editarItemPIR(id) {
 
 // Salvar edição PIR
 async function salvarEdicaoPIR(id) {
-  const itemVerificado = document.getElementById('editPirItemVerificado').value.trim();
+  const frequencia = Number(document.getElementById('editPirFrequencia').value);
   const oQueVerificar = document.getElementById('editPirOQueVerificar').value.trim();
   
-  if (!itemVerificado || !oQueVerificar) {
+  if (!frequencia || !oQueVerificar) {
     alert('Preencha todos os campos');
     return;
   }
   
   const dados = {
-    item_verificado: itemVerificado,
+    frequencia: frequencia,
     o_que_verificar: oQueVerificar
   };
   
@@ -30751,18 +31298,23 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
       }
     });
 
-    // Fechar menu ao clicar fora
+    // Fechar menu ao clicar fora (somente quando o hambúrguer estiver visível/ativo)
     document.addEventListener('click', (e) => {
+      const hamburgerVisivel = hamburger.offsetParent !== null;
+      const hamburgerAtivo = hamburger.classList.contains('active');
+      if (!hamburgerVisivel || !hamburgerAtivo) return;
       if (!sidebarContent.contains(e.target) && !hamburger.contains(e.target)) {
         sidebarContent.classList.add('collapsed');
         hamburger.classList.remove('active');
       }
     });
 
-    // Fechar menu ao clicar em qualquer link do menu
+    // Fechar menu ao clicar em qualquer link do menu (somente no modo hambúrguer)
     const sidebarLinks = sidebarContent.querySelectorAll('a');
     sidebarLinks.forEach(link => {
       link.addEventListener('click', () => {
+        const hamburgerVisivel = hamburger.offsetParent !== null;
+        if (!hamburgerVisivel) return;
         sidebarContent.classList.add('collapsed');
         hamburger.classList.remove('active');
       });

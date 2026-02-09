@@ -676,11 +676,13 @@ app.post('/api/produtos/busca', express.json(), async (req, res) => {
       SELECT
         s.codigo,
         s.descricao,
+        s.codigo_produto,
         ARRAY['${schemaTable}']::text[] AS fontes
       FROM (
         SELECT DISTINCT
           codigo::text   AS codigo,
-          descricao::text AS descricao
+          descricao::text AS descricao,
+          codigo_produto::bigint AS codigo_produto
         FROM ${schemaTable}
         WHERE codigo ILIKE $1 OR descricao ILIKE $1
       ) s
@@ -707,6 +709,144 @@ app.post('/api/produtos/busca', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[API] /api/produtos/busca erro:', err, 'body:', req.body);
     res.status(500).json({ error: 'Falha na busca' });
+  }
+});
+
+// Qualidade: registra inspeção em qualidade.produtos_liberado
+app.post('/api/qualidade/produtos-liberado', express.json(), async (req, res) => {
+  try {
+    const cod_produto = String(req.body?.cod_produto || '').trim();
+    const nfe = String(req.body?.nfe || '').trim();
+    const frequencia = String(req.body?.frequencia || '').trim();
+    const quantidadeOk = req.body?.quantidade_ok;
+    const quantidadeNok = req.body?.quantidade_nok;
+
+    if (!cod_produto) {
+      return res.status(400).json({ ok: false, error: 'cod_produto é obrigatório' });
+    }
+    if (!nfe) {
+      return res.status(400).json({ ok: false, error: 'nfe é obrigatória' });
+    }
+    if (quantidadeOk === undefined || quantidadeOk === null || Number.isNaN(Number(quantidadeOk))) {
+      return res.status(400).json({ ok: false, error: 'quantidade_ok é obrigatória' });
+    }
+
+    const quantidadeOkNum = Number(quantidadeOk);
+    const quantidadeNokNum = quantidadeNok === null || quantidadeNok === undefined || quantidadeNok === ''
+      ? null
+      : Number(quantidadeNok);
+
+    if (quantidadeNokNum !== null && Number.isNaN(quantidadeNokNum)) {
+      return res.status(400).json({ ok: false, error: 'quantidade_nok inválida' });
+    }
+
+    const frequenciaValor = frequencia ? frequencia : null;
+    const nfeValor = nfe ? nfe : null;
+
+    const colunaNfe = await pool.query(
+      `SELECT 1
+         FROM information_schema.columns
+        WHERE table_schema = 'qualidade'
+          AND table_name = 'produtos_liberado'
+          AND column_name = 'nfe'
+        LIMIT 1`
+    );
+    const temNfe = colunaNfe.rowCount > 0;
+    if (!temNfe) {
+      return res.status(400).json({ ok: false, error: 'Coluna nfe não existe. Execute a migração.' });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO qualidade.produtos_liberado
+        (cod_produto, data_inspecao, nfe, frequencia, status, quantidade_ok, quantidade_nok)
+       VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [cod_produto, nfeValor, frequenciaValor, 'Liberado', quantidadeOkNum, quantidadeNokNum]
+    );
+
+    res.json({ ok: true, id: rows[0]?.id || null });
+  } catch (err) {
+    console.error('[API] /api/qualidade/produtos-liberado erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao registrar inspeção' });
+  }
+});
+
+// Qualidade: lista NFe recentes por produto (últimos 3 recebimentos)
+app.get('/api/qualidade/nfe-por-produto/:codigo_produto', async (req, res) => {
+  try {
+    const codigoProduto = String(req.params.codigo_produto || '').trim();
+    if (!codigoProduto) {
+      return res.json({ ok: true, itens: [] });
+    }
+
+    const { rows } = await pool.query(
+      `WITH ultimos AS (
+         SELECT n_id_receb, created_at
+           FROM logistica.recebimentos_nfe_itens
+          WHERE n_id_produto = $1
+          ORDER BY created_at DESC NULLS LAST
+          LIMIT 3
+       )
+       SELECT u.n_id_receb, r.c_numero_nfe
+         FROM ultimos u
+         JOIN logistica.recebimentos_nfe_omie r
+           ON r.n_id_receb = u.n_id_receb
+        WHERE r.c_numero_nfe IS NOT NULL
+        ORDER BY u.created_at DESC NULLS LAST`,
+      [codigoProduto]
+    );
+
+    const unicos = [];
+    const vistos = new Set();
+    rows.forEach((row) => {
+      const valor = String(row.c_numero_nfe || '').trim();
+      if (!valor || vistos.has(valor)) return;
+      vistos.add(valor);
+      unicos.push(valor);
+    });
+
+    res.json({ ok: true, itens: unicos });
+  } catch (err) {
+    console.error('[API] /api/qualidade/nfe-por-produto erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar NFe' });
+  }
+});
+
+// Qualidade: lista todos os registros de produtos liberados
+app.get('/api/qualidade/produtos-liberado', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT *
+         FROM qualidade.produtos_liberado
+        ORDER BY id DESC`
+    );
+    res.json({ ok: true, itens: rows || [] });
+  } catch (err) {
+    console.error('[API] /api/qualidade/produtos-liberado GET erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar registros' });
+  }
+});
+
+// GET /api/produtos/imagem/:codigo_produto - Retorna a primeira imagem do produto
+app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
+  try {
+    const codigoProduto = String(req.params.codigo_produto || '').trim();
+    if (!codigoProduto) {
+      return res.json({ ok: true, url_imagem: null });
+    }
+    const { rows } = await pool.query(
+      `SELECT TRIM(url_imagem) AS url_imagem
+       FROM public.produtos_omie_imagens
+       WHERE codigo_produto = $1
+       ORDER BY pos NULLS LAST, id ASC
+       LIMIT 1`,
+      [codigoProduto]
+    );
+    const url = rows[0]?.url_imagem || null;
+    res.json({ ok: true, url_imagem: url });
+  } catch (err) {
+    console.error('[API] /api/produtos/imagem erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar imagem do produto' });
   }
 });
 
