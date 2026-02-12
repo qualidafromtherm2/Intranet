@@ -147,8 +147,147 @@ function renderList(ul, produtos) {
   attachOpenHandlers(ul);
 }
 
+function normalizeCatalogoProdutos(produtos = []) {
+  return produtos.map(p => ({
+    codigo: p.codigo ?? '',
+    descricao: p.descricao ?? '',
+    codigo_produto: p.codigo_produto ?? null,
+    url_imagem: p.primeira_imagem || p.url_imagem || '',
+    descricao_familia: p.descricao_familia || p.familia || '',
+    abaixo_minimo: p.abaixo_minimo || false,
+    saldo_estoque: p.saldo_estoque ?? p.quantidade_estoque,
+    estoque_minimo: p.estoque_minimo
+  }));
+}
+
+function renderGrid(grid, produtos) {
+  if (!grid) return;
+  const normalizados = normalizeCatalogoProdutos(produtos);
+  window.produtosCatalogoOmie = normalizados;
+
+  __gridState.items = normalizados;
+  __gridState.rendered = 0;
+  __gridState.loading = false;
+  grid.innerHTML = '';
+
+  if (typeof window.renderizarCatalogoOmie !== 'function') {
+    grid.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Visualização em grade indisponível</div>';
+    return;
+  }
+
+  renderNextGridBatch(grid);
+  bindGridLazyLoad(grid);
+}
+
+function renderNextGridBatch(grid) {
+  if (__gridState.loading) return;
+  const start = __gridState.rendered;
+  const end = start + __gridState.batchSize;
+  const slice = __gridState.items.slice(start, end);
+  if (!slice.length) return;
+
+  __gridState.loading = true;
+  window.renderizarCatalogoOmie(slice, {
+    containerId: grid.id,
+    atualizarContador: false,
+    append: start > 0
+  });
+  __gridState.rendered += slice.length;
+  __gridState.loading = false;
+}
+
+function bindGridLazyLoad(grid) {
+  if (grid.__lazyBound) return;
+  grid.__lazyBound = true;
+
+  grid.addEventListener('scroll', () => {
+    const nearBottom = grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 400;
+    if (nearBottom) {
+      renderNextGridBatch(grid);
+    }
+  });
+}
+
+let __listaViewMode = 'list';
+const __listaRefs = {
+  ul: null,
+  grid: null,
+  toggleBtn: null,
+  pagination: null
+};
+
+const __gridState = {
+  items: [],
+  rendered: 0,
+  batchSize: 50,
+  loading: false
+};
+
+function updateListaViewUI() {
+  const { ul, grid, toggleBtn, pagination } = __listaRefs;
+  if (!ul || !grid || !toggleBtn) return;
+
+  const isGrid = __listaViewMode === 'grid';
+  ul.style.display = isGrid ? 'none' : '';
+  grid.style.display = isGrid ? 'grid' : 'none';
+  if (pagination) pagination.style.display = isGrid ? 'none' : '';
+
+  toggleBtn.title = isGrid ? 'Alternar para lista' : 'Alternar para grade';
+  toggleBtn.classList.toggle('active', isGrid);
+  toggleBtn.innerHTML = isGrid
+    ? `
+      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"></line>
+        <line x1="8" y1="12" x2="21" y2="12"></line>
+        <line x1="8" y1="18" x2="21" y2="18"></line>
+        <circle cx="4" cy="6" r="1"></circle>
+        <circle cx="4" cy="12" r="1"></circle>
+        <circle cx="4" cy="18" r="1"></circle>
+      </svg>
+    `
+    : `
+      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+      </svg>
+    `;
+}
+
+function renderListaView(itens) {
+  const { ul, grid } = __listaRefs;
+  if (__listaViewMode === 'grid') {
+    renderGrid(grid, itens);
+  } else if (ul) {
+    renderList(ul, itens);
+  }
+}
+
 /* --------------------- “Hard refresh” da lista ----------------------- */
 let __refreshing = false;
+let __cacheDirty = false;
+let __listaPaneId = 'listaProdutos';
+
+function setCacheDirty(flag) {
+  __cacheDirty = Boolean(flag);
+  const indicator = document.getElementById('refreshCacheIndicator');
+  if (indicator) {
+    indicator.style.display = __cacheDirty ? 'inline-block' : 'none';
+  }
+}
+
+function renderFromCache() {
+  setCache(window.__omieFullCache || []);
+  const itens = getFiltered();
+  renderListaView(itens);
+
+  const pane = document.getElementById(__listaPaneId);
+  const title = pane?.querySelector('.content-section-title');
+  if (title) title.textContent = `Lista de produtos (${itens.length})`;
+}
 
 async function hardRefreshLista() {
   if (__refreshing) return;
@@ -158,15 +297,8 @@ async function hardRefreshLista() {
     await preloadFromDB();
 
     // Atualiza filtros e re-renderiza (se a aba estiver visível ou não)
-    setCache(window.__omieFullCache || []);
-    const itens = getFiltered();
-
-    const pane = document.getElementById('listaPecas');
-    const ul   = document.getElementById('listaProdutosList');
-    if (ul) renderList(ul, itens);
-
-    const title = pane?.querySelector('.content-section-title');
-    if (title) title.textContent = `Lista de produtos (${itens.length})`;
+    renderFromCache();
+    setCacheDirty(false);
 
     try { populateFilters(); } catch {}
   } finally {
@@ -195,7 +327,7 @@ function connectSSE() {
 
     if (['produtos_updated','refresh_all','product_updated'].includes(msg.type)) {
       clearTimeout(debounce);
-      debounce = setTimeout(() => hardRefreshLista(), 400);
+      debounce = setTimeout(() => setCacheDirty(true), 200);
     }
   };
 
@@ -211,8 +343,22 @@ export async function initListarProdutosUI(
 ) {
   const pane = document.getElementById(paneId);
   const ul   = document.getElementById(listId);
+  const grid = document.getElementById('listaProdutosGrid');
+  const toggleBtn = document.getElementById('viewToggleBtn');
+  const refreshBtn = document.getElementById('refreshCacheBtn');
+  const scrollTopBtn = document.getElementById('listaProdutosScrollTopBtn');
+  const abrirCarrinhoBtn = document.getElementById('listaProdutosAbrirCarrinhoBtn');
+  const floatingActions = document.getElementById('listaProdutosFloatingActions');
+  const pagination = document.getElementById('pagination');
   const hdr  = document.querySelector('.main-header');
   if (!pane || !ul || !hdr) return;
+
+  __listaPaneId = paneId;
+  __listaRefs.ul = ul;
+  __listaRefs.grid = grid;
+  __listaRefs.toggleBtn = toggleBtn;
+  __listaRefs.pagination = pagination;
+  updateListaViewUI();
 
   // mostra aba Lista e esconde as outras
   hdr.style.display = 'none';
@@ -223,12 +369,7 @@ export async function initListarProdutosUI(
   if (!window.__listaReady) window.__listaReady = preloadFromDB();
   await window.__listaReady;
 
-  setCache(window.__omieFullCache || []);
-  const produtosFiltrados = getFiltered();
-  renderList(ul, produtosFiltrados);
-
-  const title = pane.querySelector('.content-section-title');
-  if (title) title.textContent = `Lista de produtos (${produtosFiltrados.length})`;
+  renderFromCache();
 
   initFiltros({
     _codeInput            : document.getElementById('codeFilter'),
@@ -241,13 +382,42 @@ export async function initListarProdutosUI(
     _filterBtn            : document.getElementById('filterBtn'),
     _filterPanel          : document.getElementById('filterPanel'),
     onFiltered: itens => {
-      renderList(ul, itens);
+      renderListaView(itens);
       if (title) title.textContent = `Lista de produtos (${itens.length})`;
       populateFilters();
     }
   });
 
   populateFilters();
+
+  bindViewToggle();
+
+  refreshBtn?.addEventListener('click', async () => {
+    await hardRefreshLista();
+  });
+
+  const updateScrollTopVisibility = () => {
+    const target = (__listaViewMode === 'grid' ? grid : ul);
+    if (!target || !floatingActions) return;
+    const shouldShow = target.scrollTop > 40;
+    floatingActions.style.display = shouldShow ? 'flex' : 'none';
+  };
+
+  scrollTopBtn?.addEventListener('click', () => {
+    const target = (__listaViewMode === 'grid' ? grid : ul);
+    if (target) target.scrollTop = 0;
+    updateScrollTopVisibility();
+  });
+
+  abrirCarrinhoBtn?.addEventListener('click', async () => {
+    if (typeof window.abrirModalCarrinhoCompras === 'function') {
+      await window.abrirModalCarrinhoCompras();
+    }
+  });
+
+  grid?.addEventListener('scroll', updateScrollTopVisibility);
+  ul?.addEventListener('scroll', updateScrollTopVisibility);
+  updateScrollTopVisibility();
 
   // liga SSE (se estiver funcionando no back)
   connectSSE();
@@ -265,33 +435,8 @@ window.__forceListaRefresh = async function () {
     const itens = getFiltered();
 
     // 3) redesenha a UL
-    const pane = document.getElementById('listaPecas');
-    const ul   = document.getElementById('listaProdutosList');
-    if (ul) {
-      ul.innerHTML = itens.map(p => `
-        <li data-codigo="${p.codigo ?? ''}" style="cursor: pointer;" class="product-list-item">
-          <span class="products">${p.codigo ?? ''}</span>
-          <span class="status">${p.descricao ?? ''}</span>
-        </li>`).join('');
-
-      // reatacha os handlers - agora cada <li> é clicável
-      ul.querySelectorAll('li[data-codigo]').forEach(li => {
-        li.style.cursor = 'pointer';
-        li.onclick = () => {
-          const codigo = li.dataset.codigo;
-          document.querySelector('.main-header')?.style && (document.querySelector('.main-header').style.display = 'flex');
-          document.querySelectorAll('.main-header-link')
-                  .forEach(l => l.classList.remove('is-active'));
-          document.querySelector('[data-target="dadosProduto"]')
-                  ?.classList.add('is-active');
-          document.querySelectorAll('.tab-pane')
-                  .forEach(p => p.style.display = 'none');
-          document.getElementById('dadosProduto').style.display = 'block';
-          // se você já tem loadDadosProduto importado:
-          try { loadDadosProduto(codigo); } catch {}
-        };
-      });
-    }
+    const pane = document.getElementById(__listaPaneId);
+    renderListaView(itens);
 
     // 4) atualiza o título com a contagem
     const title = pane?.querySelector('.content-section-title');
@@ -310,14 +455,19 @@ window.__forceListaRefresh = async function () {
   btn.addEventListener('click', async (ev) => {
     try { ev.preventDefault(); } catch {}
     // mostra a aba da lista
-    const pane = document.getElementById('listaPecas');
+    const pane = document.getElementById(__listaPaneId);
     const hdr  = document.querySelector('.main-header');
     if (hdr) hdr.style.display = 'none';
     document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
     if (pane) pane.style.display = 'block';
 
-    // força recarregar e redesenhar
-    await window.__forceListaRefresh();
+    // usa cache se disponível; só recarrega quando marcado como desatualizado
+    if (window.__listaReady && !__cacheDirty) {
+      await window.__listaReady;
+      renderFromCache();
+    } else {
+      await window.__forceListaRefresh();
+    }
   });
 })();
 
@@ -331,11 +481,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('menuListaProdutos');
   btn?.addEventListener('click', async (ev) => {
     try { ev.preventDefault(); } catch {}
-    await hardRefreshLista();
+    if (window.__listaReady && !__cacheDirty) {
+      await window.__listaReady;
+      renderFromCache();
+    } else {
+      await hardRefreshLista();
+    }
 
     // se você também alterna as abas manualmente em outro script, ótimo.
     // se não, garante que a aba fique visível:
-    const pane = document.getElementById('listaPecas');
+    const pane = document.getElementById(__listaPaneId);
     const hdr  = document.querySelector('.main-header');
     if (hdr) hdr.style.display = 'none';
     document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
@@ -344,3 +499,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   connectSSE();
 });
+
+function bindViewToggle() {
+  const toggleBtn = document.getElementById('viewToggleBtn');
+  if (!toggleBtn || toggleBtn.__boundToggle) return;
+  toggleBtn.__boundToggle = true;
+
+  toggleBtn.addEventListener('click', () => {
+    __listaViewMode = __listaViewMode === 'list' ? 'grid' : 'list';
+    updateListaViewUI();
+    renderListaView(getFiltered());
+  });
+}

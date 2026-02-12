@@ -75,7 +75,7 @@
       <span class="notification-number">5</span>
       <i id="bell-icon" class="fa-solid fa-bell" title="Mensagens"></i>
     </div>
-    <i id="cart-icon" class="fa-solid fa-cart-shopping" title="Solicitação de compras" style="display:none;"></i>
+    <i id="cart-icon" class="fa-solid fa-shopping-bag" title="Painel de compras" style="display:none;"></i>
     <i id="print-icon" class="fa-solid fa-print" title="Imprimir" style="display:none;"></i>
     <i id="config-icon" class="fa-solid fa-cog" title="Configurações" style="cursor:pointer;display:none;"></i>
     <img id="profile-icon" class="profile-img"
@@ -433,19 +433,19 @@
               <!-- Título e Botões de Ação -->
               <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
                 <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-user-check" style="color:#22c55e;"></i>
-                  Kanban de compras
+                  <i class="fa-solid fa-shopping-bag" style="color:#22c55e;"></i>
+                  Compras
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Catálogo">
-                    <i class="fa-solid fa-cart-plus" style="font-size:20px;"></i>
-                  </button>
-                  <button id="comprasAbrirCarrinhoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;position:relative;" title="Abrir Carrinho de Compras">
-                    <i class="fa-solid fa-cart-shopping" style="font-size:20px;"></i>
-                    <span id="carrinhoCountBadge" style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:white;border-radius:50%;width:20px;height:20px;display:none;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid white;">0</span>
+                  <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Solicitação">
+                    <i class="fa-solid fa-file-circle-plus" style="font-size:20px;"></i>
                   </button>
                   <button id="comprasAtualizarKanbansBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Atualizar Kanbans">
                     <i class="fa-solid fa-rotate" style="font-size:20px;"></i>
+                  </button>
+                  <button id="comprasToggleSolicitanteBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:white;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;height:44px;border-radius:22px;font-weight:600;font-size:13px;" title="Alternar entre minhas solicitações e todas as solicitações">
+                    <i class="fa-solid fa-user" style="font-size:16px;"></i>
+                    <span id="comprasToggleSolicitanteText">Minhas</span>
                   </button>
                   <button id="comprasAcoesHamburgerBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0f172a 0%,#1f2937 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Mais ações">
                     <i class="fa-solid fa-bars" style="font-size:20px;"></i>
@@ -566,18 +566,52 @@
                 Meu Carrinho de Compras
               </h3>
               <div style="display:flex;align-items:center;gap:8px;">
-                <div style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 12px;border-radius:6px;">
-                  <label style="font-size:11px;font-weight:600;color:#6b7280;">NP:</label>
-                  <select id="filtroCarrinhoNP" style="padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;background:white;cursor:pointer;">
-                    <option value="">Todos</option>
-                  </select>
-                </div>
                 <button id="modalCarrinhoFecharBtn" class="modal-close-btn" type="button">
                   <i class="fa-solid fa-xmark"></i>
                 </button>
               </div>
             </div>
             <div class="modal-body" style="padding:20px;">
+              <!-- Campos globais do carrinho (placeholder, sem lógica) -->
+              <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+                <div style="background:transparent;border:none;border-radius:0;padding:0;display:flex;flex-direction:column;gap:10px;">
+                  <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                    Departamento *
+                  </label>
+                  <select id="carrinhoDepartamentoGlobal" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                    <option value="">Selecione...</option>
+                  </select>
+
+                  <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                    Categoria *
+                  </label>
+                  <select id="carrinhoCentroCustoGlobal" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                    <option value="">Selecione...</option>
+                  </select>
+
+                  <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                    Prazo Solicitado
+                  </label>
+                  <input type="date" id="carrinhoPrazoSolicitadoGlobal"
+                         style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                </div>
+
+                <div style="background:transparent;border:none;border-radius:0;padding:0;display:flex;flex-direction:column;gap:10px;">
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                    <input type="checkbox" id="carrinhoCompraAutorizada" style="width:18px;height:18px;cursor:pointer;">
+                    <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já autorizada</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                    <input type="checkbox" id="carrinhoCompraRealizada" style="width:18px;height:18px;cursor:pointer;">
+                    <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra ja realizada!</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                    <input type="checkbox" id="carrinhoNaoIncluirQuantidade" style="width:18px;height:18px;cursor:pointer;">
+                    <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Não incluir quantidade</span>
+                  </label>
+                </div>
+              </div>
+
               <!-- Contador de itens -->
               <div style="font-size:14px;color:var(--inactive-color);margin-bottom:16px;">
                 <i class="fa-solid fa-cart-shopping" style="margin-right:6px;"></i>
@@ -590,7 +624,7 @@
                 <div style="grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--inactive-color);">
                   <i class="fa-solid fa-cart-shopping" style="font-size:48px;opacity:0.2;display:block;margin-bottom:16px;"></i>
                   <div style="font-size:16px;font-weight:500;">Carrinho vazio</div>
-                  <div style="font-size:14px;margin-top:8px;">Clique em "Abrir Catálogo" para adicionar produtos</div>
+                  <div style="font-size:14px;margin-top:8px;">Nenhum item adicionado</div>
                 </div>
               </div>
 
@@ -627,10 +661,6 @@
 
               <!-- Botões de ação -->
               <div style="margin-top:20px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-                <button id="modalComprasAbrirCatalogoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
-                  <i class="fa-solid fa-book"></i>
-                  <span>Abrir Catálogo</span>
-                </button>
                 <div style="display:flex;gap:12px;">
                   <button id="modalComprasLimparCarrinhoBtn" class="content-button" type="button" style="background:var(--button-inactive);color:var(--inactive-color);display:none;">
                     <i class="fa-solid fa-trash"></i>
@@ -1032,225 +1062,156 @@
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-book" style="color:#3b82f6;"></i>
-                <span>Painel de compra</span>
+                <span>Solicitação de compra</span>
               </h3>
               <div style="display:flex;align-items:center;gap:12px;">
-                <div style="display:flex;align-items:center;gap:8px;background:#3b82f6;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;box-shadow:0 2px 8px rgba(59,130,246,0.3);">
-                  <i class="fa-solid fa-boxes-stacked" style="font-size:16px;"></i>
-                  <span id="catalogoTotalProdutos" style="min-width:20px;text-align:center;">0</span>
-                  <span style="font-size:12px;font-weight:600;opacity:0.9;">produtos</span>
-                </div>
-                <div id="catalogoContadorCarrinho" style="display:flex;align-items:center;gap:8px;background:#10b981;color:white;padding:10px 18px;border-radius:25px;font-size:14px;font-weight:700;transition:transform 0.2s ease;box-shadow:0 2px 8px rgba(16,185,129,0.3);cursor:pointer;" title="Clique para abrir o carrinho" onclick="abrirModalCarrinhoCompras()">
-                  <i class="fa-solid fa-shopping-cart" style="font-size:16px;"></i>
-                  <span id="catalogoNumeroItens" style="min-width:20px;text-align:center;">0</span>
-                  <span style="font-size:12px;font-weight:600;opacity:0.9;">itens</span>
-                </div>
                 <button class="modal-close" onclick="fecharModalCatalogoOmie()">&times;</button>
               </div>
             </div>
             <div class="modal-body" style="padding:20px;">
               
-              <!-- Configurações Globais -->
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
+              <!-- Configurações Globais em 2 Colunas -->
+              <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
                 
-                <!-- Linha 1: Departamento + Categoria + Categoria da Compra + Possui cadastro na Omie -->
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
-                    Departamento *
-                  </label>
-                  <select 
-                    id="catalogoDepartamentoGlobal"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="">Selecione...</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-coins" style="color:#3b82f6;margin-right:4px;"></i>
-                    Categoria *
-                  </label>
-                  <select 
-                    id="catalogoCentroCustoGlobal"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="">Selecione...</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-tags" style="color:#3b82f6;margin-right:4px;"></i>
-                    Categoria da Compra *
-                  </label>
-                  <div id="catalogoCategoriaCompraWrapper" style="position:relative;">
-                    <button 
-                      type="button"
-                      id="catalogoCategoriaCompraBtn"
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                      <span id="catalogoCategoriaCompraBtnText">Selecione...</span>
-                      <i class="fa-solid fa-chevron-down" style="color:#64748b;"></i>
-                    </button>
-                    <input type="hidden" id="catalogoCategoriaCompraGlobal" value="" data-label="" />
-                    <div 
-                      id="catalogoCategoriaCompraDropdown"
-                      style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:260px;overflow-y:auto;z-index:1200;box-shadow:0 6px 12px rgba(0,0,0,0.12);padding:8px;">
+                <!-- COLUNA ESQUERDA -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
+                      Departamento
+                    </label>
+                    <select 
+                      id="catalogoDepartamentoGlobal"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-coins" style="color:#3b82f6;margin-right:4px;"></i>
+                      Categoria *
+                    </label>
+                    <select 
+                      id="catalogoCentroCustoGlobal"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione...</option>
+                    </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
+                      Objetivo da Compra
+                    </label>
+                    <textarea 
+                      id="catalogoObservacaoGlobal"
+                      rows="2"
+                      placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
+                      Tipo de retorno solicitado
+                      <span title="Se é compra direta, deixe em branco, ou selecione umas das opções para que o responsavel de comprar possa retornar no kanban cotado as informações que vc escolher." style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#0f172a;font-size:11px;cursor:help;">
+                        ?
+                      </span>
+                    </label>
+                    <select 
+                      id="catalogoRetornoCotacoesGlobal"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione...</option>
+                      <option value="Apenas realizar compra sem retorno de valores ou caracteristica" selected>🛒 Apenas realizar compra sem retorno de valores ou caracteristica</option>
+                      <option value="Solicitar retorno de valores e caracteristica tecnica">💰🔧 Solicitar retorno de valores e caracteristica tecnica</option>
+                      <option value="Solicitar retorno somente de caracteristica tecnica">🔧 Solicitar retorno somente de caracteristica tecnica</option>
+                      <option value="Solicitar retorno somente de valores">💰 Solicitar retorno somente de valores</option>
+                    </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-paperclip" style="color:#3b82f6;margin-right:4px;"></i>
+                      Anexar arquivo (opcional)
+                    </label>
+                    <div style="position:relative;">
+                      <input 
+                        type="file" 
+                        id="catalogoAnexo"
+                        accept="image/*,.pdf,.xlsx,.xls"
+                        multiple
+                        style="display:none;"
+                        onchange="handleCatalogoAnexoChange(this)"
+                      />
+                      <button 
+                        type="button"
+                        onclick="document.getElementById('catalogoAnexo').click()"
+                        style="width:100%;padding:10px;background:white;border:2px dashed #3b82f6;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#1e40af;display:flex;align-items:center;justify-content:center;gap:8px;">
+                        <i class="fa-solid fa-upload"></i>
+                        <span id="catalogoAnexoLabel">Selecionar arquivos</span>
+                      </button>
+                      <div id="catalogoAnexoPreview" style="display:none;margin-top:8px;">
+                        <!-- Lista de arquivos será inserida aqui -->
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-database" style="color:#3b82f6;margin-right:4px;"></i>
-                    Possui cadastro na Omie? *
-                  </label>
-                  <select 
-                    id="catalogoPossuiCadastroOmie"
-                    onchange="toggleCamposCatalogoOmie()"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="nao">Não</option>
-                    <option value="sim">Sim</option>
-                  </select>
-                </div>
 
-                <!-- Linha 3: Objetivo da Compra + Observação para recebimento (2 colunas cada) -->
-                <div style="grid-column:span 2;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
-                    Objetivo da Compra
-                  </label>
-                  <textarea 
-                    id="catalogoObservacaoGlobal"
-                    rows="2"
-                    placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
-                </div>
-                <div style="grid-column:span 2;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
-                    Observação para recebimento
-                  </label>
-                  <textarea 
-                    id="catalogoObservacaoRecebimento"
-                    rows="2"
-                    placeholder="Observações sobre o recebimento do produto..."
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
-                </div>
-
-                <!-- Campo Descrição breve do pedido (sempre visível, oculta apenas quando Sim) -->
-                <div id="catalogoCampoDescricao" style="grid-column:span 3;position:relative;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
-                    Descrição breve do pedido.
-                  </label>
-                  <input 
-                    type="text"
-                    id="catalogoDescricaoNaoCadastrado"
-                    autocomplete="off"
-                    placeholder="Digite uma descrição breve do produto..."
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
-                  <ul id="catalogoDescricaoLista" aria-label="Sugestões de descrição"></ul>
-                </div>
-
-                <!-- Campo Quantidade (sempre visível, oculta apenas quando Sim) -->
-                <div id="catalogoCampoQuantidade" style="grid-column:span 1;">
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-hashtag" style="color:#3b82f6;margin-right:4px;"></i>
-                    Quantidade *
-                  </label>
-                  <input 
-                    type="number"
-                    id="catalogoQuantidadeNaoCadastrado"
-                    min="1"
-                    value="1"
-                    placeholder="Qtd"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;height:52px;"
-                  />
-                </div>
-
-                <!-- Linha com Checkboxes: Requisição Direta + Não incluir quantidade (2 colunas cada) -->
-                <div style="grid-column:span 2;">
-                  <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#e0f2fe;border:2px solid #0ea5e9;border-radius:6px;transition:all 0.2s;">
-                    <input type="checkbox" id="catalogoRequisicaoDiretaGlobal" style="width:20px;height:20px;cursor:pointer;">
-                    <span style="font-weight:700;color:#0369a1;font-size:13px;">
-                      <i class="fa-solid fa-bolt" style="margin-right:6px;"></i>
-                      Requisição Direta
-                    </span>
-                  </label>
-                  <small style="display:block;margin-top:8px;margin-left:30px;color:#64748b;font-size:11px;">
-                    ⚡ Todos os itens serão aprovados automaticamente
-                  </small>
-                </div>
-                <div style="grid-column:span 2;">
-                  <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px;background:#f1f5f9;border:2px solid #64748b;border-radius:6px;transition:all 0.2s;" id="labelNaoIncluirQuantidade">
-                    <input type="checkbox" id="catalogoNaoIncluirQuantidade" style="width:20px;height:20px;cursor:pointer;">
-                    <span style="font-weight:700;color:#334155;font-size:13px;">
-                      <i class="fa-solid fa-ban" style="margin-right:6px;"></i>
-                      Não incluir quantidade
-                    </span>
-                  </label>
-                  <small style="display:block;margin-top:8px;margin-left:30px;color:#64748b;font-size:11px;">
-                    ⚠️ Desabilitado com Requisição Direta ativa
-                  </small>
-                </div>
-
-                <!-- Linha 2: Retorno das cotações + Grupo de pedido + Etapas do Pedido + Anexar arquivo -->
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;margin-right:4px;"></i>
-                    Retorno das cotações *
-                  </label>
-                  <select 
-                    id="catalogoRetornoCotacoesGlobal"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="nao">Não</option>
-                    <option value="sim">Sim</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-layer-group" style="color:#3b82f6;margin-right:4px;"></i>
-                    Grupo de pedido
-                  </label>
-                  <select 
-                    id="catalogoNPGlobal"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="unica">Requisição unica</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-list-check" style="color:#3b82f6;margin-right:4px;"></i>
-                    Etapas do Pedido *
-                  </label>
-                  <select 
-                    id="catalogoEtapasPedido"
-                    style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                    <option value="aguardando aprovação da requisição" selected>Aguardando aprovação da requisição</option>
-                    <option value="compra realizada">Compra realizada</option>
-                  </select>
-                </div>
-                <div>
-                  <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;margin-bottom:6px;">
-                    <i class="fa-solid fa-paperclip" style="color:#3b82f6;margin-right:4px;"></i>
-                    Anexar arquivo (opcional)
-                  </label>
-                  <div style="position:relative;">
+                <!-- COLUNA DIREITA -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
+                      Incluir palavra chave do produto e aperte enter.
+                    </label>
                     <input 
-                      type="file" 
-                      id="catalogoAnexo"
-                      accept="image/*,.pdf,.xlsx,.xls"
-                      multiple
-                      style="display:none;"
-                      onchange="handleCatalogoAnexoChange(this)"
+                      type="text"
+                      id="catalogoDescricaoNaoCadastrado"
+                      autocomplete="off"
+                      placeholder="Digite a palavra chave e pressione Enter..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
+                    <input type="hidden" id="catalogoDescricaoKeywords" value="" />
+                    <div id="catalogoDescricaoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-hashtag" style="color:#3b82f6;margin-right:4px;"></i>
+                      Quantidade *
+                    </label>
+                    <input 
+                      type="number"
+                      id="catalogoQuantidadeNaoCadastrado"
+                      min="1"
+                      value="1"
+                      placeholder="Qtd"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;height:52px;"
                     />
-                    <button 
-                      type="button"
-                      onclick="document.getElementById('catalogoAnexo').click()"
-                      style="width:100%;padding:10px;background:white;border:2px dashed #3b82f6;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#1e40af;display:flex;align-items:center;justify-content:center;gap:8px;">
-                      <i class="fa-solid fa-upload"></i>
-                      <span id="catalogoAnexoLabel">Selecionar arquivos</span>
-                    </button>
-                    <div id="catalogoAnexoPreview" style="display:none;margin-top:8px;">
-                      <!-- Lista de arquivos será inserida aqui -->
-                    </div>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
+                      Responsável pela inspeção do produto ao chegar na fábrica
+                    </label>
+                    <select 
+                      id="catalogoRespInspecaoRecebimento"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione o responsável...</option>
+                    </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
+                      Observação para recebimento
+                    </label>
+                    <textarea 
+                      id="catalogoObservacaoRecebimento"
+                      rows="2"
+                      placeholder="Observações sobre o recebimento do produto..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
                   </div>
                 </div>
               </div>
@@ -1264,7 +1225,7 @@
                   onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 6px 16px rgba(16,185,129,0.4)'"
                   onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'">
                   <i class="fa-solid fa-cart-plus" style="font-size:18px;"></i>
-                  <span>Adicionar ao Carrinho</span>
+                  <span>Realizar solicitação de compra</span>
                 </button>
               </div>
               
@@ -1732,7 +1693,7 @@
   <!-- Painel de Lista de Produtos -->
         <div id="listaProdutos" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
-            <div class="content-section">
+            <div class="content-section lista-produtos-alta">
               <div class="title-wrapper">
                 <div class="content-section-title">
                   Lista de produtos (<span id="productCount">0</span>)
@@ -1755,6 +1716,32 @@
                     <path d="M3 4h18l-7 8v6l-4 2v-8l-7-8z"/>
                   </svg>
                 </button>
+                <button id="refreshCacheBtn" class="filter-icon" title="Atualizar cache">
+                  <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
+                       stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+                    <polyline points="22 3 21 12 12 11"/>
+                  </svg>
+                  <span id="refreshCacheIndicator" style="display:none;margin-left:6px;width:8px;height:8px;background:#f59e0b;border-radius:999px;box-shadow:0 0 0 2px rgba(245,158,11,0.25);"></span>
+                </button>
+                <button id="viewToggleBtn" class="filter-icon" title="Alternar para grade">
+                  <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none"
+                       stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                    <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                  </svg>
+                </button>
+                <button id="listaProdutosAbrirCarrinhoBtn" class="filter-icon carrinho-btn" title="Meu Carrinho de Compras">
+                  <i class="fa-solid fa-cart-shopping"></i>
+                  <span id="listaProdutosCarrinhoCount" class="carrinho-badge">0</span>
+                </button>
+              </div>
+              <div id="listaProdutosFloatingActions" class="lista-produtos-fab">
+                <button id="listaProdutosScrollTopBtn" class="lista-produtos-fab-btn" title="Voltar ao topo">
+                  <i class="fa-solid fa-arrow-up"></i>
+                </button>
               </div>
               <div id="filterPanel" class="filter-panel">
                 <div class="filter-row">
@@ -1770,6 +1757,7 @@
                   <select id="conteudoSelect" style="display:none"><option value="">– selecione –</option></select>
                 </div>
               </div>
+              <div id="listaProdutosGrid" style="display:none;grid-template-columns:repeat(5,1fr);gap:16px;max-height:calc(100vh - 220px);overflow-y:auto;align-content:start;grid-auto-rows:minmax(240px,auto);"></div>
               <ul id="listaProdutosList" class="content-list product-details"></ul>
               <div id="pagination" class="pagination-wrapper"></div>
             </div>
