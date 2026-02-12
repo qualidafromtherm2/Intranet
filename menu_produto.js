@@ -13617,6 +13617,121 @@ function obterUsuarioLogado() {
          '';
 }
 
+// Carrega departamentos e categorias do backend
+async function carregarCategoriasPorDepartamento() {
+  try {
+    console.log('[CONFIG] Buscando departamentos/categorias...');
+    const resp = await fetch('/api/compras/departamentos-categorias', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    console.log('[CONFIG] Resposta departamentos/categorias:', {
+      okHttp: resp.ok,
+      status: resp.status,
+      body: data
+    });
+
+    if (!resp.ok || !data.ok) {
+      throw new Error(data?.error || 'Erro ao carregar departamentos e categorias');
+    }
+
+    const departamentos = Array.isArray(data.departamentos) ? data.departamentos : [];
+    window.departamentosConfig = departamentos;
+    console.log('[CONFIG] Departamentos carregados:', departamentos.length);
+
+    const map = {};
+    departamentos.forEach((dept) => {
+      const categorias = Array.isArray(dept.categorias) ? dept.categorias : [];
+      map[dept.nome] = categorias.map(cat => cat.nome);
+    });
+    window.categoriasPorDepartamento = map;
+
+    return departamentos;
+  } catch (err) {
+    console.error('[Config] Erro ao carregar departamentos/categorias:', err);
+    window.departamentosConfig = [];
+    window.categoriasPorDepartamento = {};
+    return [];
+  }
+}
+
+window.carregarCategoriasPorDepartamento = carregarCategoriasPorDepartamento;
+
+// Carrega opções de Departamento no carrinho a partir de configuracoes.departamento
+async function carregarDepartamentosCarrinho() {
+  const select = document.getElementById('carrinhoDepartamentoGlobal');
+  if (!select) return;
+
+  try {
+    const resp = await fetch('/api/compras/departamentos', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Erro ao buscar departamentos');
+    const data = await resp.json();
+    const departamentos = Array.isArray(data.departamentos) ? data.departamentos : [];
+
+    const nomes = departamentos
+      .map(d => String(d.nome || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+    select.innerHTML = '<option value="">Selecione...</option>' +
+      nomes.map(nome => `<option value="${window.escapeHtml(nome)}">${window.escapeHtml(nome)}</option>`).join('');
+
+    const padrao = nomes.find(n => n.toLowerCase() === 'produção');
+    if (padrao) select.value = padrao;
+
+    // Atualiza categorias do carrinho ao selecionar departamento
+    select.onchange = () => {
+      atualizarCategoriasPorDepartamento(select.value, 'carrinhoCentroCustoGlobal');
+      aplicarCategoriaPadraoCarrinho();
+    };
+
+    // Inicializa categorias com o departamento atual (se houver)
+    atualizarCategoriasPorDepartamento(select.value, 'carrinhoCentroCustoGlobal');
+    aplicarCategoriaPadraoCarrinho();
+  } catch (err) {
+    console.error('[CARRINHO] Erro ao carregar departamentos:', err);
+    select.innerHTML = '<option value="">Selecione...</option>';
+    atualizarCategoriasPorDepartamento('', 'carrinhoCentroCustoGlobal');
+  }
+}
+
+// Define "Materia prima" como padrão no carrinho quando disponível
+function aplicarCategoriaPadraoCarrinho() {
+  const select = document.getElementById('carrinhoCentroCustoGlobal');
+  if (!select || select.value) return;
+
+  const option = Array.from(select.options).find(opt =>
+    (opt.value || '').toLowerCase() === 'materia prima' ||
+    (opt.textContent || '').toLowerCase() === 'materia prima'
+  );
+
+  if (option) {
+    select.value = option.value;
+  }
+}
+
+// Configura o Prazo Solicitado global do carrinho
+function configurarPrazoSolicitadoGlobal() {
+  const input = document.getElementById('carrinhoPrazoSolicitadoGlobal');
+  if (!input) return;
+
+  if (!input.dataset.bound) {
+    input.addEventListener('change', async () => {
+      const valor = input.value || null;
+      const carrinho = window.carrinhoCompras || [];
+      await Promise.all(carrinho.map(async (item) => {
+        item.prazo_solicitado = valor;
+        await atualizarItemCarrinhoNoBanco(item);
+      }));
+      renderCarrinhoCompras();
+      renderModalCarrinhoCompras();
+    });
+    input.dataset.bound = '1';
+  }
+
+  const carrinho = window.carrinhoCompras || [];
+  const primeiroComPrazo = carrinho.find(item => item.prazo_solicitado);
+  input.value = primeiroComPrazo?.prazo_solicitado || '';
+}
+
 // Abre o modal do carrinho e sincroniza com os dados atuais
 window.abrirModalCarrinhoCompras = async function() {
   const modal = document.getElementById('modalCarrinhoCompras');
@@ -13629,16 +13744,12 @@ window.abrirModalCarrinhoCompras = async function() {
   
   // Sincroniza os dados do carrinho no modal
   await carregarCarrinhoComprasDoBanco();
+  configurarPrazoSolicitadoGlobal();
+  await carregarCategoriasPorDepartamento();
+  await carregarDepartamentosCarrinho();
+  await carregarCategoriaCompraDropdown();
   await carregarGruposRequisicaoDisponiveis();
   renderModalCarrinhoCompras();
-  
-  // Adiciona evento ao selector de NP
-  const selectFiltro = document.getElementById('filtroCarrinhoNP');
-  if (selectFiltro) {
-    selectFiltro.addEventListener('change', () => {
-      renderModalCarrinhoCompras();
-    });
-  }
   
   // Exibe o modal
   modal.style.display = 'flex';
@@ -13884,73 +13995,20 @@ function renderModalCarrinhoCompras() {
         <!-- Campos Expandíveis (sempre em coluna única) -->
         <div class="carrinho-detalhes-expandiveis" data-idx="${idx}" style="display:none;flex-direction:column;gap:4px;font-size:11px;padding-top:8px;border-top:1px solid #f3f4f6;">
         
-          <div>
-          <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;">
-            <i class="fa-solid fa-calendar-days" style="margin-right:3px;font-size:10px;"></i>Prazo Solicitado
-          </label>
-          <input type="date" class="carrinho-input-prazo" data-idx="${idx}" 
-                 value="${item.prazo_solicitado || ''}"
-                 style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-        </div>
-        
-        <div style="display:flex;align-items:center;gap:6px;padding:4px 0;">
-          <i class="fa-solid fa-user" style="color:#3b82f6;width:12px;font-size:10px;"></i>
-          <span style="color:#6b7280;font-weight:500;min-width:70px;">Solicitante:</span>
-          <span style="color:#111827;font-weight:600;font-size:10px;">${window.escapeHtml(itemSolicitante)}</span>
-        </div>
-        
         <div>
           <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-building" style="color:#8b5cf6;width:12px;font-size:10px;"></i>Departamento
+            <i class="fa-solid fa-tags" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria da Compra *
           </label>
-          <select class="carrinho-input-departamento" data-idx="${idx}"
-                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-            <option value="Produção" ${item.departamento === 'Produção' ? 'selected' : ''}>Produção</option>
-            <option value="Qualidade" ${item.departamento === 'Qualidade' ? 'selected' : ''}>Qualidade</option>
-            <option value="Manutenção" ${item.departamento === 'Manutenção' ? 'selected' : ''}>Manutenção</option>
-            <option value="Compras" ${item.departamento === 'Compras' ? 'selected' : ''}>Compras</option>
-            <option value="Administrativo" ${item.departamento === 'Administrativo' ? 'selected' : ''}>Administrativo</option>
-            <option value="Comercial" ${item.departamento === 'Comercial' ? 'selected' : ''}>Comercial</option>
-            <option value="Financeiro" ${item.departamento === 'Financeiro' ? 'selected' : ''}>Financeiro</option>
-            <option value="Logística" ${item.departamento === 'Logística' ? 'selected' : ''}>Logística</option>
-          </select>
-        </div>
-        
-        <div>
-          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-bullseye" style="color:#f59e0b;width:12px;font-size:10px;"></i>Objetivo de Compra
-          </label>
-          <input type="text" class="carrinho-input-objetivo" data-idx="${idx}" 
-                 value="${window.escapeHtml(item.objetivo_compra || '')}" placeholder="Digite o objetivo"
-                 style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-        </div>
-        
-        <div>
-          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-tag" style="color:#ec4899;width:12px;font-size:10px;"></i>Categoria
-          </label>
-          <select class="carrinho-input-categoria" data-idx="${idx}"
-                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-            <option value="">Selecione...</option>
-            ${(window.categoriasCompra || []).map(cat => 
-              `<option value="${cat.codigo}" ${item.categoria_compra === cat.codigo ? 'selected' : ''}>${window.escapeHtml(cat.descricao)}</option>`
-            ).join('')}
-          </select>
-        </div>
-        
-        <div>
-          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-user-tie" style="color:#14b8a6;width:12px;font-size:10px;"></i>Responsável
-          </label>
-          <select class="carrinho-input-responsavel" data-idx="${idx}"
-                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-            <option value="">Selecione...</option>
-            ${window.usuariosAtivos.map(u => {
-              const usuarioLogado = obterUsuarioLogado();
-              const responsavelAtual = item.responsavel_pela_compra || usuarioLogado;
-              return `<option value="${window.escapeHtml(u.username)}" ${responsavelAtual === u.username ? 'selected' : ''}>${window.escapeHtml(u.username)}</option>`;
-            }).join('')}
-          </select>
+          <div class="carrinho-item-categoria-wrapper" data-idx="${idx}" style="position:relative;">
+            <button type="button" class="carrinho-item-categoria-btn" data-idx="${idx}"
+                    style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;background:white;font-weight:600;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <span id="carrinhoItemCategoriaCompraBtnText-${idx}">Selecione...</span>
+              <i class="fa-solid fa-chevron-down" style="color:#64748b;"></i>
+            </button>
+            <input type="hidden" id="carrinhoItemCategoriaCompra-${idx}" data-idx="${idx}" value="${window.escapeHtml(item.categoria_compra || '')}" data-label="" />
+            <div id="carrinhoItemCategoriaCompraDropdown-${idx}" class="carrinho-item-categoria-dropdown"
+                 style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #d1d5db;border-top:none;border-radius:0 0 6px 6px;max-height:260px;overflow-y:auto;z-index:1200;box-shadow:0 6px 12px rgba(0,0,0,0.12);padding:8px;"></div>
+          </div>
         </div>
         
         <div>
@@ -13963,27 +14021,6 @@ function renderModalCarrinhoCompras() {
             </select>
         </div>
         
-        <div>
-          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-reply" style="color:#6366f1;width:12px;font-size:10px;"></i>Retorno Cotação
-          </label>
-          <select class="carrinho-input-retorno" data-idx="${idx}"
-                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-            <option value="Sim" ${item.retorno_cotacao === 'Sim' ? 'selected' : ''}>Sim</option>
-            <option value="Não" ${item.retorno_cotacao === 'Não' ? 'selected' : ''}>Não</option>
-          </select>
-        </div>
-        
-        <div>
-          <label style="color:#6b7280;font-weight:500;display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-            <i class="fa-solid fa-bolt" style="color:#f97316;width:12px;font-size:10px;"></i>Requisição Direta
-          </label>
-          <select class="carrinho-input-requisicao" data-idx="${idx}"
-                  style="width:100%;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
-            <option value="true" ${item.requisicao_direta ? 'selected' : ''}>Sim</option>
-            <option value="false" ${!item.requisicao_direta ? 'selected' : ''}>Não</option>
-          </select>
-        </div>
         
         ${temAnexo ? `
         <div style="background:#dbeafe;padding:4px 8px;border-radius:4px;margin-top:2px;">
@@ -15761,9 +15798,10 @@ async function adicionarItemCarrinho(ev) {
     return;
   }
   
+  // Aplica categoria padrão se não selecionada (campo removido)
+  const categoriaPadraoCodigo = '2.14.94';
   if (!categoriaCompra) {
-    alert('Selecione a categoria da compra');
-    return;
+    categoriaCompra = categoriaPadraoCodigo;
   }
   
   // Busca codigo_produto da tabela produtos_omie usando o codigo do produto
@@ -16044,6 +16082,53 @@ document.getElementById('modalConfigResponsavelCategoria')?.addEventListener('cl
 });
 
 // Binds dos botões de filtro de kanbans
+
+// Botão toggle para filtrar por solicitante (Minhas / Todas)
+document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('comprasToggleSolicitanteBtn');
+  const textElement = document.getElementById('comprasToggleSolicitanteText');
+  const iconElement = btn?.querySelector('i');
+  
+  if (!btn || !textElement) return;
+  
+  try {
+    // Alterna o filtro entre 'minhas' e 'todas'
+    const filtroAtual = window.kanbanFiltroSolicitante || 'minhas';
+    const novoFiltro = filtroAtual === 'minhas' ? 'todas' : 'minhas';
+    
+    // Salva a preferência
+    window.kanbanFiltroSolicitante = novoFiltro;
+    
+    // Atualiza o texto e ícone do botão
+    if (novoFiltro === 'todas') {
+      textElement.textContent = 'Todas';
+      if (iconElement) iconElement.className = 'fa-solid fa-users';
+      btn.style.background = 'linear-gradient(135deg,#3b82f6 0%,#2563eb 100%)';
+    } else {
+      textElement.textContent = 'Minhas';
+      if (iconElement) iconElement.className = 'fa-solid fa-user';
+      btn.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
+    }
+    
+    // Feedback visual durante carregamento
+    const originalText = textElement.textContent;
+    textElement.textContent = '...';
+    btn.disabled = true;
+    
+    // Recarrega os kanbans com o novo filtro
+    await loadMinhasSolicitacoes();
+    
+    // Restaura o botão
+    textElement.textContent = originalText;
+    btn.disabled = false;
+    
+  } catch (err) {
+    console.error('[Kanban] Erro ao alternar filtro de solicitante:', err);
+    alert('Erro ao alternar filtro. Tente novamente.');
+    btn.disabled = false;
+  }
+});
+
 document.getElementById('comprasAtualizarKanbansBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('comprasAtualizarKanbansBtn');
   if (!btn) return;
@@ -22455,6 +22540,32 @@ window.enviarCotacoes = enviarCotacoes;
 // Armazena produtos do catálogo
 window.produtosCatalogoOmie = [];
 
+// Carrega responsáveis para inspeção no painel de compra
+async function carregarResponsaveisCatalogoInspecao() {
+  const select = document.getElementById('catalogoRespInspecaoRecebimento');
+  if (!select) return;
+
+  try {
+    const resp = await fetch('/api/compras/usuarios', { credentials: 'include' });
+    const data = await resp.json();
+    if (data.ok && Array.isArray(data.usuarios)) {
+      select.innerHTML = '<option value="">Selecione o responsável...</option>' +
+        data.usuarios.map(u =>
+          `<option value="${window.escapeHtml(u.username)}">${window.escapeHtml(u.username)}</option>`
+        ).join('');
+    }
+  } catch (err) {
+    console.error('[Catálogo] Erro ao carregar responsáveis:', err);
+    select.innerHTML = '<option value="">Erro ao carregar</option>';
+  }
+
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim() || window.__sessionUser?.username || '';
+  if (currentUser) {
+    const option = Array.from(select.options).find(o => String(o.value || '').toLowerCase() === currentUser.toLowerCase());
+    if (option) select.value = option.value;
+  }
+}
+
 // Abre modal do catálogo Omie
 async function abrirModalCatalogoOmie() {
   const modal = document.getElementById('modalCatalogoOmie');
@@ -22514,8 +22625,22 @@ async function abrirModalCatalogoOmie() {
     // Carrega departamentos e categorias de compra
     await Promise.all([
       carregarDepartamentosCatalogo(),
-      loadModalComprasCategoriasCompra()
+      loadModalComprasCategoriasCompra(),
+      carregarResponsaveisCatalogoInspecao()
     ]);
+    
+    // Define "Produção" como padrão após carregar departamentos
+    const selectDept = document.getElementById('catalogoDepartamentoGlobal');
+    if (selectDept) {
+      const opcaoProd = Array.from(selectDept.options).find(o => 
+        (o.value || '').toLowerCase() === 'produção' || (o.value || '').toLowerCase() === 'producao'
+      );
+      if (opcaoProd) {
+        selectDept.value = opcaoProd.value;
+        // Dispara evento change para carregar categorias
+        selectDept.dispatchEvent(new Event('change'));
+      }
+    }
     
     console.log('[Catálogo] Modal aberto. Produtos não carregados (aguardando seleção Sim).');
     
@@ -22528,7 +22653,111 @@ async function abrirModalCatalogoOmie() {
   
   // Adiciona event listeners para validar interação entre Requisição Direta e Não incluir quantidade
   inicializarValidacaoCatalogoCheckboxes();
+  
+  // Inicializa sistema de keywords/tags para descrição
+  inicializarDescricaoKeywords();
 }
+
+// ========== FUNÇÕES PARA GERENCIAR KEYWORDS/TAGS DE DESCRIÇÃO ==========
+// Objetivo: Permitir adicionar palavras-chave ao pressionar Enter e remover ao clicar no X
+
+function atualizarDescricaoKeywordsHidden() {
+  const tagsContainer = document.getElementById('catalogoDescricaoTags');
+  const hidden = document.getElementById('catalogoDescricaoKeywords');
+  if (!tagsContainer || !hidden) return '';
+  const keywords = Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
+    .map(tag => tag.getAttribute('data-keyword') || '')
+    .filter(Boolean);
+  hidden.value = keywords.join(';');
+  return hidden.value;
+}
+
+function adicionarDescricaoKeyword(valor) {
+  const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const tagsContainer = document.getElementById('catalogoDescricaoTags');
+  const hidden = document.getElementById('catalogoDescricaoKeywords');
+  if (!input || !tagsContainer || !hidden) return;
+
+  const keyword = String(valor || '').trim();
+  if (!keyword) return;
+
+  const existente = Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
+    .some(tag => (tag.getAttribute('data-keyword') || '').toLowerCase() === keyword.toLowerCase());
+  if (existente) {
+    input.value = '';
+    return;
+  }
+
+  const tag = document.createElement('span');
+  tag.setAttribute('data-keyword', keyword);
+  tag.style.display = 'inline-flex';
+  tag.style.alignItems = 'center';
+  tag.style.gap = '6px';
+  tag.style.padding = '4px 8px';
+  tag.style.background = '#eff6ff';
+  tag.style.border = '1px solid #bfdbfe';
+  tag.style.borderRadius = '999px';
+  tag.style.fontSize = '12px';
+  tag.style.fontWeight = '600';
+  tag.style.color = '#1e40af';
+
+  const texto = document.createElement('span');
+  texto.textContent = keyword;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = '×';
+  btn.setAttribute('aria-label', `Remover ${keyword}`);
+  btn.style.border = 'none';
+  btn.style.background = 'transparent';
+  btn.style.cursor = 'pointer';
+  btn.style.fontSize = '14px';
+  btn.style.lineHeight = '1';
+  btn.style.color = '#1e3a8a';
+
+  tag.appendChild(texto);
+  tag.appendChild(btn);
+  tagsContainer.appendChild(tag);
+
+  input.value = '';
+  atualizarDescricaoKeywordsHidden();
+}
+
+function limparDescricaoKeywords() {
+  const tagsContainer = document.getElementById('catalogoDescricaoTags');
+  const hidden = document.getElementById('catalogoDescricaoKeywords');
+  const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  if (tagsContainer) tagsContainer.innerHTML = '';
+  if (hidden) hidden.value = '';
+  if (input) input.value = '';
+}
+
+function inicializarDescricaoKeywords() {
+  const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const tagsContainer = document.getElementById('catalogoDescricaoTags');
+  if (!input || !tagsContainer || input.dataset.keywordsInit === '1') return;
+
+  input.dataset.keywordsInit = '1';
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    adicionarDescricaoKeyword(input.value);
+  });
+
+  tagsContainer.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.tagName !== 'BUTTON') return;
+    const tag = target.closest('[data-keyword]');
+    if (tag) {
+      tag.remove();
+      atualizarDescricaoKeywordsHidden();
+    }
+  });
+}
+
+// ========== FIM DAS FUNÇÕES DE KEYWORDS/TAGS ==========
 
 // Array global para acumular anexos do catálogo
 window.catalogoAnexosAcumulados = window.catalogoAnexosAcumulados || [];
@@ -22891,22 +23120,32 @@ function inicializarValidacaoCatalogoCheckboxes() {
 }
 
 // Renderiza produtos do catálogo
-function renderizarCatalogoOmie(produtos) {
-  const lista = document.getElementById('listaProdutosCatalogo');
+function renderizarCatalogoOmie(produtos, options = {}) {
+  const {
+    containerId = 'listaProdutosCatalogo',
+    atualizarContador = true,
+    append = false
+  } = options;
+
+  const lista = document.getElementById(containerId);
   if (!lista) return;
   
-  // Atualiza contador de produtos exibidos
-  const contadorProdutos = document.getElementById('catalogoTotalProdutos');
-  if (contadorProdutos) {
-    contadorProdutos.textContent = produtos.length;
+  // Atualiza contador de produtos exibidos (apenas no modal)
+  if (atualizarContador) {
+    const contadorProdutos = document.getElementById('catalogoTotalProdutos');
+    if (contadorProdutos) {
+      contadorProdutos.textContent = produtos.length;
+    }
   }
   
   if (produtos.length === 0) {
-    lista.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
+    if (!append) {
+      lista.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
+    }
     return;
   }
   
-  lista.innerHTML = produtos.map(produto => {
+  const html = produtos.map(produto => {
     // Valida se a URL da imagem é válida
     const temImagem = produto.url_imagem && 
                       produto.url_imagem.trim() && 
@@ -23102,10 +23341,19 @@ function renderizarCatalogoOmie(produtos) {
       </div>
     `;
   }).join('');
+
+  if (append) {
+    lista.insertAdjacentHTML('beforeend', html);
+  } else {
+    lista.innerHTML = html;
+  }
   
   // Atualiza automaticamente todas as imagens expiradas em lote
   setTimeout(() => atualizarImagensExpiradasEmLote(), 100);
 }
+
+// Disponibiliza para uso externo (ex.: lista de produtos)
+window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
 // Atualiza automaticamente todas as imagens expiradas em lote (com controle de concorrência)
 async function atualizarImagensExpiradasEmLote() {
@@ -23364,19 +23612,30 @@ window.atualizarCategoriasPorDepartamento = atualizarCategoriasPorDepartamento;
 window.handleCatalogoDepartamentoChange = handleCatalogoDepartamentoChange;
 
 // Carrega categorias da tabela ListarCategorias para o dropdown recolhível
-async function carregarCategoriaCompraDropdown() {
-  const dropdown = document.getElementById('catalogoCategoriaCompraDropdown');
-  const btnText = document.getElementById('catalogoCategoriaCompraBtnText');
-  const hiddenInput = document.getElementById('catalogoCategoriaCompraGlobal');
+async function carregarCategoriaCompraDropdown(options = {}) {
+  const dropdownId = options.dropdownId || 'catalogoCategoriaCompraDropdown';
+  const btnTextId = options.btnTextId || 'catalogoCategoriaCompraBtnText';
+  const hiddenInputId = options.hiddenInputId || 'catalogoCategoriaCompraGlobal';
+  const logPrefix = options.logPrefix || 'Catálogo';
+  const categoriasOverride = Array.isArray(options.categorias) ? options.categorias : null;
+  const onSelect = typeof options.onSelect === 'function' ? options.onSelect : null;
+
+  const dropdown = document.getElementById(dropdownId);
+  const btnText = document.getElementById(btnTextId);
+  const hiddenInput = document.getElementById(hiddenInputId);
   if (!dropdown || !btnText || !hiddenInput) return;
 
   dropdown.innerHTML = '<div style="padding:8px;color:#64748b;font-size:12px;">Carregando...</div>';
 
-  const respCat = await fetch('/api/compras/categorias-listar', { credentials: 'include' });
-  if (!respCat.ok) throw new Error('Erro ao buscar categorias');
-  const dataCat = await respCat.json();
-  const categorias = Array.isArray(dataCat.categorias) ? dataCat.categorias : [];
-  console.log('[Catálogo] categorias-listar total:', categorias.length);
+  let categorias = categoriasOverride || [];
+  if (!categoriasOverride) {
+    const respCat = await fetch('/api/compras/categorias-listar', { credentials: 'include' });
+    if (!respCat.ok) throw new Error('Erro ao buscar categorias');
+    const dataCat = await respCat.json();
+    categorias = Array.isArray(dataCat.categorias) ? dataCat.categorias : [];
+    window.categoriasCompra = categorias;
+  }
+  console.log(`[${logPrefix}] categorias-listar total:`, categorias.length);
 
   if (categorias.length === 0) {
     dropdown.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:12px;">Nenhuma categoria encontrada</div>';
@@ -23385,6 +23644,7 @@ async function carregarCategoriaCompraDropdown() {
 
   const map = new Map();
   categorias.forEach(c => map.set(String(c.codigo), c));
+  window.categoriasCompraMap = map;
   const filhosPorPai = new Map();
   categorias.forEach(c => {
     const pai = c.categoria_superior ? String(c.categoria_superior) : null;
@@ -23412,6 +23672,11 @@ async function carregarCategoriaCompraDropdown() {
       hiddenInput.setAttribute('data-label', `${cat.codigo} - ${cat.descricao}`);
       btnText.textContent = `${cat.codigo} - ${cat.descricao}`;
       dropdown.style.display = 'none';
+      if (onSelect) {
+        Promise.resolve(onSelect(cat, { hiddenInput, btnText })).catch(err => {
+          console.warn('[Categoria Compra] Falha ao aplicar seleção:', err);
+        });
+      }
     });
     return btn;
   };
@@ -23582,8 +23847,8 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   const retornoCotacoesTexto = (selectRetornoGlobal && selectRetornoGlobal.selectedOptions && selectRetornoGlobal.selectedOptions[0]) 
     ? (selectRetornoGlobal.selectedOptions[0].text || '') 
     : '';
-  const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
-  const categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0]) 
+  let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
+  let categoriaCompraTexto = (selectCategoriaGlobal && selectCategoriaGlobal.selectedOptions && selectCategoriaGlobal.selectedOptions[0]) 
     ? (selectCategoriaGlobal.selectedOptions[0].text || '') 
     : (selectCategoriaGlobal?.getAttribute('data-label') || '');
   const grupoPedidoValor = selectNPGlobal ? selectNPGlobal.value : 'unica';
@@ -23593,6 +23858,17 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   const objetivoCompraGlobal = textareaObservacaoGlobal ? textareaObservacaoGlobal.value.trim() : '';
   const requisicaoDiretaGlobal = checkboxRequisicaoDiretaGlobal ? checkboxRequisicaoDiretaGlobal.checked : false;
   const naoIncluirQuantidade = checkboxNaoIncluirQuantidade ? checkboxNaoIncluirQuantidade.checked : false;
+  
+  // Aplica categoria padrão se não selecionada (campo removido)
+  const categoriaPadraoCodigo = '2.14.94';
+  if (!categoriaCompra) {
+    categoriaCompra = categoriaPadraoCodigo;
+    const map = window.categoriasCompraMap instanceof Map ? window.categoriasCompraMap : null;
+    const cat = map ? map.get(categoriaCompra) : null;
+    categoriaCompraTexto = cat
+      ? `${cat.codigo} - ${cat.descricao}`
+      : categoriaCompraTexto || `${categoriaPadraoCodigo} - Outros Materiais`;
+  }
   
   console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
   console.log('[Catálogo] Possui cadastro na Omie:', possuiCadastroOmie);
@@ -23666,12 +23942,6 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       return;
     }
     
-    if (!etapasPedido) {
-      alert('Para produtos não cadastrados na Omie, selecione a etapa do pedido!');
-      selectEtapas?.focus();
-      return;
-    }
-    
     // Sobrescreve descrição com os valores informados
     // O código já vem como parâmetro (gerado como CODPROV via API ou TEMP como fallback)
     descricao = descricaoNaoCadastrado;
@@ -23687,12 +23957,6 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   if (!centroCusto) {
     alert('Selecione a categoria no topo do catálogo!');
     selectCCGlobal?.focus();
-    return;
-  }
-  
-  if (!categoriaCompra) {
-    alert('Selecione a categoria da compra no topo do catálogo!');
-    selectCategoriaGlobal?.focus();
     return;
   }
   
@@ -23797,7 +24061,7 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   
   // Limpa anexos acumulados se houver anexos
   if (anexoData) {
-    limparAnexosCatalogo();
+    removerCatalogoAnexo();
     console.log('[Catálogo] Anexos limpos após adicionar produto ao carrinho');
   }
   
@@ -23847,20 +24111,28 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   
   // Valida campos obrigatórios
   const inputDescricao = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const hiddenKeywords = document.getElementById('catalogoDescricaoKeywords');
   const inputQuantidade = document.getElementById('catalogoQuantidadeNaoCadastrado');
   const selectDeptGlobal = document.getElementById('catalogoDepartamentoGlobal');
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
   const selectEtapas = document.getElementById('catalogoEtapasPedido');
   
-  const descricao = inputDescricao ? inputDescricao.value.trim() : '';
+  // Usa as keywords do campo hidden (separadas por ;) como descrição
+  const descricao = hiddenKeywords ? hiddenKeywords.value.trim() : (inputDescricao ? inputDescricao.value.trim() : '');
   const quantidade = inputQuantidade ? parseInt(inputQuantidade.value) || 1 : 1;
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
-  const categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
+  let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const etapas = selectEtapas ? selectEtapas.value : '';
   
-  console.log('[Catálogo] Descrição:', descricao);
+  // Aplica categoria padrão se não selecionada (campo removido)
+  const categoriaPadraoCodigo = '2.14.94';
+  if (!categoriaCompra) {
+    categoriaCompra = categoriaPadraoCodigo;
+  }
+  
+  console.log('[Catálogo] Descrição (keywords):', descricao);
   console.log('[Catálogo] Quantidade:', quantidade);
   console.log('[Catálogo] Departamento:', departamento);
   console.log('[Catálogo] Categoria:', centroCusto);
@@ -23869,7 +24141,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   
   // Validações
   if (!descricao) {
-    alert('Informe a descrição do produto!');
+    alert('Adicione pelo menos uma palavra-chave! Digite e pressione Enter.');
     inputDescricao?.focus();
     return;
   }
@@ -23889,18 +24161,6 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   if (!centroCusto) {
     alert('Selecione a categoria!');
     selectCCGlobal?.focus();
-    return;
-  }
-  
-  if (!categoriaCompra) {
-    alert('Selecione a categoria da compra!');
-    selectCategoriaGlobal?.focus();
-    return;
-  }
-  
-  if (!etapas) {
-    alert('Selecione a etapa do pedido!');
-    selectEtapas?.focus();
     return;
   }
   
@@ -23933,13 +24193,71 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       console.warn('[Catálogo] Usando código temporário fallback:', codigoTemp);
     }
     
-    // Chama a função existente selecionarProdutoCatalogo com o código provisório
-    // Isso reutiliza toda a lógica de processamento de anexos, validações e adição ao carrinho
-    const fakeEvent = { target: btn };
+    // Prepara dados para envio
+    const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
+    const selectRespInspecao = document.getElementById('catalogoRespInspecaoRecebimento');
+    const textareaObsRecebimento = document.getElementById('catalogoObservacaoRecebimento');
+    const textareaObjetivo = document.getElementById('catalogoObservacaoGlobal');
     
-    await selecionarProdutoCatalogo(codigoTemp, descricao, fakeEvent);
+    const retornoCotacao = selectRetornoGlobal ? selectRetornoGlobal.value : null;
+    const respInspecao = selectRespInspecao ? selectRespInspecao.value.trim() : '';
+    const observacaoRecebimento = textareaObsRecebimento ? textareaObsRecebimento.value.trim() : '';
+    const objetivoCompra = textareaObjetivo ? textareaObjetivo.value.trim() : '';
     
-    console.log('[Catálogo] Produto não cadastrado adicionado ao carrinho com sucesso!');
+    // Processa anexos
+    let anexosArray = null;
+    if (window.catalogoAnexosAcumulados && window.catalogoAnexosAcumulados.length > 0) {
+      anexosArray = [];
+      for (let i = 0; i < window.catalogoAnexosAcumulados.length; i++) {
+        const file = window.catalogoAnexosAcumulados[i];
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        anexosArray.push({
+          nome: file.name,
+          tipo: file.type,
+          tamanho: file.size,
+          base64: base64
+        });
+      }
+    }
+    
+    const payload = {
+      produto_codigo: codigoTemp,
+      produto_descricao: descricao,
+      quantidade: quantidade,
+      departamento: departamento,
+      centro_custo: centroCusto,
+      categoria_compra_codigo: categoriaCompra,
+      categoria_compra_nome: categoriaCompra === '2.14.94' ? 'Outros Materiais' : '',
+      objetivo_compra: objetivoCompra,
+      retorno_cotacao: retornoCotacao,
+      resp_inspecao_recebimento: respInspecao,
+      observacao_recebimento: observacaoRecebimento,
+      anexos: anexosArray
+    };
+    
+    console.log('[Catálogo] Enviando para /api/compras/sem-cadastro:', payload);
+    
+    // Envia para a nova API de produtos sem cadastro
+    const response = await fetch('/api/compras/sem-cadastro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `Erro ao salvar (${response.status})`);
+    }
+    
+    console.log('[Catálogo] Produto não cadastrado salvo com sucesso! ID:', result.id);
+    alert('Solicitação de compra realizada com sucesso.');
     
     // Feedback visual de sucesso
     if (btn) {
@@ -23948,15 +24266,19 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       btn.style.opacity = '1';
       
       setTimeout(() => {
-        btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Adicionar ao Carrinho</span>';
+        btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
         btn.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
         btn.disabled = false;
       }, 1000);
     }
     
     // Limpa os campos após adicionar
-    if (inputDescricao) inputDescricao.value = '';
+    limparDescricaoKeywords();
     if (inputQuantidade) inputQuantidade.value = '1';
+    const objetivoGlobal = document.getElementById('catalogoObservacaoGlobal');
+    const obsRecebimentoInput = document.getElementById('catalogoObservacaoRecebimento');
+    if (objetivoGlobal) objetivoGlobal.value = '';
+    if (obsRecebimentoInput) obsRecebimentoInput.value = '';
     
     // Limpa anexos acumulados
     window.catalogoAnexosAcumulados = [];
@@ -23976,7 +24298,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     
     // Restaura botão em caso de erro
     if (btn) {
-      btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Adicionar ao Carrinho</span>';
+      btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
       btn.style.opacity = '1';
       btn.disabled = false;
     }
@@ -25243,6 +25565,9 @@ function fecharModalComprasAcoes() {
 // Variável global para armazenar kanbans visíveis do usuário
 let kanbansVisiveis = [];
 const DATA_LIMITE_PADRAO = '2026-02-01';
+
+// Variável global para controlar filtro por solicitante (padrão: apenas minhas solicitações)
+window.kanbanFiltroSolicitante = 'minhas';
 
 function formatarDataLimite(valor) {
   if (!valor) return '';
@@ -26830,6 +27155,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       return status !== 'aguardando compra' && status !== 'compra realizada';
     });
     
+    // Aplica filtro por solicitante se filtroSolicitante não for 'todas'
+    // Variável global controla se mostra apenas do usuário logado ou todas
+    const filtroSolicitante = window.kanbanFiltroSolicitante || 'minhas';
+    
+    if (filtroSolicitante === 'minhas') {
+      // Filtra apenas itens onde o solicitante é o usuário logado
+      lista = lista.filter(item => {
+        const solicitante = (item.solicitante || '').trim().toLowerCase();
+        const usuario = currentUser.toLowerCase();
+        return solicitante === usuario;
+      });
+    }
+    // Se filtroSolicitante === 'todas', não aplica filtro (mostra tudo)
+    
     // Busca requisições sem pedidos de compra
     const respReq = await fetch(`/api/compras/requisicoes`, { credentials: 'include' });
     let requisicoes = [];
@@ -26846,6 +27185,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         isRequisicao: true,
         ...req
       }));
+      
+      // Aplica filtro por solicitante nas requisições se modo 'minhas'
+      if (filtroSolicitante === 'minhas') {
+        // Para requisições, verifica se existe na tabela solicitacao_compras
+        // Busca itens da solicitacao_compras que correspondem a essas requisições
+        requisicoes = requisicoes.filter(req => {
+          // Verifica se existe algum item na lista original com mesmo cod_req_compra
+          const existeNaSolicitacao = lista.some(item => 
+            item.cod_req_compra === req.cod_req_compra && 
+            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
+          );
+          return existeNaSolicitacao;
+        });
+      }
       
       // DEBUG: Log para verificar requisição específica
       const req2337 = requisicoes.find(r => r.cod_req_compra === '10816583034');
@@ -26873,6 +27226,18 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         statusNormalizado: 'aguardando compra',
         isPedidoCompra: true
       }));
+      
+      // Aplica filtro por solicitante nos pedidos se modo 'minhas'
+      if (filtroSolicitante === 'minhas') {
+        // Para pedidos, verifica se existe na tabela solicitacao_compras com mesmo numero
+        pedidosCompra = pedidosCompra.filter(ped => {
+          const existeNaSolicitacao = lista.some(item => 
+            item.numero_pedido === ped.numero && 
+            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
+          );
+          return existeNaSolicitacao;
+        });
+      }
       
       console.log('[DEBUG] Pedidos mapeados:', pedidosCompra);
       lista = [...lista, ...pedidosCompra];
@@ -26904,6 +27269,19 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           isCompraRealizada: true
         };
       });
+      
+      // Aplica filtro por solicitante nas compras realizadas se modo 'minhas'
+      if (filtroSolicitante === 'minhas') {
+        // Para compras realizadas, verifica se existe na tabela solicitacao_compras com mesmo numero
+        comprasRealizadas = comprasRealizadas.filter(comp => {
+          const cNumero = comp.c_numero;
+          const existeNaSolicitacao = lista.some(item => 
+            item.numero_pedido === cNumero && 
+            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
+          );
+          return existeNaSolicitacao;
+        });
+      }
       
       console.log('[DEBUG] Compras realizadas mapeadas:', comprasRealizadas);
       console.log('[DEBUG] Total de compras realizadas:', comprasRealizadas.length);

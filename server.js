@@ -4106,6 +4106,65 @@ app.delete('/api/compras/config-acesso-botoes/:id', async (req, res) => {
   }
 });
 
+// GET /api/compras/departamentos-categorias - Lista departamentos com categorias
+app.get('/api/compras/departamentos-categorias', async (req, res) => {
+  try {
+    // Objetivo: listar todos os registros (inclusive inativos) para o painel de configuração
+    const deptResult = await pool.query(`
+      SELECT id, nome, ativo
+      FROM configuracoes.departamento
+      ORDER BY nome
+    `);
+
+    const catResult = await pool.query(`
+      SELECT id, departamento_id, nome, ordem, ativo
+      FROM configuracoes.categoria_departamento
+      ORDER BY departamento_id, ordem, nome
+    `);
+
+    const subResult = await pool.query(`
+      SELECT id, categoria_id, nome, ordem, ativo
+      FROM configuracoes.subitem_departamento
+      ORDER BY categoria_id, ordem, nome
+    `);
+
+    const departamentos = deptResult.rows.map((dept) => ({
+      id: dept.id,
+      nome: dept.nome,
+      categorias: []
+    }));
+
+    const deptMap = new Map(departamentos.map((d) => [d.id, d]));
+
+    const catMap = new Map();
+    catResult.rows.forEach((cat) => {
+      const dept = deptMap.get(cat.departamento_id);
+      if (!dept) return;
+      const categoria = {
+        id: cat.id,
+        nome: cat.nome,
+        subitens: []
+      };
+      dept.categorias.push(categoria);
+      catMap.set(cat.id, categoria);
+    });
+
+    subResult.rows.forEach((sub) => {
+      const categoria = catMap.get(sub.categoria_id);
+      if (!categoria) return;
+      categoria.subitens.push({
+        id: sub.id,
+        nome: sub.nome
+      });
+    });
+
+    res.json({ ok: true, departamentos });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar departamentos/categorias:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/compras/departamentos - Lista departamentos
 app.get('/api/compras/departamentos', async (req, res) => {
   try {
@@ -14469,6 +14528,121 @@ function gerarNumeroGrupoRequisicao() {
   return `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
 }
 
+// POST /api/compras/sem-cadastro - Registra solicitação de compra para produto SEM cadastro na Omie
+app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
+  try {
+    const item = req.body || {};
+    
+    // Validações obrigatórias
+    const produtoCodigo = String(item.produto_codigo || '').trim();
+    const produtoDescricao = String(item.produto_descricao || '').trim();
+    const quantidade = parseInt(item.quantidade) || 1;
+    const departamento = String(item.departamento || '').trim();
+    const centroCusto = String(item.centro_custo || '').trim();
+    
+    if (!produtoCodigo) {
+      return res.status(400).json({ ok: false, error: 'produto_codigo é obrigatório' });
+    }
+    if (!produtoDescricao) {
+      return res.status(400).json({ ok: false, error: 'produto_descricao é obrigatório' });
+    }
+    if (!departamento) {
+      return res.status(400).json({ ok: false, error: 'departamento é obrigatório' });
+    }
+    if (!centroCusto) {
+      return res.status(400).json({ ok: false, error: 'centro_custo (categoria) é obrigatório' });
+    }
+    
+    const solicitante = req.session?.user?.username || req.session?.user?.id || item.solicitante || 'sistema';
+    const categoriaCompraCodigo = item.categoria_compra_codigo || item.categoria_compra || '2.14.94';
+    const categoriaCompraNome = item.categoria_compra_nome || 'Outros Materiais';
+    const objetivoCompra = item.objetivo_compra || null;
+    const retornoCotacao = item.retorno_cotacao || null;
+    const respInspecao = item.resp_inspecao_recebimento || solicitante;
+    const observacaoRecebimento = item.observacao_recebimento || item.observacao || null;
+    
+    // Normaliza anexos (converte base64 para null temporariamente - pode salvar em filesystem depois)
+    const normalizarAnexos = (raw) => {
+      if (!raw) return null;
+      const arr = Array.isArray(raw) ? raw : [raw];
+      const limpos = arr.map(a => ({
+        nome: a?.nome || null,
+        tipo: a?.tipo || null,
+        tamanho: a?.tamanho || null,
+        // Remove base64 para não ocupar muito espaço no banco (pode salvar em arquivo depois)
+        base64: null
+      })).filter(a => a.nome);
+      return limpos.length ? limpos : null;
+    };
+    
+    const anexosArray = normalizarAnexos(item.anexo || item.anexos);
+    
+    // Grupo de requisição: gera novo se for 'unica' ou não informado
+    const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
+    const grupoRequisicao = (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica')
+      ? gerarNumeroGrupoRequisicao()
+      : grupoRequisicaoRaw;
+    
+    // Insere na tabela compras_sem_cadastro
+    const result = await pool.query(`
+      INSERT INTO compras.compras_sem_cadastro (
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        departamento,
+        centro_custo,
+        categoria_compra_codigo,
+        categoria_compra_nome,
+        objetivo_compra,
+        retorno_cotacao,
+        resp_inspecao_recebimento,
+        observacao_recebimento,
+        anexos,
+        solicitante,
+        status,
+        grupo_requisicao,
+        created_at,
+        updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pendente', $14, NOW(), NOW()
+      )
+      RETURNING id, grupo_requisicao
+    `, [
+      produtoCodigo,
+      produtoDescricao,
+      quantidade,
+      departamento,
+      centroCusto,
+      categoriaCompraCodigo,
+      categoriaCompraNome,
+      objetivoCompra,
+      retornoCotacao,
+      respInspecao,
+      observacaoRecebimento,
+      anexosArray ? JSON.stringify(anexosArray) : null,
+      solicitante,
+      grupoRequisicao
+    ]);
+    
+    const novoId = result.rows[0]?.id;
+    const grupoFinal = result.rows[0]?.grupo_requisicao;
+    
+    console.log(`[Compras Sem Cadastro] Registrado ID ${novoId}, grupo: ${grupoFinal}, produto: ${produtoCodigo}, solicitante: ${solicitante}`);
+    
+    res.json({ 
+      ok: true, 
+      id: novoId,
+      grupo_requisicao: grupoFinal,
+      message: 'Solicitação de compra registrada com sucesso'
+    });
+    
+  } catch (err) {
+    console.error('[Compras Sem Cadastro] Erro ao registrar:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao registrar solicitação' });
+  }
+});
+
+
 // Comentário: garante codigo_omie para itens de requisição direta (fluxo igual ao Enviar requisição)
 async function garantirCodigoOmieParaItem(client, item, itemId) {
   if (item?.codigo_omie) return item.codigo_omie;
@@ -16870,6 +17044,48 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
 });
 
 // ========== FIM ENDPOINTS DE COTAÇÕES ==========
+
+// Garante que a tabela compras_sem_cadastro existe
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.compras_sem_cadastro (
+        id SERIAL PRIMARY KEY,
+        produto_codigo VARCHAR(255) NOT NULL,
+        produto_descricao TEXT NOT NULL,
+        quantidade INTEGER NOT NULL DEFAULT 1,
+        departamento VARCHAR(255) NOT NULL,
+        centro_custo VARCHAR(255) NOT NULL,
+        categoria_compra_codigo VARCHAR(50),
+        categoria_compra_nome VARCHAR(255),
+        objetivo_compra TEXT,
+        retorno_cotacao VARCHAR(255),
+        resp_inspecao_recebimento VARCHAR(255),
+        observacao_recebimento TEXT,
+        anexos JSONB,
+        solicitante VARCHAR(255) NOT NULL,
+        status VARCHAR(50) DEFAULT 'pendente',
+        grupo_requisicao VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_solicitante 
+        ON compras.compras_sem_cadastro(solicitante);
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_status 
+        ON compras.compras_sem_cadastro(status);
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_departamento 
+        ON compras.compras_sem_cadastro(departamento);
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_grupo 
+        ON compras.compras_sem_cadastro(grupo_requisicao);
+      CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_created 
+        ON compras.compras_sem_cadastro(created_at DESC);
+    `);
+    console.log('[Compras] ✓ Tabela compras_sem_cadastro garantida');
+  } catch (err) {
+    console.error('[Compras] Erro ao criar tabela compras_sem_cadastro:', err.message);
+  }
+})();
 
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
