@@ -11618,7 +11618,7 @@ async function ensureComprasSchema() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS compras.cotacoes (
         id SERIAL PRIMARY KEY,
-        solicitacao_id INTEGER NOT NULL REFERENCES compras.solicitacao_compras(id) ON DELETE CASCADE,
+        solicitacao_id INTEGER NOT NULL,
         fornecedor_nome TEXT NOT NULL,
         fornecedor_id TEXT,
         valor_cotado DECIMAL(15,2),
@@ -11637,6 +11637,23 @@ async function ensureComprasSchema() {
       -- Cria índice para busca rápida por status_aprovacao
       CREATE INDEX IF NOT EXISTS idx_cotacoes_status_aprovacao
       ON compras.cotacoes(status_aprovacao);
+    `);
+
+    // Migration: Remove constraint de foreign key se existir (para aceitar IDs de compras_sem_cadastro também)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.table_constraints 
+          WHERE constraint_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND constraint_name = 'cotacoes_solicitacao_id_fkey'
+          AND constraint_type = 'FOREIGN KEY'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          DROP CONSTRAINT cotacoes_solicitacao_id_fkey;
+        END IF;
+      END $$;
     `);
     
     // Migration: Adiciona coluna status_aprovacao se não existir
@@ -11700,6 +11717,22 @@ async function ensureComprasSchema() {
           SET numero_pedido = s.numero_pedido
           FROM compras.solicitacao_compras s
           WHERE s.id = c.solicitacao_id;
+        END IF;
+      END $$;
+    `);
+
+    // Migration: Adiciona coluna table_source se não existir (identifica origem da cotação)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND column_name = 'table_source'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          ADD COLUMN table_source VARCHAR(50) DEFAULT 'solicitacao_compras';
         END IF;
       END $$;
     `);
@@ -14580,6 +14613,15 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const respInspecao = item.resp_inspecao_recebimento || solicitante;
     const observacaoRecebimento = item.observacao_recebimento || item.observacao || null;
 
+    // Normaliza links (array de strings)
+    const normalizarLinks = (raw) => {
+      if (!raw) return null;
+      const arr = Array.isArray(raw) ? raw : [raw];
+      const limpos = arr.map(l => String(l || '').trim()).filter(l => l.length > 0);
+      return limpos.length ? limpos : null;
+    };
+    const linksArray = normalizarLinks(item.link || item.links);
+
     // Comentário: define status inicial considerando retorno_cotacao e função do usuário logado.
     const userId = req.session?.user?.id || null;
     const username = req.session?.user?.username || null;
@@ -14612,17 +14654,24 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       }
     }
     
-    // Normaliza anexos (converte base64 para null temporariamente - pode salvar em filesystem depois)
+    // Normaliza anexos - aceita URLs (strings) do Supabase ou array de objetos legados
     const normalizarAnexos = (raw) => {
       if (!raw) return null;
       const arr = Array.isArray(raw) ? raw : [raw];
+      
+      // Se for array de strings (URLs do Supabase), retorna como está
+      if (arr.length > 0 && typeof arr[0] === 'string') {
+        return arr.filter(url => url && typeof url === 'string' && url.trim().length > 0);
+      }
+      
+      // Se for array de objetos legados (com base64), processa
       const limpos = arr.map(a => ({
         nome: a?.nome || null,
         tipo: a?.tipo || null,
         tamanho: a?.tamanho || null,
-        // Remove base64 para não ocupar muito espaço no banco (pode salvar em arquivo depois)
         base64: null
       })).filter(a => a.nome);
+      
       return limpos.length ? limpos : null;
     };
     
@@ -14648,6 +14697,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         retorno_cotacao,
         resp_inspecao_recebimento,
         observacao_recebimento,
+        link,
         anexos,
         solicitante,
         status,
@@ -14655,7 +14705,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
       )
       RETURNING id, grupo_requisicao
     `, [
@@ -14670,6 +14720,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       retornoCotacao,
       respInspecao,
       observacaoRecebimento,
+      linksArray ? JSON.stringify(linksArray) : null,
       anexosArray ? JSON.stringify(anexosArray) : null,
       solicitante,
       statusInicial,
@@ -14691,6 +14742,88 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao registrar:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao registrar solicitação' });
+  }
+});
+
+// GET /api/compras/sem-cadastro - Lista itens sem cadastro
+app.get('/api/compras/sem-cadastro', async (req, res) => {
+  console.log('[DEBUG] GET /api/compras/sem-cadastro chamado com query:', req.query);
+  try {
+    const solicitante = req.query.solicitante;
+    
+    if (!solicitante) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro solicitante é obrigatório' });
+    }
+    
+    const { rows } = await pool.query(`
+      SELECT 
+        id,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        departamento,
+        centro_custo,
+        categoria_compra_codigo,
+        categoria_compra_nome,
+        objetivo_compra,
+        retorno_cotacao,
+        resp_inspecao_recebimento,
+        observacao_recebimento,
+        status,
+        solicitante,
+        anexos,
+        link,
+        created_at,
+        updated_at
+      FROM compras.compras_sem_cadastro
+      WHERE solicitante = $1
+      ORDER BY created_at DESC
+      LIMIT 500
+    `, [solicitante]);
+    
+    res.json({ ok: true, itens: rows });
+  } catch (err) {
+    console.error('[Compras Sem Cadastro] Erro ao listar:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar itens sem cadastro' });
+  }
+});
+
+// PUT /api/compras/sem-cadastro/:id - Atualiza status de item sem cadastro
+app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    
+    const { status } = req.body || {};
+    if (!status) {
+      return res.status(400).json({ ok: false, error: 'Status é obrigatório' });
+    }
+    
+    // Atualiza o status na tabela compras_sem_cadastro
+    const result = await pool.query(`
+      UPDATE compras.compras_sem_cadastro
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+    
+    console.log(`[Compras Sem Cadastro] Status atualizado: ID ${id} -> ${status}`);
+    
+    res.json({ 
+      ok: true, 
+      item: result.rows[0],
+      message: 'Status atualizado com sucesso'
+    });
+    
+  } catch (err) {
+    console.error('[Compras Sem Cadastro] Erro ao atualizar:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao atualizar status' });
   }
 });
 
@@ -15869,6 +16002,7 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
+    // Comentário: Traz itens de solicitacao_compras com identificação de origem
     const { rows: solicitacoesBase } = await pool.query(`
       SELECT 
         id,
@@ -15901,13 +16035,16 @@ app.get('/api/compras/todas', async (req, res) => {
         cnumero AS "cNumero",
         ncodped AS "nCodPed",
         created_at,
-        updated_at
+        updated_at,
+        'solicitacao_compras' AS table_source
       FROM compras.solicitacao_compras
       ORDER BY created_at DESC
       LIMIT 1000
     `);
     
-    // Comentário: inclui itens de compras_sem_cadastro que estão em "Analise de cadastro".
+    // Comentário: inclui itens de compras_sem_cadastro com status que aparecem nos kanbans:
+    // 'Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado'
+    // Objetivo: adicionar table_source para identificar origem dos dados para agrupamento por grupo_requisicao
     const { rows: solicitacoesSemCadastro } = await pool.query(`
       SELECT
         id,
@@ -15937,12 +16074,14 @@ app.get('/api/compras/todas', async (req, res) => {
         NULL::text AS codigo_produto_omie,
         NULL::boolean AS requisicao_direta,
         anexos,
+        link,
         NULL::text AS "cNumero",
         NULL::text AS "nCodPed",
         created_at,
-        updated_at
+        updated_at,
+        'compras_sem_cadastro' AS table_source
       FROM compras.compras_sem_cadastro
-      WHERE status = 'Analise de cadastro'
+      WHERE status IN ('Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado')
       ORDER BY created_at DESC
       LIMIT 1000
     `);
@@ -16623,7 +16762,8 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
 // POST /api/compras/cotacoes - Adiciona uma cotação de fornecedor
 app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
   try {
-    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por } = req.body || {};
+    // Objetivo: Aceitar cotações de ambas as tabelas (solicitacao_compras e compras_sem_cadastro)
+    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por, table_source } = req.body || {};
     
     if (!solicitacao_id || !fornecedor_nome) {
       return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
@@ -16704,21 +16844,43 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       }
     }
     
-    // Busca produto_codigo da solicitação para amarrar a cotação
-    const { rows: rowsSolic } = await pool.query(`
-      SELECT produto_codigo, numero_pedido
-      FROM compras.solicitacao_compras
-      WHERE id = $1
-      LIMIT 1
-    `, [solicitacao_id]);
-
-    const produtoCodigo = rowsSolic[0]?.produto_codigo || null;
-    const numeroPedido = rowsSolic[0]?.numero_pedido || null;
+    // Busca produto_codigo da solicitação (ambas as tabelas podem ter dados)
+    // Objetivo: compras_sem_cadastro não tem numero_pedido, então busca apenas produto_codigo
+    let produtoCodigo = null;
+    let numeroPedido = null;
+    const tableToUse = table_source === 'compras_sem_cadastro' ? 'compras.compras_sem_cadastro' : 'compras.solicitacao_compras';
+    
+    if (table_source === 'compras_sem_cadastro') {
+      // compras_sem_cadastro tem apenas produto_codigo
+      const { rows: rowsSolic } = await pool.query(`
+        SELECT produto_codigo
+        FROM ${tableToUse}
+        WHERE id = $1
+        LIMIT 1
+      `, [solicitacao_id]);
+      
+      if (rowsSolic.length > 0) {
+        produtoCodigo = rowsSolic[0]?.produto_codigo || null;
+      }
+    } else {
+      // solicitacao_compras tem produto_codigo e numero_pedido
+      const { rows: rowsSolic } = await pool.query(`
+        SELECT produto_codigo, numero_pedido
+        FROM ${tableToUse}
+        WHERE id = $1
+        LIMIT 1
+      `, [solicitacao_id]);
+      
+      if (rowsSolic.length > 0) {
+        produtoCodigo = rowsSolic[0]?.produto_codigo || null;
+        numeroPedido = rowsSolic[0]?.numero_pedido || null;
+      }
+    }
 
     const { rows } = await pool.query(`
       INSERT INTO compras.cotacoes 
-        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por, table_source)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `, [
       solicitacao_id,
@@ -16729,12 +16891,14 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       valor_cotado || null,
       observacao || null,
       anexosUrls ? JSON.stringify(anexosUrls) : null,
-      criado_por || null
+      criado_por || null,
+      table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras'
     ]);
     
     console.log('[Cotações] Cotação salva:', {
       id: rows[0].id,
       fornecedor: rows[0].fornecedor_nome,
+      table_source: rows[0].table_source,
       anexos_count: anexosUrls ? anexosUrls.length : 0
     });
     
@@ -16753,13 +16917,17 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
     
+    // Comentário: aceita table_source como query parameter para filtrar cotações
+    const table_source = req.query.table_source || 'solicitacao_compras';
+    
     const { rows } = await pool.query(`
       SELECT * FROM compras.cotacoes 
       WHERE solicitacao_id = $1 
+        AND table_source = $2
       ORDER BY criado_em DESC
-    `, [solicitacao_id]);
+    `, [solicitacao_id, table_source]);
     
-    res.json(rows);
+    res.json({ cotacoes: rows });
   } catch (err) {
     console.error('[Cotações] Erro ao listar cotações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar cotações' });

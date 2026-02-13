@@ -834,6 +834,25 @@
           </div>
         </div>
 
+        <!-- Modal Análise de Cadastro -->
+        <div id="modalAnaliseCadastro" class="modal" style="display:none;justify-content:center;align-items:center;">
+          <div class="modal-content" style="max-width:1000px;width:95%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-clipboard-list" style="color:#3b82f6;"></i>
+                <span id="modalAnaliseCadastroTitulo">Análise de Cadastro</span>
+              </h3>
+              <button class="modal-close" onclick="fecharModalAnaliseCadastro()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalAnaliseCadastroBody" style="padding:20px;">
+              <!-- Conteúdo será inserido dinamicamente -->
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" onclick="fecharModalAnaliseCadastro()">Fechar</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal Kanban Cotação -->
         <div id="modalCotacaoKanban" class="modal" style="display:none;justify-content:center;align-items:center;">
           <div class="modal-content" style="max-width:1200px;width:95%;">
@@ -1071,7 +1090,7 @@
             <div class="modal-body" style="padding:20px;">
               
               <!-- Configurações Globais em 2 Colunas -->
-              <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;">
+              <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;align-items:flex-start;">
                 
                 <!-- COLUNA ESQUERDA -->
                 <div style="display:flex;flex-direction:column;gap:12px;">
@@ -1108,9 +1127,28 @@
                       id="catalogoObservacaoGlobal"
                       rows="2"
                       placeholder="Descreva o objetivo/finalidade desta compra que será aplicado a todos os itens..."
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;height:80px;"></textarea>
                   </div>
 
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
+                      Incluir palavra chave do produto e aperte enter.
+                    </label>
+                    <input 
+                      type="text"
+                      id="catalogoDescricaoNaoCadastrado"
+                      autocomplete="off"
+                      placeholder="Digite a palavra chave e pressione Enter..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
+                    <input type="hidden" id="catalogoDescricaoKeywords" value="" />
+                    <div id="catalogoDescricaoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+                  </div>
+
+                </div>
+
+                <!-- COLUNA DIREITA -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
@@ -1128,6 +1166,30 @@
                       <option value="Solicitar retorno somente de caracteristica tecnica">🔧 Solicitar retorno somente de caracteristica tecnica</option>
                       <option value="Solicitar retorno somente de valores">💰 Solicitar retorno somente de valores</option>
                     </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
+                      Responsável pela inspeção do produto ao chegar na fábrica
+                    </label>
+                    <select 
+                      id="catalogoRespInspecaoRecebimento"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione o responsável...</option>
+                    </select>
+                  </div>
+
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
+                      Observação para recebimento
+                    </label>
+                    <textarea 
+                      id="catalogoObservacaoRecebimento"
+                      rows="2"
+                      placeholder="Observações sobre o recebimento do produto..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;height:80px;"></textarea>
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:6px;">
@@ -1156,62 +1218,20 @@
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <!-- COLUNA DIREITA -->
-                <div style="display:flex;flex-direction:column;gap:12px;">
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
-                      Incluir palavra chave do produto e aperte enter.
+                      <i class="fa-solid fa-link" style="color:#3b82f6;margin-right:4px;"></i>
+                      Link (opcional)
                     </label>
-                    <input 
+                    <input
                       type="text"
-                      id="catalogoDescricaoNaoCadastrado"
+                      id="catalogoLinkInput"
                       autocomplete="off"
-                      placeholder="Digite a palavra chave e pressione Enter..."
+                      placeholder="Cole o link e pressione Enter..."
+                      onkeydown="handleCatalogoLinkKeydown(event)"
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
-                    <input type="hidden" id="catalogoDescricaoKeywords" value="" />
-                    <div id="catalogoDescricaoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
-                  </div>
-
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-hashtag" style="color:#3b82f6;margin-right:4px;"></i>
-                      Quantidade *
-                    </label>
-                    <input 
-                      type="number"
-                      id="catalogoQuantidadeNaoCadastrado"
-                      min="1"
-                      value="1"
-                      placeholder="Qtd"
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;height:52px;"
-                    />
-                  </div>
-
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
-                      Responsável pela inspeção do produto ao chegar na fábrica
-                    </label>
-                    <select 
-                      id="catalogoRespInspecaoRecebimento"
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                      <option value="">Selecione o responsável...</option>
-                    </select>
-                  </div>
-
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
-                      Observação para recebimento
-                    </label>
-                    <textarea 
-                      id="catalogoObservacaoRecebimento"
-                      rows="2"
-                      placeholder="Observações sobre o recebimento do produto..."
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;"></textarea>
+                    <div id="catalogoLinkPreview" style="display:none;margin-top:8px;"></div>
                   </div>
                 </div>
               </div>
