@@ -23947,27 +23947,12 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     descricao = descricaoNaoCadastrado;
   }
   
-  // Validações dos campos globais
-  if (!departamento) {
-    alert('Selecione o departamento no topo do catálogo!');
-    selectDeptGlobal?.focus();
-    return;
-  }
-  
-  if (!centroCusto) {
-    alert('Selecione a categoria no topo do catálogo!');
-    selectCCGlobal?.focus();
-    return;
-  }
-  
   // Captura dados específicos do produto
   const inputQtd = document.getElementById(`catalogo-qtd-${codigo}`);
-  const inputPrazo = document.getElementById(`catalogo-prazo-${codigo}`);
-  const prazoContainer = document.getElementById(`catalogo-prazo-container-${codigo}`);
   
   // Se é produto não cadastrado, usa a quantidade capturada anteriormente
   let quantidade = !possuiCadastroOmie ? quantidadeNaoCadastrado : (inputQtd ? parseInt(inputQtd.value) || 1 : 1);
-  const prazo = (prazoContainer && prazoContainer.style.display !== 'none' && inputPrazo) ? inputPrazo.value : '';
+  const prazo = '';
   
   // Validações
   if (naoIncluirQuantidade) {
@@ -25624,6 +25609,7 @@ const todosKanbans = [
   'solicitado revisão',
   'aguardando cotação',
   'cotado aguardando escolha',
+  'analise de cadastro',
   'aguardando compra',
   'aguardando compra preparação',
   'compra realizada',
@@ -25653,7 +25639,8 @@ async function abrirModalFiltroKanbans() {
   const titulosPersonalizados = {
     'aguardando cotação': 'Cotação com compras',
     'aguardando compra preparação': 'Requisições',
-    'aguardando compra': 'Pedido de compra'
+    'aguardando compra': 'Pedido de compra',
+    'analise de cadastro': 'Analise de cadastro'
   };
   
   // Badges identificadores para cada kanban
@@ -25662,6 +25649,7 @@ async function abrirModalFiltroKanbans() {
     'aguardando cotação': { texto: 'Operação Comprador', cor: '#059669' },
     'cotado aguardando escolha': { texto: 'Ação Requisitante', cor: '#dc2626' },
     'solicitado revisão': { texto: 'Ação Requisitante', cor: '#dc2626' },
+    'analise de cadastro': { texto: 'Operação Comprador', cor: '#059669' },
     'aguardando compra': { texto: 'Operação Comprador', cor: '#059669' },
     'aguardando compra preparação': { texto: 'Operação Comprador', cor: '#059669' },
     'compra realizada': { texto: 'Ação Recebimento', cor: '#d97706' },
@@ -27325,6 +27313,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'solicitado revisão': filtrarItensPorDataLimite('solicitado revisão', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar')),
       'aguardando cotação': filtrarItensPorDataLimite('aguardando cotação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação')),
       'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
+      'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
       'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
       'aguardando compra': filtrarItensPorDataLimite('aguardando compra', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra')),
       'compra realizada': filtrarItensPorDataLimite('compra realizada', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada')),
@@ -27342,6 +27331,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando aprovação da requisição': { bg: '#9333ea', bgLight: '#f3e8ff', text: '#581c87', icon: 'fa-clock' },
         'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
         'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
+        'analise de cadastro': { bg: '#0ea5e9', bgLight: '#e0f2fe', text: '#0c4a6e', icon: 'fa-magnifying-glass' },
         'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
         'aguardando compra': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-cart-shopping' },
         'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' },
@@ -27358,6 +27348,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'solicitado revisão': 'Revisão',
         'aguardando cotação': 'Cotação',
         'cotado aguardando escolha': 'Cotado',
+        'analise de cadastro': 'Analise de cadastro',
         'aguardando compra preparação': 'Requisições',
         'aguardando compra': 'Pedido de compra'
       };
@@ -27366,7 +27357,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       // Define grupos de kanbans com características especiais
       const kanbanAcaoRequisitante = ['cotado aguardando escolha', 'solicitado revisão']; // Ações do requisitante
       const kanbanOperacaoAprovador = ['aguardando aprovação da requisição']; // Aprovador precisa aprovar
-      const kanbanOperacaoComprador = ['aguardando cotação', 'aguardando compra preparação', 'aguardando compra']; // Operações do comprador
+      const kanbanOperacaoComprador = ['aguardando cotação', 'analise de cadastro', 'aguardando compra preparação', 'aguardando compra']; // Operações do comprador
       const kanbanAcaoRecebimento = ['compra realizada', 'faturada pelo fornecedor']; // Ações do recebimento
       const kanbanSetoresLiberacao = ['recebido']; // Setores precisam liberar
       
@@ -27495,7 +27486,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           itens.forEach(item => {
             const chave = (status === 'aguardando cotação' || status === 'cotado aguardando escolha')
               ? (item.numero_pedido || 'sem_pedido')
-              : (item.cNumero || item.cnumero || 'sem_pedido');
+              : (status === 'analise de cadastro'
+                ? (item.id || item.produto_codigo || 'sem_item')
+                : (item.cNumero || item.cnumero || 'sem_pedido'));
             if (!grupos[chave]) grupos[chave] = [];
             grupos[chave].push(item);
           });
@@ -27691,11 +27684,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             : '#e5e7eb';
 
           // Comentário: no kanban "cotado aguardando escolha" e "aguardando cotação", o clique abre modal específico
-          const onclickCard = status === 'cotado aguardando escolha'
-            ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
-            : (status === 'aguardando cotação'
-              ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
-              : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`);
+          const onclickCard = status === 'analise de cadastro'
+            ? ''
+            : (status === 'cotado aguardando escolha'
+              ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
+              : (status === 'aguardando cotação'
+                ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
+                : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`));
+          const cursorCard = status === 'analise de cadastro' ? 'default' : 'pointer';
           
           return `
             <div class="kanban-card" 
@@ -27711,7 +27707,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               box-shadow:0 1px 3px rgba(0,0,0,0.1);
               flex-shrink:0;
               position:relative;
-              cursor:pointer;
+              cursor:${cursorCard};
             "
             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
