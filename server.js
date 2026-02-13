@@ -14533,15 +14533,34 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
   try {
     const item = req.body || {};
     
+    // Comentário: gera código provisório sequencial (CODPROV - 00001) considerando ambas as tabelas.
+    const obterProximoCodigoProvisorio = async () => {
+      const { rows: maxRows } = await pool.query(`
+        SELECT COALESCE(MAX(num), 0) AS max_num
+        FROM (
+          SELECT CAST(NULLIF(regexp_replace(produto_codigo, '\\D', '', 'g'), '') AS INT) AS num
+          FROM compras.solicitacao_compras
+          WHERE produto_codigo ILIKE 'CODPROV%'
+          UNION ALL
+          SELECT CAST(NULLIF(regexp_replace(produto_codigo, '\\D', '', 'g'), '') AS INT) AS num
+          FROM compras.compras_sem_cadastro
+          WHERE produto_codigo ILIKE 'CODPROV%'
+        ) AS codigos
+      `);
+      const atual = Number(maxRows[0]?.max_num || 0);
+      const proximo = atual + 1;
+      return `CODPROV - ${String(proximo).padStart(5, '0')}`;
+    };
+
     // Validações obrigatórias
-    const produtoCodigo = String(item.produto_codigo || '').trim();
+    let produtoCodigo = String(item.produto_codigo || '').trim();
     const produtoDescricao = String(item.produto_descricao || '').trim();
     const quantidade = parseInt(item.quantidade) || 1;
     const departamento = String(item.departamento || '').trim();
     const centroCusto = String(item.centro_custo || '').trim();
     
-    if (!produtoCodigo) {
-      return res.status(400).json({ ok: false, error: 'produto_codigo é obrigatório' });
+    if (!produtoCodigo || /^codprov\s*-?/i.test(produtoCodigo)) {
+      produtoCodigo = await obterProximoCodigoProvisorio();
     }
     if (!produtoDescricao) {
       return res.status(400).json({ ok: false, error: 'produto_descricao é obrigatório' });
@@ -14560,6 +14579,38 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const retornoCotacao = item.retorno_cotacao || null;
     const respInspecao = item.resp_inspecao_recebimento || solicitante;
     const observacaoRecebimento = item.observacao_recebimento || item.observacao || null;
+
+    // Comentário: define status inicial considerando retorno_cotacao e função do usuário logado.
+    const userId = req.session?.user?.id || null;
+    const username = req.session?.user?.username || null;
+    let isDiretor = false;
+    if (userId || username) {
+      const { rows: funcaoRows } = await pool.query(`
+        SELECT f.name AS funcao
+        FROM public.auth_user u
+        LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+        LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+        WHERE ($1::bigint IS NOT NULL AND u.id = $1)
+           OR ($2::text IS NOT NULL AND u.username = $2)
+        LIMIT 1
+      `, [userId, username]);
+      const funcaoNome = String(funcaoRows[0]?.funcao || '').trim().toLowerCase();
+      isDiretor = funcaoNome === 'diretor(a)';
+    }
+
+    const retornoTexto = String(retornoCotacao || '').trim().toLowerCase();
+    const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
+    let statusInicial = 'pendente';
+
+    if (retornoTexto) {
+      if (isDiretor) {
+        statusInicial = (retornoTexto === retornoSemValores)
+          ? 'Analise de cadastro'
+          : 'aguardando cotação';
+      } else {
+        statusInicial = 'aguardando aprovação da requisição';
+      }
+    }
     
     // Normaliza anexos (converte base64 para null temporariamente - pode salvar em filesystem depois)
     const normalizarAnexos = (raw) => {
@@ -14604,7 +14655,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pendente', $14, NOW(), NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
       )
       RETURNING id, grupo_requisicao
     `, [
@@ -14621,6 +14672,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       observacaoRecebimento,
       anexosArray ? JSON.stringify(anexosArray) : null,
       solicitante,
+      statusInicial,
       grupoRequisicao
     ]);
     
@@ -15817,7 +15869,7 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
-    const { rows } = await pool.query(`
+    const { rows: solicitacoesBase } = await pool.query(`
       SELECT 
         id,
         numero_pedido,
@@ -15855,7 +15907,51 @@ app.get('/api/compras/todas', async (req, res) => {
       LIMIT 1000
     `);
     
-    res.json({ ok: true, solicitacoes: rows });
+    // Comentário: inclui itens de compras_sem_cadastro que estão em "Analise de cadastro".
+    const { rows: solicitacoesSemCadastro } = await pool.query(`
+      SELECT
+        id,
+        NULL::text AS numero_pedido,
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        NULL::date AS prazo_solicitado,
+        NULL::date AS previsao_chegada,
+        status,
+        observacao_recebimento AS observacao,
+        NULL::text AS observacao_retificacao,
+        solicitante,
+        resp_inspecao_recebimento,
+        NULL::text AS responsavel_pela_compra,
+        departamento,
+        centro_custo,
+        objetivo_compra,
+        NULL::text AS fornecedor_nome,
+        NULL::integer AS fornecedor_id,
+        NULL::text AS familia_produto,
+        grupo_requisicao,
+        retorno_cotacao,
+        categoria_compra_codigo,
+        categoria_compra_nome,
+        NULL::text AS codigo_omie,
+        NULL::text AS codigo_produto_omie,
+        NULL::boolean AS requisicao_direta,
+        anexos,
+        NULL::text AS "cNumero",
+        NULL::text AS "nCodPed",
+        created_at,
+        updated_at
+      FROM compras.compras_sem_cadastro
+      WHERE status = 'Analise de cadastro'
+      ORDER BY created_at DESC
+      LIMIT 1000
+    `);
+
+    const todasSolicitacoes = [...solicitacoesBase, ...solicitacoesSemCadastro]
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .slice(0, 1000);
+    
+    res.json({ ok: true, solicitacoes: todasSolicitacoes });
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
