@@ -19806,6 +19806,117 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   }
 }
 
+// Comentário: modal específico para o kanban "Analise de cadastro" (exibe dados de compras_sem_cadastro)
+async function abrirModalAnaliseCadastro(itemId) {
+  const modal = document.getElementById('modalAnaliseCadastro');
+  const modalBody = document.getElementById('modalAnaliseCadastroBody');
+  const modalTitulo = document.getElementById('modalAnaliseCadastroTitulo');
+  if (!modal || !modalBody || !modalTitulo) return;
+
+  modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
+  modal.style.display = 'flex';
+
+  const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+
+  try {
+    // Comentário: tenta localizar primeiro no cache do kanban
+    const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+    let item = cacheItens.find(i => String(i.id) === String(itemId) && i.table_source === 'compras_sem_cadastro');
+
+    // Fallback: busca os itens do usuário logado e filtra pelo ID
+    if (!item) {
+      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
+      const data = await resp.json();
+      const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+      item = listaCompleta.find(i => String(i.id) === String(itemId) && i.table_source === 'compras_sem_cadastro');
+    }
+
+    if (!item) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Item não encontrado.</div>';
+      return;
+    }
+
+    modalTitulo.textContent = `Item ${item.id} - Análise de Cadastro`;
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    // Comentário: renderiza detalhes do item de compras_sem_cadastro
+    let anexosItem = item.anexos;
+    if (typeof anexosItem === 'string') {
+      try {
+        anexosItem = JSON.parse(anexosItem);
+      } catch (e) {
+        anexosItem = [];
+      }
+    }
+    if (!Array.isArray(anexosItem)) anexosItem = [];
+    
+    const anexosItemHtml = anexosItem.length > 0 ? `
+      <div style="margin-top:12px;">
+        <div style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:8px;">
+          <i class="fa-solid fa-paperclip"></i> Anexos do Item:
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${anexosItem.map((anexo, idx) => {
+            const nome = anexo?.nome || `Anexo ${idx + 1}`;
+            const url = anexo?.url || anexo?.path || '#';
+            return `
+              <a 
+                href="${url}" 
+                target="_blank" 
+                style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:8px 12px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:12px;border:1px solid #d1d5db;">
+                <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
+                <span>${escapeHtml(nome)}</span>
+              </a>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    const html = `
+      <div style="background:#eff6ff;border:2px solid #3b82f6;border-radius:8px;padding:20px;">
+        <h4 style="margin:0 0 16px 0;font-size:15px;font-weight:700;color:#1e40af;">
+          <i class="fa-solid fa-clipboard-list"></i>
+          Detalhes da Solicitação
+        </h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;font-size:13px;color:#1f2937;">
+          <div><strong>ID:</strong> ${item.id}</div>
+          <div><strong>CODPROV:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
+          <div><strong>Descrição:</strong> ${escapeHtml(item.descricao || '-')}</div>
+          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
+          <div><strong>Unidade:</strong> ${escapeHtml(item.unidade || '-')}</div>
+          <div><strong>Status:</strong> <span style="background:#dbeafe;color:#1e40af;padding:4px 8px;border-radius:4px;font-weight:600;">${escapeHtml(item.status || '-')}</span></div>
+          <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
+          <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
+          <div><strong>Grupo Requisição:</strong> ${escapeHtml(item.grupo_requisicao || '-')}</div>
+          <div><strong>Data Solicitação:</strong> ${fmtDate(item.data_solicitacao)}</div>
+          <div><strong>Prazo Solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
+          <div><strong>Observações:</strong> ${escapeHtml(item.observacao || '-')}</div>
+        </div>
+        ${anexosItemHtml}
+      </div>
+    `;
+
+    modalBody.innerHTML = html;
+
+  } catch (err) {
+    console.error('[MODAL ANALISE CADASTRO] Erro:', err);
+    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.</div>';
+  }
+}
+
+// Comentário: fecha o modal de analise de cadastro
+function fecharModalAnaliseCadastro() {
+  const modal = document.getElementById('modalAnaliseCadastro');
+  if (modal) modal.style.display = 'none';
+}
+
 // Comentário: modal específico para o kanban "Cotado aguardando escolha" (detalhes do item)
 async function abrirModalCotadoEscolhaItem(itemId) {
   const modal = document.getElementById('modalCotadoEscolhaItem');
@@ -19836,6 +19947,10 @@ async function abrirModalCotadoEscolhaItem(itemId) {
       modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Item não encontrado.</div>';
       return;
     }
+
+    // Comentário: armazena table_source para uso posterior
+    const tableSource = item.table_source || 'solicitacao_compras';
+    window.cotadoEscolhaTableSource = tableSource;
 
     const fmtDate = (iso) => {
       if (!iso) return '-';
@@ -19938,7 +20053,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
             id="btn-enviar-requisicao-cotado-escolha"
             style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-paper-plane"></i>
-            <span>Enviar requisição</span>
+            <span>Enviar solicitação</span>
           </button>
         </div>
       </div>
@@ -19946,14 +20061,14 @@ async function abrirModalCotadoEscolhaItem(itemId) {
 
     modalBody.innerHTML = html;
 
-    // Comentário: carrega cotações do banco usando produto_codigo
-    const produtoCodigo = (item.produto_codigo || '').toString().trim();
-    if (produtoCodigo) {
+    // Comentário: carrega cotações do banco usando solicitacao_id e table_source
+    const solicitacaoId = item.id;
+    if (solicitacaoId) {
       try {
-        const respCot = await fetch(`/api/compras/cotacoes-por-produto/${encodeURIComponent(produtoCodigo)}`, { credentials: 'include' });
+        const respCot = await fetch(`/api/compras/cotacoes/${solicitacaoId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
         if (respCot.ok) {
-          const cotacoes = await respCot.json();
-          window.cotadoEscolhaCotacoesDb = Array.isArray(cotacoes) ? cotacoes : [];
+          const data = await respCot.json();
+          window.cotadoEscolhaCotacoesDb = Array.isArray(data.cotacoes) ? data.cotacoes : (Array.isArray(data) ? data : []);
         }
       } catch (e) {
         console.error('[COTADO ESCOLHA] Erro ao buscar cotações:', e);
@@ -19990,14 +20105,21 @@ async function abrirModalCotacaoKanban(itemId) {
 
   try {
     const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+    console.log('[DEBUG Modal Cotação] itemId recebido:', itemId);
+    console.log('[DEBUG Modal Cotação] Total de itens no cache:', cacheItens.length);
+    console.log('[DEBUG Modal Cotação] IDs no cache:', cacheItens.map(i => i.id).slice(0, 20));
+    
     let item = cacheItens.find(i => String(i.id) === String(itemId));
 
     if (!item) {
+      console.log('[DEBUG Modal Cotação] Item não encontrado no cache, buscando na API...');
       const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
       if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
       const data = await resp.json();
       const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
       item = listaCompleta.find(i => String(i.id) === String(itemId));
+    } else {
+      console.log('[DEBUG Modal Cotação] Item encontrado no cache!');
     }
 
     if (!item) {
@@ -20018,6 +20140,46 @@ async function abrirModalCotacaoKanban(itemId) {
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
 
+    const normalizarLinksCotacao = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [raw];
+        } catch (err) {
+          return [raw];
+        }
+      }
+      return [];
+    };
+
+    const formatarLinkPrincipal = (url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.hostname;
+      } catch (err) {
+        return url;
+      }
+    };
+
+    console.log('[DEBUG Modal Cotação] Item completo:', item);
+    console.log('[DEBUG Modal Cotação] Todas as propriedades do item:', Object.keys(item));
+    console.log('[DEBUG Modal Cotação] item.link:', item.link);
+    console.log('[DEBUG Modal Cotação] item.links:', item.links);
+    console.log('[DEBUG Modal Cotação] item.isSemCadastro:', item.isSemCadastro);
+    
+    const linksCotacao = normalizarLinksCotacao(item.link || item.links);
+    console.log('[DEBUG Modal Cotação] linksCotacao normalizado:', linksCotacao);
+    
+    const linksCotacaoHtml = linksCotacao.length
+      ? linksCotacao.map((link) => {
+          const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+          const label = formatarLinkPrincipal(link);
+          return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;">${escapeHtml(label)}</a>`;
+        }).join(' • ')
+      : '-';
+
     const html = `
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
         <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
@@ -20029,8 +20191,7 @@ async function abrirModalCotacaoKanban(itemId) {
           <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
           <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
           <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
-          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
-          <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
+          <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
         </div>
       </div>
 
@@ -20206,6 +20367,9 @@ async function registrarCotacaoKanban() {
       }
     }
 
+    // Objetivo: Passar table_source para identificar se é de compras_sem_cadastro ou solicitacao_compras
+    const tableSource = window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
+
     const resp = await fetch('/api/compras/cotacoes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -20214,7 +20378,8 @@ async function registrarCotacaoKanban() {
         solicitacao_id: window.cotacaoKanbanItemId,
         fornecedor_nome: fornecedor,
         valor_cotado: valor,
-        anexos: anexosArray
+        anexos: anexosArray,
+        table_source: tableSource
       })
     });
 
@@ -20223,6 +20388,7 @@ async function registrarCotacaoKanban() {
       throw new Error(errData.error || 'Erro ao salvar cotação');
     }
 
+    document.getElementById('cotacaoKanbanFornecedor').value = '';
     document.getElementById('cotacaoKanbanValor').value = '';
     window.cotacaoKanbanAnexos = [];
     renderizarListaAnexosCotacaoKanban();
@@ -20239,10 +20405,14 @@ async function carregarCotacoesKanban() {
   if (!container) return;
 
   try {
-    const resp = await fetch(`/api/compras/cotacoes/${window.cotacaoKanbanItemId}`, { credentials: 'include' });
+    // Comentário: determina table_source a partir do item (compras_sem_cadastro ou solicitacao_compras)
+    const item = window.cotacaoKanbanItem || {};
+    const tableSource = item.table_source || 'solicitacao_compras';
+    
+    const resp = await fetch(`/api/compras/cotacoes/${window.cotacaoKanbanItemId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar cotações');
-    const cotacoes = await resp.json();
-    window.cotacaoKanbanCotacoes = Array.isArray(cotacoes) ? cotacoes : [];
+    const data = await resp.json();
+    window.cotacaoKanbanCotacoes = Array.isArray(data.cotacoes) ? data.cotacoes : [];
 
     if (window.cotacaoKanbanCotacoes.length === 0) {
       container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
@@ -20377,16 +20547,28 @@ async function excluirCotacaoKanban(cotacaoId) {
 async function enviarCotacoesKanban() {
   if (!window.cotacaoKanbanItemId) return;
   try {
-    const resp = await fetch(`/api/compras/solicitacoes/${window.cotacaoKanbanItemId}`, {
+    // Objetivo: Mudar status para "cotado" na tabela correta (compras_sem_cadastro ou solicitacao_compras)
+    const tableSource = window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
+    
+    let endpoint = '';
+    if (tableSource === 'compras_sem_cadastro') {
+      endpoint = `/api/compras/sem-cadastro/${window.cotacaoKanbanItemId}`;
+    } else {
+      endpoint = `/api/compras/solicitacoes/${window.cotacaoKanbanItemId}`;
+    }
+    
+    const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ status: 'cotado' })
     });
+    
     if (!resp.ok) {
       const errData = await resp.json();
       throw new Error(errData.error || 'Erro ao atualizar status');
     }
+    
     alert('Cotações enviadas com sucesso! Status atualizado para "cotado".');
     fecharModalCotacaoKanban();
     if (typeof loadMinhasSolicitacoes === 'function') {
@@ -20573,22 +20755,39 @@ async function enviarCotadoEscolhaParaCompra() {
   if (!window.cotadoEscolhaItemId) return;
   const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
   const originalHtml = btn ? btn.innerHTML : '';
+  const tableSource = window.cotadoEscolhaTableSource || 'solicitacao_compras';
   try {
     if (btn) {
       btn.disabled = true;
       btn.style.cursor = 'not-allowed';
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
     }
-    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}/enviar-requisicao`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include'
-    });
+    
+    // Comentário: se for compras_sem_cadastro, apenas muda status para "Analise de cadastro"
+    let resp;
+    let mensagem;
+    if (tableSource === 'compras_sem_cadastro') {
+      resp = await fetch(`/api/compras/sem-cadastro/${window.cotadoEscolhaItemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'Analise de cadastro' })
+      });
+      mensagem = 'Solicitação enviada e status atualizado para "Analise de cadastro".';
+    } else {
+      resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}/enviar-requisicao`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      mensagem = 'Requisição enviada e status atualizado para "aguardando compra".';
+    }
+    
     if (!resp.ok) {
       const errData = await resp.json();
       throw new Error(errData.error || 'Erro ao atualizar status');
     }
-    alert('Requisição enviada e status atualizado para "aguardando compra".');
+    alert(mensagem);
     fecharModalCotadoEscolhaItem();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
@@ -20607,8 +20806,16 @@ async function enviarCotadoEscolhaParaCompra() {
 // Comentário: retifica item para aguardando cotação
 async function retificarCotadoEscolha() {
   if (!window.cotadoEscolhaItemId) return;
+  const tableSource = window.cotadoEscolhaTableSource || 'solicitacao_compras';
   try {
-    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`, {
+    let endpoint;
+    if (tableSource === 'compras_sem_cadastro') {
+      endpoint = `/api/compras/sem-cadastro/${window.cotadoEscolhaItemId}`;
+    } else {
+      endpoint = `/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`;
+    }
+    
+    const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -20632,8 +20839,16 @@ async function retificarCotadoEscolha() {
 // Comentário: cancela item para compra cancelada
 async function cancelarCotadoEscolha() {
   if (!window.cotadoEscolhaItemId) return;
+  const tableSource = window.cotadoEscolhaTableSource || 'solicitacao_compras';
   try {
-    const resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`, {
+    let endpoint;
+    if (tableSource === 'compras_sem_cadastro') {
+      endpoint = `/api/compras/sem-cadastro/${window.cotadoEscolhaItemId}`;
+    } else {
+      endpoint = `/api/compras/solicitacoes/${window.cotadoEscolhaItemId}`;
+    }
+    
+    const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -20818,6 +21033,8 @@ async function voltarParaAguardandoCompra(itemId) {
 
 window.abrirModalDetalhesPedidoMinhas = abrirModalDetalhesPedidoMinhas;
 window.toggleAprovarCotacaoMinhas = toggleAprovarCotacaoMinhas;
+window.abrirModalAnaliseCadastro = abrirModalAnaliseCadastro;
+window.fecharModalAnaliseCadastro = fecharModalAnaliseCadastro;
 window.abrirModalCotadoEscolhaItem = abrirModalCotadoEscolhaItem;
 window.fecharModalCotadoEscolhaItem = fecharModalCotadoEscolhaItem;
 window.aprovarCotacaoCotadoEscolha = aprovarCotacaoCotadoEscolha;
@@ -22665,8 +22882,13 @@ function atualizarDescricaoKeywordsHidden() {
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
   if (!tagsContainer || !hidden) return '';
+  // Comentário: formato agora é palavra-quantidade;palavra2-quantidade2;
   const keywords = Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
-    .map(tag => tag.getAttribute('data-keyword') || '')
+    .map(tag => {
+      const palavra = tag.getAttribute('data-keyword') || '';
+      const quantidade = tag.getAttribute('data-quantidade') || '1';
+      return palavra ? `${palavra}-${quantidade}` : '';
+    })
     .filter(Boolean);
   hidden.value = keywords.join(';');
   return hidden.value;
@@ -22688,8 +22910,24 @@ function adicionarDescricaoKeyword(valor) {
     return;
   }
 
+  // Comentário: solicita quantidade ao usuário
+  const quantidadeStr = prompt(`Digite a quantidade para "${keyword}":`, '1');
+  if (quantidadeStr === null) {
+    // Cancelou
+    input.value = '';
+    return;
+  }
+  
+  const quantidade = parseInt(quantidadeStr, 10);
+  if (!Number.isFinite(quantidade) || quantidade < 1) {
+    alert('Quantidade inválida. Deve ser um número maior que zero.');
+    input.value = '';
+    return;
+  }
+
   const tag = document.createElement('span');
   tag.setAttribute('data-keyword', keyword);
+  tag.setAttribute('data-quantidade', String(quantidade));
   tag.style.display = 'inline-flex';
   tag.style.alignItems = 'center';
   tag.style.gap = '6px';
@@ -22702,7 +22940,7 @@ function adicionarDescricaoKeyword(valor) {
   tag.style.color = '#1e40af';
 
   const texto = document.createElement('span');
-  texto.textContent = keyword;
+  texto.textContent = `${keyword} (${quantidade})`;
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -22840,10 +23078,6 @@ function toggleCamposCatalogoOmie() {
     // Limpa campo ao ocultar
     const descricao = document.getElementById('catalogoDescricaoNaoCadastrado');
     if (descricao) descricao.value = '';
-    
-    // Limpa campo de quantidade
-    const quantidade = document.getElementById('catalogoQuantidadeNaoCadastrado');
-    if (quantidade) quantidade.value = '1';
     
     // Carrega produtos do catálogo Omie
     carregarProdutosCatalogoOmie();
@@ -22985,6 +23219,73 @@ function handleCatalogoAnexoChange(input) {
   if (novosAdicionados > 0) {
     console.log(`[Catálogo] ${novosAdicionados} novo(s) arquivo(s) adicionado(s). Total: ${window.catalogoAnexosAcumulados.length}`);
   }
+}
+
+// Gerencia links no catálogo (cache em memória e renderização)
+function handleCatalogoLinkKeydown(event) {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+
+  const input = event.target;
+  if (!input) return;
+
+  const valor = String(input.value || '').trim();
+  if (!valor) return;
+
+  if (!window.catalogoLinksAcumulados) {
+    window.catalogoLinksAcumulados = [];
+  }
+
+  // Evita duplicidade
+  if (window.catalogoLinksAcumulados.includes(valor)) {
+    input.value = '';
+    return;
+  }
+
+  window.catalogoLinksAcumulados.push(valor);
+  input.value = '';
+  renderizarCatalogoLinks();
+}
+
+function removerCatalogoLink(index) {
+  if (!window.catalogoLinksAcumulados || index < 0 || index >= window.catalogoLinksAcumulados.length) return;
+  window.catalogoLinksAcumulados.splice(index, 1);
+  renderizarCatalogoLinks();
+}
+
+function renderizarCatalogoLinks() {
+  const preview = document.getElementById('catalogoLinkPreview');
+  if (!preview) return;
+
+  const links = window.catalogoLinksAcumulados || [];
+  if (links.length === 0) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+    return;
+  }
+
+  const listaHTML = links.map((link, index) => {
+    const linkSeguro = escapeHtml(link);
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:white;border:2px solid #3b82f6;border-radius:6px;margin-bottom:6px;">
+        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+          <i class="fa-solid fa-link" style="color:#3b82f6;font-size:16px;"></i>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;color:#1e3a8a;word-break:break-all;">${linkSeguro}</div>
+          </div>
+        </div>
+        <button 
+          type="button"
+          onclick="removerCatalogoLink(${index})"
+          style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  preview.innerHTML = listaHTML;
+  preview.style.display = 'block';
 }
 
 // Remove todos os anexos do catálogo
@@ -23916,16 +24217,13 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   let descricaoNaoCadastrado = '';
   let etapasPedido = '';
   let observacaoRecebimento = '';
-  let quantidadeNaoCadastrado = 1;
   
   if (!possuiCadastroOmie) {
     const inputDescricao = document.getElementById('catalogoDescricaoNaoCadastrado');
-    const inputQuantidade = document.getElementById('catalogoQuantidadeNaoCadastrado');
     const selectEtapas = document.getElementById('catalogoEtapasPedido');
     const textareaObs = document.getElementById('catalogoObservacaoRecebimento');
     
     descricaoNaoCadastrado = inputDescricao ? inputDescricao.value.trim() : '';
-    quantidadeNaoCadastrado = inputQuantidade ? parseInt(inputQuantidade.value) || 1 : 1;
     etapasPedido = selectEtapas ? selectEtapas.value : '';
     observacaoRecebimento = textareaObs ? textareaObs.value.trim() : '';
     
@@ -23933,12 +24231,6 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     if (!descricaoNaoCadastrado) {
       alert('Para produtos não cadastrados na Omie, informe a descrição!');
       inputDescricao?.focus();
-      return;
-    }
-    
-    if (!quantidadeNaoCadastrado || quantidadeNaoCadastrado < 1) {
-      alert('Informe uma quantidade válida (mínimo 1)!');
-      inputQuantidade?.focus();
       return;
     }
     
@@ -23950,8 +24242,8 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   // Captura dados específicos do produto
   const inputQtd = document.getElementById(`catalogo-qtd-${codigo}`);
   
-  // Se é produto não cadastrado, usa a quantidade capturada anteriormente
-  let quantidade = !possuiCadastroOmie ? quantidadeNaoCadastrado : (inputQtd ? parseInt(inputQtd.value) || 1 : 1);
+  // Comentário: para produto não cadastrado, quantidade sempre será 1 (a quantidade real vem no formato palavra-quantidade nas keywords)
+  let quantidade = !possuiCadastroOmie ? 1 : (inputQtd ? parseInt(inputQtd.value) || 1 : 1);
   const prazo = '';
   
   // Validações
@@ -24090,6 +24382,37 @@ function atualizarContadorCatalogo() {
   }
 }
 
+// Função para fazer upload de anexo para Supabase
+async function uploadCatalogoAnexo(file, codigoTemp) {
+  if (!file) return null;
+  
+  try {
+    const formData = new FormData();
+    const timestamp = Date.now();
+    const fileName = `compras_sem_cadastro/${codigoTemp}/${timestamp}_${file.name}`;
+    
+    formData.append('file', file);
+    formData.append('path', fileName);
+    
+    const response = await fetch('/api/upload/supabase', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.url || data.path;
+  } catch (err) {
+    console.error('[Catálogo] Erro ao fazer upload do anexo:', err);
+    throw err;
+  }
+}
+
 // Função para adicionar produto não cadastrado ao carrinho
 async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   console.log('[Catálogo] adicionarProdutoNaoCadastradoAoCarrinho() CHAMADA');
@@ -24097,7 +24420,6 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   // Valida campos obrigatórios
   const inputDescricao = document.getElementById('catalogoDescricaoNaoCadastrado');
   const hiddenKeywords = document.getElementById('catalogoDescricaoKeywords');
-  const inputQuantidade = document.getElementById('catalogoQuantidadeNaoCadastrado');
   const selectDeptGlobal = document.getElementById('catalogoDepartamentoGlobal');
   const selectCCGlobal = document.getElementById('catalogoCentroCustoGlobal');
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
@@ -24105,11 +24427,20 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   
   // Usa as keywords do campo hidden (separadas por ;) como descrição
   const descricao = hiddenKeywords ? hiddenKeywords.value.trim() : (inputDescricao ? inputDescricao.value.trim() : '');
-  const quantidade = inputQuantidade ? parseInt(inputQuantidade.value) || 1 : 1;
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const etapas = selectEtapas ? selectEtapas.value : '';
+  
+  // Extrai a quantidade da primeira palavra-chave (formato: palavra-quantidade)
+  let quantidade = 1;
+  if (descricao) {
+    const primeiraKeyword = descricao.split(';')[0];
+    const match = primeiraKeyword.match(/-(\d+)$/);
+    if (match) {
+      quantidade = parseInt(match[1], 10);
+    }
+  }
   
   // Aplica categoria padrão se não selecionada (campo removido)
   const categoriaPadraoCodigo = '2.14.94';
@@ -24133,7 +24464,6 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   
   if (!quantidade || quantidade < 1) {
     alert('Informe uma quantidade válida (mínimo 1)!');
-    inputQuantidade?.focus();
     return;
   }
   
@@ -24189,27 +24519,28 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     const observacaoRecebimento = textareaObsRecebimento ? textareaObsRecebimento.value.trim() : '';
     const objetivoCompra = textareaObjetivo ? textareaObjetivo.value.trim() : '';
     
-    // Processa anexos
-    let anexosArray = null;
+    // Processa anexos - UPLOAD via Supabase
+    let anexosUrls = [];
     if (window.catalogoAnexosAcumulados && window.catalogoAnexosAcumulados.length > 0) {
-      anexosArray = [];
       for (let i = 0; i < window.catalogoAnexosAcumulados.length; i++) {
         const file = window.catalogoAnexosAcumulados[i];
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        anexosArray.push({
-          nome: file.name,
-          tipo: file.type,
-          tamanho: file.size,
-          base64: base64
-        });
+        try {
+          const url = await uploadCatalogoAnexo(file, codigoTemp);
+          if (url) {
+            anexosUrls.push(url);
+            console.log('[Catálogo] Anexo enviado com sucesso:', url);
+          }
+        } catch (err) {
+          console.error('[Catálogo] Erro ao fazer upload de anexo:', err);
+          alert(`Erro ao fazer upload do arquivo "${file.name}". Continuando sem este anexo.`);
+        }
       }
     }
     
+    const linksCatalogo = Array.isArray(window.catalogoLinksAcumulados)
+      ? window.catalogoLinksAcumulados.filter(l => l && String(l).trim().length > 0)
+      : [];
+
     const payload = {
       produto_codigo: codigoTemp,
       produto_descricao: descricao,
@@ -24222,7 +24553,8 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       retorno_cotacao: retornoCotacao,
       resp_inspecao_recebimento: respInspecao,
       observacao_recebimento: observacaoRecebimento,
-      anexos: anexosArray
+      anexos: anexosUrls,
+      link: linksCatalogo
     };
     
     console.log('[Catálogo] Enviando para /api/compras/sem-cadastro:', payload);
@@ -24259,7 +24591,6 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     
     // Limpa os campos após adicionar
     limparDescricaoKeywords();
-    if (inputQuantidade) inputQuantidade.value = '1';
     const objetivoGlobal = document.getElementById('catalogoObservacaoGlobal');
     const obsRecebimentoInput = document.getElementById('catalogoObservacaoRecebimento');
     if (objetivoGlobal) objetivoGlobal.value = '';
@@ -24271,6 +24602,14 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     if (preview) preview.style.display = 'none';
     const label = document.getElementById('catalogoAnexoLabel');
     if (label) label.textContent = 'Selecionar arquivos';
+
+    // Limpa links acumulados
+    window.catalogoLinksAcumulados = [];
+    const linkPreview = document.getElementById('catalogoLinkPreview');
+    if (linkPreview) linkPreview.style.display = 'none';
+    if (linkPreview) linkPreview.innerHTML = '';
+    const linkInput = document.getElementById('catalogoLinkInput');
+    if (linkInput) linkInput.value = '';
     
     // Foca no campo de descrição para próxima entrada
     setTimeout(() => {
@@ -24716,6 +25055,8 @@ window.togglePrazoCatalogo = togglePrazoCatalogo;
 window.toggleFiltrosCatalogo = toggleFiltrosCatalogo;
 window.toggleCamposCatalogoOmie = toggleCamposCatalogoOmie;
 window.handleCatalogoAnexoChange = handleCatalogoAnexoChange;
+window.handleCatalogoLinkKeydown = handleCatalogoLinkKeydown;
+window.removerCatalogoLink = removerCatalogoLink;
 window.removerCatalogoAnexo = removerCatalogoAnexo;
 window.removerCatalogoAnexoIndividual = removerCatalogoAnexoIndividual;
 
@@ -27279,6 +27620,30 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       lista = [...lista, ...comprasRealizadas];
     }
     
+    // Busca itens sem cadastro da tabela compras_sem_cadastro
+    console.log('[DEBUG] Buscando itens sem cadastro...');
+    const respSemCadastro = await fetch(`/api/compras/sem-cadastro?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+    console.log('[DEBUG] Resposta do fetch itens sem cadastro:', respSemCadastro.status, respSemCadastro.ok);
+    let itensSemCadastro = [];
+    if (respSemCadastro.ok) {
+      const dataSemCadastro = await respSemCadastro.json();
+      console.log('[DEBUG] Itens sem cadastro recebidos da API:', dataSemCadastro.itens);
+      itensSemCadastro = (dataSemCadastro.itens || []).map(item => ({
+        ...item,
+        id: `sem_cadastro_${item.id}`,
+        numero_pedido: item.produto_codigo,
+        statusNormalizado: (item.status || 'pendente').toLowerCase(),
+        isSemCadastro: true
+      }));
+      
+      console.log('[DEBUG] Itens sem cadastro mapeados:', itensSemCadastro);
+      console.log('[DEBUG] Total de itens sem cadastro:', itensSemCadastro.length);
+      if (itensSemCadastro.length > 0) {
+        console.log('[DEBUG] Primeiro item sem cadastro:', itensSemCadastro[0]);
+      }
+      lista = [...lista, ...itensSemCadastro];
+    }
+    
     console.log('[DEBUG] Lista total após adicionar compras realizadas:', lista.length);
     
     // Aplica filtro de status se fornecido
@@ -27482,13 +27847,28 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           usarArrayDireto = true;
           gruposArrayOrdenado = gruposArray;
         } else {
-          // Para solicitações: agrupa por numero_pedido (nos kanbans "Cotação" e "Cotado") ou cNumero nos demais
+          // Para solicitações: agrupa usando critérios específicos por status
+          // Objetivo: agrupar por grupo_requisicao para compras_sem_cadastro e nCodPed para solicitacao_compras
+          const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro'];
+          
           itens.forEach(item => {
-            const chave = (status === 'aguardando cotação' || status === 'cotado aguardando escolha')
-              ? (item.numero_pedido || 'sem_pedido')
-              : (status === 'analise de cadastro'
-                ? (item.id || item.produto_codigo || 'sem_item')
-                : (item.cNumero || item.cnumero || 'sem_pedido'));
+            let chave;
+            
+            if (statusComAgrupamentoPorGrupo.includes(status)) {
+              // Para esses status, agrupa por grupo_requisicao (compras_sem_cadastro) ou nCodPed (solicitacao_compras)
+              if (item.table_source === 'compras_sem_cadastro') {
+                chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
+              } else {
+                // solicitacao_compras
+                chave = item.nCodPed || item.numero_pedido || `sem_pedido_${item.id}`;
+              }
+            } else {
+              // Para outros status, mantém lógica anterior
+              chave = (status === 'numero_pedido' || status === 'cNumero')
+                ? (item.numero_pedido || 'sem_pedido')
+                : (item.cNumero || item.cnumero || 'sem_pedido');
+            }
+            
             if (!grupos[chave]) grupos[chave] = [];
             grupos[chave].push(item);
           });
@@ -27683,15 +28063,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             ? determinCorBorda(primeiroItem.c_cod_int_ped) 
             : '#e5e7eb';
 
-          // Comentário: no kanban "cotado aguardando escolha" e "aguardando cotação", o clique abre modal específico
+          // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
           const onclickCard = status === 'analise de cadastro'
-            ? ''
+            ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
             : (status === 'cotado aguardando escolha'
               ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
               : (status === 'aguardando cotação'
                 ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
                 : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`));
-          const cursorCard = status === 'analise de cadastro' ? 'default' : 'pointer';
+          const cursorCard = 'pointer';
           
           return `
             <div class="kanban-card" 
@@ -27714,6 +28094,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               
               ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
+              <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
+              ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') ? `
               <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
                 ${escapeHtml(
                   primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
@@ -27724,6 +28106,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   (primeiroItem.numero_pedido || primeiroItem.cNumero || '-')
                 )}
               </div>
+              ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.fornecedor_nome ? `
                 <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;">
@@ -27737,6 +28120,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   <i class="fa-solid fa-calendar-plus" style="margin-right:4px;color:#f59e0b;"></i>
                   <span style="font-weight:600;">Data:</span>
                   <span style="margin-left:4px;">${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                </div>
+              ` : ''}
+              
+              <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos -->
+              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') && chaveGrupo && chaveGrupo !== '-' ? `
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;">
+                  <span style="font-weight:600;color:#374151;">${escapeHtml(chaveGrupo)}</span>
                 </div>
               ` : ''}
               
