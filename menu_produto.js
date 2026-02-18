@@ -19845,6 +19845,24 @@ async function abrirModalAnaliseCadastro(itemId) {
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
 
+    // Comentário: processa descrições separadas por ";" e quantidades no formato "descricao-quantidade"
+    const processarItensDescricao = (descricao) => {
+      if (!descricao || typeof descricao !== 'string') return [];
+      
+      const itens = descricao.split(';').map(s => s.trim()).filter(s => s);
+      return itens.map((item) => {
+        const partes = item.split('-');
+        const desc = partes.slice(0, -1).join('-').trim() || item.trim();
+        const qtd = partes.length > 1 ? partes[partes.length - 1].trim() : '';
+        return { descricao: desc, quantidade: qtd };
+      });
+    };
+
+    window.analiseCadastroCodprovBase = item.produto_codigo || '';
+    window.analiseCadastroItens = processarItensDescricao(item.produto_descricao);
+    window.analiseCadastroItemId = item.id;
+    window.analiseCadastroDirty = false;
+
     // Comentário: renderiza detalhes do item de compras_sem_cadastro
     let anexosItem = item.anexos;
     if (typeof anexosItem === 'string') {
@@ -19887,9 +19905,6 @@ async function abrirModalAnaliseCadastro(itemId) {
         </h4>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;font-size:13px;color:#1f2937;">
           <div><strong>ID:</strong> ${item.id}</div>
-          <div><strong>CODPROV:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
-          <div><strong>Descrição:</strong> ${escapeHtml(item.descricao || '-')}</div>
-          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
           <div><strong>Unidade:</strong> ${escapeHtml(item.unidade || '-')}</div>
           <div><strong>Status:</strong> <span style="background:#dbeafe;color:#1e40af;padding:4px 8px;border-radius:4px;font-weight:600;">${escapeHtml(item.status || '-')}</span></div>
           <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
@@ -19901,9 +19916,23 @@ async function abrirModalAnaliseCadastro(itemId) {
         </div>
         ${anexosItemHtml}
       </div>
+      <div style="margin-top:20px;">
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#1e40af;">
+          <i class="fa-solid fa-list"></i>
+          Itens da Solicitação
+        </h4>
+        <div id="listaItensAnaliseCadastro" style="display:grid;gap:8px;"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+          <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-floppy-disk"></i>
+            Salvar alterações
+          </button>
+        </div>
+      </div>
     `;
 
     modalBody.innerHTML = html;
+    renderizarListaItensAnaliseCadastro();
 
   } catch (err) {
     console.error('[MODAL ANALISE CADASTRO] Erro:', err);
@@ -19916,6 +19945,137 @@ function fecharModalAnaliseCadastro() {
   const modal = document.getElementById('modalAnaliseCadastro');
   if (modal) modal.style.display = 'none';
 }
+
+// Comentário: renderiza lista de itens do modal de análise de cadastro
+function renderizarListaItensAnaliseCadastro() {
+  const container = document.getElementById('listaItensAnaliseCadastro');
+  if (!container) return;
+
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  const codprovBase = String(window.analiseCadastroCodprovBase || '').trim();
+
+  if (!itens.length) {
+    container.innerHTML = '<div style="text-align:center;padding:12px;color:#9ca3af;font-size:12px;">Nenhum item encontrado</div>';
+    return;
+  }
+
+  const codBaseMatch = codprovBase.match(/(\d+)$/);
+  const codBaseNumero = codBaseMatch ? codBaseMatch[1] : '00001';
+
+  container.innerHTML = itens.map((item, idx) => {
+    const subIndice = (idx + 1).toString();
+    const codprov = `CODPROV - ${codBaseNumero}.${subIndice}`;
+    const descricao = item.descricao ? escapeHtml(item.descricao) : '';
+    const quantidade = item.quantidade ? escapeHtml(item.quantidade) : '';
+
+    return `
+      <div style="background:white;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:grid;grid-template-columns:150px 1fr 110px 120px;gap:12px;align-items:center;">
+        <div style="font-weight:600;color:#1e40af;font-size:13px;">${codprov}</div>
+        <div>
+          <input
+            type="text"
+            value="${descricao}"
+            placeholder="Descrição"
+            oninput="atualizarItemAnaliseCadastro(${idx}, 'descricao', this.value)"
+            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" />
+        </div>
+        <div>
+          <input
+            type="text"
+            value="${quantidade}"
+            placeholder="Quantidade"
+            oninput="atualizarItemAnaliseCadastro(${idx}, 'quantidade', this.value)"
+            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;text-align:center;" />
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button onclick="duplicarItemAnaliseCadastro(${idx})" title="Duplicar item" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-copy"></i>
+          </button>
+          <button onclick="inserirNovoItemAnaliseCadastro(${idx})" title="Novo abaixo" style="background:#ecfccb;color:#3f6212;border:1px solid #d9f99d;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  atualizarBotaoSalvarAnaliseCadastro();
+}
+
+// Comentário: atualiza item editado e habilita salvar
+window.atualizarItemAnaliseCadastro = function(index, campo, valor) {
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  const alvo = itens[index];
+  if (!alvo) return;
+  alvo[campo] = String(valor ?? '').trim();
+  window.analiseCadastroDirty = true;
+  atualizarBotaoSalvarAnaliseCadastro();
+};
+
+function atualizarBotaoSalvarAnaliseCadastro() {
+  const btn = document.getElementById('btnSalvarItensAnaliseCadastro');
+  if (!btn) return;
+  const dirty = !!window.analiseCadastroDirty;
+  btn.disabled = !dirty;
+  btn.style.opacity = dirty ? '1' : '0.5';
+  btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+}
+
+// Comentário: duplica o item mantendo o sequencial do CODPROV
+window.duplicarItemAnaliseCadastro = function(index) {
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  const alvo = itens[index];
+  if (!alvo) return;
+
+  const duplicado = { descricao: alvo.descricao || '', quantidade: alvo.quantidade || '' };
+  itens.splice(index + 1, 0, duplicado);
+  window.analiseCadastroItens = itens;
+  window.analiseCadastroDirty = true;
+  renderizarListaItensAnaliseCadastro();
+};
+
+// Comentário: insere novo item vazio abaixo do atual
+window.inserirNovoItemAnaliseCadastro = function(index) {
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  itens.splice(index + 1, 0, { descricao: '', quantidade: '' });
+  window.analiseCadastroItens = itens;
+  window.analiseCadastroDirty = true;
+  renderizarListaItensAnaliseCadastro();
+};
+
+// Comentário: salva alterações na coluna produto_descricao
+window.salvarItensAnaliseCadastro = async function() {
+  const itemId = window.analiseCadastroItemId;
+  if (!itemId) return;
+
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  const descricaoFinal = itens.map((item) => {
+    const desc = String(item.descricao || 'vazio').trim() || 'vazio';
+    const qtd = String(item.quantidade || 'vazio').trim() || 'vazio';
+    return `${desc}-${qtd}`;
+  }).join(';');
+
+  try {
+    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ produto_descricao: descricaoFinal })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao salvar');
+    }
+
+    window.analiseCadastroDirty = false;
+    atualizarBotaoSalvarAnaliseCadastro();
+    alert('Itens atualizados com sucesso.');
+  } catch (err) {
+    console.error('[ANALISE CADASTRO] Erro ao salvar itens:', err);
+    alert('Erro ao salvar itens: ' + err.message);
+  }
+};
 
 // Comentário: modal específico para o kanban "Cotado aguardando escolha" (detalhes do item)
 async function abrirModalCotadoEscolhaItem(itemId) {
@@ -26453,9 +26613,14 @@ async function abrirModalAprovacaoRequisicao() {
               </thead>
               <tbody>
                 ${itensGrupo.map((item, idx) => {
-                  const retornoCotacao = item.retorno_cotacao || 'N';
-                  const retornoTexto = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? 'SIM' : 'NÃO';
-                  const retornoCor = (retornoCotacao === 'S' || retornoCotacao === 'Sim') ? '#10b981' : '#ef4444';
+                  const isSemCadastro = item.table_source === 'compras_sem_cadastro';
+                  const retornoCotacaoRaw = String(item.retorno_cotacao || '').trim();
+                  const retornoSemValores = '🛒 Apenas realizar compra sem retorno de valores ou caracteristica';
+                  const retornoCotacaoEhSim = isSemCadastro
+                    ? retornoCotacaoRaw !== retornoSemValores
+                    : (retornoCotacaoRaw === 'S' || retornoCotacaoRaw === 'Sim');
+                  const retornoTexto = retornoCotacaoEhSim ? 'SIM' : 'NÃO';
+                  const retornoCor = retornoCotacaoEhSim ? '#10b981' : '#ef4444';
                   const grupoAtual = item.grupo_requisicao || 'Sem grupo';
                   
                   // Processa anexos
@@ -26519,11 +26684,11 @@ async function abrirModalAprovacaoRequisicao() {
                       <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;">
                           ${usuarioPodeAprovarDepartamento(item.departamento || '') ? `
-                          <button onclick="aprovarItemRequisicao(${item.id})" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
+                          <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', '${escapeHtml(retornoCotacaoRaw)}')" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-check"></i>
                           </button>
                           ` : '<span style="color:#9ca3af;font-size:11px;font-style:italic;">Sem permissão</span>'}
-                          <button onclick="abrirModalReprovacao(${item.id})" title="Reprovar (voltar para carrinho)" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
+                          <button onclick="abrirModalReprovacao(${item.id}, '${escapeHtml(item.table_source || '')}')" title="Reprovar (voltar para carrinho)" style="background:#ef4444;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#dc2626';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#ef4444';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-rotate-left"></i>
                           </button>
                         </div>
@@ -26591,10 +26756,39 @@ async function abrirModalAprovacaoRequisicao() {
 }
 
 // Função para aprovar um item individualmente
-async function aprovarItemRequisicao(itemId) {
-  if (!confirm('Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".')) return;
+async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
+  const isSemCadastro = tableSource === 'compras_sem_cadastro';
+  const retornoSemValores = '🛒 Apenas realizar compra sem retorno de valores ou caracteristica';
+  const retornoCotacaoEhSim = isSemCadastro
+    ? String(retornoCotacaoRaw || '').trim() !== retornoSemValores
+    : false;
+
+  const mensagemConfirmacao = isSemCadastro
+    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro'}.`
+    : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
+
+  if (!confirm(mensagemConfirmacao)) return;
   
   try {
+    if (isSemCadastro) {
+      const novoStatus = retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro';
+      const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: novoStatus })
+      });
+
+      if (!resp.ok) {
+        const error = await resp.json();
+        throw new Error(error.error || 'Falha ao atualizar status');
+      }
+
+      alert(`Item aprovado e status atualizado para ${novoStatus}.`);
+      await abrirModalAprovacaoRequisicao();
+      return;
+    }
+
     // Chama o endpoint que aprova o item e cria requisição na Omie
     const resp = await fetch(`/api/compras/aprovar-item/${itemId}`, {
       method: 'POST',
@@ -27135,8 +27329,9 @@ function fecharModalHistoricoItem() {
 }
 
 // Abre modal para informar motivo da reprovação
-function abrirModalReprovacao(itemId) {
+function abrirModalReprovacao(itemId, tableSource) {
   window.itemReprovacaoId = itemId;
+  window.itemReprovacaoTableSource = tableSource || '';
   const modalId = 'modalReprovacaoAprovacao';
   let modal = document.getElementById(modalId);
 
@@ -27183,6 +27378,7 @@ function fecharModalReprovacao() {
   if (textarea) textarea.value = '';
   if (errorDiv) errorDiv.style.display = 'none';
   window.itemReprovacaoId = null;
+  window.itemReprovacaoTableSource = null;
 }
 
 async function confirmarReprovacao() {
@@ -27198,24 +27394,49 @@ async function confirmarReprovacao() {
     return;
   }
 
-  await reprovarItemAprovacao(itemId, motivo);
+  await reprovarItemAprovacao(itemId, motivo, window.itemReprovacaoTableSource);
   fecharModalReprovacao();
 }
 
 // Reprova item e devolve para o carrinho
-async function reprovarItemAprovacao(itemId, motivo) {
+async function reprovarItemAprovacao(itemId, motivo, tableSource) {
   try {
     const usuario = window.__sessionUser?.username || window.__sessionUser?.id || '';
-    const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ status: 'carrinho', observacao_reprovacao: motivo, usuario_comentario: usuario })
-    });
-    if (!resp.ok) {
-      const error = await resp.json();
-      throw new Error(error.error || 'Erro ao reprovar item');
+    
+    // Se for de compras_sem_cadastro, usa endpoint e status específico
+    if (tableSource === 'compras_sem_cadastro') {
+      const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          status: 'Carrinho',
+          observacao_reprovacao: motivo,
+          usuario_comentario: usuario 
+        })
+      });
+      if (!resp.ok) {
+        const error = await resp.json();
+        throw new Error(error.error || 'Erro ao reprovar item');
+      }
+    } else {
+      // Para solicitacao_compras, usa endpoint original
+      const resp = await fetch(`/api/compras/itens/${itemId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ 
+          status: 'carrinho', 
+          observacao_reprovacao: motivo, 
+          usuario_comentario: usuario 
+        })
+      });
+      if (!resp.ok) {
+        const error = await resp.json();
+        throw new Error(error.error || 'Erro ao reprovar item');
+      }
     }
+    
     await abrirModalAprovacaoRequisicao();
   } catch (err) {
     console.error('[Aprovação] Erro ao reprovar item:', err);
@@ -27618,30 +27839,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         console.log('[DEBUG] Primeira compra realizada:', comprasRealizadas[0]);
       }
       lista = [...lista, ...comprasRealizadas];
-    }
-    
-    // Busca itens sem cadastro da tabela compras_sem_cadastro
-    console.log('[DEBUG] Buscando itens sem cadastro...');
-    const respSemCadastro = await fetch(`/api/compras/sem-cadastro?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
-    console.log('[DEBUG] Resposta do fetch itens sem cadastro:', respSemCadastro.status, respSemCadastro.ok);
-    let itensSemCadastro = [];
-    if (respSemCadastro.ok) {
-      const dataSemCadastro = await respSemCadastro.json();
-      console.log('[DEBUG] Itens sem cadastro recebidos da API:', dataSemCadastro.itens);
-      itensSemCadastro = (dataSemCadastro.itens || []).map(item => ({
-        ...item,
-        id: `sem_cadastro_${item.id}`,
-        numero_pedido: item.produto_codigo,
-        statusNormalizado: (item.status || 'pendente').toLowerCase(),
-        isSemCadastro: true
-      }));
-      
-      console.log('[DEBUG] Itens sem cadastro mapeados:', itensSemCadastro);
-      console.log('[DEBUG] Total de itens sem cadastro:', itensSemCadastro.length);
-      if (itensSemCadastro.length > 0) {
-        console.log('[DEBUG] Primeiro item sem cadastro:', itensSemCadastro[0]);
-      }
-      lista = [...lista, ...itensSemCadastro];
     }
     
     console.log('[DEBUG] Lista total após adicionar compras realizadas:', lista.length);
