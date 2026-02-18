@@ -14796,34 +14796,63 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
     
-    const { status } = req.body || {};
-    if (!status) {
-      return res.status(400).json({ ok: false, error: 'Status é obrigatório' });
+    const { status, produto_descricao, observacao_reprovacao, usuario_comentario } = req.body || {};
+    if (!status && typeof produto_descricao === 'undefined' && !observacao_reprovacao) {
+      return res.status(400).json({ ok: false, error: 'Informe status, produto_descricao ou observacao_reprovacao' });
     }
     
-    // Atualiza o status na tabela compras_sem_cadastro
+    const sets = [];
+    const values = [];
+    let idx = 1;
+    if (status) {
+      sets.push(`status = $${idx++}`);
+      values.push(status);
+    }
+    if (typeof produto_descricao !== 'undefined') {
+      sets.push(`produto_descricao = $${idx++}`);
+      values.push(produto_descricao);
+    }
+    if (observacao_reprovacao) {
+      sets.push(`observacao_reprovacao = $${idx++}`);
+      values.push(observacao_reprovacao);
+    }
+    if (usuario_comentario) {
+      sets.push(`usuario_comentario = $${idx++}`);
+      values.push(usuario_comentario);
+    }
+    sets.push('updated_at = NOW()');
+    values.push(id);
+    
     const result = await pool.query(`
       UPDATE compras.compras_sem_cadastro
-      SET status = $1, updated_at = NOW()
-      WHERE id = $2
+      SET ${sets.join(', ')}
+      WHERE id = $${idx}
       RETURNING *
-    `, [status, id]);
+    `, values);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
     }
     
-    console.log(`[Compras Sem Cadastro] Status atualizado: ID ${id} -> ${status}`);
+    if (status) {
+      console.log(`[Compras Sem Cadastro] Status atualizado: ID ${id} -> ${status}`);
+    }
+    if (typeof produto_descricao !== 'undefined') {
+      console.log(`[Compras Sem Cadastro] produto_descricao atualizado: ID ${id}`);
+    }
+    if (observacao_reprovacao) {
+      console.log(`[Compras Sem Cadastro] observacao_reprovacao registrada: ID ${id}`);
+    }
     
     res.json({ 
       ok: true, 
       item: result.rows[0],
-      message: 'Status atualizado com sucesso'
+      message: 'Item atualizado com sucesso'
     });
     
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao atualizar:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Erro ao atualizar status' });
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao atualizar item' });
   }
 });
 
