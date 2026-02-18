@@ -19757,28 +19757,19 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
           ${statusColuna === 'solicitado revisão' ? `
           <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
             <button 
-              onclick="voltarParaAguardandoCompra('${item.id}')"
+              onclick="voltarParaAguardandoCompra('${item.id}', '${item.table_source || 'solicitacao_compras'}')"
               style="display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;"
               title="Retificar">
               <i class="fa-solid fa-check-circle"></i>
               Retificar
             </button>
-            <div style="display:flex;gap:8px;">
-              <button 
-                onclick="editarItemMinhas('${item.id}')"
-                style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:#f59e0b;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
-                title="Editar este item">
-                <i class="fa-solid fa-edit"></i>
-                Editar
-              </button>
-              <button 
-                onclick="excluirItemMinhas('${item.id}')"
-                style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
-                title="Excluir este item">
-                <i class="fa-solid fa-trash"></i>
-                Excluir
-              </button>
-            </div>
+            <button 
+              onclick="excluirItemMinhas('${item.id}', '${item.table_source || 'solicitacao_compras'}')"
+              style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:#ef4444;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+              title="Excluir este item">
+              <i class="fa-solid fa-trash"></i>
+              Excluir
+            </button>
           </div>
           ` : ''}
           
@@ -19922,7 +19913,15 @@ async function abrirModalAnaliseCadastro(itemId) {
           Itens da Solicitação
         </h4>
         <div id="listaItensAnaliseCadastro" style="display:grid;gap:8px;"></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+          <button id="btnCriarItensOmieAnaliseCadastro" onclick="criarItensOmieAnaliseCadastro()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            Criar itens na Omie
+          </button>
+          <button id="btnCriarRequisicaoCompraAnaliseCadastro" onclick="criarRequisicaoCompraAnaliseCadastro()" style="background:#7c3aed;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-cart-shopping"></i>
+            Criar requisição de compra
+          </button>
           <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
             <i class="fa-solid fa-floppy-disk"></i>
             Salvar alterações
@@ -19968,9 +19967,24 @@ function renderizarListaItensAnaliseCadastro() {
     const descricao = item.descricao ? escapeHtml(item.descricao) : '';
     const quantidade = item.quantidade ? escapeHtml(item.quantidade) : '';
 
+    const codigoOmie = item.codigo_omie ? escapeHtml(item.codigo_omie) : '';
+    const jaExiste = !!item.ja_existe_omie;
+
     return `
-      <div style="background:white;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:grid;grid-template-columns:150px 1fr 110px 120px;gap:12px;align-items:center;">
-        <div style="font-weight:600;color:#1e40af;font-size:13px;">${codprov}</div>
+      <div style="background:white;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:grid;grid-template-columns:170px 1fr 110px 150px;gap:12px;align-items:center;">
+        <div style="font-weight:600;color:#1e40af;font-size:13px;display:flex;flex-direction:column;gap:6px;">
+          <span>${codprov}</span>
+          ${codigoOmie ? `
+            <span style="font-size:11px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 6px;border-radius:6px;width:max-content;">
+              Omie: ${codigoOmie}
+            </span>
+          ` : ''}
+          ${jaExiste ? `
+            <span style="font-size:11px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 6px;border-radius:6px;width:max-content;">
+              Já existe
+            </span>
+          ` : ''}
+        </div>
         <div>
           <input
             type="text"
@@ -19993,6 +20007,9 @@ function renderizarListaItensAnaliseCadastro() {
           </button>
           <button onclick="inserirNovoItemAnaliseCadastro(${idx})" title="Novo abaixo" style="background:#ecfccb;color:#3f6212;border:1px solid #d9f99d;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
             <i class="fa-solid fa-plus"></i>
+          </button>
+          <button onclick="removerItemAnaliseCadastro(${idx})" title="Excluir item" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:6px 8px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+            <i class="fa-solid fa-trash"></i>
           </button>
         </div>
       </div>
@@ -20043,6 +20060,19 @@ window.inserirNovoItemAnaliseCadastro = function(index) {
   renderizarListaItensAnaliseCadastro();
 };
 
+// Comentário: remove item da lista
+window.removerItemAnaliseCadastro = function(index) {
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  if (!itens[index]) return;
+  itens.splice(index, 1);
+  window.analiseCadastroItens = itens;
+  window.analiseCadastroDirty = true;
+  renderizarListaItensAnaliseCadastro();
+  if (typeof window.salvarItensAnaliseCadastro === 'function') {
+    window.salvarItensAnaliseCadastro();
+  }
+};
+
 // Comentário: salva alterações na coluna produto_descricao
 window.salvarItensAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
@@ -20074,6 +20104,126 @@ window.salvarItensAnaliseCadastro = async function() {
   } catch (err) {
     console.error('[ANALISE CADASTRO] Erro ao salvar itens:', err);
     alert('Erro ao salvar itens: ' + err.message);
+  }
+};
+
+// Comentário: cadastra os itens do modal na Omie e retorna os códigos criados
+window.criarItensOmieAnaliseCadastro = async function() {
+  const itemId = window.analiseCadastroItemId;
+  if (!itemId) return;
+
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  if (!itens.length) {
+    alert('Nenhum item para cadastrar na Omie.');
+    return;
+  }
+
+  const btn = document.getElementById('btnCriarItensOmieAnaliseCadastro');
+  const originalHtml = btn ? btn.innerHTML : '';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.style.cursor = 'not-allowed';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cadastrando...';
+    }
+
+    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}/cadastrar-omie`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ itens })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao cadastrar itens na Omie');
+    }
+
+    const data = await resp.json();
+    const resultados = Array.isArray(data.itens) ? data.itens : [];
+
+    resultados.forEach((r) => {
+      const alvo = itens[r.index];
+      if (alvo) {
+        alvo.codigo_omie = r.codigo_produto || '';
+        alvo.ja_existe_omie = !!r.ja_existe;
+      }
+    });
+
+    if (data.base_codigo) {
+      window.analiseCadastroCodprovBase = data.base_codigo;
+    }
+
+    window.analiseCadastroItens = itens;
+    renderizarListaItensAnaliseCadastro();
+    alert('Itens cadastrados na Omie com sucesso.');
+  } catch (err) {
+    console.error('[ANALISE CADASTRO] Erro ao cadastrar itens na Omie:', err);
+    alert('Erro ao cadastrar itens na Omie: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = originalHtml;
+    }
+  }
+};
+
+// Comentário: cria requisição de compra na Omie sem validar retorno de cotação (fluxo compras_sem_cadastro)
+window.criarRequisicaoCompraAnaliseCadastro = async function() {
+  const itemId = window.analiseCadastroItemId;
+  if (!itemId) return;
+
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  if (!itens.length) {
+    alert('Nenhum item para criar requisição.');
+    return;
+  }
+
+  const semCodigoOmie = itens.find(i => !i.codigo_omie);
+  if (semCodigoOmie) {
+    alert('Todos os itens precisam ter código Omie antes de criar a requisição.');
+    return;
+  }
+
+  const btn = document.getElementById('btnCriarRequisicaoCompraAnaliseCadastro');
+  const originalHtml = btn ? btn.innerHTML : '';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.style.cursor = 'not-allowed';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Criando...';
+    }
+
+    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ itens })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao criar requisição na Omie');
+    }
+
+    const data = await resp.json();
+    alert(`Requisição criada com sucesso!\nCódigo interno: ${data.codIntReqCompra || '-'}\nCódigo Omie: ${data.codReqCompra || '-'}`);
+    fecharModalAnaliseCadastro();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[ANALISE CADASTRO] Erro ao criar requisição:', err);
+    alert('Erro ao criar requisição: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = originalHtml;
+    }
   }
 };
 
@@ -20913,6 +21063,17 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
 // Comentário: envia item do modal para aguardando compra
 async function enviarCotadoEscolhaParaCompra() {
   if (!window.cotadoEscolhaItemId) return;
+  
+  // Objetivo: Validar se há pelo menos uma cotação aprovada antes de enviar a solicitação
+  // Se não houver, impede o processo e mostra mensagem de erro
+  const cotacoesDb = window.cotadoEscolhaCotacoesDb || [];
+  const temAprovada = cotacoesDb.some(c => (c.status_aprovacao || 'pendente').toString().toLowerCase() === 'aprovado');
+  
+  if (!temAprovada) {
+    alert('⚠️ Erro: Você precisa aprovar pelo menos uma cotação antes de enviar a solicitação!');
+    return;
+  }
+  
   const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
   const originalHtml = btn ? btn.innerHTML : '';
   const tableSource = window.cotadoEscolhaTableSource || 'solicitacao_compras';
@@ -21127,13 +21288,15 @@ async function editarItemMinhas(itemId) {
   alert('Função de edição em desenvolvimento');
 }
 
-async function excluirItemMinhas(itemId) {
+async function excluirItemMinhas(itemId, tableSource = 'solicitacao_compras') {
   if (!confirm('Tem certeza que deseja excluir este item?')) return;
   
   try {
     const resp = await fetch(`/api/compras/itens/${itemId}`, {
       method: 'DELETE',
-      credentials: 'include'
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource })
     });
     
     if (!resp.ok) throw new Error('Erro ao excluir item');
@@ -21147,8 +21310,9 @@ async function excluirItemMinhas(itemId) {
   }
 }
 
-// Função para voltar item de "retificar" para "aguardando compra"
-async function voltarParaAguardandoCompra(itemId) {
+// Função para retificar item de "solicitado revisão" para "aguardando aprovação da requisição"
+// Objetivo: Receber o parâmetro table_source para saber qual tabela atualizar (solicitacao_compras ou compras_sem_cadastro)
+async function voltarParaAguardandoCompra(itemId, tableSource = 'solicitacao_compras') {
   // Pega o valor do textarea de comentário
   const textarea = document.getElementById(`novo-comentario-retificacao-${itemId}`);
   const novoComentario = textarea ? textarea.value.trim() : '';
@@ -21186,7 +21350,7 @@ async function voltarParaAguardandoCompra(itemId) {
     fecharModalDetalhesPedidoCompras();
     loadMinhasSolicitacoes();
   } catch (err) {
-    console.error('Erro ao voltar para aguardando compra:', err);
+    console.error('Erro ao retificar item:', err);
     alert('Erro ao atualizar status: ' + err.message);
   }
 }
@@ -26570,7 +26734,7 @@ async function abrirModalAprovacaoRequisicao() {
       const grupoRequisicaoEncoded = encodeURIComponent(grupoRequisicao);
       
       tabelaHtml += `
-        <div style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
+        <div data-grupo-aprovacao="${escapeHtml(grupoRequisicao)}" style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
           <div style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
             <div style="display:flex;align-items:center;gap:10px;">
               <i class="fa-solid fa-layer-group" style="font-size:18px;"></i>
@@ -26650,7 +26814,7 @@ async function abrirModalAprovacaoRequisicao() {
                   ].join('');
 
                   return `
-                    <tr style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
+                    <tr data-aprovacao-item-id="${item.id}" style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
                       <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
                       <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
                       <td style="padding:10px;color:#374151;max-width:250px;line-height:1.4;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
@@ -26684,6 +26848,11 @@ async function abrirModalAprovacaoRequisicao() {
                       <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;">
                           ${usuarioPodeAprovarDepartamento(item.departamento || '') ? `
+                          ${(!isSemCadastro && !retornoCotacaoEhSimSolicitacao) ? `
+                          <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', 'N')" title="Criar requisição de compra" style="background:#2563eb;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#1d4ed8';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#2563eb';this.style.transform='translateY(0)'">
+                            <i class="fa-solid fa-cart-shopping"></i>
+                          </button>
+                          ` : ''}
                           <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', '${escapeHtml(retornoCotacaoRaw)}')" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-check"></i>
                           </button>
@@ -26763,6 +26932,9 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
     ? String(retornoCotacaoRaw || '').trim() !== retornoSemValores
     : false;
 
+  const retornoCotacaoEhSimSolicitacao = ['s', 'sim', 'yes', 'true', '1'].includes(String(retornoCotacaoRaw || '').trim().toLowerCase());
+  const novoStatusSolicitacao = retornoCotacaoEhSimSolicitacao ? 'aguardando cotação' : 'Requisição';
+
   const mensagemConfirmacao = isSemCadastro
     ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro'}.`
     : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
@@ -26785,7 +26957,8 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
       }
 
       alert(`Item aprovado e status atualizado para ${novoStatus}.`);
-      await abrirModalAprovacaoRequisicao();
+      removerItemModalAprovacao(itemId);
+      atualizarKanbanMinhasAposMudanca(itemId, novoStatus);
       return;
     }
 
@@ -26806,9 +26979,9 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
     
     // Feedback visual
     alert(`Item aprovado com sucesso!\nNúmero do Pedido: ${resultado.numero_pedido}\nRequisição criada na Omie.`);
-    
-    // Recarrega o modal de aprovação
-    await abrirModalAprovacaoRequisicao();
+
+    removerItemModalAprovacao(itemId);
+    atualizarKanbanMinhasAposMudanca(itemId, novoStatusSolicitacao);
     
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
@@ -27402,6 +27575,7 @@ async function confirmarReprovacao() {
 async function reprovarItemAprovacao(itemId, motivo, tableSource) {
   try {
     const usuario = window.__sessionUser?.username || window.__sessionUser?.id || '';
+    const novoStatusCache = tableSource === 'compras_sem_cadastro' ? 'Carrinho' : 'carrinho';
     
     // Se for de compras_sem_cadastro, usa endpoint e status específico
     if (tableSource === 'compras_sem_cadastro') {
@@ -27437,11 +27611,209 @@ async function reprovarItemAprovacao(itemId, motivo, tableSource) {
       }
     }
     
-    await abrirModalAprovacaoRequisicao();
+    removerItemModalAprovacao(itemId);
+    atualizarKanbanMinhasAposMudanca(itemId, novoStatusCache);
   } catch (err) {
     console.error('[Aprovação] Erro ao reprovar item:', err);
     alert('Erro ao reprovar item: ' + err.message);
   }
+}
+
+function removerItemModalAprovacao(itemId) {
+  const modal = document.getElementById('modalAprovacaoRequisicao');
+  if (!modal) return;
+
+  const row = modal.querySelector(`tr[data-aprovacao-item-id="${itemId}"]`);
+  if (!row) return;
+
+  const tbody = row.closest('tbody');
+  row.remove();
+
+  if (tbody && !tbody.querySelector('tr[data-aprovacao-item-id]')) {
+    const grupoWrapper = tbody.closest('[data-grupo-aprovacao]');
+    if (grupoWrapper) grupoWrapper.remove();
+  }
+
+  const restantes = modal.querySelectorAll('tr[data-aprovacao-item-id]').length;
+  if (restantes === 0) {
+    const body = modal.querySelector('.modal-body');
+    if (body) {
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Nenhuma solicitação aguardando aprovação.</div>';
+    }
+  }
+}
+
+function atualizarKanbanMinhasAposMudanca(itemId, novoStatus) {
+  const itens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+  if (!itens.length) return;
+
+  const item = itens.find(i => String(i.id) === String(itemId));
+  if (!item) return;
+
+  const statusAnterior = String(item.statusNormalizado || item.status || '').toLowerCase().trim();
+  const statusNovo = String(novoStatus || '').toLowerCase().trim();
+
+  if (statusNovo) {
+    item.status = novoStatus;
+    item.statusNormalizado = statusNovo;
+  }
+
+  atualizarColunaKanbanMinhas(statusAnterior);
+  if (statusNovo && statusNovo !== statusAnterior) {
+    atualizarColunaKanbanMinhas(statusNovo);
+  }
+}
+
+function atualizarColunaKanbanMinhas(status) {
+  const coluna = document.querySelector(`.kanban-column-minhas[data-status="${status}"]`);
+  if (!coluna) return;
+
+  const itens = Array.isArray(window.kanbanMinhasItens)
+    ? window.kanbanMinhasItens.filter(i => String(i.statusNormalizado || '').toLowerCase().trim() === status)
+    : [];
+  const itensFiltrados = typeof filtrarItensPorDataLimite === 'function'
+    ? filtrarItensPorDataLimite(status, itens)
+    : itens;
+
+  const countEl = coluna.querySelector('.kanban-count-minhas');
+  if (countEl) countEl.textContent = itensFiltrados.length;
+
+  const cardsContainer = coluna.querySelector('.kanban-cards-minhas');
+  if (cardsContainer) {
+    cardsContainer.innerHTML = montarCardsKanbanMinhas(status, itensFiltrados);
+  }
+}
+
+function montarCardsKanbanMinhas(status, itens) {
+  if (!itens.length) {
+    return '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+  }
+
+  const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro'];
+  const grupos = {};
+
+  itens.forEach(item => {
+    let chave;
+    if (statusComAgrupamentoPorGrupo.includes(status)) {
+      if (item.table_source === 'compras_sem_cadastro') {
+        chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
+      } else {
+        chave = item.nCodPed || item.numero_pedido || `sem_pedido_${item.id}`;
+      }
+    } else if (status === 'aguardando compra preparação') {
+      // Para o kanban Requisições, agrupa pelo campo 'numero' (grupo_requisicao)
+      chave = item.numero || item.grupo_requisicao || `sem_requisicao_${item.id}`;
+    } else {
+      chave = (status === 'numero_pedido' || status === 'cNumero')
+        ? (item.numero_pedido || 'sem_pedido')
+        : (item.cNumero || item.cnumero || 'sem_pedido');
+    }
+
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(item);
+  });
+
+  return Object.keys(grupos).map(chaveGrupo => {
+    const itensGrupo = grupos[chaveGrupo];
+    const primeiroItem = itensGrupo[0];
+    const totalItens = itensGrupo.length;
+    const todosIds = itensGrupo.map(i => i.id).join(',');
+
+    const listaProdutos = itensGrupo.map((item, itemIdx) => {
+      const codigo = item.produto_codigo || '-';
+      const desc = item.produto_descricao || item.descricao || '-';
+      const tooltipId = `tooltip-${status.replace(/\s+/g, '-')}-${chaveGrupo}-${itemIdx}`;
+      return `
+        <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+          <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+          <div>
+            <div 
+              class="desc-truncada"
+              data-tooltip-id="${tooltipId}"
+              style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+              onmouseover="
+                event.stopPropagation();
+                const tooltipId = this.getAttribute('data-tooltip-id');
+                let tooltip = document.getElementById(tooltipId);
+                if (!tooltip) {
+                  tooltip = document.createElement('div');
+                  tooltip.id = tooltipId;
+                  tooltip.className = 'tooltip-descricao';
+                  tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                  tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                  document.body.appendChild(tooltip);
+                }
+                tooltip.style.display='block';
+                tooltip.style.visibility='hidden';
+                setTimeout(() => {
+                  const rect = this.getBoundingClientRect();
+                  const tooltipHeight = tooltip.offsetHeight;
+                  tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                  tooltip.style.left = rect.left + 'px';
+                  tooltip.style.visibility='visible';
+                }, 0);
+              "
+              onmouseout="
+                event.stopPropagation();
+                const tooltipId = this.getAttribute('data-tooltip-id');
+                const tooltip = document.getElementById(tooltipId);
+                if (tooltip) tooltip.style.display='none';
+              "
+              onclick="event.stopPropagation();">
+              ${escapeHtml(desc)}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const determinCorBorda = (codIntPed) => {
+      if (!codIntPed || codIntPed.trim() === '') return '#ef4444';
+      const regex = /^\d{8}-/;
+      if (regex.test(codIntPed)) return '#10b981';
+      return '#eab308';
+    };
+
+    const corBorda = (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada)
+      ? determinCorBorda(primeiroItem.c_cod_int_ped)
+      : '#e5e7eb';
+
+    const onclickCard = status === 'analise de cadastro'
+      ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
+      : (status === 'cotado aguardando escolha'
+        ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
+        : (status === 'aguardando cotação'
+          ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
+          : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`));
+
+    return `
+      <div class="kanban-card" 
+        data-item-id="${primeiroItem.id}"
+        data-todos-ids="${todosIds}"
+        onclick="${onclickCard}"
+        style="
+        background:#ffffff;
+        border:2px solid ${corBorda};
+        border-radius:8px;
+        padding:12px;
+        transition:all 0.2s;
+        box-shadow:0 1px 3px rgba(0,0,0,0.1);
+        flex-shrink:0;
+        position:relative;
+        cursor:pointer;
+      "
+      onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
+      onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
+        ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
+        ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') && chaveGrupo && chaveGrupo !== '-' ? `
+        <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;">
+          <span style="font-weight:600;color:#374151;">${escapeHtml(chaveGrupo)}</span>
+        </div>
+        ` : ''}
+        ${listaProdutos}
+      </div>
+    `;
+  }).join('');
 }
 
 // Função para exibir anexos de um item de aprovação
@@ -27724,12 +28096,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     let requisicoes = [];
     if (respReq.ok) {
       const dataReq = await respReq.json();
-      requisicoes = (dataReq.requisicoes || []).map(req => ({
-        id: `req_${req.cod_req_compra}`,
-        numero_pedido: req.numero || req.cod_int_req_compra,
+      requisicoes = (dataReq.requisicoes || []).map((req, idx) => ({
+        id: req.cod_req_compra ? `req_${req.cod_req_compra}` : `req_sem_numero_${idx}`,
+        numero_pedido: req.numero || req.cod_int_req_compra || 'SEM_NUMERO',
         cnumero: req.numero,
-        cod_req_compra: req.cod_req_compra,
-        cod_int_req_compra: req.cod_int_req_compra,
+        cod_req_compra: req.cod_req_compra || null,
+        cod_int_req_compra: req.cod_int_req_compra || null,
         status: 'aguardando compra preparação',
         statusNormalizado: 'aguardando compra preparação',
         isRequisicao: true,
@@ -27738,15 +28110,25 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Aplica filtro por solicitante nas requisições se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
-        // Para requisições, verifica se existe na tabela solicitacao_compras
-        // Busca itens da solicitacao_compras que correspondem a essas requisições
+        // Para requisições, valida se algum item do grupo pertence ao usuário
         requisicoes = requisicoes.filter(req => {
-          // Verifica se existe algum item na lista original com mesmo cod_req_compra
-          const existeNaSolicitacao = lista.some(item => 
-            item.cod_req_compra === req.cod_req_compra && 
+          const itensReq = Array.isArray(req.itens) ? req.itens : [];
+          const existeNoGrupo = itensReq.some(item =>
             (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
           );
-          return existeNaSolicitacao;
+
+          if (existeNoGrupo) return true;
+
+          // Fallback apenas se tiver cod_req_compra ou cod_int_req_compra
+          if (req.cod_req_compra || req.cod_int_req_compra) {
+            const existeNaSolicitacao = lista.some(item => 
+              (item.cod_req_compra === req.cod_req_compra || item.numero_pedido === req.cod_int_req_compra) &&
+              (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
+            );
+            return existeNaSolicitacao;
+          }
+
+          return false;
         });
       }
       
@@ -27872,7 +28254,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Agrupa por status (apenas os que o usuário solicitou)
     const statusColunas = {
       'aguardando aprovação da requisição': filtrarItensPorDataLimite('aguardando aprovação da requisição', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição')),
-      'solicitado revisão': filtrarItensPorDataLimite('solicitado revisão', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar')),
+      'solicitado revisão': filtrarItensPorDataLimite('solicitado revisão', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'retificar' || (i.table_source === 'compras_sem_cadastro' && i.statusNormalizado === 'carrinho'))),
       'aguardando cotação': filtrarItensPorDataLimite('aguardando cotação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando cotação')),
       'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
       'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
@@ -28292,7 +28674,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
-              ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') ? `
+              ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
               <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
                 ${escapeHtml(
                   primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
@@ -28320,10 +28702,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                 </div>
               ` : ''}
               
-              <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos -->
-              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') && chaveGrupo && chaveGrupo !== '-' ? `
+              <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições -->
+              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') && chaveGrupo && chaveGrupo !== '-' ? `
                 <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;">
-                  <span style="font-weight:600;color:#374151;">${escapeHtml(chaveGrupo)}</span>
+                  <span style="font-weight:600;color:#374151;">
+                    ${status === 'aguardando compra preparação' 
+                      ? escapeHtml(primeiroItem.numero_pedido || primeiroItem.grupo_requisicao || chaveGrupo)
+                      : escapeHtml(chaveGrupo)
+                    }
+                  </span>
+                  ${primeiroItem.numero_requisicao_omie ? `<div style="margin-top:4px;font-size:10px;color:#9ca3af;">Omie: ${escapeHtml(primeiroItem.numero_requisicao_omie)}</div>` : ''}
                 </div>
               ` : ''}
               
