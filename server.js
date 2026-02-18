@@ -14856,6 +14856,328 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
   }
 });
 
+// POST /api/compras/sem-cadastro/:id/cadastrar-omie - Cadastra itens na Omie sem avançar status
+app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const { itens: itensRequest } = req.body || {};
+
+    const { rows } = await pool.query(
+      `SELECT id, produto_codigo, produto_descricao
+       FROM compras.compras_sem_cadastro
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const itemDb = rows[0];
+    const descricaoBase = String(itemDb.produto_descricao || '').trim();
+
+    const processarItensDescricao = (descricao) => {
+      if (!descricao || typeof descricao !== 'string') return [];
+      const itens = descricao.split(';').map(s => s.trim()).filter(s => s);
+      return itens.map((texto) => {
+        const partes = texto.split('-');
+        const desc = partes.slice(0, -1).join('-').trim() || texto.trim();
+        const qtd = partes.length > 1 ? partes[partes.length - 1].trim() : '';
+        return { descricao: desc, quantidade: qtd };
+      });
+    };
+
+    const itens = Array.isArray(itensRequest) && itensRequest.length
+      ? itensRequest.map(i => ({
+          descricao: String(i?.descricao || '').trim(),
+          quantidade: String(i?.quantidade || '').trim()
+        })).filter(i => i.descricao)
+      : processarItensDescricao(descricaoBase);
+
+    if (!itens.length) {
+      return res.status(400).json({ ok: false, error: 'Nenhum item válido para cadastro' });
+    }
+
+    const codigoBaseRaw = String(itemDb.produto_codigo || '').trim();
+    const matchBase = codigoBaseRaw.match(/(CODPROV\s*-\s*)(\d{1,})/i);
+    const baseNumeroAtual = matchBase ? parseInt(matchBase[2], 10) : null;
+    const basePadLength = matchBase ? matchBase[2].length : 5;
+
+    const buscarMaximoCodprov = async () => {
+      const { rows: maxOmie } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM public.produtos_omie
+         WHERE codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSolic } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.solicitacao_compras
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSem } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.compras_sem_cadastro
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+
+      const nums = [maxOmie[0]?.max_num, maxSolic[0]?.max_num, maxSem[0]?.max_num]
+        .map(n => Number(n) || 0);
+      return Math.max(...nums, 0);
+    };
+
+    const maxExistente = await buscarMaximoCodprov();
+    let baseNumero = Number.isFinite(baseNumeroAtual) ? baseNumeroAtual : (maxExistente + 1);
+    if (baseNumero <= maxExistente) baseNumero = maxExistente + 1;
+
+    const formatarBase = (num) => String(num).padStart(basePadLength, '0');
+    const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
+
+    // Comentário: se o código base atual já existir, avança para o próximo disponível
+    const baseExiste = async (num) => {
+      const prefixo = `${montarCodigoBase(num)}%`;
+      const { rows: existe } = await pool.query(
+        `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
+        [prefixo]
+      );
+      return existe.length > 0;
+    };
+
+    while (await baseExiste(baseNumero)) {
+      baseNumero += 1;
+    }
+
+    const baseCodigo = montarCodigoBase(baseNumero);
+
+    if (baseCodigo !== codigoBaseRaw) {
+      await pool.query(
+        `UPDATE compras.compras_sem_cadastro
+         SET produto_codigo = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [baseCodigo, id]
+      );
+    }
+
+    const resultados = [];
+    for (let i = 0; i < itens.length; i++) {
+      const itemAtual = itens[i];
+      const codigoIntegracao = `${baseCodigo}.${i + 1}`;
+      const descricaoProduto = itemAtual.descricao || `Produto ${codigoIntegracao}`;
+
+      // Comentário: se já houver codigo_omie informado no payload, ignora criação
+      if (itemAtual?.codigo_omie) {
+        resultados.push({
+          index: i,
+          codigo_integracao: codigoIntegracao,
+          codigo_produto: itemAtual.codigo_omie,
+          ja_existe: true
+        });
+        continue;
+      }
+
+      // Comentário: verifica se o item já existe na tabela produtos_omie
+      const { rows: prodRows } = await pool.query(
+        `SELECT codigo_produto
+         FROM public.produtos_omie
+         WHERE codigo = $1 OR codigo_produto_integracao = $1
+         LIMIT 1`,
+        [codigoIntegracao]
+      );
+
+      if (prodRows.length > 0) {
+        resultados.push({
+          index: i,
+          codigo_integracao: codigoIntegracao,
+          codigo_produto: prodRows[0].codigo_produto || null,
+          ja_existe: true
+        });
+        continue;
+      }
+
+      let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
+      if (!cadastro.ok) {
+        const msgErro = String(cadastro.error || '');
+        const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+
+        if (ehDescricaoDuplicada) {
+          const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
+            ? descricaoProduto
+            : `${descricaoProduto} - ${codigoIntegracao}`;
+          cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoComCodigo);
+        }
+
+        if (!cadastro.ok) {
+          return res.status(500).json({
+            ok: false,
+            error: cadastro.error || 'Erro ao cadastrar produto na Omie',
+            resultados
+          });
+        }
+      }
+
+      resultados.push({
+        index: i,
+        codigo_integracao: codigoIntegracao,
+        codigo_produto: cadastro.codigo_produto || null,
+        ja_existe: false
+      });
+    }
+
+    return res.json({
+      ok: true,
+      base_codigo: baseCodigo,
+      itens: resultados
+    });
+  } catch (err) {
+    console.error('[Compras Sem Cadastro] Erro ao cadastrar itens na Omie:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Erro ao cadastrar itens na Omie' });
+  }
+});
+
+// POST /api/compras/sem-cadastro/:id/criar-requisicao-omie - Cria requisição de compra na Omie
+app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+    const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ ok: false, error: 'Credenciais Omie não configuradas' });
+    }
+
+    const { itens: itensRequest } = req.body || {};
+    const itensPayload = Array.isArray(itensRequest) ? itensRequest : [];
+
+    const { rows } = await pool.query(
+      `SELECT id, categoria_compra_codigo, objetivo_compra, solicitante, resp_inspecao_recebimento, observacao_recebimento
+       FROM compras.compras_sem_cadastro
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const itemDb = rows[0];
+    if (!itemDb.categoria_compra_codigo || !String(itemDb.categoria_compra_codigo).trim()) {
+      return res.status(400).json({ ok: false, error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de criar a requisição.' });
+    }
+
+    if (!itensPayload.length) {
+      return res.status(400).json({ ok: false, error: 'Nenhum item informado para criar requisição' });
+    }
+
+    const itensReqCompra = [];
+    for (const i of itensPayload) {
+      const codigoOmie = String(i?.codigo_omie || '').trim();
+      if (!codigoOmie) {
+        return res.status(400).json({ ok: false, error: 'Todos os itens precisam ter código Omie antes de criar a requisição.' });
+      }
+
+      let precoUnitario = 0;
+      try {
+        const { rows: rowsEstoque } = await pool.query(`
+          SELECT cmc
+          FROM public.omie_estoque_posicao
+          WHERE omie_prod_id = $1
+          LIMIT 1
+        `, [codigoOmie]);
+        if (rowsEstoque.length > 0 && rowsEstoque[0].cmc) {
+          precoUnitario = parseFloat(rowsEstoque[0].cmc) || 0;
+        }
+      } catch (errCmc) {
+        console.error('[Sem Cadastro] Erro ao buscar CMC:', errCmc);
+      }
+
+      itensReqCompra.push({
+        codProd: codigoOmie,
+        obsItem: String(i?.descricao || '').trim(),
+        precoUnit: precoUnitario,
+        qtde: parseFloat(i?.quantidade) || 1
+      });
+    }
+
+    const agora = new Date();
+    const ano = agora.getFullYear();
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const dia = String(agora.getDate()).padStart(2, '0');
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const minuto = String(agora.getMinutes()).padStart(2, '0');
+    const segundo = String(agora.getSeconds()).padStart(2, '0');
+    const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
+    const numeroPedido = `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+
+    const dtSugestao = (() => {
+      const dt = new Date();
+      dt.setDate(dt.getDate() + 5);
+      return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+    })();
+
+    const solicitante = itemDb.solicitante || '';
+    const respInspecao = itemDb.resp_inspecao_recebimento || '';
+    const objetivoCompra = itemDb.objetivo_compra || '';
+    const codigoOmiePrincipal = itensReqCompra[0]?.codProd || '';
+    const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmiePrincipal}\nObjetivo da Compra: ${objetivoCompra}`.trim();
+
+    const requisicaoOmie = {
+      codIntReqCompra: numeroPedido,
+      codCateg: itemDb.categoria_compra_codigo || '',
+      codProj: 0,
+      dtSugestao: dtSugestao,
+      obsReqCompra: obsReqCompra,
+      obsIntReqCompra: String(itemDb.observacao_recebimento || '').trim(),
+      ItensReqCompra: itensReqCompra
+    };
+
+    const omieResponse = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'IncluirReq',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [requisicaoOmie]
+      })
+    });
+
+    const omieResult = await omieResponse.json();
+    if (!omieResponse.ok || omieResult.faultstring) {
+      console.error('[Sem Cadastro] Erro Omie:', omieResult);
+      return res.status(500).json({ ok: false, error: omieResult.faultstring || 'Erro ao criar requisição na Omie' });
+    }
+
+    const codReqCompraOmie = omieResult.codReqCompra || null;
+    
+    await pool.query(
+      `UPDATE compras.compras_sem_cadastro
+       SET status = 'Requisição',
+           numero_pedido = $1,
+           ncodped = $2,
+           cod_req_compra = $3,
+           updated_at = NOW()
+       WHERE id = $4`,
+      [omieResult.codIntReqCompra || numeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, id]
+    );
+
+    return res.json({
+      ok: true,
+      codReqCompra: codReqCompraOmie,
+      codIntReqCompra: omieResult.codIntReqCompra || numeroPedido
+    });
+  } catch (err) {
+    console.error('[Sem Cadastro] Erro ao criar requisição na Omie:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Erro ao criar requisição na Omie' });
+  }
+});
+
 
 // Comentário: garante codigo_omie para itens de requisição direta (fluxo igual ao Enviar requisição)
 async function garantirCodigoOmieParaItem(client, item, itemId) {
@@ -16072,7 +16394,7 @@ app.get('/api/compras/todas', async (req, res) => {
     `);
     
     // Comentário: inclui itens de compras_sem_cadastro com status que aparecem nos kanbans:
-    // 'Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado'
+    // 'Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado', 'Carrinho'
     // Objetivo: adicionar table_source para identificar origem dos dados para agrupamento por grupo_requisicao
     const { rows: solicitacoesSemCadastro } = await pool.query(`
       SELECT
@@ -16110,7 +16432,7 @@ app.get('/api/compras/todas', async (req, res) => {
         updated_at,
         'compras_sem_cadastro' AS table_source
       FROM compras.compras_sem_cadastro
-      WHERE status IN ('Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado')
+      WHERE status IN ('Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado', 'Carrinho')
       ORDER BY created_at DESC
       LIMIT 1000
     `);
@@ -16123,6 +16445,52 @@ app.get('/api/compras/todas', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// GET /api/compras/requisicoes/debug/:id - Debug de requisição específica
+app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    // 1. Busca o item em compras_sem_cadastro
+    const { rows: item } = await pool.query(
+      'SELECT * FROM compras.compras_sem_cadastro WHERE id = $1',
+      [id]
+    );
+    
+    if (!item.length) {
+      return res.json({ ok: false, error: 'Item não encontrado' });
+    }
+    
+    const itemData = item[0];
+    
+    // 2. Verifica se tem cod_req_compra
+    const codReqCompra = itemData.cod_req_compra;
+    
+    // 3. Busca em requisicoes_omie
+    const { rows: requisicao } = await pool.query(
+      'SELECT * FROM compras.requisicoes_omie WHERE cod_req_compra = $1',
+      [codReqCompra]
+    );
+    
+    // 4. Verifica se existe em pedidos_omie
+    const { rows: pedido } = await pool.query(
+      'SELECT n_cod_ped FROM compras.pedidos_omie WHERE n_cod_ped::text = $1::text',
+      [codReqCompra]
+    );
+    
+    res.json({
+      ok: true,
+      item: itemData,
+      tem_cod_req_compra: !!codReqCompra,
+      requisicao_omie: requisicao[0] || null,
+      existe_em_pedidos: pedido.length > 0,
+      deveria_aparecer: !!codReqCompra && itemData.status === 'Requisição' && pedido.length === 0
+    });
+  } catch (err) {
+    console.error('[Debug] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -16139,7 +16507,8 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         sc.*,
         po.codigo AS produto_codigo,
         po.descricao AS produto_descricao,
-        ro.numero AS cnumero
+        ro.numero AS cnumero,
+        'solicitacao_compras' AS table_source
       FROM compras.solicitacao_compras sc
       LEFT JOIN public.produtos_omie po ON po.codigo_produto = sc.codigo_omie
       LEFT JOIN compras.requisicoes_omie ro ON ro.cod_req_compra = sc.ncodped
@@ -16147,19 +16516,35 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         AND sc.ncodped IS NOT NULL
       ORDER BY ro.numero DESC, sc.created_at DESC
     `);
-    
-    console.log(`[Compras/Requisições] Encontradas ${solicitacoes.length} solicitações com status Requisição`);
 
-    // Agrupa os itens por número da requisição (cnumero)
-    const requisicoesPorNumero = {};
+    const { rows: semCadastro } = await pool.query(`
+      SELECT
+        sc.*,
+        sc.produto_codigo AS produto_codigo,
+        sc.produto_descricao AS produto_descricao,
+        ro.numero AS cnumero,
+        'compras_sem_cadastro' AS table_source
+      FROM compras.compras_sem_cadastro sc
+      LEFT JOIN compras.requisicoes_omie ro ON ro.cod_req_compra::text = sc.cod_req_compra::text
+      WHERE sc.status = 'Requisição'
+        AND sc.cod_req_compra IS NOT NULL
+      ORDER BY sc.created_at DESC
+    `);
     
-    solicitacoes.forEach(item => {
-      const numero = item.cnumero || item.numero_pedido || 'SEM_NUMERO';
+    const solicitacoesTodas = [...solicitacoes, ...semCadastro];
+    console.log(`[Compras/Requisições] Encontradas ${solicitacoesTodas.length} solicitações com status Requisição`);
+
+    // Agrupa os itens por grupo_requisicao (campo que agrupa requisições no kanban)
+    const requisicoesPorGrupo = {};
+    
+    solicitacoesTodas.forEach(item => {
+      const grupoRequisicao = item.grupo_requisicao || item.cnumero || 'SEM_GRUPO';
       
-      if (!requisicoesPorNumero[numero]) {
-        requisicoesPorNumero[numero] = {
-          numero: numero,
-          cod_req_compra: item.ncodped,
+      if (!requisicoesPorGrupo[grupoRequisicao]) {
+        requisicoesPorGrupo[grupoRequisicao] = {
+          numero: grupoRequisicao,
+          numero_requisicao_omie: item.cnumero || null,
+          cod_req_compra: item.cod_req_compra || item.ncodped,
           cod_int_req_compra: item.numero_pedido,
           created_at: item.created_at,
           updated_at: item.updated_at,
@@ -16167,7 +16552,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         };
       }
       
-      requisicoesPorNumero[numero].itens.push({
+      requisicoesPorGrupo[grupoRequisicao].itens.push({
         id: item.id,
         produto_codigo: item.produto_codigo || item.codigo_omie || '-',
         produto_descricao: item.produto_descricao || item.produto_descricao_manual || 'Sem descrição',
@@ -16179,14 +16564,16 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         codigo_omie: item.codigo_omie,
         ncodped: item.ncodped,
         numero_pedido: item.numero_pedido,
-        status: item.status
+        status: item.status,
+        table_source: item.table_source || null
       });
     });
     
     // Converte objeto em array
-    const requisicoes = Object.values(requisicoesPorNumero);
+    const requisicoes = Object.values(requisicoesPorGrupo);
     
     console.log(`[Compras/Requisições] Retornando ${requisicoes.length} requisições agrupadas`);
+    console.log('[Compras/Requisições] Primeira requisição:', JSON.stringify(requisicoes[0], null, 2));
 
     res.json({ ok: true, requisicoes: requisicoes });
   } catch (err) {
@@ -17167,7 +17554,7 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
     const { status, observacao_retificacao, observacao_reprovacao, usuario_comentario } = req.body;
     
     // Valida status
-    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar', 'aguardando aprovação da requisição', 'carrinho'];
+    const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar', 'aguardando aprovação da requisição', 'carrinho', 'Analise de cadastro', 'Carrinho'];
     if (!status || !statusValidos.includes(status)) {
       return res.status(400).json({ 
         ok: false, 
@@ -17175,8 +17562,35 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
       });
     }
     
-    // Se o status for 'retificar', exige observação
-    if (status === 'retificar' && (!observacao_retificacao || observacao_retificacao.trim() === '')) {
+    // Objetivo: Detectar de qual tabela o item vem (solicitacao_compras ou compras_sem_cadastro)
+    // e fazer a atualização na tabela correta
+    let tableSource = null;
+    
+    // Tenta encontrar em solicitacao_compras primeiro
+    const { rows: fromSolicitacao } = await pool.query(
+      'SELECT id FROM compras.solicitacao_compras WHERE id = $1',
+      [id]
+    );
+    
+    if (fromSolicitacao.length > 0) {
+      tableSource = 'solicitacao_compras';
+    } else {
+      // Se não encontrou, tenta compras_sem_cadastro
+      const { rows: fromSemCadastro } = await pool.query(
+        'SELECT id FROM compras.compras_sem_cadastro WHERE id = $1',
+        [id]
+      );
+      if (fromSemCadastro.length > 0) {
+        tableSource = 'compras_sem_cadastro';
+      }
+    }
+    
+    if (!tableSource) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado em nenhuma tabela' });
+    }
+
+    // Se o status for 'retificar', exige observação (para solicitacao_compras)
+    if (tableSource === 'solicitacao_compras' && status === 'retificar' && (!observacao_retificacao || observacao_retificacao.trim() === '')) {
       return res.status(400).json({ 
         ok: false, 
         error: 'Observação é obrigatória ao solicitar retificação' 
@@ -17184,9 +17598,10 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
     }
 
     // Se for voltar para carrinho a partir de aprovação, exige motivo
-    if (status === 'carrinho') {
+    if (status === 'carrinho' || status === 'Carrinho') {
+      const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
       const { rows: currentRows } = await pool.query(
-        'SELECT status FROM compras.solicitacao_compras WHERE id = $1',
+        `SELECT status FROM ${tableName} WHERE id = $1`,
         [id]
       );
       if (currentRows.length === 0) {
@@ -17203,33 +17618,48 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
     
     // Atualiza status do item (e observação se houver comentário)
     let query, params;
+    const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
+    
+    // Objetivo: Usar a coluna correta de observação dependendo da tabela
+    // - solicitacao_compras usa: observacao_retificacao
+    // - compras_sem_cadastro usa: observacao_reprovacao
     
     // Se tiver observação (retificar ou voltando de retificar), acrescenta ao histórico
     if (observacao_retificacao && observacao_retificacao.trim() !== '') {
-      // Busca histórico existente
-      const { rows: existingRows } = await pool.query(
-        'SELECT observacao_retificacao FROM compras.solicitacao_compras WHERE id = $1',
-        [id]
-      );
-      
-      const historicoExistente = existingRows[0]?.observacao_retificacao || '';
       const nomeUsuario = usuario_comentario || 'Usuário';
       const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-      
-      // Acrescenta novo comentário ao histórico
       const novaLinha = `User ${nomeUsuario} - ${dataHora}\n${observacao_retificacao}\n`;
-      const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
       
-      query = `
-        UPDATE compras.solicitacao_compras 
-        SET status = $1, observacao_retificacao = $2, updated_at = NOW()
-        WHERE id = $3
-        RETURNING *
-      `;
-      params = [status, novoHistorico, id];
+      if (tableSource === 'solicitacao_compras') {
+        // Para solicitacao_compras: usar observacao_retificacao com histórico
+        const { rows: existingRows } = await pool.query(
+          `SELECT observacao_retificacao FROM ${tableName} WHERE id = $1`,
+          [id]
+        );
+        
+        const historicoExistente = existingRows[0]?.observacao_retificacao || '';
+        const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
+        
+        query = `
+          UPDATE ${tableName}
+          SET status = $1, observacao_retificacao = $2, updated_at = NOW()
+          WHERE id = $3
+          RETURNING *
+        `;
+        params = [status, novoHistorico, id];
+      } else {
+        // Para compras_sem_cadastro: usar observacao_reprovacao (sem histórico, apenas sobrescreve)
+        query = `
+          UPDATE ${tableName}
+          SET status = $1, observacao_reprovacao = $2, usuario_comentario = $3, updated_at = NOW()
+          WHERE id = $4
+          RETURNING *
+        `;
+        params = [status, observacao_retificacao.trim(), nomeUsuario, id];
+      }
     } else if (observacao_reprovacao && observacao_reprovacao.trim() !== '') {
       query = `
-        UPDATE compras.solicitacao_compras 
+        UPDATE ${tableName}
         SET status = $1, observacao_reprovacao = $2, updated_at = NOW()
         WHERE id = $3
         RETURNING *
@@ -17237,7 +17667,7 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
       params = [status, observacao_reprovacao.trim(), id];
     } else {
       query = `
-        UPDATE compras.solicitacao_compras 
+        UPDATE ${tableName}
         SET status = $1, updated_at = NOW()
         WHERE id = $2
         RETURNING *
@@ -17251,7 +17681,7 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
     }
     
-    res.json({ ok: true, item: rows[0] });
+    res.json({ ok: true, item: rows[0], table_source: tableSource });
     
   } catch (err) {
     console.error('[Compras] Erro ao atualizar status do item:', err);
@@ -17313,22 +17743,45 @@ app.put('/api/compras/itens/:id/observacao-retificacao', async (req, res) => {
 app.delete('/api/compras/itens/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const { table_source } = req.body || {};
     
-    // Verifica se o item existe
-    const { rows: itemRows } = await pool.query(`
-      SELECT * FROM compras.solicitacao_compras WHERE id = $1
-    `, [id]);
+    // Objetivo: Detectar de qual tabela o item vem (solicitacao_compras ou compras_sem_cadastro)
+    // e fazer a exclusão na tabela correta
+    let tableSource = table_source;
     
-    if (itemRows.length === 0) {
-      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    if (!tableSource) {
+      // Tenta encontrar em solicitacao_compras primeiro
+      const { rows: fromSolicitacao } = await pool.query(
+        'SELECT id FROM compras.solicitacao_compras WHERE id = $1',
+        [id]
+      );
+      
+      if (fromSolicitacao.length > 0) {
+        tableSource = 'solicitacao_compras';
+      } else {
+        // Se não encontrou, tenta compras_sem_cadastro
+        const { rows: fromSemCadastro } = await pool.query(
+          'SELECT id FROM compras.compras_sem_cadastro WHERE id = $1',
+          [id]
+        );
+        if (fromSemCadastro.length > 0) {
+          tableSource = 'compras_sem_cadastro';
+        }
+      }
     }
     
-    // Exclui o item (as cotações serão excluídas automaticamente por CASCADE)
+    if (!tableSource) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado em nenhuma tabela' });
+    }
+    
+    const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
+    
+    // Exclui o item (as cotações serão excluídas automaticamente por CASCADE se for solicitacao_compras)
     await pool.query(`
-      DELETE FROM compras.solicitacao_compras WHERE id = $1
+      DELETE FROM ${tableName} WHERE id = $1
     `, [id]);
     
-    res.json({ ok: true, message: 'Item excluído com sucesso' });
+    res.json({ ok: true, message: 'Item excluído com sucesso', table_source: tableSource });
     
   } catch (err) {
     console.error('[Compras] Erro ao excluir item:', err);
@@ -17373,6 +17826,17 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
         ON compras.compras_sem_cadastro(grupo_requisicao);
       CREATE INDEX IF NOT EXISTS idx_compras_sem_cadastro_created 
         ON compras.compras_sem_cadastro(created_at DESC);
+    `);
+
+    await pool.query(`
+      ALTER TABLE compras.compras_sem_cadastro
+      ADD COLUMN IF NOT EXISTS numero_pedido TEXT;
+
+      ALTER TABLE compras.compras_sem_cadastro
+      ADD COLUMN IF NOT EXISTS ncodped TEXT;
+
+      ALTER TABLE compras.compras_sem_cadastro
+      ADD COLUMN IF NOT EXISTS cod_req_compra TEXT;
     `);
     console.log('[Compras] ✓ Tabela compras_sem_cadastro garantida');
   } catch (err) {
