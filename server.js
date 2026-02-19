@@ -141,6 +141,27 @@ app.get('/api/produtos/stream', (req, res) => {
   res.on('close', clean);
 });
 
+// ===== Endpoint de Verificação de Versão/Atualização ======================
+// Objetivo: Permitir que o frontend detecte quando há uma nova versão disponível
+// e possa notificar o usuário para atualizar o cache
+app.get('/api/check-version', (req, res) => {
+  try {
+    // Usa timestamp do server como versão (em segundos desde epoch)
+    // Você pode também usar git hash, package.json version, ou arquivo específico
+    const currentVersion = Math.floor(Date.now() / 1000);
+    
+    res.json({
+      ok: true,
+      version: currentVersion,
+      timestamp: new Date().toISOString(),
+      message: 'Versão do sistema'
+    });
+  } catch (err) {
+    console.error('[VERSION-CHECK] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Conexão Postgres (Render)
 const { Pool } = require('pg');
 
