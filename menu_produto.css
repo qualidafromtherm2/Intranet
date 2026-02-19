@@ -8045,3 +8045,11 @@ table.tabela td.num {
     transform: rotate(360deg);
   }
 }
+
+/* Estilo para ícone de atualização quando há nova versão */
+#config-icon.update-available {
+  animation: spin 2s linear infinite;
+  color: #ff9800;
+  font-weight: bold;
+}
+

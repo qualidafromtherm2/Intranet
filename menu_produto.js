@@ -33333,6 +33333,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Variável global para armazenar a versão atual do cliente
 window.__appVersion = null;
 window.__versionCheckInterval = null;
+window.__updatePending = false; // Flag para saber se há atualização pendente
 
 // Função para limpar cache e recarregar a página
 async function clearCacheAndReload() {
@@ -33379,7 +33380,11 @@ async function clearCacheAndReload() {
       }
     }
     
-    // 5. Recarregar a página com hard-refresh (bypass cache)
+    // 5. Resetar flags antes de recarregar
+    window.__appVersion = null;
+    window.__updatePending = false;
+    
+    // 6. Recarregar a página com hard-refresh (bypass cache)
     console.log('[UPDATE-CHECK] Recarregando página...');
     window.location.href = window.location.href;
     
@@ -33417,14 +33422,23 @@ async function checkForUpdates() {
     // Se é a primeira verificação, salva a versão
     if (window.__appVersion === null) {
       window.__appVersion = serverVersion;
+      window.__updatePending = false;
       console.log('[UPDATE-CHECK] Versão inicial definida:', window.__appVersion);
+      
+      // Esconde o ícone na primeira verificação
+      const updateIcon = document.getElementById('config-icon');
+      if (updateIcon) {
+        updateIcon.style.display = 'none';
+        updateIcon.classList.remove('update-available');
+        console.log('[UPDATE-CHECK] Ícone ocultado (primeira verificação)');
+      }
       return;
     }
     
     // Se versão mudou, mostra o ícone de atualização
     if (serverVersion !== window.__appVersion) {
       console.log('[UPDATE-CHECK] ⚠️ ATUALIZAÇÃO DISPONÍVEL!');
-      console.log('[UPDATE-CHECK] Nova versão detectada. Mostrando ícone de atualização...');
+      console.log('[UPDATE-CHECK] Nova versão detectada:', serverVersion, 'vs', window.__appVersion);
       
       const updateIcon = document.getElementById('config-icon');
       if (updateIcon) {
@@ -33432,14 +33446,26 @@ async function checkForUpdates() {
         updateIcon.title = '✨ Atualização disponível! Clique para aplicar.';
         updateIcon.setAttribute('data-update-available', 'true');
         
-        // Adiciona classe para destacar visualmente
+        // Adiciona classe para destacar visualmente (animar)
         updateIcon.classList.add('update-available');
         
-        console.log('[UPDATE-CHECK] Ícone de atualização exibido');
+        window.__updatePending = true;
+        console.log('[UPDATE-CHECK] Ícone de atualização exibido e animando');
+      }
+    } else {
+      // Versão é a mesma - nenhuma atualização pendente
+      if (window.__updatePending) {
+        console.log('[UPDATE-CHECK] Atualização foi aplicada, versão agora está sincronizada');
+        window.__updatePending = false;
       }
       
-      // Atualiza a versão armazenada
-      window.__appVersion = serverVersion;
+      // Esconde o ícone se não há atualização
+      const updateIcon = document.getElementById('config-icon');
+      if (updateIcon && !window.__updatePending) {
+        updateIcon.style.display = 'none';
+        updateIcon.classList.remove('update-available');
+        console.log('[UPDATE-CHECK] Ícone ocultado (nenhuma atualização pendente)');
+      }
     }
     
   } catch (err) {
