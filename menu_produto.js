@@ -33400,7 +33400,7 @@ async function clearCacheAndReload() {
   }
 }
 
-// Função para verificar versão no servidor
+// Função para verificar versão no servidor (do banco de dados)
 async function checkForUpdates() {
   try {
     const response = await fetch('/api/check-version', { 
@@ -33416,56 +33416,55 @@ async function checkForUpdates() {
     const data = await response.json();
     const serverVersion = data.version;
     
-    console.log('[UPDATE-CHECK] Versão do servidor:', serverVersion);
-    console.log('[UPDATE-CHECK] Versão do cliente:', window.__appVersion);
+    console.log('[UPDATE-CHECK] Versão do servidor (BD):', serverVersion);
+    console.log('[UPDATE-CHECK] Versão armazenada no cliente:', window.__appVersion);
     
-    // Se é a primeira verificação, salva a versão
+    const updateIcon = document.getElementById('config-icon');
+    
+    // Se é a primeira verificação, salva a versão e esconde o ícone
     if (window.__appVersion === null) {
       window.__appVersion = serverVersion;
       window.__updatePending = false;
-      console.log('[UPDATE-CHECK] Versão inicial definida:', window.__appVersion);
+      console.log('[UPDATE-CHECK] Versão inicial sincronizada:', window.__appVersion);
       
-      // Esconde o ícone na primeira verificação
-      const updateIcon = document.getElementById('config-icon');
+      // SEMPRE esconde o ícone na primeira verificação
       if (updateIcon) {
         updateIcon.style.display = 'none';
         updateIcon.classList.remove('update-available');
-        console.log('[UPDATE-CHECK] Ícone ocultado (primeira verificação)');
+        updateIcon.removeAttribute('data-update-available');
       }
+      console.log('[UPDATE-CHECK] ✓ Sincronização inicial completa - ícone escondido');
       return;
     }
     
-    // Se versão mudou, mostra o ícone de atualização
+    // Se versão é DIFERENTE, mostra o ícone
     if (serverVersion !== window.__appVersion) {
       console.log('[UPDATE-CHECK] ⚠️ ATUALIZAÇÃO DISPONÍVEL!');
-      console.log('[UPDATE-CHECK] Nova versão detectada:', serverVersion, 'vs', window.__appVersion);
+      console.log('[UPDATE-CHECK] Cliente:', window.__appVersion, '→ Servidor:', serverVersion);
       
-      const updateIcon = document.getElementById('config-icon');
       if (updateIcon) {
         updateIcon.style.display = 'inline-block';
         updateIcon.title = '✨ Atualização disponível! Clique para aplicar.';
         updateIcon.setAttribute('data-update-available', 'true');
-        
-        // Adiciona classe para destacar visualmente (animar)
         updateIcon.classList.add('update-available');
         
-        window.__updatePending = true;
-        console.log('[UPDATE-CHECK] Ícone de atualização exibido e animando');
-      }
-    } else {
-      // Versão é a mesma - nenhuma atualização pendente
-      if (window.__updatePending) {
-        console.log('[UPDATE-CHECK] Atualização foi aplicada, versão agora está sincronizada');
-        window.__updatePending = false;
+        console.log('[UPDATE-CHECK] ✓ Ícone de atualização exibido e animando');
       }
       
-      // Esconde o ícone se não há atualização
-      const updateIcon = document.getElementById('config-icon');
-      if (updateIcon && !window.__updatePending) {
+      window.__updatePending = true;
+    } 
+    // Se versão é IGUAL, esconde o ícone
+    else {
+      console.log('[UPDATE-CHECK] ✓ Sistema sincronizado - nenhuma atualização pendente');
+      
+      if (updateIcon) {
         updateIcon.style.display = 'none';
         updateIcon.classList.remove('update-available');
-        console.log('[UPDATE-CHECK] Ícone ocultado (nenhuma atualização pendente)');
+        updateIcon.removeAttribute('data-update-available');
       }
+      
+      window.__updatePending = false;
+      console.log('[UPDATE-CHECK] ✓ Ícone ocultado');
     }
     
   } catch (err) {

@@ -143,22 +143,43 @@ app.get('/api/produtos/stream', (req, res) => {
 
 // ===== Endpoint de Verificação de Versão/Atualização ======================
 // Objetivo: Permitir que o frontend detecte quando há uma nova versão disponível
-// e possa notificar o usuário para atualizar o cache
-app.get('/api/check-version', (req, res) => {
+// Busca a versão do banco de dados (tabela configuracoes.versao_sistema)
+app.get('/api/check-version', async (req, res) => {
   try {
-    // Usa timestamp do server como versão (em segundos desde epoch)
-    // Você pode também usar git hash, package.json version, ou arquivo específico
-    const currentVersion = Math.floor(Date.now() / 1000);
+    // Busca versão do banco de dados
+    const result = await pool.query(
+      'SELECT versao, data_atualizacao FROM configuracoes.versao_sistema LIMIT 1'
+    );
+    
+    if (result.rows.length === 0) {
+      // Se tabela não existe, retorna erro instruindo a criação
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'Tabela versao_sistema não encontrada. Execute: sql/create_versao_sistema.sql',
+        version: null
+      });
+    }
+    
+    const row = result.rows[0];
+    const version = row.versao;
+    const dataAtualizacao = row.data_atualizacao;
+    
+    console.log('[VERSION-CHECK] Versão atual do sistema:', version);
     
     res.json({
       ok: true,
-      version: currentVersion,
+      version: version,
       timestamp: new Date().toISOString(),
-      message: 'Versão do sistema'
+      dataAtualizacao: dataAtualizacao,
+      message: 'Versão do sistema (do banco de dados)'
     });
   } catch (err) {
-    console.error('[VERSION-CHECK] Erro:', err);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[VERSION-CHECK] Erro ao buscar versão:', err);
+    res.status(500).json({ 
+      ok: false, 
+      error: err.message || 'Erro ao buscar versão do sistema',
+      version: null
+    });
   }
 });
 
