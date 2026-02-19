@@ -8034,3 +8034,14 @@ table.tabela td.num {
 }
 
 /* Cache bust 1768834639 */
+
+
+/* Animação de spinner para carregamento */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

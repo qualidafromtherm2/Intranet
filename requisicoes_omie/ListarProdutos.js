@@ -365,15 +365,65 @@ export async function initListarProdutosUI(
   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
   pane.style.display = 'block';
 
+  console.log('[ListarProdutos] Carregando contador do carrinho da API...');
+  
+  // Carrega quantidade de itens do carrinho diretamente da API
+  fetch('/api/compras/carrinho', { credentials: 'include' })
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok && Array.isArray(data.itens)) {
+        const qtd = data.itens.length;
+        console.log('[ListarProdutos] Itens no carrinho (API):', qtd);
+        
+        // Atualiza o badge
+        const badge = document.getElementById('listaProdutosCarrinhoCount');
+        if (badge) {
+          badge.textContent = qtd;
+          badge.style.display = qtd > 0 ? 'flex' : 'none';
+          console.log('[ListarProdutos] ✅ Badge atualizado:', qtd, 'itens');
+        } else {
+          console.warn('[ListarProdutos] ❌ Badge não encontrado');
+        }
+        
+        // Atualiza também o window.carrinhoCompras para manter sincronizado
+        if (!window.carrinhoCompras) {
+          window.carrinhoCompras = data.itens.map(item => ({
+            id_db: item.id,
+            produto_codigo: item.produto_codigo,
+            produto_descricao: item.produto_descricao,
+            quantidade: item.quantidade ?? '',
+            prazo_solicitado: item.prazo_solicitado,
+            familia_nome: item.familia_produto,
+            observacao: item.observacao,
+            solicitante: item.solicitante,
+            departamento: item.departamento,
+            centro_custo: item.centro_custo
+          }));
+        }
+      } else {
+        console.warn('[ListarProdutos] ⚠️ API retornou erro ou dados inválidos:', data);
+      }
+    })
+    .catch(err => {
+      console.error('[ListarProdutos] ❌ Erro ao buscar carrinho da API:', err);
+    });
+
   // primeira carga
   if (!window.__listaReady) window.__listaReady = preloadFromDB();
   await window.__listaReady;
 
   renderFromCache();
 
+  const codeFilterInput = document.getElementById('codeFilter');
+  const clearSearchBtn = document.getElementById('clearSearchBtn');
+  
+  // Limpa o campo de pesquisa ao inicializar a página
+  if (codeFilterInput) {
+    codeFilterInput.value = '';
+  }
+
   initFiltros({
-    _codeInput            : document.getElementById('codeFilter'),
-    _descInput            : document.getElementById('descFilter'),
+    _codeInput            : codeFilterInput,
     _familySelect         : document.getElementById('familySelect'),
     _tipoItemSelect       : document.getElementById('tipoItemSelect'),
     _caracteristicaSelect : document.getElementById('caracteristicaSelect'),
@@ -387,6 +437,26 @@ export async function initListarProdutosUI(
       populateFilters();
     }
   });
+  
+  // Mostra/esconde botão X baseado no conteúdo do input
+  if (codeFilterInput && clearSearchBtn) {
+    const updateClearButton = () => {
+      clearSearchBtn.style.display = codeFilterInput.value.trim() ? 'block' : 'none';
+    };
+    
+    codeFilterInput.addEventListener('input', updateClearButton);
+    
+    // Limpa o campo e aplica filtros ao clicar no X
+    clearSearchBtn.addEventListener('click', () => {
+      codeFilterInput.value = '';
+      clearSearchBtn.style.display = 'none';
+      // Dispara evento input para aplicar o filtro vazio
+      codeFilterInput.dispatchEvent(new Event('input'));
+    });
+    
+    // Atualiza visibilidade inicial
+    updateClearButton();
+  }
 
   populateFilters();
 
@@ -410,8 +480,38 @@ export async function initListarProdutosUI(
   });
 
   abrirCarrinhoBtn?.addEventListener('click', async () => {
-    if (typeof window.abrirModalCarrinhoCompras === 'function') {
-      await window.abrirModalCarrinhoCompras();
+    // Mostra spinner enquanto carrega
+    const iconElement = abrirCarrinhoBtn.querySelector('i:not(.carrinho-badge)');
+    
+    if (iconElement) {
+      abrirCarrinhoBtn.disabled = true;
+      // Troca classes para mostrar spinner
+      iconElement.className = 'fa-solid fa-spinner';
+      iconElement.style.animation = 'spin 1s linear infinite';
+    }
+
+    try {
+      if (typeof window.abrirModalCarrinhoCompras === 'function') {
+        await window.abrirModalCarrinhoCompras();
+      }
+    } catch (err) {
+      console.error('[ListarProdutos] Erro ao abrir carrinho:', err);
+      // Restaura imediatamente em caso de erro
+      if (iconElement) {
+        iconElement.className = 'fa-solid fa-cart-shopping';
+        iconElement.style.animation = '';
+        abrirCarrinhoBtn.disabled = false;
+      }
+    }
+  });
+
+  // Listener para resetar o botão quando o modal fechar
+  window.addEventListener('carrinhoModalFechado', () => {
+    const iconElement = abrirCarrinhoBtn?.querySelector('i:not(.carrinho-badge)');
+    if (iconElement && abrirCarrinhoBtn) {
+      iconElement.className = 'fa-solid fa-cart-shopping';
+      iconElement.style.animation = '';
+      abrirCarrinhoBtn.disabled = false;
     }
   });
 

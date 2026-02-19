@@ -20,7 +20,7 @@ export const TIPO_ITEM_MAP = {
   let allItems = [];
   let lastFiltered = [];
   
-  let codeInput, descInput, familySelect,
+  let codeInput, familySelect,
       tipoItemSelect, caracteristicaSelect,
       conteudoLabel, conteudoSelect,
       filterBtn, filterPanel;
@@ -28,15 +28,14 @@ export const TIPO_ITEM_MAP = {
   /**
    * Inicializa os filtros e liga eventos
    */
-  export function initFiltros({
-    _codeInput, _descInput, _familySelect,
+export function initFiltros({
+    _codeInput, _familySelect,
     _tipoItemSelect, _caracteristicaSelect,
     _conteudoLabel, _conteudoSelect,
     _filterBtn, _filterPanel,
     onFiltered
   }) {
     codeInput            = _codeInput;
-    descInput            = _descInput;
     familySelect         = _familySelect;
     tipoItemSelect       = _tipoItemSelect;
     caracteristicaSelect = _caracteristicaSelect;
@@ -44,19 +43,21 @@ export const TIPO_ITEM_MAP = {
     conteudoSelect       = _conteudoSelect;
     filterBtn            = _filterBtn;
     filterPanel          = _filterPanel;
+    
+    if (!codeInput) {
+      console.error('[filtro_produto] codeInput não encontrado!');
+      return;
+    }
   
     // esconde campos de conteúdo
-    conteudoLabel.style.display  = 'none';
-    conteudoSelect.style.display = 'none';
+    if (conteudoLabel) conteudoLabel.style.display  = 'none';
+    if (conteudoSelect) conteudoSelect.style.display = 'none';
   
-    let dbCode, dbDesc;
+    let dbSearch;
+    // Campo unificado - busca em código e descrição
     codeInput.addEventListener('input', () => {
-      clearTimeout(dbCode);
-      dbCode = setTimeout(() => { applyFilters(); onFiltered(lastFiltered); }, 200);
-    });
-    descInput.addEventListener('input', () => {
-      clearTimeout(dbDesc);
-      dbDesc = setTimeout(() => { applyFilters(); onFiltered(lastFiltered); }, 200);
+      clearTimeout(dbSearch);
+      dbSearch = setTimeout(() => { applyFilters(); onFiltered(lastFiltered); }, 200);
     });
   
     familySelect.addEventListener('change', () => { applyFilters(); onFiltered(lastFiltered); });
@@ -78,7 +79,6 @@ export const TIPO_ITEM_MAP = {
       } else {
         // limpar todos os filtros
         codeInput.value =
-        descInput.value =
         familySelect.value =
         tipoItemSelect.value =
         caracteristicaSelect.value =
@@ -116,17 +116,16 @@ export function setCache(items) {
   function applyFilters() {
     let filtered = allItems.slice();
   
-    const codeTerm = codeInput.value.trim().toLowerCase();
-    if (codeTerm) {
-      filtered = filtered.filter(i => i.codigo.toLowerCase().includes(codeTerm));
-    }
-  
-    const descRaw = descInput.value.trim().toLowerCase();
-    if (descRaw) {
-      const terms = descRaw.split(/\s+/).filter(t => t);
-      filtered = filtered.filter(i =>
-        terms.every(t => (i.descricao || '').toLowerCase().includes(t))
-      );
+    // Busca unificada - procura tanto em código quanto em descrição
+    const searchTerm = codeInput.value.trim().toLowerCase();
+    if (searchTerm) {
+      const terms = searchTerm.split(/\s+/).filter(t => t);
+      filtered = filtered.filter(i => {
+        const codigo = (i.codigo || '').toLowerCase();
+        const descricao = (i.descricao || '').toLowerCase();
+        // Retorna true se encontrar em código OU se TODOS os termos estiverem na descrição
+        return codigo.includes(searchTerm) || terms.every(t => descricao.includes(t));
+      });
     }
   
     if (familySelect.value) {

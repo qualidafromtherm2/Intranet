@@ -3957,6 +3957,62 @@ app.get('/api/compras/categorias-listar', async (_req, res) => {
   }
 });
 
+// GET /api/compras/categoria-por-produto/:codigo_produto
+// Busca a categoria da compra utilizada no último pedido/recebimento deste produto
+app.get('/api/compras/categoria-por-produto/:codigo_produto', async (req, res) => {
+  try {
+    const codigoProduto = String(req.params.codigo_produto || '').trim();
+    if (!codigoProduto) {
+      return res.status(400).json({ ok: false, error: 'codigo_produto é obrigatório' });
+    }
+
+    console.log('[Compras/Categoria] Buscando categoria do último pedido', {
+      codigo_produto: codigoProduto
+    });
+
+    // Busca a categoria do último recebimento deste produto ordenando por data de criação
+    const { rows } = await pool.query(`
+      SELECT c_categoria_item
+      FROM logistica.recebimentos_nfe_itens
+      WHERE c_codigo_produto = $1
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `, [codigoProduto]);
+
+    // Se não encontrar, usa categoria padrão para itens não localizados
+    const codigoCat = rows[0]?.c_categoria_item || '2.14.94'; // Categoria padrão: Outros Materiais
+    
+    // Busca a descrição da categoria
+    const { rows: catRows } = await pool.query(`
+      SELECT codigo, descricao
+      FROM configuracoes."ListarCategorias"
+      WHERE codigo = $1
+    `, [codigoCat]);
+    
+    const descricao = catRows[0]?.descricao || '';
+    const categoriaCompleta = descricao ? `${codigoCat} - ${descricao}` : codigoCat;
+    
+    console.log('[Compras/Categoria] Resultado:', {
+      codigo_produto: codigoProduto,
+      categoria_codigo: codigoCat,
+      categoria_descricao: descricao,
+      categoria_completa: categoriaCompleta,
+      encontrado_na_base: rows.length > 0
+    });
+
+    res.json({ 
+      ok: true, 
+      categoria: codigoCat,
+      categoria_codigo: codigoCat,
+      categoria_descricao: descricao,
+      categoria_nome: categoriaCompleta
+    });
+  } catch (err) {
+    console.error('[Compras] Erro ao buscar categoria por produto:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar categoria' });
+  }
+});
+
 // GET /api/compras/config-responsavel-categoria - Lista configurações de responsáveis por categoria
 app.get('/api/compras/config-responsavel-categoria', async (req, res) => {
   try {
@@ -4161,6 +4217,252 @@ app.get('/api/compras/departamentos-categorias', async (req, res) => {
     res.json({ ok: true, departamentos });
   } catch (err) {
     console.error('[Compras] Erro ao listar departamentos/categorias:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/compras/departamentos - Cria departamento
+app.post('/api/compras/departamentos', async (req, res) => {
+  try {
+    const nome = String(req.body?.nome || '').trim();
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome do departamento é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      INSERT INTO configuracoes.departamento (nome)
+      VALUES ($1)
+      RETURNING id, nome
+    `, [nome]);
+
+    res.json({ ok: true, departamento: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao criar departamento:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/compras/departamentos/:id - Renomeia departamento
+app.put('/api/compras/departamentos/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const nome = String(req.body?.nome || '').trim();
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome do departamento é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      UPDATE configuracoes.departamento
+      SET nome = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, nome
+    `, [nome, id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Departamento não encontrado' });
+    }
+
+    res.json({ ok: true, departamento: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao renomear departamento:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/compras/departamentos/:id - Remove departamento
+app.delete('/api/compras/departamentos/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const { rows } = await pool.query(`
+      DELETE FROM configuracoes.departamento
+      WHERE id = $1
+      RETURNING id
+    `, [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Departamento não encontrado' });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Compras] Erro ao excluir departamento:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/compras/departamentos/:id/categorias - Cria categoria
+app.post('/api/compras/departamentos/:id/categorias', async (req, res) => {
+  try {
+    const departamentoId = parseInt(req.params.id);
+    const nome = String(req.body?.nome || '').trim();
+    if (!departamentoId || isNaN(departamentoId)) {
+      return res.status(400).json({ ok: false, error: 'ID do departamento inválido' });
+    }
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome da categoria é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      WITH prox AS (
+        SELECT COALESCE(MAX(ordem), 0) + 1 AS ordem
+        FROM configuracoes.categoria_departamento
+        WHERE departamento_id = $1
+      )
+      INSERT INTO configuracoes.categoria_departamento (departamento_id, nome, ordem)
+      SELECT $1, $2, prox.ordem FROM prox
+      RETURNING id, nome
+    `, [departamentoId, nome]);
+
+    res.json({ ok: true, categoria: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao criar categoria:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/compras/categorias-departamento/:id - Renomeia categoria
+app.put('/api/compras/categorias-departamento/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const nome = String(req.body?.nome || '').trim();
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID da categoria inválido' });
+    }
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome da categoria é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      UPDATE configuracoes.categoria_departamento
+      SET nome = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, nome
+    `, [nome, id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Categoria não encontrada' });
+    }
+
+    res.json({ ok: true, categoria: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao renomear categoria:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/compras/categorias-departamento/:id - Remove categoria
+app.delete('/api/compras/categorias-departamento/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID da categoria inválido' });
+    }
+
+    const { rows } = await pool.query(`
+      DELETE FROM configuracoes.categoria_departamento
+      WHERE id = $1
+      RETURNING id
+    `, [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Categoria não encontrada' });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Compras] Erro ao excluir categoria:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/compras/categorias-departamento/:id/subitens - Cria subitem
+app.post('/api/compras/categorias-departamento/:id/subitens', async (req, res) => {
+  try {
+    const categoriaId = parseInt(req.params.id);
+    const nome = String(req.body?.nome || '').trim();
+    if (!categoriaId || isNaN(categoriaId)) {
+      return res.status(400).json({ ok: false, error: 'ID da categoria inválido' });
+    }
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome do subitem é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      WITH prox AS (
+        SELECT COALESCE(MAX(ordem), 0) + 1 AS ordem
+        FROM configuracoes.subitem_departamento
+        WHERE categoria_id = $1
+      )
+      INSERT INTO configuracoes.subitem_departamento (categoria_id, nome, ordem)
+      SELECT $1, $2, prox.ordem FROM prox
+      RETURNING id, nome
+    `, [categoriaId, nome]);
+
+    res.json({ ok: true, subitem: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao criar subitem:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /api/compras/subitens-departamento/:id - Renomeia subitem
+app.put('/api/compras/subitens-departamento/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const nome = String(req.body?.nome || '').trim();
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID do subitem inválido' });
+    }
+    if (!nome) {
+      return res.status(400).json({ ok: false, error: 'Nome do subitem é obrigatório' });
+    }
+
+    const { rows } = await pool.query(`
+      UPDATE configuracoes.subitem_departamento
+      SET nome = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, nome
+    `, [nome, id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Subitem não encontrado' });
+    }
+
+    res.json({ ok: true, subitem: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao renomear subitem:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE /api/compras/subitens-departamento/:id - Remove subitem
+app.delete('/api/compras/subitens-departamento/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ ok: false, error: 'ID do subitem inválido' });
+    }
+
+    const { rows } = await pool.query(`
+      DELETE FROM configuracoes.subitem_departamento
+      WHERE id = $1
+      RETURNING id
+    `, [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Subitem não encontrado' });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Compras] Erro ao excluir subitem:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -14078,16 +14380,17 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
                 observacao = $6,
                 solicitante = $7,
                 departamento = $8,
-                objetivo_compra = $9,
-                categoria_compra_codigo = $10,
-                retorno_cotacao = $11,
-                resp_inspecao_recebimento = $12,
-                codigo_produto_omie = $13,
-                codigo_omie = $14,
-                grupo_requisicao = $15,
-                anexos = COALESCE($16, anexos),
+                centro_custo = $9,
+                objetivo_compra = $10,
+                categoria_compra_codigo = $11,
+                retorno_cotacao = $12,
+                resp_inspecao_recebimento = $13,
+                codigo_produto_omie = $14,
+                codigo_omie = $15,
+                grupo_requisicao = $16,
+                anexos = COALESCE($17, anexos),
                 updated_at = NOW()
-            WHERE id = $17 AND status = 'carrinho'
+            WHERE id = $18 AND status = 'carrinho'
             RETURNING id
           `, [
             produto_codigo,
@@ -14098,6 +14401,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             observacao || '',
             solicitante,
             departamento || null,
+            centro_custo || null,
             objetivoCompraFinal,
             categoriaCompraCodigo,
             retorno_cotacao || null,
@@ -14130,6 +14434,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             observacao,
             solicitante,
             departamento,
+            centro_custo,
             objetivo_compra,
             categoria_compra_codigo,
             retorno_cotacao,
@@ -14140,7 +14445,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             anexos,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -14151,6 +14456,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           observacao || '',
           solicitante,
           departamento || null,
+          centro_custo || null,
           objetivoCompraFinal,
           categoriaCompraCodigo, // categoria_compra_codigo - usa o código recebido do frontend
           retorno_cotacao || null,
@@ -14250,9 +14556,31 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
 
     const anexosArray = normalizarAnexos(item.anexo || item.anexos);
     const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
-    const grupoRequisicao = (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica')
-      ? gerarNumeroGrupoRequisicao()
-      : grupoRequisicaoRaw;
+    
+    // Comentário: Verifica se existe grupo_requisicao do mesmo dia antes de gerar novo
+    let grupoRequisicao = grupoRequisicaoRaw;
+    if (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica') {
+      // Busca grupo_requisicao mais recente (ORDER BY created_at DESC) do mesmo dia do usuário
+      const dataHoje = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const buscaGrupoResult = await pool.query(`
+        SELECT grupo_requisicao 
+        FROM compras.solicitacao_compras 
+        WHERE solicitante = $1 
+          AND status = 'carrinho'
+          AND grupo_requisicao IS NOT NULL
+          AND DATE(created_at) = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [solicitante, dataHoje]);
+      
+      if (buscaGrupoResult.rows.length > 0 && buscaGrupoResult.rows[0].grupo_requisicao) {
+        grupoRequisicao = buscaGrupoResult.rows[0].grupo_requisicao;
+        console.log(`[Carrinho] Reutilizando grupo_requisicao mais recente do dia: ${grupoRequisicao}`);
+      } else {
+        grupoRequisicao = gerarNumeroGrupoRequisicao();
+        console.log(`[Carrinho] Novo grupo_requisicao gerado: ${grupoRequisicao}`);
+      }
+    }
 
     const result = await pool.query(`
       INSERT INTO compras.solicitacao_compras (
@@ -14428,6 +14756,19 @@ app.delete('/api/compras/carrinho/:id', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao remover item do carrinho:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao remover item do carrinho' });
+  }
+});
+
+// POST /api/compras/gerar-novo-grupo - Gera um novo grupo_requisicao único
+app.post('/api/compras/gerar-novo-grupo', express.json(), async (req, res) => {
+  try {
+    // Comentário: Gera sempre um novo número de grupo_requisicao
+    const novoGrupo = gerarNumeroGrupoRequisicao();
+    console.log(`[Compras] Novo grupo_requisicao gerado via API: ${novoGrupo}`);
+    res.json({ ok: true, grupo_requisicao: novoGrupo });
+  } catch (err) {
+    console.error('[Compras] Erro ao gerar novo grupo:', err);
+    res.status(500).json({ ok: false, error: err.message || 'Erro ao gerar novo grupo' });
   }
 });
 
