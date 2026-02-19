@@ -11641,6 +11641,33 @@ const cartBtn    = document.getElementById('cart-icon');
     e.preventDefault();
     openComprasFormTab();
   });
+
+  /* –– ÍCONE DE ATUALIZAÇÃO –– */
+  const updateIcon = document.getElementById('config-icon');
+  if (updateIcon) {
+    updateIcon.addEventListener('click', async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      console.log('[UPDATE-CHECK] Clique no ícone de atualização detectado');
+      
+      // Mostra confirmação ao usuário
+      const confirmed = confirm(
+        '🔄 Uma atualização está disponível!\n\n' +
+        'Seu navegador será recarregado e o cache será limpo.\n' +
+        'Isso aplicará a nova versão do sistema.\n\n' +
+        'Deseja continuar?'
+      );
+      
+      if (confirmed) {
+        console.log('[UPDATE-CHECK] Usuário confirmou atualização');
+        await clearCacheAndReload();
+      } else {
+        console.log('[UPDATE-CHECK] Usuário cancelou atualização');
+      }
+    });
+  }
+
 // ——— Função para abrir painel de registros de modificações de produto ———
 window.openRegistros = async function() {
   try {
@@ -33298,6 +33325,161 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Objetivo: Alternar entre modo claro e escuro ao clicar no botão dark-light
 // Salva preferência no banco de dados por usuário
 
+
+// ===== SISTEMA DE DETECÇÃO DE ATUALIZAÇÃO =================================
+// Objetivo: Detectar quando há uma nova versão disponível no servidor
+// e notificar o usuário para atualizar o cache do navegador
+
+// Variável global para armazenar a versão atual do cliente
+window.__appVersion = null;
+window.__versionCheckInterval = null;
+
+// Função para limpar cache e recarregar a página
+async function clearCacheAndReload() {
+  try {
+    console.log('[UPDATE-CHECK] Iniciando limpeza de cache...');
+    
+    // 1. Limpar localStorage
+    if (localStorage) {
+      localStorage.clear();
+      console.log('[UPDATE-CHECK] localStorage limpo');
+    }
+    
+    // 2. Limpar sessionStorage
+    if (sessionStorage) {
+      sessionStorage.clear();
+      console.log('[UPDATE-CHECK] sessionStorage limpo');
+    }
+    
+    // 3. Limpar IndexedDB
+    if (window.indexedDB) {
+      try {
+        const databases = await window.indexedDB.databases?.();
+        if (databases && Array.isArray(databases)) {
+          for (const db of databases) {
+            window.indexedDB.deleteDatabase(db.name);
+            console.log(`[UPDATE-CHECK] IndexedDB "${db.name}" deletado`);
+          }
+        }
+      } catch (err) {
+        console.warn('[UPDATE-CHECK] Erro ao limpar IndexedDB:', err);
+      }
+    }
+    
+    // 4. Limpar Service Workers (se existentes)
+    if ('serviceWorker' in navigator) {
+      try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+          console.log('[UPDATE-CHECK] Service Worker desregistrado');
+        }
+      } catch (err) {
+        console.warn('[UPDATE-CHECK] Erro ao limpar Service Workers:', err);
+      }
+    }
+    
+    // 5. Recarregar a página com hard-refresh (bypass cache)
+    console.log('[UPDATE-CHECK] Recarregando página...');
+    window.location.href = window.location.href;
+    
+    // Força reload ignorando cache
+    setTimeout(() => {
+      window.location.reload(true);
+    }, 500);
+    
+  } catch (err) {
+    console.error('[UPDATE-CHECK] Erro ao limpar cache:', err);
+    // Fallback: apenas recarrega
+    window.location.reload(true);
+  }
+}
+
+// Função para verificar versão no servidor
+async function checkForUpdates() {
+  try {
+    const response = await fetch('/api/check-version', { 
+      credentials: 'include',
+      cache: 'no-store' // Força o navegador a não cachear
+    });
+    
+    if (!response.ok) {
+      console.warn('[UPDATE-CHECK] Falha ao verificar versão:', response.status);
+      return;
+    }
+    
+    const data = await response.json();
+    const serverVersion = data.version;
+    
+    console.log('[UPDATE-CHECK] Versão do servidor:', serverVersion);
+    console.log('[UPDATE-CHECK] Versão do cliente:', window.__appVersion);
+    
+    // Se é a primeira verificação, salva a versão
+    if (window.__appVersion === null) {
+      window.__appVersion = serverVersion;
+      console.log('[UPDATE-CHECK] Versão inicial definida:', window.__appVersion);
+      return;
+    }
+    
+    // Se versão mudou, mostra o ícone de atualização
+    if (serverVersion !== window.__appVersion) {
+      console.log('[UPDATE-CHECK] ⚠️ ATUALIZAÇÃO DISPONÍVEL!');
+      console.log('[UPDATE-CHECK] Nova versão detectada. Mostrando ícone de atualização...');
+      
+      const updateIcon = document.getElementById('config-icon');
+      if (updateIcon) {
+        updateIcon.style.display = 'inline-block';
+        updateIcon.title = '✨ Atualização disponível! Clique para aplicar.';
+        updateIcon.setAttribute('data-update-available', 'true');
+        
+        // Adiciona classe para destacar visualmente
+        updateIcon.classList.add('update-available');
+        
+        console.log('[UPDATE-CHECK] Ícone de atualização exibido');
+      }
+      
+      // Atualiza a versão armazenada
+      window.__appVersion = serverVersion;
+    }
+    
+  } catch (err) {
+    console.warn('[UPDATE-CHECK] Erro ao verificar atualizações:', err);
+  }
+}
+
+// Função para iniciar verificação periódica
+function startVersionCheckLoop() {
+  // Se já tem um intervalo, cancela o anterior
+  if (window.__versionCheckInterval) {
+    clearInterval(window.__versionCheckInterval);
+  }
+  
+  // Verifica imediatamente na primeira vez
+  checkForUpdates();
+  
+  // Depois verifica a cada 5 minutos (300000 ms)
+  // Você pode ajustar esse valor conforme necessário
+  const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
+  
+  window.__versionCheckInterval = setInterval(() => {
+    console.log('[UPDATE-CHECK] Verificação periódica de atualização...');
+    checkForUpdates();
+  }, CHECK_INTERVAL);
+  
+  console.log('[UPDATE-CHECK] Loop de verificação iniciado (intervalo: 5 min)');
+}
+
+// Função para parar verificação periódica
+function stopVersionCheckLoop() {
+  if (window.__versionCheckInterval) {
+    clearInterval(window.__versionCheckInterval);
+    window.__versionCheckInterval = null;
+    console.log('[UPDATE-CHECK] Loop de verificação parado');
+  }
+}
+
+// ===== FIM DO SISTEMA DE DETECÇÃO DE ATUALIZAÇÃO ===========================
+
 // Função para aplicar tema
 function aplicarTema(theme) {
   if (theme === 'light') {
@@ -33373,4 +33555,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mensagem = novoTema === 'light' ? 'Mudou para modo claro' : 'Mudou para modo escuro';
     console.log('[DARK-LIGHT]', mensagem);
   });
+  
+  // ===== Iniciar loop de verificação de atualização =====
+  // Inicia o monitoramento de versão automaticamente quando usuário estiver logado
+  if (window.__sessionUser && window.__sessionUser.id) {
+    console.log('[UPDATE-CHECK] Usuário logado, iniciando monitoramento de atualização');
+    startVersionCheckLoop();
+  } else {
+    console.log('[UPDATE-CHECK] Usuário não logado, monitoramento de atualização desativado');
+  }
 });
