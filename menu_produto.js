@@ -31034,6 +31034,9 @@ async function applyCurrentUserPermissionsToUI(){
   document.querySelectorAll('#menu-inicio').forEach(el => el.classList.remove('perm-hidden'));
 }
 
+// Variável para rastrear se o usuário estava logado na última verificação
+window.__wasLoggedInBefore = false;
+
 // Checa auth no backend e aplica estado
 async function ensureAuthVisibility(){
   try {
@@ -31042,11 +31045,38 @@ async function ensureAuthVisibility(){
 
     const r  = await fetch('/api/auth/status', { credentials:'include' });
     const st = r.ok ? await r.json() : { loggedIn:false };
-  window.__sessionUser = st.loggedIn ? st.user : null;
-  console.log('[AUTH] window.__sessionUser atualizado:', window.__sessionUser);
+    
+    // Compara com o estado anterior (não com o estado atual que pode ter mudado)
+    const wasLoggedBefore = window.__wasLoggedInBefore;
+    const isLoggedNow = st.loggedIn;
+    
+    console.log('[AUTH] Estado anterior:', wasLoggedBefore, '| Estado atual:', isLoggedNow);
+    console.log('[AUTH] Mudança detectada?', wasLoggedBefore !== isLoggedNow);
+    
+    // Atualiza o estado para a próxima comparação
+    window.__wasLoggedInBefore = isLoggedNow;
+    
+    window.__sessionUser = st.loggedIn ? st.user : null;
+    console.log('[AUTH] window.__sessionUser atualizado:', window.__sessionUser);
 
-    if (st.loggedIn) await applyCurrentUserPermissionsToUI();
-    else             applyLoggedOutUI();
+    if (st.loggedIn) {
+      await applyCurrentUserPermissionsToUI();
+      
+      // Se estava deslogado E agora está logado, inicia monitoramento
+      if (!wasLoggedBefore && isLoggedNow && typeof startVersionCheckLoop === 'function') {
+        console.log('[UPDATE-CHECK] ✓✓✓ USUÁRIO FEZ LOGIN! Iniciando monitoramento de atualização...');
+        startVersionCheckLoop();
+      }
+    }
+    else {
+      applyLoggedOutUI();
+      
+      // Se estava logado E agora está deslogado, para o monitoramento
+      if (wasLoggedBefore && !isLoggedNow && typeof stopVersionCheckLoop === 'function') {
+        console.log('[UPDATE-CHECK] Usuário fez logout. Parando monitoramento de atualização...');
+        stopVersionCheckLoop();
+      }
+    }
   } catch {
     applyLoggedOutUI();
   }
@@ -33335,6 +33365,15 @@ window.__appVersion = null;
 window.__versionCheckInterval = null;
 window.__updatePending = false; // Flag para saber se há atualização pendente
 
+// Esconder o ícone IMEDIATAMENTE na inicialização
+(function() {
+  const icon = document.getElementById('config-icon');
+  if (icon) {
+    icon.style.display = 'none';
+    console.log('[UPDATE-CHECK-INIT] Ícone de atualização escondido na inicialização');
+  }
+})();
+
 // Função para limpar cache e recarregar a página
 async function clearCacheAndReload() {
   try {
@@ -33403,72 +33442,91 @@ async function clearCacheAndReload() {
 // Função para verificar versão no servidor (do banco de dados)
 async function checkForUpdates() {
   try {
+    console.log('[UPDATE-CHECK] ========================================');
+    console.log('[UPDATE-CHECK] Iniciando verificação de atualização...');
+    
     const response = await fetch('/api/check-version', { 
       credentials: 'include',
       cache: 'no-store' // Força o navegador a não cachear
     });
     
     if (!response.ok) {
-      console.warn('[UPDATE-CHECK] Falha ao verificar versão:', response.status);
+      console.warn('[UPDATE-CHECK] ❌ Falha ao verificar versão:', response.status);
+      console.log('[UPDATE-CHECK] Resposta:', await response.text());
       return;
     }
     
     const data = await response.json();
     const serverVersion = data.version;
     
-    console.log('[UPDATE-CHECK] Versão do servidor (BD):', serverVersion);
-    console.log('[UPDATE-CHECK] Versão armazenada no cliente:', window.__appVersion);
+    console.log('[UPDATE-CHECK] ✓ Resposta do servidor:', data);
+    console.log('[UPDATE-CHECK] Versão no servidor (BD): ', serverVersion);
+    console.log('[UPDATE-CHECK] Versão no cliente: ', window.__appVersion);
     
     const updateIcon = document.getElementById('config-icon');
     
-    // Se é a primeira verificação, salva a versão e esconde o ícone
+    // Se é a primeira verificação
     if (window.__appVersion === null) {
+      console.log('[UPDATE-CHECK] 🔄 PRIMEIRA VERIFICAÇÃO - Sincronizando...');
       window.__appVersion = serverVersion;
       window.__updatePending = false;
-      console.log('[UPDATE-CHECK] Versão inicial sincronizada:', window.__appVersion);
       
-      // SEMPRE esconde o ícone na primeira verificação
+      // Garante que ícone fica escondido
       if (updateIcon) {
         updateIcon.style.display = 'none';
         updateIcon.classList.remove('update-available');
         updateIcon.removeAttribute('data-update-available');
+        console.log('[UPDATE-CHECK] ✓ Ícone escondido (primeira verificação)');
       }
-      console.log('[UPDATE-CHECK] ✓ Sincronização inicial completa - ícone escondido');
+      
+      console.log('[UPDATE-CHECK] ✓ Versão do cliente definida para:', window.__appVersion);
+      console.log('[UPDATE-CHECK] ========================================');
       return;
     }
     
-    // Se versão é DIFERENTE, mostra o ícone
+    console.log('[UPDATE-CHECK] Comparando versões...');
+    console.log('[UPDATE-CHECK] Servidor: "' + serverVersion + '" vs Cliente: "' + window.__appVersion + '"');
+    console.log('[UPDATE-CHECK] São diferentes?', serverVersion !== window.__appVersion);
+    
+    // Se versão é DIFERENTE
     if (serverVersion !== window.__appVersion) {
+      console.log('[UPDATE-CHECK] ⚠️ VERSÕES DIFERENTES!');
       console.log('[UPDATE-CHECK] ⚠️ ATUALIZAÇÃO DISPONÍVEL!');
-      console.log('[UPDATE-CHECK] Cliente:', window.__appVersion, '→ Servidor:', serverVersion);
+      console.log('[UPDATE-CHECK] Servidor:', serverVersion, '≠ Cliente:', window.__appVersion);
       
       if (updateIcon) {
+        console.log('[UPDATE-CHECK] Mostrando ícone de atualização...');
         updateIcon.style.display = 'inline-block';
         updateIcon.title = '✨ Atualização disponível! Clique para aplicar.';
         updateIcon.setAttribute('data-update-available', 'true');
         updateIcon.classList.add('update-available');
         
-        console.log('[UPDATE-CHECK] ✓ Ícone de atualização exibido e animando');
+        console.log('[UPDATE-CHECK] ✨ Ícone exibido e animando');
       }
       
       window.__updatePending = true;
+      console.log('[UPDATE-CHECK] ✓ Flag updatePending = true');
     } 
-    // Se versão é IGUAL, esconde o ícone
+    // Se versão é IGUAL
     else {
-      console.log('[UPDATE-CHECK] ✓ Sistema sincronizado - nenhuma atualização pendente');
+      console.log('[UPDATE-CHECK] ✓ Versões iguais - Sistema sincronizado');
       
       if (updateIcon) {
         updateIcon.style.display = 'none';
         updateIcon.classList.remove('update-available');
         updateIcon.removeAttribute('data-update-available');
+        console.log('[UPDATE-CHECK] ✓ Ícone escondido');
       }
       
       window.__updatePending = false;
-      console.log('[UPDATE-CHECK] ✓ Ícone ocultado');
+      console.log('[UPDATE-CHECK] ✓ Flag updatePending = false');
     }
     
+    console.log('[UPDATE-CHECK] ========================================');
+    
   } catch (err) {
-    console.warn('[UPDATE-CHECK] Erro ao verificar atualizações:', err);
+    console.error('[UPDATE-CHECK] ❌ ERRO ao verificar atualizações:', err);
+    console.log('[UPDATE-CHECK] ========================================');
   }
 }
 
@@ -33477,8 +33535,10 @@ function startVersionCheckLoop() {
   // Se já tem um intervalo, cancela o anterior
   if (window.__versionCheckInterval) {
     clearInterval(window.__versionCheckInterval);
+    console.log('[UPDATE-CHECK] Intervalo anterior cancelado');
   }
   
+  console.log('[UPDATE-CHECK] Iniciando verificação imediata...');
   // Verifica imediatamente na primeira vez
   checkForUpdates();
   
@@ -33487,11 +33547,11 @@ function startVersionCheckLoop() {
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
   
   window.__versionCheckInterval = setInterval(() => {
-    console.log('[UPDATE-CHECK] Verificação periódica de atualização...');
+    console.log('[UPDATE-CHECK] ⏱️ Verificação periódica (a cada 5 min)...');
     checkForUpdates();
   }, CHECK_INTERVAL);
   
-  console.log('[UPDATE-CHECK] Loop de verificação iniciado (intervalo: 5 min)');
+  console.log('[UPDATE-CHECK] ✓ Loop de verificação iniciado (intervalo: 5 minutos)');
 }
 
 // Função para parar verificação periódica
@@ -33502,6 +33562,14 @@ function stopVersionCheckLoop() {
     console.log('[UPDATE-CHECK] Loop de verificação parado');
   }
 }
+
+// Função para FORÇAR verificação AGORA (útil para testes)
+window.forceUpdateCheck = function() {
+  console.log('[UPDATE-CHECK] 🔄 VERIFICAÇÃO FORÇADA MANUALMENTE');
+  checkForUpdates();
+  console.log('[UPDATE-CHECK] ✓ Verificação forçada concluída');
+  console.log('[UPDATE-CHECK] Dica: Use window.forceUpdateCheck() no console para testar novamente');
+};
 
 // ===== FIM DO SISTEMA DE DETECÇÃO DE ATUALIZAÇÃO ===========================
 
