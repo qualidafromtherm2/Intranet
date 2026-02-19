@@ -8323,23 +8323,21 @@ const ulList     = document.getElementById('listaProdutosList');
   // Guarda os itens da busca resumida
   let resumoItems = [];
 
-  // FILTRO LOCAL (SEM RE-RENDER)
+  // FILTRO LOCAL (SEM RE-RENDER) - Campo unificado
   function applyResumoFilters() {
-    const termCode = codeFilter.value.trim().toLowerCase();
-    const termDesc = descFilter.value.trim().toLowerCase();
+    const searchTerm = codeFilter.value.trim().toLowerCase();
   
     ulList.querySelectorAll('li').forEach(li => {
       const code = (li.dataset.codigo    || '').toLowerCase();
       const desc = (li.dataset.descricao || '').toLowerCase();
   
-      const show = ((!termCode || code.includes(termCode)) &&
-                    (!termDesc || desc.includes(termDesc)));
+      // Mostra se encontrar no código OU na descrição
+      const show = !searchTerm || code.includes(searchTerm) || desc.includes(searchTerm);
       li.style.display = show ? '' : 'none';
     });
   }
   
   codeFilter.addEventListener('input', applyResumoFilters);
-  descFilter.addEventListener('input', applyResumoFilters);
 
 
   // pega referências ao botão e ao painel de filtros
@@ -13460,32 +13458,44 @@ async function carregarCarrinhoComprasDoBanco() {
     }
 
     const itens = Array.isArray(data.itens) ? data.itens : [];
-    window.carrinhoCompras = itens.map(item => ({
-      id_db: item.id,
-      produto_codigo: item.produto_codigo,
-      produto_descricao: item.produto_descricao,
-      quantidade: item.quantidade ?? '',
-      prazo_solicitado: item.prazo_solicitado,
-      familia_nome: item.familia_produto,
-      observacao: item.observacao,
-      observacao_reprovacao: item.observacao_reprovacao,
-      solicitante: item.solicitante,
-      departamento: item.departamento,
-      centro_custo: item.centro_custo,
-      objetivo_compra: item.objetivo_compra,
-      resp_inspecao_recebimento: item.resp_inspecao_recebimento,
-      responsavel_pela_compra: item.responsavel_pela_compra,
-      retorno_cotacao: item.retorno_cotacao,
-      codigo_produto_omie: item.codigo_produto_omie,
-      categoria_compra: item.categoria_compra_codigo,
-      categoria_compra_codigo: item.categoria_compra_codigo,
-      categoria_compra_nome: item.categoria_compra_nome,
-      codigo_omie: item.codigo_omie,
-      requisicao_direta: item.requisicao_direta,
-      grupo_requisicao: item.grupo_requisicao || null,
-      np: item.grupo_requisicao || item.np || null,
-      anexo: item.anexos || null
-    }));
+    window.carrinhoCompras = itens.map(item => {
+      // Comentário: Busca url_imagem do cache de produtos usando produto_codigo
+      let urlImagem = '';
+      if (item.produto_codigo && window.produtosCatalogoOmie) {
+        const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+          String(p.codigo).trim() === String(item.produto_codigo).trim()
+        );
+        urlImagem = produtoComImagem?.url_imagem || '';
+      }
+      
+      return {
+        id_db: item.id,
+        produto_codigo: item.produto_codigo,
+        produto_descricao: item.produto_descricao,
+        quantidade: item.quantidade ?? '',
+        prazo_solicitado: item.prazo_solicitado,
+        familia_nome: item.familia_produto,
+        observacao: item.observacao,
+        observacao_reprovacao: item.observacao_reprovacao,
+        solicitante: item.solicitante,
+        departamento: item.departamento,
+        centro_custo: item.centro_custo,
+        objetivo_compra: item.objetivo_compra,
+        resp_inspecao_recebimento: item.resp_inspecao_recebimento,
+        responsavel_pela_compra: item.responsavel_pela_compra,
+        retorno_cotacao: item.retorno_cotacao,
+        codigo_produto_omie: item.codigo_produto_omie,
+        categoria_compra: item.categoria_compra_codigo,
+        categoria_compra_codigo: item.categoria_compra_codigo,
+        categoria_compra_nome: item.categoria_compra_nome,
+        codigo_omie: item.codigo_omie,
+        requisicao_direta: item.requisicao_direta,
+        grupo_requisicao: item.grupo_requisicao || null,
+        np: item.grupo_requisicao || item.np || null,
+        anexo: item.anexos || null,
+        url_imagem: urlImagem  // Adiciona URL da imagem do cache
+      };
+    });
 
     renderCarrinhoCompras();
     renderModalCarrinhoCompras();
@@ -13541,6 +13551,13 @@ function renderCarrinhoCompras() {
   if (badgeEl) {
     badgeEl.textContent = carrinho.length;
     badgeEl.style.display = carrinho.length > 0 ? 'flex' : 'none';
+  }
+  
+  // Atualiza também o badge da Lista de Produtos (página Compras)
+  const badgeListaProdutos = document.getElementById('listaProdutosCarrinhoCount');
+  if (badgeListaProdutos) {
+    badgeListaProdutos.textContent = carrinho.length;
+    badgeListaProdutos.style.display = carrinho.length > 0 ? 'flex' : 'none';
   }
   
   // Atualiza também o contador do catálogo Omie se existir
@@ -13764,6 +13781,8 @@ function fecharModalCarrinhoCompras() {
   modal.classList.remove('active');
   setTimeout(() => {
     modal.style.display = 'none';
+    // Dispara evento para resetar o botão do carrinho
+    window.dispatchEvent(new CustomEvent('carrinhoModalFechado'));
   }, 300);
 }
 
@@ -13821,7 +13840,7 @@ function atualizarSelectFiltroNP() {
 }
 
 // Renderiza a tabela do carrinho dentro do modal
-function renderModalCarrinhoCompras() {
+async function renderModalCarrinhoCompras() {
   const cardsContainer = document.getElementById('modalCarrinhoCards');
   const countEl = document.getElementById('modalCarrinhoCount');
   const btnLimpar = document.getElementById('modalComprasLimparCarrinhoBtn');
@@ -13908,11 +13927,16 @@ function renderModalCarrinhoCompras() {
       ...gruposDisponiveis
     ].filter(Boolean)));
     const opcoesGrupo = (gruposUnicos.length ? gruposUnicos : ['']);
-    const opcoesGrupoHtml = opcoesGrupo.map(grupo => {
-      const label = grupo || 'Sem grupo';
-      const selected = grupo === npExibicao ? 'selected' : '';
-      return `<option value="${grupo}" ${selected}>${label}</option>`;
-    }).join('');
+    const opcoesGrupoHtml = [
+      // Opção para criar novo grupo
+      `<option value="__NOVO__" style="color:#10b981;font-weight:600;">+ Criar Novo NP</option>`,
+      // Opções existentes
+      ...opcoesGrupo.map(grupo => {
+        const label = grupo || 'Sem grupo';
+        const selected = grupo === npExibicao ? 'selected' : '';
+        return `<option value="${grupo}" ${selected}>${label}</option>`;
+      })
+    ].join('');
     return `
       <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:all 0.2s;display:flex;flex-direction:column;gap:12px;" 
            onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';" 
@@ -14069,16 +14093,41 @@ function renderModalCarrinhoCompras() {
   
   // Bind botões de expandir/recolher
   cardsContainer.querySelectorAll('.carrinho-toggle-detalhes-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = btn.getAttribute('data-idx');
       const detalhesDiv = cardsContainer.querySelector(`.carrinho-detalhes-expandiveis[data-idx="${idx}"]`);
       const icon = btn.querySelector('i');
+      
+      console.log('[DEBUG CATEGORIA] Botão expandir clicado', { 
+        idx, 
+        detalhesDiv_existe: !!detalhesDiv 
+      });
       
       if (detalhesDiv) {
         if (detalhesDiv.style.display === 'none' || !detalhesDiv.style.display) {
           detalhesDiv.style.display = 'flex';
           icon.className = 'fa-solid fa-chevron-up';
           btn.style.background = '#10b981';
+          
+          // Busca e aplica categoria da última compra deste produto
+          const itemIdx = parseInt(idx, 10);
+          const item = window.carrinhoCompras[itemIdx];
+          
+          console.log('[DEBUG CATEGORIA] Item do carrinho:', { 
+            itemIdx, 
+            item_existe: !!item,
+            produto_codigo: item?.produto_codigo,
+            codigo_omie: item?.codigo_omie,
+            categoria_atual: item?.categoria_compra,
+            item_completo: item
+          });
+          
+          if (item && item.produto_codigo) {
+            console.log('[DEBUG CATEGORIA] Chamando aplicarCategoriaCompraPorProdutoCarrinho');
+            await aplicarCategoriaCompraPorProdutoCarrinho(item.produto_codigo, itemIdx);
+          } else if (item && !item.produto_codigo) {
+            console.warn('[DEBUG CATEGORIA] Item não tem produto_codigo!');
+          }
         } else {
           detalhesDiv.style.display = 'none';
           icon.className = 'fa-solid fa-chevron-down';
@@ -14162,13 +14211,50 @@ function renderModalCarrinhoCompras() {
   cardsContainer.querySelectorAll('.carrinho-input-np').forEach(input => {
     input.addEventListener('change', async (e) => {
       const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      const valorSelecionado = e.target.value;
+      
       if (window.carrinhoCompras[idx]) {
-        window.carrinhoCompras[idx].grupo_requisicao = e.target.value || null;
-        window.carrinhoCompras[idx].np = e.target.value || null;
-        await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
-        await carregarGruposRequisicaoDisponiveis();
-        atualizarSelectFiltroNP();
-        renderModalCarrinhoCompras();
+        // Se selecionou "Criar Novo NP", gera um novo grupo_requisicao
+        if (valorSelecionado === '__NOVO__') {
+          try {
+            // Chama API para gerar novo grupo_requisicao
+            const resp = await fetch('/api/compras/gerar-novo-grupo', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include'
+            });
+            
+            if (!resp.ok) {
+              throw new Error('Erro ao gerar novo grupo');
+            }
+            
+            const data = await resp.json();
+            const novoGrupo = data.grupo_requisicao;
+            
+            console.log(`[Carrinho] Novo grupo_requisicao criado: ${novoGrupo}`);
+            
+            // Atualiza o item com o novo grupo
+            window.carrinhoCompras[idx].grupo_requisicao = novoGrupo;
+            window.carrinhoCompras[idx].np = novoGrupo;
+            await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
+            await carregarGruposRequisicaoDisponiveis();
+            atualizarSelectFiltroNP();
+            renderModalCarrinhoCompras();
+          } catch (err) {
+            console.error('[Carrinho] Erro ao criar novo NP:', err);
+            alert('Erro ao criar novo NP. Tente novamente.');
+            // Reverte para o valor anterior
+            e.target.value = window.carrinhoCompras[idx].grupo_requisicao || '';
+          }
+        } else {
+          // Atualização normal de grupo
+          window.carrinhoCompras[idx].grupo_requisicao = valorSelecionado || null;
+          window.carrinhoCompras[idx].np = valorSelecionado || null;
+          await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[idx]);
+          await carregarGruposRequisicaoDisponiveis();
+          atualizarSelectFiltroNP();
+          renderModalCarrinhoCompras();
+        }
       }
     });
   });
@@ -14206,6 +14292,136 @@ function renderModalCarrinhoCompras() {
       }
     });
   });
+  
+  // Popula e bind dropdown de Categoria da Compra
+  await popularDropdownCategoriaCompraCarrinho(cardsContainer);
+}
+
+// Popula dropdown de Categoria da Compra no carrinho com categorias filtradas
+async function popularDropdownCategoriaCompraCarrinho(container) {
+  try {
+    // Busca categorias da API
+    const resp = await fetch('/api/compras/categorias-listar', { credentials: 'include' });
+    if (!resp.ok) {
+      console.error('[CARRINHO] Erro ao buscar categorias:', resp.status);
+      return;
+    }
+    
+    const data = await resp.json();
+    const categorias = data.categorias || [];
+    
+    // Filtra apenas categorias com formato x.xx.xx (3 níveis)
+    const categoriasFiltradas = categorias.filter(cat => {
+      const codigo = String(cat.codigo || '').trim();
+      const partes = codigo.split('.');
+      return partes.length === 3 && partes.every(p => p.length > 0);
+    });
+    
+    console.log('[CARRINHO] Categorias carregadas:', {
+      total: categorias.length,
+      filtradas: categoriasFiltradas.length
+    });
+    
+    // Popula todos os dropdowns
+    container.querySelectorAll('.carrinho-item-categoria-wrapper').forEach(wrapper => {
+      const idx = wrapper.getAttribute('data-idx');
+      const dropdown = document.getElementById(`carrinhoItemCategoriaCompraDropdown-${idx}`);
+      const btnText = document.getElementById(`carrinhoItemCategoriaCompraBtnText-${idx}`);
+      const hiddenInput = document.getElementById(`carrinhoItemCategoriaCompra-${idx}`);
+      const btn = wrapper.querySelector('.carrinho-item-categoria-btn');
+      
+      if (!dropdown || !btn) return;
+      
+      // Popula dropdown com opções
+      dropdown.innerHTML = categoriasFiltradas.map(cat => `
+        <div class="carrinho-categoria-option" data-codigo="${window.escapeHtml(cat.codigo)}" 
+             data-descricao="${window.escapeHtml(cat.descricao)}" data-idx="${idx}"
+             style="padding:6px 10px;cursor:pointer;font-size:11px;border-radius:4px;transition:background 0.15s;color:#111827;">
+          <strong style="color:var(--active-color);">${window.escapeHtml(cat.codigo)}</strong> - <span style="color:#111827;">${window.escapeHtml(cat.descricao)}</span>
+        </div>
+      `).join('');
+      
+      // Atualiza texto do botão se já tiver valor
+      const item = window.carrinhoCompras[parseInt(idx, 10)];
+      if (item && item.categoria_compra_nome) {
+        btnText.textContent = item.categoria_compra_nome;
+        btnText.style.color = 'var(--active-color)';
+      } else if (item && item.categoria_compra_codigo) {
+        const cat = categoriasFiltradas.find(c => c.codigo === item.categoria_compra_codigo);
+        if (cat) {
+          btnText.textContent = `${cat.codigo} - ${cat.descricao}`;
+          btnText.style.color = 'var(--active-color)';
+        }
+      }
+      
+      // Toggle dropdown ao clicar no botão
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = dropdown.style.display === 'block';
+        
+        // Fecha todos os outros dropdowns
+        document.querySelectorAll('.carrinho-item-categoria-dropdown').forEach(d => {
+          d.style.display = 'none';
+        });
+        
+        // Toggle este dropdown
+        dropdown.style.display = isVisible ? 'none' : 'block';
+      });
+      
+      // Selecionar opção
+      dropdown.querySelectorAll('.carrinho-categoria-option').forEach(option => {
+        option.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          
+          const codigo = option.getAttribute('data-codigo');
+          const descricao = option.getAttribute('data-descricao');
+          const itemIdx = parseInt(option.getAttribute('data-idx'), 10);
+          
+          console.log('[CARRINHO] Categoria selecionada:', { codigo, descricao, itemIdx });
+          
+          // Atualiza no carrinho
+          if (window.carrinhoCompras[itemIdx]) {
+            window.carrinhoCompras[itemIdx].categoria_compra_codigo = codigo;
+            window.carrinhoCompras[itemIdx].categoria_compra = descricao;
+            window.carrinhoCompras[itemIdx].categoria_compra_nome = `${codigo} - ${descricao}`;
+            
+            // Salva no banco
+            await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[itemIdx]);
+            
+            // Atualiza UI
+            btnText.textContent = `${codigo} - ${descricao}`;
+            btnText.style.color = 'var(--active-color)';
+            if (hiddenInput) hiddenInput.value = codigo;
+            
+            console.log('[CARRINHO] Categoria atualizada no item', itemIdx);
+          }
+          
+          // Fecha dropdown
+          dropdown.style.display = 'none';
+        });
+        
+        // Hover effect
+        option.addEventListener('mouseenter', () => {
+          option.style.background = 'var(--bg-hover)';
+        });
+        option.addEventListener('mouseleave', () => {
+          option.style.background = 'transparent';
+        });
+      });
+    });
+    
+    // Fecha dropdown ao clicar fora
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.carrinho-item-categoria-wrapper')) {
+        document.querySelectorAll('.carrinho-item-categoria-dropdown').forEach(d => {
+          d.style.display = 'none';
+        });
+      }
+    });
+    
+  } catch (err) {
+    console.error('[CARRINHO] Erro ao popular dropdown de categorias:', err);
+  }
 }
 
 // Limpar carrinho do modal
@@ -14496,6 +14712,33 @@ async function enviarPedidoModal() {
     alert('Carrinho vazio!');
     return;
   }
+  
+  // Captura valores dos campos globais do modal
+  const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value?.trim() || null;
+  const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value?.trim() || null;
+  const prazoSolicitadoGlobal = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || null;
+  
+  console.log('[Enviar Pedido] Valores globais capturados:', {
+    departamento: departamentoGlobal,
+    centro_custo: centroCustoGlobal,
+    prazo_solicitado: prazoSolicitadoGlobal
+  });
+  
+  // Aplica os valores globais a TODOS os itens do carrinho
+  carrinho.forEach((item, idx) => {
+    if (departamentoGlobal) {
+      item.departamento = departamentoGlobal;
+      console.log(`[Enviar Pedido] Item ${idx}: departamento aplicado = ${departamentoGlobal}`);
+    }
+    if (centroCustoGlobal) {
+      item.centro_custo = centroCustoGlobal;
+      console.log(`[Enviar Pedido] Item ${idx}: centro_custo aplicado = ${centroCustoGlobal}`);
+    }
+    if (prazoSolicitadoGlobal) {
+      item.prazo_solicitado = prazoSolicitadoGlobal;
+      console.log(`[Enviar Pedido] Item ${idx}: prazo_solicitado aplicado = ${prazoSolicitadoGlobal}`);
+    }
+  });
   
   const statusEl = document.getElementById('modalComprasFormStatus');
   const btnEnviar = document.getElementById('modalComprasEnviarPedidoBtn');
@@ -15845,6 +16088,16 @@ async function adicionarItemCarrinho(ev) {
     }
   }
   
+  // Comentário: Busca url_imagem do cache de produtos usando produto_codigo
+  let urlImagem = '';
+  if (codigo && window.produtosCatalogoOmie) {
+    const produtoComImagem = window.produtosCatalogoOmie.find(p => 
+      String(p.codigo).trim() === String(codigo).trim()
+    );
+    urlImagem = produtoComImagem?.url_imagem || '';
+    console.log('[Compras] URL da imagem encontrada:', urlImagem ? 'SIM' : 'NÃO');
+  }
+  
   const novoItemCarrinho = {
     produto_codigo: codigo,
     produto_descricao: descricao,
@@ -15865,7 +16118,8 @@ async function adicionarItemCarrinho(ev) {
     categoria_compra_nome: categoriaCompraTexto,
     requisicao_direta: requisicaoDireta,  // Novo campo: requisição direta
     status_pedido: statusPedido,  // Novo campo: etapa do pedido escolhida pelo usuário
-    anexo: anexoData  // Novo campo: anexo do item
+    anexo: anexoData,  // Novo campo: anexo do item
+    url_imagem: urlImagem  // Novo campo: URL da imagem do produto
   };
 
   const registro = await registrarItemCarrinhoNoBanco(novoItemCarrinho);
@@ -16042,6 +16296,252 @@ document.getElementById('comprasConfigBtn')?.addEventListener('click', () => {
 document.getElementById('comprasHistoricoBtn')?.addEventListener('click', () => {
   fecharModalComprasAcoes();
   abrirModalHistoricoGeral();
+});
+
+// ========== FUNÇÕES PARA COLAR LISTA DE COMPRA EM MASSA ==========
+
+// Abre modal de colar lista de compra
+window.abrirModalColarLista = function() {
+  const modal = document.getElementById('modalColarListaCompra');
+  const textarea = document.getElementById('colarListaCompraTexto');
+  const errorDiv = document.getElementById('colarListaCompraError');
+  const infoDiv = document.getElementById('colarListaCompraInfo');
+  
+  if (modal) {
+    modal.style.display = 'flex';
+    if (textarea) textarea.value = '';
+    if (errorDiv) errorDiv.style.display = 'none';
+    if (infoDiv) infoDiv.style.display = 'none';
+  }
+};
+
+// Fecha modal de colar lista de compra
+window.fecharModalColarLista = function() {
+  const modal = document.getElementById('modalColarListaCompra');
+  if (modal) modal.style.display = 'none';
+};
+
+// Processa lista de compra colada
+window.processarListaCompra = async function() {
+  const textarea = document.getElementById('colarListaCompraTexto');
+  const errorDiv = document.getElementById('colarListaCompraError');
+  const errorMsg = document.getElementById('colarListaCompraErrorMsg');
+  const infoDiv = document.getElementById('colarListaCompraInfo');
+  const infoMsg = document.getElementById('colarListaCompraInfoMsg');
+  const btn = document.getElementById('btnProcessarListaCompra');
+  
+  if (!textarea) return;
+  
+  const textoColado = textarea.value.trim();
+  
+  // Valida se há conteúdo
+  if (!textoColado) {
+    if (errorDiv && errorMsg) {
+      errorDiv.style.display = 'block';
+      errorMsg.textContent = 'Por favor, cole a lista de produtos';
+    }
+    return;
+  }
+  
+  // Esconde mensagens anteriores
+  if (errorDiv) errorDiv.style.display = 'none';
+  if (infoDiv) infoDiv.style.display = 'none';
+  
+  // Desabilita botão
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando...';
+  }
+  
+  try {
+    // Parse das linhas: codigo<TAB>quantidade
+    const linhas = textoColado.split('\n').filter(l => l.trim());
+    const itensParaAdicionar = [];
+    const erros = [];
+    
+    for (let i = 0; i < linhas.length; i++) {
+      const linha = linhas[i].trim();
+      if (!linha) continue;
+      
+      // Divide por TAB ou múltiplos espaços
+      const partes = linha.split(/\t+|\s{2,}/).filter(p => p.trim());
+      
+      if (partes.length < 2) {
+        erros.push(`Linha ${i + 1}: formato inválido (esperado: CODIGO<TAB>QUANTIDADE)`);
+        continue;
+      }
+      
+      const codigo = partes[0].trim();
+      const qtdStr = partes[1].trim();
+      const quantidade = parseInt(qtdStr, 10);
+      
+      if (isNaN(quantidade) || quantidade <= 0) {
+        erros.push(`Linha ${i + 1}: quantidade inválida "${qtdStr}"`);
+        continue;
+      }
+      
+      itensParaAdicionar.push({ codigo, quantidade, linha: i + 1 });
+    }
+    
+    // Se houver erros, exibe
+    if (erros.length > 0) {
+      if (errorDiv && errorMsg) {
+        errorDiv.style.display = 'block';
+        errorMsg.innerHTML = erros.join('<br>');
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho';
+      }
+      return;
+    }
+    
+    // Busca produtos no cache
+    if (!window.produtosCatalogoOmie || window.produtosCatalogoOmie.length === 0) {
+      if (errorDiv && errorMsg) {
+        errorDiv.style.display = 'block';
+        errorMsg.textContent = 'Catálogo de produtos não carregado. Atualize a página.';
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho';
+      }
+      return;
+    }
+    
+    // Captura valores globais do carrinho
+    const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value || '';
+    const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value || '';
+    const prazoGlobal = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || '';
+    
+    let adicionados = 0;
+    let naoEncontrados = [];
+    
+    // Adiciona cada item ao carrinho
+    for (const item of itensParaAdicionar) {
+      const produto = window.produtosCatalogoOmie.find(p => 
+        String(p.codigo).trim().toLowerCase() === item.codigo.toLowerCase()
+      );
+      
+      if (!produto) {
+        naoEncontrados.push(`${item.codigo} (linha ${item.linha})`);
+        continue;
+      }
+      
+      // Busca categoria da compra baseada na última compra
+      let categoriaCompra = '2.14.94'; // Default
+      let categoriaCompraTexto = '';
+      try {
+        const respCat = await fetch(`/api/compras/categoria-por-produto/${encodeURIComponent(item.codigo)}`, {
+          credentials: 'include'
+        });
+        if (respCat.ok) {
+          const dataCat = await respCat.json();
+          if (dataCat.categoria_codigo) {
+            categoriaCompra = dataCat.categoria_codigo;
+            categoriaCompraTexto = dataCat.categoria_nome || '';
+          }
+        }
+      } catch (err) {
+        console.warn('[COLAR_LISTA] Erro ao buscar categoria:', err);
+      }
+      
+      // Busca codigo_produto da tabela produtos_omie
+      let codigoOmie = null;
+      try {
+        const resOmie = await fetch(`/api/produtos-omie/buscar-codigo?codigo=${encodeURIComponent(item.codigo)}`);
+        if (resOmie.ok) {
+          const dataOmie = await resOmie.json();
+          codigoOmie = dataOmie.codigo_produto || null;
+        }
+      } catch (err) {
+        console.warn('[COLAR_LISTA] Erro ao buscar codigo_produto:', err);
+      }
+      
+      // Cria item do carrinho
+      const novoItemCarrinho = {
+        produto_codigo: produto.codigo,
+        produto_descricao: produto.descricao || produto.descricaoDetalhada || '',
+        quantidade: item.quantidade,
+        prazo_solicitado: prazoGlobal || null,
+        familia_codigo: produto.familia || null,
+        familia_nome: produto.familia_nome || null,
+        observacao: '',
+        departamento: departamentoGlobal,
+        centro_custo: centroCustoGlobal,
+        codigo_produto_omie: produto.codigo_produto || null,
+        codigo_omie: codigoOmie,
+        objetivo_compra: '',
+        resp_inspecao_recebimento: '',
+        responsavel_pela_compra: '',
+        retorno_cotacao: '',
+        categoria_compra_codigo: categoriaCompra,
+        categoria_compra_nome: categoriaCompraTexto,
+        requisicao_direta: false,
+        status_pedido: '',
+        anexo: null,
+        url_imagem: produto.url_imagem || ''
+      };
+      
+      // Registra no banco
+      const registro = await registrarItemCarrinhoNoBanco(novoItemCarrinho);
+      if (!registro?.id) {
+        naoEncontrados.push(`${item.codigo} (erro ao registrar)`);
+        continue;
+      }
+      
+      novoItemCarrinho.id_db = registro.id;
+      if (registro.grupo_requisicao) {
+        novoItemCarrinho.grupo_requisicao = registro.grupo_requisicao;
+        novoItemCarrinho.np = registro.grupo_requisicao;
+      }
+      
+      window.carrinhoCompras.push(novoItemCarrinho);
+      adicionados++;
+    }
+    
+    // Atualiza carrinho
+    renderCarrinhoCompras();
+    renderModalCarrinhoCompras();
+    await carregarGruposRequisicaoDisponiveis();
+    
+    // Exibe resultado
+    let mensagem = `${adicionados} produto(s) adicionado(s) ao carrinho`;
+    if (naoEncontrados.length > 0) {
+      mensagem += `<br><span style="color:#ef4444;">Não encontrados: ${naoEncontrados.join(', ')}</span>`;
+    }
+    
+    if (infoDiv && infoMsg) {
+      infoDiv.style.display = 'block';
+      infoMsg.innerHTML = mensagem;
+    }
+    
+    // Fecha modal após 2 segundos se todos foram adicionados
+    if (naoEncontrados.length === 0) {
+      setTimeout(() => {
+        fecharModalColarLista();
+      }, 2000);
+    }
+    
+  } catch (err) {
+    console.error('[COLAR_LISTA] Erro ao processar:', err);
+    if (errorDiv && errorMsg) {
+      errorDiv.style.display = 'block';
+      errorMsg.textContent = 'Erro ao processar lista: ' + err.message;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho';
+    }
+  }
+};
+
+// Fecha modal ao clicar fora
+document.getElementById('modalColarListaCompra')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    fecharModalColarLista();
+  }
 });
 
 // Bind do botão para abrir modal do carrinho
@@ -23906,30 +24406,6 @@ function renderizarCatalogoOmie(produtos, options = {}) {
               style="width:50px;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;text-align:center;"
             />
             
-            <!-- Botão Calendário (toggle prazo) -->
-            <button 
-              onclick="togglePrazoCatalogo('${produto.codigo}')"
-              id="catalogo-btn-prazo-${produto.codigo}"
-              title="Definir prazo de entrega"
-              style="
-                width:32px;
-                background:#f3f4f6;
-                color:#4b5563;
-                border:1px solid #d1d5db;
-                padding:6px;
-                border-radius:4px;
-                cursor:pointer;
-                font-size:14px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                flex-shrink:0;
-              "
-              onmouseover="this.style.background='#e5e7eb'"
-              onmouseout="this.style.background='#f3f4f6'">
-              <i class="fa-solid fa-calendar-plus"></i>
-            </button>
-            
             <!-- Botão Adicionar ao Carrinho -->
             <button 
               onclick="selecionarProdutoCatalogo('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', event)"
@@ -24370,6 +24846,110 @@ async function carregarCategoriaCompraDropdown(options = {}) {
   }
 }
 
+// Aplica categoria da compra baseada no último pedido do produto
+async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemIdx) {
+  console.log('[DEBUG CATEGORIA] Função chamada com:', { codigoProdutoOmie, itemIdx });
+  
+  const codigo = String(codigoProdutoOmie || '').trim();
+  console.log('[DEBUG CATEGORIA] Código após trim:', codigo);
+  
+  if (!codigo || !Number.isFinite(itemIdx)) {
+    console.warn('[DEBUG CATEGORIA] Validação falhou:', { 
+      codigo_valido: !!codigo, 
+      idx_valido: Number.isFinite(itemIdx) 
+    });
+    return null;
+  }
+
+  try {
+    const url = `/api/compras/categoria-por-produto/${encodeURIComponent(codigo)}`;
+    console.log('[DEBUG CATEGORIA] Fazendo fetch para:', url);
+
+    const resp = await fetch(url, { credentials: 'include' });
+    console.log('[DEBUG CATEGORIA] Resposta recebida:', { 
+      status: resp.status, 
+      ok: resp.ok 
+    });
+    
+    if (!resp.ok) {
+      console.warn('[DEBUG CATEGORIA] Resposta não OK:', resp.status);
+      return null;
+    }
+
+    const data = await resp.json();
+    console.log('[DEBUG CATEGORIA] Dados da API:', data);
+    
+    const categoriaCodigo = String(data?.categoria_codigo || data?.categoria || '').trim();
+    const categoriaDescricao = String(data?.categoria_descricao || '').trim();
+    const categoriaNome = String(data?.categoria_nome || '').trim();
+    
+    console.log('[DEBUG CATEGORIA] Categoria extraída:', {
+      codigo: categoriaCodigo,
+      descricao: categoriaDescricao,
+      nome: categoriaNome
+    });
+    
+    if (!categoriaCodigo) {
+      console.warn('[DEBUG CATEGORIA] Nenhuma categoria na resposta');
+      return null;
+    }
+
+    // Atualiza o item do carrinho
+    if (window.carrinhoCompras[itemIdx]) {
+      console.log('[DEBUG CATEGORIA] Atualizando item no índice:', itemIdx);
+      
+      window.carrinhoCompras[itemIdx].categoria_compra_codigo = categoriaCodigo;
+      window.carrinhoCompras[itemIdx].categoria_compra = categoriaDescricao;
+      window.carrinhoCompras[itemIdx].categoria_compra_nome = categoriaNome;
+
+      // Atualiza no banco
+      console.log('[DEBUG CATEGORIA] Salvando no banco...');
+      await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[itemIdx]);
+      console.log('[DEBUG CATEGORIA] Salvo no banco!');
+      
+      // Atualiza a UI
+      const btnText = document.getElementById(`carrinhoItemCategoriaCompraBtnText-${itemIdx}`);
+      const hiddenInput = document.getElementById(`carrinhoItemCategoriaCompra-${itemIdx}`);
+      
+      console.log('[DEBUG CATEGORIA] Elementos DOM:', { 
+        btnText_existe: !!btnText, 
+        hiddenInput_existe: !!hiddenInput,
+        btnText_id: `carrinhoItemCategoriaCompraBtnText-${itemIdx}`,
+        hiddenInput_id: `carrinhoItemCategoriaCompra-${itemIdx}`
+      });
+      
+      if (btnText && categoriaNome) {
+        console.log('[DEBUG CATEGORIA] Atualizando btnText para:', categoriaNome);
+        btnText.textContent = categoriaNome;
+        btnText.style.color = 'var(--active-color)';
+      }
+      
+      if (hiddenInput) {
+        console.log('[DEBUG CATEGORIA] Atualizando hiddenInput.value para:', categoriaCodigo);
+        hiddenInput.value = categoriaCodigo;
+      }
+
+      console.log('[DEBUG CATEGORIA] ✅ Categoria aplicada com sucesso!', { 
+        codigo: categoriaCodigo,
+        descricao: categoriaDescricao,
+        nome: categoriaNome,
+        item_idx: itemIdx 
+      });
+      
+      return { 
+        codigo: categoriaCodigo, 
+        descricao: categoriaDescricao,
+        nome: categoriaNome
+      };
+    }
+    
+    return null;
+  } catch (err) {
+    console.warn('[CARRINHO] Falha ao aplicar categoria por produto:', err);
+    return null;
+  }
+}
+
 // Toggle dropdown do catálogo (Categoria da Compra)
 document.addEventListener('click', (e) => {
   const wrapper = document.getElementById('catalogoCategoriaCompraWrapper');
@@ -24666,23 +25246,22 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
     console.log('[Catálogo] Anexos limpos após adicionar produto ao carrinho');
   }
   
-  // Feedback visual
+  // Feedback visual: mostra checkmark por 3 segundos
   const btn = event?.target?.closest('button');
   if (btn) {
     const originalHTML = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+    const originalBackground = btn.style.background;
+    btn.innerHTML = '<i class="fa-solid fa-check" style="font-size:20px;color:#fbbf24;"></i>';
     btn.style.background = '#059669';
+    btn.style.transition = 'all 0.3s ease';
     setTimeout(() => {
       btn.innerHTML = originalHTML;
-      btn.style.background = 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
-    }, 500);
+      btn.style.background = originalBackground || 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+    }, 3000);
   }
   
   // Reseta campos do card
   if (inputQtd) inputQtd.value = naoIncluirQuantidade ? '' : 1;
-  if (prazoContainer && prazoContainer.style.display !== 'none') {
-    togglePrazoCatalogo(codigo);
-  }
   
   // NÃO fecha o catálogo para permitir adicionar mais produtos
   // fecharModalCatalogoOmie();
@@ -26780,9 +27359,11 @@ async function abrirModalAprovacaoRequisicao() {
                   const isSemCadastro = item.table_source === 'compras_sem_cadastro';
                   const retornoCotacaoRaw = String(item.retorno_cotacao || '').trim();
                   const retornoSemValores = '🛒 Apenas realizar compra sem retorno de valores ou caracteristica';
+                  // Se vier de solicitacao_compras, sempre considera retorno = NÃO
+                  // Se vier de compras_sem_cadastro, verifica se não é "apenas realizar compra"
                   const retornoCotacaoEhSim = isSemCadastro
                     ? retornoCotacaoRaw !== retornoSemValores
-                    : (retornoCotacaoRaw === 'S' || retornoCotacaoRaw === 'Sim');
+                    : false;  // solicitacao_compras sempre NÃO retorna cotação
                   const retornoTexto = retornoCotacaoEhSim ? 'SIM' : 'NÃO';
                   const retornoCor = retornoCotacaoEhSim ? '#10b981' : '#ef4444';
                   const grupoAtual = item.grupo_requisicao || 'Sem grupo';
@@ -26848,12 +27429,7 @@ async function abrirModalAprovacaoRequisicao() {
                       <td style="padding:10px;text-align:center;">
                         <div style="display:flex;gap:6px;justify-content:center;">
                           ${usuarioPodeAprovarDepartamento(item.departamento || '') ? `
-                          ${(!isSemCadastro && !retornoCotacaoEhSimSolicitacao) ? `
-                          <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', 'N')" title="Criar requisição de compra" style="background:#2563eb;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#1d4ed8';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#2563eb';this.style.transform='translateY(0)'">
-                            <i class="fa-solid fa-cart-shopping"></i>
-                          </button>
-                          ` : ''}
-                          <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', '${escapeHtml(retornoCotacaoRaw)}')" title="Aprovar item" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
+                          <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', '${escapeHtml(retornoCotacaoRaw)}')" title="Aprovar item${retornoCotacaoEhSim ? ' (enviar para cotação)' : ' (criar requisição direto)'}" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
                             <i class="fa-solid fa-check"></i>
                           </button>
                           ` : '<span style="color:#9ca3af;font-size:11px;font-style:italic;">Sem permissão</span>'}
