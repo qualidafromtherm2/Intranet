@@ -20104,7 +20104,190 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     modalTitulo.textContent = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' 
       ? `Meu Pedido ${numeroPedido}` 
       : `Meus Itens - ${statusColuna}`;
-    
+
+    const fmtDate = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const statusColunaLower = (statusColuna || '').toLowerCase().trim();
+    if (statusColunaLower === 'aguardando aprovação da requisição' || statusColunaLower === 'aguardando compra preparação' || statusColunaLower === 'aguardando compra' || statusColunaLower === 'compra realizada') {
+      
+      // Comentário: Para "aguardando compra" e "compra realizada", busca dados especiais do backend
+      if (statusColunaLower === 'aguardando compra' || statusColunaLower === 'compra realizada') {
+        // Busca detalhes especiais do pedido
+        const primeiroItemPedido = itensPedido[0];
+        if (primeiroItemPedido) {
+          try {
+            const respDetalhes = await fetch(`/api/compras/pedido-detalhes/${primeiroItemPedido.n_cod_ped || primeiroItemPedido.id}`, { credentials: 'include' });
+            if (respDetalhes.ok) {
+              const detalhes = await respDetalhes.json();
+              
+              // Usa os itens do backend se disponível, caso contrário usa os do frontend
+              const itensParaMostrar = detalhes.itens && Array.isArray(detalhes.itens) && detalhes.itens.length > 0 
+                ? detalhes.itens 
+                : (primeiroItemPedido.itens || []);
+              
+              const linhasItens = itensParaMostrar.map(item => {
+                const codigo = escapeHtml(item.produto_codigo || '-');
+                const descricao = escapeHtml(item.produto_descricao || 'Sem descrição');
+                const quantidade = item.quantidade ?? '-';
+                return `
+                  <tr>
+                    <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${codigo}</td>
+                    <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${descricao}</td>
+                    <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:center;">${quantidade}</td>
+                  </tr>
+                `;
+              }).join('');
+
+              const createdAt = fmtDate(detalhes.createdAt);
+              const previsao = fmtDate(detalhes.d_dt_previsao);
+              const dataInclusao = fmtDate(detalhes.d_inc_data);
+
+              modalBody.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:16px;">
+                  <div style="padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Solicitante</div>
+                        <div style="font-weight:600;color:#374151;">${escapeHtml(detalhes.solicitante)}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Data de Inclusão</div>
+                        <div style="font-weight:600;color:#374151;">${dataInclusao}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Data de Previsão</div>
+                        <div style="font-weight:600;color:#059669;">${previsao}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Departamento</div>
+                        <div style="font-weight:600;color:#374151;">${escapeHtml(detalhes.departamento)}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Centro de custo</div>
+                        <div style="font-weight:600;color:#374151;">${escapeHtml(detalhes.centroCusto)}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Fornecedor</div>
+                        <div style="font-weight:600;color:#374151;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;">${escapeHtml(detalhes.fornecedorNome)}</div>
+                      </div>
+                      </div>
+                      <div style="grid-column:1/-1;">
+                        <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Objetivo da compra</div>
+                        <div style="font-weight:600;color:#374151;">${escapeHtml(detalhes.objetivoCompra)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="padding:16px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;">
+                    <div style="font-weight:700;color:#1f2937;margin-bottom:10px;">Itens</div>
+                    <div style="overflow-x:auto;">
+                      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                          <tr>
+                            <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">produto_codigo</th>
+                            <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">produto_descricao</th>
+                            <th style="text-align:center;padding:10px;border-bottom:2px solid #e5e7eb;">quantidade</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${linhasItens || '<tr><td colspan="3" style="padding:10px;text-align:center;color:#9ca3af;">Sem produtos</td></tr>'}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              `;
+              return;
+            }
+          } catch (err) {
+            console.error('[Modal] Erro ao buscar detalhes do pedido:', err);
+          }
+        }
+      }
+      
+      // Comentário: suporta itens agrupados (com array itens) e prioriza dados de compras_sem_cadastro
+      const itensDetalhe = itensPedido.flatMap((item) => {
+        if (Array.isArray(item.itens) && item.itens.length > 0) {
+          return item.itens.map(i => ({ ...i, table_source: i.table_source || item.table_source }));
+        }
+        return [item];
+      });
+
+      const itemSemCadastro = itensDetalhe.find(i => i.table_source === 'compras_sem_cadastro')
+        || itensPedido.find(i => i.table_source === 'compras_sem_cadastro');
+      const primeiro = itemSemCadastro || itensDetalhe[0] || itensPedido[0] || {};
+      const solicitante = escapeHtml(primeiro.solicitante || primeiro.fornecedor_nome || '-');
+      const departamento = escapeHtml(primeiro.departamento || '-');
+      const centroCusto = escapeHtml(primeiro.centro_custo || '-');
+      const objetivoCompra = escapeHtml(primeiro.objetivo_compra || '-');
+      const createdAt = fmtDate(primeiro.created_at || primeiro.createdAt || primeiro.data_criacao);
+
+      const linhasItens = itensDetalhe.map(item => {
+        const codigo = escapeHtml(item.produto_codigo || '-');
+        const descricao = escapeHtml(item.produto_descricao || item.descricao || '-');
+        const quantidade = item.quantidade ?? '-';
+        return `
+          <tr>
+            <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${codigo}</td>
+            <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${descricao}</td>
+            <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:center;">${quantidade}</td>
+          </tr>
+        `;
+      }).join('');
+
+      modalBody.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+              <div>
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Solicitante</div>
+                <div style="font-weight:600;color:#374151;">${solicitante}</div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Created at</div>
+                <div style="font-weight:600;color:#374151;">${createdAt}</div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Departamento</div>
+                <div style="font-weight:600;color:#374151;">${departamento}</div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Centro de custo</div>
+                <div style="font-weight:600;color:#374151;">${centroCusto}</div>
+              </div>
+              <div style="grid-column:1/-1;">
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Objetivo da compra</div>
+                <div style="font-weight:600;color:#374151;">${objetivoCompra}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:16px;background:#ffffff;border-radius:8px;border:1px solid #e5e7eb;">
+            <div style="font-weight:700;color:#1f2937;margin-bottom:10px;">Itens</div>
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">produto_codigo</th>
+                    <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">produto_descricao</th>
+                    <th style="text-align:center;padding:10px;border-bottom:2px solid #e5e7eb;">quantidade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${linhasItens}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     // Busca cotações apenas para itens cotados
     const cotacoesMap = new Map();
     if (statusColuna === 'cotado aguardando escolha') {
@@ -20120,12 +20303,6 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         }
       }));
     }
-    
-    const fmtDate = (iso) => {
-      if (!iso) return '-';
-      const d = new Date(iso);
-      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
-    };
     
     let html = '<div style="display:flex;flex-direction:column;gap:20px;">';
     
@@ -21905,6 +22082,12 @@ window.enviarEscolhaMinhas = enviarEscolhaMinhas;
 window.editarItemMinhas = editarItemMinhas;
 window.excluirItemMinhas = excluirItemMinhas;
 window.voltarParaAguardandoCompra = voltarParaAguardandoCompra;
+window.toggleAprovacaoItensMinhas = toggleAprovacaoItensMinhas;
+window.toggleRequisicoesItensMinhas = toggleRequisicoesItensMinhas;
+window.toggleCompraItensMinhas = toggleCompraItensMinhas;
+window.togglePedidoCompraItens = togglePedidoCompraItens;
+window.toggleCompraRealizadaItens = toggleCompraRealizadaItens;
+window.toggleSolicitacaoCompraItens = toggleSolicitacaoCompraItens;
 
 // FUNÇÃO REMOVIDA - Página "Kanban de Compras" foi substituída por "Minhas solicitações"
 // A renderização do kanban agora é feita pela função listarMinhasSolicitacoes()
@@ -28292,7 +28475,11 @@ function montarCardsKanbanMinhas(status, itens) {
     return '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
   }
 
-  const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro'];
+  const statusLower = String(status || '').toLowerCase();
+  const statusNormalizado = statusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const isKanbanAprovacao = statusNormalizado.includes('aprovacao') || statusNormalizado.includes('aprov');
+
+  const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro', 'aguardando compra', 'compra realizada'];
   const grupos = {};
 
   itens.forEach(item => {
@@ -28300,6 +28487,9 @@ function montarCardsKanbanMinhas(status, itens) {
     if (statusComAgrupamentoPorGrupo.includes(status)) {
       if (item.table_source === 'compras_sem_cadastro') {
         chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
+      } else if (status === 'aguardando compra' || status === 'compra realizada') {
+        // Para Pedido de compra e Compra realizada, agrupa pelo numero/cNumero
+        chave = item.numero || item.cNumero || item.c_numero || item.numero_pedido || `sem_pedido_${item.id}`;
       } else {
         chave = item.nCodPed || item.numero_pedido || `sem_pedido_${item.id}`;
       }
@@ -28381,6 +28571,11 @@ function montarCardsKanbanMinhas(status, itens) {
       ? determinCorBorda(primeiroItem.c_cod_int_ped)
       : '#e5e7eb';
 
+    const itemStatusLower = String(primeiroItem.statusNormalizado || primeiroItem.status || '').toLowerCase();
+    const itemStatusNorm = itemStatusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const isAprovacaoCard = isKanbanAprovacao || itemStatusNorm.includes('aprovacao') || itemStatusNorm.includes('aprov');
+    const isCompraCard = itemStatusNorm.includes('aguardando compra') || itemStatusNorm.includes('compra realizada') || primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada;
+
     const onclickCard = status === 'analise de cadastro'
       ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
       : (status === 'cotado aguardando escolha'
@@ -28388,6 +28583,8 @@ function montarCardsKanbanMinhas(status, itens) {
         : (status === 'aguardando cotação'
           ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
           : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`));
+
+    const cardAprovacaoKey = `aprovacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
 
     return `
       <div class="kanban-card" 
@@ -28407,16 +28604,150 @@ function montarCardsKanbanMinhas(status, itens) {
       "
       onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
       onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
-        ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
-        ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro') && chaveGrupo && chaveGrupo !== '-' ? `
-        <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;">
+        ${(!isAprovacaoCard && !isCompraCard && totalItens > 1) ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
+        ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra' || status === 'compra realizada') && chaveGrupo && chaveGrupo !== '-' ? `
+        <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <span style="font-weight:600;color:#374151;">${escapeHtml(chaveGrupo)}</span>
+          ${isAprovacaoCard ? `
+            <button
+              onclick="toggleAprovacaoCardItens('${cardAprovacaoKey}', event)"
+              style="background:#e5e7eb;color:#111827;border:none;border-radius:8px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+          ` : (isCompraCard ? `
+            <button
+              onclick="toggleCompraItensMinhas('${cardAprovacaoKey}', event)"
+              style="background:#e5e7eb;color:#111827;border:none;border-radius:8px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;">
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+          ` : '') }
         </div>
         ` : ''}
-        ${listaProdutos}
+        ${isAprovacaoCard ? `
+          <div id="aprovacao-itens-${cardAprovacaoKey}" style="display:none;">
+            ${listaProdutos}
+          </div>
+        ` : (isCompraCard ? `
+          <div id="compra-itens-${cardAprovacaoKey}" style="display:none;">
+            ${listaProdutos}
+          </div>
+        ` : listaProdutos)}
       </div>
     `;
   }).join('');
+}
+
+// Comentário: alterna exibição dos itens no kanban Aprovação
+function toggleAprovacaoCardItens(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`aprovacao-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) btn.textContent = fechado ? 'Recolher' : 'Expandir';
+}
+
+// Comentário: alterna exibição dos itens no kanban Aprovação (Minhas Solicitações)
+function toggleAprovacaoItensMinhas(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`aprovacao-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
+}
+
+// Comentário: alterna exibição dos itens no kanban Requisições (Minhas Solicitações)
+function toggleRequisicoesItensMinhas(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`requisicoes-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
+}
+
+// Comentário: alterna exibição dos itens no kanban Compra (Pedido de compra e Compra realizada)
+function toggleCompraItensMinhas(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`compra-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
+}
+
+// Objetivo: Alterna exibição dos itens no kanban de Pedido de Compra (status "aguardando compra" com isPedidoCompra=true)
+function togglePedidoCompraItens(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`pedido-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
+}
+
+// Objetivo: Alterna exibição dos itens no kanban de Compra Realizada (status "compra realizada" com isCompraRealizada=true)
+function toggleCompraRealizadaItens(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`compra-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
+}
+
+// Objetivo: Alterna exibição dos itens no kanban de Solicitação de Compra (grupos de requisição)
+function toggleSolicitacaoCompraItens(cardKey, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const container = document.getElementById(`solicitacao-itens-${cardKey}`);
+  if (!container) return;
+  const btn = event?.currentTarget;
+  const fechado = container.style.display === 'none' || container.style.display === '';
+  container.style.display = fechado ? 'block' : 'none';
+  if (btn) {
+    btn.innerHTML = fechado
+      ? '<i class="fa-solid fa-chevron-up"></i>'
+      : '<i class="fa-solid fa-chevron-down"></i>';
+    btn.title = fechado ? 'Recolher' : 'Expandir';
+    btn.setAttribute('aria-label', fechado ? 'Recolher' : 'Expandir');
+  }
 }
 
 // Função para exibir anexos de um item de aprovação
@@ -28750,17 +29081,21 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     if (respPed.ok) {
       const dataPed = await respPed.json();
       console.log('[DEBUG] Pedidos de compra recebidos da API:', dataPed.pedidos);
-      pedidosCompra = (dataPed.pedidos || []).map(ped => ({
-        ...ped,
-        id: `ped_${ped.n_cod_ped}`,
-        numero_pedido: ped.numero,
-        numero: ped.numero, // c_numero com 4 dígitos
-        n_cod_ped: ped.n_cod_ped,
-        fornecedor_nome: ped.fornecedor_nome,
-        status: 'aguardando compra',
-        statusNormalizado: 'aguardando compra',
-        isPedidoCompra: true
-      }));
+      pedidosCompra = (dataPed.pedidos || []).map(ped => {
+        console.log('[DEBUG] Pedido individual:', ped.numero, 'com itens:', ped.itens ? ped.itens.length : 0);
+        return {
+          ...ped,
+          id: `ped_${ped.n_cod_ped}`,
+          numero_pedido: ped.numero,
+          numero: ped.numero, // c_numero com 4 dígitos
+          n_cod_ped: ped.n_cod_ped,
+          fornecedor_nome: ped.fornecedor_nome,
+          status: 'aguardando compra',
+          statusNormalizado: 'aguardando compra',
+          isPedidoCompra: true,
+          itens: ped.itens || [] // Garante que itens estão presentes
+        };
+      });
       
       // Aplica filtro por solicitante nos pedidos se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
@@ -28791,6 +29126,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         const cNumero = String(comp.c_numero || comp.numero || '').trim();
         const cNumeroValido = /^\d+$/.test(cNumero) ? cNumero : '';
 
+        console.log('[DEBUG] Compra realizada individual:', cNumeroValido, 'com itens:', comp.itens ? comp.itens.length : 0);
+
         return {
           ...comp,
           id: `comp_${comp.n_cod_ped}`,
@@ -28801,7 +29138,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           fornecedor_nome: comp.fornecedor_nome,
           status: 'compra realizada',
           statusNormalizado: 'compra realizada',
-          isCompraRealizada: true
+          isCompraRealizada: true,
+          itens: comp.itens || [] // Garante que itens estão presentes
         };
       });
       
@@ -29030,20 +29368,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           gruposArrayOrdenado = gruposArray;
         } else {
           // Para solicitações: agrupa usando critérios específicos por status
-          // Objetivo: agrupar por grupo_requisicao para compras_sem_cadastro e nCodPed para solicitacao_compras
+          // Objetivo: agrupar por grupo_requisicao para compras_sem_cadastro e solicitacao_compras
           const statusComAgrupamentoPorGrupo = ['aguardando aprovação da requisição', 'solicitado revisão', 'aguardando cotação', 'cotado aguardando escolha', 'analise de cadastro'];
           
           itens.forEach(item => {
             let chave;
             
             if (statusComAgrupamentoPorGrupo.includes(status)) {
-              // Para esses status, agrupa por grupo_requisicao (compras_sem_cadastro) ou nCodPed (solicitacao_compras)
-              if (item.table_source === 'compras_sem_cadastro') {
-                chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
-              } else {
-                // solicitacao_compras
-                chave = item.nCodPed || item.numero_pedido || `sem_pedido_${item.id}`;
-              }
+              // Para esses status, agrupa por grupo_requisicao (compras_sem_cadastro e solicitacao_compras)
+              chave = item.grupo_requisicao || `sem_grupo_${item.id}`;
             } else {
               // Para outros status, mantém lógica anterior
               chave = (status === 'numero_pedido' || status === 'cNumero')
@@ -29245,21 +29578,36 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             ? determinCorBorda(primeiroItem.c_cod_int_ped) 
             : '#e5e7eb';
 
+          const statusLower = String(status || '').toLowerCase();
+          const statusNormalizado = statusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          const isAprovacao = statusNormalizado.includes('aguardando aprovacao') || statusNormalizado.includes('aprovacao');
+          const isRequisicoes = statusNormalizado.includes('aguardando compra preparacao');
+          const isPedidoCompraCard = statusNormalizado.includes('aguardando compra') && primeiroItem.isPedidoCompra;
+          const isCompraRealizadaCard = (status === 'compra realizada' || statusNormalizado.includes('compra realizada')) && primeiroItem.isCompraRealizada;
+          const isSolicitacaoCompra = statusNormalizado.includes('solicitado revisao') || statusNormalizado.includes('aguardando cotacao') || statusNormalizado.includes('cotado aguardando escolha') || statusNormalizado.includes('analise de cadastro');
+          const cardKey = `aprovacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+          const cardReqKey = `requisicoes-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+          const cardPedKey = `pedido-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+          const cardCompKey = `compra-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+          const cardSolKey = `solicitacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+
           // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
-          const onclickCard = status === 'analise de cadastro'
-            ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
-            : (status === 'cotado aguardando escolha'
-              ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
-              : (status === 'aguardando cotação'
-                ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
-                : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`));
+          const onclickCard = (
+            status === 'analise de cadastro'
+              ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
+              : (status === 'cotado aguardando escolha'
+                ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
+                : (status === 'aguardando cotação'
+                  ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
+                  : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`))
+          );
           const cursorCard = 'pointer';
           
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
               data-todos-ids="${todosIds}"
-              onclick="${onclickCard}"
+              ${onclickCard ? `onclick="${onclickCard}"` : ''}
               style="
               background:#ffffff;
               border:2px solid ${corBorda};
@@ -29274,7 +29622,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
               
-              ${totalItens > 1 ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
+              ${(!isAprovacao && totalItens > 1) ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
               ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
@@ -29298,27 +29646,110 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.d_inc_data ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;align-items:center;">
-                  <i class="fa-solid fa-calendar-plus" style="margin-right:4px;color:#f59e0b;"></i>
-                  <span style="font-weight:600;">Data:</span>
-                  <span style="margin-left:4px;">${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#fef3c7;border-radius:4px;display:flex;flex-direction:column;gap:4px;">
+                  <span style="display:flex;align-items:center;gap:4px;">
+                    <i class="fa-solid fa-calendar" style="color:#f59e0b;"></i>
+                    <span>${new Date(primeiroItem.d_inc_data).toLocaleDateString('pt-BR')}</span>
+                  </span>
+                  ${primeiroItem.d_dt_previsao ? `
+                    <span style="display:flex;align-items:center;gap:4px;color:#059669;">
+                      <i class="fa-solid fa-clock" style="color:#059669;"></i>
+                      <span>${new Date(primeiroItem.d_dt_previsao).toLocaleDateString('pt-BR')}</span>
+                    </span>
+                  ` : ''}
                 </div>
               ` : ''}
               
-              <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições -->
-              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') && chaveGrupo && chaveGrupo !== '-' ? `
-                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;">
+              ${(primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) && primeiroItem.solicitante ? `
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#e0f2fe;border-radius:4px;display:flex;align-items:center;">
+                  <i class="fa-solid fa-user" style="margin-right:4px;color:#0284c7;"></i>
+                  <span style="font-weight:600;">Solicitante:</span>
+                  <span style="margin-left:4px;color:#0284c7;">${escapeHtml(primeiroItem.solicitante)}</span>
+                </div>
+              ` : ''}
+              
+              <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
+              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada') && chaveGrupo && chaveGrupo !== '-' ? `
+                <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                   <span style="font-weight:600;color:#374151;">
                     ${status === 'aguardando compra preparação' 
                       ? escapeHtml(primeiroItem.numero_pedido || primeiroItem.grupo_requisicao || chaveGrupo)
-                      : escapeHtml(chaveGrupo)
+                      : (status === 'aguardando compra'
+                        ? escapeHtml(primeiroItem.c_cod_int_ped || '')
+                        : (status === 'compra realizada'
+                          ? escapeHtml(primeiroItem.c_cod_int_ped || '')
+                          : escapeHtml(chaveGrupo)))
                     }
                   </span>
-                  ${primeiroItem.numero_requisicao_omie ? `<div style="margin-top:4px;font-size:10px;color:#9ca3af;">Omie: ${escapeHtml(primeiroItem.numero_requisicao_omie)}</div>` : ''}
+                  ${isAprovacao ? `
+                    <button
+                      onclick="toggleAprovacaoItensMinhas('${cardKey}', event)"
+                      title="Expandir"
+                      aria-label="Expandir"
+                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                  ` : ''}
+                  ${isRequisicoes ? `
+                    <button
+                      onclick="toggleRequisicoesItensMinhas('${cardReqKey}', event)"
+                      title="Expandir"
+                      aria-label="Expandir"
+                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                  ` : ''}
+                  ${isPedidoCompraCard ? `
+                    <button
+                      onclick="togglePedidoCompraItens('${cardPedKey}', event)"
+                      title="Expandir"
+                      aria-label="Expandir"
+                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                  ` : ''}
+                  ${isCompraRealizadaCard ? `
+                    <button
+                      onclick="toggleCompraRealizadaItens('${cardCompKey}', event)"
+                      title="Expandir"
+                      aria-label="Expandir"
+                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                  ` : ''}
+                  ${isSolicitacaoCompra ? `
+                    <button
+                      onclick="toggleSolicitacaoCompraItens('${cardSolKey}', event)"
+                      title="Expandir"
+                      aria-label="Expandir"
+                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chevron-down"></i>
+                    </button>
+                  ` : ''}
                 </div>
               ` : ''}
               
-              ${listaProdutos}
+              ${isAprovacao ? `
+                <div id="aprovacao-itens-${cardKey}" style="display:none;">
+                  ${listaProdutos}
+                </div>
+              ` : (isRequisicoes ? `
+                <div id="requisicoes-itens-${cardReqKey}" style="display:none;">
+                  ${listaProdutos}
+                </div>
+              ` : (isPedidoCompraCard ? `
+                <div id="pedido-itens-${cardPedKey}" style="display:none;">
+                  ${listaProdutos}
+                </div>
+              ` : (isCompraRealizadaCard ? `
+                <div id="compra-itens-${cardCompKey}" style="display:none;">
+                  ${listaProdutos}
+                </div>
+              ` : (isSolicitacaoCompra ? `
+                <div id="solicitacao-itens-${cardSolKey}" style="display:none;">
+                  ${listaProdutos}
+                </div>
+              ` : listaProdutos))))}
             </div>
           `;
         }).join('');
