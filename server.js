@@ -2512,6 +2512,41 @@ app.post(['/webhooks/omie/clientes', '/api/webhooks/omie/clientes'],
   }
 );
 
+// ========================================
+// Sincronização via webhooks - fornecedores são atualizados automaticamente pela Omie
+
+// ========================================
+// GET /api/fornecedores/status - Verificar status de fornecedores sincronizados
+// ========================================
+/**
+ * Objetivo: Retornar informações sobre fornecedores da Omie sincronizados em omie.fornecedores
+ */
+app.get('/api/fornecedores/status', async (req, res) => {
+  try {
+    const { rows: fornecedoresCount } = await pool.query('SELECT COUNT(*) AS count FROM omie.fornecedores');
+    const { rows: ultimoUpdate } = await pool.query(
+      'SELECT MAX(updated_at) AS ultima_atualizacao FROM omie.fornecedores'
+    );
+    
+    // inativo é BOOLEAN, então usamos conversão correta
+    const { rows: inativoCount } = await pool.query(`
+      SELECT COUNT(*) AS count FROM omie.fornecedores 
+      WHERE inativo = true
+    `);
+    
+    res.json({
+      ok: true,
+      total_fornecedores: parseInt(fornecedoresCount[0]?.count || 0),
+      fornecedores_inativos: parseInt(inativoCount[0]?.count || 0),
+      ultima_atualizacao: ultimoUpdate[0]?.ultima_atualizacao || null,
+      msg: `${fornecedoresCount[0]?.count || 0} fornecedores cadastrados da Omie`
+    });
+  } catch (err) {
+    console.error('[Fornecedores/Status] Erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
 // ——— WEBHOOK DE PRODUTOS DA OMIE (atualiza imagens) ———
 app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
   chkOmieToken,
@@ -12478,9 +12513,18 @@ async function upsertFornecedor(cliente) {
       estado,
       cep,
       inativo,
-      tags
+      tags,
+      inscricao_estadual,
+      inscricao_municipal,
+      inscricao_suframa,
+      cidade_ibge,
+      contato,
+      pais,
+      pessoa_fisica,
+      codigo_pais
     } = cliente;
     
+    // Atualizar omie.fornecedores
     await pool.query(`
       INSERT INTO omie.fornecedores (
         codigo_cliente_omie,
@@ -12543,6 +12587,8 @@ async function upsertFornecedor(cliente) {
       Array.isArray(tags) ? tags : [],
       JSON.stringify(cliente)
     ]);
+    
+    console.log('[upsertFornecedor] Cliente', codigo_cliente_omie, 'sincronizado com sucesso');
   } catch (e) {
     console.error('[Fornecedores] Erro ao fazer upsert:', e);
   }
@@ -16943,7 +16989,10 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         prazo_solicitado: item.prazo_solicitado,
         observacao: item.observacao,
         solicitante: item.solicitante,
+        departamento: item.departamento,
+        centro_custo: item.centro_custo,
         objetivo_compra: item.objetivo_compra,
+        created_at: item.created_at,
         codigo_omie: item.codigo_omie,
         ncodped: item.ncodped,
         numero_pedido: item.numero_pedido,
@@ -16981,14 +17030,18 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         po.c_etapa,
         po.n_cod_for,
         po.d_inc_data,
+        po.d_dt_previsao,
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
         po.created_at,
-        po.updated_at
+        po.updated_at,
+        sc.solicitante,
+        sc.grupo_requisicao
       FROM compras.pedidos_omie po
-      LEFT JOIN public.clientes_cadastro cc ON cc.codigo_cliente_omie = po.n_cod_for
+      LEFT JOIN omie.fornecedores cc ON cc.codigo_cliente_omie = po.n_cod_for
       LEFT JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = po.n_cod_ped
+      LEFT JOIN compras.solicitacao_compras sc ON sc.numero_pedido = po.c_cod_int_ped
       WHERE po.c_etapa = '10'
         AND (po.inativo IS NULL OR po.inativo = false)
       ORDER BY
@@ -17013,6 +17066,8 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
           c_etapa: row.c_etapa,
           n_cod_for: row.n_cod_for,
           d_inc_data: row.d_inc_data,
+          d_dt_previsao: row.d_dt_previsao,
+          solicitante: row.solicitante,
           fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
           created_at: row.created_at,
           updated_at: row.updated_at,
@@ -17078,16 +17133,20 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         po.c_etapa,
         po.n_cod_for,
         po.d_inc_data,
+        po.d_dt_previsao,
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
         po.created_at,
-        po.updated_at
+        po.updated_at,
+        sc.solicitante,
+        sc.grupo_requisicao
       FROM compras.pedidos_omie po
-      LEFT JOIN public.clientes_cadastro cc
+      LEFT JOIN omie.fornecedores cc
         ON cc.codigo_cliente_omie = po.n_cod_for
       LEFT JOIN compras.pedidos_omie_produtos pop
         ON pop.n_cod_ped = po.n_cod_ped
+      LEFT JOIN compras.solicitacao_compras sc ON sc.numero_pedido = po.c_cod_int_ped
       WHERE po.c_etapa = '15'
         AND (po.inativo IS NULL OR po.inativo = false)
       ORDER BY
@@ -17112,6 +17171,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
           c_etapa: row.c_etapa,
           n_cod_for: row.n_cod_for,
           d_inc_data: row.d_inc_data,
+          d_dt_previsao: row.d_dt_previsao,
+          solicitante: row.solicitante,
           fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
           created_at: row.created_at,
           updated_at: row.updated_at,
@@ -17152,6 +17213,193 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
   } catch (err) {
     console.error('[Compras/ComprasRealizadas] Erro ao listar compras:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar compras realizadas' });
+  }
+});
+
+// ========================================
+//  DEBUG: GET /api/compras/debug/grupo-requisicao/:valor
+// ========================================
+app.get('/api/compras/debug/grupo-requisicao/:valor', async (req, res) => {
+  try {
+    const { valor } = req.params;
+    console.log('[DEBUG] Buscando grupo_requisicao:', valor);
+    
+    const { rows: solicitRows } = await pool.query(
+      `SELECT * FROM compras.solicitacao_compras WHERE grupo_requisicao = $1 LIMIT 3`,
+      [valor]
+    );
+    
+    const { rows: semCadRows } = await pool.query(
+      `SELECT * FROM compras.compras_sem_cadastro WHERE grupo_requisicao = $1 OR CAST(id AS TEXT) = $1 LIMIT 3`,
+      [valor]
+    );
+    
+    res.json({
+      valor,
+      solicitacao_compras: solicitRows.length,
+      solicitacao_compras_data: solicitRows,
+      compras_sem_cadastro: semCadRows.length,
+      compras_sem_cadastro_data: semCadRows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ========================================
+//  Endpoint: GET /api/compras/pedido-detalhes/:nCodPed
+// ========================================
+/**
+ * Objetivo: Retornar detalhes de um pedido de compra com informações de solicitante, departamento, centro de custo e objetivo
+ * baseado na lógica do c_cod_int_ped
+ */
+app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
+  try {
+    const { nCodPed } = req.params;
+    const nCodPedInt = parseInt(nCodPed, 10);
+    
+    console.log('[PedidoDetalhes] Buscando n_cod_ped:', nCodPedInt);
+    
+    // Busca o pedido
+    const { rows: pedidoRows } = await pool.query(
+      'SELECT n_cod_ped, c_cod_int_ped, d_inc_data, d_dt_previsao, created_at, n_cod_for FROM compras.pedidos_omie WHERE n_cod_ped = $1',
+      [nCodPedInt]
+    );
+    
+    if (pedidoRows.length === 0) {
+      console.log('[PedidoDetalhes] Pedido não encontrado:', nCodPedInt);
+      return res.status(404).json({ ok: false, error: 'Pedido não encontrado' });
+    }
+    
+    const pedido = pedidoRows[0];
+    const cCodIntPed = (pedido.c_cod_int_ped || '').toString().trim();
+    
+    console.log('[PedidoDetalhes] Pedido encontrado:', { n_cod_ped: pedido.n_cod_ped, c_cod_int_ped: cCodIntPed });
+    
+    // Busca o nome do fornecedor usando n_cod_for
+    let fornecedorNome = 'Sem fornecedor';
+    if (pedido.n_cod_for) {
+      console.log('[PedidoDetalhes] Buscando fornecedor com codigo_cliente_omie:', pedido.n_cod_for);
+      const { rows: fornecedorRows } = await pool.query(
+        `SELECT nome_fantasia FROM omie.fornecedores WHERE codigo_cliente_omie = $1 LIMIT 1`,
+        [pedido.n_cod_for]
+      );
+      if (fornecedorRows.length > 0) {
+        fornecedorNome = fornecedorRows[0].nome_fantasia || 'Sem fornecedor';
+        console.log('[PedidoDetalhes] Fornecedor encontrado:', fornecedorNome);
+      } else {
+        // Fallback: usa o código como referência
+        console.log('[PedidoDetalhes] Fornecedor não encontrado para codigo:', pedido.n_cod_for);
+        fornecedorNome = `Fornecedor ID: ${pedido.n_cod_for}`;
+      }
+    }
+    
+    // Busca os produtos/itens do pedido
+    console.log('[PedidoDetalhes] Buscando itens para n_cod_ped:', nCodPedInt);
+    const { rows: produtosRows } = await pool.query(
+      `SELECT c_produto, c_descricao, n_qtde FROM compras.pedidos_omie_produtos 
+       WHERE n_cod_ped = $1
+       ORDER BY id ASC`,
+      [nCodPedInt]
+    );
+    
+    console.log('[PedidoDetalhes] Encontrados', produtosRows.length, 'produtos');
+    
+    const itens = produtosRows.map(row => ({
+      produto_codigo: row.c_produto,
+      produto_descricao: row.c_descricao,
+      quantidade: row.n_qtde || '-'
+    }));
+    
+    let solicitante = '-';
+    let departamento = '-';
+    let centroCusto = '-';
+    let objetivoCompra = '-';
+    
+    if (cCodIntPed === '' || cCodIntPed === 'null') {
+      // Vazio = Realizado na omie
+      console.log('[PedidoDetalhes] c_cod_int_ped vazio - Realizado na omie');
+      solicitante = 'Realizado na omie';
+    } else if (cCodIntPed.startsWith('REQ')) {
+      // Começa com REQ = Realizado em app externo
+      console.log('[PedidoDetalhes] c_cod_int_ped começa com REQ - Realizado em app externo');
+      solicitante = 'Realizado em app externo';
+    } else {
+      // Objetivo: Buscar em solicitacao_compras usando numero_pedido = c_cod_int_ped
+      // O c_cod_int_ped contém o identificador único que foi armazenado como numero_pedido
+      console.log('[PedidoDetalhes] Procurando em solicitacao_compras com numero_pedido:', cCodIntPed);
+      const { rows: solicitRows } = await pool.query(
+        `SELECT solicitante, departamento, centro_custo, objetivo_compra 
+         FROM compras.solicitacao_compras 
+         WHERE numero_pedido = $1 
+         LIMIT 1`,
+        [cCodIntPed]
+      );
+      
+      if (solicitRows.length > 0) {
+        console.log('[PedidoDetalhes] Encontrado em solicitacao_compras por numero_pedido');
+        solicitante = solicitRows[0].solicitante || '-';
+        departamento = solicitRows[0].departamento || '-';
+        centroCusto = solicitRows[0].centro_custo || '-';
+        objetivoCompra = solicitRows[0].objetivo_compra || '-';
+      } else {
+        // Fallback: Procurar por grupo_requisicao
+        console.log('[PedidoDetalhes] Não encontrado por numero_pedido, tentando grupo_requisicao');
+        const { rows: solicitRows2 } = await pool.query(
+          `SELECT solicitante, departamento, centro_custo, objetivo_compra 
+           FROM compras.solicitacao_compras 
+           WHERE grupo_requisicao = $1 
+           LIMIT 1`,
+          [cCodIntPed]
+        );
+        
+        if (solicitRows2.length > 0) {
+          console.log('[PedidoDetalhes] Encontrado em solicitacao_compras por grupo_requisicao');
+          solicitante = solicitRows2[0].solicitante || '-';
+          departamento = solicitRows2[0].departamento || '-';
+          centroCusto = solicitRows2[0].centro_custo || '-';
+          objetivoCompra = solicitRows2[0].objetivo_compra || '-';
+        } else {
+          // Fallback: Procurar em compras_sem_cadastro
+          console.log('[PedidoDetalhes] Não encontrado em solicitacao_compras, procurando em compras_sem_cadastro');
+          const { rows: semCadastroRows } = await pool.query(
+            `SELECT solicitante, departamento, centro_custo, objetivo_compra 
+             FROM compras.compras_sem_cadastro 
+             WHERE CAST(grupo_requisicao AS TEXT) = $1 OR CAST(id AS TEXT) = $1
+             LIMIT 1`,
+            [cCodIntPed]
+          );
+          
+          if (semCadastroRows.length > 0) {
+            console.log('[PedidoDetalhes] Encontrado em compras_sem_cadastro');
+            solicitante = semCadastroRows[0].solicitante || '-';
+            departamento = semCadastroRows[0].departamento || '-';
+            centroCusto = semCadastroRows[0].centro_custo || '-';
+            objetivoCompra = semCadastroRows[0].objetivo_compra || '-';
+          } else {
+            // Se nenhum match, marcar como "Realizado na Omie" (sem requisição)
+            console.log('[PedidoDetalhes] Nenhuma correspondência encontrada - marcando como criado na Omie');
+            solicitante = 'Criado direto na Omie (sem requisição)';
+          }
+        }
+      }
+    }
+    
+    res.json({
+      ok: true,
+      solicitante,
+      departamento,
+      centroCusto,
+      objetivoCompra,
+      fornecedorNome,
+      d_inc_data: pedido.d_inc_data,
+      d_dt_previsao: pedido.d_dt_previsao,
+      createdAt: pedido.created_at,
+      itens: itens
+    });
+  } catch (err) {
+    console.error('[Compras/PedidoDetalhes] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar detalhes do pedido' });
   }
 });
 
