@@ -3146,11 +3146,14 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
       const messageId = body.messageId || body.message_id || null;
       
       // Extrai nIdReceb ou cChaveNfe do evento
+      // Omie pode enviar em: event.nIdReceb, event.cabec.nIdReceb, event.cabecalho.nIdReceb, etc
+      // Procura em múltiplas localizações possíveis
       const nIdReceb = event.nIdReceb 
         || event.n_id_receb 
         || body.nIdReceb 
         || body.n_id_receb
         || event.cabec?.nIdReceb
+        || event.cabecalho?.nIdReceb        // ← Webhook real envia aqui!
         || null;
         
       const cChaveNfe = event.cChaveNfe
@@ -3158,6 +3161,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || body.cChaveNfe
         || body.c_chave_nfe
         || event.cabec?.cChaveNfe
+        || event.cabecalho?.cChaveNfe       // ← Para consistência
         || null;
       
       if (!nIdReceb && !cChaveNfe) {
@@ -3226,7 +3230,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
           // Delay de 2 segundos para dar tempo da Omie processar
           await new Promise(resolve => setTimeout(resolve, 2000));
           
-          console.log(`[webhooks/omie/recebimentos-nfe] Consultando recebimento completo...`);
+          console.log(`[webhooks/omie/recebimentos-nfe] Consultando dados completos do recebimento com nIdReceb=${nIdReceb}...`);
           
           const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
             method: 'POST',
@@ -13643,6 +13647,45 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
     return { ok: false, error: e.message };
   }
 }
+
+// ============================================================================
+// ENDPOINT: POST /api/admin/sync/recebimentos-nfe
+// Sincroniza recebimentos de NF-e da Omie via webhook
+// Objetivo: Preencher corretamente a coluna c_chave_nfe
+// ============================================================================
+app.post('/api/admin/sync/recebimentos-nfe', express.json(), async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    console.log('[API] Iniciando sincronização de recebimentos de NF-e...');
+    
+    const resultado = await syncRecebimentosNFeOmie({});
+    
+    const duracao = Date.now() - startTime;
+    
+    res.json({
+      ok: resultado.ok,
+      total_sincronizados: resultado.total || 0,
+      erro: resultado.error || null,
+      duracao_ms: duracao,
+      tempo_formatado: `${Math.floor(duracao / 1000)}s`
+    });
+    
+    // Log de conclusão
+    if (resultado.ok) {
+      console.log(`[API] ✓ Sincronização concluída em ${duracao}ms`);
+    } else {
+      console.error(`[API] ✗ Erro na sincronização:`, resultado.error);
+    }
+    
+  } catch (err) {
+    console.error('[API] Erro no endpoint /api/admin/sync/recebimentos-nfe:', err);
+    res.status(500).json({
+      ok: false,
+      erro: err.message
+    });
+  }
+});
 
 // ============================================================================
 // Sincroniza todas as requisições de compra da Omie para o banco de dados

@@ -1,0 +1,66 @@
+                           Tabela "logistica.recebimentos_nfe_omie"
+        Coluna         |            Tipo             | Ordenação | Pode ser nulo |   Padrão    
+-----------------------+-----------------------------+-----------+---------------+-------------
+ n_id_receb            | bigint                      |           | not null      | 
+ c_chave_nfe           | character varying(50)       |           |               | 
+ c_numero_nfe          | character varying(20)       |           |               | 
+ c_serie_nfe           | character varying(10)       |           |               | 
+ c_modelo_nfe          | character varying(5)        |           |               | 
+ d_emissao_nfe         | date                        |           |               | 
+ d_entrada             | date                        |           |               | 
+ d_registro            | date                        |           |               | 
+ n_valor_nfe           | numeric(15,2)               |           |               | 
+ v_total_produtos      | numeric(15,2)               |           |               | 
+ v_aprox_tributos      | numeric(15,2)               |           |               | 
+ v_desconto            | numeric(15,2)               |           |               | 
+ v_frete               | numeric(15,2)               |           |               | 
+ v_seguro              | numeric(15,2)               |           |               | 
+ v_outras              | numeric(15,2)               |           |               | 
+ v_ipi                 | numeric(15,2)               |           |               | 
+ v_icms_st             | numeric(15,2)               |           |               | 
+ n_id_fornecedor       | bigint                      |           |               | 
+ c_nome_fornecedor     | character varying(200)      |           |               | 
+ c_cnpj_cpf_fornecedor | character varying(20)       |           |               | 
+ c_etapa               | character varying(20)       |           |               | 
+ c_desc_etapa          | character varying(100)      |           |               | 
+ c_faturado            | character(1)                |           |               | 
+ d_fat                 | date                        |           |               | 
+ h_fat                 | time without time zone      |           |               | 
+ c_usuario_fat         | character varying(100)      |           |               | 
+ c_recebido            | character(1)                |           |               | 
+ d_rec                 | date                        |           |               | 
+ h_rec                 | time without time zone      |           |               | 
+ c_usuario_rec         | character varying(100)      |           |               | 
+ c_devolvido           | character(1)                |           |               | 
+ c_devolvido_parc      | character(1)                |           |               | 
+ d_dev                 | date                        |           |               | 
+ h_dev                 | time without time zone      |           |               | 
+ c_usuario_dev         | character varying(100)      |           |               | 
+ c_autorizado          | character(1)                |           |               | 
+ c_bloqueado           | character(1)                |           |               | 
+ c_cancelada           | character(1)                |           |               | 
+ c_natureza_operacao   | character varying(100)      |           |               | 
+ c_cfop_entrada        | character varying(10)       |           |               | 
+ n_id_conta            | bigint                      |           |               | 
+ c_categ_compra        | character varying(20)       |           |               | 
+ c_obs_nfe             | text                        |           |               | 
+ c_obs_rec             | text                        |           |               | 
+ c_importado_api       | character(1)                |           |               | 'S'::bpchar
+ d_importacao          | timestamp without time zone |           |               | now()
+ created_at            | timestamp without time zone |           |               | now()
+ updated_at            | timestamp without time zone |           |               | now()
+Índices:
+    "recebimentos_nfe_omie_pkey" PRIMARY KEY, btree (n_id_receb)
+    "idx_recebimentos_nfe_chave" btree (c_chave_nfe)
+    "idx_recebimentos_nfe_emissao" btree (d_emissao_nfe)
+    "idx_recebimentos_nfe_etapa" btree (c_etapa)
+    "idx_recebimentos_nfe_faturado" btree (c_faturado)
+    "idx_recebimentos_nfe_fornecedor" btree (n_id_fornecedor)
+    "idx_recebimentos_nfe_numero" btree (c_numero_nfe)
+    "idx_recebimentos_nfe_recebido" btree (c_recebido)
+    "recebimentos_nfe_omie_c_chave_nfe_key" UNIQUE CONSTRAINT, btree (c_chave_nfe)
+Referenciada por:
+    TABLE "logistica.recebimentos_nfe_frete" CONSTRAINT "recebimentos_nfe_frete_n_id_receb_fkey" FOREIGN KEY (n_id_receb) REFERENCES logistica.recebimentos_nfe_omie(n_id_receb) ON DELETE CASCADE
+    TABLE "logistica.recebimentos_nfe_itens" CONSTRAINT "recebimentos_nfe_itens_n_id_receb_fkey" FOREIGN KEY (n_id_receb) REFERENCES logistica.recebimentos_nfe_omie(n_id_receb) ON DELETE CASCADE
+    TABLE "logistica.recebimentos_nfe_parcelas" CONSTRAINT "recebimentos_nfe_parcelas_n_id_receb_fkey" FOREIGN KEY (n_id_receb) REFERENCES logistica.recebimentos_nfe_omie(n_id_receb) ON DELETE CASCADE
+
