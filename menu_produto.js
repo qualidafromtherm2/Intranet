@@ -28890,6 +28890,8 @@ function mostrarVisualizacaoKanban() {
     const icone = botaoAlternar.querySelector('i');
     if (icone) icone.className = 'fa-solid fa-columns';
   }
+  // Recalcula altura após o display:flex ser renderizado
+  requestAnimationFrame(() => ajustarAlturaKanban());
 }
 
 // Objetivo: Exibir visualização em Lista (tabela)
@@ -28898,7 +28900,11 @@ function mostrarVisualizacaoLista() {
   const listaContainer = document.getElementById('listaMinhasSolicitacoes');
   const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');
   
-  if (kanbanContainer) kanbanContainer.style.display = 'none';
+  if (kanbanContainer) {
+    kanbanContainer.style.display = 'none';
+    // Remove height fixo para não reservar espaço quando o kanban estiver oculto
+    kanbanContainer.style.height = '';
+  }
   if (listaContainer) listaContainer.style.display = 'block';
   if (botaoAlternar) {
     botaoAlternar.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
@@ -29503,31 +29509,25 @@ window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 
 // Função para ajustar dinamicamente a altura do kanban
 function ajustarAlturaKanban() {
-  const wrapper = document.getElementById('minhasComprasWrapper');
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  if (!kanbanContainer) return;
 
-  if (!wrapper || !kanbanContainer) return;
+  // Só ajusta quando o kanban está visível (não interfere no modo lista)
+  if (kanbanContainer.style.display === 'none') return;
 
-  // Calcula a altura disponível até o final do content-wrapper
-  const contentWrapper = wrapper.closest('.content-wrapper');
-  if (!contentWrapper) return;
-
-  const contentWrapperRect = contentWrapper.getBoundingClientRect();
+  // Calcula altura: viewport menos o topo do kanban menos folga (48 px garante barra horizontal visível)
   const containerRect = kanbanContainer.getBoundingClientRect();
+  const alturaDisponivel = Math.floor(window.innerHeight - containerRect.top - 48);
 
-  // Altura disponível = fim do content-wrapper - topo do kanban - folga mínima
-  const alturaDisponivel = Math.floor(contentWrapperRect.bottom - containerRect.top - 8);
-
-  // Define a altura do container do kanban
   if (alturaDisponivel > 200) {
     kanbanContainer.style.height = `${alturaDisponivel}px`;
   }
 }
 
-// Reajusta ao redimensionar a janela
+// Reajusta ao redimensionar a janela (apenas no modo kanban)
 window.addEventListener('resize', () => {
-  const wrapper = document.getElementById('minhasComprasWrapper');
-  if (wrapper && wrapper.style.display !== 'none') {
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  if (kanbanContainer && kanbanContainer.style.display !== 'none') {
     ajustarAlturaKanban();
   }
 });
