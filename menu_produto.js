@@ -4,20 +4,21 @@ import config from './config.client.js';
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = config;
 const API_BASE = window.location.origin; // já serve https://intranet-30av.onrender.com
 
-// Silencia todos os logs de debug do chat que começam com "[CHAT]"
-;(function silenceChatLogs(){
-  let respostasErro = 0;
+// Silencia TODOS os logs de console EXCETO diagnóstico de produtos
+;(function silenceAllLogs(){
   try {
     const _log = console.log.bind(console);
     const _warn = console.warn.bind(console);
+    const _error = console.error.bind(console);
     console.log = (...args) => {
-      if (typeof args[0] === 'string' && args[0].startsWith('[CHAT]')) return;
-      _log(...args);
+      // Permite apenas logs de DIAGNÓSTICO-PRODUTO
+      if (typeof args[0] === 'string' && args[0].includes('[DIAGNÓSTICO-PRODUTO]')) {
+        _log(...args);
+        return;
+      }
     };
-    console.warn = (...args) => {
-      if (typeof args[0] === 'string' && args[0].startsWith('[CHAT]')) return;
-      _warn(...args);
-    };
+    console.warn = () => {};
+    console.error = () => {};
   } catch {}
 })();
 
@@ -16642,11 +16643,12 @@ document.getElementById('comprasToggleSolicitanteBtn')?.addEventListener('click'
     textElement.textContent = '...';
     btn.disabled = true;
     
-    // Recarrega os kanbans com o novo filtro
+    // Recarrega os dados com o novo filtro (loadMinhasSolicitacoes já exibe a view correta)
     await loadMinhasSolicitacoes();
     
-    // Restaura o botão
-    textElement.textContent = originalText;
+    // Restaura o botão com o texto atualizado (minhas ou todas)
+    const filtroFinal = window.kanbanFiltroSolicitante || 'minhas';
+    textElement.textContent = filtroFinal === 'todas' ? 'Todas' : 'Minhas';
     btn.disabled = false;
     
   } catch (err) {
@@ -17716,13 +17718,19 @@ async function loadComprasSolicitacoes() {
                     if (Array.isArray(anexosCot) && anexosCot.length > 0) {
                       anexosCotacaoHtml = `
                         <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
-                          ${anexosCot.map(anexo => `
-                            <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#d1fae5;padding:3px 8px;border-radius:4px;font-size:10px;text-decoration:none;color:#047857;">
-                              <i class="fa-solid fa-file" style="color:#10b981;"></i>
-                              <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
-                              <i class="fa-solid fa-external-link-alt" style="font-size:8px;color:#059669;"></i>
-                            </a>
-                          `).join('')}
+                          ${anexosCot.map(anexoRaw => {
+                            const aUrl = typeof anexoRaw === 'string' ? anexoRaw : (anexoRaw?.url || '#');
+                            const aNome = typeof anexoRaw === 'string'
+                              ? (decodeURIComponent((anexoRaw.split('/').pop() || '').split('?')[0]).replace(/^\d+_/, '') || 'Arquivo')
+                              : (anexoRaw?.nome || 'Arquivo');
+                            return `
+                              <a href="${aUrl}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#d1fae5;padding:3px 8px;border-radius:4px;font-size:10px;text-decoration:none;color:#047857;">
+                                <i class="fa-solid fa-file" style="color:#10b981;"></i>
+                                <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(aNome)}">${escapeHtml(aNome)}</span>
+                                <i class="fa-solid fa-external-link-alt" style="font-size:8px;color:#059669;"></i>
+                              </a>
+                            `;
+                          }).join('')}
                         </div>
                       `;
                     }
@@ -17764,13 +17772,19 @@ async function loadComprasSolicitacoes() {
         try {
           const anexosExistentes = item.anexos ? (typeof item.anexos === 'string' ? JSON.parse(item.anexos) : item.anexos) : [];
           if (Array.isArray(anexosExistentes) && anexosExistentes.length > 0) {
-            anexosExistentesHtml = anexosExistentes.map(anexo => `
-              <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
-                <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
-                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
-                <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
-              </a>
-            `).join('');
+            anexosExistentesHtml = anexosExistentes.map(anexoRaw => {
+              const aUrl = typeof anexoRaw === 'string' ? anexoRaw : (anexoRaw?.url || '#');
+              const aNome = typeof anexoRaw === 'string'
+                ? (decodeURIComponent((anexoRaw.split('/').pop() || '').split('?')[0]).replace(/^\d+_/, '') || 'Arquivo')
+                : (anexoRaw?.nome || 'Arquivo');
+              return `
+                <a href="${aUrl}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
+                  <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
+                  <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(aNome)}">${escapeHtml(aNome)}</span>
+                  <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
+                </a>
+              `;
+            }).join('');
           }
         } catch (e) {
           console.error('[Anexos] Erro ao processar anexos:', e);
@@ -22088,6 +22102,11 @@ window.toggleCompraItensMinhas = toggleCompraItensMinhas;
 window.togglePedidoCompraItens = togglePedidoCompraItens;
 window.toggleCompraRealizadaItens = toggleCompraRealizadaItens;
 window.toggleSolicitacaoCompraItens = toggleSolicitacaoCompraItens;
+window.filtrarTodosKanbans = filtrarTodosKanbans;
+window.limparFiltroGlobal = limparFiltroGlobal;
+window.toggleVisualizacao = toggleVisualizacao;
+window.mostrarVisualizacaoKanban = mostrarVisualizacaoKanban;
+window.mostrarVisualizacaoLista = mostrarVisualizacaoLista;
 
 // FUNÇÃO REMOVIDA - Página "Kanban de Compras" foi substituída por "Minhas solicitações"
 // A renderização do kanban agora é feita pela função listarMinhasSolicitacoes()
@@ -26497,13 +26516,19 @@ async function loadComprasCotadas() {
         try {
           const anexosExistentes = item.anexos ? (typeof item.anexos === 'string' ? JSON.parse(item.anexos) : item.anexos) : [];
           if (Array.isArray(anexosExistentes) && anexosExistentes.length > 0) {
-            anexosExistentesHtml = anexosExistentes.map(anexo => `
-              <a href="${anexo.url}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
-                <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
-                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(anexo.nome)}">${escapeHtml(anexo.nome)}</span>
-                <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
-              </a>
-            `).join('');
+            anexosExistentesHtml = anexosExistentes.map(anexoRaw => {
+              const aUrl = typeof anexoRaw === 'string' ? anexoRaw : (anexoRaw?.url || '#');
+              const aNome = typeof anexoRaw === 'string'
+                ? (decodeURIComponent((anexoRaw.split('/').pop() || '').split('?')[0]).replace(/^\d+_/, '') || 'Arquivo')
+                : (anexoRaw?.nome || 'Arquivo');
+              return `
+                <a href="${aUrl}" target="_blank" style="display:flex;align-items:center;gap:4px;background:#dbeafe;padding:4px 8px;border-radius:4px;font-size:11px;text-decoration:none;color:#1e40af;">
+                  <i class="fa-solid fa-file" style="color:#3b82f6;"></i>
+                  <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(aNome)}">${escapeHtml(aNome)}</span>
+                  <i class="fa-solid fa-external-link-alt" style="font-size:9px;color:#60a5fa;"></i>
+                </a>
+              `;
+            }).join('');
           }
         } catch (e) {
           console.error('[Anexos] Erro ao processar anexos:', e);
@@ -28590,6 +28615,11 @@ function montarCardsKanbanMinhas(status, itens) {
       <div class="kanban-card" 
         data-item-id="${primeiroItem.id}"
         data-todos-ids="${todosIds}"
+        data-fornecedor="${escapeHtml(primeiroItem.fornecedor_nome || '')}"
+        data-solicitante="${escapeHtml(primeiroItem.solicitante || '')}"
+        data-created-at="${primeiroItem.created_at || ''}"
+        data-dt-previsao="${primeiroItem.d_dt_previsao || ''}"
+        data-numero-pedido="${primeiroItem.numero || primeiroItem.c_numero || primeiroItem.numero_pedido || ''}"
         onclick="${onclickCard}"
         style="
         background:#ffffff;
@@ -28750,6 +28780,514 @@ function toggleSolicitacaoCompraItens(cardKey, event) {
   }
 }
 
+// Objetivo: Filtrar TODOS os kanbans simultaneamente pela palavra inserida no campo de busca
+function filtrarTodosKanbans(textoFiltro) {
+  const textoNormalizado = (textoFiltro || '').toLowerCase().trim();
+  const botaoLimpar = document.getElementById('kanbanLimparFiltroGlobal');
+  
+  // Mostra/esconde botão de limpar conforme necessário
+  if (botaoLimpar) {
+    botaoLimpar.style.display = textoNormalizado.length >= 3 ? 'block' : 'none';
+  }
+  
+  // Procura TODOS os cards em TODOS os kanbans
+  const todasAsColunas = document.querySelectorAll('.kanban-column-minhas');
+  
+  todasAsColunas.forEach(coluna => {
+    const container = coluna.querySelector('.kanban-cards-minhas');
+    if (!container) return;
+    
+    const cards = container.querySelectorAll('.kanban-card');
+    
+    // Se digitou menos de 3 caracteres, mostra todos os cards
+    if (textoNormalizado.length < 3) {
+      cards.forEach(card => {
+        card.style.display = '';
+      });
+      return;
+    }
+    
+    // Filtra os cards em todos os kanbans
+    cards.forEach(card => {
+      const textoCard = card.textContent
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      if (textoCard.includes(textoNormalizado)) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  });
+  
+  // Aplica o mesmo filtro à lista (sempre, independente de qual view está visível)
+  const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
+  if (corpoTabela) {
+    // :scope > tr = apenas filhos diretos do tbody, NÃO as linhas dentro das tabelas de produtos aninhadas
+    const linhas = Array.from(corpoTabela.querySelectorAll(':scope > tr'));
+    
+    for (let i = 0; i < linhas.length; i++) {
+      const tr = linhas[i];
+      
+      // Pula linhas de detalhe de produtos (tratadas junto com a linha pai)
+      if (tr.id && tr.id.startsWith('lista-produtos-')) continue;
+      
+      if (textoNormalizado.length < 3) {
+        tr.style.display = '';
+        // Não força mostrar o detalhe — estado controlado pelo toggleListaProdutos
+      } else {
+        // Usa data-search (inclui descrições de produtos) se disponível; fallback para textContent
+        const textoLinha = (tr.getAttribute('data-search') || tr.textContent.toLowerCase().replace(/\s+/g, ' ').trim());
+        const visivel = textoLinha.includes(textoNormalizado);
+        tr.style.display = visivel ? '' : 'none';
+        // Se a linha principal foi ocultada, oculta também a linha de detalhe seguinte
+        const proxima = linhas[i + 1];
+        if (proxima && proxima.id && proxima.id.startsWith('lista-produtos-') && !visivel) {
+          proxima.style.display = 'none';
+        }
+      }
+    }
+  }
+}
+
+// Objetivo: Limpar o filtro global de pesquisa
+function limparFiltroGlobal() {
+  const input = document.getElementById('kanbanFiltroGlobal');
+  if (input) {
+    input.value = '';
+    input.focus();
+    filtrarTodosKanbans('');
+  }
+}
+
+// Variável global para ratrear o modo de visualização atual
+let modoVisualizacaoKanban = false;
+
+// Objetivo: Alternar entre visualização Kanban e Lista
+function toggleVisualizacao() {
+  modoVisualizacaoKanban = !modoVisualizacaoKanban;
+  
+  if (modoVisualizacaoKanban) {
+    mostrarVisualizacaoKanban();
+  } else {
+    mostrarVisualizacaoLista();
+  }
+}
+
+// Objetivo: Exibir visualização em Kanban (padrão)
+function mostrarVisualizacaoKanban() {
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  const listaContainer = document.getElementById('listaMinhasSolicitacoes');
+  const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');
+  
+  if (kanbanContainer) kanbanContainer.style.display = 'flex';
+  if (listaContainer) listaContainer.style.display = 'none';
+  if (botaoAlternar) {
+    botaoAlternar.style.background = 'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)';
+    botaoAlternar.title = 'Alternar para Visualização em Lista';
+    const icone = botaoAlternar.querySelector('i');
+    if (icone) icone.className = 'fa-solid fa-columns';
+  }
+}
+
+// Objetivo: Exibir visualização em Lista (tabela)
+function mostrarVisualizacaoLista() {
+  const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
+  const listaContainer = document.getElementById('listaMinhasSolicitacoes');
+  const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');
+  
+  if (kanbanContainer) kanbanContainer.style.display = 'none';
+  if (listaContainer) listaContainer.style.display = 'block';
+  if (botaoAlternar) {
+    botaoAlternar.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
+    botaoAlternar.title = 'Alternar para Visualização em Kanban';
+    const icone = botaoAlternar.querySelector('i');
+    if (icone) icone.className = 'fa-solid fa-table';
+  }
+  
+  // Renderiza a lista com dados dos kanbans
+  renderizarLista();
+}
+
+// Objetivo: Renderizar tabela de lista extraindo dados dos cards do kanban
+function renderizarLista() {
+  const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
+  if (!corpoTabela) return;
+  
+  corpoTabela.innerHTML = '';
+  
+  // Procura todos os cards nos kanbans
+  const todasAsColunas = document.querySelectorAll('.kanban-column-minhas');
+  const linhas = [];
+  let rowIndex = 0;
+  
+  todasAsColunas.forEach(coluna => {
+    const status = coluna.getAttribute('data-status');
+    const container = coluna.querySelector('.kanban-cards-minhas');
+    if (!container) return;
+    
+    const cards = container.querySelectorAll('.kanban-card');
+    
+    cards.forEach(card => {
+      // Ignora cards ocultos pelo filtro
+      if (card.style.display === 'none') return;
+      
+      // Extrai dados dos atributos data-*
+      const fornecedorData = card.getAttribute('data-fornecedor') || '';
+      const solicitanteData = card.getAttribute('data-solicitante') || '';
+      const createdAt = card.getAttribute('data-created-at') || '';
+      const dtPrevisao = card.getAttribute('data-dt-previsao') || '';
+      const numeroPedidoData = card.getAttribute('data-numero-pedido') || '';
+      const produtosData = card.getAttribute('data-produtos') || '';
+      const itemId = card.getAttribute('data-item-id') || '';
+      const todosIds = card.getAttribute('data-todos-ids') || '';
+      
+      // Extrai texto completo do card
+      const textoCard = card.textContent || '';
+      
+      // Tenta extrair número de requisição (formato YYYYMMDD-HHMMSS-NNN)
+      const regexRequisicao = /(\d{8})-(\d{6})-(\d+)/;
+      const matchRequisicao = textoCard.match(regexRequisicao);
+      const requisicao = matchRequisicao ? `${matchRequisicao[1]}-${matchRequisicao[2]}-${matchRequisicao[3]}` : 'N/A';
+      
+      // Extrai linhas de texto do card
+      const linhasTexto = textoCard.split('\n').map(l => l.trim()).filter(l => l);
+      
+      let numeroPedido = '';
+      
+      // Procura por padrões nas linhas
+      for (let i = 0; i < linhasTexto.length; i++) {
+        const linha = linhasTexto[i];
+        const linhaUpper = linha.toUpperCase();
+        
+        // Nº Pedido: procura por padrão CODPROV - ou números
+        if (!numeroPedido && (linha.match(/^[A-Z]+ - \d+/) || linha.match(/^\d{3,}/))) {
+          numeroPedido = linha;
+          continue;
+        }
+        
+      }
+      
+      // Formata datas
+      const dataFormatada = createdAt ? new Date(createdAt).toLocaleDateString('pt-BR') : '-';
+      const dataPrevisaoFormatada = dtPrevisao ? new Date(dtPrevisao).toLocaleDateString('pt-BR') : '-';
+      let produtosLista = [];
+      try {
+        produtosLista = produtosData ? JSON.parse(decodeURIComponent(produtosData)) : [];
+      } catch (err) {
+        // Falha silenciosa ao parsear produtos
+      }
+      // Log diagnóstico apenas na primeira renderização
+      if (produtosLista.length > 0) {
+        console.log('[DIAGNÓSTICO-PRODUTO] 1º produto:', JSON.stringify(produtosLista[0], null, 2));
+        console.log('[DIAGNÓSTICO-PRODUTO] c_unidade:', produtosLista[0].c_unidade, '| n_qtde:', produtosLista[0].n_qtde, '| n_val_tot:', produtosLista[0].n_val_tot);
+      }
+      const produtosHtml = Array.isArray(produtosLista) && produtosLista.length > 0
+        ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;">
+             <thead>
+               <tr style="border-bottom:1px solid #d1d5db;background:#f3f4f6;">
+                 <th style="text-align:left;padding:8px;font-weight:700;color:#374151;">Código</th>
+                 <th style="text-align:left;padding:8px;font-weight:700;color:#374151;">Descrição</th>
+                 <th style="text-align:center;padding:8px;font-weight:700;color:#374151;width:80px;">Unidade</th>
+                 <th style="text-align:center;padding:8px;font-weight:700;color:#374151;width:80px;">Qtd</th>
+                 <th style="text-align:right;padding:8px;font-weight:700;color:#374151;width:100px;">Valor Total</th>
+               </tr>
+             </thead>
+             <tbody>
+               ${produtosLista.map((prod, idx) => {
+                 const codigo = prod.produto_codigo || prod.cod_prod || '-';
+                 const desc = prod.produto_descricao || prod.descricao || '-';
+                 const unidade = prod.c_unidade || prod.unidade || '-';
+                 const qtde = prod.n_qtde || prod.qtde || '-';
+                 const valorTotal = prod.n_val_tot || prod.valor_total || '-';
+                 // Converte qtde para número
+                 const qtdeNum = typeof qtde === 'number' ? qtde : (typeof qtde === 'string' && qtde !== '-' ? parseFloat(qtde) : NaN);
+                 const qtdeFormatada = !isNaN(qtdeNum) ? Math.round(qtdeNum).toLocaleString('pt-BR') : qtde;
+                 const valorFormatado = typeof valorTotal === 'number' ? valorTotal.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}) : valorTotal;
+                 return `<tr style="border-bottom:1px solid #bfdbfe;background:#dbeafe;">
+                   <td style="padding:8px;color:#1e3a5f;">${escapeHtml(codigo)}</td>
+                   <td style="padding:8px;color:#1e3a5f;">${escapeHtml(desc)}</td>
+                   <td style="padding:8px;text-align:center;color:#2563eb;">${escapeHtml(String(unidade))}</td>
+                   <td style="padding:8px;text-align:center;color:#2563eb;">${qtdeFormatada}</td>
+                   <td style="padding:8px;text-align:right;color:#1e3a5f;font-weight:500;">${valorFormatado}</td>
+                 </tr>`;
+               }).join('')}
+             </tbody>
+           </table>`
+        : '<div style="font-size:11px;color:#9ca3af;">Sem produtos cadastrados</div>';
+      const rowId = `linha-${rowIndex++}`;
+      
+      // Texto pesquisável: inclui dados principais + códigos e descrições de produtos
+      const produtosTexto = Array.isArray(produtosLista)
+        ? produtosLista.map(p => `${p.produto_codigo || p.cod_prod || ''} ${p.produto_descricao || p.descricao || ''}`).join(' ')
+        : '';
+
+      // Calcula valor total: soma de n_val_tot de cada produto
+      const valorTotalNum = Array.isArray(produtosLista)
+        ? produtosLista.reduce((acc, p) => {
+            const v = parseFloat(p.n_val_tot || p.valor_total || 0);
+            return acc + (isNaN(v) ? 0 : v);
+          }, 0)
+        : 0;
+      const valorTotalFormatado = valorTotalNum > 0
+        ? valorTotalNum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : '-';
+      
+      const linhaMontada = {
+        rowId,
+        requisicao,
+        numeroPedido: numeroPedido || numeroPedidoData || '-',
+        solicitante: solicitanteData || '-',
+        fornecedor: fornecedorData || '-',
+        status,
+        itemId,
+        todosIds,
+        valorTotal: valorTotalFormatado,
+        data: dataFormatada,
+        dataPrevisao: dataPrevisaoFormatada,
+        dataPrevisaoRaw: dtPrevisao,
+        produtosHtml,
+        produtosTexto
+      };
+      console.log('[Lista] Linha montada', linhaMontada);
+      linhas.push(linhaMontada);
+    });
+  });
+  
+  // Renderiza as linhas da tabela
+  console.log('[Lista] Total de linhas para renderizar:', linhas.length);
+  linhas.forEach(linha => {
+    const tr = document.createElement('tr');
+    tr.style.cssText = 'border-bottom:1px solid #e5e7eb;transition:background 0.2s;cursor:pointer;';
+    tr.onmouseover = () => tr.style.background = '#f9fafb';
+    tr.onmouseout = () => tr.style.background = 'transparent';
+    
+    // Armazena texto pesquisável completo (inclui produtos) para o filtro funcionar
+    const textoSearch = [
+      linha.requisicao,
+      linha.numeroPedido,
+      linha.solicitante,
+      linha.fornecedor,
+      linha.status,
+      linha.data,
+      linha.dataPrevisao,
+      linha.produtosTexto
+    ].join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
+    tr.setAttribute('data-search', textoSearch);
+    
+    // Estilos de status: { bg, color, border }
+    const statusEstilos = {
+      // Sem fundo — texto preto, borda cinza
+      'aguardando aprovação da requisição': { bg: 'transparent', color: '#111827', border: '1.5px solid #d1d5db' },
+      // Cotação → cinza padrão (como está)
+      'aguardando cotação':                 { bg: '#9ca3af',     color: 'white',   border: 'none' },
+      // Fundo cinza, letra verde
+      'cotado aguardando escolha':          { bg: '#9ca3af',     color: '#16a34a', border: 'none' },
+      // Fundo amarelo, letra verde
+      'aguardando compra':                  { bg: '#fbbf24',     color: '#16a34a', border: 'none' },
+      // Compra realizada — como está (verde)
+      'compra realizada':                   { bg: '#34d399',     color: 'white',   border: 'none' },
+      // Demais status úteis
+      'faturada pelo fornecedor':           { bg: '#f97316',     color: 'white',   border: 'none' },
+      'recebido':                           { bg: '#34d399',     color: 'white',   border: 'none' },
+      'concluído':                          { bg: '#34d399',     color: 'white',   border: 'none' },
+      'analise de cadastro':                { bg: '#a78bfa',     color: 'white',   border: 'none' },
+      'solicitado revisão':                 { bg: '#fbbf24',     color: '#111827', border: 'none' },
+      'aguardando compra preparação':       { bg: '#fb923c',     color: 'white',   border: 'none' },
+    };
+    const estiloStatus = statusEstilos[linha.status.toLowerCase()] || { bg: '#9ca3af', color: 'white', border: 'none' };
+    
+    // Define se o fornecedor deve ser exibido baseado no status
+    const statusSemFornecedor = ['aprovacao', 'revisao', 'cotacao', 'cotado', 'analise de cadastro', 'requisicoes'];
+    const exibeFornecedor = !statusSemFornecedor.includes(linha.status.toLowerCase());
+    const fornecedorExibido = exibeFornecedor ? linha.fornecedor : '-';
+    
+    // Data de previsão só existe para Pedido de compra e Compra realizada
+    const statusComPrevisao = ['pedido de compra', 'compra realizada'];
+    const exibeDataPrevisao = statusComPrevisao.includes(linha.status.toLowerCase());
+    const dataPrevisaoExibida = exibeDataPrevisao ? linha.dataPrevisao : '-';
+    let dataPrevisaoStyle = 'color:#111827;';
+    if (exibeDataPrevisao && linha.dataPrevisaoRaw) {
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      const previsao = new Date(linha.dataPrevisaoRaw);
+      previsao.setHours(0, 0, 0, 0);
+      if (previsao < hoje) {
+        dataPrevisaoStyle = 'color:#ef4444;font-weight:700;';
+      }
+    }
+    
+    tr.innerHTML = `
+      <td style="padding:12px 16px;font-size:12px;color:#111827;font-weight:500;">
+        <button type="button" onclick="toggleListaProdutos('${linha.rowId}', event)" style="margin-right:8px;background:#e5e7eb;border:none;border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;cursor:pointer;">+</button>
+        ${linha.requisicao}
+      </td>
+      <td style="padding:12px 16px;font-size:11px;color:#6b7280;font-family:monospace;">${linha.numeroPedido}</td>
+      <td style="padding:12px 16px;font-size:12px;color:#374151;">${escapeHtml(linha.solicitante)}</td>
+      <td style="padding:12px 16px;font-size:12px;color:#111827;">${fornecedorExibido}</td>
+      <td style="padding:12px 16px;text-align:center;">
+        <span
+          onclick="abrirModalPorStatusLista('${linha.status}', '${linha.itemId}', '${linha.todosIds}', '${linha.numeroPedido}', this); event.stopPropagation();"
+          style="display:inline-block;padding:6px 12px;background:${estiloStatus.bg};color:${estiloStatus.color};border:${estiloStatus.border};border-radius:4px;font-size:11px;font-weight:600;text-transform:capitalize;cursor:pointer;transition:opacity 0.15s;"
+          onmouseover="if(!this.dataset.badgeTxt)this.style.opacity='0.8'"
+          onmouseout="this.style.opacity='1'"
+          title="Clique para abrir o painel desta solicitação">${linha.status}</span>
+      </td>
+      <td style="padding:12px 16px;font-size:12px;color:#111827;text-align:center;">${linha.data}</td>
+      <td style="padding:12px 16px;font-size:12px;text-align:center;${dataPrevisaoStyle}">${dataPrevisaoExibida}</td>
+      <td style="padding:12px 16px;font-size:12px;color:#059669;font-weight:600;text-align:right;white-space:nowrap;">${linha.valorTotal}</td>
+    `;
+    
+    corpoTabela.appendChild(tr);
+
+    const trDetalhe = document.createElement('tr');
+    trDetalhe.id = `lista-produtos-${linha.rowId}`;
+    trDetalhe.style.display = 'none';
+    trDetalhe.innerHTML = `
+      <td colspan="8" style="padding:12px 16px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+        <div style="font-size:12px;color:#111827;font-weight:600;margin-bottom:8px;">Produtos</div>
+        ${linha.produtosHtml}
+      </td>
+    `;
+    corpoTabela.appendChild(trDetalhe);
+  });
+  
+  // Se não houver linhas, mostra mensagem
+  if (linhas.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="8" style="padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td>';
+    corpoTabela.appendChild(tr);
+  }
+}
+
+// Comentário: alterna exibição da sublinha de produtos na lista
+function toggleListaProdutos(rowId, event) {
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const detalhe = document.getElementById(`lista-produtos-${rowId}`);
+  if (!detalhe) return;
+  const aberto = detalhe.style.display === 'table-row';
+  detalhe.style.display = aberto ? 'none' : 'table-row';
+  const btn = event?.currentTarget;
+  if (btn) btn.textContent = aberto ? '+' : '-';
+}
+window.toggleListaProdutos = toggleListaProdutos;
+
+// Injeta uma vez o @keyframes do spinner no <head>
+function _garantirCssSpinnerBadge() {
+  if (document.getElementById('_badge_spin_kf')) return;
+  const st = document.createElement('style');
+  st.id = '_badge_spin_kf';
+  st.textContent = '@keyframes _badgeSpin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}';
+  document.head.appendChild(st);
+}
+
+// Mostra spinner no badge e monitora modais para restaurar quando abrir
+function _spinnerBadgeIniciar(el, textoOriginal) {
+  if (!el) return;
+  _garantirCssSpinnerBadge();
+  el.dataset.badgeTxt = textoOriginal;
+  el.style.pointerEvents = 'none';
+  el.style.opacity = '1';
+  // Adapta cor do spinner ao fundo do badge (transparente = escuro, colorido = branco)
+  const bgTransp = el.style.background === 'transparent' || el.style.backgroundColor === 'transparent';
+  const spinBorder = bgTransp ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.35)';
+  const spinTop    = bgTransp ? '#111827'           : '#fff';
+  el.innerHTML =
+    `<span style="display:inline-block;width:10px;height:10px;box-sizing:border-box;` +
+    `border:2px solid ${spinBorder};border-top-color:${spinTop};border-radius:50%;` +
+    `animation:_badgeSpin 0.7s linear infinite;vertical-align:middle;margin-right:5px;"></span>` +
+    textoOriginal;
+
+  // Verifica a cada 150 ms se algum modal ficou visível (máx ~5 s)
+  let tentativas = 0;
+  const id = setInterval(() => {
+    tentativas++;
+    const visivel = document.querySelector(
+      '.modal.show, ' +
+      '[id*="modal"][style*="display: flex"], [id*="modal"][style*="display:flex"], ' +
+      '[id*="modal"][style*="display: block"], [id*="modal"][style*="display:block"], ' +
+      '[id*="Modal"][style*="display: flex"], [id*="Modal"][style*="display:flex"], ' +
+      '[id*="Modal"][style*="display: block"], [id*="Modal"][style*="display:block"]'
+    );
+    if (visivel || tentativas >= 34) {
+      clearInterval(id);
+      _spinnerBadgeRemover(el);
+    }
+  }, 150);
+}
+
+// Restaura o badge ao texto original
+function _spinnerBadgeRemover(el) {
+  if (!el || !el.dataset.badgeTxt) return;
+  el.textContent = el.dataset.badgeTxt;
+  delete el.dataset.badgeTxt;
+  el.style.pointerEvents = '';
+}
+
+// Objetivo: Ao clicar no badge de status na lista, abre o modal correspondente do kanban
+function abrirModalPorStatusLista(status, itemId, todosIds, numeroPedido, el) {
+  _spinnerBadgeIniciar(el, status);  // <-- exibe spinner imediatamente
+  const s = (status || '').toLowerCase().trim();
+
+  // Aprovação da requisição → modal de aprovação em lote
+  if (s === 'aguardando aprovação da requisição') {
+    if (typeof abrirModalAprovacaoRequisicao === 'function') abrirModalAprovacaoRequisicao();
+    return;
+  }
+
+  // Revisão → modal de detalhes
+  if (s === 'solicitado revisão' || s === 'retificar') {
+    if (numeroPedido && numeroPedido !== '-' && typeof abrirModalDetalhesPedidoMinhas === 'function') {
+      abrirModalDetalhesPedidoMinhas(numeroPedido, status, todosIds || null);
+    }
+    return;
+  }
+
+  // Aguardando cotação → modal de cotação do item
+  if (s === 'aguardando cotação') {
+    if (itemId && typeof abrirModalCotacaoKanban === 'function') {
+      abrirModalCotacaoKanban(itemId);
+    } else if (typeof abrirModalSelecaoItensCotacao === 'function') {
+      abrirModalSelecaoItensCotacao();
+    }
+    return;
+  }
+
+  // Cotado aguardando escolha → modal de escolha da cotação
+  if (s === 'cotado' || s === 'cotado aguardando escolha') {
+    if (itemId && typeof abrirModalCotadoEscolhaItem === 'function') {
+      abrirModalCotadoEscolhaItem(itemId);
+    }
+    return;
+  }
+
+  // Análise de cadastro → modal de análise
+  if (s === 'analise de cadastro') {
+    if (itemId && typeof abrirModalAnaliseCadastro === 'function') {
+      abrirModalAnaliseCadastro(itemId);
+    }
+    return;
+  }
+
+  // Aguardando compra (preparação) → modal de seleção de itens para compra
+  if (s === 'aguardando compra preparação') {
+    if (typeof abrirModalSelecaoItensCompra === 'function') abrirModalSelecaoItensCompra();
+    return;
+  }
+
+  // Pedido de compra / Aguardando compra / Compra realizada / Faturada / Recebido / Concluído
+  // → modal de detalhes do pedido
+  if (['aguardando compra', 'compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'].includes(s)) {
+    if (numeroPedido && numeroPedido !== '-' && typeof abrirModalDetalhesPedidoMinhas === 'function') {
+      abrirModalDetalhesPedidoMinhas(numeroPedido, status, todosIds || null);
+    }
+    return;
+  }
+}
+window.abrirModalPorStatusLista = abrirModalPorStatusLista;
+
 // Função para exibir anexos de um item de aprovação
 function exibirAnexosAprovacao(itemId, anexosStr) {
   console.log('[Anexos] Chamada da função com itemId:', itemId, 'anexosStr type:', typeof anexosStr);
@@ -28789,8 +29327,22 @@ function exibirAnexosAprovacao(itemId, anexosStr) {
                .replace(/'/g, '&#039;');
   };
   
+  // Helper para normalizar anexo: suporta string URL simples (Supabase) ou objeto {nome, url, tipo}
+  const normalizarAnexoExibicao = (raw) => {
+    if (typeof raw === 'string') {
+      const segs = raw.split('/');
+      const nomeArqBruto = decodeURIComponent((segs[segs.length - 1] || '').split('?')[0]);
+      const nomeLimpo = nomeArqBruto.replace(/^\d+_/, '') || 'Arquivo';
+      const ext = nomeLimpo.split('.').pop().toLowerCase();
+      const tipoMap = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel' };
+      return { url: raw, nome: nomeLimpo, tipo: tipoMap[ext] || null };
+    }
+    return { url: raw?.url || '#', nome: raw?.nome || 'Arquivo', tipo: raw?.tipo || null };
+  };
+
   // Cria HTML dos anexos
-  const anexosHtml = anexos.map((anexo, idx) => {
+  const anexosHtml = anexos.map((anexoRaw, idx) => {
+    const anexo = normalizarAnexoExibicao(anexoRaw);
     const icone = anexo.tipo?.includes('pdf') ? 'fa-file-pdf' : 
                   anexo.tipo?.includes('image') ? 'fa-file-image' : 
                   anexo.tipo?.includes('word') ? 'fa-file-word' : 
@@ -29083,6 +29635,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       console.log('[DEBUG] Pedidos de compra recebidos da API:', dataPed.pedidos);
       pedidosCompra = (dataPed.pedidos || []).map(ped => {
         console.log('[DEBUG] Pedido individual:', ped.numero, 'com itens:', ped.itens ? ped.itens.length : 0);
+        // Busca solicitante na lista de solicitacao_compras pelo numero_pedido
+        const itemRef = lista.find(item => item.numero_pedido === ped.numero);
         return {
           ...ped,
           id: `ped_${ped.n_cod_ped}`,
@@ -29090,6 +29644,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           numero: ped.numero, // c_numero com 4 dígitos
           n_cod_ped: ped.n_cod_ped,
           fornecedor_nome: ped.fornecedor_nome,
+          solicitante: ped.solicitante || (itemRef ? itemRef.solicitante : '') || '',
           status: 'aguardando compra',
           statusNormalizado: 'aguardando compra',
           isPedidoCompra: true,
@@ -29128,6 +29683,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
         console.log('[DEBUG] Compra realizada individual:', cNumeroValido, 'com itens:', comp.itens ? comp.itens.length : 0);
 
+        // Busca solicitante na lista de solicitacao_compras pelo numero_pedido
+        const itemRef = cNumeroValido ? lista.find(item => item.numero_pedido === cNumeroValido) : null;
+
         return {
           ...comp,
           id: `comp_${comp.n_cod_ped}`,
@@ -29136,6 +29694,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           c_numero: cNumeroValido,
           n_cod_ped: comp.n_cod_ped,
           fornecedor_nome: comp.fornecedor_nome,
+          solicitante: comp.solicitante || (itemRef ? itemRef.solicitante : '') || '',
           status: 'compra realizada',
           statusNormalizado: 'compra realizada',
           isCompraRealizada: true,
@@ -29603,10 +30162,17 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           );
           const cursorCard = 'pointer';
           
+          const produtosData = encodeURIComponent(JSON.stringify(primeiroItem.itens || []));
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
               data-todos-ids="${todosIds}"
+              data-fornecedor="${escapeHtml(primeiroItem.fornecedor_nome || '')}"
+              data-solicitante="${escapeHtml(primeiroItem.solicitante || '')}"
+              data-created-at="${primeiroItem.created_at || ''}"
+              data-dt-previsao="${primeiroItem.d_dt_previsao || ''}"
+              data-numero-pedido="${primeiroItem.numero || primeiroItem.c_numero || primeiroItem.numero_pedido || ''}"
+              data-produtos="${produtosData}"
               ${onclickCard ? `onclick="${onclickCard}"` : ''}
               style="
               background:#ffffff;
@@ -29810,6 +30376,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     // Aplica o filtro de kanbans visíveis após renderizar
     aplicarFiltroKanbans();
+
+    // Objetivo: Após carregar os dados, exibe a visualização correta (lista ou kanban)
+    if (!modoVisualizacaoKanban) {
+      mostrarVisualizacaoLista();
+    } else {
+      mostrarVisualizacaoKanban();
+    }
 
   } catch (err) {
     console.error('[COMPRAS] Falha ao listar kanban de compras:', err);
