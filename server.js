@@ -15088,9 +15088,21 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       if (!raw) return null;
       const arr = Array.isArray(raw) ? raw : [raw];
       
-      // Se for array de strings (URLs do Supabase), retorna como está
+      // Se for array de strings (URLs do Supabase), converte para objeto {nome, url, tipo}
       if (arr.length > 0 && typeof arr[0] === 'string') {
-        return arr.filter(url => url && typeof url === 'string' && url.trim().length > 0);
+        return arr
+          .filter(url => url && typeof url === 'string' && url.trim().length > 0)
+          .map(url => {
+            // Extrai o nome do arquivo a partir da URL (remove timestamp prefix ex: 1234567890_arquivo.pdf)
+            const segmentos = url.split('/');
+            const nomeArqBruto = decodeURIComponent((segmentos[segmentos.length - 1] || '').split('?')[0]);
+            const nomeLimpo = nomeArqBruto.replace(/^\d+_/, '') || 'arquivo';
+            // Infere o tipo pela extensão
+            const ext = nomeLimpo.split('.').pop().toLowerCase();
+            const tipoMap = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel' };
+            const tipo = tipoMap[ext] || null;
+            return { nome: nomeLimpo, url, tipo };
+          });
       }
       
       // Se for array de objetos legados (com base64), processa
@@ -16937,10 +16949,15 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         po.codigo AS produto_codigo,
         po.descricao AS produto_descricao,
         ro.numero AS cnumero,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_val_tot,
         'solicitacao_compras' AS table_source
       FROM compras.solicitacao_compras sc
       LEFT JOIN public.produtos_omie po ON po.codigo_produto = sc.codigo_omie
       LEFT JOIN compras.requisicoes_omie ro ON ro.cod_req_compra = sc.ncodped
+      LEFT JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = sc.ncodped 
+        AND LOWER(pop.c_codigo) = LOWER(sc.codigo_omie)
       WHERE sc.status = 'Requisição'
         AND sc.ncodped IS NOT NULL
       ORDER BY ro.numero DESC, sc.created_at DESC
@@ -16997,6 +17014,9 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         ncodped: item.ncodped,
         numero_pedido: item.numero_pedido,
         status: item.status,
+        c_unidade: item.c_unidade || '-',
+        n_qtde: item.n_qtde || 0,
+        n_val_tot: item.n_val_tot || 0,
         table_source: item.table_source || null
       });
     });
@@ -17034,6 +17054,9 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_val_tot,
         po.created_at,
         po.updated_at,
         sc.solicitante,
@@ -17081,7 +17104,10 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
       if (row.c_produto) {
         pedidosPorNumero.get(numero).itens.push({
           produto_codigo: row.c_produto,
-          produto_descricao: row.c_descricao || 'Sem descrição'
+          produto_descricao: row.c_descricao || 'Sem descrição',
+          c_unidade: row.c_unidade || '-',
+          n_qtde: row.n_qtde || 0,
+          n_val_tot: row.n_val_tot || 0
         });
       }
     });
@@ -17137,6 +17163,9 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_val_tot,
         po.created_at,
         po.updated_at,
         sc.solicitante,
@@ -17185,7 +17214,10 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
       if (row.c_produto) {
         pedidosPorNumero.get(numero).itens.push({
           produto_codigo: row.c_produto,
-          produto_descricao: row.c_descricao || 'Sem descrição'
+          produto_descricao: row.c_descricao || 'Sem descrição',
+          c_unidade: row.c_unidade || '-',
+          n_qtde: row.n_qtde || 0,
+          n_val_tot: row.n_val_tot || 0
         });
       }
     }
