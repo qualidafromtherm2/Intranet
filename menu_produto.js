@@ -30162,7 +30162,21 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           );
           const cursorCard = 'pointer';
           
-          const produtosData = encodeURIComponent(JSON.stringify(primeiroItem.itens || []));
+          // Objetivo: se primeiroItem.itens vier vazio (solicitacao_compras / compras_sem_cadastro),
+          // monta array sintético com os campos de produto diretos de cada item do grupo
+          const itensProdutos = (primeiroItem.itens && primeiroItem.itens.length > 0)
+            ? primeiroItem.itens
+            : itensGrupo
+                .map(item => ({
+                  produto_codigo:    item.produto_codigo  || item.cod_prod   || '',
+                  produto_descricao: item.produto_descricao || item.descricao || '',
+                  c_unidade:         item.c_unidade || item.unidade || '',
+                  n_qtde:            item.quantidade || item.n_qtde || item.qtde || '',
+                  n_val_tot:         item.n_val_tot  || item.valor_total || ''
+                }))
+                .filter(i => i.produto_codigo || i.produto_descricao);
+
+          const produtosData = encodeURIComponent(JSON.stringify(itensProdutos));
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
