@@ -3251,8 +3251,8 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
           
           recebimento = await response.json();
           
-          // Atualiza no banco
-          await upsertRecebimentoNFe(recebimento, topic, messageId);
+          // Atualiza no banco - passa cChaveNfe do webhook como 4º parâmetro
+          await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe);
           
           console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} ${acao} com sucesso`);
           
@@ -13242,7 +13242,8 @@ async function syncPedidosCompraOmie(filtros = {}) {
 // ============================================================================
 
 // Função para fazer upsert de um recebimento de NF-e no banco
-async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null) {
+// Agora aceita cChaveNfeWebhook como parâmetro adicional (vem do webhook, não da API)
+async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -13261,6 +13262,9 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     if (!nIdReceb) {
       throw new Error('nIdReceb não encontrado no recebimento');
     }
+    
+    // Usa cChaveNfe do webhook (se disponível) ou do cabec da API (raramente vem)
+    const cChaveNfeFinal = cChaveNfeWebhook || cabec.cChaveNfe || null;
     
     // 1. Upsert do cabeçalho do recebimento
     await client.query(`
@@ -13297,7 +13301,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         NOW()
       )
       ON CONFLICT (n_id_receb) DO UPDATE SET
-        c_chave_nfe = EXCLUDED.c_chave_nfe,
+        c_chave_nfe = COALESCE(EXCLUDED.c_chave_nfe, logistica.recebimentos_nfe_omie.c_chave_nfe),  -- Preserva se já existir
         c_numero_nfe = EXCLUDED.c_numero_nfe,
         c_serie_nfe = EXCLUDED.c_serie_nfe,
         c_modelo_nfe = EXCLUDED.c_modelo_nfe,
@@ -13343,7 +13347,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         updated_at = NOW()
     `, [
       nIdReceb,
-      cabec.cChaveNfe || null,
+      cChaveNfeFinal,  // ← Usa variável que prioriza webhook
       cabec.cNumeroNFe || null,
       cabec.cSerieNFe || null,
       cabec.cModeloNFe || null,
@@ -14346,12 +14350,17 @@ app.post('/api/compras/pedido', async (req, res) => {
 // POST /api/compras/solicitacao - Cria solicitações agrupadas por NP (do modal de carrinho)
 app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
   try {
-    const { itens } = req.body || {};
+    const { itens, compra_autorizada } = req.body || {};
+    const compraAutorizada = compra_autorizada === true;
     
     // Obtém usuário da sessão
     const solicitante = req.session?.user?.username || req.session?.user?.id || 'sistema';
     
-    console.log('[Compras-Solicitacao] Recebido:', { totalItens: itens?.length, primeiroItem: itens?.[0] });
+    console.log('[Compras-Solicitacao] Recebido:', {
+      totalItens: itens?.length,
+      compraAutorizada,
+      primeiroItem: itens?.[0]
+    });
     if (!Array.isArray(itens) || itens.length === 0) {
       return res.status(400).json({ ok: false, error: 'Nenhum item no carrinho' });
     }
@@ -14359,6 +14368,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
     const client = await pool.connect();
     const idsInseridos = [];
     const idsRequisicaoDireta = [];
+    const itensDiretosParaProcessar = [];
     
     try {
       await client.query('BEGIN');
@@ -14393,17 +14403,24 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           throw new Error('Cada item precisa ter produto_codigo');
         }
         
-        // Define status baseado no checkbox "Requisição Direta":
-        // - requisicao_direta = true (marcado) → "aguardando compra"
-        // - requisicao_direta = false/undefined (desmarcado) → "aguardando aprovação da requisição"
+        const requisicaoDiretaFinal = compraAutorizada || requisicao_direta === true;
+
+        // Regras:
+        // - compra_autorizada = true (checkbox global do carrinho) → força fluxo de requisição direta
+        // - requisicao_direta = true (item) → fluxo de requisição direta
+        // - demais casos → aguarda aprovação da requisição
         let statusInicial;
-        if (requisicao_direta === true) {
+        if (compraAutorizada) {
+          // Regra do modal "Meu Carrinho de Compras":
+          // compra já autorizada deve entrar diretamente como Requisição.
+          statusInicial = 'Requisição';
+        } else if (requisicaoDiretaFinal) {
           statusInicial = 'aguardando compra';
         } else {
           statusInicial = 'aguardando aprovação da requisição';
         }
         
-        console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta: ${requisicao_direta} - Status: ${statusInicial}`);
+        console.log(`[Compras-Solicitacao] Item ${produto_codigo} - NP: ${np} - Requisição Direta Item: ${requisicao_direta} - Compra Autorizada: ${compraAutorizada} - Requisição Direta Final: ${requisicaoDiretaFinal} - Status: ${statusInicial}`);
         
         // Processa anexo(s) se houver - SALVA NO SUPABASE
         let anexosArray = null;
@@ -14547,8 +14564,12 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           if (updateResult.rowCount > 0) {
             const itemId = updateResult.rows[0].id;
             idsInseridos.push(itemId);
-            if (requisicao_direta === true) {
+            if (requisicaoDiretaFinal) {
               idsRequisicaoDireta.push(itemId);
+              itensDiretosParaProcessar.push({
+                item: { ...item, requisicao_direta: true },
+                idDb: itemId
+              });
             }
             continue;
           }
@@ -14602,8 +14623,12 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         idsInseridos.push(itemId);
         
         // Se checkbox Requisição Direta estiver marcado, marca para criar na Omie
-        if (requisicao_direta === true) {
+        if (requisicaoDiretaFinal) {
           idsRequisicaoDireta.push(itemId);
+          itensDiretosParaProcessar.push({
+            item: { ...item, requisicao_direta: true },
+            idDb: itemId
+          });
         }
       }
       
@@ -14612,21 +14637,12 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
       console.log(`[Compras-Solicitacao] ${itens.length} item(ns) criado(s) por ${solicitante} - IDs: ${idsInseridos.join(', ')}`);
       console.log(`[Compras-Solicitacao] ${idsRequisicaoDireta.length} item(ns) com Requisição Direta para processar na Omie`);
       
-      // APÓS inserir todos os itens no banco, processa os com Requisição Direta na Omie
-      // Agrupa os items de requisição direta por NP
-      const itensFiltrados = itens.filter((_, idx) => idsRequisicaoDireta.includes(idsInseridos[idx]));
-      
-      // Mapa para agrupar por NP
+      // APÓS inserir/atualizar no banco, processa os itens diretos na Omie (agrupados por NP)
       const gruposNP = {};
-      itensFiltrados.forEach((item, idx) => {
-        const np = item.np || 'A';
-        if (!gruposNP[np]) {
-          gruposNP[np] = [];
-        }
-        gruposNP[np].push({
-          item: item,
-          idDb: idsInseridos[idx]
-        });
+      itensDiretosParaProcessar.forEach((itemGroup) => {
+        const np = itemGroup.item?.np || 'A';
+        if (!gruposNP[np]) gruposNP[np] = [];
+        gruposNP[np].push(itemGroup);
       });
       
       // Processa cada grupo de NP
@@ -15907,10 +15923,10 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${primeiroItem.resp_inspecao_recebimento || solicitante}\nNPST: ${numeroPedido}\nNPOM: ${primeiroItem.codigo_omie || ''}\nNP: ${np}\nObjetivo da Compra: ${primeiroItem.objetivo_compra || ''}\nObservação: ${primeiroItem.observacao || ''}`.trim();
   
   // Pega a categoria de compra do primeiro item (todos do mesmo NP devem ter a mesma categoria)
-  // Nota: primeiroItem vem do array do frontend, onde o campo é "categoria_compra", não "categoria_compra_codigo"
-  const categoriaCompra = primeiroItem.categoria_compra || '';
+  // Fallback: alguns fluxos enviam "categoria_compra_codigo" em vez de "categoria_compra".
+  const categoriaCompra = primeiroItem.categoria_compra || primeiroItem.categoria_compra_codigo || '';
   console.log(`[Compras-Solicitacao-Omie] Item recebido:`, primeiroItem);
-  console.log(`[Compras-Solicitacao-Omie] Categoria da compra (NP ${np}): Código="${categoriaCompra}" | Campo="categoria_compra"`);
+  console.log(`[Compras-Solicitacao-Omie] Categoria da compra (NP ${np}): Código="${categoriaCompra}" | Campos testados="categoria_compra/categoria_compra_codigo"`);
   
   // Monta payload para Omie - IncluirReq (seguindo o padrão do aprovar-item)
   const requisicaoOmie = {
@@ -16978,63 +16994,89 @@ app.get('/api/compras/requisicoes/debug/:id', async (req, res) => {
   }
 });
 
-// GET /api/compras/requisicoes - Lista solicitações com status 'Requisição' agrupadas por número
+// GET /api/compras/requisicoes - Lista requisições válidas para o kanban "Requisições"
 app.get('/api/compras/requisicoes', async (req, res) => {
   try {
-    // Objetivo: Retornar solicitações com status 'Requisição' da tabela compras.solicitacao_compras
-    // Agrupa os itens pelo campo 'numero' obtido da tabela compras.requisicoes_omie através do ncodped
+    // Regras:
+    // 1) Base: compras.solicitacao_compras (status Requisição)
+    // 2) Só entra se existir correspondência em compras.requisicoes_omie por cod_int_req_compra = numero_pedido
+    // 3) Só entra se requisicoes_omie.inativo = false
+    // 4) Não entra se já existir em compras.pedidos_omie por c_cod_int_ped = numero_pedido
     console.log('[Compras/Requisições] Iniciando busca de requisições...');
     
-    // Busca todas as solicitações com status 'Requisição' e que possuem ncodped
+    // Busca somente solicitações válidas da tabela solicitacao_compras
     const { rows: solicitacoes } = await pool.query(`
       SELECT 
         sc.*,
         po.codigo AS produto_codigo,
         po.descricao AS produto_descricao,
         ro.numero AS cnumero,
-        pop.c_unidade,
-        pop.n_qtde,
-        pop.n_val_tot,
+        ro.cod_req_compra AS cod_req_compra_omie,
+        ro.cod_int_req_compra AS cod_int_req_compra_omie,
         'solicitacao_compras' AS table_source
       FROM compras.solicitacao_compras sc
       LEFT JOIN public.produtos_omie po ON po.codigo_produto = sc.codigo_omie
-      LEFT JOIN compras.requisicoes_omie ro ON ro.cod_req_compra = sc.ncodped
-      LEFT JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = sc.ncodped 
-        AND LOWER(pop.c_codigo) = LOWER(sc.codigo_omie)
-      WHERE sc.status = 'Requisição'
-        AND sc.ncodped IS NOT NULL
-      ORDER BY ro.numero DESC, sc.created_at DESC
+      INNER JOIN compras.requisicoes_omie ro
+        ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+      WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
+        AND TRIM(LOWER(COALESCE(sc.status, ''))) IN (
+          TRIM(LOWER('Requisição')),
+          TRIM(LOWER('Requisicao'))
+        )
+        AND COALESCE(ro.inativo, false) = false
+        AND NOT EXISTS (
+          SELECT 1
+          FROM compras.pedidos_omie ped
+          WHERE TRIM(COALESCE(ped.c_cod_int_ped, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+        )
+      ORDER BY ro.numero DESC NULLS LAST, sc.created_at DESC
     `);
-
+    
+    // Busca também itens válidos da tabela compras_sem_cadastro
     const { rows: semCadastro } = await pool.query(`
       SELECT
         sc.*,
         sc.produto_codigo AS produto_codigo,
         sc.produto_descricao AS produto_descricao,
         ro.numero AS cnumero,
+        ro.cod_req_compra AS cod_req_compra_omie,
+        ro.cod_int_req_compra AS cod_int_req_compra_omie,
         'compras_sem_cadastro' AS table_source
       FROM compras.compras_sem_cadastro sc
-      LEFT JOIN compras.requisicoes_omie ro ON ro.cod_req_compra::text = sc.cod_req_compra::text
-      WHERE sc.status = 'Requisição'
-        AND sc.cod_req_compra IS NOT NULL
-      ORDER BY sc.created_at DESC
+      INNER JOIN compras.requisicoes_omie ro
+        ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+      WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
+        AND TRIM(LOWER(COALESCE(sc.status, ''))) IN (
+          TRIM(LOWER('Requisição')),
+          TRIM(LOWER('Requisicao'))
+        )
+        AND COALESCE(ro.inativo, false) = false
+        AND NOT EXISTS (
+          SELECT 1
+          FROM compras.pedidos_omie ped
+          WHERE TRIM(COALESCE(ped.c_cod_int_ped, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+        )
+      ORDER BY ro.numero DESC NULLS LAST, sc.created_at DESC
     `);
-    
+
     const solicitacoesTodas = [...solicitacoes, ...semCadastro];
-    console.log(`[Compras/Requisições] Encontradas ${solicitacoesTodas.length} solicitações com status Requisição`);
+    console.log(
+      `[Compras/Requisições] Encontradas ${solicitacoesTodas.length} solicitações válidas para o kanban Requisições ` +
+      `(solicitacao_compras=${solicitacoes.length}, compras_sem_cadastro=${semCadastro.length})`
+    );
 
     // Agrupa os itens por grupo_requisicao (campo que agrupa requisições no kanban)
     const requisicoesPorGrupo = {};
     
     solicitacoesTodas.forEach(item => {
-      const grupoRequisicao = item.grupo_requisicao || item.cnumero || 'SEM_GRUPO';
+      const grupoRequisicao = item.grupo_requisicao || item.cnumero || item.numero_pedido || 'SEM_GRUPO';
       
       if (!requisicoesPorGrupo[grupoRequisicao]) {
         requisicoesPorGrupo[grupoRequisicao] = {
           numero: grupoRequisicao,
           numero_requisicao_omie: item.cnumero || null,
-          cod_req_compra: item.cod_req_compra || item.ncodped,
-          cod_int_req_compra: item.numero_pedido,
+          cod_req_compra: item.cod_req_compra_omie || item.cod_req_compra || item.ncodped,
+          cod_int_req_compra: item.cod_int_req_compra_omie || item.numero_pedido,
           created_at: item.created_at,
           updated_at: item.updated_at,
           itens: []
@@ -17047,7 +17089,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         produto_descricao: item.produto_descricao || item.produto_descricao_manual || 'Sem descrição',
         quantidade: item.quantidade,
         prazo_solicitado: item.prazo_solicitado,
-        observacao: item.observacao,
+        observacao: item.observacao || item.observacao_recebimento,
         solicitante: item.solicitante,
         departamento: item.departamento,
         centro_custo: item.centro_custo,
@@ -17058,7 +17100,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         numero_pedido: item.numero_pedido,
         status: item.status,
         c_unidade: item.c_unidade || '-',
-        n_qtde: item.n_qtde || 0,
+        n_qtde: item.n_qtde || item.quantidade || 0,
         n_val_tot: item.n_val_tot || 0,
         table_source: item.table_source || null
       });
