@@ -14745,6 +14745,7 @@ async function enviarPedidoModal() {
   const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value?.trim() || null;
   const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value?.trim() || null;
   const prazoSolicitadoGlobal = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || null;
+  const compraAutorizada = document.getElementById('carrinhoCompraAutorizada')?.checked === true;
   
   console.log('[Enviar Pedido] Valores globais capturados:', {
     departamento: departamentoGlobal,
@@ -14765,6 +14766,9 @@ async function enviarPedidoModal() {
     if (prazoSolicitadoGlobal) {
       item.prazo_solicitado = prazoSolicitadoGlobal;
       console.log(`[Enviar Pedido] Item ${idx}: prazo_solicitado aplicado = ${prazoSolicitadoGlobal}`);
+    }
+    if (compraAutorizada) {
+      item.requisicao_direta = true;
     }
   });
   
@@ -14831,7 +14835,10 @@ async function enviarPedidoModal() {
         const response = await fetch('/api/compras/solicitacao', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itens: sol.itens })
+          body: JSON.stringify({
+            itens: sol.itens,
+            compra_autorizada: compraAutorizada
+          })
         });
         
         const result = await response.json();
@@ -16718,6 +16725,7 @@ document.getElementById('comprasFiltroKanbanBtn')?.addEventListener('click', () 
 });
 document.getElementById('modalFiltroKanbansFecharBtn')?.addEventListener('click', salvarPreferenciasKanbans);
 document.getElementById('filtroKanbanSelecionarTodos')?.addEventListener('click', toggleSelecionarTodosKanbans);
+document.getElementById('filtroKanbanSelecionarTodosVazio')?.addEventListener('click', toggleSelecionarTodosKanbansVazios);
 document.getElementById('filtroKanbanAplicar')?.addEventListener('click', salvarPreferenciasKanbans);
 
 // Binds do menu hamburger de ações do Kanban
@@ -16727,11 +16735,6 @@ document.getElementById('modalComprasAcoes')?.addEventListener('click', (e) => {
   if (e.target.id === 'modalComprasAcoes') {
     fecharModalComprasAcoes();
   }
-});
-
-document.getElementById('comprasAcoesContainer')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('button');
-  if (btn) kanbanAcoesAlteradas = true;
 });
 
 // Fecha modal ao clicar fora
@@ -27004,7 +27007,6 @@ async function loadComprasRecebimento() {
 }
 
 // ========== Modal de Ações do Kanban (Hamburger) ==========
-let kanbanAcoesAlteradas = false;
 function abrirModalComprasAcoes() {
   const modal = document.getElementById('modalComprasAcoes');
   if (modal) {
@@ -27017,17 +27019,13 @@ function fecharModalComprasAcoes() {
   if (modal) {
     modal.style.display = 'none';
   }
-
-  if (kanbanAcoesAlteradas) {
-    kanbanAcoesAlteradas = false;
-    loadMinhasSolicitacoes();
-  }
 }
 
 // ========== Funções de Filtro de Kanbans ==========
 
 // Variável global para armazenar kanbans visíveis do usuário
 let kanbansVisiveis = [];
+let estadoInicialFiltroKanbans = null;
 const DATA_LIMITE_PADRAO = '2026-02-01';
 
 // Variável global para controlar filtro por solicitante (padrão: apenas minhas solicitações)
@@ -27096,6 +27094,67 @@ const todosKanbans = [
   'recebido',
   'concluído'
 ];
+
+function normalizarListaKanbans(lista = []) {
+  return Array.from(new Set((Array.isArray(lista) ? lista : []).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function listasKanbansIguais(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  return a.every((valor, idx) => valor === b[idx]);
+}
+
+function normalizarMapaDatasLimite(map = {}) {
+  const normalizado = {};
+  todosKanbans.forEach(kanban => {
+    normalizado[kanban] = normalizarDataLimite(map[kanban]) || DATA_LIMITE_PADRAO;
+  });
+  return normalizado;
+}
+
+function mapasDataLimiteIguais(a = {}, b = {}) {
+  return todosKanbans.every(kanban => {
+    const valorA = normalizarDataLimite(a[kanban]) || DATA_LIMITE_PADRAO;
+    const valorB = normalizarDataLimite(b[kanban]) || DATA_LIMITE_PADRAO;
+    return valorA === valorB;
+  });
+}
+
+function coletarEstadoFiltroKanbansModal() {
+  const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
+  const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
+  const inputsDataLimite = document.querySelectorAll('#listaFiltroKanbans .kanban-data-limite');
+
+  if (!checkboxesVisivel.length) return null;
+
+  let visiveis = Array.from(checkboxesVisivel)
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+
+  let vazios = Array.from(checkboxesVazio)
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+
+  // Mantém a consistência: "mesmo vazio" implica "visível".
+  const visiveisSet = new Set(visiveis);
+  vazios.forEach(kanban => visiveisSet.add(kanban));
+  visiveis = Array.from(visiveisSet);
+  vazios = vazios.filter(kanban => visiveisSet.has(kanban));
+
+  const datasLimite = {};
+  inputsDataLimite.forEach(input => {
+    const kanban = input.getAttribute('data-kanban');
+    if (!kanban) return;
+    datasLimite[kanban] = normalizarDataLimite(input.value) || DATA_LIMITE_PADRAO;
+  });
+
+  return {
+    visiveis: normalizarListaKanbans(visiveis),
+    vazios: normalizarListaKanbans(vazios),
+    datasLimite: normalizarMapaDatasLimite(datasLimite)
+  };
+}
 
 // Abre o modal de filtro de kanbans
 async function abrirModalFiltroKanbans() {
@@ -27277,7 +27336,8 @@ async function abrirModalFiltroKanbans() {
       }
     });
   });
-  
+
+  estadoInicialFiltroKanbans = coletarEstadoFiltroKanbansModal();
   modal.style.display = 'flex';
 }
 
@@ -27285,6 +27345,7 @@ async function abrirModalFiltroKanbans() {
 function fecharModalFiltroKanbans() {
   const modal = document.getElementById('modalFiltroKanbans');
   if (modal) modal.style.display = 'none';
+  estadoInicialFiltroKanbans = null;
 }
 
 // Carrega preferências de kanbans visíveis do servidor
@@ -27312,56 +27373,58 @@ async function carregarPreferenciasKanbans() {
 // Salva preferências de kanbans visíveis no servidor
 async function salvarPreferenciasKanbans() {
   try {
-    const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
-    const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
-    const inputsDataLimite = document.querySelectorAll('#listaFiltroKanbans .kanban-data-limite');
+    const estadoAtual = coletarEstadoFiltroKanbansModal();
+    if (!estadoAtual) {
+      fecharModalFiltroKanbans();
+      return;
+    }
 
-    let selecionados = Array.from(checkboxesVisivel)
-      .filter(cb => cb.checked)
-      .map(cb => cb.value);
+    const estadoBase = estadoInicialFiltroKanbans || {
+      visiveis: normalizarListaKanbans(kanbansVisiveis),
+      vazios: normalizarListaKanbans(obterKanbansVaziosVisiveis()),
+      datasLimite: normalizarMapaDatasLimite(obterDatasLimiteKanban())
+    };
 
-    let vaziosSelecionados = Array.from(checkboxesVazio)
-      .filter(cb => cb.checked)
-      .map(cb => cb.value);
+    const alterouVisiveis = !listasKanbansIguais(estadoAtual.visiveis, estadoBase.visiveis);
+    const alterouVazios = !listasKanbansIguais(estadoAtual.vazios, estadoBase.vazios);
+    const alterouDatas = !mapasDataLimiteIguais(estadoAtual.datasLimite, estadoBase.datasLimite);
+    const houveAlteracao = alterouVisiveis || alterouVazios || alterouDatas;
 
-    // Regra: se está marcado como "mesmo vazio", obrigatoriamente deve estar visível
-    const visiveisSet = new Set(selecionados);
-    vaziosSelecionados.forEach(kanban => visiveisSet.add(kanban));
-    selecionados = Array.from(visiveisSet);
-    vaziosSelecionados = vaziosSelecionados.filter(kanban => visiveisSet.has(kanban));
+    // Sem alterações: apenas fecha, sem POST e sem recarregar kanban/lista.
+    if (!houveAlteracao) {
+      fecharModalFiltroKanbans();
+      return;
+    }
 
     // Salva preferência de kanbans que podem aparecer vazios no localStorage
-    localStorage.setItem('kanbansVaziosVisiveis', JSON.stringify(vaziosSelecionados));
+    localStorage.setItem('kanbansVaziosVisiveis', JSON.stringify(estadoAtual.vazios));
 
     // Salva datas limite por kanban no localStorage
-    const datasLimite = {};
-    inputsDataLimite.forEach(input => {
-      const kanban = input.getAttribute('data-kanban');
-      const valor = normalizarDataLimite(input.value) || DATA_LIMITE_PADRAO;
-      if (kanban) datasLimite[kanban] = valor;
-    });
-    salvarDatasLimiteKanban(datasLimite);
-    
-    const resp = await fetch('/api/compras/filtro-kanbans', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ kanbans_visiveis: selecionados })
-    });
-    
-    if (!resp.ok) {
-      throw new Error('Falha ao salvar preferências');
+    salvarDatasLimiteKanban(estadoAtual.datasLimite);
+
+    // Só grava no banco se o conjunto de kanbans visíveis realmente mudou.
+    if (alterouVisiveis) {
+      const resp = await fetch('/api/compras/filtro-kanbans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ kanbans_visiveis: estadoAtual.visiveis })
+      });
+
+      if (!resp.ok) {
+        throw new Error('Falha ao salvar preferências');
+      }
     }
-    
+
     // Atualiza variável global
-    kanbansVisiveis = selecionados;
-    
+    kanbansVisiveis = estadoAtual.visiveis;
+
     // Aplica filtro visualmente
     aplicarFiltroKanbans();
 
-    // Recarrega os kanbans para aplicar datas limite
+    // Recarrega os kanbans apenas quando houve alteração salva/aplicada.
     await loadMinhasSolicitacoes();
-    
+
     // Fecha modal
     fecharModalFiltroKanbans();
     
@@ -27384,13 +27447,22 @@ async function salvarPreferenciasKanbans() {
 }
 
 // Aplica o filtro de kanbans (oculta/mostra colunas)
+function deveExibirKanbanPorFiltro(statusNormalizado, count = 0) {
+  if (!statusNormalizado) return false;
+  if (!kanbansVisiveis.includes(statusNormalizado)) return false;
+
+  if (count <= 0) {
+    const kanbansVaziosVisiveis = obterKanbansVaziosVisiveis();
+    if (!kanbansVaziosVisiveis.includes(statusNormalizado)) return false;
+  }
+
+  return true;
+}
+
 function aplicarFiltroKanbans() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   if (!kanbanContainer) return;
-  
-  // Verifica quais kanbans podem aparecer vazios
-  const kanbansVaziosVisiveis = obterKanbansVaziosVisiveis();
-  
+
   // Pega todas as colunas do kanban
   const colunas = kanbanContainer.querySelectorAll('.kanban-column-minhas');
   
@@ -27407,13 +27479,7 @@ function aplicarFiltroKanbans() {
     // 1. Se o kanban não está na lista de visíveis: oculta
     // 2. Se está na lista de visíveis mas tem 0 itens e "mostrarVazios" está desativado: oculta
     // 3. Caso contrário: mostra
-    if (!kanbansVisiveis.includes(statusNormalizado)) {
-      coluna.style.display = 'none';
-    } else if (count === 0 && !kanbansVaziosVisiveis.includes(statusNormalizado)) {
-      coluna.style.display = 'none';
-    } else {
-      coluna.style.display = '';
-    }
+    coluna.style.display = deveExibirKanbanPorFiltro(statusNormalizado, count) ? '' : 'none';
   });
 }
 
@@ -27447,6 +27513,24 @@ function toggleSelecionarTodosKanbans() {
   if (todosMarcados) {
     checkboxesVazio.forEach(cb => {
       cb.checked = false;
+    });
+  }
+}
+
+// Seleciona/desmarca todos os checkboxes da coluna "Visível mesmo vazio"
+function toggleSelecionarTodosKanbansVazios() {
+  const checkboxesVisivel = document.querySelectorAll('#listaFiltroKanbans .kanban-visivel-checkbox');
+  const checkboxesVazio = document.querySelectorAll('#listaFiltroKanbans .kanban-vazio-checkbox');
+  const todosMarcados = Array.from(checkboxesVazio).every(cb => cb.checked);
+
+  checkboxesVazio.forEach(cb => {
+    cb.checked = !todosMarcados;
+  });
+
+  // Regra de consistência: se "mesmo vazio" estiver marcado, o kanban precisa estar visível.
+  if (!todosMarcados) {
+    checkboxesVisivel.forEach(cb => {
+      cb.checked = true;
     });
   }
 }
@@ -28935,6 +29019,10 @@ function renderizarLista() {
     if (!container) return;
     
     const cards = container.querySelectorAll('.kanban-card');
+    const statusNormalizado = (status || '').toLowerCase().trim();
+
+    // Mantém o modo tabela alinhado ao mesmo filtro de etapas aplicado no modo kanban.
+    if (!deveExibirKanbanPorFiltro(statusNormalizado, cards.length)) return;
     
     cards.forEach(card => {
       // Ignora cards ocultos pelo filtro
