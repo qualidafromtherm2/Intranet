@@ -852,7 +852,87 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
 
 /* Ajusta o topo do painel de compras para reduzir espaço vazio */
 #comprasFormPane .content-wrapper {
-  padding-top: 12px;
+  padding-top: 0;
+}
+
+/* Compras (lista): trava barra superior + cabeçalho sem transparência */
+#minhasComprasWrapper {
+  --compras-lista-topo-offset: 64px;
+  margin-top: 0 !important;
+  background: #f3f4f6;
+}
+
+#comprasListaToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 140;
+  margin-top: 0;
+  padding: 8px 0 10px;
+  background: #f3f4f6;
+  border-bottom: 1px solid #d1d5db;
+  isolation: isolate;
+}
+
+#comprasListaToolbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -16px;
+  height: 16px;
+  background: inherit;
+  pointer-events: none;
+}
+
+#listaMinhasSolicitacoes {
+  position: relative;
+  z-index: 1;
+  background: #f3f4f6;
+  padding-top: 2px;
+}
+
+#listaMinhasSolicitacoes table {
+  background: #ffffff;
+}
+
+#listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr {
+  background: #f9fafb !important;
+}
+
+#listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr > th {
+  position: sticky;
+  top: var(--compras-lista-topo-offset) !important;
+  z-index: 130 !important;
+  background: #f9fafb !important;
+  box-shadow: 0 2px 0 #e5e7eb !important;
+  background-clip: padding-box;
+}
+
+/* Não fixar cabeçalhos de tabelas internas (produtos) */
+#listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela tbody table thead th {
+  position: static !important;
+  top: auto !important;
+  z-index: auto !important;
+  box-shadow: none !important;
+}
+
+body:not(.light-mode) #comprasListaToolbar {
+  background: #0f172a;
+  border-bottom-color: #334155;
+}
+
+body:not(.light-mode) #minhasComprasWrapper {
+  background: #0f172a;
+}
+
+body:not(.light-mode) #listaMinhasSolicitacoes {
+  background: #0f172a;
+}
+
+body:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr > th {
+  color: #e5e7eb !important;
+  background: #111827 !important;
+  box-shadow: 0 2px 0 #334155 !important;
 }
 @media screen and (max-width: 510px) {
   .content-wrapper {
@@ -8052,4 +8132,3 @@ table.tabela td.num {
   color: #ff9800;
   font-weight: bold;
 }
-

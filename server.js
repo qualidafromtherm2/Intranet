@@ -20,6 +20,7 @@ const pcpEstruturaRoutes = require('./routes/pcp_estrutura');
 // ——————————————————————————————
 const express = require('express');
 const session       = require('express-session');
+const { AsyncLocalStorage } = require('async_hooks');
 const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
 const path          = require('path');
@@ -189,6 +190,73 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
   ssl: { rejectUnauthorized: false },
+});
+const comprasAuditContext = new AsyncLocalStorage();
+const originalPoolQuery = pool.query.bind(pool);
+const originalPoolConnect = pool.connect.bind(pool);
+
+function resolverUsuarioAuditoria(req) {
+  const user = req?.session?.user || {};
+  const candidato = user.username || user.fullName || user.login || user.id || null;
+  return String(candidato || '').trim() || null;
+}
+
+// Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
+pool.query = function queryComContexto(...args) {
+  const ctx = comprasAuditContext.getStore();
+  if (ctx?.client) {
+    return ctx.client.query(...args);
+  }
+  return originalPoolQuery(...args);
+};
+
+// Garante app.current_user também para clients obtidos via pool.connect dentro do contexto.
+pool.connect = async function connectComContexto(...args) {
+  const client = await originalPoolConnect(...args);
+  const ctx = comprasAuditContext.getStore();
+  if (ctx?.username) {
+    try {
+      await client.query(`SELECT set_config('app.current_user', $1, false)`, [ctx.username]);
+    } catch (err) {
+      console.warn('[Compras/Auditoria] Falha ao aplicar app.current_user no client:', err?.message || err);
+    }
+  }
+  return client;
+};
+
+// Contexto de auditoria apenas para endpoints de compras.
+app.use('/api/compras', async (req, res, next) => {
+  const metodo = String(req.method || 'GET').toUpperCase();
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodo)) {
+    return next();
+  }
+
+  const username = resolverUsuarioAuditoria(req);
+  if (!username) {
+    return next();
+  }
+
+  let client;
+  let released = false;
+  const releaseClient = () => {
+    if (released) return;
+    released = true;
+    try { client?.release?.(); } catch {}
+  };
+
+  try {
+    client = await originalPoolConnect();
+    await client.query(`SELECT set_config('app.current_user', $1, false)`, [username]);
+  } catch (err) {
+    releaseClient();
+    console.warn('[Compras/Auditoria] Falha ao criar contexto de auditoria:', err?.message || err);
+    return next();
+  }
+
+  res.on('finish', releaseClient);
+  res.on('close', releaseClient);
+
+  comprasAuditContext.run({ username, client }, () => next());
 });
 const ProdutosEstruturaJsonClient = require(
   path.resolve(__dirname, 'utils/omie/ProdutosEstruturaJsonClient.js')
@@ -1598,6 +1666,65 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
   }
 });
 
+// Atualiza retorno_cotacao em lote para itens do mesmo grupo de requisição
+app.put('/api/compras/solicitacoes/retorno-cotacao/lote', express.json(), async (req, res) => {
+  try {
+    const { ids, retorno_cotacao } = req.body || {};
+    const idsNumericos = Array.isArray(ids)
+      ? [...new Set(ids.map(v => Number(v)).filter(v => Number.isInteger(v) && v > 0))]
+      : [];
+
+    if (!idsNumericos.length) {
+      return res.status(400).json({ success: false, error: 'Informe ao menos um ID válido' });
+    }
+
+    const retornoTexto = String(retorno_cotacao ?? '').trim().toLowerCase();
+    let retornoNormalizado = null;
+    if (['s', 'sim', 'yes', 'true', '1'].includes(retornoTexto)) {
+      retornoNormalizado = 'Sim';
+    } else if (['n', 'nao', 'não', 'no', 'false', '0'].includes(retornoTexto)) {
+      retornoNormalizado = 'Não';
+    } else {
+      return res.status(400).json({ success: false, error: 'retorno_cotacao inválido. Use Sim ou Não' });
+    }
+
+    const gruposRes = await pool.query(`
+      SELECT DISTINCT COALESCE(grupo_requisicao, '') AS grupo_requisicao
+      FROM compras.solicitacao_compras
+      WHERE id = ANY($1::int[])
+    `, [idsNumericos]);
+
+    if (!gruposRes.rows.length) {
+      return res.status(404).json({ success: false, error: 'Itens não encontrados em solicitacao_compras' });
+    }
+
+    if (gruposRes.rows.length > 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Os itens informados pertencem a grupos diferentes. A alteração em massa deve ser por grupo.'
+      });
+    }
+
+    const updateRes = await pool.query(`
+      UPDATE compras.solicitacao_compras
+         SET retorno_cotacao = $1,
+             updated_at = NOW()
+       WHERE id = ANY($2::int[])
+       RETURNING id, grupo_requisicao, retorno_cotacao
+    `, [retornoNormalizado, idsNumericos]);
+
+    return res.json({
+      success: true,
+      atualizados: updateRes.rowCount,
+      grupo_requisicao: updateRes.rows[0]?.grupo_requisicao || null,
+      retorno_cotacao: retornoNormalizado
+    });
+  } catch (err) {
+    console.error('[API] PUT /api/compras/solicitacoes/retorno-cotacao/lote erro:', err);
+    return res.status(500).json({ success: false, error: 'Falha ao atualizar retorno_cotacao em lote' });
+  }
+});
+
 // Atualiza status ou previsão de chegada de uma solicitação
 app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
   const client = await pool.connect();
@@ -1605,7 +1732,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao } = req.body || {};
+    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao } = req.body || {};
     
     const allowedStatus = [
       'aguardando aprovação',
@@ -1657,6 +1784,25 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
         : (grupo_requisicao ? String(grupo_requisicao).trim() : null);
       fields.push(`grupo_requisicao = $${idx++}`);
       values.push(novoGrupo);
+    }
+
+    if (typeof retorno_cotacao !== 'undefined') {
+      const retornoTexto = String(retorno_cotacao ?? '').trim();
+      let retornoNormalizado = null;
+
+      if (retornoTexto) {
+        const retornoLower = retornoTexto.toLowerCase();
+        if (['s', 'sim', 'yes', 'true', '1'].includes(retornoLower)) {
+          retornoNormalizado = 'Sim';
+        } else if (['n', 'nao', 'não', 'no', 'false', '0'].includes(retornoLower)) {
+          retornoNormalizado = 'Não';
+        } else {
+          return res.status(400).json({ error: 'retorno_cotacao inválido. Use Sim ou Não' });
+        }
+      }
+
+      fields.push(`retorno_cotacao = $${idx++}`);
+      values.push(retornoNormalizado);
     }
     
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
@@ -4569,20 +4715,35 @@ app.get('/api/compras/departamentos', async (req, res) => {
 // GET /api/compras/historico/resumo - Estatísticas do histórico (DEVE VIR ANTES DO :id)
 app.get('/api/compras/historico/resumo', async (req, res) => {
   try {
-    const { dias = 30 } = req.query;
-    
-    const { rows } = await pool.query(`
+    const { dias = 30, table_source } = req.query;
+    const diasInt = Number.parseInt(dias, 10) || 30;
+    const tableSource = String(table_source || '').trim();
+
+    let query = `
       SELECT 
         operacao,
         campo_alterado,
         COUNT(*) as total,
-        COUNT(DISTINCT solicitacao_id) as itens_afetados,
-        COUNT(DISTINCT usuario) as usuarios_distintos
+        COUNT(DISTINCT (COALESCE(table_source, 'solicitacao_compras') || ':' || solicitacao_id::TEXT)) as itens_afetados,
+        COUNT(DISTINCT COALESCE(NULLIF(TRIM(usuario), ''), 'sistema')) as usuarios_distintos
       FROM compras.historico_solicitacao_compras
-      WHERE created_at >= NOW() - INTERVAL '${parseInt(dias)} days'
+      WHERE created_at >= NOW() - ($1::INT * INTERVAL '1 day')
+    `;
+    const params = [diasInt];
+    let paramIndex = 2;
+
+    if (tableSource) {
+      query += ` AND table_source = $${paramIndex}`;
+      params.push(tableSource);
+      paramIndex++;
+    }
+
+    query += `
       GROUP BY operacao, campo_alterado
       ORDER BY total DESC
-    `);
+    `;
+
+    const { rows } = await pool.query(query, params);
     
     console.log(`[Compras] Resumo do histórico: ${rows.length} tipos de operações`);
     res.json({ ok: true, resumo: rows });
@@ -4595,12 +4756,16 @@ app.get('/api/compras/historico/resumo', async (req, res) => {
 // GET /api/compras/historico - Lista histórico com filtros opcionais (DEVE VIR ANTES DO :id)
 app.get('/api/compras/historico', async (req, res) => {
   try {
-    const { usuario, operacao, dias = 30, limit = 100 } = req.query;
+    const { usuario, operacao, table_source, dias = 30, limit = 100 } = req.query;
+    const diasInt = Number.parseInt(dias, 10) || 30;
+    const limitInt = Number.parseInt(limit, 10) || 100;
+    const tableSource = String(table_source || '').trim();
     
     let query = `
       SELECT 
         id,
         solicitacao_id,
+        table_source,
         operacao,
         campo_alterado,
         valor_anterior,
@@ -4611,11 +4776,17 @@ app.get('/api/compras/historico', async (req, res) => {
         departamento,
         created_at
       FROM compras.historico_solicitacao_compras
-      WHERE created_at >= NOW() - INTERVAL '${parseInt(dias)} days'
+      WHERE created_at >= NOW() - ($1::INT * INTERVAL '1 day')
     `;
     
-    const params = [];
-    let paramIndex = 1;
+    const params = [diasInt];
+    let paramIndex = 2;
+    
+    if (tableSource) {
+      query += ` AND table_source = $${paramIndex}`;
+      params.push(tableSource);
+      paramIndex++;
+    }
     
     if (usuario) {
       query += ` AND usuario = $${paramIndex}`;
@@ -4630,7 +4801,7 @@ app.get('/api/compras/historico', async (req, res) => {
     }
     
     query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
-    params.push(parseInt(limit));
+    params.push(limitInt);
     
     const { rows } = await pool.query(query, params);
     
@@ -4646,15 +4817,17 @@ app.get('/api/compras/historico', async (req, res) => {
 app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
   try {
     const { solicitacaoId } = req.params;
+    const tableSource = String(req.query?.table_source || '').trim();
     
     if (!solicitacaoId || isNaN(solicitacaoId)) {
       return res.status(400).json({ ok: false, error: 'ID da solicitação inválido' });
     }
-    
-    const { rows } = await pool.query(`
+
+    let query = `
       SELECT 
         id,
         solicitacao_id,
+        table_source,
         operacao,
         campo_alterado,
         valor_anterior,
@@ -4666,8 +4839,17 @@ app.get('/api/compras/historico/:solicitacaoId', async (req, res) => {
         created_at
       FROM compras.historico_solicitacao_compras
       WHERE solicitacao_id = $1
-      ORDER BY created_at DESC
-    `, [solicitacaoId]);
+    `;
+    const params = [solicitacaoId];
+
+    if (tableSource) {
+      query += ` AND table_source = $2`;
+      params.push(tableSource);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+
+    const { rows } = await pool.query(query, params);
     
     console.log(`[Compras] Histórico da solicitação ${solicitacaoId}: ${rows.length} registros`);
     res.json({ ok: true, historico: rows });
@@ -12006,6 +12188,7 @@ async function ensureComprasSchema() {
         fornecedor_id TEXT,
         valor_cotado DECIMAL(15,2),
         observacao TEXT,
+        link TEXT,
         anexos JSONB,
         status_aprovacao VARCHAR(20) DEFAULT 'pendente' CHECK (status_aprovacao IN ('pendente', 'aprovado', 'reprovado')),
         criado_por TEXT,
@@ -12056,6 +12239,22 @@ async function ensureComprasSchema() {
           -- Cria índice para a nova coluna
           CREATE INDEX idx_cotacoes_status_aprovacao 
           ON compras.cotacoes(status_aprovacao);
+        END IF;
+      END $$;
+    `);
+
+    // Migration: Adiciona coluna link se não existir (armazena links da cotação em JSON string)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = 'compras' 
+          AND table_name = 'cotacoes' 
+          AND column_name = 'link'
+        ) THEN
+          ALTER TABLE compras.cotacoes 
+          ADD COLUMN link TEXT;
         END IF;
       END $$;
     `);
@@ -12306,6 +12505,138 @@ async function ensureComprasSchema() {
       CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_status 
         ON compras.solicitacao_compras(status);
     `);
+
+    // Garante coluna codigo_produto_omie para vincular com produtos_omie (se ainda não existir)
+    await pool.query(`
+      ALTER TABLE compras.solicitacao_compras
+      ADD COLUMN IF NOT EXISTS codigo_produto_omie TEXT;
+    `);
+
+    // Backfill: alguns registros antigos gravaram apenas codigo_omie
+    // e ficaram sem codigo_produto_omie. Mantém o vínculo padronizado.
+    try {
+      const backfillCodigoProdutoOmie = await pool.query(`
+        UPDATE compras.solicitacao_compras
+           SET codigo_produto_omie = codigo_omie
+         WHERE (codigo_produto_omie IS NULL OR TRIM(codigo_produto_omie::TEXT) = '')
+           AND codigo_omie IS NOT NULL
+           AND TRIM(codigo_omie::TEXT) <> '';
+      `);
+      if (backfillCodigoProdutoOmie.rowCount > 0) {
+        console.log(`[Compras] ✓ Backfill codigo_produto_omie concluído (${backfillCodigoProdutoOmie.rowCount} registro(s) atualizado(s))`);
+      }
+    } catch (backfillCodigoErr) {
+      console.warn('[Compras] Aviso no backfill de codigo_produto_omie:', backfillCodigoErr.message);
+    }
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_solicitacao_compras_codigo_produto_omie
+        ON compras.solicitacao_compras(codigo_produto_omie);
+    `);
+
+    // Trigger 1: ao inserir/alterar solicitacao_compras, preenche produto_descricao pela tabela produtos_omie
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION compras.fn_preencher_desc_solicitacao_por_produto_omie()
+      RETURNS TRIGGER
+      LANGUAGE plpgsql
+      AS $fn$
+      DECLARE
+        v_descricao TEXT;
+      BEGIN
+        IF NEW.codigo_produto_omie IS NULL OR TRIM(NEW.codigo_produto_omie::TEXT) = '' THEN
+          RETURN NEW;
+        END IF;
+
+        SELECT po.descricao
+          INTO v_descricao
+          FROM public.produtos_omie po
+         WHERE po.codigo_produto::TEXT = NEW.codigo_produto_omie::TEXT
+         LIMIT 1;
+
+        IF v_descricao IS NOT NULL THEN
+          NEW.produto_descricao := v_descricao;
+        END IF;
+
+        RETURN NEW;
+      EXCEPTION
+        WHEN undefined_table THEN
+          RETURN NEW;
+      END;
+      $fn$;
+    `);
+
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trg_preencher_desc_solicitacao_por_produto_omie
+      ON compras.solicitacao_compras;
+
+      CREATE TRIGGER trg_preencher_desc_solicitacao_por_produto_omie
+      BEFORE INSERT OR UPDATE OF codigo_produto_omie
+      ON compras.solicitacao_compras
+      FOR EACH ROW
+      EXECUTE FUNCTION compras.fn_preencher_desc_solicitacao_por_produto_omie();
+    `);
+
+    // Trigger 2: quando descrição mudar em produtos_omie, propaga para solicitacao_compras
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION compras.fn_sync_desc_produto_omie_para_solicitacao()
+      RETURNS TRIGGER
+      LANGUAGE plpgsql
+      AS $fn$
+      BEGIN
+        IF NEW.codigo_produto IS NULL THEN
+          RETURN NEW;
+        END IF;
+
+        UPDATE compras.solicitacao_compras sc
+           SET produto_descricao = NEW.descricao,
+               updated_at = NOW()
+         WHERE sc.codigo_produto_omie IS NOT NULL
+           AND sc.codigo_produto_omie::TEXT = NEW.codigo_produto::TEXT
+           AND COALESCE(sc.produto_descricao, '') IS DISTINCT FROM COALESCE(NEW.descricao, '');
+
+        RETURN NEW;
+      END;
+      $fn$;
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name = 'produtos_omie'
+        ) THEN
+          DROP TRIGGER IF EXISTS trg_sync_desc_produto_omie_para_solicitacao
+          ON public.produtos_omie;
+
+          CREATE TRIGGER trg_sync_desc_produto_omie_para_solicitacao
+          AFTER INSERT OR UPDATE OF descricao
+          ON public.produtos_omie
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_sync_desc_produto_omie_para_solicitacao();
+        END IF;
+      END $$;
+    `);
+
+    // Backfill inicial: sincroniza descrições já existentes
+    try {
+      const backfillDesc = await pool.query(`
+        UPDATE compras.solicitacao_compras sc
+           SET produto_descricao = po.descricao,
+               updated_at = NOW()
+          FROM public.produtos_omie po
+         WHERE sc.codigo_produto_omie IS NOT NULL
+           AND sc.codigo_produto_omie::TEXT = po.codigo_produto::TEXT
+           AND COALESCE(sc.produto_descricao, '') IS DISTINCT FROM COALESCE(po.descricao, '');
+      `);
+      console.log(`[Compras] ✓ Backfill produto_descricao concluído (${backfillDesc.rowCount} registro(s) atualizado(s))`);
+    } catch (backfillErr) {
+      if (!String(backfillErr?.message || '').includes('does not exist')) {
+        console.warn('[Compras] Aviso no backfill de produto_descricao:', backfillErr.message);
+      }
+    }
     
     // Migration: Corrigir tipo de n_qtde_parc de INTEGER para BIGINT
     // Motivo: Omie envia IDs grandes que não cabem em INTEGER (máximo ~2 bilhões)
@@ -12365,6 +12696,209 @@ async function ensureComprasSchema() {
         console.warn('[Compras] Aviso na migração de colunas numero/etapa:', migErr.message);
       }
     }
+
+    // Histórico completo de alterações (solicitacao_compras + compras_sem_cadastro)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.historico_solicitacao_compras (
+        id SERIAL PRIMARY KEY,
+        solicitacao_id INTEGER NOT NULL,
+        table_source TEXT NOT NULL DEFAULT 'solicitacao_compras',
+        operacao TEXT NOT NULL,
+        campo_alterado TEXT,
+        valor_anterior TEXT,
+        valor_novo TEXT,
+        usuario TEXT,
+        descricao_item TEXT,
+        status_item TEXT,
+        departamento TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      ALTER TABLE compras.historico_solicitacao_compras
+      ADD COLUMN IF NOT EXISTS table_source TEXT NOT NULL DEFAULT 'solicitacao_compras';
+
+      UPDATE compras.historico_solicitacao_compras
+      SET table_source = 'solicitacao_compras'
+      WHERE table_source IS NULL OR TRIM(table_source) = '';
+
+      CREATE INDEX IF NOT EXISTS idx_historico_solicitacao_lookup
+        ON compras.historico_solicitacao_compras(table_source, solicitacao_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_historico_solicitacao_created
+        ON compras.historico_solicitacao_compras(created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION compras.fn_registrar_historico_solicitacao()
+      RETURNS TRIGGER
+      LANGUAGE plpgsql
+      AS $fn$
+      DECLARE
+        v_usuario TEXT;
+        v_table_source TEXT := COALESCE(TG_TABLE_NAME, 'solicitacao_compras');
+        v_descricao_item TEXT;
+        v_status_item TEXT;
+        v_departamento TEXT;
+        v_valor_anterior TEXT;
+        v_valor_novo TEXT;
+        v_id_item INTEGER;
+        rec RECORD;
+        j_new JSONB;
+        j_old JSONB;
+      BEGIN
+        IF TG_OP IN ('INSERT', 'UPDATE') THEN
+          j_new := to_jsonb(NEW);
+        ELSE
+          j_new := '{}'::jsonb;
+        END IF;
+
+        IF TG_OP IN ('UPDATE', 'DELETE') THEN
+          j_old := to_jsonb(OLD);
+        ELSE
+          j_old := '{}'::jsonb;
+        END IF;
+
+        BEGIN
+          v_usuario := NULLIF(TRIM(COALESCE(current_setting('app.current_user', true), '')), '');
+        EXCEPTION WHEN OTHERS THEN
+          v_usuario := NULL;
+        END;
+
+        IF v_usuario IS NULL THEN
+          v_usuario := NULLIF(TRIM(COALESCE(
+            j_new->>'usuario_comentario',
+            j_old->>'usuario_comentario',
+            j_new->>'solicitante',
+            j_old->>'solicitante',
+            ''
+          )), '');
+        END IF;
+
+        IF v_usuario IS NULL THEN
+          v_usuario := current_user;
+        END IF;
+
+        v_descricao_item := COALESCE(
+          j_new->>'produto_descricao',
+          j_old->>'produto_descricao',
+          j_new->>'produto_codigo',
+          j_old->>'produto_codigo',
+          'Item sem descrição'
+        );
+        v_status_item := COALESCE(j_new->>'status', j_old->>'status');
+        v_departamento := COALESCE(j_new->>'departamento', j_old->>'departamento');
+        v_id_item := COALESCE((j_new->>'id')::INTEGER, (j_old->>'id')::INTEGER);
+
+        IF TG_OP = 'INSERT' THEN
+          INSERT INTO compras.historico_solicitacao_compras (
+            solicitacao_id, table_source, operacao, campo_alterado, valor_anterior, valor_novo,
+            usuario, descricao_item, status_item, departamento
+          ) VALUES (
+            v_id_item, v_table_source, 'INSERT', 'NOVO_ITEM', NULL,
+            format('Descrição: %s | Qtd: %s | Solicitante: %s',
+              COALESCE(j_new->>'produto_descricao', '-'),
+              COALESCE(j_new->>'quantidade', '-'),
+              COALESCE(j_new->>'solicitante', '-')),
+            v_usuario, v_descricao_item, v_status_item, v_departamento
+          );
+          RETURN NEW;
+        END IF;
+
+        IF TG_OP = 'UPDATE' THEN
+          FOR rec IN
+            SELECT
+              COALESCE(n.key, o.key) AS campo,
+              o.value AS valor_antigo,
+              n.value AS valor_novo
+            FROM jsonb_each(COALESCE(j_new, '{}'::jsonb)) n
+            FULL JOIN jsonb_each(COALESCE(j_old, '{}'::jsonb)) o
+              ON o.key = n.key
+            WHERE COALESCE(n.value, 'null'::jsonb) IS DISTINCT FROM COALESCE(o.value, 'null'::jsonb)
+          LOOP
+            IF rec.campo IN ('updated_at') THEN
+              CONTINUE;
+            END IF;
+
+            IF rec.valor_antigo IS NULL OR rec.valor_antigo = 'null'::jsonb THEN
+              v_valor_anterior := NULL;
+            ELSIF jsonb_typeof(rec.valor_antigo) = 'string' THEN
+              v_valor_anterior := rec.valor_antigo #>> '{}';
+            ELSE
+              v_valor_anterior := rec.valor_antigo::TEXT;
+            END IF;
+
+            IF rec.valor_novo IS NULL OR rec.valor_novo = 'null'::jsonb THEN
+              v_valor_novo := NULL;
+            ELSIF jsonb_typeof(rec.valor_novo) = 'string' THEN
+              v_valor_novo := rec.valor_novo #>> '{}';
+            ELSE
+              v_valor_novo := rec.valor_novo::TEXT;
+            END IF;
+
+            INSERT INTO compras.historico_solicitacao_compras (
+              solicitacao_id, table_source, operacao, campo_alterado, valor_anterior, valor_novo,
+              usuario, descricao_item, status_item, departamento
+            ) VALUES (
+              v_id_item, v_table_source, 'UPDATE', rec.campo, v_valor_anterior, v_valor_novo,
+              v_usuario, v_descricao_item, COALESCE(j_new->>'status', v_status_item), COALESCE(j_new->>'departamento', v_departamento)
+            );
+          END LOOP;
+          RETURN NEW;
+        END IF;
+
+        IF TG_OP = 'DELETE' THEN
+          INSERT INTO compras.historico_solicitacao_compras (
+            solicitacao_id, table_source, operacao, campo_alterado, valor_anterior, valor_novo,
+            usuario, descricao_item, status_item, departamento
+          ) VALUES (
+            v_id_item, v_table_source, 'DELETE', 'ITEM_REMOVIDO',
+            format('Descrição: %s | Qtd: %s | Status: %s',
+              COALESCE(j_old->>'produto_descricao', '-'),
+              COALESCE(j_old->>'quantidade', '-'),
+              COALESCE(j_old->>'status', '-')),
+            NULL,
+            v_usuario, v_descricao_item, v_status_item, v_departamento
+          );
+          RETURN OLD;
+        END IF;
+
+        RETURN NULL;
+      END;
+      $fn$;
+    `);
+
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trg_historico_solicitacao_compras
+      ON compras.solicitacao_compras;
+
+      CREATE TRIGGER trg_historico_solicitacao_compras
+      AFTER INSERT OR UPDATE OR DELETE
+      ON compras.solicitacao_compras
+      FOR EACH ROW
+      EXECUTE FUNCTION compras.fn_registrar_historico_solicitacao();
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'compras'
+            AND table_name = 'compras_sem_cadastro'
+        ) THEN
+          DROP TRIGGER IF EXISTS trg_historico_compras_sem_cadastro
+          ON compras.compras_sem_cadastro;
+
+          CREATE TRIGGER trg_historico_compras_sem_cadastro
+          AFTER INSERT OR UPDATE OR DELETE
+          ON compras.compras_sem_cadastro
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_registrar_historico_solicitacao();
+        END IF;
+      END $$;
+    `);
     
     console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
   } catch (e) {
@@ -16856,46 +17390,63 @@ app.get('/api/compras/todas', async (req, res) => {
     // Comentário: Traz itens de solicitacao_compras com identificação de origem
     const { rows: solicitacoesBase } = await pool.query(`
       SELECT 
-        id,
-        numero_pedido,
-        produto_codigo,
-        produto_descricao,
-        quantidade,
-        prazo_solicitado,
-        previsao_chegada,
-        status,
-        observacao,
-        observacao_retificacao,
-        solicitante,
-        resp_inspecao_recebimento,
-        responsavel_pela_compra,
-        departamento,
-        centro_custo,
-        objetivo_compra,
-        fornecedor_nome,
-        fornecedor_id,
-        familia_produto,
-        grupo_requisicao,
-        retorno_cotacao,
-        categoria_compra_codigo,
-        categoria_compra_nome,
-        codigo_omie,
-        codigo_produto_omie,
-        requisicao_direta,
-        anexos,
-        cnumero AS "cNumero",
-        ncodped AS "nCodPed",
-        created_at,
-        updated_at,
+        sc.id,
+        sc.numero_pedido,
+        sc.produto_codigo,
+        sc.produto_descricao,
+        sc.quantidade,
+        po.unidade,
+        sc.prazo_solicitado,
+        sc.previsao_chegada,
+        sc.status,
+        sc.observacao,
+        sc.observacao_retificacao,
+        sc.solicitante,
+        sc.resp_inspecao_recebimento,
+        sc.responsavel_pela_compra,
+        sc.departamento,
+        sc.centro_custo,
+        sc.objetivo_compra,
+        sc.fornecedor_nome,
+        sc.fornecedor_id,
+        sc.familia_produto,
+        sc.grupo_requisicao,
+        sc.retorno_cotacao,
+        sc.categoria_compra_codigo,
+        sc.categoria_compra_nome,
+        sc.codigo_omie,
+        sc.codigo_produto_omie,
+        sc.requisicao_direta,
+        sc.anexos,
+        sc.cnumero AS "cNumero",
+        sc.ncodped AS "nCodPed",
+        sc.created_at,
+        sc.updated_at,
         'solicitacao_compras' AS table_source
-      FROM compras.solicitacao_compras
-      ORDER BY created_at DESC
+      FROM compras.solicitacao_compras sc
+      LEFT JOIN LATERAL (
+        SELECT po.unidade
+        FROM public.produtos_omie po
+        WHERE (
+          po.codigo_produto::TEXT = COALESCE(
+            NULLIF(sc.codigo_produto_omie::TEXT, ''),
+            NULLIF(sc.codigo_omie::TEXT, '')
+          )
+          OR po.codigo::TEXT = sc.produto_codigo::TEXT
+        )
+        ORDER BY CASE
+          WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_produto_omie::TEXT, '') THEN 1
+          WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_omie::TEXT, '') THEN 2
+          WHEN po.codigo::TEXT = sc.produto_codigo::TEXT THEN 3
+          ELSE 4
+        END
+        LIMIT 1
+      ) po ON TRUE
+      ORDER BY sc.created_at DESC
       LIMIT 1000
     `);
     
-    // Comentário: inclui itens de compras_sem_cadastro com status que aparecem nos kanbans:
-    // 'Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado', 'Carrinho'
-    // Objetivo: adicionar table_source para identificar origem dos dados para agrupamento por grupo_requisicao
+    // Comentário: inclui itens de compras_sem_cadastro e mantém table_source para identificar origem dos dados
     const { rows: solicitacoesSemCadastro } = await pool.query(`
       SELECT
         id,
@@ -16903,6 +17454,7 @@ app.get('/api/compras/todas', async (req, res) => {
         produto_codigo,
         produto_descricao,
         quantidade,
+        NULL::text AS unidade,
         NULL::date AS prazo_solicitado,
         NULL::date AS previsao_chegada,
         status,
@@ -16936,6 +17488,106 @@ app.get('/api/compras/todas', async (req, res) => {
       ORDER BY created_at DESC
       LIMIT 1000
     `);
+
+    // Objetivo: gerar ID no formato "<auth_user.id>.<sequencia_por_created_at>"
+    // usando a sequência por solicitante considerando as duas tabelas base.
+    const { rows: idsSolicitanteRows } = await pool.query(`
+      WITH base AS (
+        SELECT
+          'solicitacao_compras'::text AS table_source,
+          sc.id::text AS item_id,
+          sc.solicitante,
+          sc.created_at,
+          NULLIF(TRIM(sc.grupo_requisicao), '') AS grupo_requisicao
+        FROM compras.solicitacao_compras sc
+        UNION ALL
+        SELECT
+          'compras_sem_cadastro'::text AS table_source,
+          csc.id::text AS item_id,
+          csc.solicitante,
+          csc.created_at,
+          NULLIF(TRIM(csc.grupo_requisicao), '') AS grupo_requisicao
+        FROM compras.compras_sem_cadastro csc
+      ),
+      base_normalizada AS (
+        SELECT
+          b.table_source,
+          b.item_id,
+          LOWER(TRIM(COALESCE(b.solicitante, ''))) AS solicitante_norm,
+          b.created_at,
+          CASE
+            WHEN b.grupo_requisicao IS NOT NULL
+              THEN LOWER(TRIM(b.grupo_requisicao))
+            ELSE ('__sem_grupo__:' || b.table_source || ':' || b.item_id)
+          END AS grupo_seq_key
+        FROM base b
+        WHERE TRIM(COALESCE(b.solicitante, '')) <> ''
+      ),
+      usuarios AS (
+        SELECT
+          au.id AS usuario_id,
+          LOWER(TRIM(COALESCE(au.username, ''))) AS username_norm
+        FROM public.auth_user au
+        WHERE TRIM(COALESCE(au.username, '')) <> ''
+      ),
+      grupos AS (
+        SELECT
+          bn.solicitante_norm,
+          bn.grupo_seq_key,
+          MIN(bn.created_at) AS created_at_grupo,
+          MIN(bn.item_id::bigint) AS item_ordem
+        FROM base_normalizada bn
+        GROUP BY bn.solicitante_norm, bn.grupo_seq_key
+      ),
+      grupos_ranqueados AS (
+        SELECT
+          g.solicitante_norm,
+          g.grupo_seq_key,
+          ROW_NUMBER() OVER (
+            PARTITION BY g.solicitante_norm
+            ORDER BY g.created_at_grupo ASC NULLS FIRST, g.item_ordem ASC, g.grupo_seq_key ASC
+          ) AS sequencia
+        FROM grupos g
+      ),
+      itens_ranqueados AS (
+        SELECT
+          bn.table_source,
+          bn.item_id,
+          bn.solicitante_norm,
+          gr.sequencia
+        FROM base_normalizada bn
+        INNER JOIN grupos_ranqueados gr
+          ON gr.solicitante_norm = bn.solicitante_norm
+         AND gr.grupo_seq_key = bn.grupo_seq_key
+      )
+      SELECT
+        ir.table_source,
+        ir.item_id,
+        u.usuario_id,
+        ir.sequencia,
+        CASE
+          WHEN u.usuario_id IS NULL THEN NULL
+          ELSE (u.usuario_id::text || '.' || ir.sequencia::text)
+        END AS id_solicitante
+      FROM itens_ranqueados ir
+      LEFT JOIN usuarios u
+        ON u.username_norm = ir.solicitante_norm
+    `);
+
+    const mapaIdSolicitante = new Map();
+    for (const row of idsSolicitanteRows) {
+      const chave = `${row.table_source}:${row.item_id}`;
+      mapaIdSolicitante.set(chave, row.id_solicitante || '-');
+    }
+
+    const aplicarIdSolicitante = (item) => {
+      const chave = `${item.table_source}:${item.id}`;
+      item.id_solicitante = mapaIdSolicitante.get(chave) || '-';
+      return item;
+    };
+
+    solicitacoesBase.forEach(aplicarIdSolicitante);
+    solicitacoesSemCadastro.forEach(aplicarIdSolicitante);
 
     const todasSolicitacoes = [...solicitacoesBase, ...solicitacoesSemCadastro]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
@@ -17144,12 +17796,27 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         pop.n_val_tot,
         po.created_at,
         po.updated_at,
-        sc.solicitante,
-        sc.grupo_requisicao
+        origem.solicitante,
+        origem.grupo_requisicao
       FROM compras.pedidos_omie po
       LEFT JOIN omie.fornecedores cc ON cc.codigo_cliente_omie = po.n_cod_for
       LEFT JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = po.n_cod_ped
-      LEFT JOIN compras.solicitacao_compras sc ON sc.numero_pedido = po.c_cod_int_ped
+      LEFT JOIN LATERAL (
+        SELECT src.solicitante, src.grupo_requisicao
+        FROM (
+          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
+          FROM compras.solicitacao_compras sc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          UNION ALL
+          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
+          FROM compras.compras_sem_cadastro csc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+        ) src
+        ORDER BY src.created_at DESC NULLS LAST
+        LIMIT 1
+      ) origem ON TRUE
       WHERE po.c_etapa = '10'
         AND (po.inativo IS NULL OR po.inativo = false)
       ORDER BY
@@ -17176,6 +17843,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
           d_inc_data: row.d_inc_data,
           d_dt_previsao: row.d_dt_previsao,
           solicitante: row.solicitante,
+          grupo_requisicao: row.grupo_requisicao,
           fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
           created_at: row.created_at,
           updated_at: row.updated_at,
@@ -17253,14 +17921,29 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         pop.n_val_tot,
         po.created_at,
         po.updated_at,
-        sc.solicitante,
-        sc.grupo_requisicao
+        origem.solicitante,
+        origem.grupo_requisicao
       FROM compras.pedidos_omie po
       LEFT JOIN omie.fornecedores cc
         ON cc.codigo_cliente_omie = po.n_cod_for
       LEFT JOIN compras.pedidos_omie_produtos pop
         ON pop.n_cod_ped = po.n_cod_ped
-      LEFT JOIN compras.solicitacao_compras sc ON sc.numero_pedido = po.c_cod_int_ped
+      LEFT JOIN LATERAL (
+        SELECT src.solicitante, src.grupo_requisicao
+        FROM (
+          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
+          FROM compras.solicitacao_compras sc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          UNION ALL
+          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
+          FROM compras.compras_sem_cadastro csc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+        ) src
+        ORDER BY src.created_at DESC NULLS LAST
+        LIMIT 1
+      ) origem ON TRUE
       WHERE po.c_etapa = '15'
         AND (po.inativo IS NULL OR po.inativo = false)
       ORDER BY
@@ -17287,6 +17970,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
           d_inc_data: row.d_inc_data,
           d_dt_previsao: row.d_dt_previsao,
           solicitante: row.solicitante,
+          grupo_requisicao: row.grupo_requisicao,
           fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
           created_at: row.created_at,
           updated_at: row.updated_at,
@@ -17927,7 +18611,34 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
 app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
   try {
     // Objetivo: Aceitar cotações de ambas as tabelas (solicitacao_compras e compras_sem_cadastro)
-    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por, table_source } = req.body || {};
+    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link, criado_por, table_source } = req.body || {};
+        const normalizarLinksCotacao = (valor) => {
+          if (Array.isArray(valor)) {
+            return valor
+              .map(v => String(v || '').trim())
+              .filter(Boolean);
+          }
+          if (typeof valor === 'string') {
+            const texto = valor.trim();
+            if (!texto) return [];
+            try {
+              const parsed = JSON.parse(texto);
+              if (Array.isArray(parsed)) {
+                return parsed
+                  .map(v => String(v || '').trim())
+                  .filter(Boolean);
+              }
+            } catch (e) {
+              // mantém fluxo para string simples
+            }
+            return [texto];
+          }
+          return [];
+        };
+
+        const linksCotacao = normalizarLinksCotacao(link);
+        const linkParaSalvar = linksCotacao.length > 0 ? JSON.stringify(linksCotacao) : null;
+
     
     if (!solicitacao_id || !fornecedor_nome) {
       return res.status(400).json({ ok: false, error: 'solicitacao_id e fornecedor_nome são obrigatórios' });
@@ -18043,8 +18754,8 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
 
     const { rows } = await pool.query(`
       INSERT INTO compras.cotacoes 
-        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, criado_por, table_source)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, link, anexos, criado_por, table_source)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `, [
       solicitacao_id,
@@ -18054,6 +18765,7 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       fornecedor_id || null,
       valor_cotado || null,
       observacao || null,
+      linkParaSalvar,
       anexosUrls ? JSON.stringify(anexosUrls) : null,
       criado_por || null,
       table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras'
@@ -18127,7 +18839,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
     
-    const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos } = req.body || {};
+    const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link } = req.body || {};
     
     const fields = [];
     const values = [];
@@ -18209,6 +18921,34 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
     if (typeof observacao !== 'undefined') {
       fields.push(`observacao = $${idx++}`);
       values.push(observacao || null);
+    }
+
+    if (typeof link !== 'undefined') {
+      let linksNormalizados = [];
+      if (Array.isArray(link)) {
+        linksNormalizados = link
+          .map(v => String(v || '').trim())
+          .filter(Boolean);
+      } else if (typeof link === 'string') {
+        const texto = link.trim();
+        if (texto) {
+          try {
+            const parsed = JSON.parse(texto);
+            if (Array.isArray(parsed)) {
+              linksNormalizados = parsed
+                .map(v => String(v || '').trim())
+                .filter(Boolean);
+            } else {
+              linksNormalizados = [texto];
+            }
+          } catch (e) {
+            linksNormalizados = [texto];
+          }
+        }
+      }
+
+      fields.push(`link = $${idx++}`);
+      values.push(linksNormalizados.length ? JSON.stringify(linksNormalizados) : null);
     }
     
     if (fields.length === 0) {
@@ -18586,17 +19326,425 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
       ALTER TABLE compras.compras_sem_cadastro
       ADD COLUMN IF NOT EXISTS cod_req_compra TEXT;
     `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'compras'
+            AND p.proname = 'fn_registrar_historico_solicitacao'
+        ) THEN
+          DROP TRIGGER IF EXISTS trg_historico_compras_sem_cadastro
+          ON compras.compras_sem_cadastro;
+
+          CREATE TRIGGER trg_historico_compras_sem_cadastro
+          AFTER INSERT OR UPDATE OR DELETE
+          ON compras.compras_sem_cadastro
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_registrar_historico_solicitacao();
+        END IF;
+      END $$;
+    `);
     console.log('[Compras] ✓ Tabela compras_sem_cadastro garantida');
   } catch (err) {
     console.error('[Compras] Erro ao criar tabela compras_sem_cadastro:', err.message);
   }
 })();
 
+// ===================== AUTO-SYNC COMPRAS -> GOOGLE SHEETS =====================
+const GOOGLE_SHEETS_AUTOSYNC_ENABLED = process.env.GOOGLE_SHEETS_AUTOSYNC_ENABLED !== '0';
+const GOOGLE_SHEETS_SYNC_MODE = String(process.env.GOOGLE_SHEETS_SYNC_MODE || 'db-trigger').toLowerCase();
+const GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS = Math.max(
+  15000,
+  Number(process.env.GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS || 60000)
+);
+const GOOGLE_SHEETS_SYNC_CHANNEL = 'compras_google_sheets_sync';
+const comprasGoogleSheetsSyncState = {
+  running: false,
+  lastFingerprint: null,
+  timer: null,
+  eventDebounceTimer: null,
+  listenerClient: null,
+  lastSyncAt: null,
+  lastSyncReason: null,
+  lastSyncStatus: 'idle',
+  lastSyncRows: 0,
+  lastSyncError: null,
+};
+
+function formatarDataHoraPtBr(valor) {
+  if (!valor) return '-';
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) return '-';
+  return data.toLocaleString('pt-BR');
+}
+
+function formatarDataPtBr(valor) {
+  if (!valor) return '-';
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) return '-';
+  return data.toLocaleDateString('pt-BR');
+}
+
+function normalizarRetornoCotacao(valor, tableSource) {
+  const texto = String(valor || '').trim().toLowerCase();
+  if (!texto) return 'Não';
+  if (String(tableSource) === 'compras_sem_cadastro') {
+    const semRetorno = '🛒 apenas realizar compra sem retorno de valores ou caracteristica';
+    return texto === semRetorno ? 'Não' : 'Sim';
+  }
+  return ['s', 'sim', 'yes', 'true', '1'].includes(texto) ? 'Sim' : 'Não';
+}
+
+async function obterFingerprintComprasParaSheets() {
+  const { rows } = await pool.query(`
+    SELECT
+      (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.solicitacao_compras) AS max_sol,
+      (SELECT COUNT(*) FROM compras.solicitacao_compras) AS qtd_sol,
+      (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.compras_sem_cadastro) AS max_sem,
+      (SELECT COUNT(*) FROM compras.compras_sem_cadastro) AS qtd_sem
+  `);
+
+  const row = rows[0] || {};
+  const maxSol = row.max_sol ? new Date(row.max_sol).toISOString() : '0';
+  const maxSem = row.max_sem ? new Date(row.max_sem).toISOString() : '0';
+  return `${maxSol}|${row.qtd_sol || 0}|${maxSem}|${row.qtd_sem || 0}`;
+}
+
+async function montarLinhasComprasParaSheets() {
+  const { rows: solicitacoesBase } = await pool.query(`
+    SELECT
+      id,
+      numero_pedido,
+      produto_codigo,
+      produto_descricao,
+      quantidade,
+      prazo_solicitado,
+      previsao_chegada,
+      status,
+      observacao,
+      observacao_retificacao,
+      solicitante,
+      resp_inspecao_recebimento,
+      departamento,
+      centro_custo,
+      objetivo_compra,
+      fornecedor_nome,
+      fornecedor_id,
+      familia_produto,
+      grupo_requisicao,
+      retorno_cotacao,
+      categoria_compra_codigo,
+      categoria_compra_nome,
+      codigo_omie,
+      codigo_produto_omie,
+      anexos,
+      cnumero,
+      ncodped,
+      created_at,
+      updated_at,
+      'solicitacao_compras' AS table_source
+    FROM compras.solicitacao_compras
+  `);
+
+  const { rows: solicitacoesSemCadastro } = await pool.query(`
+    SELECT
+      id,
+      numero_pedido,
+      produto_codigo,
+      produto_descricao,
+      quantidade,
+      NULL::date AS prazo_solicitado,
+      NULL::date AS previsao_chegada,
+      status,
+      objetivo_compra AS observacao,
+      NULL::text AS observacao_retificacao,
+      solicitante,
+      resp_inspecao_recebimento,
+      departamento,
+      centro_custo,
+      objetivo_compra,
+      NULL::text AS fornecedor_nome,
+      NULL::text AS fornecedor_id,
+      NULL::text AS familia_produto,
+      grupo_requisicao,
+      retorno_cotacao,
+      categoria_compra_codigo,
+      categoria_compra_nome,
+      NULL::text AS codigo_omie,
+      NULL::text AS codigo_produto_omie,
+      anexos,
+      numero_pedido AS cnumero,
+      ncodped,
+      created_at,
+      updated_at,
+      'compras_sem_cadastro' AS table_source
+    FROM compras.compras_sem_cadastro
+  `);
+
+  const todas = [...solicitacoesBase, ...solicitacoesSemCadastro]
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+
+  return todas.map(item => ({
+    'Origem': item.table_source || '-',
+    'ID': item.id || '-',
+    'Nº Pedido': item.numero_pedido || '-',
+    'Código Produto': item.produto_codigo || '-',
+    'Descrição Produto': item.produto_descricao || '-',
+    'Quantidade': item.quantidade || 0,
+    'Prazo Solicitado': formatarDataPtBr(item.prazo_solicitado),
+    'Previsão Chegada': formatarDataPtBr(item.previsao_chegada),
+    'Status': item.status || '-',
+    'Observação': item.observacao || '-',
+    'Observação Retificação': item.observacao_retificacao || '-',
+    'Solicitante': item.solicitante || '-',
+    'Resp. Inspeção/Recebimento': item.resp_inspecao_recebimento || '-',
+    'Departamento': item.departamento || '-',
+    'Centro de Custo': item.centro_custo || '-',
+    'Objetivo da Compra': item.objetivo_compra || '-',
+    'Fornecedor Nome': item.fornecedor_nome || '-',
+    'Fornecedor ID': item.fornecedor_id || '-',
+    'Família Produto': item.familia_produto || '-',
+    'Grupo Requisição': item.grupo_requisicao || '-',
+    'Retorno Cotação': normalizarRetornoCotacao(item.retorno_cotacao, item.table_source),
+    'Categoria Compra Código': item.categoria_compra_codigo || '-',
+    'Categoria Compra Nome': item.categoria_compra_nome || '-',
+    'Código Omie': item.codigo_omie || '-',
+    'Código Produto Omie': item.codigo_produto_omie || '-',
+    'Anexos': item.anexos ? JSON.stringify(item.anexos) : '-',
+    'cNumero': item.cnumero || '-',
+    'nCodPed': item.ncodped || '-',
+    'Criado em': formatarDataHoraPtBr(item.created_at),
+    'Atualizado em': formatarDataHoraPtBr(item.updated_at || item.created_at)
+  }));
+}
+
+async function enviarLinhasComprasParaGoogleSheets(linhas) {
+  const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
+  if (!webhookUrl) {
+    throw new Error('GOOGLE_SHEETS_WEBHOOK_URL não configurada');
+  }
+
+  const fetchFn = global.safeFetch || globalThis.fetch;
+  if (!fetchFn) {
+    throw new Error('Fetch indisponível no servidor');
+  }
+
+  const resposta = await fetchFn(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ linhas })
+  });
+
+  const contentType = String(resposta.headers.get('content-type') || '').toLowerCase();
+  const texto = await resposta.text();
+
+  if (!resposta.ok) {
+    throw new Error(`Webhook Google Sheets retornou HTTP ${resposta.status}: ${texto.slice(0, 300)}`);
+  }
+
+  if (contentType.includes('text/html')) {
+    throw new Error(`Webhook Google Sheets retornou HTML: ${texto.slice(0, 300)}`);
+  }
+
+  if (texto) {
+    try {
+      const payload = JSON.parse(texto);
+      if (payload && payload.ok === false) {
+        throw new Error(`Apps Script retornou erro: ${JSON.stringify(payload)}`);
+      }
+    } catch (_) {
+      // resposta não-JSON é aceita desde que não seja HTML e não seja erro HTTP
+    }
+  }
+}
+
+async function sincronizarComprasGoogleSheets({ force = false, motivo = 'auto' } = {}) {
+  if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) return;
+  if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) return;
+  if (comprasGoogleSheetsSyncState.running) return;
+
+  comprasGoogleSheetsSyncState.running = true;
+  try {
+    const fingerprint = await obterFingerprintComprasParaSheets();
+    if (!force && comprasGoogleSheetsSyncState.lastFingerprint === fingerprint) {
+      return;
+    }
+
+    const linhas = await montarLinhasComprasParaSheets();
+    if (!linhas.length) {
+      comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
+      comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
+      comprasGoogleSheetsSyncState.lastSyncReason = motivo;
+      comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
+      comprasGoogleSheetsSyncState.lastSyncRows = 0;
+      comprasGoogleSheetsSyncState.lastSyncError = null;
+      return;
+    }
+
+    await enviarLinhasComprasParaGoogleSheets(linhas);
+    comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
+    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
+    comprasGoogleSheetsSyncState.lastSyncReason = motivo;
+    comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
+    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length;
+    comprasGoogleSheetsSyncState.lastSyncError = null;
+    console.log(`[SheetsAuto] Sincronização concluída (${motivo}) com ${linhas.length} linha(s).`);
+  } catch (err) {
+    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
+    comprasGoogleSheetsSyncState.lastSyncReason = motivo;
+    comprasGoogleSheetsSyncState.lastSyncStatus = 'error';
+    comprasGoogleSheetsSyncState.lastSyncError = String(err?.message || err || 'Erro desconhecido');
+    console.error('[SheetsAuto] Erro ao sincronizar automaticamente:', err?.message || err);
+  } finally {
+    comprasGoogleSheetsSyncState.running = false;
+  }
+}
+
+function agendarSyncPorEvento(motivo = 'evento-db') {
+  if (comprasGoogleSheetsSyncState.eventDebounceTimer) {
+    clearTimeout(comprasGoogleSheetsSyncState.eventDebounceTimer);
+  }
+  comprasGoogleSheetsSyncState.eventDebounceTimer = setTimeout(() => {
+    sincronizarComprasGoogleSheets({ force: true, motivo });
+  }, 1200);
+}
+
+async function garantirTriggersNotificacaoGoogleSheets() {
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION compras.fn_notify_google_sheets_sync()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $fn$
+    BEGIN
+      PERFORM pg_notify('${GOOGLE_SHEETS_SYNC_CHANNEL}', TG_TABLE_NAME || ':' || TG_OP);
+      RETURN NULL;
+    END;
+    $fn$;
+  `);
+
+  await pool.query(`
+    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_solicitacao
+    ON compras.solicitacao_compras;
+
+    CREATE TRIGGER trg_notify_google_sheets_sync_solicitacao
+    AFTER INSERT OR UPDATE OR DELETE
+    ON compras.solicitacao_compras
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
+  `);
+
+  await pool.query(`
+    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_sem_cadastro
+    ON compras.compras_sem_cadastro;
+
+    CREATE TRIGGER trg_notify_google_sheets_sync_sem_cadastro
+    AFTER INSERT OR UPDATE OR DELETE
+    ON compras.compras_sem_cadastro
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
+  `);
+}
+
+async function iniciarAutoSyncPorEventosPostgres() {
+  if (comprasGoogleSheetsSyncState.listenerClient) return;
+
+  await garantirTriggersNotificacaoGoogleSheets();
+
+  const client = await pool.connect();
+  comprasGoogleSheetsSyncState.listenerClient = client;
+
+  client.on('notification', (msg) => {
+    if (msg.channel !== GOOGLE_SHEETS_SYNC_CHANNEL) return;
+    agendarSyncPorEvento(`evento-db:${msg.payload || 'mudanca'}`);
+  });
+
+  client.on('error', (err) => {
+    console.error('[SheetsAuto] Erro no listener LISTEN/NOTIFY:', err?.message || err);
+    try { client.release(); } catch (_) {}
+    if (comprasGoogleSheetsSyncState.listenerClient === client) {
+      comprasGoogleSheetsSyncState.listenerClient = null;
+    }
+    setTimeout(() => {
+      iniciarAutoSyncPorEventosPostgres().catch((e) => {
+        console.error('[SheetsAuto] Falha ao reconectar listener:', e?.message || e);
+      });
+    }, 5000);
+  });
+
+  await client.query(`LISTEN ${GOOGLE_SHEETS_SYNC_CHANNEL}`);
+  console.log(`[SheetsAuto] Listener DB ativo no canal ${GOOGLE_SHEETS_SYNC_CHANNEL}.`);
+
+  setTimeout(() => {
+    sincronizarComprasGoogleSheets({ force: true, motivo: 'startup' });
+  }, 10000);
+}
+
+function iniciarAutoSyncComprasGoogleSheets() {
+  if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) {
+    console.log('[SheetsAuto] Auto-sync desabilitado por GOOGLE_SHEETS_AUTOSYNC_ENABLED=0');
+    return;
+  }
+
+  if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) {
+    console.log('[SheetsAuto] Auto-sync não iniciado (GOOGLE_SHEETS_WEBHOOK_URL ausente)');
+    return;
+  }
+
+  if (GOOGLE_SHEETS_SYNC_MODE === 'polling') {
+    if (comprasGoogleSheetsSyncState.timer) {
+      clearInterval(comprasGoogleSheetsSyncState.timer);
+    }
+
+    setTimeout(() => {
+      sincronizarComprasGoogleSheets({ force: true, motivo: 'startup' });
+    }, 12000);
+
+    comprasGoogleSheetsSyncState.timer = setInterval(() => {
+      sincronizarComprasGoogleSheets({ force: false, motivo: 'intervalo' });
+    }, GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS);
+
+    console.log(`[SheetsAuto] Auto-sync iniciado em polling (intervalo ${GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS}ms).`);
+    return;
+  }
+
+  iniciarAutoSyncPorEventosPostgres().catch((err) => {
+    console.error('[SheetsAuto] Falha ao iniciar listener do banco:', err?.message || err);
+  });
+}
+
+app.get('/api/compras/google-sheets/status', async (_req, res) => {
+  const planilhaUrl = process.env.GOOGLE_SHEETS_PLANILHA_URL
+    || 'https://docs.google.com/spreadsheets/d/1xJT96JbXxqb2SPdCwsNAI55E8EGuEofDOiXbn5iFCDE/edit?usp=sharing';
+
+  res.json({
+    ok: true,
+    enabled: GOOGLE_SHEETS_AUTOSYNC_ENABLED,
+    mode: GOOGLE_SHEETS_SYNC_MODE,
+    listenerActive: !!comprasGoogleSheetsSyncState.listenerClient,
+    running: comprasGoogleSheetsSyncState.running,
+    webhookConfigured: !!process.env.GOOGLE_SHEETS_WEBHOOK_URL,
+    planilhaUrl,
+    channel: GOOGLE_SHEETS_SYNC_CHANNEL,
+    lastSync: {
+      at: comprasGoogleSheetsSyncState.lastSyncAt,
+      reason: comprasGoogleSheetsSyncState.lastSyncReason,
+      status: comprasGoogleSheetsSyncState.lastSyncStatus,
+      rows: comprasGoogleSheetsSyncState.lastSyncRows,
+      error: comprasGoogleSheetsSyncState.lastSyncError,
+    }
+  });
+});
+
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
+  iniciarAutoSyncComprasGoogleSheets();
 });
 
 // DEBUG: sanity check do webhook (GET simples)
