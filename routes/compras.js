@@ -280,5 +280,84 @@ module.exports = (pool) => {
     }
   });
 
+  // Envia dados exportados para um webhook do Google Apps Script (Google Sheets)
+  router.post('/exportar-google-sheets', async (req, res) => {
+    try {
+      const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
+      if (!webhookUrl) {
+        return res.status(500).json({
+          ok: false,
+          error: 'GOOGLE_SHEETS_WEBHOOK_URL não configurada no ambiente'
+        });
+      }
+
+      const linhas = Array.isArray(req.body?.linhas) ? req.body.linhas : [];
+      if (!linhas.length) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Nenhuma linha enviada para atualização da planilha'
+        });
+      }
+
+      const fetchFn = global.safeFetch || globalThis.fetch;
+      if (!fetchFn) {
+        return res.status(500).json({
+          ok: false,
+          error: 'Fetch indisponível no servidor para integrar com Google Sheets'
+        });
+      }
+
+      const respostaWebhook = await fetchFn(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linhas })
+      });
+
+      const contentType = String(respostaWebhook.headers.get('content-type') || '').toLowerCase();
+      const payloadTexto = await respostaWebhook.text();
+      let payloadJson = null;
+      try {
+        payloadJson = payloadTexto ? JSON.parse(payloadTexto) : null;
+      } catch (_) {
+        payloadJson = null;
+      }
+
+      if (!respostaWebhook.ok) {
+        return res.status(502).json({
+          ok: false,
+          error: `Webhook Google Sheets retornou HTTP ${respostaWebhook.status}`,
+          detalhe: payloadJson || payloadTexto || null
+        });
+      }
+
+      // Alguns erros do Apps Script retornam HTTP 200 com HTML de página de erro.
+      // Nesses casos, força falha para o front não exibir falso sucesso.
+      if (contentType.includes('text/html')) {
+        return res.status(502).json({
+          ok: false,
+          error: 'Webhook Google Sheets retornou HTML (provável erro de publicação/permissão no Apps Script)',
+          detalhe: payloadTexto ? payloadTexto.slice(0, 500) : null
+        });
+      }
+
+      if (payloadJson && payloadJson.ok === false) {
+        return res.status(502).json({
+          ok: false,
+          error: 'Apps Script retornou erro lógico',
+          detalhe: payloadJson
+        });
+      }
+
+      return res.json({
+        ok: true,
+        webhookStatus: respostaWebhook.status,
+        webhookRetorno: payloadJson || payloadTexto || { ok: true }
+      });
+    } catch (e) {
+      console.error('[POST /api/compras/exportar-google-sheets] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   return router;
 };

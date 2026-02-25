@@ -16744,91 +16744,93 @@ document.getElementById('modalFiltroKanbans')?.addEventListener('click', (e) => 
   }
 });
 
-// Botão de exportar Excel
-document.getElementById('comprasExportarExcelMinhasBtn')?.addEventListener('click', async () => {
-  fecharModalComprasAcoes();
+function formatarDataStatusSheets(valor) {
+  if (!valor) return '-';
+  const dt = new Date(valor);
+  if (Number.isNaN(dt.getTime())) return '-';
+  return dt.toLocaleString('pt-BR');
+}
+
+function traduzirOrigemSyncSheets(origem) {
+  const valor = String(origem || '').toLowerCase();
+  if (valor.includes('startup')) return 'startup';
+  if (valor.includes('evento-db') || valor.includes('evento_tabela')) return 'evento de tabela';
+  if (valor.includes('intervalo')) return 'intervalo';
+  if (valor.includes('manual')) return 'manual';
+  return origem || '-';
+}
+
+async function carregarStatusGoogleSheetsModal() {
+  const resumoEl = document.getElementById('googleSheetsSyncResumo');
+  const detalhesEl = document.getElementById('googleSheetsSyncDetalhes');
+  const linkEl = document.getElementById('googleSheetsAbrirPlanilhaBtn');
+
+  if (resumoEl) resumoEl.textContent = 'Carregando status...';
+  if (detalhesEl) detalhesEl.textContent = '';
+
   try {
-    const btn = document.getElementById('comprasExportarExcelMinhasBtn');
-    const originalHtml = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Gerando...';
-    btn.disabled = true;
-    
-    const resp = await fetch('/api/compras/todas', { credentials: 'include' });
-    if (!resp.ok) throw new Error('Erro ao buscar dados');
-    
-    const data = await resp.json();
-    const solicitacoes = data.solicitacoes || [];
-    
-    if (!solicitacoes.length) {
-      alert('Nenhuma solicitação para exportar.');
-      btn.innerHTML = originalHtml;
-      btn.disabled = false;
-      return;
+    const resp = await fetch('/api/compras/google-sheets/status', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `Falha HTTP ${resp.status}`);
     }
-    
-    // Prepara dados para Excel com TODAS as colunas da tabela
-    const dadosExcel = solicitacoes.map(item => ({
-      'ID': item.id || '-',
-      'Nº Pedido': item.numero_pedido || '-',
-      'Código Produto': item.produto_codigo || '-',
-      'Descrição Produto': item.produto_descricao || '-',
-      'Quantidade': item.quantidade || 0,
-      'Prazo Solicitado': item.prazo_solicitado ? new Date(item.prazo_solicitado).toLocaleDateString('pt-BR') : '-',
-      'Previsão Chegada': item.previsao_chegada ? new Date(item.previsao_chegada).toLocaleDateString('pt-BR') : '-',
-      'Status': item.status || '-',
-      'Observação': item.observacao || '-',
-      'Observação Retificação': item.observacao_retificacao || '-',
-      'Solicitante': item.solicitante || '-',
-      'Resp. Inspeção/Recebimento': item.resp_inspecao_recebimento || '-',
-      'Departamento': item.departamento || '-',
-      'Centro de Custo': item.centro_custo || '-',
-      'Objetivo da Compra': item.objetivo_compra || '-',
-      'Fornecedor Nome': item.fornecedor_nome || '-',
-      'Fornecedor ID': item.fornecedor_id || '-',
-      'Família Produto': item.familia_produto || '-',
-      'Retorno Cotação': item.retorno_cotacao || '-',
-      'Categoria Compra Código': item.categoria_compra_codigo || '-',
-      'Categoria Compra Nome': item.categoria_compra_nome || '-',
-      'Código Omie': item.codigo_omie || '-',
-      'Código Produto Omie': item.codigo_produto_omie || '-',
-      'Anexos': item.anexos ? JSON.stringify(item.anexos) : '-',
-      'cNumero': item.cNumero || '-',
-      'nCodPed': item.nCodPed || '-',
-      'Criado em': item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : '-',
-      'Atualizado em': item.updated_at ? new Date(item.updated_at).toLocaleString('pt-BR') : '-'
-    }));
-    
-    // Converte para CSV
-    const headers = Object.keys(dadosExcel[0]);
-    const csvContent = [
-      headers.join(','),
-      ...dadosExcel.map(row => headers.map(h => {
-        const valor = String(row[h] || '').replace(/"/g, '""');
-        return `"${valor}"`;
-      }).join(','))
-    ].join('\n');
-    
-    // Download do arquivo
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `solicitacoes_compras_${new Date().toISOString().slice(0,10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    
-    btn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:6px;"></i>Exportado!';
-    setTimeout(() => {
-      btn.innerHTML = originalHtml;
-      btn.disabled = false;
-    }, 2000);
-    
+
+    if (linkEl && data.planilhaUrl) {
+      linkEl.href = data.planilhaUrl;
+    }
+
+    const ultimo = data.lastSync || {};
+    const statusTxt = ultimo.status || 'sem execução';
+    const origemTxt = traduzirOrigemSyncSheets(ultimo.reason);
+    const quandoTxt = formatarDataStatusSheets(ultimo.at);
+    const linhasTxt = Number.isFinite(Number(ultimo.rows)) ? Number(ultimo.rows) : 0;
+    const erroTxt = ultimo.error ? String(ultimo.error) : '';
+
+    if (resumoEl) {
+      resumoEl.innerHTML = `
+        <div><strong>Status:</strong> ${escapeHtml(statusTxt)}</div>
+        <div><strong>Origem:</strong> ${escapeHtml(origemTxt)}</div>
+        <div><strong>Última execução:</strong> ${escapeHtml(quandoTxt)}</div>
+      `;
+    }
+
+    if (detalhesEl) {
+      detalhesEl.innerHTML = `
+        <div><strong>Linhas enviadas:</strong> ${linhasTxt}</div>
+        <div><strong>Modo:</strong> ${escapeHtml(data.mode || '-')}</div>
+        <div><strong>Listener ativo:</strong> ${data.listenerActive ? 'Sim' : 'Não'}</div>
+        ${erroTxt ? `<div style="margin-top:6px;color:#fca5a5;"><strong>Erro:</strong> ${escapeHtml(erroTxt)}</div>` : ''}
+      `;
+    }
   } catch (err) {
-    console.error('[Excel] Erro:', err);
-    alert('Erro ao exportar para Excel.');
-    const btn = document.getElementById('comprasExportarExcelMinhasBtn');
-    btn.innerHTML = '<i class="fa-solid fa-file-excel" style="font-size:18px;"></i><span style="font-size:13px;font-weight:600;">Exportar Excel</span>';
-    btn.disabled = false;
+    if (resumoEl) resumoEl.textContent = 'Não foi possível carregar o status.';
+    if (detalhesEl) detalhesEl.textContent = String(err?.message || err || 'Erro desconhecido');
+  }
+}
+
+function abrirModalGoogleSheetsStatus() {
+  const modal = document.getElementById('modalGoogleSheetsStatus');
+  if (modal) modal.style.display = 'flex';
+  carregarStatusGoogleSheetsModal();
+}
+
+function fecharModalGoogleSheetsStatus() {
+  const modal = document.getElementById('modalGoogleSheetsStatus');
+  if (modal) modal.style.display = 'none';
+}
+
+// Botão do menu de ações: abre modal da Tabela Google Sheet
+document.getElementById('comprasExportarExcelMinhasBtn')?.addEventListener('click', () => {
+  fecharModalComprasAcoes();
+  abrirModalGoogleSheetsStatus();
+});
+
+document.getElementById('modalGoogleSheetsStatusFecharBtn')?.addEventListener('click', fecharModalGoogleSheetsStatus);
+document.getElementById('googleSheetsAtualizarStatusBtn')?.addEventListener('click', carregarStatusGoogleSheetsModal);
+document.getElementById('modalGoogleSheetsStatus')?.addEventListener('click', (e) => {
+  if (e.target.id === 'modalGoogleSheetsStatus') {
+    fecharModalGoogleSheetsStatus();
   }
 });
 
@@ -21001,6 +21003,49 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     window.cotadoEscolhaCotacoesDb = [];
 
     // Comentário: renderiza apenas detalhes do item + cotações registradas
+    const normalizarListaLinks = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw.filter(Boolean).map(v => String(v).trim()).filter(Boolean);
+      if (typeof raw === 'string') {
+        const texto = raw.trim();
+        if (!texto) return [];
+        try {
+          const parsed = JSON.parse(texto);
+          if (Array.isArray(parsed)) return parsed.filter(Boolean).map(v => String(v).trim()).filter(Boolean);
+        } catch (err) {
+          // mantém fluxo para string simples
+        }
+        return [texto];
+      }
+      return [];
+    };
+
+    const montarHtmlLinks = (links) => {
+      if (!Array.isArray(links) || links.length === 0) return '-';
+      return links.map((link, idx) => {
+        const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+        let nome = `Link ${idx + 1}`;
+        try {
+          const semQuery = link.split('?')[0];
+          nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || nome;
+        } catch (err) {
+          nome = link;
+        }
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;">${escapeHtml(nome)}</a>`;
+      }).join(' • ');
+    };
+
+    const linksSemCadastro = normalizarListaLinks(item.link || item.links);
+    const linksAnexoUrlSolicitacao = normalizarListaLinks(item.anexo_url);
+
+    const campoLinkSemCadastroHtml = tableSource === 'compras_sem_cadastro'
+      ? `<div><strong>Link:</strong> ${montarHtmlLinks(linksSemCadastro)}</div>`
+      : '';
+
+    const campoAnexoUrlSolicitacaoHtml = tableSource === 'solicitacao_compras'
+      ? `<div><strong>Anexo URL:</strong> ${montarHtmlLinks(linksAnexoUrlSolicitacao)}</div>`
+      : '';
+
     let anexosItem = item.anexos;
     if (typeof anexosItem === 'string') {
       try {
@@ -21015,11 +21060,21 @@ async function abrirModalCotadoEscolhaItem(itemId) {
         <div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
           ${anexosItem.map((anexo, idx) => {
-            const nome = anexo?.nome || `Anexo ${idx + 1}`;
-            const url = anexo?.url || anexo?.path || '#';
+            const anexoRaw = typeof anexo === 'string' ? anexo : '';
+            const url = anexoRaw || anexo?.url || anexo?.path || '';
+            let nome = anexo?.nome || '';
+            if (!nome && url) {
+              try {
+                const semQuery = url.split('?')[0];
+                nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || '';
+              } catch (err) {
+                nome = url;
+              }
+            }
+            if (!nome) nome = `Anexo ${idx + 1}`;
             return `
               <a 
-                href="${url}" 
+                href="${escapeHtml(url || 'javascript:void(0)')}" 
                 target="_blank" 
                 style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;">
                 <i class=\"fa-solid fa-paperclip\" style=\"color:#3b82f6;\"></i>
@@ -21046,6 +21101,8 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
           <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
           <div><strong>Retorno Cotação:</strong> ${escapeHtml(item.retorno_cotacao || '-')}</div>
+          ${campoLinkSemCadastroHtml}
+          ${campoAnexoUrlSolicitacaoHtml}
           ${anexosItemHtml}
         </div>
       </div>
@@ -21161,6 +21218,7 @@ async function abrirModalCotacaoKanban(itemId) {
     window.cotacaoKanbanItem = item;
     window.cotacaoKanbanItemId = item.id;
     window.cotacaoKanbanAnexos = [];
+    window.cotacaoKanbanLinks = [];
     window.cotacaoKanbanCotacoes = [];
 
     modalTitulo.textContent = `Cotação - Item ${item.id}`;
@@ -21211,6 +21269,57 @@ async function abrirModalCotacaoKanban(itemId) {
         }).join(' • ')
       : '-';
 
+    let anexosItem = item.anexos;
+    if (typeof anexosItem === 'string') {
+      try {
+        anexosItem = JSON.parse(anexosItem);
+      } catch (err) {
+        anexosItem = [];
+      }
+    }
+    if (!Array.isArray(anexosItem)) anexosItem = [];
+
+    const anexosItemHtml = anexosItem.length > 0
+      ? `
+        <div style="margin-top:8px;">
+          <div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong></div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+            ${anexosItem.map((anexo, idx) => {
+              const anexoRaw = typeof anexo === 'string' ? anexo : '';
+              const url = anexoRaw || anexo?.url || anexo?.path || '';
+              const tipo = anexo?.tipo || 'application/octet-stream';
+              const base64 = anexo?.base64 || '';
+              const href = url || (base64 ? `data:${tipo};base64,${base64}` : 'javascript:void(0)');
+              let nome = anexo?.nome || '';
+              if (!nome && url) {
+                try {
+                  const semQuery = url.split('?')[0];
+                  nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || '';
+                } catch (err) {
+                  nome = url;
+                }
+              }
+              if (!nome) nome = `Anexo ${idx + 1}`;
+              return `
+                <a
+                  href="${escapeHtml(href)}"
+                  target="_blank"
+                  rel="noopener"
+                  style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;border:1px solid #d1d5db;">
+                  <i class="fa-solid fa-paperclip" style="color:#3b82f6;"></i>
+                  <span>${escapeHtml(nome)}</span>
+                </a>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `
+      : `
+        <div style="margin-top:8px;">
+          <div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong> -</div>
+        </div>
+      `;
+
     const html = `
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
         <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
@@ -21223,6 +21332,7 @@ async function abrirModalCotacaoKanban(itemId) {
           <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
           <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
           <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
+          ${anexosItemHtml}
         </div>
       </div>
 
@@ -21261,6 +21371,17 @@ async function abrirModalCotacaoKanban(itemId) {
             style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
           />
           <div id="listaAnexosCotacaoKanban" style="margin-top:10px;display:grid;gap:6px;"></div>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Link (opcional)</label>
+          <input
+            type="text"
+            id="cotacaoKanbanLink"
+            placeholder="Cole o link e pressione Enter"
+            onkeydown="adicionarLinkCotacaoKanban(event)"
+            style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+          />
+          <div id="listaLinksCotacaoKanban" style="margin-top:10px;display:grid;gap:6px;"></div>
         </div>
         <button 
           onclick="registrarCotacaoKanban()"
@@ -21302,6 +21423,7 @@ function fecharModalCotacaoKanban() {
   window.cotacaoKanbanItem = null;
   window.cotacaoKanbanItemId = null;
   window.cotacaoKanbanAnexos = [];
+  window.cotacaoKanbanLinks = [];
   window.cotacaoKanbanCotacoes = [];
 }
 
@@ -21364,6 +21486,79 @@ window.removerAnexoCotacaoKanban = function(anexoId) {
   renderizarListaAnexosCotacaoKanban();
 };
 
+window.adicionarLinkCotacaoKanban = function(event) {
+  if (!event || event.key !== 'Enter') return;
+  event.preventDefault();
+
+  const input = document.getElementById('cotacaoKanbanLink');
+  if (!input) return;
+
+  const valor = String(input.value || '').trim();
+  if (!valor) return;
+
+  const href = /^https?:\/\//i.test(valor) ? valor : `https://${valor}`;
+  try {
+    new URL(href);
+  } catch (err) {
+    alert('Link inválido. Verifique a URL e tente novamente.');
+    return;
+  }
+
+  if (!window.cotacaoKanbanLinks) window.cotacaoKanbanLinks = [];
+  const jaExiste = window.cotacaoKanbanLinks.some(link => String(link).toLowerCase() === href.toLowerCase());
+  if (jaExiste) {
+    input.value = '';
+    return;
+  }
+
+  window.cotacaoKanbanLinks.push(href);
+  input.value = '';
+  renderizarListaLinksCotacaoKanban();
+};
+
+function renderizarListaLinksCotacaoKanban() {
+  const listaContainer = document.getElementById('listaLinksCotacaoKanban');
+  if (!listaContainer) return;
+
+  if (!window.cotacaoKanbanLinks || window.cotacaoKanbanLinks.length === 0) {
+    listaContainer.innerHTML = '';
+    return;
+  }
+
+  const html = window.cotacaoKanbanLinks.map((link, idx) => {
+    let nome = `Link ${idx + 1}`;
+    try {
+      const semQuery = link.split('?')[0];
+      nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || nome;
+    } catch (err) {
+      nome = link;
+    }
+
+    return `
+      <div style="display:flex;align-items:center;gap:8px;background:#ecfeff;border:1px solid #a5f3fc;border-radius:6px;padding:8px 10px;">
+        <i class="fa-solid fa-link" style="color:#0891b2;font-size:12px;"></i>
+        <a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="flex:1;font-size:12px;color:#0c4a6e;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:underline;" title="${escapeHtml(link)}">${escapeHtml(nome)}</a>
+        <button
+          onclick="removerLinkCotacaoKanban(${idx})"
+          style="background:transparent;color:#ef4444;border:none;padding:4px;border-radius:4px;font-size:14px;cursor:pointer;line-height:1;width:20px;height:20px;display:flex;align-items:center;justify-content:center;"
+          title="Remover link"
+          onmouseover="this.style.background='#fee2e2'"
+          onmouseout="this.style.background='transparent'">
+          <i class="fa-solid fa-times"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  listaContainer.innerHTML = html;
+}
+
+window.removerLinkCotacaoKanban = function(index) {
+  if (!window.cotacaoKanbanLinks) return;
+  window.cotacaoKanbanLinks.splice(index, 1);
+  renderizarListaLinksCotacaoKanban();
+};
+
 async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
@@ -21400,6 +21595,7 @@ async function registrarCotacaoKanban() {
 
     // Objetivo: Passar table_source para identificar se é de compras_sem_cadastro ou solicitacao_compras
     const tableSource = window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
+    const linksCotacao = Array.isArray(window.cotacaoKanbanLinks) ? window.cotacaoKanbanLinks : [];
 
     const resp = await fetch('/api/compras/cotacoes', {
       method: 'POST',
@@ -21409,6 +21605,7 @@ async function registrarCotacaoKanban() {
         solicitacao_id: window.cotacaoKanbanItemId,
         fornecedor_nome: fornecedor,
         valor_cotado: valor,
+        link: linksCotacao,
         anexos: anexosArray,
         table_source: tableSource
       })
@@ -21421,8 +21618,12 @@ async function registrarCotacaoKanban() {
 
     document.getElementById('cotacaoKanbanFornecedor').value = '';
     document.getElementById('cotacaoKanbanValor').value = '';
+    const inputLink = document.getElementById('cotacaoKanbanLink');
+    if (inputLink) inputLink.value = '';
     window.cotacaoKanbanAnexos = [];
+    window.cotacaoKanbanLinks = [];
     renderizarListaAnexosCotacaoKanban();
+    renderizarListaLinksCotacaoKanban();
     await carregarCotacoesKanban();
   } catch (err) {
     console.error('[COTACAO KANBAN] Erro ao registrar:', err);
@@ -21452,6 +21653,46 @@ async function carregarCotacoesKanban() {
 
     const html = window.cotacaoKanbanCotacoes.map(cotacao => {
       const observacaoTexto = cotacao.observacao || '';
+      let linksHtml = '';
+      const linksArray = (() => {
+        const bruto = cotacao.link;
+        if (!bruto) return [];
+        if (Array.isArray(bruto)) return bruto.map(v => String(v || '').trim()).filter(Boolean);
+        if (typeof bruto === 'string') {
+          const texto = bruto.trim();
+          if (!texto) return [];
+          try {
+            const parsed = JSON.parse(texto);
+            if (Array.isArray(parsed)) return parsed.map(v => String(v || '').trim()).filter(Boolean);
+          } catch (err) {
+            // mantém fluxo de string simples
+          }
+          return [texto];
+        }
+        return [];
+      })();
+
+      if (linksArray.length > 0) {
+        linksHtml = `
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+            <strong><i class="fa-solid fa-link"></i> Links:</strong>
+            <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:4px;">
+              ${linksArray.map((link, idx) => {
+                const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+                let nome = `Link ${idx + 1}`;
+                try {
+                  const semQuery = link.split('?')[0];
+                  nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || nome;
+                } catch (err) {
+                  nome = link;
+                }
+                return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline;">• ${escapeHtml(nome)}</a>`;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+
       let anexosHtml = '';
       if (cotacao.anexos) {
         const anexosArray = Array.isArray(cotacao.anexos) ? cotacao.anexos : [];
@@ -21487,6 +21728,7 @@ async function carregarCotacoesKanban() {
             <div style="font-size:11px;color:#6b7280;">
               <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || 0).toFixed(2)}
             </div>
+            ${linksHtml}
             ${anexosHtml}
 
             <div style="margin-top:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
@@ -21624,6 +21866,46 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
     const statusAprovacao = (cotacao.status_aprovacao || 'pendente').toString().toLowerCase();
     const aprovado = statusAprovacao === 'aprovado';
     const observacaoTexto = cotacao.observacao || '';
+    let linksHtml = '';
+    const linksArray = (() => {
+      const bruto = cotacao.link;
+      if (!bruto) return [];
+      if (Array.isArray(bruto)) return bruto.map(v => String(v || '').trim()).filter(Boolean);
+      if (typeof bruto === 'string') {
+        const texto = bruto.trim();
+        if (!texto) return [];
+        try {
+          const parsed = JSON.parse(texto);
+          if (Array.isArray(parsed)) return parsed.map(v => String(v || '').trim()).filter(Boolean);
+        } catch (err) {
+          // mantém fluxo para string simples
+        }
+        return [texto];
+      }
+      return [];
+    })();
+
+    if (linksArray.length > 0) {
+      linksHtml = `
+        <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+          <strong><i class="fa-solid fa-link"></i> Links:</strong>
+          <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:4px;">
+            ${linksArray.map((link, idx) => {
+              const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+              let nome = `Link ${idx + 1}`;
+              try {
+                const semQuery = link.split('?')[0];
+                nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || nome;
+              } catch (err) {
+                nome = link;
+              }
+              return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#0284c7;text-decoration:underline;">• ${escapeHtml(nome)}</a>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
     let anexosHtml = '';
     if (cotacao.anexos) {
       const anexosArray = Array.isArray(cotacao.anexos) ? cotacao.anexos : [];
@@ -21665,6 +21947,7 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
           <div style="font-size:11px;color:#6b7280;">
             <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || cotacao.valor_unitario || 0).toFixed(2)}
           </div>
+          ${linksHtml}
           ${anexosHtml}
 
           <div style="margin-top:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;">
@@ -27628,6 +27911,19 @@ async function abrirModalAprovacaoRequisicao() {
       const totalQtd = itensGrupo.reduce((sum, i) => sum + (parseFloat(i.quantidade) || 0), 0);
       const itensPermitidos = itensGrupo.filter(i => usuarioPodeAprovarDepartamento(i.departamento || ''));
       const idsPermitidos = itensPermitidos.map(i => i.id).join(',');
+      const itensSolicitacaoGrupo = itensGrupo.filter(i => i.table_source === 'solicitacao_compras');
+      const idsSolicitacaoGrupo = itensSolicitacaoGrupo
+        .map(i => Number(i.id))
+        .filter(id => Number.isInteger(id) && id > 0);
+      const idsSolicitacaoGrupoCsv = idsSolicitacaoGrupo.join(',');
+      const retornoCotacaoGrupoValores = itensSolicitacaoGrupo.map((item) => {
+        const valor = String(item.retorno_cotacao || '').trim().toLowerCase();
+        return ['s', 'sim', 'yes', 'true', '1'].includes(valor) ? 'Sim' : 'Não';
+      });
+      const retornoGrupoUnico = retornoCotacaoGrupoValores.length > 0
+        && retornoCotacaoGrupoValores.every(v => v === retornoCotacaoGrupoValores[0])
+        ? retornoCotacaoGrupoValores[0]
+        : '__misto__';
       const totalSemPermissao = itensGrupo.length - itensPermitidos.length;
       const grupoRequisicaoEncoded = encodeURIComponent(grupoRequisicao);
       
@@ -27650,6 +27946,20 @@ async function abrirModalAprovacaoRequisicao() {
                 <span>Comprar requisição ${escapeHtml(grupoRequisicao)}</span>
               </button>
               ` : '<span style="font-size:11px;opacity:0.8;">Sem permissão</span>'}
+              ${idsSolicitacaoGrupo.length > 0 ? `
+              <div style="background:rgba(255,255,255,0.2);padding:4px 10px;border-radius:12px;display:flex;align-items:center;gap:8px;">
+                <span style="font-size:11px;opacity:0.9;">Retorno Cotação:</span>
+                <select
+                  data-valor-original="${escapeHtml(retornoGrupoUnico)}"
+                  onchange="atualizarRetornoCotacaoGrupoAprovacao('${grupoRequisicaoEncoded}', '${idsSolicitacaoGrupoCsv}', this)"
+                  style="padding:4px 8px;border-radius:10px;border:1px solid rgba(255,255,255,0.4);background:rgba(255,255,255,0.9);color:#1f2937;font-size:11px;font-weight:700;"
+                >
+                  ${retornoGrupoUnico === '__misto__' ? '<option value="__misto__" selected disabled>Misto</option>' : ''}
+                  <option value="Sim" ${retornoGrupoUnico === 'Sim' ? 'selected' : ''}>Sim</option>
+                  <option value="Não" ${retornoGrupoUnico === 'Não' ? 'selected' : ''}>Não</option>
+                </select>
+              </div>
+              ` : ''}
               <div style="background:rgba(255,255,255,0.2);padding:4px 12px;border-radius:12px;">
                 <span style="font-size:11px;opacity:0.9;">Itens:</span>
                 <span style="font-weight:700;margin-left:4px;">${itensGrupo.length}</span>
@@ -27664,6 +27974,7 @@ async function abrirModalAprovacaoRequisicao() {
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Código</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;">Descrição</th>
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:80px;">Qtd</th>
+                  <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:90px;">Unidade</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Solicitante</th>
                   <th style="padding:10px;text-align:center;font-weight:600;color:#374151;width:120px;">Retorno Cotação</th>
                   <th style="padding:10px;text-align:left;font-weight:600;color:#374151;width:120px;">Departamento</th>
@@ -27677,17 +27988,12 @@ async function abrirModalAprovacaoRequisicao() {
                 ${itensGrupo.map((item, idx) => {
                   const isSemCadastro = item.table_source === 'compras_sem_cadastro';
                   const retornoCotacaoRaw = String(item.retorno_cotacao || '').trim();
-                  const retornoSemValores = '🛒 Apenas realizar compra sem retorno de valores ou caracteristica';
-                  // Se vier de solicitacao_compras, sempre considera retorno = NÃO
-                  // Se vier de compras_sem_cadastro, verifica se não é "apenas realizar compra"
-                  const retornoCotacaoEhSim = isSemCadastro
-                    ? retornoCotacaoRaw !== retornoSemValores
-                    : false;  // solicitacao_compras sempre NÃO retorna cotação
+                  const retornoCotacaoEhSim = retornoCotacaoIndicaCotacao(retornoCotacaoRaw, item.table_source || 'solicitacao_compras');
                   const retornoTexto = retornoCotacaoEhSim ? 'SIM' : 'NÃO';
                   const retornoCor = retornoCotacaoEhSim ? '#10b981' : '#ef4444';
                   const grupoAtual = item.grupo_requisicao || 'Sem grupo';
-                  
-                  // Processa anexos
+	                  
+	                  // Processa anexos
                   let anexosHtml = '-';
                   if (item.anexos && Array.isArray(item.anexos) && item.anexos.length > 0) {
                     const anexosJson = JSON.stringify(item.anexos).replace(/"/g, '&quot;');
@@ -27729,6 +28035,7 @@ async function abrirModalAprovacaoRequisicao() {
                           onblur="atualizarQuantidadeItemAprovacao(${item.id}, this)"
                         />
                       </td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.unidade || '-')}</td>
                       <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.solicitante || '-')}</td>
                       <td style="padding:10px;text-align:center;">
                         <span style="background:${retornoCor};color:white;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${retornoTexto}</span>
@@ -27820,14 +28127,12 @@ async function abrirModalAprovacaoRequisicao() {
 }
 
 // Função para aprovar um item individualmente
-async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
+async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOriginal) {
+  const retornoCotacaoRaw = String(retornoCotacaoRawOriginal || '').trim();
   const isSemCadastro = tableSource === 'compras_sem_cadastro';
-  const retornoSemValores = '🛒 Apenas realizar compra sem retorno de valores ou caracteristica';
-  const retornoCotacaoEhSim = isSemCadastro
-    ? String(retornoCotacaoRaw || '').trim() !== retornoSemValores
-    : false;
+  const retornoCotacaoEhSim = retornoCotacaoIndicaCotacao(retornoCotacaoRaw, tableSource || 'solicitacao_compras');
 
-  const retornoCotacaoEhSimSolicitacao = ['s', 'sim', 'yes', 'true', '1'].includes(String(retornoCotacaoRaw || '').trim().toLowerCase());
+  const retornoCotacaoEhSimSolicitacao = ['s', 'sim', 'yes', 'true', '1'].includes(retornoCotacaoRaw.toLowerCase());
   const novoStatusSolicitacao = retornoCotacaoEhSimSolicitacao ? 'aguardando cotação' : 'Requisição';
 
   const mensagemConfirmacao = isSemCadastro
@@ -27881,6 +28186,61 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRaw) {
   } catch (err) {
     console.error('[Aprovação] Erro ao aprovar item:', err);
     alert('Erro ao aprovar item: ' + err.message);
+  }
+}
+
+// Atualiza retorno_cotacao (Sim/Não) em massa no grupo da requisição
+async function atualizarRetornoCotacaoGrupoAprovacao(grupoRequisicaoEncoded, idsCsv, selectEl) {
+  if (!selectEl) return;
+  const originalValue = String(selectEl.getAttribute('data-valor-original') || 'Não').trim() || 'Não';
+
+  const valorSelecionado = String(selectEl.value || '').trim();
+  if (!valorSelecionado || valorSelecionado === '__misto__') {
+    selectEl.value = originalValue;
+    return;
+  }
+  const valorNormalizado = ['s', 'sim', 'yes', 'true', '1'].includes(valorSelecionado.toLowerCase()) ? 'Sim' : 'Não';
+  const ids = String(idsCsv || '')
+    .split(',')
+    .map(v => Number(v.trim()))
+    .filter(v => Number.isInteger(v) && v > 0);
+
+  if (!ids.length) {
+    selectEl.value = originalValue;
+    return;
+  }
+
+  const grupoRequisicao = decodeURIComponent(String(grupoRequisicaoEncoded || ''));
+  const confirma = confirm(
+    `Deseja alterar Retorno Cotação para "${valorNormalizado}" em ${ids.length} item(ns) do grupo "${grupoRequisicao}"?`
+  );
+  if (!confirma) {
+    selectEl.value = originalValue;
+    return;
+  }
+
+  selectEl.disabled = true;
+  try {
+    const resp = await fetch('/api/compras/solicitacoes/retorno-cotacao/lote', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ids, retorno_cotacao: valorNormalizado })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.success) {
+      throw new Error(data.error || 'Falha ao atualizar retorno de cotação em lote');
+    }
+
+    selectEl.setAttribute('data-valor-original', valorNormalizado);
+    await abrirModalAprovacaoRequisicao();
+  } catch (err) {
+    console.error('[Aprovação] Erro ao atualizar retorno de cotação em lote:', err);
+    alert('Erro ao atualizar retorno de cotação em lote: ' + err.message);
+    selectEl.value = originalValue;
+  } finally {
+    selectEl.disabled = false;
   }
 }
 
@@ -28105,13 +28465,15 @@ async function abrirModalHistoricoGeral() {
       }
     };
     
-    // Agrupa histórico por solicitacao_id
+    // Agrupa histórico por origem + solicitacao_id
     const historicoPorItem = {};
     historico.forEach(h => {
-      if (!historicoPorItem[h.solicitacao_id]) {
-        historicoPorItem[h.solicitacao_id] = [];
+      const tableSource = String(h.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+      const chaveGrupo = `${tableSource}:${h.solicitacao_id}`;
+      if (!historicoPorItem[chaveGrupo]) {
+        historicoPorItem[chaveGrupo] = [];
       }
-      historicoPorItem[h.solicitacao_id].push(h);
+      historicoPorItem[chaveGrupo].push(h);
     });
     
     // Monta HTML do histórico agrupado por item
@@ -28119,14 +28481,18 @@ async function abrirModalHistoricoGeral() {
       const ultimaA = historicoPorItem[a][0].created_at;
       const ultimaB = historicoPorItem[b][0].created_at;
       return new Date(ultimaB) - new Date(ultimaA);
-    }).map(solicitacaoId => {
-      const registros = historicoPorItem[solicitacaoId];
+    }).map(chaveGrupo => {
+      const registros = historicoPorItem[chaveGrupo];
       const primeiroRegistro = registros[0];
+      const tableSource = String(primeiroRegistro.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+      const solicitacaoId = primeiroRegistro.solicitacao_id;
+      const fonteLabel = tableSource === 'compras_sem_cadastro' ? 'Sem Cadastro' : 'Solicitação';
       const descricaoItem = primeiroRegistro.descricao_item || `Item #${solicitacaoId}`;
       
       const registrosHtml = registros.map(h => {
         const style = getOperacaoStyle(h.operacao);
         const campoLabel = h.campo_alterado || 'Item completo';
+        const usuarioLabel = String(h.usuario || 'sistema').trim() || 'sistema';
         
         return `
           <div style="border-left:3px solid ${style.cor};padding:8px 12px;margin-bottom:8px;background:#f9fafb;border-radius:4px;">
@@ -28137,9 +28503,10 @@ async function abrirModalHistoricoGeral() {
                 </div>
                 <span style="font-weight:600;color:#1f2937;font-size:12px;">${style.label}</span>
                 <span style="color:#6366f1;font-weight:600;font-size:11px;">${escapeHtml(campoLabel)}</span>
+                <span style="color:#4b5563;font-weight:600;font-size:11px;">- user: ${escapeHtml(usuarioLabel)}</span>
               </div>
               <div style="text-align:right;">
-                ${h.usuario ? `<span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;">${escapeHtml(h.usuario)}</span>` : ''}
+                <span style="background:#e0e7ff;color:#4f46e5;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;">${escapeHtml(usuarioLabel)}</span>
                 <div style="color:#9ca3af;font-size:10px;margin-top:2px;">${formatarDataHora(h.created_at)}</div>
               </div>
             </div>
@@ -28169,7 +28536,7 @@ async function abrirModalHistoricoGeral() {
               <i class="fa-solid fa-box" style="font-size:16px;"></i>
               <div>
                 <div style="font-weight:700;font-size:14px;">${escapeHtml(descricaoItem)}</div>
-                <div style="font-size:10px;opacity:0.9;">ID: ${solicitacaoId} | ${registros.length} registro(s)</div>
+                <div style="font-size:10px;opacity:0.9;">${escapeHtml(fonteLabel)} | ID: ${solicitacaoId} | ${registros.length} registro(s)</div>
               </div>
             </div>
             ${primeiroRegistro.departamento ? `
@@ -28914,22 +29281,44 @@ function filtrarTodosKanbans(textoFiltro) {
     
     for (let i = 0; i < linhas.length; i++) {
       const tr = linhas[i];
+      if (!tr) continue;
       
-      // Pula linhas de detalhe de produtos (tratadas junto com a linha pai)
-      if (tr.id && tr.id.startsWith('lista-produtos-')) continue;
-      
+      // Pula linhas auxiliares; elas são tratadas junto com a linha principal.
+      if (tr.id && (tr.id.startsWith('lista-produtos-') || tr.id.startsWith('lista-fluxo-'))) continue;
+
+      const rowId = tr.getAttribute('data-row-id');
+      const linhaFluxo = rowId ? document.getElementById(`lista-fluxo-${rowId}`) : null;
+      const linhaProdutos = rowId ? document.getElementById(`lista-produtos-${rowId}`) : null;
+      const linhaProdutosConteudo = rowId ? document.getElementById(`lista-produtos-conteudo-${rowId}`) : null;
+
       if (textoNormalizado.length < 3) {
         tr.style.display = '';
-        // Não força mostrar o detalhe — estado controlado pelo toggleListaProdutos
+        if (linhaFluxo) linhaFluxo.style.display = 'table-row';
+        if (linhaProdutos) {
+          const ocultoPeloUsuario = linhaProdutos.getAttribute('data-user-hidden') === '1';
+          linhaProdutos.style.display = 'table-row';
+          if (linhaProdutosConteudo) {
+            linhaProdutosConteudo.style.display = ocultoPeloUsuario ? 'none' : 'block';
+          }
+        }
       } else {
         // Usa data-search (inclui descrições de produtos) se disponível; fallback para textContent
         const textoLinha = (tr.getAttribute('data-search') || tr.textContent.toLowerCase().replace(/\s+/g, ' ').trim());
         const visivel = textoLinha.includes(textoNormalizado);
         tr.style.display = visivel ? '' : 'none';
-        // Se a linha principal foi ocultada, oculta também a linha de detalhe seguinte
-        const proxima = linhas[i + 1];
-        if (proxima && proxima.id && proxima.id.startsWith('lista-produtos-') && !visivel) {
-          proxima.style.display = 'none';
+
+        if (linhaFluxo) linhaFluxo.style.display = visivel ? 'table-row' : 'none';
+
+        if (linhaProdutos) {
+          if (!visivel) {
+            linhaProdutos.style.display = 'none';
+          } else {
+            const ocultoPeloUsuario = linhaProdutos.getAttribute('data-user-hidden') === '1';
+            linhaProdutos.style.display = 'table-row';
+            if (linhaProdutosConteudo) {
+              linhaProdutosConteudo.style.display = ocultoPeloUsuario ? 'none' : 'block';
+            }
+          }
         }
       }
     }
@@ -28948,6 +29337,21 @@ function limparFiltroGlobal() {
 
 // Variável global para ratrear o modo de visualização atual
 let modoVisualizacaoKanban = false;
+
+function atualizarOffsetCabecalhoListaCompras() {
+  const wrapper = document.getElementById('minhasComprasWrapper');
+  const toolbar = document.getElementById('comprasListaToolbar');
+  if (!wrapper || !toolbar) return;
+
+  const toolbarStyle = window.getComputedStyle(toolbar);
+  if (toolbarStyle.display === 'none' || toolbarStyle.visibility === 'hidden') return;
+
+  const marginBottom = parseFloat(toolbarStyle.marginBottom) || 0;
+  const borderBottom = parseFloat(toolbarStyle.borderBottomWidth) || 0;
+  const alturaToolbar = Math.ceil(toolbar.getBoundingClientRect().height + marginBottom + borderBottom);
+  const offset = Math.max(0, alturaToolbar);
+  wrapper.style.setProperty('--compras-lista-topo-offset', `${offset}px`);
+}
 
 // Objetivo: Alternar entre visualização Kanban e Lista
 function toggleVisualizacao() {
@@ -28975,7 +29379,10 @@ function mostrarVisualizacaoKanban() {
     if (icone) icone.className = 'fa-solid fa-columns';
   }
   // Recalcula altura após o display:flex ser renderizado
-  requestAnimationFrame(() => ajustarAlturaKanban());
+  requestAnimationFrame(() => {
+    ajustarAlturaKanban();
+    atualizarOffsetCabecalhoListaCompras();
+  });
 }
 
 // Objetivo: Exibir visualização em Lista (tabela)
@@ -28990,6 +29397,7 @@ function mostrarVisualizacaoLista() {
     kanbanContainer.style.height = '';
   }
   if (listaContainer) listaContainer.style.display = 'block';
+  requestAnimationFrame(() => atualizarOffsetCabecalhoListaCompras());
   if (botaoAlternar) {
     botaoAlternar.style.background = 'linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%)';
     botaoAlternar.title = 'Alternar para Visualização em Kanban';
@@ -28999,6 +29407,183 @@ function mostrarVisualizacaoLista() {
   
   // Renderiza a lista com dados dos kanbans
   renderizarLista();
+  requestAnimationFrame(() => atualizarOffsetCabecalhoListaCompras());
+}
+
+function normalizarTextoFluxoCompras(valor) {
+  return String(valor || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizarRetornoSemCadastro(valor) {
+  return normalizarTextoFluxoCompras(valor)
+    .replace(/^🛒\s*/u, '')
+    .trim();
+}
+
+const RETORNO_SEM_VALORES_NORMALIZADO = normalizarTextoFluxoCompras('Apenas realizar compra sem retorno de valores ou caracteristica');
+
+const STATUS_PARA_ETAPA_COMPRAS = {
+  'aguardando aprovacao da requisicao': 'Aprovação',
+  'solicitado revisao': 'Revisão',
+  retificar: 'Revisão',
+  'aguardando cotacao': 'Cotação',
+  'cotado aguardando escolha': 'Cotado',
+  cotado: 'Cotado',
+  'analise de cadastro': 'Analise de cadastro',
+  'aguardando compra preparacao': 'Requisições',
+  requisicao: 'Requisições',
+  'aguardando compra': 'Pedido de compra',
+  'compra realizada': 'Compra realizada',
+  'faturada pelo fornecedor': 'Faturado',
+  recebido: 'Recebido',
+  concluido: 'Concluído'
+};
+
+const FLUXOS_ETAPAS_COMPRAS = {
+  solicitacao_requisicao: [
+    'Aprovação',
+    'Revisão',
+    'Requisições',
+    'Pedido de compra',
+    'Compra realizada',
+    'Faturado',
+    'Recebido',
+    'Concluído'
+  ],
+  solicitacao_cotacao: [
+    'Aprovação',
+    'Revisão',
+    'Cotação',
+    'Cotado',
+    'Requisições',
+    'Pedido de compra',
+    'Compra realizada',
+    'Faturado',
+    'Recebido',
+    'Concluído'
+  ],
+  sem_cadastro_analise: [
+    'Aprovação',
+    'Revisão',
+    'Analise de cadastro',
+    'Requisições',
+    'Pedido de compra',
+    'Compra realizada',
+    'Faturado',
+    'Recebido',
+    'Concluído'
+  ],
+  sem_cadastro_cotacao: [
+    'Aprovação',
+    'Revisão',
+    'Cotação',
+    'Cotado',
+    'Analise de cadastro',
+    'Requisições',
+    'Pedido de compra',
+    'Compra realizada',
+    'Faturado',
+    'Recebido',
+    'Concluído'
+  ]
+};
+
+function retornoCotacaoIndicaCotacao(valor, tableSource = 'solicitacao_compras') {
+  const sourceNormalizado = normalizarTextoFluxoCompras(tableSource);
+  const retornoNormalizado = normalizarRetornoSemCadastro(valor);
+
+  if (sourceNormalizado === 'compras_sem_cadastro') {
+    return retornoNormalizado !== RETORNO_SEM_VALORES_NORMALIZADO;
+  }
+
+  return ['s', 'sim', 'yes', 'true', '1'].includes(retornoNormalizado);
+}
+
+function mapearStatusParaEtapaCompras(statusAtual) {
+  const statusNormalizado = normalizarTextoFluxoCompras(statusAtual);
+  return STATUS_PARA_ETAPA_COMPRAS[statusNormalizado] || null;
+}
+
+function inferirFluxoStatusCompras(statusAtual, itensRelacionados = []) {
+  const statusNormalizado = normalizarTextoFluxoCompras(statusAtual);
+  const temSemCadastro = itensRelacionados.some(
+    item => normalizarTextoFluxoCompras(item?.table_source) === 'compras_sem_cadastro'
+  );
+  const retornoCotacaoValor = itensRelacionados
+    .map(item => item?.retorno_cotacao)
+    .find(valor => String(valor ?? '').trim() !== '') || '';
+  const tableSourceReferencia = temSemCadastro ? 'compras_sem_cadastro' : 'solicitacao_compras';
+  const retornoVaiParaCotacao = retornoCotacaoIndicaCotacao(retornoCotacaoValor, tableSourceReferencia);
+
+  if (statusNormalizado === 'analise de cadastro') {
+    return retornoVaiParaCotacao ? 'sem_cadastro_cotacao' : 'sem_cadastro_analise';
+  }
+
+  if (statusNormalizado === 'aguardando cotacao' || statusNormalizado === 'cotado aguardando escolha' || statusNormalizado === 'cotado') {
+    return temSemCadastro ? 'sem_cadastro_cotacao' : 'solicitacao_cotacao';
+  }
+
+  if (temSemCadastro) {
+    return retornoVaiParaCotacao ? 'sem_cadastro_cotacao' : 'sem_cadastro_analise';
+  }
+
+  return retornoVaiParaCotacao ? 'solicitacao_cotacao' : 'solicitacao_requisicao';
+}
+
+function obterItensRelacionadosLinhaLista(linha) {
+  const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+  if (!cacheItens.length) return [];
+
+  const idsRelacionados = String(linha?.todosIds || linha?.itemId || '')
+    .split(',')
+    .map(id => String(id || '').trim())
+    .filter(Boolean);
+
+  if (!idsRelacionados.length) return [];
+
+  const itensRelacionados = cacheItens.filter(item => idsRelacionados.includes(String(item?.id)));
+  if (itensRelacionados.length) return itensRelacionados;
+
+  const itemUnico = cacheItens.find(item => String(item?.id) === String(linha?.itemId));
+  return itemUnico ? [itemUnico] : [];
+}
+
+function renderizarFluxoStatusCompras(statusAtual, itensRelacionados = []) {
+  const fluxo = inferirFluxoStatusCompras(statusAtual, itensRelacionados);
+  const etapas = FLUXOS_ETAPAS_COMPRAS[fluxo] || FLUXOS_ETAPAS_COMPRAS.solicitacao_requisicao;
+  const etapaAtual = mapearStatusParaEtapaCompras(statusAtual);
+  const indiceAtual = etapaAtual
+    ? etapas.findIndex(etapa => normalizarTextoFluxoCompras(etapa) === normalizarTextoFluxoCompras(etapaAtual))
+    : -1;
+
+  return `
+    <div style="display:flex;align-items:center;gap:6px;overflow-x:auto;padding:2px 0 4px;max-width:100%;">
+      ${etapas.map((etapa, idx) => {
+        const concluida = indiceAtual >= 0 && idx < indiceAtual;
+        const atual = idx === indiceAtual;
+        const corFundo = concluida ? '#dcfce7' : (atual ? '#dbeafe' : '#f8fafc');
+        const corTexto = concluida ? '#166534' : (atual ? '#1d4ed8' : '#64748b');
+        const corBorda = concluida ? '#86efac' : (atual ? '#93c5fd' : '#d7dee8');
+        const corDot = concluida ? '#16a34a' : (atual ? '#2563eb' : '#94a3b8');
+        const corConector = indiceAtual >= 0 && idx < indiceAtual ? '#16a34a' : '#d1d5db';
+
+        return `
+          <span style="display:inline-flex;align-items:center;gap:6px;min-width:max-content;">
+            <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;border:1px solid ${corBorda};background:${corFundo};color:${corTexto};font-size:10px;font-weight:${atual ? '700' : '600'};line-height:1;white-space:nowrap;box-shadow:${atual ? '0 0 0 2px rgba(37,99,235,0.12)' : 'none'};">
+              <span style="width:8px;height:8px;border-radius:50%;background:${corDot};display:inline-block;flex-shrink:0;"></span>
+              ${escapeHtml(etapa)}
+            </span>
+            ${idx < etapas.length - 1 ? `<span style="width:16px;height:2px;background:${corConector};border-radius:999px;display:inline-block;"></span>` : ''}
+          </span>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 // Objetivo: Renderizar tabela de lista extraindo dados dos cards do kanban
@@ -29031,6 +29616,7 @@ function renderizarLista() {
       // Extrai dados dos atributos data-*
       const fornecedorData = card.getAttribute('data-fornecedor') || '';
       const solicitanteData = card.getAttribute('data-solicitante') || '';
+      const idSolicitanteData = card.getAttribute('data-id-solicitante') || '-';
       const createdAt = card.getAttribute('data-created-at') || '';
       const dtPrevisao = card.getAttribute('data-dt-previsao') || '';
       const numeroPedidoData = card.getAttribute('data-numero-pedido') || '';
@@ -29133,6 +29719,7 @@ function renderizarLista() {
         rowId,
         requisicao,
         numeroPedido: numeroPedido || numeroPedidoData || '-',
+        idSolicitante: (String(idSolicitanteData || '').trim() || '-'),
         solicitante: solicitanteData || '-',
         fornecedor: fornecedorData || '-',
         status,
@@ -29152,9 +29739,11 @@ function renderizarLista() {
   
   // Renderiza as linhas da tabela
   console.log('[Lista] Total de linhas para renderizar:', linhas.length);
-  linhas.forEach(linha => {
+  linhas.forEach((linha, indiceLinha) => {
     const tr = document.createElement('tr');
-    tr.style.cssText = 'border-bottom:1px solid #e5e7eb;transition:background 0.2s;cursor:pointer;';
+    const bordaSeparadora = indiceLinha === 0 ? '1px solid #e5e7eb' : '3px solid #000000';
+    const bordaFinalGrupo = indiceLinha === linhas.length - 1 ? '1px solid #e5e7eb' : '3px solid #000000';
+    tr.style.cssText = `border-top:${bordaSeparadora};border-bottom:0;transition:background 0.2s;cursor:pointer;`;
     tr.onmouseover = () => tr.style.background = '#f9fafb';
     tr.onmouseout = () => tr.style.background = 'transparent';
     
@@ -29162,6 +29751,7 @@ function renderizarLista() {
     const textoSearch = [
       linha.requisicao,
       linha.numeroPedido,
+      linha.idSolicitante,
       linha.solicitante,
       linha.fornecedor,
       linha.status,
@@ -29171,36 +29761,32 @@ function renderizarLista() {
     ].join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
     tr.setAttribute('data-search', textoSearch);
     
-    // Estilos de status: { bg, color, border }
-    const statusEstilos = {
-      // Sem fundo — texto preto, borda cinza
-      'aguardando aprovação da requisição': { bg: 'transparent', color: '#111827', border: '1.5px solid #d1d5db' },
-      // Cotação → cinza padrão (como está)
-      'aguardando cotação':                 { bg: '#9ca3af',     color: 'white',   border: 'none' },
-      // Fundo cinza, letra verde
-      'cotado aguardando escolha':          { bg: '#9ca3af',     color: '#16a34a', border: 'none' },
-      // Fundo amarelo, letra verde
-      'aguardando compra':                  { bg: '#fbbf24',     color: '#16a34a', border: 'none' },
-      // Compra realizada — como está (verde)
-      'compra realizada':                   { bg: '#34d399',     color: 'white',   border: 'none' },
-      // Demais status úteis
-      'faturada pelo fornecedor':           { bg: '#f97316',     color: 'white',   border: 'none' },
-      'recebido':                           { bg: '#34d399',     color: 'white',   border: 'none' },
-      'concluído':                          { bg: '#34d399',     color: 'white',   border: 'none' },
-      'analise de cadastro':                { bg: '#a78bfa',     color: 'white',   border: 'none' },
-      'solicitado revisão':                 { bg: '#fbbf24',     color: '#111827', border: 'none' },
-      'aguardando compra preparação':       { bg: '#fb923c',     color: 'white',   border: 'none' },
-    };
-    const estiloStatus = statusEstilos[linha.status.toLowerCase()] || { bg: '#9ca3af', color: 'white', border: 'none' };
+    const itensRelacionados = obterItensRelacionadosLinhaLista(linha);
+    const fluxoStatusHtml = renderizarFluxoStatusCompras(linha.status, itensRelacionados);
+    const statusArg = JSON.stringify(String(linha.status || ''));
+    const itemIdArg = JSON.stringify(String(linha.itemId || ''));
+    const todosIdsArg = JSON.stringify(String(linha.todosIds || ''));
+    const numeroPedidoArg = JSON.stringify(String(linha.numeroPedido || ''));
     
+    const statusNormalizadoLinha = normalizarTextoFluxoCompras(linha.status);
+
     // Define se o fornecedor deve ser exibido baseado no status
-    const statusSemFornecedor = ['aprovacao', 'revisao', 'cotacao', 'cotado', 'analise de cadastro', 'requisicoes'];
-    const exibeFornecedor = !statusSemFornecedor.includes(linha.status.toLowerCase());
+    const statusSemFornecedor = [
+      'aguardando aprovacao da requisicao',
+      'solicitado revisao',
+      'aguardando cotacao',
+      'cotado aguardando escolha',
+      'cotado',
+      'analise de cadastro',
+      'aguardando compra preparacao',
+      'requisicao'
+    ];
+    const exibeFornecedor = !statusSemFornecedor.includes(statusNormalizadoLinha);
     const fornecedorExibido = exibeFornecedor ? linha.fornecedor : '-';
     
     // Data de previsão só existe para Pedido de compra e Compra realizada
-    const statusComPrevisao = ['pedido de compra', 'compra realizada'];
-    const exibeDataPrevisao = statusComPrevisao.includes(linha.status.toLowerCase());
+    const statusComPrevisao = ['aguardando compra', 'compra realizada'];
+    const exibeDataPrevisao = statusComPrevisao.includes(statusNormalizadoLinha);
     const dataPrevisaoExibida = exibeDataPrevisao ? linha.dataPrevisao : '-';
     let dataPrevisaoStyle = 'color:#111827;';
     if (exibeDataPrevisao && linha.dataPrevisaoRaw) {
@@ -29212,10 +29798,26 @@ function renderizarLista() {
         dataPrevisaoStyle = 'color:#ef4444;font-weight:700;';
       }
     }
+
+    const statusBadgeEstilos = {
+      'aguardando aprovacao da requisicao': { bg: '#eef2f7', color: '#475569', border: '#d7dee8' },
+      'solicitado revisao': { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
+      'aguardando cotacao': { bg: '#fffbeb', color: '#92400e', border: '#fde68a' },
+      'cotado aguardando escolha': { bg: '#f5f3ff', color: '#5b21b6', border: '#ddd6fe' },
+      'analise de cadastro': { bg: '#ecfeff', color: '#155e75', border: '#bae6fd' },
+      'aguardando compra preparacao': { bg: '#ecfdf5', color: '#065f46', border: '#a7f3d0' },
+      requisicao: { bg: '#ecfdf5', color: '#065f46', border: '#a7f3d0' },
+      'aguardando compra': { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+      'compra realizada': { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' },
+      'faturada pelo fornecedor': { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
+      recebido: { bg: '#ecfdf5', color: '#166534', border: '#bbf7d0' },
+      concluido: { bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' }
+    };
+    const estiloStatusBadge = statusBadgeEstilos[statusNormalizadoLinha] || { bg: '#f8fafc', color: '#475569', border: '#d7dee8' };
     
     tr.innerHTML = `
+      <td style="padding:12px 10px;font-size:12px;color:#111827;font-weight:700;text-align:center;white-space:nowrap;">${escapeHtml(linha.idSolicitante || '-')}</td>
       <td style="padding:12px 16px;font-size:12px;color:#111827;font-weight:500;">
-        <button type="button" onclick="toggleListaProdutos('${linha.rowId}', event)" style="margin-right:8px;background:#e5e7eb;border:none;border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;cursor:pointer;">+</button>
         ${linha.requisicao}
       </td>
       <td style="padding:12px 16px;font-size:11px;color:#6b7280;font-family:monospace;">${linha.numeroPedido}</td>
@@ -29223,26 +29825,56 @@ function renderizarLista() {
       <td style="padding:12px 16px;font-size:12px;color:#111827;">${fornecedorExibido}</td>
       <td style="padding:12px 16px;text-align:center;">
         <span
-          onclick="abrirModalPorStatusLista('${linha.status}', '${linha.itemId}', '${linha.todosIds}', '${linha.numeroPedido}', this); event.stopPropagation();"
-          style="display:inline-block;padding:6px 12px;background:${estiloStatus.bg};color:${estiloStatus.color};border:${estiloStatus.border};border-radius:4px;font-size:11px;font-weight:600;text-transform:capitalize;cursor:pointer;transition:opacity 0.15s;"
-          onmouseover="if(!this.dataset.badgeTxt)this.style.opacity='0.8'"
+          onclick='abrirModalPorStatusLista(${statusArg}, ${itemIdArg}, ${todosIdsArg}, ${numeroPedidoArg}, this); event.stopPropagation();'
+          style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:${estiloStatusBadge.bg};color:${estiloStatusBadge.color};border:1px solid ${estiloStatusBadge.border};border-radius:999px;cursor:pointer;transition:opacity 0.15s;font-size:11px;font-weight:700;line-height:1;"
+          onmouseover="if(!this.dataset.badgeTxt)this.style.opacity='0.82'"
           onmouseout="this.style.opacity='1'"
-          title="Clique para abrir o painel desta solicitação">${linha.status}</span>
+          title="Clique para abrir o painel desta solicitação">
+          <span style="width:8px;height:8px;border-radius:50%;background:${estiloStatusBadge.color};display:inline-block;"></span>
+          ${escapeHtml(linha.status || '-')}
+        </span>
       </td>
       <td style="padding:12px 16px;font-size:12px;color:#111827;text-align:center;">${linha.data}</td>
       <td style="padding:12px 16px;font-size:12px;text-align:center;${dataPrevisaoStyle}">${dataPrevisaoExibida}</td>
       <td style="padding:12px 16px;font-size:12px;color:#059669;font-weight:600;text-align:right;white-space:nowrap;">${linha.valorTotal}</td>
     `;
+    tr.setAttribute('data-row-id', linha.rowId);
     
     corpoTabela.appendChild(tr);
 
+    const trFluxo = document.createElement('tr');
+    trFluxo.id = `lista-fluxo-${linha.rowId}`;
+    trFluxo.setAttribute('data-parent-row-id', linha.rowId);
+    trFluxo.innerHTML = `
+      <td colspan="9" style="padding:10px 16px 8px;background:#f9fafb;border-bottom:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:12px;color:#111827;font-weight:600;">Produtos</span>
+          <span style="font-size:12px;color:#9ca3af;font-weight:700;">-</span>
+          <div style="flex:1;min-width:280px;">
+            ${fluxoStatusHtml}
+          </div>
+          <button
+            type="button"
+            onclick="toggleListaProdutos('${linha.rowId}', event)"
+            title="Ocultar produtos"
+            aria-label="Ocultar produtos"
+            style="background:#e5e7eb;border:1px solid #d1d5db;border-radius:999px;padding:3px 10px;font-size:10px;font-weight:700;cursor:pointer;color:#111827;">
+            Ocultar
+          </button>
+        </div>
+      </td>
+    `;
+    corpoTabela.appendChild(trFluxo);
+
     const trDetalhe = document.createElement('tr');
     trDetalhe.id = `lista-produtos-${linha.rowId}`;
-    trDetalhe.style.display = 'none';
+    trDetalhe.style.display = 'table-row';
+    trDetalhe.setAttribute('data-user-hidden', '0');
     trDetalhe.innerHTML = `
-      <td colspan="8" style="padding:12px 16px;background:#f9fafb;border-bottom:1px solid #e5e7eb;">
-        <div style="font-size:12px;color:#111827;font-weight:600;margin-bottom:8px;">Produtos</div>
-        ${linha.produtosHtml}
+      <td colspan="9" style="padding:0 16px 12px;background:#f9fafb;border-bottom:${bordaFinalGrupo};">
+        <div id="lista-produtos-conteudo-${linha.rowId}" style="display:block;">
+          ${linha.produtosHtml}
+        </div>
       </td>
     `;
     corpoTabela.appendChild(trDetalhe);
@@ -29251,7 +29883,7 @@ function renderizarLista() {
   // Se não houver linhas, mostra mensagem
   if (linhas.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="8" style="padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td>';
+    tr.innerHTML = '<td colspan="9" style="padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td>';
     corpoTabela.appendChild(tr);
   }
 }
@@ -29260,11 +29892,18 @@ function renderizarLista() {
 function toggleListaProdutos(rowId, event) {
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const detalhe = document.getElementById(`lista-produtos-${rowId}`);
-  if (!detalhe) return;
-  const aberto = detalhe.style.display === 'table-row';
-  detalhe.style.display = aberto ? 'none' : 'table-row';
+  const conteudo = document.getElementById(`lista-produtos-conteudo-${rowId}`);
+  if (!detalhe || !conteudo) return;
+  const aberto = conteudo.style.display !== 'none';
+  detalhe.style.display = 'table-row';
+  conteudo.style.display = aberto ? 'none' : 'block';
+  detalhe.setAttribute('data-user-hidden', aberto ? '1' : '0');
   const btn = event?.currentTarget;
-  if (btn) btn.textContent = aberto ? '+' : '-';
+  if (btn) {
+    btn.textContent = aberto ? 'Mostrar' : 'Ocultar';
+    btn.title = aberto ? 'Mostrar produtos' : 'Ocultar produtos';
+    btn.setAttribute('aria-label', aberto ? 'Mostrar produtos' : 'Ocultar produtos');
+  }
 }
 window.toggleListaProdutos = toggleListaProdutos;
 
@@ -29282,10 +29921,16 @@ function _spinnerBadgeIniciar(el, textoOriginal) {
   if (!el) return;
   _garantirCssSpinnerBadge();
   el.dataset.badgeTxt = textoOriginal;
+  el.dataset.badgeHtml = el.innerHTML;
   el.style.pointerEvents = 'none';
   el.style.opacity = '1';
   // Adapta cor do spinner ao fundo do badge (transparente = escuro, colorido = branco)
-  const bgTransp = el.style.background === 'transparent' || el.style.backgroundColor === 'transparent';
+  const bgComputado = window.getComputedStyle(el).backgroundColor || '';
+  const bgTransp = el.style.background === 'transparent'
+    || el.style.backgroundColor === 'transparent'
+    || bgComputado === 'rgba(0, 0, 0, 0)'
+    || bgComputado === 'transparent'
+    || bgComputado === 'rgb(255, 255, 255)';
   const spinBorder = bgTransp ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.35)';
   const spinTop    = bgTransp ? '#111827'           : '#fff';
   el.innerHTML =
@@ -29314,8 +29959,13 @@ function _spinnerBadgeIniciar(el, textoOriginal) {
 
 // Restaura o badge ao texto original
 function _spinnerBadgeRemover(el) {
-  if (!el || !el.dataset.badgeTxt) return;
-  el.textContent = el.dataset.badgeTxt;
+  if (!el) return;
+  if (el.dataset.badgeHtml != null) {
+    el.innerHTML = el.dataset.badgeHtml;
+    delete el.dataset.badgeHtml;
+  } else if (el.dataset.badgeTxt) {
+    el.textContent = el.dataset.badgeTxt;
+  }
   delete el.dataset.badgeTxt;
   el.style.pointerEvents = '';
 }
@@ -29594,6 +30244,7 @@ window.confirmarReprovacao = confirmarReprovacao;
 window.reprovarItemAprovacao = reprovarItemAprovacao;
 window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
 window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
+window.atualizarRetornoCotacaoGrupoAprovacao = atualizarRetornoCotacaoGrupoAprovacao;
 
 // Função para ajustar dinamicamente a altura do kanban
 function ajustarAlturaKanban() {
@@ -29614,11 +30265,93 @@ function ajustarAlturaKanban() {
 
 // Reajusta ao redimensionar a janela (apenas no modo kanban)
 window.addEventListener('resize', () => {
+  atualizarOffsetCabecalhoListaCompras();
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   if (kanbanContainer && kanbanContainer.style.display !== 'none') {
     ajustarAlturaKanban();
   }
 });
+
+function normalizarSolicitanteParaId(valor) {
+  return String(valor || '').trim().toLowerCase();
+}
+
+function construirMapaIdSolicitante(solicitacoes = []) {
+  const mapa = new Map();
+  if (!Array.isArray(solicitacoes)) return mapa;
+
+  solicitacoes.forEach(item => {
+    const tableSource = String(item?.table_source || 'solicitacao_compras');
+    const itemId = String(item?.id || '').trim();
+    if (!itemId) return;
+    const chave = `${tableSource}:${itemId}`;
+    const idSolicitante = String(item?.id_solicitante || '').trim() || '-';
+    mapa.set(chave, idSolicitante);
+  });
+
+  return mapa;
+}
+
+function obterIdSolicitanteDoMapa(mapa, tableSource, itemId) {
+  if (!(mapa instanceof Map)) return '-';
+  const chave = `${String(tableSource || 'solicitacao_compras')}:${String(itemId || '').trim()}`;
+  const valor = mapa.get(chave);
+  return String(valor || '').trim() || '-';
+}
+
+function resolverIdSolicitanteRequisicao(req, mapaIdSolicitante, solicitacoesBase = []) {
+  const itensReq = Array.isArray(req?.itens) ? req.itens : [];
+  for (const item of itensReq) {
+    const idCalc = obterIdSolicitanteDoMapa(mapaIdSolicitante, item?.table_source || 'solicitacao_compras', item?.id);
+    if (idCalc !== '-') return idCalc;
+  }
+
+  const codReq = String(req?.cod_req_compra || '');
+  const codIntReq = String(req?.cod_int_req_compra || req?.numero || '');
+  const itemRef = Array.isArray(solicitacoesBase)
+    ? solicitacoesBase.find(item =>
+        String(item?.cod_req_compra || '') === codReq ||
+        String(item?.numero_pedido || '') === codIntReq
+      )
+    : null;
+
+  if (itemRef) {
+    const idRef = String(itemRef.id_solicitante || '').trim();
+    if (idRef) return idRef;
+  }
+
+  return '-';
+}
+
+function normalizarGrupoRequisicaoParaId(valor) {
+  return String(valor || '').trim().toLowerCase();
+}
+
+function construirMapaIdSolicitantePorGrupo(solicitacoes = []) {
+  const mapa = new Map();
+  if (!Array.isArray(solicitacoes)) return mapa;
+
+  solicitacoes.forEach(item => {
+    const solicitanteKey = normalizarSolicitanteParaId(item?.solicitante);
+    const grupoKey = normalizarGrupoRequisicaoParaId(item?.grupo_requisicao);
+    const idSolicitante = String(item?.id_solicitante || '').trim();
+    if (!solicitanteKey || !grupoKey || !idSolicitante || idSolicitante === '-') return;
+    const chave = `${solicitanteKey}::${grupoKey}`;
+    if (!mapa.has(chave)) mapa.set(chave, idSolicitante);
+  });
+
+  return mapa;
+}
+
+function obterIdSolicitantePorGrupo(mapa, solicitante, grupoRequisicao) {
+  if (!(mapa instanceof Map)) return '-';
+  const solicitanteKey = normalizarSolicitanteParaId(solicitante);
+  const grupoKey = normalizarGrupoRequisicaoParaId(grupoRequisicao);
+  if (!solicitanteKey || !grupoKey) return '-';
+  const chave = `${solicitanteKey}::${grupoKey}`;
+  const valor = mapa.get(chave);
+  return String(valor || '').trim() || '-';
+}
 
 async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
@@ -29632,6 +30365,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
   }
   
   wrapper.style.display = 'flex';
+  requestAnimationFrame(() => atualizarOffsetCabecalhoListaCompras());
   kanbanContainer.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Carregando...</div>';
   
   // Ajusta a altura do kanban para ocupar todo o espaço disponível
@@ -29645,8 +30379,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     const resp = await fetch(`/api/compras/todas`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
     const data = await resp.json();
+    const solicitacoesBaseTodas = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+    const mapaIdSolicitante = construirMapaIdSolicitante(solicitacoesBaseTodas);
+    const mapaIdSolicitantePorGrupo = construirMapaIdSolicitantePorGrupo(solicitacoesBaseTodas);
+    window.__comprasIdSolicitanteMap = mapaIdSolicitante;
+    window.__comprasIdSolicitantePorGrupoMap = mapaIdSolicitantePorGrupo;
+
     // Objetivo: remover status que serão substituídos pelos dados da tabela pedidos_omie
-    let lista = (data.solicitacoes || []).filter(item => {
+    let lista = solicitacoesBaseTodas.filter(item => {
       const status = (item.status || '').toLowerCase();
       return status !== 'aguardando compra' && status !== 'compra realizada';
     });
@@ -29658,8 +30398,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     if (filtroSolicitante === 'minhas') {
       // Filtra apenas itens onde o solicitante é o usuário logado
       lista = lista.filter(item => {
-        const solicitante = (item.solicitante || '').trim().toLowerCase();
-        const usuario = currentUser.toLowerCase();
+        const solicitante = normalizarSolicitanteParaId(item.solicitante);
+        const usuario = normalizarSolicitanteParaId(currentUser);
         return solicitante === usuario;
       });
     }
@@ -29676,6 +30416,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         cnumero: req.numero,
         cod_req_compra: req.cod_req_compra || null,
         cod_int_req_compra: req.cod_int_req_compra || null,
+        solicitante: req.solicitante || (Array.isArray(req.itens) ? (req.itens.find(i => String(i?.solicitante || '').trim() !== '')?.solicitante || '') : ''),
+        id_solicitante: resolverIdSolicitanteRequisicao(req, mapaIdSolicitante, solicitacoesBaseTodas),
         status: 'aguardando compra preparação',
         statusNormalizado: 'aguardando compra preparação',
         isRequisicao: true,
@@ -29723,8 +30465,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       console.log('[DEBUG] Pedidos de compra recebidos da API:', dataPed.pedidos);
       pedidosCompra = (dataPed.pedidos || []).map(ped => {
         console.log('[DEBUG] Pedido individual:', ped.numero, 'com itens:', ped.itens ? ped.itens.length : 0);
-        // Busca solicitante na lista de solicitacao_compras pelo numero_pedido
-        const itemRef = lista.find(item => item.numero_pedido === ped.numero);
+        // Busca item de referência nas tabelas base para herdar solicitante e id_solicitante
+        const itemRef = solicitacoesBaseTodas.find(item => item.numero_pedido === ped.numero);
+        const solicitanteRef = ped.solicitante || (itemRef ? itemRef.solicitante : '') || '';
+        const grupoRequisicaoRef = ped.grupo_requisicao || (itemRef ? itemRef.grupo_requisicao : '') || '';
+        const idSolicitantePorGrupo = obterIdSolicitantePorGrupo(
+          mapaIdSolicitantePorGrupo,
+          solicitanteRef,
+          grupoRequisicaoRef
+        );
         return {
           ...ped,
           id: `ped_${ped.n_cod_ped}`,
@@ -29732,7 +30481,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           numero: ped.numero, // c_numero com 4 dígitos
           n_cod_ped: ped.n_cod_ped,
           fornecedor_nome: ped.fornecedor_nome,
-          solicitante: ped.solicitante || (itemRef ? itemRef.solicitante : '') || '',
+          solicitante: solicitanteRef,
+          id_solicitante: (itemRef && String(itemRef.id_solicitante || '').trim()) || idSolicitantePorGrupo || '-',
           status: 'aguardando compra',
           statusNormalizado: 'aguardando compra',
           isPedidoCompra: true,
@@ -29771,8 +30521,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
         console.log('[DEBUG] Compra realizada individual:', cNumeroValido, 'com itens:', comp.itens ? comp.itens.length : 0);
 
-        // Busca solicitante na lista de solicitacao_compras pelo numero_pedido
-        const itemRef = cNumeroValido ? lista.find(item => item.numero_pedido === cNumeroValido) : null;
+        // Busca item de referência nas tabelas base para herdar solicitante e id_solicitante
+        const itemRef = cNumeroValido ? solicitacoesBaseTodas.find(item => item.numero_pedido === cNumeroValido) : null;
+        const solicitanteRef = comp.solicitante || (itemRef ? itemRef.solicitante : '') || '';
+        const grupoRequisicaoRef = comp.grupo_requisicao || (itemRef ? itemRef.grupo_requisicao : '') || '';
+        const idSolicitantePorGrupo = obterIdSolicitantePorGrupo(
+          mapaIdSolicitantePorGrupo,
+          solicitanteRef,
+          grupoRequisicaoRef
+        );
 
         return {
           ...comp,
@@ -29782,7 +30539,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           c_numero: cNumeroValido,
           n_cod_ped: comp.n_cod_ped,
           fornecedor_nome: comp.fornecedor_nome,
-          solicitante: comp.solicitante || (itemRef ? itemRef.solicitante : '') || '',
+          solicitante: solicitanteRef,
+          id_solicitante: (itemRef && String(itemRef.id_solicitante || '').trim()) || idSolicitantePorGrupo || '-',
           status: 'compra realizada',
           statusNormalizado: 'compra realizada',
           isCompraRealizada: true,
@@ -30271,6 +31029,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               data-todos-ids="${todosIds}"
               data-fornecedor="${escapeHtml(primeiroItem.fornecedor_nome || '')}"
               data-solicitante="${escapeHtml(primeiroItem.solicitante || '')}"
+              data-id-solicitante="${escapeHtml(String(primeiroItem.id_solicitante || '-'))}"
               data-created-at="${primeiroItem.created_at || ''}"
               data-dt-previsao="${primeiroItem.d_dt_previsao || ''}"
               data-numero-pedido="${primeiroItem.numero || primeiroItem.c_numero || primeiroItem.numero_pedido || ''}"

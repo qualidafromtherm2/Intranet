@@ -431,7 +431,7 @@
             <div id="minhasComprasWrapper" class="content-section" style="margin-top:0px;display:none;">
               
               <!-- Título e Botões de Ação -->
-              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;gap:16px;">
+              <div id="comprasListaToolbar" class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;gap:16px;">
                 <div style="display:flex;align-items:center;gap:12px;flex:1;">
                   <div class="content-section-title" style="display:flex;align-items:center;gap:8px;margin:0;">
                     <i class="fa-solid fa-shopping-bag" style="color:#22c55e;"></i>
@@ -483,18 +483,19 @@
               </div>
 
               <!-- Visualização em Lista -->
-              <div id="listaMinhasSolicitacoes" style="display:none;margin-top:4px;overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+              <div id="listaMinhasSolicitacoes" style="display:none;margin-top:0;overflow:visible;">
+                <table id="listaMinhasSolicitacoesTabela" style="width:100%;border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
                   <thead>
                     <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;">Nº Requisição</th>
-                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;">Nº Pedido</th>
-                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;">Solicitante</th>
-                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;">Fornecedor</th>
-                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;">Status</th>
-                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;">Data</th>
-                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;">Data Previsão</th>
-                      <th style="padding:12px 16px;text-align:right;font-weight:600;color:#111827;font-size:13px;">Vlr Total</th>
+                      <th style="padding:12px 10px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;width:80px;">ID</th>
+                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Nº Requisição</th>
+                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Nº Pedido</th>
+                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Solicitante</th>
+                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Fornecedor</th>
+                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Status</th>
+                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Data</th>
+                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Data Previsão</th>
+                      <th style="padding:12px 16px;text-align:right;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Vlr Total</th>
                     </tr>
                   </thead>
                   <tbody id="listaMinhasSolicitacoesCorpo">
@@ -522,9 +523,9 @@
                   <i class="fa-solid fa-filter"></i>
                   <span class="compras-acao-text">Filtrar Kanban</span>
                 </button>
-                <button id="comprasExportarExcelMinhasBtn" class="content-button compras-acao-btn" type="button" title="Exportar para Excel">
-                  <i class="fa-solid fa-file-excel"></i>
-                  <span class="compras-acao-text">Exportar para Excel</span>
+                <button id="comprasExportarExcelMinhasBtn" class="content-button compras-acao-btn" type="button" title="Tabela google sheet">
+                  <i class="fa-solid fa-table"></i>
+                  <span class="compras-acao-text">Tabela google sheet</span>
                 </button>
                 <button id="comprasConfigBtn" class="content-button compras-acao-btn" type="button" title="Configuração de Compras">
                   <i class="fa-solid fa-cog"></i>
@@ -534,6 +535,42 @@
                   <i class="fa-solid fa-clock-rotate-left"></i>
                   <span class="compras-acao-text">Histórico de Movimentações</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Tabela Google Sheet -->
+        <div id="modalGoogleSheetsStatus" class="modal-overlay" style="display:none;z-index:10025;">
+          <div class="modal-container" style="max-width:720px;">
+            <div class="modal-header">
+              <div style="font-weight:600;color:#e5e7eb;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-table" style="color:#60a5fa;"></i>
+                Tabela Google Sheet
+              </div>
+              <button id="modalGoogleSheetsStatusFecharBtn" class="modal-close-btn" type="button">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+              <a id="googleSheetsAbrirPlanilhaBtn" href="https://docs.google.com/spreadsheets/d/1xJT96JbXxqb2SPdCwsNAI55E8EGuEofDOiXbn5iFCDE/edit?usp=sharing" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#2563eb;color:#fff;width:fit-content;">
+                <i class="fa-solid fa-up-right-from-square"></i>
+                Abrir planilha
+              </a>
+
+              <div style="border:1px solid var(--card-border-color);border-radius:10px;padding:12px;background:rgba(255,255,255,0.03);">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                  <div style="font-weight:600;color:#e5e7eb;">Status da última sincronização</div>
+                  <button id="googleSheetsAtualizarStatusBtn" type="button" class="content-button" style="padding:8px 12px;font-size:12px;">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    Atualizar status
+                  </button>
+                </div>
+
+                <div id="googleSheetsSyncResumo" style="margin-top:10px;font-size:13px;color:#cbd5e1;line-height:1.5;">
+                  Carregando status...
+                </div>
+                <div id="googleSheetsSyncDetalhes" style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.6;"></div>
               </div>
             </div>
           </div>

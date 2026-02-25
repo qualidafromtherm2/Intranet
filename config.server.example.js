@@ -2,6 +2,7 @@
 module.exports = {
   OMIE_APP_KEY:    process.env.OMIE_APP_KEY,
   OMIE_APP_SECRET: process.env.OMIE_APP_SECRET,
+  GOOGLE_SHEETS_WEBHOOK_URL: process.env.GOOGLE_SHEETS_WEBHOOK_URL,
   GITHUB_TOKEN:    process.env.GITHUB_TOKEN,
   GITHUB_BRANCH:   process.env.GITHUB_BRANCH || 'main',
   GITHUB_OWNER:    process.env.GITHUB_OWNER   || 'qualidafromtherm2',
