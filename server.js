@@ -3236,6 +3236,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       // Para inclusão, alteração, encerramento ou mudança de etapa, busca dados completos na API da Omie
       (async () => {
         try {
+          const etapaWebhook = String(cabecalho.cEtapa || cabecalho.c_etapa || '').trim();
+          const numeroWebhook = String(cabecalho.cNumero || cabecalho.c_numero || '').trim();
+
           const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3256,6 +3259,18 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           }
           
           const pedido = await response.json();
+
+          // Webhook tem prioridade para etapa/numero quando vier preenchido,
+          // pois a API ConsultarPedCompra pode retornar dados defasados por alguns instantes.
+          if (!pedido.cabecalho || typeof pedido.cabecalho !== 'object') {
+            pedido.cabecalho = {};
+          }
+          if (etapaWebhook) {
+            pedido.cabecalho.cEtapa = etapaWebhook;
+          }
+          if (numeroWebhook) {
+            pedido.cabecalho.cNumero = numeroWebhook;
+          }
           
           // Atualiza no banco com messageId
           await upsertPedidoCompra(pedido, topic, messageId);
@@ -3282,8 +3297,13 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
   express.json(),
   async (req, res) => {
     try {
-      const body = req.body || {};
-      const event = body.evento || (typeof body.event === 'object' ? body.event : null) || body;
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const event =
+        (body.evento && typeof body.evento === 'object' ? body.evento : null)
+        || (body.event && typeof body.event === 'object' ? body.event : null)
+        || (body.payload && typeof body.payload.event === 'object' ? body.payload.event : null)
+        || (body.data && typeof body.data.event === 'object' ? body.data.event : null)
+        || body;
       
       // Log do webhook recebido
       console.log('[webhooks/omie/recebimentos-nfe] Webhook recebido:', JSON.stringify(body, null, 2));
@@ -3299,7 +3319,9 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || body.nIdReceb 
         || body.n_id_receb
         || event.cabec?.nIdReceb
+        || body.cabec?.nIdReceb
         || event.cabecalho?.nIdReceb        // ← Webhook real envia aqui!
+        || body.cabecalho?.nIdReceb
         || null;
         
       const cChaveNfe = event.cChaveNfe
@@ -3307,7 +3329,21 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || body.cChaveNfe
         || body.c_chave_nfe
         || event.cabec?.cChaveNfe
+        || body.cabec?.cChaveNfe
         || event.cabecalho?.cChaveNfe       // ← Para consistência
+        || body.cabecalho?.cChaveNfe
+        || null;
+
+      const cDadosAdicionaisWebhook = event.cDadosAdicionais
+        || event.c_dados_adicionais
+        || event.cabec?.cDadosAdicionais
+        || event.cabec?.c_dados_adicionais
+        || body.cabec?.cDadosAdicionais
+        || body.cabec?.c_dados_adicionais
+        || event.cabecalho?.cDadosAdicionais
+        || event.cabecalho?.c_dados_adicionais
+        || body.cabecalho?.cDadosAdicionais
+        || body.cabecalho?.c_dados_adicionais
         || null;
       
       if (!nIdReceb && !cChaveNfe) {
@@ -3397,8 +3433,8 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
           
           recebimento = await response.json();
           
-          // Atualiza no banco - passa cChaveNfe do webhook como 4º parâmetro
-          await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe);
+          // Atualiza no banco - passa cChaveNfe e cDadosAdicionais vindos do webhook como fallback
+          await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe, cDadosAdicionaisWebhook);
           
           console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} ${acao} com sucesso`);
           
@@ -8583,6 +8619,139 @@ function pickLocalFromPayload(body) {
   );
 }
 
+function isRecebimentoProdutoTopic(topic = '') {
+  return /^RecebimentoProduto\./i.test(String(topic || ''));
+}
+
+async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
+  const body = (rawBody && typeof rawBody === 'object') ? rawBody : {};
+  const event =
+    (body.event && typeof body.event === 'object' ? body.event : null)
+    || (body.evento && typeof body.evento === 'object' ? body.evento : null)
+    || body;
+  const cab =
+    (event.cabecalho && typeof event.cabecalho === 'object' ? event.cabecalho : null)
+    || (event.cabec && typeof event.cabec === 'object' ? event.cabec : null)
+    || (body.cabecalho && typeof body.cabecalho === 'object' ? body.cabecalho : null)
+    || (body.cabec && typeof body.cabec === 'object' ? body.cabec : null)
+    || {};
+
+  const infoAdicionais =
+    (event.infoAdicionais && typeof event.infoAdicionais === 'object' ? event.infoAdicionais : null)
+    || (event.info_adicionais && typeof event.info_adicionais === 'object' ? event.info_adicionais : null)
+    || (body.infoAdicionais && typeof body.infoAdicionais === 'object' ? body.infoAdicionais : null)
+    || (body.info_adicionais && typeof body.info_adicionais === 'object' ? body.info_adicionais : null)
+    || {};
+
+  const nIdRecebRaw = cab.nIdReceb ?? cab.n_id_receb ?? null;
+  const nIdReceb = nIdRecebRaw !== null && nIdRecebRaw !== undefined && String(nIdRecebRaw).trim() !== ''
+    ? Number(nIdRecebRaw)
+    : null;
+
+  if (!Number.isFinite(nIdReceb) || nIdReceb <= 0) {
+    return { ok: false, reason: 'missing_n_id_receb' };
+  }
+
+  const cDadosAdicionais =
+    cab.cDadosAdicionais
+    || cab.c_dados_adicionais
+    || cab.cObsNFe
+    || null;
+
+  await pool.query(`
+    INSERT INTO logistica.recebimentos_nfe_omie (
+      n_id_receb,
+      c_chave_nfe,
+      c_numero_nfe,
+      c_serie_nfe,
+      c_modelo_nfe,
+      d_emissao_nfe,
+      d_registro,
+      n_valor_nfe,
+      n_id_fornecedor,
+      c_nome_fornecedor,
+      c_cnpj_cpf_fornecedor,
+      c_etapa,
+      n_id_conta,
+      c_categ_compra,
+      c_dados_adicionais,
+      c_obs_nfe,
+      updated_at
+    )
+    VALUES (
+      $1,
+      COALESCE($2, $3),
+      COALESCE($4, $5),
+      COALESCE($6, $7),
+      COALESCE($8, $9),
+      CASE
+        WHEN COALESCE($10, $11) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($10, $11), 'DD/MM/YYYY')
+        ELSE NULL
+      END,
+      CASE
+        WHEN COALESCE($12, $13) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($12, $13), 'DD/MM/YYYY')
+        ELSE NULL
+      END,
+      NULLIF($14::text, '')::numeric,
+      NULLIF($15::text, '')::bigint,
+      COALESCE($16, $17),
+      COALESCE($18, $19, $20),
+      $21,
+      NULLIF($22::text, '')::bigint,
+      $23,
+      $24,
+      COALESCE($25, $24),
+      NOW()
+    )
+    ON CONFLICT (n_id_receb)
+    DO UPDATE SET
+      c_chave_nfe = COALESCE(EXCLUDED.c_chave_nfe, logistica.recebimentos_nfe_omie.c_chave_nfe),
+      c_numero_nfe = COALESCE(EXCLUDED.c_numero_nfe, logistica.recebimentos_nfe_omie.c_numero_nfe),
+      c_serie_nfe = COALESCE(EXCLUDED.c_serie_nfe, logistica.recebimentos_nfe_omie.c_serie_nfe),
+      c_modelo_nfe = COALESCE(EXCLUDED.c_modelo_nfe, logistica.recebimentos_nfe_omie.c_modelo_nfe),
+      d_emissao_nfe = COALESCE(EXCLUDED.d_emissao_nfe, logistica.recebimentos_nfe_omie.d_emissao_nfe),
+      d_registro = COALESCE(EXCLUDED.d_registro, logistica.recebimentos_nfe_omie.d_registro),
+      n_valor_nfe = COALESCE(EXCLUDED.n_valor_nfe, logistica.recebimentos_nfe_omie.n_valor_nfe),
+      n_id_fornecedor = COALESCE(EXCLUDED.n_id_fornecedor, logistica.recebimentos_nfe_omie.n_id_fornecedor),
+      c_nome_fornecedor = COALESCE(EXCLUDED.c_nome_fornecedor, logistica.recebimentos_nfe_omie.c_nome_fornecedor),
+      c_cnpj_cpf_fornecedor = COALESCE(EXCLUDED.c_cnpj_cpf_fornecedor, logistica.recebimentos_nfe_omie.c_cnpj_cpf_fornecedor),
+      c_etapa = COALESCE(EXCLUDED.c_etapa, logistica.recebimentos_nfe_omie.c_etapa),
+      n_id_conta = COALESCE(EXCLUDED.n_id_conta, logistica.recebimentos_nfe_omie.n_id_conta),
+      c_categ_compra = COALESCE(EXCLUDED.c_categ_compra, logistica.recebimentos_nfe_omie.c_categ_compra),
+      c_dados_adicionais = COALESCE(EXCLUDED.c_dados_adicionais, logistica.recebimentos_nfe_omie.c_dados_adicionais),
+      c_obs_nfe = COALESCE(EXCLUDED.c_obs_nfe, logistica.recebimentos_nfe_omie.c_obs_nfe),
+      updated_at = NOW();
+  `, [
+    nIdReceb,
+    cab.cChaveNFe,
+    cab.cChaveNfe,
+    cab.cNumeroNFe,
+    cab.cNumeroNF,
+    cab.cSerieNFe,
+    cab.cSerie,
+    cab.cModeloNFe,
+    cab.cModelo,
+    cab.dEmissaoNFe,
+    cab.dDataEmissao,
+    infoAdicionais.dRegistro,
+    cab.dDataRegistro,
+    cab.nValorNFe || cab.nValorNF,
+    cab.nIdFornecedor || cab.nCodFor,
+    cab.cNome,
+    cab.cRazaoSocial,
+    cab.cCNPJ_CPF,
+    cab.cCNPJ,
+    cab.cCpfCnpj,
+    cab.cEtapa,
+    infoAdicionais.nIdConta || cab.nCodCC,
+    infoAdicionais.cCategCompra || cab.cCodCateg,
+    cDadosAdicionais,
+    cab.cObsNFe || null,
+  ]);
+
+  return { ok: true, nIdReceb };
+}
+
 // ====== rota do webhook ======
 app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
   try {
@@ -8595,14 +8764,20 @@ app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, re
     }
 
     const body = req.body || {};
-    const tipo = body?.event_type || body?.tipoEvento || 'estoque';
+    const topic = body?.topic || body?.event?.topic || body?.evento?.topic || '';
+    const tipo = body?.event_type || body?.tipoEvento || (topic || 'estoque');
 
     // 2) guarda o evento cru (auditoria)
     await pool.query(
       `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
        VALUES ($1,$2,$3)`,
-      [ body?.event_id || null, tipo, body ]
+      [ body?.event_id || body?.messageId || body?.message_id || null, tipo, body ]
     );
+
+    if (isRecebimentoProdutoTopic(topic)) {
+      const upsertInfo = await upsertRecebimentoFromWebhookPayload(body);
+      return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
+    }
 
     // 3) agenda re-sync
     const hojeBR = new Date().toLocaleDateString('pt-BR');
@@ -8624,13 +8799,19 @@ app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, re
 app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
   try {
     const body = req.body || {};
+    const topic = body?.topic || body?.event?.topic || body?.evento?.topic || '';
 
     // 1) guarda o evento "como veio"
     await pool.query(
       `INSERT INTO omie_webhook_events (event_id, event_type, payload_json)
        VALUES ($1,$2,$3)`,
-      [ body?.event_id || null, body?.event_type || 'estoque', body ]
+      [ body?.event_id || body?.messageId || body?.message_id || null, body?.event_type || topic || 'estoque', body ]
     );
+
+    if (isRecebimentoProdutoTopic(topic)) {
+      const upsertInfo = await upsertRecebimentoFromWebhookPayload(body);
+      return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
+    }
 
     // 2) tenta descobrir o local do estoque no payload; se não achar, usa o padrão
     const localDoPayload =
@@ -13641,6 +13822,47 @@ async function syncPedidosCompraOmie(filtros = {}) {
     let pagina = 1;
     let totalSincronizados = 0;
     let continuar = true;
+
+    const chamarOmieComRetry = async (call, param, maxTentativas = 4) => {
+      let tentativa = 0;
+      while (tentativa < maxTentativas) {
+        tentativa += 1;
+        const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            call,
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [param]
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return { ok: true, data };
+        }
+
+        const errorText = await response.text();
+        const errorLower = String(errorText || '').toLowerCase();
+        const erroConsumoRedundante = response.status === 500 && errorLower.includes('consumo redundante detectado');
+        const erroSemRegistrosPagina = response.status === 500 && errorLower.includes('não existem registros para a página');
+
+        if (erroConsumoRedundante && tentativa < maxTentativas) {
+          console.warn(`[PedidosCompra] API Omie informou consumo redundante (${call}). Tentativa ${tentativa}/${maxTentativas}. Aguardando 3s...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          continue;
+        }
+
+        if (erroSemRegistrosPagina) {
+          return { ok: false, noRecordsPage: true, errorText, status: response.status };
+        }
+
+        return { ok: false, errorText, status: response.status };
+      }
+
+      return { ok: false, status: 500, errorText: 'Máximo de tentativas atingido' };
+    };
     
     while (continuar) {
       // Monta os parâmetros da requisição
@@ -13649,22 +13871,48 @@ async function syncPedidosCompraOmie(filtros = {}) {
         nRegsPorPagina: 50
       };
       
-      // Só adiciona filtros de status se EXPLICITAMENTE definidos
-      // Se não definir nenhum filtro, a API retorna TODOS os pedidos (comportamento padrão)
-      if (filtros.pendentes !== undefined) {
-        param.lExibirPedidosPendentes = filtros.pendentes;
-      }
-      if (filtros.faturados !== undefined) {
-        param.lExibirPedidosFaturados = filtros.faturados;
-      }
-      if (filtros.recebidos !== undefined) {
-        param.lExibirPedidosRecebidos = filtros.recebidos;
-      }
-      if (filtros.cancelados !== undefined) {
-        param.lExibirPedidosCancelados = filtros.cancelados;
-      }
-      if (filtros.encerrados !== undefined) {
-        param.lExibirPedidosEncerrados = filtros.encerrados;
+      // Filtros de status:
+      // - Se vierem explicitamente no body, respeita.
+      // - Se não vier nenhum, força todos = true para trazer o conjunto completo.
+      const algumFiltroStatusExplicito =
+        filtros.pendentes !== undefined ||
+        filtros.faturados !== undefined ||
+        filtros.recebidos !== undefined ||
+        filtros.cancelados !== undefined ||
+        filtros.encerrados !== undefined ||
+        filtros.rec_parciais !== undefined ||
+        filtros.fat_parciais !== undefined;
+
+      if (algumFiltroStatusExplicito) {
+        if (filtros.pendentes !== undefined) {
+          param.lExibirPedidosPendentes = filtros.pendentes;
+        }
+        if (filtros.faturados !== undefined) {
+          param.lExibirPedidosFaturados = filtros.faturados;
+        }
+        if (filtros.recebidos !== undefined) {
+          param.lExibirPedidosRecebidos = filtros.recebidos;
+        }
+        if (filtros.cancelados !== undefined) {
+          param.lExibirPedidosCancelados = filtros.cancelados;
+        }
+        if (filtros.encerrados !== undefined) {
+          param.lExibirPedidosEncerrados = filtros.encerrados;
+        }
+        if (filtros.rec_parciais !== undefined) {
+          param.lExibirPedidosRecParciais = filtros.rec_parciais;
+        }
+        if (filtros.fat_parciais !== undefined) {
+          param.lExibirPedidosFatParciais = filtros.fat_parciais;
+        }
+      } else {
+        param.lExibirPedidosPendentes = true;
+        param.lExibirPedidosFaturados = true;
+        param.lExibirPedidosRecebidos = true;
+        param.lExibirPedidosCancelados = true;
+        param.lExibirPedidosEncerrados = true;
+        param.lExibirPedidosRecParciais = true;
+        param.lExibirPedidosFatParciais = true;
       }
       
       // Filtros de data (sempre adiciona se definidos)
@@ -13675,28 +13923,19 @@ async function syncPedidosCompraOmie(filtros = {}) {
         param.dDataFinal = filtros.data_final;
       }
       
-      const body = {
-        call: 'PesquisarPedCompra',
-        app_key: OMIE_APP_KEY,
-        app_secret: OMIE_APP_SECRET,
-        param: [param]
-      };
-      
       console.log(`[PedidosCompra] Buscando página ${pagina}...`);
-      
-      const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[PedidosCompra] Erro na API Omie: ${response.status} - ${errorText}`);
-        throw new Error(`Omie API retornou ${response.status}`);
+
+      const pesquisa = await chamarOmieComRetry('PesquisarPedCompra', param, 4);
+      if (!pesquisa.ok) {
+        if (pesquisa.noRecordsPage) {
+          console.warn(`[PedidosCompra] Omie informou ausência de registros na página ${pagina}. Encerrando sincronização.`);
+          break;
+        }
+        console.error(`[PedidosCompra] Erro na API Omie (${pesquisa.status}): ${pesquisa.errorText}`);
+        throw new Error(`Omie API retornou ${pesquisa.status}`);
       }
-      
-      const data = await response.json();
+
+      const data = pesquisa.data || {};
       const pedidos = data.pedidos_pesquisa || [];
       const totalPaginas = data.nTotalPaginas || 1;
       const totalRegistros = data.nTotalRegistros || 0;
@@ -13719,23 +13958,14 @@ async function syncPedidosCompraOmie(filtros = {}) {
           }
           
           // Consulta detalhes completos do pedido
-          const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              call: 'ConsultarPedCompra',
-              app_key: OMIE_APP_KEY,
-              app_secret: OMIE_APP_SECRET,
-              param: [{ nCodPed: parseInt(nCodPed) }]
-            })
-          });
-          
-          if (!detalhesResponse.ok) {
-            console.error(`[PedidosCompra] Erro ao consultar pedido ${nCodPed}:`, detalhesResponse.status);
+          const detalhes = await chamarOmieComRetry('ConsultarPedCompra', { nCodPed: parseInt(nCodPed) }, 4);
+
+          if (!detalhes.ok) {
+            console.error(`[PedidosCompra] Erro ao consultar pedido ${nCodPed}: ${detalhes.status} - ${detalhes.errorText}`);
             continue;
           }
-          
-          const pedidoCompleto = await detalhesResponse.json();
+
+          const pedidoCompleto = detalhes.data;
           
           // Faz o upsert no banco
           await upsertPedidoCompra(pedidoCompleto, 'sync');
@@ -13775,11 +14005,22 @@ async function syncPedidosCompraOmie(filtros = {}) {
 // FUNÇÕES DE SINCRONIZAÇÃO DE RECEBIMENTOS DE NF-e
 // ============================================================================
 
+let _recebimentosNfeDadosAdicionaisColReady = false;
+async function ensureRecebimentosNfeDadosAdicionaisColumn(client) {
+  if (_recebimentosNfeDadosAdicionaisColReady) return;
+  await client.query(`
+    ALTER TABLE logistica.recebimentos_nfe_omie
+    ADD COLUMN IF NOT EXISTS c_dados_adicionais TEXT;
+  `);
+  _recebimentosNfeDadosAdicionaisColReady = true;
+}
+
 // Função para fazer upsert de um recebimento de NF-e no banco
-// Agora aceita cChaveNfeWebhook como parâmetro adicional (vem do webhook, não da API)
-async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null) {
+// Aceita cChaveNfe e cDadosAdicionais vindos do webhook como fallback
+async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null, cDadosAdicionaisWebhook = null) {
   const client = await pool.connect();
   try {
+    await ensureRecebimentosNfeDadosAdicionaisColumn(client);
     await client.query('BEGIN');
     
     // Extrai os dados das diferentes seções
@@ -13799,6 +14040,8 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     
     // Usa cChaveNfe do webhook (se disponível) ou do cabec da API (raramente vem)
     const cChaveNfeFinal = cChaveNfeWebhook || cabec.cChaveNfe || null;
+    const cDadosAdicionaisFinal = cabec.cDadosAdicionais || cabec.c_dados_adicionais || cabec.cObsNFe || cDadosAdicionaisWebhook || null;
+    const cObsNFeFinal = cabec.cObsNFe || cDadosAdicionaisFinal || null;
     
     // 1. Upsert do cabeçalho do recebimento
     await client.query(`
@@ -13815,7 +14058,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         c_autorizado, c_bloqueado, c_cancelada,
         c_natureza_operacao, c_cfop_entrada,
         n_id_conta, c_categ_compra,
-        c_obs_nfe, c_obs_rec,
+        c_obs_nfe, c_dados_adicionais, c_obs_rec,
         updated_at
       )
       VALUES (
@@ -13831,7 +14074,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         $36, $37, $38,
         $39, $40,
         $41, $42,
-        $43, $44,
+        $43, $44, $45,
         NOW()
       )
       ON CONFLICT (n_id_receb) DO UPDATE SET
@@ -13877,6 +14120,7 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         n_id_conta = EXCLUDED.n_id_conta,
         c_categ_compra = EXCLUDED.c_categ_compra,
         c_obs_nfe = EXCLUDED.c_obs_nfe,
+        c_dados_adicionais = EXCLUDED.c_dados_adicionais,
         c_obs_rec = EXCLUDED.c_obs_rec,
         updated_at = NOW()
     `, [
@@ -13922,7 +14166,8 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       cabec.cCfopEntrada || null,
       cabec.nIdConta || null,
       cabec.cCategCompra || null,
-      cabec.cObsNFe || null,
+      cObsNFeFinal,
+      cDadosAdicionaisFinal,
       infoCadastro.cObsRec || null
     ]);
     

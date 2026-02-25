@@ -55,18 +55,32 @@ async function upsertUserProfile(client, userId, { funcao_id, setor_id, operacao
 
   if (!hasFuncao && !hasSetor && !shouldHandleOper) return;
 
-  const cols = ['user_id', 'funcao_id', 'sector_id'];
-  const params = [userId, funcao_id ?? null, setor_id ?? null];
-  const updates = ['funcao_id = EXCLUDED.funcao_id', 'sector_id = EXCLUDED.sector_id'];
+  const cols = ['user_id'];
+  const params = [userId];
+  const updates = [];
+
+  if (hasFuncao) {
+    cols.push('funcao_id');
+    params.push(funcao_id ?? null);
+    updates.push('funcao_id = EXCLUDED.funcao_id');
+  }
+
+  if (hasSetor) {
+    cols.push('sector_id');
+    params.push(setor_id ?? null);
+    updates.push('sector_id = EXCLUDED.sector_id');
+  }
 
   if (hasOper) {
-    const opId = operacao_id === undefined || operacao_id === null
+    const opId = operacao_id == null
       ? null
       : String(operacao_id).trim();
     cols.push('operacao_id');
     params.push(opId && opId.length ? opId : null);
     updates.push('operacao_id = EXCLUDED.operacao_id');
   }
+
+  if (!updates.length) return;
 
   const placeholders = cols.map((_, idx) => `$${idx + 1}`);
   await client.query(
