@@ -18212,6 +18212,106 @@ async function loadComprasSolicitacoes() {
 // ========== KANBAN DE COMPRAS ==========
 let comprasViewMode = 'table'; // 'table' ou 'kanban'
 
+function renderizarNavegacaoModalKanban({ modalId, status, currentItemId, openType }) {
+  const modal = document.getElementById(modalId);
+  const modalContent = modal?.querySelector('.modal-content');
+  if (!modalContent) return;
+
+  const navExistente = modalContent.querySelector('.kanban-modal-nav');
+  if (navExistente) navExistente.remove();
+
+  const statusNorm = String(status || '').trim().toLowerCase();
+  const itemIdNorm = String(currentItemId || '').trim();
+  if (!statusNorm || !itemIdNorm) {
+    window.__kanbanModalNavCtx = null;
+    return;
+  }
+
+  const colunas = Array.from(document.querySelectorAll('.kanban-column-minhas[data-status]'));
+  const colunaAtual = colunas.find(col => String(col.getAttribute('data-status') || '').trim().toLowerCase() === statusNorm);
+  const cards = colunaAtual ? Array.from(colunaAtual.querySelectorAll('.kanban-cards-minhas .kanban-card[data-item-id]')) : [];
+  if (!cards.length) {
+    window.__kanbanModalNavCtx = null;
+    return;
+  }
+
+  const idxAtual = cards.findIndex(card => String(card.getAttribute('data-item-id') || '').trim() === itemIdNorm);
+  if (idxAtual === -1) {
+    window.__kanbanModalNavCtx = null;
+    return;
+  }
+
+  const prevCard = idxAtual > 0 ? cards[idxAtual - 1] : null;
+  const nextCard = idxAtual < cards.length - 1 ? cards[idxAtual + 1] : null;
+  const hasPrev = !!prevCard;
+  const hasNext = !!nextCard;
+
+  window.__kanbanModalNavCtx = {
+    modalId,
+    status,
+    openType,
+    prev: prevCard ? {
+      itemId: prevCard.getAttribute('data-item-id') || '',
+      numeroPedido: prevCard.getAttribute('data-numero-pedido') || '',
+      todosIds: prevCard.getAttribute('data-todos-ids') || ''
+    } : null,
+    next: nextCard ? {
+      itemId: nextCard.getAttribute('data-item-id') || '',
+      numeroPedido: nextCard.getAttribute('data-numero-pedido') || '',
+      todosIds: nextCard.getAttribute('data-todos-ids') || ''
+    } : null
+  };
+
+  const nav = document.createElement('div');
+  nav.className = 'kanban-modal-nav';
+  nav.style.cssText = 'position:absolute;top:12px;right:54px;z-index:30;display:flex;gap:6px;';
+  nav.innerHTML = `
+    <button
+      onclick="navegarModalKanban(-1)"
+      title="Item anterior"
+      ${hasPrev ? '' : 'disabled'}
+      style="border:1px solid #d1d5db;background:#fff;color:#111827;border-radius:999px;padding:4px 8px;font-size:12px;cursor:${hasPrev ? 'pointer' : 'not-allowed'};opacity:${hasPrev ? '1' : '0.45'};display:inline-flex;align-items:center;gap:4px;">
+      <i class="fa-solid fa-chevron-left"></i>
+    </button>
+    <button
+      onclick="navegarModalKanban(1)"
+      title="Próximo item"
+      ${hasNext ? '' : 'disabled'}
+      style="border:1px solid #d1d5db;background:#fff;color:#111827;border-radius:999px;padding:4px 8px;font-size:12px;cursor:${hasNext ? 'pointer' : 'not-allowed'};opacity:${hasNext ? '1' : '0.45'};display:inline-flex;align-items:center;gap:4px;">
+      <i class="fa-solid fa-chevron-right"></i>
+    </button>
+  `;
+
+  modalContent.style.position = 'relative';
+  modalContent.appendChild(nav);
+}
+
+function navegarModalKanban(delta) {
+  const ctx = window.__kanbanModalNavCtx;
+  if (!ctx) return;
+
+  const alvo = delta < 0 ? ctx.prev : ctx.next;
+  if (!alvo || !alvo.itemId) return;
+
+  if (ctx.openType === 'detalhes-pedido') {
+    abrirModalDetalhesPedidoMinhas(alvo.numeroPedido || null, ctx.status, alvo.todosIds || null);
+    return;
+  }
+  if (ctx.openType === 'cotacao') {
+    abrirModalCotacaoKanban(alvo.itemId);
+    return;
+  }
+  if (ctx.openType === 'cotado-escolha') {
+    abrirModalCotadoEscolhaItem(alvo.itemId);
+    return;
+  }
+  if (ctx.openType === 'analise-cadastro') {
+    abrirModalAnaliseCadastro(alvo.itemId);
+  }
+}
+
+window.navegarModalKanban = navegarModalKanban;
+
 // Função para alternar entre visualizações
 // Abre modal com detalhes completos do pedido
 async function abrirModalDetalhesPedidoCompras(numeroPedido) {
@@ -18220,6 +18320,8 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
   const modalTitulo = document.getElementById('modalPedidoTitulo');
   
   if (!modal || !modalBody || !modalTitulo) return;
+
+  renderizarNavegacaoModalKanban({ modalId: 'modalDetalhesPedidoCompras', status: '', currentItemId: '', openType: '' });
   
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
@@ -20100,6 +20202,17 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+
+  const itemIdAtualNavegacao = String(itemIds || '')
+    .split(',')
+    .map(v => String(v || '').trim())
+    .filter(Boolean)[0] || '';
+  renderizarNavegacaoModalKanban({
+    modalId: 'modalDetalhesPedidoCompras',
+    status: statusColuna,
+    currentItemId: itemIdAtualNavegacao,
+    openType: 'detalhes-pedido'
+  });
   
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
   
@@ -20299,14 +20412,67 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       // Comentário: suporta itens agrupados (com array itens) e prioriza dados de compras_sem_cadastro
       const itensDetalhe = itensPedido.flatMap((item) => {
         if (Array.isArray(item.itens) && item.itens.length > 0) {
-          return item.itens.map(i => ({ ...i, table_source: i.table_source || item.table_source }));
+          return item.itens.map(i => ({
+            ...i,
+            table_source: i.table_source || item.table_source,
+            link: i.link ?? item.link,
+            links: i.links ?? item.links
+          }));
         }
         return [item];
       });
 
       const itemSemCadastro = itensDetalhe.find(i => i.table_source === 'compras_sem_cadastro')
-        || itensPedido.find(i => i.table_source === 'compras_sem_cadastro');
+        || itensPedido.find(i => i.table_source === 'compras_sem_cadastro')
+        || itensDetalhe.find(i => i && (i.link || i.links))
+        || itensPedido.find(i => i && (i.link || i.links));
       const primeiro = itemSemCadastro || itensDetalhe[0] || itensPedido[0] || {};
+
+      const normalizarListaLinks = (raw) => {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw.filter(Boolean).map(v => String(v).trim()).filter(Boolean);
+        if (typeof raw === 'string') {
+          const texto = raw.trim();
+          if (!texto) return [];
+          try {
+            const parsed = JSON.parse(texto);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean).map(v => String(v).trim()).filter(Boolean);
+          } catch (_) {}
+          return [texto];
+        }
+        return [];
+      };
+
+      const montarHtmlLinks = (links) => {
+        if (!Array.isArray(links) || links.length === 0) return '-';
+        return links.map((link, idx) => {
+          const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+          let nome = `Link ${idx + 1}`;
+          try {
+            const semQuery = link.split('?')[0];
+            nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || nome;
+          } catch (_) {
+            nome = link;
+          }
+          return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;">${escapeHtml(nome)}</a>`;
+        }).join(' • ');
+      };
+
+      const linksSemCadastro = Array.from(new Set(
+        itensDetalhe
+          .filter(i => i.table_source === 'compras_sem_cadastro' || i.link || i.links)
+          .flatMap(i => normalizarListaLinks(i.link || i.links))
+      ));
+
+      const campoLinkSemCadastroHtml = itemSemCadastro
+        ? `
+              <div style="grid-column:1/-1;">
+                <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Link</div>
+                <div style="font-weight:600;color:#374151;word-break:break-word;">${montarHtmlLinks(linksSemCadastro)}</div>
+              </div>
+            `
+        : '';
+
       const solicitante = escapeHtml(primeiro.solicitante || primeiro.fornecedor_nome || '-');
       const departamento = escapeHtml(primeiro.departamento || '-');
       const centroCusto = escapeHtml(primeiro.centro_custo || '-');
@@ -20350,6 +20516,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                 <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Objetivo da compra</div>
                 <div style="font-weight:600;color:#374151;">${objetivoCompra}</div>
               </div>
+              ${campoLinkSemCadastroHtml}
             </div>
           </div>
 
@@ -20597,6 +20764,12 @@ async function abrirModalAnaliseCadastro(itemId) {
 
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#3b82f6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+  renderizarNavegacaoModalKanban({
+    modalId: 'modalAnaliseCadastro',
+    status: 'analise de cadastro',
+    currentItemId: itemId,
+    openType: 'analise-cadastro'
+  });
 
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
@@ -21027,6 +21200,12 @@ async function abrirModalCotadoEscolhaItem(itemId) {
 
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#8b5cf6;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+  renderizarNavegacaoModalKanban({
+    modalId: 'modalCotadoEscolhaItem',
+    status: 'cotado aguardando escolha',
+    currentItemId: itemId,
+    openType: 'cotado-escolha'
+  });
 
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
@@ -21335,6 +21514,12 @@ async function abrirModalCotacaoKanban(itemId) {
 
   modalBody.innerHTML = '<div style="text-align:center;padding:40px;"><i class="fa-solid fa-spinner fa-spin" style="font-size:32px;color:#fbbf24;"></i><br><br>Carregando...</div>';
   modal.style.display = 'flex';
+  renderizarNavegacaoModalKanban({
+    modalId: 'modalCotacaoKanban',
+    status: 'aguardando cotação',
+    currentItemId: itemId,
+    openType: 'cotacao'
+  });
 
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
@@ -30727,8 +30912,10 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const dataReq = await respReq.json();
       requisicoes = (dataReq.requisicoes || []).map((req, idx) => ({
         id: req.cod_req_compra ? `req_${req.cod_req_compra}` : `req_sem_numero_${idx}`,
-        numero_pedido: req.numero || req.cod_int_req_compra || 'SEM_NUMERO',
-        cnumero: req.numero,
+        numero: req.numero || req.numero_requisicao_omie || req.cnumero || req.grupo_requisicao || 'SEM_NUMERO',
+        numero_pedido: req.cod_int_req_compra || req.grupo_requisicao || req.numero_pedido || 'SEM_NUMERO',
+        cnumero: req.numero || req.numero_requisicao_omie || req.cnumero || null,
+        grupo_requisicao: req.grupo_requisicao || req.cod_int_req_compra || null,
         cod_req_compra: req.cod_req_compra || null,
         cod_int_req_compra: req.cod_int_req_compra || null,
         solicitante: req.solicitante || (Array.isArray(req.itens) ? (req.itens.find(i => String(i?.solicitante || '').trim() !== '')?.solicitante || '') : ''),
@@ -31401,6 +31588,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const cardPedKey = `pedido-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
           const cardCompKey = `compra-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
           const cardSolKey = `solicitacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
+          const statusCompactarIdentificador = [
+            'cotado aguardando escolha',
+            'aguardando cotação',
+            'solicitado revisão',
+            'aguardando aprovação da requisição'
+          ];
+          const compactarIdentificadorKanbanCotado = (valor) => {
+            const texto = String(valor || '').trim();
+            if (!texto) return '-';
+            const match = texto.match(/^(\d{8})-(\d{6})-(\d+)$/);
+            if (!match) return texto;
+            return `${match[2]}-${match[3]}`;
+          };
+          const cardTemBordaVerde = corBorda === '#10b981';
 
           // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
           const onclickCard = (
@@ -31506,28 +31707,43 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
               ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada') && chaveGrupo && chaveGrupo !== '-' ? `
                 <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                  <span style="font-weight:600;color:#374151;">
-                    ${status === 'aguardando compra preparação' 
-                      ? escapeHtml(primeiroItem.numero_pedido || primeiroItem.grupo_requisicao || chaveGrupo)
-                      : (status === 'aguardando compra'
-                        ? escapeHtml(primeiroItem.c_cod_int_ped || '')
-                        : (status === 'compra realizada'
-                          ? escapeHtml(primeiroItem.c_cod_int_ped || '')
-                          : escapeHtml(chaveGrupo)))
-                    }
-                  </span>
+                  ${status === 'aguardando compra preparação'
+                    ? `
+                      ${(() => {
+                        const pedidoNumero = ((primeiroItem.numero || primeiroItem.cnumero || '-').toString().trim()) || '-';
+                        const numeroPedidoBruto = ((primeiroItem.numero_pedido || primeiroItem.grupo_requisicao || chaveGrupo || '').toString().trim()) || '-';
+                        const partesReq = numeroPedidoBruto.split('-').map(p => p.trim()).filter(Boolean);
+                        const reqNumero = (partesReq.length >= 3 && /^\d{8}$/.test(partesReq[0]))
+                          ? `${partesReq[1]}-${partesReq[2]}`
+                          : numeroPedidoBruto;
+                        return `
+                      <div style="font-weight:600;color:#374151;display:flex;flex-direction:column;gap:2px;line-height:1.3;">
+                        <span>Pedido: ${escapeHtml(pedidoNumero)}</span>
+                        <span>Req: ${escapeHtml(reqNumero)}</span>
+                      </div>
+                        `;
+                      })()}
+                    `
+                    : `
+                      <span style="font-weight:600;color:#374151;">
+                        ${status === 'aguardando compra'
+                          ? escapeHtml(cardTemBordaVerde
+                            ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
+                            : (primeiroItem.c_cod_int_ped || ''))
+                          : (status === 'compra realizada'
+                            ? escapeHtml(cardTemBordaVerde
+                              ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
+                              : (primeiroItem.c_cod_int_ped || ''))
+                            : (statusCompactarIdentificador.includes(status)
+                              ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
+                              : escapeHtml(chaveGrupo)))
+                        }
+                      </span>
+                    `
+                  }
                   ${isAprovacao ? `
                     <button
                       onclick="toggleAprovacaoItensMinhas('${cardKey}', event)"
-                      title="Expandir"
-                      aria-label="Expandir"
-                      style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
-                      <i class="fa-solid fa-chevron-down"></i>
-                    </button>
-                  ` : ''}
-                  ${isRequisicoes ? `
-                    <button
-                      onclick="toggleRequisicoesItensMinhas('${cardReqKey}', event)"
                       title="Expandir"
                       aria-label="Expandir"
                       style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
@@ -31561,6 +31777,18 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                       <i class="fa-solid fa-chevron-down"></i>
                     </button>
                   ` : ''}
+                </div>
+              ` : ''}
+
+              ${isRequisicoes ? `
+                <div style="display:flex;justify-content:flex-end;margin-top:-2px;margin-bottom:8px;">
+                  <button
+                    onclick="toggleRequisicoesItensMinhas('${cardReqKey}', event)"
+                    title="Expandir"
+                    aria-label="Expandir"
+                    style="background:#e5e7eb;color:#111827;border:none;border-radius:999px;padding:4px 6px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;">
+                    <i class="fa-solid fa-chevron-down"></i>
+                  </button>
                 </div>
               ` : ''}
               
