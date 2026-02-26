@@ -28342,6 +28342,27 @@ async function abrirModalAprovacaoRequisicao() {
     
     const data = await resp.json();
     const todasSolicitacoes = data.solicitacoes || [];
+
+    const fmtQtdModal = (valor) => {
+      if (valor === null || valor === undefined || String(valor).trim() === '') return '-';
+      const bruto = String(valor).trim();
+      let normalizado = bruto;
+      const temVirgula = normalizado.includes(',');
+      const temPonto = normalizado.includes('.');
+      if (temVirgula && temPonto) {
+        if (normalizado.lastIndexOf(',') > normalizado.lastIndexOf('.')) {
+          normalizado = normalizado.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalizado = normalizado.replace(/,/g, '');
+        }
+      } else if (temVirgula) {
+        normalizado = normalizado.replace(',', '.');
+      }
+      const n = Number(normalizado);
+      if (!Number.isFinite(n)) return bruto;
+      if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+      return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+    };
     
     // Filtra apenas as que estão aguardando aprovação
     const itensAprovacao = todasSolicitacoes.filter(item => 
@@ -28491,30 +28512,45 @@ async function abrirModalAprovacaoRequisicao() {
                     ...gruposAlternativos.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`)
                   ].join('');
 
-                  return `
-                    <tr data-aprovacao-item-id="${item.id}" style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
-                      <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
-                      <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
-                      <td style="padding:10px;color:#374151;max-width:250px;line-height:1.4;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
-                      <td style="padding:10px;text-align:center;">
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          value="${item.quantidade || ''}"
-                          style="width:70px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;"
-                          onkeydown="if(event.key==='Enter'){this.blur();}"
-                          onblur="atualizarQuantidadeItemAprovacao(${item.id}, this)"
-                        />
-                      </td>
-                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.unidade || '-')}</td>
-                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.solicitante || '-')}</td>
-                      <td style="padding:10px;text-align:center;">
-                        <span style="background:${retornoCor};color:white;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${retornoTexto}</span>
-                      </td>
-                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
-                      <td style="padding:10px;color:#374151;font-size:11px;max-width:150px;">${escapeHtml((item.objetivo_compra || '-').substring(0, 50))}${(item.objetivo_compra || '').length > 50 ? '...' : ''}</td>
-                      <td style="padding:10px;color:#374151;font-size:11px;">
+                  const itensExpandirSemCadastro = (() => {
+                    if (!isSemCadastro) {
+                      return [{
+                        codigo: item.produto_codigo || '-',
+                        descricao: item.produto_descricao || '-',
+                        quantidade: item.quantidade
+                      }];
+                    }
+
+                    const descricaoBruta = String(item.produto_descricao || '').trim();
+                    const partes = descricaoBruta
+                      .split(';')
+                      .map(parte => String(parte || '').trim())
+                      .filter(Boolean);
+
+                    const baseCodigo = String(item.produto_codigo || '-').trim() || '-';
+                    if (!partes.length) {
+                      return [{
+                        codigo: `${baseCodigo}.1`,
+                        descricao: descricaoBruta || '-',
+                        quantidade: item.quantidade || '1'
+                      }];
+                    }
+
+                    return partes.map((parte, i) => {
+                      const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
+                      const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
+                      const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (item.quantidade || '1');
+                      return {
+                        codigo: `${baseCodigo}.${i + 1}`,
+                        descricao: descricaoItem || '-',
+                        quantidade: quantidadeItem
+                      };
+                    });
+                  })();
+
+                  const numeroRequisicaoHtml = isSemCadastro
+                    ? `<span style="display:inline-flex;align-items:center;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;font-size:11px;color:#475569;">${escapeHtml(grupoAtualLabel)}</span>`
+                    : `
                         <select
                           id="grupo-requisicao-select-${item.id}"
                           data-valor-original="${escapeHtml(grupoAtualValor)}"
@@ -28522,9 +28558,11 @@ async function abrirModalAprovacaoRequisicao() {
                           style="width:100%;padding:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;background:white;">
                           ${opcoesGrupoHtml}
                         </select>
-                      </td>
-                      <td style="padding:10px;text-align:center;">${anexosHtml}</td>
-                      <td style="padding:10px;text-align:center;">
+                      `;
+
+                  const acoesHtml = isSemCadastro
+                    ? '<span style="color:#64748b;font-size:11px;font-style:italic;">Use Comprar requisição</span>'
+                    : `
                         <div style="display:flex;gap:6px;justify-content:center;">
                           ${usuarioPodeAprovarDepartamento(item.departamento || '') ? `
                           <button onclick="aprovarItemRequisicao(${item.id}, '${escapeHtml(item.table_source || '')}', '${escapeHtml(retornoCotacaoRaw)}')" title="Aprovar item${retornoCotacaoEhSim ? ' (enviar para cotação)' : ' (criar requisição direto)'}" style="background:#10b981;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;transition:all 0.2s;" onmouseover="this.style.background='#059669';this.style.transform='translateY(-1px)'" onmouseout="this.style.background='#10b981';this.style.transform='translateY(0)'">
@@ -28535,9 +28573,39 @@ async function abrirModalAprovacaoRequisicao() {
                             <i class="fa-solid fa-rotate-left"></i>
                           </button>
                         </div>
+                      `;
+
+                  return itensExpandirSemCadastro.map((itemExpandido, idxExpandido) => `
+                    <tr data-aprovacao-item-id="${item.id}" style="border-bottom:1px solid #f3f4f6;${idx % 2 === 0 ? 'background:#f9fafb;' : ''}transition:background 0.2s;" onmouseover="this.style.background='#eff6ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#f9fafb' : 'white'}'">
+                      <td style="padding:10px;color:#6b7280;font-weight:600;">${item.id}</td>
+                      <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(itemExpandido.codigo || '-')}</td>
+                      <td style="padding:10px;color:#374151;max-width:250px;line-height:1.4;">${escapeHtml((itemExpandido.descricao || '-').substring(0, 120))}${(itemExpandido.descricao || '').length > 120 ? '...' : ''}</td>
+                      <td style="padding:10px;text-align:center;">
+                        ${isSemCadastro
+                          ? `<span style="font-weight:700;color:#1f2937;">${fmtQtdModal(itemExpandido.quantidade)}</span>`
+                          : `<input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value="${item.quantidade || ''}"
+                              style="width:70px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;"
+                              onkeydown="if(event.key==='Enter'){this.blur();}"
+                              onblur="atualizarQuantidadeItemAprovacao(${item.id}, this)"
+                            />`
+                        }
                       </td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.unidade || '-')}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.solicitante || '-')}</td>
+                      <td style="padding:10px;text-align:center;">
+                        <span style="background:${retornoCor};color:white;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${retornoTexto}</span>
+                      </td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;max-width:150px;">${escapeHtml((item.objetivo_compra || '-').substring(0, 50))}${(item.objetivo_compra || '').length > 50 ? '...' : ''}</td>
+                      <td style="padding:10px;color:#374151;font-size:11px;">${numeroRequisicaoHtml}</td>
+                      <td style="padding:10px;text-align:center;">${idxExpandido === 0 ? anexosHtml : '-'}</td>
+                      <td style="padding:10px;text-align:center;">${acoesHtml}</td>
                     </tr>
-                  `;
+                  `).join('');
                 }).join('')}
               </tbody>
             </table>
@@ -28830,29 +28898,81 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
   if (!confirma) return;
   
   try {
-    const resp = await fetch('/api/compras/aprovar-grupo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ ids })
+    const respBase = await fetch('/api/compras/todas', { credentials: 'include' });
+    if (!respBase.ok) throw new Error('Falha ao carregar itens do grupo para aprovação');
+    const dataBase = await respBase.json();
+    const todasSolicitacoes = Array.isArray(dataBase.solicitacoes) ? dataBase.solicitacoes : [];
+
+    const itensGrupo = todasSolicitacoes.filter(item => {
+      const status = String(item?.status || '').toLowerCase().trim();
+      const grupo = String(item?.grupo_requisicao || '').trim();
+      return status === 'aguardando aprovação da requisição' && grupo === grupoRequisicao;
     });
-    
-    if (!resp.ok) {
-      const error = await resp.json().catch(() => ({}));
-      throw new Error(error.error || 'Falha ao aprovar itens do grupo');
+
+    const itensPermitidos = itensGrupo.filter(item => usuarioPodeAprovarDepartamento(item?.departamento || ''));
+    const itensSolicitacao = itensPermitidos.filter(item => String(item?.table_source || 'solicitacao_compras') !== 'compras_sem_cadastro');
+    const itensSemCadastro = itensPermitidos.filter(item => String(item?.table_source || '') === 'compras_sem_cadastro');
+
+    let resultadoSolicitacao = { numero_pedido: null, itens_requisicao: [], itens_aguardando_cotacao: [] };
+    if (itensSolicitacao.length > 0) {
+      const idsSolicitacao = itensSolicitacao
+        .map(item => String(item.id).trim())
+        .filter(id => ids.includes(id));
+
+      if (idsSolicitacao.length > 0) {
+        const resp = await fetch('/api/compras/aprovar-grupo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ ids: idsSolicitacao })
+        });
+
+        if (!resp.ok) {
+          const error = await resp.json().catch(() => ({}));
+          throw new Error(error.error || 'Falha ao aprovar itens de solicitação no grupo');
+        }
+        resultadoSolicitacao = await resp.json();
+      }
     }
-    
-    const resultado = await resp.json();
-    const itensRequisicao = resultado.itens_requisicao || [];
-    const itensCotacao = resultado.itens_aguardando_cotacao || [];
+
+    let totalSemCadastroCotacao = 0;
+    let totalSemCadastroAnalise = 0;
+    for (const item of itensSemCadastro) {
+      const retornoCotacaoRaw = String(item?.retorno_cotacao || '').trim();
+      const vaiCotacao = retornoCotacaoIndicaCotacao(retornoCotacaoRaw, 'compras_sem_cadastro');
+      const novoStatus = vaiCotacao ? 'aguardando cotação' : 'Analise de cadastro';
+
+      const respSemCadastro = await fetch(`/api/compras/sem-cadastro/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: novoStatus })
+      });
+
+      if (!respSemCadastro.ok) {
+        const errorSemCadastro = await respSemCadastro.json().catch(() => ({}));
+        throw new Error(errorSemCadastro.error || `Falha ao aprovar item sem cadastro ${item.id}`);
+      }
+
+      if (vaiCotacao) totalSemCadastroCotacao += 1;
+      else totalSemCadastroAnalise += 1;
+    }
+
+    const itensRequisicao = resultadoSolicitacao.itens_requisicao || [];
+    const itensCotacao = resultadoSolicitacao.itens_aguardando_cotacao || [];
     
     let mensagem = `Aprovação do grupo "${grupoRequisicao}" concluída.`;
-    if (resultado.numero_pedido) {
-      mensagem += `\n\nRequisição criada: ${resultado.numero_pedido}`;
+    if (resultadoSolicitacao.numero_pedido) {
+      mensagem += `\n\nRequisição criada: ${resultadoSolicitacao.numero_pedido}`;
     }
     mensagem += `\n\nItens em requisição: ${itensRequisicao.length}`;
     if (itensCotacao.length > 0) {
       mensagem += `\nItens aguardando cotação: ${itensCotacao.length}`;
+    }
+    if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0) {
+      mensagem += `\n\nItens sem cadastro aprovados via grupo:`;
+      if (totalSemCadastroCotacao > 0) mensagem += `\n- Aguardando cotação: ${totalSemCadastroCotacao}`;
+      if (totalSemCadastroAnalise > 0) mensagem += `\n- Análise de cadastro: ${totalSemCadastroAnalise}`;
     }
     
     alert(mensagem);
