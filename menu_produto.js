@@ -21274,7 +21274,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
             onclick="cancelarCotadoEscolha()"
             style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-ban"></i>
-            <span>Cancelar</span>
+            <span>Excluir</span>
           </button>
           <button 
             onclick="enviarCotadoEscolhaParaCompra()"
