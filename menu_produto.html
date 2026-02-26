@@ -904,7 +904,7 @@
 
         <!-- Modal Detalhes do Item (Cotado aguardando escolha) -->
         <div id="modalCotadoEscolhaItem" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1200px;width:95%;">
+          <div class="modal-content" style="max-width:1200px;width:95%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-clipboard-check" style="color:#8b5cf6;"></i>
@@ -4724,6 +4724,15 @@ function attachDropZone(ul) {
 .modal-close:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #f87171;
+}
+#modalCotadoEscolhaItem .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--card-bg, #fff);
+}
+#modalCotadoEscolhaItem .modal-close {
+  margin-right: 8px;
 }
 .modal-body {
   margin-bottom: 20px;
