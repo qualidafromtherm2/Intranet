@@ -5728,7 +5728,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
                   return `
                     <div style="display:table-row;${idx > 0 ? 'border-top:1px solid var(--border-color);' : ''}">
                       <div style="display:table-cell;padding:8px 12px 8px 0;vertical-align:top;width:85%;">${conteudoFormatado}</div>
-                      <div style="display:table-cell;padding:8px 0;vertical-align:top;width:15%;font-weight:600;color:var(--inactive-color);">Qtd: ${item.quantidade}</div>
+                      <div style="display:table-cell;padding:8px 0;vertical-align:top;width:15%;font-weight:600;color:var(--inactive-color);">Qtd: ${formatarQuantidadeExibicao(item.quantidade)}</div>
                     </div>
                   `;
                 }).join('')}
@@ -8418,6 +8418,34 @@ function sanitizeQtd(value, fallback = 1) {
   if (value === null || value === undefined || value === '') return fallback;
   const num = parseFloat(String(value).replace(',', '.'));
   return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function formatarQuantidadeExibicao(valor) {
+  if (valor === null || valor === undefined) return '-';
+  const bruto = String(valor).trim();
+  if (!bruto) return '-';
+
+  let normalizado = bruto;
+  const temVirgula = normalizado.includes(',');
+  const temPonto = normalizado.includes('.');
+  if (temVirgula && temPonto) {
+    if (normalizado.lastIndexOf(',') > normalizado.lastIndexOf('.')) {
+      normalizado = normalizado.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalizado = normalizado.replace(/,/g, '');
+    }
+  } else if (temVirgula) {
+    normalizado = normalizado.replace(',', '.');
+  }
+
+  const numero = Number(normalizado);
+  if (!Number.isFinite(numero)) return bruto;
+
+  if (Math.abs(numero - Math.round(numero)) < 1e-9) {
+    return String(Math.round(numero));
+  }
+
+  return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 function formatQtdInput(value) {
@@ -13621,7 +13649,7 @@ function renderCarrinhoCompras() {
           ${window.escapeHtml(item.produto_descricao || '')}
           ${badgeRequisicaoDireta}
         </td>
-        <td>${item.quantidade}</td>
+        <td>${formatarQuantidadeExibicao(item.quantidade)}</td>
         <td>${prazoFmt}</td>
         <td style="max-width:200px;">${window.escapeHtml(item.observacao || '')}</td>
         <td>
@@ -17819,7 +17847,7 @@ async function loadComprasSolicitacoes() {
                   <!-- Segunda linha: Quantidade - Observação (2 colunas, Observação ocupa 2 cols) -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
-                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+                    <div style="font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</div>
                   </div>
                   <div style="grid-column:span 2;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
@@ -18197,6 +18225,18 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
   modal.style.display = 'flex';
   
   try {
+    const fmtQtdModal = (v) => {
+      try {
+        if (typeof formatarQuantidadeExibicao === 'function') return formatarQuantidadeExibicao(v);
+      } catch (_) {}
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(String(v).replace(',', '.'));
+      if (!Number.isFinite(n)) return String(v);
+      return Math.abs(n - Math.round(n)) < 1e-9
+        ? String(Math.round(n))
+        : n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+    };
+
     // Busca todos os itens do pedido
     const resp = await fetch('/api/compras/todas', { credentials: 'include' });
     if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
@@ -18367,7 +18407,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:6px;">
             <div>
               <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Quantidade</div>
-              <div style="font-size:14px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+              <div style="font-size:14px;font-weight:600;color:#1f2937;">${fmtQtdModal(item.quantidade)}</div>
             </div>
             <div>
               <div style="font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:2px;">Prazo Solicitado</div>
@@ -20064,6 +20104,18 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
   
   try {
+    const fmtQtdModal = (v) => {
+      try {
+        if (typeof formatarQuantidadeExibicao === 'function') return formatarQuantidadeExibicao(v);
+      } catch (_) {}
+      if (v === null || v === undefined || v === '') return '-';
+      const n = Number(String(v).replace(',', '.'));
+      if (!Number.isFinite(n)) return String(v);
+      return Math.abs(n - Math.round(n)) < 1e-9
+        ? String(Math.round(n))
+        : n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+    };
+
     // Comentário: tenta usar o cache do kanban para evitar lista vazia
     let listaCompleta = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
 
@@ -20131,10 +20183,26 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
     };
 
     const statusColunaLower = (statusColuna || '').toLowerCase().trim();
-    if (statusColunaLower === 'aguardando aprovação da requisição' || statusColunaLower === 'aguardando compra preparação' || statusColunaLower === 'aguardando compra' || statusColunaLower === 'compra realizada') {
+    if (
+      statusColunaLower === 'aguardando aprovação da requisição' ||
+      statusColunaLower === 'aguardando compra preparação' ||
+      statusColunaLower === 'aguardando compra' ||
+      statusColunaLower === 'compra realizada' ||
+      statusColunaLower === 'faturada pelo fornecedor' ||
+      statusColunaLower === 'recebido' ||
+      statusColunaLower === 'concluído' ||
+      statusColunaLower === 'concluido'
+    ) {
       
-      // Comentário: Para "aguardando compra" e "compra realizada", busca dados especiais do backend
-      if (statusColunaLower === 'aguardando compra' || statusColunaLower === 'compra realizada') {
+      // Comentário: Para etapas Omie, busca dados especiais do backend
+      if (
+        statusColunaLower === 'aguardando compra' ||
+        statusColunaLower === 'compra realizada' ||
+        statusColunaLower === 'faturada pelo fornecedor' ||
+        statusColunaLower === 'recebido' ||
+        statusColunaLower === 'concluído' ||
+        statusColunaLower === 'concluido'
+      ) {
         // Busca detalhes especiais do pedido
         const primeiroItemPedido = itensPedido[0];
         if (primeiroItemPedido) {
@@ -20151,7 +20219,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
               const linhasItens = itensParaMostrar.map(item => {
                 const codigo = escapeHtml(item.produto_codigo || '-');
                 const descricao = escapeHtml(item.produto_descricao || 'Sem descrição');
-                const quantidade = item.quantidade ?? '-';
+                const quantidade = fmtQtdModal(item.quantidade);
                 return `
                   <tr>
                     <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${codigo}</td>
@@ -20248,7 +20316,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       const linhasItens = itensDetalhe.map(item => {
         const codigo = escapeHtml(item.produto_codigo || '-');
         const descricao = escapeHtml(item.produto_descricao || item.descricao || '-');
-        const quantidade = item.quantidade ?? '-';
+        const quantidade = fmtQtdModal(item.quantidade);
         return `
           <tr>
             <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${codigo}</td>
@@ -20347,7 +20415,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
             </div>
             <div>
               <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
-              <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+              <div style="font-weight:600;color:#1f2937;">${fmtQtdModal(item.quantidade)}</div>
             </div>
             <div>
               <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Status</div>
@@ -20688,7 +20756,7 @@ function renderizarListaItensAnaliseCadastro() {
     const subIndice = (idx + 1).toString();
     const codprov = `CODPROV - ${codBaseNumero}.${subIndice}`;
     const descricao = item.descricao ? escapeHtml(item.descricao) : '';
-    const quantidade = item.quantidade ? escapeHtml(item.quantidade) : '';
+    const quantidade = escapeHtml(formatarQuantidadeExibicao(item.quantidade));
 
     const codigoOmie = item.codigo_omie ? escapeHtml(item.codigo_omie) : '';
     const jaExiste = !!item.ja_existe_omie;
@@ -21096,7 +21164,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           <div><strong>ID:</strong> ${item.id}</div>
           <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
           <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
-          <div><strong>Quantidade:</strong> ${item.quantidade ?? '-'}</div>
+          <div><strong>Quantidade:</strong> ${formatarQuantidadeExibicao(item.quantidade)}</div>
           <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
           <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
           <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
@@ -22525,7 +22593,7 @@ async function renderComprasKanban() {
                 <div style="display:flex;gap:8px;margin-bottom:8px;">
                   <div style="flex:1;">
                     <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
-                    <div style="font-size:12px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</div>
+                    <div style="font-size:12px;font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</div>
                   </div>
                   <div style="flex:1;">
                     <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;margin-bottom:2px;">Prazo</div>
@@ -22597,7 +22665,7 @@ async function abrirModalPedidoAgrupado(cNumero, idsItens) {
                 <td style="padding:10px;color:#6b7280;">${item.id}</td>
                 <td style="padding:10px;font-weight:600;color:#1f2937;">${escapeHtml(item.produto_codigo || '-')}</td>
                 <td style="padding:10px;color:#374151;max-width:300px;">${escapeHtml((item.produto_descricao || '-').substring(0, 80))}${(item.produto_descricao || '').length > 80 ? '...' : ''}</td>
-                <td style="padding:10px;text-align:center;font-weight:600;color:#1f2937;">${item.quantidade}</td>
+                <td style="padding:10px;text-align:center;font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</td>
                 <td style="padding:10px;color:#374151;">${escapeHtml(item.solicitante || '-')}</td>
                 <td style="padding:10px;color:#374151;font-size:11px;">${escapeHtml(item.departamento || '-')}</td>
                 <td style="padding:10px;">
@@ -22854,7 +22922,7 @@ function renderizarListaSelecaoItens(itens) {
             <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
               <div style="display:flex;align-items:center;gap:6px;" title="Quantidade">
                 <i class="fa-solid fa-hashtag" style="font-size:12px;color:#9ca3af;"></i>
-                <span style="font-size:13px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</span>
+                <span style="font-size:13px;font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;" title="Prazo Solicitado">
                 <i class="fa-solid fa-calendar-clock" style="font-size:12px;color:#9ca3af;"></i>
@@ -23473,7 +23541,7 @@ function renderizarListaSelecaoCotacao(itens) {
             <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
               <div style="display:flex;align-items:center;gap:6px;" title="Quantidade">
                 <i class="fa-solid fa-hashtag" style="font-size:12px;color:#9ca3af;"></i>
-                <span style="font-size:13px;font-weight:600;color:#1f2937;">${item.quantidade || '-'}</span>
+                <span style="font-size:13px;font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;" title="Prazo Solicitado">
                 <i class="fa-solid fa-calendar-clock" style="font-size:12px;color:#9ca3af;"></i>
@@ -23714,7 +23782,7 @@ function abrirModalInserirCotacoes(itens) {
           <div style="font-size:11px;color:#6b7280;line-height:1.3;">${escapeHtml((item.descricao || item.produto_descricao || '-').substring(0, 50))}${(item.descricao || item.produto_descricao || '').length > 50 ? '...' : ''}</div>
           <div style="font-size:11px;color:#374151;margin-top:6px;">
             <i class="fa-solid fa-hashtag" style="font-size:10px;"></i>
-            Qtd: ${item.quantidade || '-'}
+            Qtd: ${formatarQuantidadeExibicao(item.quantidade)}
           </div>
         </div>
       </div>
@@ -26843,7 +26911,7 @@ async function loadComprasCotadas() {
                   <!-- Segunda linha: Quantidade - Observação -->
                   <div>
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Quantidade</div>
-                    <div style="font-weight:600;color:#1f2937;">${item.quantidade ?? '-'}</div>
+                    <div style="font-weight:600;color:#1f2937;">${formatarQuantidadeExibicao(item.quantidade)}</div>
                   </div>
                   <div style="grid-column:span 2;">
                     <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Observação</div>
@@ -27272,7 +27340,7 @@ async function loadComprasRecebimento() {
           <td>${item.id}</td>
           <td>${escapeHtml(item.produto_codigo || '')}</td>
           <td style="max-width:300px;">${escapeHtml(item.produto_descricao || '-')}</td>
-          <td>${item.quantidade ?? '-'}</td>
+          <td>${formatarQuantidadeExibicao(item.quantidade)}</td>
           <td>${escapeHtml(item.solicitante || '-')}</td>
           <td>${prazo}</td>
           <td>${previsao ? new Date(previsao).toLocaleDateString('pt-BR') : ''}</td>
@@ -27767,6 +27835,17 @@ function aplicarFiltroKanbans() {
 }
 
 function filtrarItensPorDataLimite(status, itens) {
+  const statusNormalizado = String(status || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  // Para etapas da NF, exibe todos os pedidos independentemente da data de inclusão.
+  if (['faturada pelo fornecedor', 'recebido', 'concluido'].includes(statusNormalizado)) {
+    return itens;
+  }
+
   const datasLimite = obterDatasLimiteKanban();
   const limite = datasLimite[status] || DATA_LIMITE_PADRAO;
   if (!limite) return itens;
@@ -29586,6 +29665,125 @@ function renderizarFluxoStatusCompras(statusAtual, itensRelacionados = []) {
   `;
 }
 
+function obterMapaLinksNfeLista() {
+  if (!(window.__comprasNfePdfCache instanceof Map)) {
+    window.__comprasNfePdfCache = new Map();
+  }
+  return window.__comprasNfePdfCache;
+}
+
+function obterSetPendentesLinksNfeLista() {
+  if (!(window.__comprasNfePdfPendentes instanceof Set)) {
+    window.__comprasNfePdfPendentes = new Set();
+  }
+  return window.__comprasNfePdfPendentes;
+}
+
+function gerarChaveLinkNfeLista(numeroPedido, valorTotalNum) {
+  const numero = String(numeroPedido || '').trim();
+  const valorNum = Number(valorTotalNum);
+  if (!/^\d+$/.test(numero)) return '';
+  if (!Number.isFinite(valorNum) || valorNum <= 0) return '';
+  return `${numero}|${valorNum.toFixed(2)}`;
+}
+
+function montarValorTotalComLinkNfe(linha) {
+  const href = String(linha?.linkNfePdf || '').trim();
+  const hrefSeguro = /^(https?:\/\/|\/)/i.test(href) ? href : '';
+  if (!hrefSeguro) return linha?.valorTotal || '-';
+
+  const tituloLink = linha?.linkNfeTitulo
+    ? String(linha.linkNfeTitulo)
+    : 'Abrir PDF da NF-e';
+
+  return `
+    <div style="display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;">
+      <span>${linha.valorTotal || '-'}</span>
+      <a
+        href="${hrefSeguro}"
+        target="_blank"
+        rel="noopener"
+        onclick="event.stopPropagation();"
+        title="${escapeHtml(tituloLink)}"
+        style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;cursor:pointer;text-decoration:none;">
+        <i class="fa-solid fa-link" style="font-size:10px;"></i>
+      </a>
+    </div>
+  `;
+}
+
+async function precarregarLinksNfeLista(linhas = []) {
+  const cache = obterMapaLinksNfeLista();
+  const pendentes = obterSetPendentesLinksNfeLista();
+
+  const candidatos = [];
+  const vistos = new Set();
+
+  linhas.forEach((linha) => {
+    const numeroPedido = String(linha?.numeroPedidoRef || '').trim();
+    const valorTotalNum = Number(linha?.valorTotalNum);
+    const chave = gerarChaveLinkNfeLista(numeroPedido, valorTotalNum);
+    if (!chave) return;
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    if (cache.has(chave) || pendentes.has(chave)) return;
+    candidatos.push({
+      chave,
+      numeroPedido,
+      valorTotal: Number(valorTotalNum.toFixed(2))
+    });
+  });
+
+  if (!candidatos.length) return;
+
+  candidatos.forEach(item => pendentes.add(item.chave));
+
+  let houveAtualizacao = false;
+  try {
+    const resp = await fetch('/api/compras/pedidos-omie/nfe-disponibilidade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        itens: candidatos.map((item) => ({
+          numero_pedido: item.numeroPedido,
+          valor_total: item.valorTotal
+        }))
+      })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    const mapaResultados = new Map();
+    const resultados = Array.isArray(data?.resultados) ? data.resultados : [];
+
+    resultados.forEach((resultado) => {
+      const numero = String(resultado?.numero_pedido || '').trim();
+      const valor = Number(resultado?.valor_total);
+      const chave = gerarChaveLinkNfeLista(numero, valor);
+      if (!chave) return;
+      mapaResultados.set(chave, {
+        disponivel: !!resultado?.disponivel,
+        c_numero_nfe: resultado?.c_numero_nfe ? String(resultado.c_numero_nfe) : null
+      });
+    });
+
+    candidatos.forEach((item) => {
+      const retorno = mapaResultados.get(item.chave);
+      const novoValor = retorno || { disponivel: false, c_numero_nfe: null };
+      cache.set(item.chave, novoValor);
+      if (novoValor.disponivel) houveAtualizacao = true;
+    });
+  } catch (_err) {
+    candidatos.forEach((item) => {
+      cache.set(item.chave, { disponivel: false, c_numero_nfe: null });
+    });
+  } finally {
+    candidatos.forEach(item => pendentes.delete(item.chave));
+  }
+
+  if (houveAtualizacao) renderizarLista();
+}
+
 // Objetivo: Renderizar tabela de lista extraindo dados dos cards do kanban
 function renderizarLista() {
   const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
@@ -29659,11 +29857,6 @@ function renderizarLista() {
       } catch (err) {
         // Falha silenciosa ao parsear produtos
       }
-      // Log diagnóstico apenas na primeira renderização
-      if (produtosLista.length > 0) {
-        console.log('[DIAGNÓSTICO-PRODUTO] 1º produto:', JSON.stringify(produtosLista[0], null, 2));
-        console.log('[DIAGNÓSTICO-PRODUTO] c_unidade:', produtosLista[0].c_unidade, '| n_qtde:', produtosLista[0].n_qtde, '| n_val_tot:', produtosLista[0].n_val_tot);
-      }
       const produtosHtml = Array.isArray(produtosLista) && produtosLista.length > 0
         ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;">
              <thead>
@@ -29682,16 +29875,32 @@ function renderizarLista() {
                  const unidade = prod.c_unidade || prod.unidade || '-';
                  const qtde = prod.n_qtde || prod.qtde || '-';
                  const valorTotal = prod.n_val_tot || prod.valor_total || '-';
+                 const linkNfePdf = String(prod.c_link_nfe_pdf || '').trim();
+                 const linkNfeSeguro = /^(https?:\/\/|\/)/i.test(linkNfePdf) ? linkNfePdf : '';
                  // Converte qtde para número
                  const qtdeNum = typeof qtde === 'number' ? qtde : (typeof qtde === 'string' && qtde !== '-' ? parseFloat(qtde) : NaN);
                  const qtdeFormatada = !isNaN(qtdeNum) ? Math.round(qtdeNum).toLocaleString('pt-BR') : qtde;
                  const valorFormatado = typeof valorTotal === 'number' ? valorTotal.toLocaleString('pt-BR', {style:'currency', currency:'BRL'}) : valorTotal;
+                 const valorComLink = linkNfeSeguro
+                   ? `<div style="display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;">
+                        <span>${valorFormatado}</span>
+                        <a
+                          href="${linkNfeSeguro}"
+                          target="_blank"
+                          rel="noopener"
+                          onclick="event.stopPropagation();"
+                          title="Abrir PDF da NF-e"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;cursor:pointer;text-decoration:none;">
+                          <i class="fa-solid fa-link" style="font-size:9px;"></i>
+                        </a>
+                      </div>`
+                   : valorFormatado;
                  return `<tr style="border-bottom:1px solid #bfdbfe;background:#dbeafe;">
                    <td style="padding:8px;color:#1e3a5f;">${escapeHtml(codigo)}</td>
                    <td style="padding:8px;color:#1e3a5f;">${escapeHtml(desc)}</td>
                    <td style="padding:8px;text-align:center;color:#2563eb;">${escapeHtml(String(unidade))}</td>
                    <td style="padding:8px;text-align:center;color:#2563eb;">${qtdeFormatada}</td>
-                   <td style="padding:8px;text-align:right;color:#1e3a5f;font-weight:500;">${valorFormatado}</td>
+                   <td style="padding:8px;text-align:right;color:#1e3a5f;font-weight:500;">${valorComLink}</td>
                  </tr>`;
                }).join('')}
              </tbody>
@@ -29714,31 +29923,41 @@ function renderizarLista() {
       const valorTotalFormatado = valorTotalNum > 0
         ? valorTotalNum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
         : '-';
+      const numeroPedidoRef = String(numeroPedidoData || numeroPedido || '').trim();
+      const linksNfeProdutos = Array.isArray(produtosLista)
+        ? [...new Set(
+            produtosLista
+              .map((p) => String(p?.c_link_nfe_pdf || '').trim())
+              .filter((link) => /^(https?:\/\/|\/)/i.test(link))
+          )]
+        : [];
       
       const linhaMontada = {
         rowId,
         requisicao,
         numeroPedido: numeroPedido || numeroPedidoData || '-',
+        numeroPedidoRef,
         idSolicitante: (String(idSolicitanteData || '').trim() || '-'),
         solicitante: solicitanteData || '-',
         fornecedor: fornecedorData || '-',
         status,
         itemId,
         todosIds,
+        valorTotalNum,
         valorTotal: valorTotalFormatado,
         data: dataFormatada,
         dataPrevisao: dataPrevisaoFormatada,
         dataPrevisaoRaw: dtPrevisao,
         produtosHtml,
-        produtosTexto
+        produtosTexto,
+        linkNfePdf: linksNfeProdutos.length === 1 ? linksNfeProdutos[0] : '',
+        linkNfeTitulo: linksNfeProdutos.length === 1 ? 'Abrir PDF da NF-e' : ''
       };
-      console.log('[Lista] Linha montada', linhaMontada);
       linhas.push(linhaMontada);
     });
   });
   
   // Renderiza as linhas da tabela
-  console.log('[Lista] Total de linhas para renderizar:', linhas.length);
   linhas.forEach((linha, indiceLinha) => {
     const tr = document.createElement('tr');
     const bordaSeparadora = indiceLinha === 0 ? '1px solid #e5e7eb' : '3px solid #000000';
@@ -29799,6 +30018,8 @@ function renderizarLista() {
       }
     }
 
+    const valorTotalComAcao = montarValorTotalComLinkNfe(linha);
+
     const statusBadgeEstilos = {
       'aguardando aprovacao da requisicao': { bg: '#eef2f7', color: '#475569', border: '#d7dee8' },
       'solicitado revisao': { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
@@ -29836,7 +30057,7 @@ function renderizarLista() {
       </td>
       <td style="padding:12px 16px;font-size:12px;color:#111827;text-align:center;">${linha.data}</td>
       <td style="padding:12px 16px;font-size:12px;text-align:center;${dataPrevisaoStyle}">${dataPrevisaoExibida}</td>
-      <td style="padding:12px 16px;font-size:12px;color:#059669;font-weight:600;text-align:right;white-space:nowrap;">${linha.valorTotal}</td>
+      <td style="padding:12px 16px;font-size:12px;color:#059669;font-weight:600;text-align:right;white-space:nowrap;">${valorTotalComAcao}</td>
     `;
     tr.setAttribute('data-row-id', linha.rowId);
     
@@ -29885,7 +30106,9 @@ function renderizarLista() {
     const tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="9" style="padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td>';
     corpoTabela.appendChild(tr);
+    return;
   }
+
 }
 
 // Comentário: alterna exibição da sublinha de produtos na lista
@@ -30568,8 +30791,67 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       }
       lista = [...lista, ...comprasRealizadas];
     }
+
+    // Busca pedidos por Etapa_NF (40/50/60/80) para kanbans:
+    // 40 -> faturada pelo fornecedor | 50/60 -> recebido | 80 -> concluído
+    console.log('[DEBUG] Buscando pedidos por Etapa_NF...');
+    const respEtapaNf = await fetch(`/api/compras/pedidos-etapa-nf`, { credentials: 'include' });
+    console.log('[DEBUG] Resposta do fetch Etapa_NF:', respEtapaNf.status, respEtapaNf.ok);
+    let pedidosEtapaNf = [];
+    if (respEtapaNf.ok) {
+      const dataEtapaNf = await respEtapaNf.json();
+      console.log('[DEBUG] Pedidos Etapa_NF recebidos da API:', dataEtapaNf.pedidos);
+
+      pedidosEtapaNf = (dataEtapaNf.pedidos || []).map(ped => {
+        const cNumero = String(ped.c_numero || ped.numero || '').trim();
+        const cNumeroValido = /^\d+$/.test(cNumero) ? cNumero : '';
+
+        const itemRef = cNumeroValido ? solicitacoesBaseTodas.find(item => item.numero_pedido === cNumeroValido) : null;
+        const solicitanteRef = ped.solicitante || (itemRef ? itemRef.solicitante : '') || '';
+        const grupoRequisicaoRef = ped.grupo_requisicao || (itemRef ? itemRef.grupo_requisicao : '') || '';
+        const idSolicitantePorGrupo = obterIdSolicitantePorGrupo(
+          mapaIdSolicitantePorGrupo,
+          solicitanteRef,
+          grupoRequisicaoRef
+        );
+
+        const statusNf = String(ped.status_nf || '').trim().toLowerCase();
+        const statusFinal = statusNf || 'faturada pelo fornecedor';
+
+        return {
+          ...ped,
+          id: `nf_${ped.n_cod_ped}_${statusFinal.replace(/\s+/g, '_')}`,
+          numero_pedido: cNumeroValido || ped.n_cod_ped,
+          numero: cNumeroValido || ped.n_cod_ped,
+          c_numero: cNumeroValido,
+          n_cod_ped: ped.n_cod_ped,
+          fornecedor_nome: ped.fornecedor_nome,
+          solicitante: solicitanteRef,
+          id_solicitante: (itemRef && String(itemRef.id_solicitante || '').trim()) || idSolicitantePorGrupo || '-',
+          status: statusFinal,
+          statusNormalizado: statusFinal,
+          isCompraRealizada: true,
+          itens: ped.itens || []
+        };
+      });
+
+      if (filtroSolicitante === 'minhas') {
+        pedidosEtapaNf = pedidosEtapaNf.filter(ped => {
+          const cNumero = ped.c_numero;
+          const existeNaSolicitacao = lista.some(item =>
+            item.numero_pedido === cNumero &&
+            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
+          );
+          return existeNaSolicitacao;
+        });
+      }
+
+      console.log('[DEBUG] Pedidos Etapa_NF mapeados:', pedidosEtapaNf);
+      console.log('[DEBUG] Total de pedidos Etapa_NF:', pedidosEtapaNf.length);
+      lista = [...lista, ...pedidosEtapaNf];
+    }
     
-    console.log('[DEBUG] Lista total após adicionar compras realizadas:', lista.length);
+    console.log('[DEBUG] Lista total após adicionar compras/Etapa_NF:', lista.length);
     
     // Aplica filtro de status se fornecido
     if (filtroStatus && filtroStatus.length > 0) {
@@ -30725,10 +31007,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       if (itens.length === 0) {
         cardsHtml = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
       } else {
-        // Para requisições, pedidos de compra e compras realizadas, agrupa diferente
+        // Para requisições e pedidos Omie, agrupa diferente
         const isRequisicao = status === 'aguardando compra preparação' && itens.length > 0 && itens[0].isRequisicao;
         const isPedidoCompra = status === 'aguardando compra' && itens.length > 0 && itens[0].isPedidoCompra;
-        const isCompraRealizada = status === 'compra realizada' && itens.length > 0 && itens[0].isCompraRealizada;
+        const isCompraRealizada = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'].includes(status)
+          && itens.length > 0
+          && itens[0].isCompraRealizada;
         
         let grupos = {};
         let usarArrayDireto = false;
@@ -30742,7 +31026,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             grupos[chave].push(item);
           });
         } else if (isPedidoCompra || isCompraRealizada) {
-          // Para pedidos de compra e compras realizadas: agrupa por numero (c_numero)
+          // Para pedidos Omie (pedido/compra/faturado/recebido/concluído): agrupa por numero (c_numero)
           // MANTÉM A ORDEM DO ARRAY ORIGINAL (já vem ordenado do backend)
           const gruposArray = [];
           const gruposVistos = new Set();
@@ -31018,7 +31302,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   produto_descricao: item.produto_descricao || item.descricao || '',
                   c_unidade:         item.c_unidade || item.unidade || '',
                   n_qtde:            item.quantidade || item.n_qtde || item.qtde || '',
-                  n_val_tot:         item.n_val_tot  || item.valor_total || ''
+                  n_val_tot:         item.n_val_tot  || item.valor_total || '',
+                  c_link_nfe_pdf:    item.c_link_nfe_pdf || '',
+                  c_dados_adicionais_nfe: item.c_dados_adicionais_nfe || ''
                 }))
                 .filter(i => i.produto_codigo || i.produto_descricao);
 

@@ -3822,7 +3822,7 @@ app.get('/api/compras/pedidos-omie', async (req, res) => {
 });
 
 // Endpoint para consultar um pedido específico com todos os detalhes
-app.get('/api/compras/pedidos-omie/:nCodPed', async (req, res) => {
+app.get('/api/compras/pedidos-omie/:nCodPed(\\d+)', async (req, res) => {
   try {
     const { nCodPed } = req.params;
     
@@ -14015,12 +14015,183 @@ async function ensureRecebimentosNfeDadosAdicionaisColumn(client) {
   _recebimentosNfeDadosAdicionaisColReady = true;
 }
 
+let _pedidosOmieProdutosNfeVinculoReady = false;
+async function ensurePedidosOmieProdutosNfeVinculo(client) {
+  if (_pedidosOmieProdutosNfeVinculoReady) return;
+
+  const { rows: tablesRows } = await client.query(`
+    SELECT
+      to_regclass('compras.pedidos_omie_produtos')::text AS pedidos_prod_table,
+      to_regclass('compras.pedidos_omie')::text AS pedidos_table,
+      to_regclass('logistica.recebimentos_nfe_omie')::text AS recebimentos_table
+  `);
+  const tablesInfo = tablesRows[0] || {};
+  if (!tablesInfo.pedidos_prod_table || !tablesInfo.pedidos_table || !tablesInfo.recebimentos_table) {
+    return;
+  }
+
+  await client.query(`
+    ALTER TABLE compras.pedidos_omie
+    ADD COLUMN IF NOT EXISTS "Etapa_NF" VARCHAR(100);
+
+    ALTER TABLE compras.pedidos_omie_produtos
+    ADD COLUMN IF NOT EXISTS c_link_nfe_pdf TEXT;
+
+    ALTER TABLE compras.pedidos_omie_produtos
+    ADD COLUMN IF NOT EXISTS c_dados_adicionais_nfe TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_pedidos_omie_produtos_link_nfe
+      ON compras.pedidos_omie_produtos(n_cod_ped, n_val_tot);
+  `);
+
+  await client.query(`
+    CREATE OR REPLACE FUNCTION compras.fn_aplicar_vinculo_nfe_por_recebimento(p_n_id_receb BIGINT)
+    RETURNS INTEGER
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      v_rows INTEGER := 0;
+    BEGIN
+      WITH r AS (
+        SELECT
+          rr.n_id_receb,
+          rr.n_id_fornecedor,
+          rr.n_valor_nfe,
+          NULLIF(TRIM(COALESCE(rr.c_etapa::text, '')), '') AS etapa_nf,
+          rr.c_dados_adicionais,
+          NULLIF(
+            COALESCE(
+              (regexp_match(
+                COALESCE(rr.c_dados_adicionais, ''),
+                '(?i)(^|[^a-z0-9])(n[[:space:]]*)?pedido[[:alpha:]]*[^0-9]*([0-9]{2,})'
+              ))[3],
+              ''
+            ),
+            ''
+          ) AS numero_pedido,
+          REPLACE(
+            TO_CHAR(ROUND(rr.n_valor_nfe::numeric, 2), 'FM999999999999990.00'),
+            ',',
+            '.'
+          ) AS valor_fmt
+        FROM logistica.recebimentos_nfe_omie rr
+        WHERE rr.n_id_receb = p_n_id_receb
+          AND rr.n_id_fornecedor IS NOT NULL
+          AND rr.n_valor_nfe IS NOT NULL
+          AND EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po2
+            JOIN compras.pedidos_omie_produtos pop2 ON pop2.n_cod_ped = po2.n_cod_ped
+            WHERE po2.n_cod_for IS NOT NULL
+              AND po2.n_cod_for::text = rr.n_id_fornecedor::text
+              AND (po2.inativo IS NULL OR po2.inativo = FALSE)
+              AND pop2.n_val_tot IS NOT NULL
+              AND ABS(pop2.n_val_tot::numeric - rr.n_valor_nfe::numeric) < 0.01
+          )
+      ),
+      alvo AS (
+        SELECT
+          pop.id AS pop_id,
+          pop.n_cod_ped,
+          r.etapa_nf,
+          '/api/compras/pedidos-omie/nfe-pdf-redirect?numero_pedido='
+          || r.numero_pedido
+          || '&valor_total='
+          || r.valor_fmt AS novo_link,
+          r.c_dados_adicionais AS novos_dados
+        FROM r
+        JOIN compras.pedidos_omie po
+          ON TRIM(COALESCE(po.c_numero, '')) = TRIM(r.numero_pedido)
+         AND po.n_cod_for IS NOT NULL
+         AND po.n_cod_for::text = r.n_id_fornecedor::text
+         AND (po.inativo IS NULL OR po.inativo = FALSE)
+        JOIN compras.pedidos_omie_produtos pop
+          ON pop.n_cod_ped = po.n_cod_ped
+         AND pop.n_val_tot IS NOT NULL
+         AND ABS(pop.n_val_tot::numeric - r.n_valor_nfe::numeric) < 0.01
+        WHERE r.numero_pedido IS NOT NULL
+      ),
+      upd_pop AS (
+        UPDATE compras.pedidos_omie_produtos pop
+           SET c_link_nfe_pdf = alvo.novo_link,
+               c_dados_adicionais_nfe = alvo.novos_dados,
+               updated_at = NOW()
+          FROM alvo
+         WHERE pop.id = alvo.pop_id
+           AND (
+             COALESCE(pop.c_link_nfe_pdf, '') IS DISTINCT FROM COALESCE(alvo.novo_link, '')
+             OR COALESCE(pop.c_dados_adicionais_nfe, '') IS DISTINCT FROM COALESCE(alvo.novos_dados, '')
+           )
+        RETURNING pop.id
+      ),
+      upd_pedido AS (
+        UPDATE compras.pedidos_omie po
+           SET "Etapa_NF" = a.etapa_nf,
+               updated_at = NOW()
+          FROM (
+            SELECT DISTINCT n_cod_ped, etapa_nf
+            FROM alvo
+            WHERE etapa_nf IS NOT NULL
+          ) a
+         WHERE po.n_cod_ped = a.n_cod_ped
+           AND COALESCE(TRIM(po."Etapa_NF"), '') IS DISTINCT FROM COALESCE(TRIM(a.etapa_nf), '')
+        RETURNING po.n_cod_ped
+      )
+      SELECT
+        COALESCE((SELECT COUNT(*) FROM upd_pop), 0)
+        + COALESCE((SELECT COUNT(*) FROM upd_pedido), 0)
+      INTO v_rows;
+
+      RETURN v_rows;
+    END;
+    $$;
+
+    CREATE OR REPLACE FUNCTION compras.fn_trg_vincular_recebimento_nfe_produtos()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      PERFORM compras.fn_aplicar_vinculo_nfe_por_recebimento(NEW.n_id_receb);
+      RETURN NEW;
+    END;
+    $$;
+
+    DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_produtos
+      ON logistica.recebimentos_nfe_omie;
+
+    DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_pedido_produto
+      ON logistica.recebimentos_nfe_omie;
+
+    CREATE TRIGGER trg_vincular_recebimento_nfe_produtos
+      AFTER INSERT OR UPDATE OF n_id_fornecedor, n_valor_nfe, c_dados_adicionais
+      ON logistica.recebimentos_nfe_omie
+      FOR EACH ROW
+      EXECUTE FUNCTION compras.fn_trg_vincular_recebimento_nfe_produtos();
+  `);
+
+  _pedidosOmieProdutosNfeVinculoReady = true;
+}
+
+(async () => {
+  try {
+    await ensurePedidosOmieProdutosNfeVinculo(pool);
+    if (_pedidosOmieProdutosNfeVinculoReady) {
+      console.log('[Compras/NFe] ✓ Vínculo automático de recebimentos -> pedidos_omie_produtos habilitado');
+    } else {
+      console.log('[Compras/NFe] Vínculo automático pendente (tabelas ainda não disponíveis)');
+    }
+  } catch (err) {
+    console.error('[Compras/NFe] Erro ao preparar vínculo automático de recebimentos:', err.message || err);
+  }
+})();
+
 // Função para fazer upsert de um recebimento de NF-e no banco
 // Aceita cChaveNfe e cDadosAdicionais vindos do webhook como fallback
 async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null, cDadosAdicionaisWebhook = null) {
   const client = await pool.connect();
   try {
     await ensureRecebimentosNfeDadosAdicionaisColumn(client);
+    await ensurePedidosOmieProdutosNfeVinculo(client);
     await client.query('BEGIN');
     
     // Extrai os dados das diferentes seções
@@ -18039,6 +18210,8 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         pop.c_unidade,
         pop.n_qtde,
         pop.n_val_tot,
+        pop.c_link_nfe_pdf,
+        pop.c_dados_adicionais_nfe,
         po.created_at,
         po.updated_at,
         origem.solicitante,
@@ -18064,6 +18237,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
       ) origem ON TRUE
       WHERE po.c_etapa = '10'
         AND (po.inativo IS NULL OR po.inativo = false)
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
@@ -18105,7 +18279,9 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
           produto_descricao: row.c_descricao || 'Sem descrição',
           c_unidade: row.c_unidade || '-',
           n_qtde: row.n_qtde || 0,
-          n_val_tot: row.n_val_tot || 0
+          n_val_tot: row.n_val_tot || 0,
+          c_link_nfe_pdf: row.c_link_nfe_pdf || null,
+          c_dados_adicionais_nfe: row.c_dados_adicionais_nfe || null
         });
       }
     });
@@ -18164,6 +18340,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         pop.c_unidade,
         pop.n_qtde,
         pop.n_val_tot,
+        pop.c_link_nfe_pdf,
+        pop.c_dados_adicionais_nfe,
         po.created_at,
         po.updated_at,
         origem.solicitante,
@@ -18191,6 +18369,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
       ) origem ON TRUE
       WHERE po.c_etapa = '15'
         AND (po.inativo IS NULL OR po.inativo = false)
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
@@ -18231,7 +18410,9 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
           produto_descricao: row.c_descricao || 'Sem descrição',
           c_unidade: row.c_unidade || '-',
           n_qtde: row.n_qtde || 0,
-          n_val_tot: row.n_val_tot || 0
+          n_val_tot: row.n_val_tot || 0,
+          c_link_nfe_pdf: row.c_link_nfe_pdf || null,
+          c_dados_adicionais_nfe: row.c_dados_adicionais_nfe || null
         });
       }
     }
@@ -18259,6 +18440,145 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
   } catch (err) {
     console.error('[Compras/ComprasRealizadas] Erro ao listar compras:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar compras realizadas' });
+  }
+});
+
+// ========================================
+//  Endpoint: Listar Pedidos por Etapa_NF (40/50/60/80)
+// ========================================
+/**
+ * GET /api/compras/pedidos-etapa-nf
+ * Retorna pedidos da tabela compras.pedidos_omie com Etapa_NF preenchida:
+ * - 40 -> faturada pelo fornecedor
+ * - 50/60 -> recebido
+ * - 80 -> concluído
+ */
+app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
+  try {
+    console.log('[Compras/PedidosEtapaNF] Listando pedidos por Etapa_NF (40/50/60/80)...');
+
+    const query = `
+      SELECT
+        po.n_cod_ped,
+        po.c_numero,
+        po.c_cod_int_ped,
+        po.c_etapa,
+        po."Etapa_NF" AS etapa_nf,
+        po.n_cod_for,
+        po.d_inc_data,
+        po.d_dt_previsao,
+        cc.nome_fantasia AS fornecedor_nome,
+        pop.c_produto,
+        pop.c_descricao,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_val_tot,
+        pop.c_link_nfe_pdf,
+        pop.c_dados_adicionais_nfe,
+        po.created_at,
+        po.updated_at,
+        origem.solicitante,
+        origem.grupo_requisicao
+      FROM compras.pedidos_omie po
+      LEFT JOIN omie.fornecedores cc
+        ON cc.codigo_cliente_omie = po.n_cod_for
+      LEFT JOIN compras.pedidos_omie_produtos pop
+        ON pop.n_cod_ped = po.n_cod_ped
+      LEFT JOIN LATERAL (
+        SELECT src.solicitante, src.grupo_requisicao
+        FROM (
+          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
+          FROM compras.solicitacao_compras sc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          UNION ALL
+          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
+          FROM compras.compras_sem_cadastro csc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+        ) src
+        ORDER BY src.created_at DESC NULLS LAST
+        LIMIT 1
+      ) origem ON TRUE
+      WHERE (po.inativo IS NULL OR po.inativo = false)
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') IN ('40', '50', '60', '80')
+      ORDER BY
+        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
+        po.c_numero DESC
+    `;
+
+    const { rows } = await pool.query(query);
+    const pedidosMap = new Map();
+    const pedidos = [];
+
+    const mapearStatusPorEtapaNf = (etapaNf) => {
+      const etapa = String(etapaNf || '').trim();
+      if (etapa === '40') return 'faturada pelo fornecedor';
+      if (etapa === '50' || etapa === '60') return 'recebido';
+      if (etapa === '80') return 'concluído';
+      return null;
+    };
+
+    for (const row of rows) {
+      const numero = row.c_numero || 'SEM_NUMERO';
+      const statusNf = mapearStatusPorEtapaNf(row.etapa_nf);
+      if (!statusNf) continue;
+
+      const chavePedido = `${numero}::${statusNf}`;
+      if (!pedidosMap.has(chavePedido)) {
+        const novoPedido = {
+          numero,
+          n_cod_ped: row.n_cod_ped,
+          c_cod_int_ped: row.c_cod_int_ped,
+          c_etapa: row.c_etapa,
+          etapa_nf: row.etapa_nf,
+          status_nf: statusNf,
+          n_cod_for: row.n_cod_for,
+          d_inc_data: row.d_inc_data,
+          d_dt_previsao: row.d_dt_previsao,
+          solicitante: row.solicitante,
+          grupo_requisicao: row.grupo_requisicao,
+          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          itens: []
+        };
+        pedidosMap.set(chavePedido, novoPedido);
+        pedidos.push(novoPedido);
+      }
+
+      if (row.c_produto) {
+        pedidosMap.get(chavePedido).itens.push({
+          produto_codigo: row.c_produto,
+          produto_descricao: row.c_descricao || 'Sem descrição',
+          c_unidade: row.c_unidade || '-',
+          n_qtde: row.n_qtde || 0,
+          n_val_tot: row.n_val_tot || 0,
+          c_link_nfe_pdf: row.c_link_nfe_pdf || null,
+          c_dados_adicionais_nfe: row.c_dados_adicionais_nfe || null
+        });
+      }
+    }
+
+    const parseNumero = valor => {
+      const texto = (valor || '').toString().trim();
+      return /^\d+$/.test(texto) ? parseInt(texto, 10) : null;
+    };
+
+    pedidos.sort((a, b) => {
+      const numA = parseNumero(a.numero);
+      const numB = parseNumero(b.numero);
+      if (numA !== null && numB !== null) return numB - numA;
+      if (numA !== null) return -1;
+      if (numB !== null) return 1;
+      return String(b.numero).localeCompare(String(a.numero));
+    });
+
+    console.log(`[Compras/PedidosEtapaNF] Retornando ${pedidos.length} pedidos agrupados`);
+    res.json({ ok: true, pedidos });
+  } catch (err) {
+    console.error('[Compras/PedidosEtapaNF] Erro ao listar pedidos por Etapa_NF:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar pedidos por Etapa_NF' });
   }
 });
 
@@ -18446,6 +18766,345 @@ app.get('/api/compras/pedido-detalhes/:nCodPed', async (req, res) => {
   } catch (err) {
     console.error('[Compras/PedidoDetalhes] Erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar detalhes do pedido' });
+  }
+});
+
+function parseValorDecimalNfe(valor) {
+  const texto = String(valor || '').trim().replace(/\u00A0/g, ' ');
+  if (!texto) return NaN;
+  const semMoeda = texto.replace(/[R$\s]/g, '');
+  if (!semMoeda) return NaN;
+
+  if (semMoeda.includes(',') && semMoeda.includes('.')) {
+    if (semMoeda.lastIndexOf(',') > semMoeda.lastIndexOf('.')) {
+      return Number(semMoeda.replace(/\./g, '').replace(',', '.'));
+    }
+    return Number(semMoeda.replace(/,/g, ''));
+  }
+
+  if (semMoeda.includes(',')) {
+    return Number(semMoeda.replace(/\./g, '').replace(',', '.'));
+  }
+
+  return Number(semMoeda);
+}
+
+function extrairPedidoDosDadosAdicionaisNfe(texto) {
+  const conteudo = String(texto || '').replace(/\s+/g, ' ').trim();
+  if (!conteudo) return null;
+  const match = conteudo.match(/(^|[^a-z0-9])(n\s*)?pedido[a-z]*[^0-9]*([0-9]{2,})/i);
+  return match ? String(match[3]).trim() : null;
+}
+
+async function localizarRecebimentoNfePorPedidoValor(numeroPedidoRaw, valorTotalRaw) {
+  const numeroPedido = String(numeroPedidoRaw || '').trim();
+  if (!numeroPedido) {
+    return { ok: false, error: 'Parâmetro numero_pedido é obrigatório' };
+  }
+
+  const valorTotal = parseValorDecimalNfe(valorTotalRaw);
+  if (!Number.isFinite(valorTotal) || valorTotal <= 0) {
+    return { ok: false, error: 'Parâmetro valor_total inválido' };
+  }
+
+  const pedidoResult = await pool.query(
+    `SELECT n_cod_ped, n_cod_for, c_numero
+       FROM compras.pedidos_omie
+      WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
+        AND (inativo IS NULL OR inativo = false)
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, n_cod_ped DESC
+      LIMIT 1`,
+    [numeroPedido]
+  );
+
+  if (pedidoResult.rows.length === 0) {
+    return { ok: false, error: 'Pedido não encontrado em compras.pedidos_omie' };
+  }
+
+  const pedido = pedidoResult.rows[0];
+  const codFornecedor = pedido.n_cod_for;
+  if (!codFornecedor) {
+    return { ok: false, error: 'Pedido encontrado sem n_cod_for' };
+  }
+
+  const recebimentosResult = await pool.query(
+    `SELECT n_id_receb, c_numero_nfe, n_valor_nfe, c_dados_adicionais, d_emissao_nfe, created_at
+       FROM logistica.recebimentos_nfe_omie
+      WHERE n_id_fornecedor = $1
+        AND c_numero_nfe IS NOT NULL
+        AND TRIM(c_numero_nfe) <> ''
+        AND n_valor_nfe IS NOT NULL
+        AND ABS(n_valor_nfe::numeric - $2::numeric) < 0.01
+      ORDER BY d_emissao_nfe DESC NULLS LAST, created_at DESC NULLS LAST, n_id_receb DESC`,
+    [codFornecedor, valorTotal]
+  );
+
+  let recebimentos = recebimentosResult.rows.map((row) => ({
+    ...row,
+    pedido_extraido: extrairPedidoDosDadosAdicionaisNfe(row.c_dados_adicionais)
+  }));
+
+  if (recebimentos.length === 0) {
+    const fallbackResult = await pool.query(
+      `SELECT n_id_receb, c_numero_nfe, n_valor_nfe, c_dados_adicionais, d_emissao_nfe, created_at
+         FROM logistica.recebimentos_nfe_omie
+        WHERE n_id_fornecedor = $1
+          AND c_numero_nfe IS NOT NULL
+          AND TRIM(c_numero_nfe) <> ''
+        ORDER BY d_emissao_nfe DESC NULLS LAST, created_at DESC NULLS LAST, n_id_receb DESC
+        LIMIT 300`,
+      [codFornecedor]
+    );
+
+    recebimentos = fallbackResult.rows
+      .map((row) => ({
+        ...row,
+        pedido_extraido: extrairPedidoDosDadosAdicionaisNfe(row.c_dados_adicionais)
+      }))
+      .filter((row) => row.pedido_extraido === numeroPedido);
+  }
+
+  if (recebimentos.length === 0) {
+    return {
+      ok: false,
+      error: 'Nenhum recebimento encontrado para este fornecedor (valor/pedido)'
+    };
+  }
+
+  let recebimentoSelecionado = recebimentos[0];
+
+  if (recebimentos.length > 1) {
+    const pedidosExtraidos = [...new Set(recebimentos.map(r => r.pedido_extraido).filter(Boolean))];
+    const pedidosValidos = new Set();
+
+    if (pedidosExtraidos.length > 0) {
+      const pedidosValidosResult = await pool.query(
+        `SELECT DISTINCT TRIM(COALESCE(c_numero, '')) AS c_numero
+           FROM compras.pedidos_omie
+          WHERE TRIM(COALESCE(c_numero, '')) = ANY($1::text[])
+            AND n_cod_for = $2
+            AND (inativo IS NULL OR inativo = false)`,
+        [pedidosExtraidos, codFornecedor]
+      );
+
+      pedidosValidosResult.rows.forEach((row) => {
+        const numero = String(row.c_numero || '').trim();
+        if (numero) pedidosValidos.add(numero);
+      });
+    }
+
+    const candidatosMesmoPedido = recebimentos.filter((row) => (
+      row.pedido_extraido
+      && row.pedido_extraido === numeroPedido
+      && pedidosValidos.has(row.pedido_extraido)
+    ));
+
+    if (candidatosMesmoPedido.length > 0) {
+      recebimentoSelecionado = candidatosMesmoPedido[0];
+    }
+  }
+
+  const numeroNfeRaw = String(recebimentoSelecionado.c_numero_nfe || '').trim();
+  const numeroNfeDigitos = numeroNfeRaw.replace(/\D/g, '');
+  if (!numeroNfeDigitos) {
+    return { ok: false, error: 'Recebimento encontrado sem c_numero_nfe válido' };
+  }
+
+  return {
+    ok: true,
+    numero_pedido: numeroPedido,
+    valor_total: Number(valorTotal.toFixed(2)),
+    n_cod_for: codFornecedor,
+    n_id_receb: recebimentoSelecionado.n_id_receb,
+    c_numero_nfe: numeroNfeRaw,
+    numero_nfe_digitos: numeroNfeDigitos
+  };
+}
+
+async function obterPdfNfeViaOmie(numeroNfeDigitos) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return { ok: false, error: 'Credenciais Omie não configuradas no servidor' };
+  }
+
+  const possiveisNNf = [
+    numeroNfeDigitos.padStart(9, '0'),
+    numeroNfeDigitos,
+    String(parseInt(numeroNfeDigitos, 10))
+  ].filter((v) => v && v !== 'NaN');
+  const nNfUnicos = [...new Set(possiveisNNf)];
+
+  let nIdNf = null;
+  let ultimaFalhaConsulta = '';
+
+  for (const nNf of nNfUnicos) {
+    const consultaResp = await fetch('https://app.omie.com.br/api/v1/produtos/nfconsultar/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarNF',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{ nNF: nNf }]
+      })
+    });
+
+    const consultaData = await consultaResp.json().catch(() => ({}));
+    const faultConsulta = consultaData?.faultstring || consultaData?.faultcode || '';
+
+    if (!consultaResp.ok || faultConsulta) {
+      ultimaFalhaConsulta = faultConsulta || `HTTP ${consultaResp.status}`;
+      continue;
+    }
+
+    const nIdNFConsulta = consultaData?.compl?.nIdNF
+      || consultaData?.compl?.nIdNf
+      || consultaData?.nIdNF
+      || consultaData?.nIdNfe;
+
+    if (!nIdNFConsulta) {
+      ultimaFalhaConsulta = 'Resposta da Omie sem compl.nIdNF';
+      continue;
+    }
+
+    nIdNf = Number(nIdNFConsulta);
+    break;
+  }
+
+  if (!Number.isFinite(nIdNf) || nIdNf <= 0) {
+    return { ok: false, error: `Não foi possível localizar nIdNF. ${ultimaFalhaConsulta || ''}`.trim() };
+  }
+
+  const obterNfeResp = await fetch('https://app.omie.com.br/api/v1/produtos/dfedocs/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'ObterNfe',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{ nIdNfe: nIdNf }]
+    })
+  });
+
+  const obterNfeData = await obterNfeResp.json().catch(() => ({}));
+  const faultObter = obterNfeData?.faultstring || obterNfeData?.faultcode || '';
+  if (!obterNfeResp.ok || faultObter) {
+    return {
+      ok: false,
+      error: faultObter || `Erro HTTP ${obterNfeResp.status} ao obter XML/PDF da NF`
+    };
+  }
+
+  const cPdf = String(obterNfeData?.cPdf || '').trim();
+  if (!/^https?:\/\//i.test(cPdf)) {
+    return { ok: false, error: 'Link cPdf não encontrado na resposta da Omie' };
+  }
+
+  return { ok: true, cPdf, n_id_nfe: nIdNf };
+}
+
+// POST /api/compras/pedidos-omie/nfe-disponibilidade
+// Objetivo: validar em lote apenas no banco se existe c_numero_nfe para cada pedido/valor (sem chamar Omie).
+app.post('/api/compras/pedidos-omie/nfe-disponibilidade', express.json(), async (req, res) => {
+  try {
+    const itens = Array.isArray(req.body?.itens) ? req.body.itens.slice(0, 400) : [];
+    if (itens.length === 0) {
+      return res.json({ ok: true, resultados: [] });
+    }
+
+    const chavesVistas = new Set();
+    const itensUnicos = [];
+    for (const item of itens) {
+      const numeroPedido = String(item?.numero_pedido || '').trim();
+      const valorTotal = parseValorDecimalNfe(item?.valor_total);
+      if (!numeroPedido || !Number.isFinite(valorTotal) || valorTotal <= 0) continue;
+
+      const chave = `${numeroPedido}|${Number(valorTotal.toFixed(2))}`;
+      if (chavesVistas.has(chave)) continue;
+      chavesVistas.add(chave);
+      itensUnicos.push({
+        chave,
+        numeroPedido,
+        valorTotal: Number(valorTotal.toFixed(2))
+      });
+    }
+
+    const resultados = [];
+    const concorrencia = 8;
+    for (let i = 0; i < itensUnicos.length; i += concorrencia) {
+      const lote = itensUnicos.slice(i, i + concorrencia);
+      const loteResultados = await Promise.all(lote.map(async (item) => {
+        const localizacao = await localizarRecebimentoNfePorPedidoValor(item.numeroPedido, item.valorTotal);
+        return {
+          chave: item.chave,
+          numero_pedido: item.numeroPedido,
+          valor_total: item.valorTotal,
+          disponivel: !!localizacao?.ok,
+          c_numero_nfe: localizacao?.ok ? localizacao.c_numero_nfe : null,
+          erro: localizacao?.ok ? null : (localizacao?.error || 'Não encontrado')
+        };
+      }));
+      resultados.push(...loteResultados);
+    }
+
+    res.json({ ok: true, resultados });
+  } catch (err) {
+    console.error('[Compras/NFeDisponibilidade] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao verificar disponibilidade de NF-e' });
+  }
+});
+
+// GET /api/compras/pedidos-omie/nfe-pdf-link
+// Objetivo: gerar cPdf da NF-e apenas no clique (chamada à Omie).
+app.get('/api/compras/pedidos-omie/nfe-pdf-link', async (req, res) => {
+  try {
+    const numeroPedido = String(req.query.numero_pedido || '').trim();
+    const valorTotalRaw = String(req.query.valor_total || '').trim();
+
+    const localizacao = await localizarRecebimentoNfePorPedidoValor(numeroPedido, valorTotalRaw);
+    if (!localizacao?.ok) {
+      return res.json({ ok: false, error: localizacao?.error || 'Não foi possível localizar NF-e' });
+    }
+
+    const omieResult = await obterPdfNfeViaOmie(localizacao.numero_nfe_digitos);
+    if (!omieResult?.ok) {
+      return res.json({ ok: false, error: omieResult?.error || 'Falha ao consultar Omie' });
+    }
+
+    res.json({
+      ok: true,
+      cPdf: omieResult.cPdf,
+      numero_pedido: localizacao.numero_pedido,
+      c_numero_nfe: localizacao.c_numero_nfe,
+      n_id_nfe: omieResult.n_id_nfe,
+      n_id_receb: localizacao.n_id_receb
+    });
+  } catch (err) {
+    console.error('[Compras/NFePdfLink] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao gerar link do PDF da NF-e' });
+  }
+});
+
+// GET /api/compras/pedidos-omie/nfe-pdf-redirect
+// Objetivo: abrir o PDF diretamente via âncora (<a>) sem janela about:blank.
+app.get('/api/compras/pedidos-omie/nfe-pdf-redirect', async (req, res) => {
+  try {
+    const numeroPedido = String(req.query.numero_pedido || '').trim();
+    const valorTotalRaw = String(req.query.valor_total || '').trim();
+
+    const localizacao = await localizarRecebimentoNfePorPedidoValor(numeroPedido, valorTotalRaw);
+    if (!localizacao?.ok) {
+      return res.status(404).send(localizacao?.error || 'NF-e não encontrada');
+    }
+
+    const omieResult = await obterPdfNfeViaOmie(localizacao.numero_nfe_digitos);
+    if (!omieResult?.ok) {
+      return res.status(404).send(omieResult?.error || 'PDF da NF-e não encontrado');
+    }
+
+    return res.redirect(302, omieResult.cPdf);
+  } catch (err) {
+    console.error('[Compras/NFePdfRedirect] Erro:', err);
+    return res.status(500).send('Erro ao abrir PDF da NF-e');
   }
 });
 

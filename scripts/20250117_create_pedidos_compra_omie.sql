@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS compras.pedidos_omie (
   
   -- Status e Etapa
   c_etapa VARCHAR(100),                          -- Etapa do pedido (cEtapa)
+  "Etapa_NF" VARCHAR(100),                       -- Etapa do recebimento NF (logistica.recebimentos_nfe_omie.c_etapa)
   c_cod_status VARCHAR(20),                      -- Código de status (cCodStatus)
   c_desc_status VARCHAR(100),                    -- Descrição do status (cDescStatus)
   
@@ -124,6 +125,10 @@ CREATE TABLE IF NOT EXISTS compras.pedidos_omie_produtos (
   
   -- Observações
   c_obs TEXT,                                    -- Observações (cObs)
+
+  -- Vínculo de NF-e de recebimento (preenchido via integração com logistica.recebimentos_nfe_omie)
+  c_link_nfe_pdf TEXT,                           -- Link interno para abrir PDF da NF-e
+  c_dados_adicionais_nfe TEXT,                   -- Conteúdo de c_dados_adicionais do recebimento vinculado
   
   -- Markup
   c_mkp_atu_pv VARCHAR(1),                       -- Atualiza preço de venda (cMkpAtuPv)
@@ -148,6 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_omie_produtos_cod_prod
   ON compras.pedidos_omie_produtos(n_cod_prod);
 CREATE INDEX IF NOT EXISTS idx_pedidos_omie_produtos_cod_int_prod 
   ON compras.pedidos_omie_produtos(c_cod_int_prod);
+CREATE INDEX IF NOT EXISTS idx_pedidos_omie_produtos_link_nfe
+  ON compras.pedidos_omie_produtos(n_cod_ped, n_val_tot);
 
 -- ============================================================================
 -- 3. TABELA DE FRETE
@@ -288,4 +295,3 @@ FROM pg_indexes
 WHERE schemaname = 'compras' 
   AND tablename LIKE 'pedidos_omie%'
 ORDER BY tablename, indexname;
-
