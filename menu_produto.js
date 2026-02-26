@@ -18279,7 +18279,7 @@ async function abrirModalDetalhesPedidoCompras(numeroPedido) {
       const d = new Date(iso);
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
-    
+
     const fmtDateTime = (iso) => {
       if (!iso) return '-';
       const d = new Date(iso);
@@ -21031,17 +21031,61 @@ async function abrirModalCotadoEscolhaItem(itemId) {
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
   try {
+    const idAlvo = String(itemId || '').trim();
+    const localizarItemCotado = (itens = []) => {
+      if (!Array.isArray(itens) || !idAlvo) return null;
+      const normalizados = itens
+        .filter(i => i && typeof i === 'object')
+        .map(i => ({
+          ...i,
+          __statusNorm: String(i?.statusNormalizado || i?.status || '').toLowerCase().trim()
+        }));
+
+      // 1) Preferência: item cotado com ID exato
+      let encontrado = normalizados.find(i => String(i.id || '').trim() === idAlvo && i.__statusNorm === 'cotado');
+      if (encontrado) return encontrado;
+
+      // 2) Fallback: qualquer item com ID exato
+      encontrado = normalizados.find(i => String(i.id || '').trim() === idAlvo);
+      if (encontrado) return encontrado;
+
+      // 3) Fallback: alguns fluxos exibem ID no formato "<id_usuario>.<sequencia>"
+      encontrado = normalizados.find(i => String(i.id_solicitante || '').trim() === idAlvo && i.__statusNorm === 'cotado');
+      if (encontrado) return encontrado;
+
+      return null;
+    };
+
     // Comentário: tenta localizar primeiro no cache do kanban
     const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
-    let item = cacheItens.find(i => String(i.id) === String(itemId));
+    let item = localizarItemCotado(cacheItens);
 
-    // Fallback: busca os itens do usuário logado e filtra pelo ID
+    // Fallback 1: endpoint "minhas" (quando existir solicitante na tela)
+    if (!item && currentUser) {
+      try {
+        const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+        if (resp.ok) {
+          const data = await resp.json();
+          const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+          item = localizarItemCotado(listaCompleta);
+        }
+      } catch (_err) {
+        // segue para próximo fallback
+      }
+    }
+
+    // Fallback 2: endpoint "todas" para não travar o modal por ausência de solicitante
     if (!item) {
-      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
-      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
-      const data = await resp.json();
-      const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-      item = listaCompleta.find(i => String(i.id) === String(itemId));
+      try {
+        const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+        if (resp.ok) {
+          const data = await resp.json();
+          const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+          item = localizarItemCotado(listaCompleta);
+        }
+      } catch (_err) {
+        // mantém fluxo para mensagem de item não encontrado
+      }
     }
 
     if (!item) {
@@ -21050,13 +21094,41 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     }
 
     // Comentário: armazena table_source para uso posterior
-    const tableSource = item.table_source || 'solicitacao_compras';
+    const tableSource = item.table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras';
     window.cotadoEscolhaTableSource = tableSource;
 
     const fmtDate = (iso) => {
       if (!iso) return '-';
       const d = new Date(iso);
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+    };
+
+    const fmtQtdModal = (valor) => {
+      try {
+        if (typeof formatarQuantidadeExibicao === 'function') return formatarQuantidadeExibicao(valor);
+      } catch (_) {}
+
+      if (valor === null || valor === undefined) return '-';
+      const bruto = String(valor).trim();
+      if (!bruto) return '-';
+
+      let normalizado = bruto;
+      const temVirgula = normalizado.includes(',');
+      const temPonto = normalizado.includes('.');
+      if (temVirgula && temPonto) {
+        if (normalizado.lastIndexOf(',') > normalizado.lastIndexOf('.')) {
+          normalizado = normalizado.replace(/\./g, '').replace(',', '.');
+        } else {
+          normalizado = normalizado.replace(/,/g, '');
+        }
+      } else if (temVirgula) {
+        normalizado = normalizado.replace(',', '.');
+      }
+
+      const numero = Number(normalizado);
+      if (!Number.isFinite(numero)) return bruto;
+      if (Math.abs(numero - Math.round(numero)) < 1e-9) return String(Math.round(numero));
+      return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
     };
 
     const statusAtual = (item.status || 'cotado').toString().toLowerCase().trim();
@@ -21164,7 +21236,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           <div><strong>ID:</strong> ${item.id}</div>
           <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
           <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
-          <div><strong>Quantidade:</strong> ${formatarQuantidadeExibicao(item.quantidade)}</div>
+          <div><strong>Quantidade:</strong> ${fmtQtdModal(item.quantidade)}</div>
           <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
           <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
           <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
@@ -21218,8 +21290,8 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     modalBody.innerHTML = html;
 
     // Comentário: carrega cotações do banco usando solicitacao_id e table_source
-    const solicitacaoId = item.id;
-    if (solicitacaoId) {
+    const solicitacaoId = String(item.id || '').trim();
+    if (/^\d+$/.test(solicitacaoId)) {
       try {
         const respCot = await fetch(`/api/compras/cotacoes/${solicitacaoId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
         if (respCot.ok) {
@@ -21231,10 +21303,17 @@ async function abrirModalCotadoEscolhaItem(itemId) {
       }
     }
 
-    renderizarCotacoesRegistradasCotadoEscolha();
+    try {
+      renderizarCotacoesRegistradasCotadoEscolha();
+    } catch (errRender) {
+      const containerCot = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
+      if (containerCot) {
+        containerCot.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px;">Falha ao renderizar cotações.</div>';
+      }
+    }
   } catch (err) {
-    console.error('[MODAL COTADO ESCOLHA] Erro:', err);
-    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.</div>';
+    const msg = (err && err.message) ? err.message : 'Erro desconhecido ao carregar detalhes do item.';
+    modalBody.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.<br><small style="display:block;margin-top:8px;color:#b91c1c;">${escapeHtml(msg)}</small></div>`;
   }
 }
 
@@ -21924,13 +22003,16 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
   const container = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
   if (!container) return;
 
-  if (!window.cotadoEscolhaCotacoesDb || window.cotadoEscolhaCotacoesDb.length === 0) {
+  const cotacoesRaw = Array.isArray(window.cotadoEscolhaCotacoesDb) ? window.cotadoEscolhaCotacoesDb : [];
+  const cotacoes = cotacoesRaw.filter(c => c && typeof c === 'object');
+
+  if (cotacoes.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
     return;
   }
 
   const item = window.cotadoEscolhaItem || {};
-  const html = window.cotadoEscolhaCotacoesDb.map((cotacao) => {
+  const html = cotacoes.map((cotacao) => {
     const statusAprovacao = (cotacao.status_aprovacao || 'pendente').toString().toLowerCase();
     const aprovado = statusAprovacao === 'aprovado';
     const observacaoTexto = cotacao.observacao || '';
@@ -21976,7 +22058,17 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
 
     let anexosHtml = '';
     if (cotacao.anexos) {
-      const anexosArray = Array.isArray(cotacao.anexos) ? cotacao.anexos : [];
+      let anexosArray = [];
+      if (Array.isArray(cotacao.anexos)) {
+        anexosArray = cotacao.anexos;
+      } else if (typeof cotacao.anexos === 'string') {
+        try {
+          const parsed = JSON.parse(cotacao.anexos);
+          anexosArray = Array.isArray(parsed) ? parsed : [];
+        } catch (_e) {
+          anexosArray = [];
+        }
+      }
       const listaAnexos = anexosArray.map(a => a?.nome).filter(a => a);
       if (listaAnexos.length > 0) {
         anexosHtml = `
@@ -30715,13 +30807,24 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Aplica filtro por solicitante nos pedidos se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
-        // Para pedidos, verifica se existe na tabela solicitacao_compras com mesmo numero
+        const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
+        // Para pedidos, prioriza o solicitante do próprio pedido.
+        // Fallback: tenta localizar vínculo por número/código interno nas solicitações base.
         pedidosCompra = pedidosCompra.filter(ped => {
-          const existeNaSolicitacao = lista.some(item => 
-            item.numero_pedido === ped.numero && 
-            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
-          );
-          return existeNaSolicitacao;
+          const solicitantePedido = normalizarSolicitanteParaId(ped.solicitante);
+          if (solicitantePedido && solicitantePedido === usuarioNormalizado) return true;
+
+          const numeroPedido = String(ped.numero || '').trim();
+          const codIntPedido = String(ped.c_cod_int_ped || '').trim();
+          return solicitacoesBaseTodas.some(item => {
+            const solicitanteItem = normalizarSolicitanteParaId(item.solicitante);
+            if (!solicitanteItem || solicitanteItem !== usuarioNormalizado) return false;
+
+            const numeroItem = String(item.numero_pedido || '').trim();
+            if (numeroPedido && numeroItem === numeroPedido) return true;
+            if (codIntPedido && numeroItem === codIntPedido) return true;
+            return false;
+          });
         });
       }
       
@@ -30773,14 +30876,24 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Aplica filtro por solicitante nas compras realizadas se modo 'minhas'
       if (filtroSolicitante === 'minhas') {
-        // Para compras realizadas, verifica se existe na tabela solicitacao_compras com mesmo numero
+        const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
+        // Para compras realizadas, prioriza solicitante já resolvido no card.
+        // Fallback: cruza com solicitações base por número/código interno.
         comprasRealizadas = comprasRealizadas.filter(comp => {
-          const cNumero = comp.c_numero;
-          const existeNaSolicitacao = lista.some(item => 
-            item.numero_pedido === cNumero && 
-            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
-          );
-          return existeNaSolicitacao;
+          const solicitanteCompra = normalizarSolicitanteParaId(comp.solicitante);
+          if (solicitanteCompra && solicitanteCompra === usuarioNormalizado) return true;
+
+          const cNumero = String(comp.c_numero || '').trim();
+          const codIntPedido = String(comp.c_cod_int_ped || '').trim();
+          return solicitacoesBaseTodas.some(item => {
+            const solicitanteItem = normalizarSolicitanteParaId(item.solicitante);
+            if (!solicitanteItem || solicitanteItem !== usuarioNormalizado) return false;
+
+            const numeroItem = String(item.numero_pedido || '').trim();
+            if (cNumero && numeroItem === cNumero) return true;
+            if (codIntPedido && numeroItem === codIntPedido) return true;
+            return false;
+          });
         });
       }
       
@@ -30836,13 +30949,22 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       });
 
       if (filtroSolicitante === 'minhas') {
+        const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
         pedidosEtapaNf = pedidosEtapaNf.filter(ped => {
-          const cNumero = ped.c_numero;
-          const existeNaSolicitacao = lista.some(item =>
-            item.numero_pedido === cNumero &&
-            (item.solicitante || '').trim().toLowerCase() === currentUser.toLowerCase()
-          );
-          return existeNaSolicitacao;
+          const solicitantePedido = normalizarSolicitanteParaId(ped.solicitante);
+          if (solicitantePedido && solicitantePedido === usuarioNormalizado) return true;
+
+          const cNumero = String(ped.c_numero || '').trim();
+          const codIntPedido = String(ped.c_cod_int_ped || '').trim();
+          return solicitacoesBaseTodas.some(item => {
+            const solicitanteItem = normalizarSolicitanteParaId(item.solicitante);
+            if (!solicitanteItem || solicitanteItem !== usuarioNormalizado) return false;
+
+            const numeroItem = String(item.numero_pedido || '').trim();
+            if (cNumero && numeroItem === cNumero) return true;
+            if (codIntPedido && numeroItem === codIntPedido) return true;
+            return false;
+          });
         });
       }
 
