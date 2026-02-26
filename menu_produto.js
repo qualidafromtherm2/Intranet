@@ -20491,7 +20491,48 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       const objetivoCompra = escapeHtml(primeiro.objetivo_compra || '-');
       const createdAt = fmtDate(primeiro.created_at || primeiro.createdAt || primeiro.data_criacao);
 
-      const linhasItens = itensDetalhe.map(item => {
+      const expandirItensTabelaModal = (item) => {
+        const tableSource = String(item?.table_source || '').trim().toLowerCase();
+        const descricaoBruta = String(item?.produto_descricao || item?.descricao || '').trim();
+        const codigoBase = String(item?.produto_codigo || '-').trim() || '-';
+
+        if (tableSource !== 'compras_sem_cadastro' || !descricaoBruta) {
+          return [{
+            produto_codigo: codigoBase,
+            produto_descricao: descricaoBruta || '-',
+            quantidade: item?.quantidade
+          }];
+        }
+
+        const partes = descricaoBruta
+          .split(';')
+          .map(parte => String(parte || '').trim())
+          .filter(Boolean);
+
+        if (!partes.length) {
+          return [{
+            produto_codigo: codigoBase,
+            produto_descricao: descricaoBruta,
+            quantidade: item?.quantidade
+          }];
+        }
+
+        return partes.map((parte, indice) => {
+          const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
+          const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
+          const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (item?.quantidade ?? '1');
+
+          return {
+            produto_codigo: `${codigoBase}.${indice + 1}`,
+            produto_descricao: descricaoItem || '-',
+            quantidade: quantidadeItem
+          };
+        });
+      };
+
+      const itensTabela = itensDetalhe.flatMap(expandirItensTabelaModal);
+
+      const linhasItens = itensTabela.map(item => {
         const codigo = escapeHtml(item.produto_codigo || '-');
         const descricao = escapeHtml(item.produto_descricao || item.descricao || '-');
         const quantidade = fmtQtdModal(item.quantidade);
