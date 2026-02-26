@@ -8448,6 +8448,18 @@ function formatarQuantidadeExibicao(valor) {
   return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
+function formatarQtdModal(valor) {
+  if (typeof formatarQuantidadeExibicao === 'function') {
+    return formatarQuantidadeExibicao(valor);
+  }
+  if (valor === null || valor === undefined || String(valor).trim() === '') return '-';
+  const numero = Number(String(valor).replace(',', '.'));
+  if (!Number.isFinite(numero)) return String(valor);
+  if (Math.abs(numero - Math.round(numero)) < 1e-9) return String(Math.round(numero));
+  return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
+window.formatarQtdModal = formatarQtdModal;
+
 function formatQtdInput(value) {
   const num = sanitizeQtd(value);
   return Number.isInteger(num) ? String(num) : num.toString();
@@ -20774,17 +20786,54 @@ async function abrirModalAnaliseCadastro(itemId) {
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
   try {
+    const alvoId = String(itemId || '').trim();
+    const isItemSemCadastro = (cand) => {
+      if (!cand) return false;
+      const tableSource = String(cand.table_source || '').trim().toLowerCase();
+      if (tableSource === 'compras_sem_cadastro') return true;
+      return !!(cand.link || cand.links);
+    };
+
+    const localizarItemAnalise = (lista) => {
+      if (!Array.isArray(lista) || !alvoId) return null;
+      return lista.find((cand) => {
+        if (!isItemSemCadastro(cand)) return false;
+        const candId = String(cand.id || '').trim();
+        const candIdSolicitante = String(cand.id_solicitante || '').trim();
+        return candId === alvoId || candIdSolicitante === alvoId;
+      }) || null;
+    };
+
     // Comentário: tenta localizar primeiro no cache do kanban
     const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
-    let item = cacheItens.find(i => String(i.id) === String(itemId) && i.table_source === 'compras_sem_cadastro');
+    let item = localizarItemAnalise(cacheItens);
 
-    // Fallback: busca os itens do usuário logado e filtra pelo ID
+    // Fallback 1: endpoint "minhas" (quando existir solicitante na tela)
+    if (!item && currentUser) {
+      try {
+        const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
+        if (resp.ok) {
+          const data = await resp.json();
+          const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+          item = localizarItemAnalise(listaCompleta);
+        }
+      } catch (_err) {
+        // segue para próximo fallback
+      }
+    }
+
+    // Fallback 2: endpoint "todas" para não travar o modal por ausência de solicitante
     if (!item) {
-      const resp = await fetch(`/api/compras/minhas?solicitante=${encodeURIComponent(currentUser)}`, { credentials: 'include' });
-      if (!resp.ok) throw new Error('Não foi possível carregar as solicitações');
-      const data = await resp.json();
-      const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
-      item = listaCompleta.find(i => String(i.id) === String(itemId) && i.table_source === 'compras_sem_cadastro');
+      try {
+        const resp = await fetch('/api/compras/todas', { credentials: 'include' });
+        if (resp.ok) {
+          const data = await resp.json();
+          const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
+          item = localizarItemAnalise(listaCompleta);
+        }
+      } catch (_err) {
+        // mantém fluxo para mensagem de item não encontrado
+      }
     }
 
     if (!item) {
@@ -20899,7 +20948,8 @@ async function abrirModalAnaliseCadastro(itemId) {
 
   } catch (err) {
     console.error('[MODAL ANALISE CADASTRO] Erro:', err);
-    modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.</div>';
+    const msg = (err && err.message) ? err.message : 'Erro desconhecido ao carregar detalhes do item.';
+    modalBody.innerHTML = `<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar detalhes do item.<br><small style="display:block;margin-top:8px;color:#b91c1c;">${escapeHtml(msg)}</small></div>`;
   }
 }
 
@@ -20907,6 +20957,31 @@ async function abrirModalAnaliseCadastro(itemId) {
 function fecharModalAnaliseCadastro() {
   const modal = document.getElementById('modalAnaliseCadastro');
   if (modal) modal.style.display = 'none';
+}
+
+// Comentário: formatador local de quantidade exclusivo do modal de Análise de Cadastro
+function formatarQuantidadeAnaliseCadastro(valor) {
+  if (valor === null || valor === undefined) return '-';
+  const bruto = String(valor).trim();
+  if (!bruto) return '-';
+
+  let normalizado = bruto;
+  const temVirgula = normalizado.includes(',');
+  const temPonto = normalizado.includes('.');
+  if (temVirgula && temPonto) {
+    if (normalizado.lastIndexOf(',') > normalizado.lastIndexOf('.')) {
+      normalizado = normalizado.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalizado = normalizado.replace(/,/g, '');
+    }
+  } else if (temVirgula) {
+    normalizado = normalizado.replace(',', '.');
+  }
+
+  const numero = Number(normalizado);
+  if (!Number.isFinite(numero)) return bruto;
+  if (Math.abs(numero - Math.round(numero)) < 1e-9) return String(Math.round(numero));
+  return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 // Comentário: renderiza lista de itens do modal de análise de cadastro
@@ -20929,7 +21004,7 @@ function renderizarListaItensAnaliseCadastro() {
     const subIndice = (idx + 1).toString();
     const codprov = `CODPROV - ${codBaseNumero}.${subIndice}`;
     const descricao = item.descricao ? escapeHtml(item.descricao) : '';
-    const quantidade = escapeHtml(formatarQuantidadeExibicao(item.quantidade));
+    const quantidade = escapeHtml(formatarQuantidadeAnaliseCadastro(item.quantidade));
 
     const codigoOmie = item.codigo_omie ? escapeHtml(item.codigo_omie) : '';
     const jaExiste = !!item.ja_existe_omie;
@@ -30065,6 +30140,113 @@ async function precarregarLinksNfeLista(linhas = []) {
 function renderizarLista() {
   const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
   if (!corpoTabela) return;
+
+  const itensKanbanFonte = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
+  const mapaItensPorId = new Map(
+    itensKanbanFonte
+      .filter(item => item && item.id !== undefined && item.id !== null)
+      .map(item => [String(item.id), item])
+  );
+
+  const valorLimpo = (valor) => String(valor || '').trim();
+  const valorValido = (valor) => {
+    const texto = valorLimpo(valor);
+    if (!texto) return false;
+    const textoLower = texto.toLowerCase();
+    return !textoLower.startsWith('sem_') && textoLower !== 'sem numero' && textoLower !== 'n/a';
+  };
+
+  const regexReqCompleta = /^\d{8}-\d{6}-\d+$/;
+
+  const compactarNumeroRequisicaoTabela = (valor) => {
+    const texto = valorLimpo(valor);
+    const match = texto.match(/^(\d{8})-(\d{6})-(\d+)$/);
+    if (!match) return texto || 'N/A';
+    return `${match[2]}-${match[3]}`;
+  };
+
+  const primeiroValorValido = (valores, filtro = null) => {
+    for (const valor of valores) {
+      const texto = valorLimpo(valor);
+      if (!valorValido(texto)) continue;
+      if (typeof filtro === 'function' && !filtro(texto)) continue;
+      return texto;
+    }
+    return '';
+  };
+
+  const obterItensDoCard = (itemId, todosIds) => {
+    const ids = String(todosIds || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean);
+
+    if (!ids.length && itemId) ids.push(String(itemId));
+
+    return ids
+      .map(id => mapaItensPorId.get(String(id)))
+      .filter(Boolean);
+  };
+
+  const resolverNumerosTabela = (statusNormalizado, card, itensCard) => {
+    const numeroPedidoData = valorLimpo(card.getAttribute('data-numero-pedido'));
+    const grupoReqData = valorLimpo(card.getAttribute('data-grupo-requisicao'));
+    const codIntPedData = valorLimpo(card.getAttribute('data-c-cod-int-ped'));
+
+    const valoresRequisicao = [
+      grupoReqData,
+      codIntPedData,
+      ...itensCard.map(item => item?.grupo_requisicao),
+      ...itensCard.map(item => item?.cod_int_req_compra),
+      ...itensCard.map(item => item?.c_cod_int_ped),
+      ...itensCard.map(item => item?.numero_pedido)
+    ];
+
+    let requisicao = primeiroValorValido(
+      valoresRequisicao,
+      (texto) => regexReqCompleta.test(texto)
+    );
+
+    if (!requisicao) {
+      requisicao = primeiroValorValido(valoresRequisicao);
+    }
+
+    const valoresPedido = [
+      numeroPedidoData,
+      ...itensCard.map(item => item?.numero),
+      ...itensCard.map(item => item?.c_numero),
+      ...itensCard.map(item => item?.cnumero),
+      ...itensCard.map(item => item?.numero_pedido),
+      ...itensCard.map(item => item?.n_cod_ped)
+    ];
+
+    let numeroPedido = primeiroValorValido(
+      valoresPedido,
+      (texto) => !regexReqCompleta.test(texto)
+    );
+
+    if (!numeroPedido) {
+      numeroPedido = primeiroValorValido(valoresPedido);
+    }
+
+    if (statusNormalizado === 'aguardando compra preparação') {
+      const pedidoPrioritario = primeiroValorValido(
+        [
+          ...itensCard.map(item => item?.numero),
+          ...itensCard.map(item => item?.cnumero),
+          ...itensCard.map(item => item?.c_numero),
+          numeroPedido
+        ],
+        (texto) => !regexReqCompleta.test(texto)
+      );
+      if (pedidoPrioritario) numeroPedido = pedidoPrioritario;
+    }
+
+    return {
+      requisicao: requisicao || 'N/A',
+      numeroPedido: numeroPedido || '-'
+    };
+  };
   
   corpoTabela.innerHTML = '';
   
@@ -30098,32 +30280,11 @@ function renderizarLista() {
       const produtosData = card.getAttribute('data-produtos') || '';
       const itemId = card.getAttribute('data-item-id') || '';
       const todosIds = card.getAttribute('data-todos-ids') || '';
-      
-      // Extrai texto completo do card
-      const textoCard = card.textContent || '';
-      
-      // Tenta extrair número de requisição (formato YYYYMMDD-HHMMSS-NNN)
-      const regexRequisicao = /(\d{8})-(\d{6})-(\d+)/;
-      const matchRequisicao = textoCard.match(regexRequisicao);
-      const requisicao = matchRequisicao ? `${matchRequisicao[1]}-${matchRequisicao[2]}-${matchRequisicao[3]}` : 'N/A';
-      
-      // Extrai linhas de texto do card
-      const linhasTexto = textoCard.split('\n').map(l => l.trim()).filter(l => l);
-      
-      let numeroPedido = '';
-      
-      // Procura por padrões nas linhas
-      for (let i = 0; i < linhasTexto.length; i++) {
-        const linha = linhasTexto[i];
-        const linhaUpper = linha.toUpperCase();
-        
-        // Nº Pedido: procura por padrão CODPROV - ou números
-        if (!numeroPedido && (linha.match(/^[A-Z]+ - \d+/) || linha.match(/^\d{3,}/))) {
-          numeroPedido = linha;
-          continue;
-        }
-        
-      }
+
+      const itensCard = obterItensDoCard(itemId, todosIds);
+      const numerosTabela = resolverNumerosTabela(statusNormalizado, card, itensCard);
+      const requisicao = numerosTabela.requisicao;
+      const numeroPedido = numerosTabela.numeroPedido;
       
       // Formata datas
       const dataFormatada = createdAt ? new Date(createdAt).toLocaleDateString('pt-BR') : '-';
@@ -30200,7 +30361,7 @@ function renderizarLista() {
       const valorTotalFormatado = valorTotalNum > 0
         ? valorTotalNum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
         : '-';
-      const numeroPedidoRef = String(numeroPedidoData || numeroPedido || '').trim();
+      const numeroPedidoRef = String(numeroPedido || numeroPedidoData || '').trim();
       const linksNfeProdutos = Array.isArray(produtosLista)
         ? [...new Set(
             produtosLista
@@ -30212,7 +30373,7 @@ function renderizarLista() {
       const linhaMontada = {
         rowId,
         requisicao,
-        numeroPedido: numeroPedido || numeroPedidoData || '-',
+        numeroPedido,
         numeroPedidoRef,
         idSolicitante: (String(idSolicitanteData || '').trim() || '-'),
         solicitante: solicitanteData || '-',
@@ -30316,7 +30477,7 @@ function renderizarLista() {
     tr.innerHTML = `
       <td style="padding:12px 10px;font-size:12px;color:#111827;font-weight:700;text-align:center;white-space:nowrap;">${escapeHtml(linha.idSolicitante || '-')}</td>
       <td style="padding:12px 16px;font-size:12px;color:#111827;font-weight:500;">
-        ${linha.requisicao}
+        ${escapeHtml(compactarNumeroRequisicaoTabela(linha.requisicao))}
       </td>
       <td style="padding:12px 16px;font-size:11px;color:#6b7280;font-family:monospace;">${linha.numeroPedido}</td>
       <td style="padding:12px 16px;font-size:12px;color:#374151;">${escapeHtml(linha.solicitante)}</td>
