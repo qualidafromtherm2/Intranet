@@ -17187,34 +17187,108 @@ app.get('/api/compras/minhas', async (req, res) => {
     }
     
     const { rows } = await pool.query(`
-      SELECT 
-        id,
-        numero_pedido,
-        produto_codigo,
-        produto_descricao,
-        quantidade,
-        prazo_solicitado,
-        previsao_chegada,
-        status,
-        observacao,
-        observacao_reprovacao,
-        observacao_retificacao,
-        solicitante,
-        resp_inspecao_recebimento,
-        departamento,
-        centro_custo,
-        objetivo_compra,
-        familia_produto,
-        retorno_cotacao,
-        created_at,
-        updated_at,
-        cnumero AS "cNumero",
-        ncodped AS "nCodPed",
-        anexos
-      FROM compras.solicitacao_compras
-      WHERE solicitante = $1
-      ORDER BY created_at DESC
-      LIMIT 500
+      SELECT *
+      FROM (
+        SELECT
+          sc.id,
+          sc.numero_pedido,
+          sc.produto_codigo,
+          sc.produto_descricao,
+          sc.quantidade,
+          po.unidade,
+          sc.prazo_solicitado,
+          sc.previsao_chegada,
+          sc.status,
+          sc.observacao,
+          sc.observacao_reprovacao,
+          sc.observacao_retificacao,
+          sc.solicitante,
+          sc.resp_inspecao_recebimento,
+          sc.responsavel_pela_compra,
+          sc.departamento,
+          sc.centro_custo,
+          sc.objetivo_compra,
+          sc.fornecedor_nome,
+          sc.fornecedor_id,
+          sc.familia_produto,
+          sc.grupo_requisicao,
+          sc.retorno_cotacao,
+          sc.categoria_compra_codigo,
+          sc.categoria_compra_nome,
+          sc.codigo_omie,
+          sc.codigo_produto_omie,
+          sc.requisicao_direta,
+          sc.anexos,
+          NULL::text AS link,
+          sc.cnumero AS "cNumero",
+          sc.ncodped AS "nCodPed",
+          sc.created_at,
+          sc.updated_at,
+          'solicitacao_compras'::text AS table_source
+        FROM compras.solicitacao_compras sc
+        LEFT JOIN LATERAL (
+          SELECT po.unidade
+          FROM public.produtos_omie po
+          WHERE (
+            po.codigo_produto::TEXT = COALESCE(
+              NULLIF(sc.codigo_produto_omie::TEXT, ''),
+              NULLIF(sc.codigo_omie::TEXT, '')
+            )
+            OR po.codigo::TEXT = sc.produto_codigo::TEXT
+          )
+          ORDER BY CASE
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_produto_omie::TEXT, '') THEN 1
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_omie::TEXT, '') THEN 2
+            WHEN po.codigo::TEXT = sc.produto_codigo::TEXT THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        ) po ON TRUE
+        WHERE TRIM(LOWER(COALESCE(sc.solicitante, ''))) = TRIM(LOWER($1))
+
+        UNION ALL
+
+        SELECT
+          csc.id,
+          NULL::text AS numero_pedido,
+          csc.produto_codigo,
+          csc.produto_descricao,
+          csc.quantidade,
+          NULL::text AS unidade,
+          NULL::date AS prazo_solicitado,
+          NULL::date AS previsao_chegada,
+          csc.status,
+          csc.observacao_recebimento AS observacao,
+          csc.observacao_reprovacao,
+          NULL::text AS observacao_retificacao,
+          csc.solicitante,
+          csc.resp_inspecao_recebimento,
+          NULL::text AS responsavel_pela_compra,
+          csc.departamento,
+          csc.centro_custo,
+          csc.objetivo_compra,
+          NULL::text AS fornecedor_nome,
+          NULL::integer AS fornecedor_id,
+          NULL::text AS familia_produto,
+          csc.grupo_requisicao,
+          csc.retorno_cotacao,
+          csc.categoria_compra_codigo,
+          csc.categoria_compra_nome,
+          NULL::text AS codigo_omie,
+          NULL::text AS codigo_produto_omie,
+          NULL::boolean AS requisicao_direta,
+          csc.anexos,
+          csc.link,
+          NULL::text AS "cNumero",
+          NULL::text AS "nCodPed",
+          csc.created_at,
+          csc.updated_at,
+          'compras_sem_cadastro'::text AS table_source
+        FROM compras.compras_sem_cadastro csc
+        WHERE TRIM(LOWER(COALESCE(csc.solicitante, ''))) = TRIM(LOWER($1))
+      ) src
+      ORDER BY src.created_at DESC
+      LIMIT 1000
     `, [solicitante]);
     
     res.json({ ok: true, solicitacoes: rows });
@@ -17900,7 +17974,6 @@ app.get('/api/compras/todas', async (req, res) => {
         updated_at,
         'compras_sem_cadastro' AS table_source
       FROM compras.compras_sem_cadastro
-      WHERE status IN ('Analise de cadastro', 'aguardando aprovação da requisição', 'retificar', 'aguardando cotação', 'cotado', 'Carrinho')
       ORDER BY created_at DESC
       LIMIT 1000
     `);
