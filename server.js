@@ -18214,7 +18214,8 @@ app.get('/api/compras/requisicoes', async (req, res) => {
       
       if (!requisicoesPorGrupo[grupoRequisicao]) {
         requisicoesPorGrupo[grupoRequisicao] = {
-          numero: grupoRequisicao,
+          numero: item.cnumero || grupoRequisicao,
+          grupo_requisicao: grupoRequisicao,
           numero_requisicao_omie: item.cnumero || null,
           cod_req_compra: item.cod_req_compra_omie || item.cod_req_compra || item.ncodped,
           cod_int_req_compra: item.cod_int_req_compra_omie || item.numero_pedido,
@@ -18240,6 +18241,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
         ncodped: item.ncodped,
         numero_pedido: item.numero_pedido,
         status: item.status,
+        link: item.table_source === 'compras_sem_cadastro' ? item.link : null,
         c_unidade: item.c_unidade || '-',
         n_qtde: item.n_qtde || item.quantidade || 0,
         n_val_tot: item.n_val_tot || 0,
