@@ -1,7 +1,7 @@
 // intranet/routes/produtos.js
 const express  = require('express');
 const router   = express.Router();
-const { dbQuery } = require('../src/db');
+const { dbQuery, dbGetClient } = require('../src/db');
 
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
@@ -14,6 +14,46 @@ const INTERNAL_BASE = `http://localhost:${process.env.PORT || 5001}`;
 
 // Utilzinho pra ocultar chaves em logs
 const mask = s => (s ? String(s).slice(0, 4) + '…' : '');
+
+async function ensureProdutosOmieWebhookOnlyGuard() {
+  try {
+    await dbQuery(`
+      CREATE OR REPLACE FUNCTION public.trg_guard_produtos_omie_webhook_only()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      DECLARE
+        v_source text;
+      BEGIN
+        v_source := current_setting('app.produtos_omie_write_source', true);
+        IF COALESCE(v_source, '') <> 'omie_webhook' THEN
+          RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via webhook da Omie'
+            USING ERRCODE = '42501';
+        END IF;
+
+        IF TG_OP = 'DELETE' THEN
+          RETURN OLD;
+        END IF;
+
+        RETURN NEW;
+      END;
+      $$;
+
+      DROP TRIGGER IF EXISTS trg_guard_produtos_omie_webhook_only ON public.produtos_omie;
+
+      CREATE TRIGGER trg_guard_produtos_omie_webhook_only
+      BEFORE INSERT OR UPDATE OR DELETE ON public.produtos_omie
+      FOR EACH ROW
+      EXECUTE FUNCTION public.trg_guard_produtos_omie_webhook_only();
+    `);
+
+    console.log('[produtos] Proteção ativa: public.produtos_omie só aceita escrita via webhook Omie');
+  } catch (err) {
+    console.error('[produtos] Falha ao instalar proteção da public.produtos_omie:', String(err));
+  }
+}
+
+ensureProdutosOmieWebhookOnlyGuard();
 
 // === Helpers =================================================================
 function ensureIntegrationKey(item) {
@@ -181,66 +221,9 @@ router.get('/detalhe', async (req, res) => {
 // ============================================================================
 router.post('/locais', async (req, res) => {
   try {
-    const codigo = String(req.body?.codigo || '').trim();
-    if (!codigo) return res.status(400).json({ error: 'codigo é obrigatório' });
-
-      const setClauses = [];
-      const values = [codigo];
-
-      // Normaliza visivel_principal para boolean ou null (só aplica se veio no body)
-      if (req.body.hasOwnProperty('visivel_principal')) {
-        const vpRaw = req.body?.visivel_principal;
-        const vpNorm =
-          vpRaw === true || String(vpRaw).trim().toUpperCase() === 'S' || String(vpRaw).trim().toUpperCase() === 'SIM'
-            ? true
-            : (vpRaw === false || String(vpRaw).trim().toUpperCase() === 'N' || String(vpRaw).trim().toUpperCase() === 'NAO' || String(vpRaw).trim().toUpperCase() === 'NÃO'
-                ? false
-                : null);
-        setClauses.push(`visivel_principal = $${values.length + 1}`);
-        values.push(vpNorm);
-      }
-
-      // Normaliza tipo_compra para valores conhecidos ou null (só aplica se veio no body)
-      if (req.body.hasOwnProperty('tipo_compra')) {
-        const tipoRaw = String(req.body?.tipo_compra || '').trim().toUpperCase();
-        const tipoAllowed = new Set(['AUTOMATICA', 'SEMIAUTOMATICA', 'MANUAL']);
-        const tipoNorm = tipoAllowed.has(tipoRaw) ? tipoRaw : null;
-        setClauses.push(`tipo_compra = $${values.length + 1}`);
-        values.push(tipoNorm);
-      }
-
-      // Normaliza preco_definido (moeda) para numeric ou null (só aplica se veio no body)
-      if (req.body.hasOwnProperty('preco_definido')) {
-        const precoRaw = req.body?.preco_definido;
-        const num = Number(String(precoRaw).replace(',', '.'));
-        const precoNorm = Number.isFinite(num) ? num : null;
-        setClauses.push(`preco_definido = $${values.length + 1}`);
-        values.push(precoNorm);
-      }
-
-      if (!setClauses.length) {
-        return res.status(400).json({ error: 'Nenhum campo enviado para atualização.' });
-      }
-
-      setClauses.push("ualt = COALESCE(ualt, 'portal')");
-      setClauses.push('dalt = COALESCE(dalt, NOW()::date)');
-      setClauses.push('halt = COALESCE(halt, NOW()::time)');
-
-      const { rows } = await dbQuery(
-        `UPDATE public.produtos_omie
-           SET ${setClauses.join(', ')}
-         WHERE codigo = $1
-         RETURNING codigo_produto, visivel_principal, tipo_compra;`,
-        values
-      );
-
-    if (!rows.length) return res.status(404).json({ error: 'Produto não encontrado no Postgres.' });
-
-    res.json({
-      ok: true,
-      codigo_produto: rows[0].codigo_produto,
-      visivel_principal: rows[0].visivel_principal,
-      tipo_compra: rows[0].tipo_compra
+    return res.status(403).json({
+      ok: false,
+      error: 'Atualização local desabilitada: public.produtos_omie é mantida exclusivamente pelo webhook da Omie.'
     });
   } catch (err) {
     console.error('[produtos/locais] erro →', err);
@@ -399,6 +382,7 @@ async function processWebhookInBackground(app, body, messageId) {
   }
 
   async function upsertNoBanco(item, label = 'raw') {
+    let client;
     try {
       const obj = ensureIntegrationKey({ ...item });
       console.log('[webhook/produtos] Salvando no banco:', {
@@ -408,8 +392,12 @@ async function processWebhookInBackground(app, body, messageId) {
         codigo: obj.codigo,
         descricao: obj.descricao?.substring(0, 50)
       });
-      
-      await dbQuery('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+
+      client = await dbGetClient();
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+      await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+      await client.query('COMMIT');
 
       const cod = Number(obj.codigo_produto || obj.codigo);
       if (!Number.isNaN(cod)) {
@@ -428,6 +416,7 @@ async function processWebhookInBackground(app, body, messageId) {
         codigo: obj.codigo
       });
     } catch (e) {
+      try { await client?.query('ROLLBACK'); } catch (_) {}
       console.error('[webhook/produtos] Erro ao salvar produto:', {
         messageId,
         label,
@@ -441,7 +430,34 @@ async function processWebhookInBackground(app, body, messageId) {
         id: item?.codigo_produto || item?.codigo,
         error: String(e)
       });
+    } finally {
+      try { client?.release?.(); } catch (_) {}
     }
+  }
+
+  function mesclarProdutoComEvento(produto, evento) {
+    if (!produto && !evento) return null;
+    if (!produto) return ensureIntegrationKey({ ...evento });
+    if (!evento) return ensureIntegrationKey({ ...produto });
+
+    const merged = { ...produto };
+
+    // preserva identificadores do evento quando presentes
+    if (evento.codigo_produto) merged.codigo_produto = evento.codigo_produto;
+    if (evento.codigo) merged.codigo = evento.codigo;
+
+    // campos críticos que chegam no webhook e não podem ser "revertidos"
+    if (typeof evento.descricao === 'string' && evento.descricao.trim()) {
+      merged.descricao = evento.descricao;
+    }
+    if (typeof evento.descr_detalhada === 'string' && evento.descr_detalhada.trim()) {
+      merged.descr_detalhada = evento.descr_detalhada;
+    }
+    if (typeof evento.obs_internas === 'string' && evento.obs_internas.trim()) {
+      merged.obs_internas = evento.obs_internas;
+    }
+
+    return ensureIntegrationKey(merged);
   }
 
   // A) webhook “clássico”
@@ -465,6 +481,10 @@ async function processWebhookInBackground(app, body, messageId) {
     });
     
     try {
+      // 1) aplica imediatamente o payload do evento para não perder alterações recentes
+      await upsertNoBanco(ev, 'omie_connect_event');
+
+      // 2) tenta enriquecer com ConsultarProduto, sem sobrescrever campos críticos do evento
       console.log('[webhook/produtos] Consultando produto na API Omie...');
       const produto = await consultarProdutoOmie({
         codigo_produto: ev.codigo_produto,
@@ -480,9 +500,9 @@ async function processWebhookInBackground(app, body, messageId) {
         codigo_produto: produto.codigo_produto,
         codigo: produto.codigo
       });
-      
-      await upsertNoBanco(produto, 'omie_connect');
-      fireAndForgetResyncById(produto?.codigo_produto || produto?.codigo);
+
+      const produtoMesclado = mesclarProdutoComEvento(produto, ev);
+      await upsertNoBanco(produtoMesclado, 'omie_connect_consulta_mesclada');
 
       fetched++;
     } catch (e) {
@@ -572,6 +592,11 @@ router.get('/familias', async (req, res) => {
 // Usa Server-Sent Events (SSE) para enviar atualizações em tempo real
 // ============================================================================
 router.post('/sincronizar-completo', async (req, res) => {
+  return res.status(403).json({
+    ok: false,
+    error: 'Sincronização manual desabilitada: public.produtos_omie é mantida exclusivamente pelo webhook da Omie.'
+  });
+
   // Configura SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
