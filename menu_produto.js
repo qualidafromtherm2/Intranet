@@ -21622,7 +21622,7 @@ function fecharModalCotadoEscolhaItem() {
 }
 
 // Comentário: modal específico do kanban "Cotação"
-async function abrirModalCotacaoKanban(itemId) {
+async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tableSourceArg = '') {
   const modal = document.getElementById('modalCotacaoKanban');
   const modalBody = document.getElementById('modalCotacaoKanbanBody');
   const modalTitulo = document.getElementById('modalCotacaoKanbanTitulo');
@@ -21640,12 +21640,20 @@ async function abrirModalCotacaoKanban(itemId) {
   const currentUser = (document.getElementById('userNameDisplay')?.textContent || '').trim();
 
   try {
+    const grupoRequisicao = decodeURIComponent(String(grupoRequisicaoEncoded || '').trim());
+    const tableSourceRecebido = String(tableSourceArg || '').trim();
     const cacheItens = Array.isArray(window.kanbanMinhasItens) ? window.kanbanMinhasItens : [];
     console.log('[DEBUG Modal Cotação] itemId recebido:', itemId);
     console.log('[DEBUG Modal Cotação] Total de itens no cache:', cacheItens.length);
     console.log('[DEBUG Modal Cotação] IDs no cache:', cacheItens.map(i => i.id).slice(0, 20));
     
     let item = cacheItens.find(i => String(i.id) === String(itemId));
+    if (!item && grupoRequisicao && tableSourceRecebido) {
+      item = cacheItens.find(i =>
+        String(i.grupo_requisicao || '').trim() === grupoRequisicao
+        && String(i.table_source || '').trim() === tableSourceRecebido
+      );
+    }
 
     if (!item) {
       console.log('[DEBUG Modal Cotação] Item não encontrado no cache, buscando na API...');
@@ -21654,22 +21662,64 @@ async function abrirModalCotacaoKanban(itemId) {
       const data = await resp.json();
       const listaCompleta = Array.isArray(data.solicitacoes) ? data.solicitacoes : [];
       item = listaCompleta.find(i => String(i.id) === String(itemId));
+      if (!item && grupoRequisicao && tableSourceRecebido) {
+        item = listaCompleta.find(i =>
+          String(i.grupo_requisicao || '').trim() === grupoRequisicao
+          && String(i.table_source || '').trim() === tableSourceRecebido
+        );
+      }
     } else {
       console.log('[DEBUG Modal Cotação] Item encontrado no cache!');
     }
 
-    if (!item) {
+    const grupoModal = grupoRequisicao || String(item?.grupo_requisicao || '').trim();
+    const tableSourceModal = String(tableSourceRecebido || item?.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+
+    if (!item && !grupoModal) {
       modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Item não encontrado.</div>';
       return;
     }
 
-    window.cotacaoKanbanItem = item;
-    window.cotacaoKanbanItemId = item.id;
+    let itensGrupo = [];
+    let itemReferenciaId = item?.id || null;
+    if (grupoModal) {
+      try {
+        const respGrupo = await fetch(
+          `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoModal)}&table_source=${encodeURIComponent(tableSourceModal)}`,
+          { credentials: 'include' }
+        );
+        if (respGrupo.ok) {
+          const dataGrupo = await respGrupo.json();
+          itensGrupo = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+          itemReferenciaId = dataGrupo.referencia_id || itemReferenciaId;
+        }
+      } catch (erroGrupo) {
+        console.error('[COTACAO KANBAN] Erro ao carregar itens do grupo:', erroGrupo);
+      }
+    }
+
+    const itemExibicao = itensGrupo[0] || item;
+    if (!itemExibicao) {
+      modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Não foi possível carregar os itens do grupo.</div>';
+      return;
+    }
+
+    window.cotacaoKanbanItem = itemExibicao;
+    window.cotacaoKanbanItemId = itemReferenciaId || itemExibicao.id;
+    window.cotacaoKanbanGrupoRequisicao = grupoModal || null;
+    window.cotacaoKanbanTableSource = tableSourceModal;
+    window.cotacaoKanbanItensGrupo = (Array.isArray(itensGrupo) && itensGrupo.length > 0) ? itensGrupo : [itemExibicao];
     window.cotacaoKanbanAnexos = [];
     window.cotacaoKanbanLinks = [];
     window.cotacaoKanbanCotacoes = [];
+    window.cotacaoKanbanItensSelecionados = [];
+    window.cotacaoKanbanItensUsados = new Set();
+    window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
+    window.cotacaoKanbanMoeda = 'BRL';
 
-    modalTitulo.textContent = `Cotação - Item ${item.id}`;
+    modalTitulo.textContent = grupoModal
+      ? `Cotação - Grupo ${grupoModal}`
+      : `Cotação - Item ${itemExibicao.id}`;
 
     const fmtDate = (iso) => {
       if (!iso) return '-';
@@ -21700,13 +21750,37 @@ async function abrirModalCotacaoKanban(itemId) {
       }
     };
 
-    console.log('[DEBUG Modal Cotação] Item completo:', item);
-    console.log('[DEBUG Modal Cotação] Todas as propriedades do item:', Object.keys(item));
-    console.log('[DEBUG Modal Cotação] item.link:', item.link);
-    console.log('[DEBUG Modal Cotação] item.links:', item.links);
-    console.log('[DEBUG Modal Cotação] item.isSemCadastro:', item.isSemCadastro);
+    const normalizarAnexosCotacao = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (err) {
+          return [raw];
+        }
+      }
+      return [];
+    };
+
+    console.log('[DEBUG Modal Cotação] Item completo:', itemExibicao);
+    console.log('[DEBUG Modal Cotação] Todas as propriedades do item:', Object.keys(itemExibicao));
+    console.log('[DEBUG Modal Cotação] item.link:', itemExibicao.link);
+    console.log('[DEBUG Modal Cotação] item.links:', itemExibicao.links);
+    console.log('[DEBUG Modal Cotação] item.isSemCadastro:', itemExibicao.isSemCadastro);
     
-    const linksCotacao = normalizarLinksCotacao(item.link || item.links);
+    const origemParaAgregacao = (Array.isArray(itensGrupo) && itensGrupo.length > 0)
+      ? itensGrupo
+      : [itemExibicao];
+
+    const linksCotacao = Array.from(new Set(
+      origemParaAgregacao.flatMap((grupoItem) =>
+        normalizarLinksCotacao(grupoItem?.link || grupoItem?.links)
+          .map((link) => String(link || '').trim())
+          .filter(Boolean)
+      )
+    ));
     console.log('[DEBUG Modal Cotação] linksCotacao normalizado:', linksCotacao);
     
     const linksCotacaoHtml = linksCotacao.length
@@ -21717,15 +21791,20 @@ async function abrirModalCotacaoKanban(itemId) {
         }).join(' • ')
       : '-';
 
-    let anexosItem = item.anexos;
-    if (typeof anexosItem === 'string') {
-      try {
-        anexosItem = JSON.parse(anexosItem);
-      } catch (err) {
-        anexosItem = [];
-      }
-    }
-    if (!Array.isArray(anexosItem)) anexosItem = [];
+    const anexosVistos = new Set();
+    const anexosItem = [];
+    origemParaAgregacao.forEach((grupoItem) => {
+      const anexosNormalizados = normalizarAnexosCotacao(grupoItem?.anexos);
+      anexosNormalizados.forEach((anexo, idx) => {
+        const anexoRaw = typeof anexo === 'string' ? anexo : '';
+        const url = anexoRaw || anexo?.url || anexo?.path || '';
+        const nome = anexo?.nome || '';
+        const chave = `${nome}::${url}::${idx}`;
+        if (anexosVistos.has(chave)) return;
+        anexosVistos.add(chave);
+        anexosItem.push(anexo);
+      });
+    });
 
     const anexosItemHtml = anexosItem.length > 0
       ? `
@@ -21768,6 +21847,24 @@ async function abrirModalCotacaoKanban(itemId) {
         </div>
       `;
 
+    const itensGrupoHtml = (Array.isArray(window.cotacaoKanbanItensGrupo) && window.cotacaoKanbanItensGrupo.length > 0)
+      ? `
+        <div style="margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="font-size:11px;color:#6b7280;"><strong>Itens do Grupo:</strong></div>
+            <button
+              type="button"
+              id="btnFiltroItensGrupoCotacaoKanban"
+              onclick="alternarFiltroItensGrupoCotacaoKanban()"
+              style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+              Mostrar pendentes
+            </button>
+          </div>
+          <div id="listaItensGrupoCotacaoKanban" style="margin-top:6px;display:grid;gap:4px;max-height:160px;overflow-y:auto;"></div>
+        </div>
+      `
+      : '';
+
     const html = `
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
         <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
@@ -21775,12 +21872,12 @@ async function abrirModalCotacaoKanban(itemId) {
           Detalhes do Item
         </h4>
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
-          <div><strong>ID:</strong> ${item.id}</div>
-          <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
-          <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
-          <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
+          <div><strong>ID de referência:</strong> ${escapeHtml(String(window.cotacaoKanbanItemId || '-'))}</div>
+          <div><strong>Grupo:</strong> ${escapeHtml(grupoModal || '-')}</div>
+          <div><strong>Objetivo da Compra:</strong> ${linkifyText(itemExibicao.objetivo_compra || '-')}</div>
           <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
           ${anexosItemHtml}
+          ${itensGrupoHtml}
         </div>
       </div>
 
@@ -21799,7 +21896,16 @@ async function abrirModalCotacaoKanban(itemId) {
           />
         </div>
         <div style="margin-bottom:12px;">
-          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Valor Unitário (R$) *</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">
+            <span>Valor Unitário *</span>
+            <button
+              type="button"
+              id="btnMoedaCotacaoKanban"
+              onclick="alternarMoedaCotacaoKanban()"
+              style="background:#f3f4f6;color:#111827;border:1px solid #d1d5db;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;cursor:pointer;">
+              R$
+            </button>
+          </label>
           <input 
             type="number" 
             id="cotacaoKanbanValor"
@@ -21808,6 +21914,17 @@ async function abrirModalCotacaoKanban(itemId) {
             min="0"
             style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
           />
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Itens nesta cotação *</label>
+          <div
+            id="areaDropItensCotacaoKanban"
+            ondragover="dragOverItemCotacaoKanban(event)"
+            ondrop="dropItemCotacaoKanban(event)"
+            style="min-height:56px;border:2px dashed #d1d5db;border-radius:8px;background:#ffffff;padding:10px;display:grid;gap:6px;align-content:start;">
+            <div style="font-size:12px;color:#9ca3af;">Arraste itens do grupo para registrar nesta cotação</div>
+          </div>
+          <div id="listaItensSelecionadosCotacaoKanban" style="margin-top:8px;display:grid;gap:6px;"></div>
         </div>
         <div style="margin-bottom:16px;">
           <label style="display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;">Anexos (opcional)</label>
@@ -21858,6 +21975,8 @@ async function abrirModalCotacaoKanban(itemId) {
     `;
 
     modalBody.innerHTML = html;
+    renderizarItensGrupoCotacaoKanban();
+    renderizarItensSelecionadosCotacaoKanban();
     await carregarCotacoesKanban();
   } catch (err) {
     console.error('[COTACAO KANBAN] Erro:', err);
@@ -21870,9 +21989,16 @@ function fecharModalCotacaoKanban() {
   if (modal) modal.style.display = 'none';
   window.cotacaoKanbanItem = null;
   window.cotacaoKanbanItemId = null;
+  window.cotacaoKanbanGrupoRequisicao = null;
+  window.cotacaoKanbanTableSource = null;
+  window.cotacaoKanbanItensGrupo = [];
   window.cotacaoKanbanAnexos = [];
   window.cotacaoKanbanLinks = [];
   window.cotacaoKanbanCotacoes = [];
+  window.cotacaoKanbanItensSelecionados = [];
+  window.cotacaoKanbanItensUsados = new Set();
+  window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
+  window.cotacaoKanbanMoeda = 'BRL';
 }
 
 window.adicionarAnexoCotacaoKanban = function() {
@@ -22007,6 +22133,131 @@ window.removerLinkCotacaoKanban = function(index) {
   renderizarListaLinksCotacaoKanban();
 };
 
+function renderizarItensGrupoCotacaoKanban() {
+  const lista = document.getElementById('listaItensGrupoCotacaoKanban');
+  const btnFiltro = document.getElementById('btnFiltroItensGrupoCotacaoKanban');
+  if (!lista) return;
+
+  const todosItens = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
+  const usados = window.cotacaoKanbanItensUsados instanceof Set ? window.cotacaoKanbanItensUsados : new Set();
+  const modoFiltro = window.cotacaoKanbanFiltroItensGrupo === 'todos' ? 'todos' : 'pendentes';
+
+  if (btnFiltro) {
+    btnFiltro.textContent = modoFiltro === 'todos' ? 'Mostrar todos' : 'Mostrar pendentes';
+    btnFiltro.style.background = modoFiltro === 'todos' ? '#ede9fe' : '#f3f4f6';
+    btnFiltro.style.borderColor = modoFiltro === 'todos' ? '#c4b5fd' : '#d1d5db';
+    btnFiltro.style.color = modoFiltro === 'todos' ? '#5b21b6' : '#374151';
+  }
+
+  const itensFiltrados = modoFiltro === 'todos'
+    ? todosItens
+    : todosItens.filter(item => !usados.has(Number(item?.id)));
+
+  if (itensFiltrados.length === 0) {
+    lista.innerHTML = '<div style="font-size:12px;color:#9ca3af;text-align:center;padding:10px;border:1px dashed #d1d5db;border-radius:6px;background:#fafafa;">Nenhum item disponível neste filtro</div>';
+    return;
+  }
+
+  lista.innerHTML = itensFiltrados.map((grupoItem) => {
+    const idItem = Number(grupoItem?.id);
+    const jaSelecionado = (window.cotacaoKanbanItensSelecionados || []).some(item => Number(item?.id) === idItem);
+    return `
+      <div
+        draggable="true"
+        ondragstart="iniciarDragItemCotacaoKanban(event, ${Number.isInteger(idItem) ? idItem : 0})"
+        style="font-size:11px;color:#1f2937;background:${jaSelecionado ? '#dcfce7' : '#f8fafc'};border:1px solid ${jaSelecionado ? '#86efac' : '#e5e7eb'};border-radius:4px;padding:6px 8px;display:flex;justify-content:space-between;gap:8px;cursor:grab;">
+        <span style="font-weight:600;">${escapeHtml(grupoItem.produto_codigo || '-')}</span>
+        <span style="flex:1;">${escapeHtml(grupoItem.produto_descricao || '-')}</span>
+        <span style="color:#6b7280;white-space:nowrap;">Qtd: ${escapeHtml(String(grupoItem.quantidade ?? '-'))}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderizarItensSelecionadosCotacaoKanban() {
+  const lista = document.getElementById('listaItensSelecionadosCotacaoKanban');
+  if (!lista) return;
+
+  const itensSelecionados = Array.isArray(window.cotacaoKanbanItensSelecionados) ? window.cotacaoKanbanItensSelecionados : [];
+  if (itensSelecionados.length === 0) {
+    lista.innerHTML = '<div style="font-size:11px;color:#9ca3af;">Nenhum item arrastado ainda.</div>';
+    return;
+  }
+
+  lista.innerHTML = itensSelecionados.map(item => `
+    <div style="display:flex;align-items:center;gap:8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:8px 10px;">
+      <i class="fa-solid fa-box" style="color:#059669;font-size:11px;"></i>
+      <span style="flex:1;font-size:11px;color:#065f46;font-weight:600;">${escapeHtml(item.produto_codigo || '-')} - ${escapeHtml(item.produto_descricao || '-')}</span>
+      <span style="font-size:10px;color:#047857;">Qtd: ${escapeHtml(String(item.quantidade ?? '-'))}</span>
+      <button
+        type="button"
+        onclick="removerItemSelecionadoCotacaoKanban(${Number(item.id)})"
+        style="background:transparent;color:#ef4444;border:none;cursor:pointer;font-size:12px;padding:2px 4px;">
+        <i class="fa-solid fa-times"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+window.alternarFiltroItensGrupoCotacaoKanban = function() {
+  window.cotacaoKanbanFiltroItensGrupo = window.cotacaoKanbanFiltroItensGrupo === 'todos' ? 'pendentes' : 'todos';
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.iniciarDragItemCotacaoKanban = function(event, itemId) {
+  if (!event?.dataTransfer) return;
+  event.dataTransfer.setData('text/plain', String(itemId));
+  event.dataTransfer.effectAllowed = 'copy';
+};
+
+window.dragOverItemCotacaoKanban = function(event) {
+  event.preventDefault();
+  if (event?.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+};
+
+window.dropItemCotacaoKanban = function(event) {
+  event.preventDefault();
+  const itemId = Number(event?.dataTransfer?.getData('text/plain') || 0);
+  if (!Number.isInteger(itemId) || itemId <= 0) return;
+
+  const todosItens = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
+  const item = todosItens.find(it => Number(it?.id) === itemId);
+  if (!item) return;
+
+  if (!Array.isArray(window.cotacaoKanbanItensSelecionados)) {
+    window.cotacaoKanbanItensSelecionados = [];
+  }
+
+  const jaSelecionado = window.cotacaoKanbanItensSelecionados.some(it => Number(it?.id) === itemId);
+  if (jaSelecionado) return;
+
+  window.cotacaoKanbanItensSelecionados.push({
+    id: item.id,
+    grupo_requisicao: item.grupo_requisicao || window.cotacaoKanbanGrupoRequisicao || null,
+    produto_codigo: item.produto_codigo || null,
+    produto_descricao: item.produto_descricao || item.descricao || null,
+    quantidade: item.quantidade ?? null,
+    table_source: item.table_source || window.cotacaoKanbanTableSource || 'solicitacao_compras'
+  });
+
+  renderizarItensSelecionadosCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.removerItemSelecionadoCotacaoKanban = function(itemId) {
+  const idNormalizado = Number(itemId);
+  if (!Array.isArray(window.cotacaoKanbanItensSelecionados)) return;
+  window.cotacaoKanbanItensSelecionados = window.cotacaoKanbanItensSelecionados.filter(item => Number(item?.id) !== idNormalizado);
+  renderizarItensSelecionadosCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.alternarMoedaCotacaoKanban = function() {
+  window.cotacaoKanbanMoeda = window.cotacaoKanbanMoeda === 'USD' ? 'BRL' : 'USD';
+  const btnMoeda = document.getElementById('btnMoedaCotacaoKanban');
+  if (btnMoeda) btnMoeda.textContent = window.cotacaoKanbanMoeda === 'USD' ? '$' : 'R$';
+};
+
 async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
@@ -22018,6 +22269,10 @@ async function registrarCotacaoKanban() {
   }
   if (!valor || valor <= 0) {
     alert('Preencha um valor válido');
+    return;
+  }
+  if (!Array.isArray(window.cotacaoKanbanItensSelecionados) || window.cotacaoKanbanItensSelecionados.length === 0) {
+    alert('Arraste pelo menos 1 item do grupo para esta cotação.');
     return;
   }
 
@@ -22042,8 +22297,10 @@ async function registrarCotacaoKanban() {
     }
 
     // Objetivo: Passar table_source para identificar se é de compras_sem_cadastro ou solicitacao_compras
-    const tableSource = window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
+    const tableSource = window.cotacaoKanbanTableSource || window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
     const linksCotacao = Array.isArray(window.cotacaoKanbanLinks) ? window.cotacaoKanbanLinks : [];
+    const itensCotacao = Array.isArray(window.cotacaoKanbanItensSelecionados) ? window.cotacaoKanbanItensSelecionados : [];
+    const moeda = window.cotacaoKanbanMoeda === 'USD' ? 'USD' : 'BRL';
 
     const resp = await fetch('/api/compras/cotacoes', {
       method: 'POST',
@@ -22053,8 +22310,10 @@ async function registrarCotacaoKanban() {
         solicitacao_id: window.cotacaoKanbanItemId,
         fornecedor_nome: fornecedor,
         valor_cotado: valor,
+        moeda,
         link: linksCotacao,
         anexos: anexosArray,
+        itens_cotacao: itensCotacao,
         table_source: tableSource
       })
     });
@@ -22070,8 +22329,13 @@ async function registrarCotacaoKanban() {
     if (inputLink) inputLink.value = '';
     window.cotacaoKanbanAnexos = [];
     window.cotacaoKanbanLinks = [];
+    window.cotacaoKanbanItensSelecionados = [];
+    window.cotacaoKanbanMoeda = 'BRL';
+    const btnMoeda = document.getElementById('btnMoedaCotacaoKanban');
+    if (btnMoeda) btnMoeda.textContent = 'R$';
     renderizarListaAnexosCotacaoKanban();
     renderizarListaLinksCotacaoKanban();
+    renderizarItensSelecionadosCotacaoKanban();
     await carregarCotacoesKanban();
   } catch (err) {
     console.error('[COTACAO KANBAN] Erro ao registrar:', err);
@@ -22087,12 +22351,23 @@ async function carregarCotacoesKanban() {
   try {
     // Comentário: determina table_source a partir do item (compras_sem_cadastro ou solicitacao_compras)
     const item = window.cotacaoKanbanItem || {};
-    const tableSource = item.table_source || 'solicitacao_compras';
+    const tableSource = window.cotacaoKanbanTableSource || item.table_source || 'solicitacao_compras';
     
     const resp = await fetch(`/api/compras/cotacoes/${window.cotacaoKanbanItemId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Erro ao carregar cotações');
     const data = await resp.json();
     window.cotacaoKanbanCotacoes = Array.isArray(data.cotacoes) ? data.cotacoes : [];
+
+    const itensUsados = new Set();
+    window.cotacaoKanbanCotacoes.forEach((cotacao) => {
+      const itens = Array.isArray(cotacao?.itens_cotacao) ? cotacao.itens_cotacao : [];
+      itens.forEach((item) => {
+        const idItem = Number(item?.item_origem_id || item?.id);
+        if (Number.isInteger(idItem)) itensUsados.add(idItem);
+      });
+    });
+    window.cotacaoKanbanItensUsados = itensUsados;
+    renderizarItensGrupoCotacaoKanban();
 
     if (window.cotacaoKanbanCotacoes.length === 0) {
       container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
@@ -22174,7 +22449,21 @@ async function carregarCotacoesKanban() {
               <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(cotacao.fornecedor_nome || '-')}</span>
             </div>
             <div style="font-size:11px;color:#6b7280;">
-              <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || 0).toFixed(2)}
+              <strong>Valor:</strong> ${String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? '$' : 'R$'} ${Number(cotacao.valor_cotado || 0).toFixed(2)}
+            </div>
+            <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+              <strong>Itens da cotação:</strong>
+              <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:3px;">
+                ${(Array.isArray(cotacao.itens_cotacao) && cotacao.itens_cotacao.length > 0)
+                  ? cotacao.itens_cotacao.map((itemCotado) => {
+                      const codigo = itemCotado?.produto_codigo || '-';
+                      const descricao = itemCotado?.produto_descricao || '-';
+                      const qtd = itemCotado?.quantidade ?? '-';
+                      return `<span style="color:#374151;">• ${escapeHtml(String(codigo))} - ${escapeHtml(String(descricao))} (Qtd: ${escapeHtml(String(qtd))})</span>`;
+                    }).join('')
+                  : '<span style="color:#9ca3af;">Sem itens vinculados</span>'
+                }
+              </div>
             </div>
             ${linksHtml}
             ${anexosHtml}
@@ -29807,12 +30096,96 @@ function toggleCompraRealizadaItens(cardKey, event) {
 }
 
 // Objetivo: Alterna exibição dos itens no kanban de Solicitação de Compra (grupos de requisição)
-function toggleSolicitacaoCompraItens(cardKey, event) {
+async function toggleSolicitacaoCompraItens(cardKey, event) {
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const container = document.getElementById(`solicitacao-itens-${cardKey}`);
   if (!container) return;
   const btn = event?.currentTarget;
   const fechado = container.style.display === 'none' || container.style.display === '';
+
+  const statusContainer = String(container.getAttribute('data-status') || '').trim().toLowerCase();
+  const grupoRequisicao = String(container.getAttribute('data-grupo-requisicao') || '').trim();
+  const tableSource = String(container.getAttribute('data-table-source') || '').trim();
+  const precisaCarregarGrupoCotacao = statusContainer === 'aguardando cotação'
+    && fechado
+    && container.getAttribute('data-loaded') !== '1'
+    && grupoRequisicao
+    && tableSource;
+
+  if (precisaCarregarGrupoCotacao) {
+    container.innerHTML = '<div style="text-align:center;padding:10px;color:#6b7280;font-size:12px;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando itens do grupo...</div>';
+    try {
+      const respGrupo = await fetch(
+        `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoRequisicao)}&table_source=${encodeURIComponent(tableSource)}`,
+        { credentials: 'include' }
+      );
+
+      if (!respGrupo.ok) {
+        throw new Error('Falha ao carregar itens do grupo');
+      }
+
+      const dataGrupo = await respGrupo.json();
+      const itensGrupo = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+
+      if (!itensGrupo.length) {
+        container.innerHTML = '<div style="text-align:center;padding:10px;color:#9ca3af;font-size:12px;">Nenhum item encontrado no grupo</div>';
+      } else {
+        container.innerHTML = itensGrupo.map((item, itemIdx) => {
+          const codigo = item.produto_codigo || '-';
+          const desc = item.produto_descricao || item.descricao || '-';
+          const tooltipId = `tooltip-aguardando-cotacao-${cardKey}-${itemIdx}`;
+          return `
+            <div style="margin-bottom:4px;padding-bottom:4px;${itensGrupo.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+              <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+              <div>
+                <div
+                  class="desc-truncada"
+                  data-tooltip-id="${tooltipId}"
+                  style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                  onmouseover="
+                    event.stopPropagation();
+                    const tooltipId = this.getAttribute('data-tooltip-id');
+                    let tooltip = document.getElementById(tooltipId);
+                    if (!tooltip) {
+                      tooltip = document.createElement('div');
+                      tooltip.id = tooltipId;
+                      tooltip.className = 'tooltip-descricao';
+                      tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                      tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                      document.body.appendChild(tooltip);
+                    }
+                    tooltip.style.display='block';
+                    tooltip.style.visibility='hidden';
+                    setTimeout(() => {
+                      const rect = this.getBoundingClientRect();
+                      const tooltipHeight = tooltip.offsetHeight;
+                      tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                      tooltip.style.left = rect.left + 'px';
+                      tooltip.style.visibility='visible';
+                    }, 0);
+                  "
+                  onmouseout="
+                    event.stopPropagation();
+                    const tooltipId = this.getAttribute('data-tooltip-id');
+                    const tooltip = document.getElementById(tooltipId);
+                    if (tooltip) tooltip.style.display='none';
+                  "
+                  onclick="event.stopPropagation();">
+                  ${escapeHtml(desc)}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      container.setAttribute('data-loaded', '1');
+    } catch (err) {
+      console.error('[KANBAN] Falha ao carregar itens do grupo de cotação:', err);
+      container.innerHTML = '<div style="text-align:center;padding:10px;color:#ef4444;font-size:12px;">Erro ao carregar itens do grupo</div>';
+    }
+  }
+
   container.style.display = fechado ? 'block' : 'none';
   if (btn) {
     btn.innerHTML = fechado
@@ -29866,55 +30239,328 @@ function filtrarTodosKanbans(textoFiltro) {
   });
   
   // Aplica o mesmo filtro à lista (sempre, independente de qual view está visível)
+  aplicarFiltrosModoLista(textoNormalizado);
+}
+
+function obterSetFiltroStatusLista() {
+  if (!(window.__listaStatusFiltroSet instanceof Set)) {
+    window.__listaStatusFiltroSet = new Set();
+  }
+  return window.__listaStatusFiltroSet;
+}
+
+function obterSetFiltroSolicitanteLista() {
+  if (!(window.__listaSolicitanteFiltroSet instanceof Set)) {
+    window.__listaSolicitanteFiltroSet = new Set();
+  }
+  return window.__listaSolicitanteFiltroSet;
+}
+
+function aplicarFiltrosModoLista(textoNormalizado = '') {
   const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
-  if (corpoTabela) {
-    // :scope > tr = apenas filhos diretos do tbody, NÃO as linhas dentro das tabelas de produtos aninhadas
-    const linhas = Array.from(corpoTabela.querySelectorAll(':scope > tr'));
-    
-    for (let i = 0; i < linhas.length; i++) {
-      const tr = linhas[i];
-      if (!tr) continue;
-      
-      // Pula linhas auxiliares; elas são tratadas junto com a linha principal.
-      if (tr.id && (tr.id.startsWith('lista-produtos-') || tr.id.startsWith('lista-fluxo-'))) continue;
+  if (!corpoTabela) return;
 
-      const rowId = tr.getAttribute('data-row-id');
-      const linhaFluxo = rowId ? document.getElementById(`lista-fluxo-${rowId}`) : null;
-      const linhaProdutos = rowId ? document.getElementById(`lista-produtos-${rowId}`) : null;
-      const linhaProdutosConteudo = rowId ? document.getElementById(`lista-produtos-conteudo-${rowId}`) : null;
+  const filtroTexto = String(textoNormalizado || '').toLowerCase().trim();
+  const statusSelecionados = obterSetFiltroStatusLista();
+  const solicitantesSelecionados = obterSetFiltroSolicitanteLista();
 
-      if (textoNormalizado.length < 3) {
-        tr.style.display = '';
-        if (linhaFluxo) linhaFluxo.style.display = 'table-row';
-        if (linhaProdutos) {
-          const ocultoPeloUsuario = linhaProdutos.getAttribute('data-user-hidden') === '1';
-          linhaProdutos.style.display = 'table-row';
-          if (linhaProdutosConteudo) {
-            linhaProdutosConteudo.style.display = ocultoPeloUsuario ? 'none' : 'block';
-          }
-        }
+  const linhas = Array.from(corpoTabela.querySelectorAll(':scope > tr'));
+  for (let i = 0; i < linhas.length; i++) {
+    const tr = linhas[i];
+    if (!tr) continue;
+    if (tr.id && (tr.id.startsWith('lista-produtos-') || tr.id.startsWith('lista-fluxo-'))) continue;
+
+    const rowId = tr.getAttribute('data-row-id');
+    const linhaFluxo = rowId ? document.getElementById(`lista-fluxo-${rowId}`) : null;
+    const linhaProdutos = rowId ? document.getElementById(`lista-produtos-${rowId}`) : null;
+    const linhaProdutosConteudo = rowId ? document.getElementById(`lista-produtos-conteudo-${rowId}`) : null;
+
+    const statusLinha = String(tr.getAttribute('data-status-filter') || '').trim();
+    const passaStatus = statusSelecionados.size === 0 || statusSelecionados.has(statusLinha);
+    const solicitanteLinha = String(tr.getAttribute('data-solicitante-filter') || '').trim();
+    const passaSolicitante = solicitantesSelecionados.size === 0 || solicitantesSelecionados.has(solicitanteLinha);
+
+    const passaTexto = filtroTexto.length < 3
+      ? true
+      : (tr.getAttribute('data-search') || tr.textContent.toLowerCase().replace(/\s+/g, ' ').trim()).includes(filtroTexto);
+
+    const visivel = passaStatus && passaSolicitante && passaTexto;
+
+    tr.style.display = visivel ? '' : 'none';
+    if (linhaFluxo) linhaFluxo.style.display = visivel ? 'table-row' : 'none';
+
+    if (linhaProdutos) {
+      if (!visivel) {
+        linhaProdutos.style.display = 'none';
       } else {
-        // Usa data-search (inclui descrições de produtos) se disponível; fallback para textContent
-        const textoLinha = (tr.getAttribute('data-search') || tr.textContent.toLowerCase().replace(/\s+/g, ' ').trim());
-        const visivel = textoLinha.includes(textoNormalizado);
-        tr.style.display = visivel ? '' : 'none';
-
-        if (linhaFluxo) linhaFluxo.style.display = visivel ? 'table-row' : 'none';
-
-        if (linhaProdutos) {
-          if (!visivel) {
-            linhaProdutos.style.display = 'none';
-          } else {
-            const ocultoPeloUsuario = linhaProdutos.getAttribute('data-user-hidden') === '1';
-            linhaProdutos.style.display = 'table-row';
-            if (linhaProdutosConteudo) {
-              linhaProdutosConteudo.style.display = ocultoPeloUsuario ? 'none' : 'block';
-            }
-          }
+        const ocultoPeloUsuario = linhaProdutos.getAttribute('data-user-hidden') === '1';
+        linhaProdutos.style.display = 'table-row';
+        if (linhaProdutosConteudo) {
+          linhaProdutosConteudo.style.display = ocultoPeloUsuario ? 'none' : 'block';
         }
       }
     }
   }
+}
+
+function inicializarFiltroStatusColunaLista() {
+  if (window.__listaStatusFiltroInit) return;
+
+  const header = document.getElementById('listaStatusHeaderFiltro');
+  if (!header) return;
+
+  let dropdown = document.getElementById('listaStatusFiltroDropdown');
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'listaStatusFiltroDropdown';
+    dropdown.style.cssText = 'display:none;position:fixed;z-index:12000;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,0.15);padding:10px;min-width:220px;max-height:320px;overflow:auto;';
+    document.body.appendChild(dropdown);
+  }
+
+  if (!document.getElementById('listaStatusFiltroCheckboxCss')) {
+    const style = document.createElement('style');
+    style.id = 'listaStatusFiltroCheckboxCss';
+    style.textContent = `
+      #listaStatusFiltroDropdown .lista-status-checkbox {
+        appearance: auto !important;
+        -webkit-appearance: checkbox !important;
+        width: 14px !important;
+        height: 14px !important;
+        min-width: 14px !important;
+        min-height: 14px !important;
+        margin: 0 !important;
+        transform: none !important;
+        zoom: 1 !important;
+        flex: 0 0 14px !important;
+        accent-color: #2563eb;
+        cursor: pointer;
+      }
+      #listaStatusFiltroDropdown label {
+        line-height: 1.2;
+      }
+      #listaSolicitanteFiltroDropdown .lista-solicitante-checkbox {
+        appearance: auto !important;
+        -webkit-appearance: checkbox !important;
+        width: 14px !important;
+        height: 14px !important;
+        min-width: 14px !important;
+        min-height: 14px !important;
+        margin: 0 !important;
+        transform: none !important;
+        zoom: 1 !important;
+        flex: 0 0 14px !important;
+        accent-color: #2563eb;
+        cursor: pointer;
+      }
+      #listaSolicitanteFiltroDropdown label {
+        line-height: 1.2;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const montarOpcoes = () => {
+    const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
+    const rows = corpoTabela ? Array.from(corpoTabela.querySelectorAll(':scope > tr[data-row-id]')) : [];
+    const mapa = new Map();
+    rows.forEach((row) => {
+      const chave = String(row.getAttribute('data-status-filter') || '').trim();
+      const label = String(row.getAttribute('data-status-label') || '').trim();
+      if (!chave || !label) return;
+      if (!mapa.has(chave)) mapa.set(chave, label);
+    });
+
+    const opcoes = Array.from(mapa.entries()).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR', { sensitivity: 'base' }));
+    const setSelecionados = obterSetFiltroStatusLista();
+    const todasMarcadas = setSelecionados.size === 0;
+
+    dropdown.innerHTML = `
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;">Filtrar por Status</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button type="button" id="listaStatusFiltroMarcarToggle" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;border-radius:6px;font-size:11px;cursor:pointer;">Marcar todos</button>
+        <button type="button" id="listaStatusFiltroAplicar" style="flex:1;padding:6px 8px;border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:6px;font-size:11px;cursor:pointer;">Aplicar</button>
+      </div>
+      <div id="listaStatusFiltroOpcoes" style="display:grid;gap:6px;">
+        ${opcoes.map(([valor, label]) => {
+          const checked = todasMarcadas || setSelecionados.has(valor) ? 'checked' : '';
+          return `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;"><input type="checkbox" class="lista-status-checkbox" value="${escapeHtml(valor)}" ${checked}>${escapeHtml(label)}</label>`;
+        }).join('') || '<div style="font-size:12px;color:#9ca3af;">Sem status disponível</div>'}
+      </div>
+    `;
+
+    const checks = Array.from(dropdown.querySelectorAll('.lista-status-checkbox'));
+    const btnMarcarToggle = dropdown.querySelector('#listaStatusFiltroMarcarToggle');
+
+    const atualizarTextoBotaoMarcar = () => {
+      if (!btnMarcarToggle) return;
+      const todosMarcados = checks.length > 0 && checks.every(c => c.checked);
+      btnMarcarToggle.textContent = todosMarcados ? 'Desmarcar todos' : 'Marcar todos';
+    };
+
+    checks.forEach((checkbox) => {
+      checkbox.addEventListener('change', atualizarTextoBotaoMarcar);
+    });
+
+    btnMarcarToggle?.addEventListener('click', () => {
+      const todosMarcados = checks.length > 0 && checks.every(c => c.checked);
+      checks.forEach((checkbox) => {
+        checkbox.checked = !todosMarcados;
+      });
+      atualizarTextoBotaoMarcar();
+    });
+
+    atualizarTextoBotaoMarcar();
+
+    dropdown.querySelector('#listaStatusFiltroAplicar')?.addEventListener('click', () => {
+      const selecionados = checks.filter(c => c.checked).map(c => String(c.value || '').trim()).filter(Boolean);
+      const totalOpcoes = checks.length;
+
+      setSelecionados.clear();
+      if (selecionados.length > 0 && selecionados.length < totalOpcoes) {
+        selecionados.forEach(s => setSelecionados.add(s));
+      }
+
+      dropdown.style.display = 'none';
+      filtrarTodosKanbans(document.getElementById('kanbanFiltroGlobal')?.value || '');
+      atualizarIndicadorFiltroStatusLista();
+    });
+  };
+
+  header.addEventListener('click', (event) => {
+    event.stopPropagation();
+    montarOpcoes();
+    const dropdownSolicitanteAberto = document.getElementById('listaSolicitanteFiltroDropdown');
+    if (dropdownSolicitanteAberto) dropdownSolicitanteAberto.style.display = 'none';
+    const rect = header.getBoundingClientRect();
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.top = `${rect.bottom + 6}px`;
+    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+  });
+
+  document.addEventListener('click', (event) => {
+    if (dropdown.style.display === 'none') return;
+    if (dropdown.contains(event.target) || header.contains(event.target)) return;
+    dropdown.style.display = 'none';
+  });
+
+  window.__listaStatusFiltroInit = true;
+  atualizarIndicadorFiltroStatusLista();
+}
+
+function inicializarFiltroSolicitanteColunaLista() {
+  if (window.__listaSolicitanteFiltroInit) return;
+
+  const header = document.getElementById('listaSolicitanteHeaderFiltro');
+  if (!header) return;
+
+  let dropdown = document.getElementById('listaSolicitanteFiltroDropdown');
+  if (!dropdown) {
+    dropdown = document.createElement('div');
+    dropdown.id = 'listaSolicitanteFiltroDropdown';
+    dropdown.style.cssText = 'display:none;position:fixed;z-index:12000;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,0.15);padding:10px;min-width:220px;max-height:320px;overflow:auto;';
+    document.body.appendChild(dropdown);
+  }
+
+  const montarOpcoes = () => {
+    const corpoTabela = document.getElementById('listaMinhasSolicitacoesCorpo');
+    const rows = corpoTabela ? Array.from(corpoTabela.querySelectorAll(':scope > tr[data-row-id]')) : [];
+    const mapa = new Map();
+    rows.forEach((row) => {
+      const chave = String(row.getAttribute('data-solicitante-filter') || '').trim();
+      const label = String(row.getAttribute('data-solicitante-label') || '').trim();
+      if (!chave || !label || label === '-') return;
+      if (!mapa.has(chave)) mapa.set(chave, label);
+    });
+
+    const opcoes = Array.from(mapa.entries()).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR', { sensitivity: 'base' }));
+    const setSelecionados = obterSetFiltroSolicitanteLista();
+    const todasMarcadas = setSelecionados.size === 0;
+
+    dropdown.innerHTML = `
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;">Filtrar por Solicitante</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button type="button" id="listaSolicitanteFiltroMarcarToggle" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;background:#f9fafb;border-radius:6px;font-size:11px;cursor:pointer;">Marcar todos</button>
+        <button type="button" id="listaSolicitanteFiltroAplicar" style="flex:1;padding:6px 8px;border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:6px;font-size:11px;cursor:pointer;">Aplicar</button>
+      </div>
+      <div id="listaSolicitanteFiltroOpcoes" style="display:grid;gap:6px;">
+        ${opcoes.map(([valor, label]) => {
+          const checked = todasMarcadas || setSelecionados.has(valor) ? 'checked' : '';
+          return `<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#374151;cursor:pointer;"><input type="checkbox" class="lista-solicitante-checkbox" value="${escapeHtml(valor)}" ${checked}>${escapeHtml(label)}</label>`;
+        }).join('') || '<div style="font-size:12px;color:#9ca3af;">Sem solicitante disponível</div>'}
+      </div>
+    `;
+
+    const checks = Array.from(dropdown.querySelectorAll('.lista-solicitante-checkbox'));
+    const btnMarcarToggle = dropdown.querySelector('#listaSolicitanteFiltroMarcarToggle');
+
+    const atualizarTextoBotaoMarcar = () => {
+      if (!btnMarcarToggle) return;
+      const todosMarcados = checks.length > 0 && checks.every(c => c.checked);
+      btnMarcarToggle.textContent = todosMarcados ? 'Desmarcar todos' : 'Marcar todos';
+    };
+
+    checks.forEach((checkbox) => {
+      checkbox.addEventListener('change', atualizarTextoBotaoMarcar);
+    });
+
+    btnMarcarToggle?.addEventListener('click', () => {
+      const todosMarcados = checks.length > 0 && checks.every(c => c.checked);
+      checks.forEach((checkbox) => {
+        checkbox.checked = !todosMarcados;
+      });
+      atualizarTextoBotaoMarcar();
+    });
+
+    atualizarTextoBotaoMarcar();
+
+    dropdown.querySelector('#listaSolicitanteFiltroAplicar')?.addEventListener('click', () => {
+      const selecionados = checks.filter(c => c.checked).map(c => String(c.value || '').trim()).filter(Boolean);
+      const totalOpcoes = checks.length;
+
+      setSelecionados.clear();
+      if (selecionados.length > 0 && selecionados.length < totalOpcoes) {
+        selecionados.forEach(s => setSelecionados.add(s));
+      }
+
+      dropdown.style.display = 'none';
+      filtrarTodosKanbans(document.getElementById('kanbanFiltroGlobal')?.value || '');
+      atualizarIndicadorFiltroSolicitanteLista();
+    });
+  };
+
+  header.addEventListener('click', (event) => {
+    event.stopPropagation();
+    montarOpcoes();
+    const dropdownStatusAberto = document.getElementById('listaStatusFiltroDropdown');
+    if (dropdownStatusAberto) dropdownStatusAberto.style.display = 'none';
+    const rect = header.getBoundingClientRect();
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.top = `${rect.bottom + 6}px`;
+    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+  });
+
+  document.addEventListener('click', (event) => {
+    if (dropdown.style.display === 'none') return;
+    if (dropdown.contains(event.target) || header.contains(event.target)) return;
+    dropdown.style.display = 'none';
+  });
+
+  window.__listaSolicitanteFiltroInit = true;
+  atualizarIndicadorFiltroSolicitanteLista();
+}
+
+function atualizarIndicadorFiltroStatusLista() {
+  const header = document.getElementById('listaStatusHeaderFiltro');
+  if (!header) return;
+  const statusSelecionados = obterSetFiltroStatusLista();
+  header.textContent = statusSelecionados.size > 0 ? `Status (${statusSelecionados.size}) ▾` : 'Status ▾';
+}
+
+function atualizarIndicadorFiltroSolicitanteLista() {
+  const header = document.getElementById('listaSolicitanteHeaderFiltro');
+  if (!header) return;
+  const solicitantesSelecionados = obterSetFiltroSolicitanteLista();
+  header.textContent = solicitantesSelecionados.size > 0 ? `Solicitante (${solicitantesSelecionados.size}) ▾` : 'Solicitante ▾';
 }
 
 // Objetivo: Limpar o filtro global de pesquisa
@@ -29999,6 +30645,8 @@ function mostrarVisualizacaoLista() {
   
   // Renderiza a lista com dados dos kanbans
   renderizarLista();
+  inicializarFiltroStatusColunaLista();
+  inicializarFiltroSolicitanteColunaLista();
   requestAnimationFrame(() => atualizarOffsetCabecalhoListaCompras());
 }
 
@@ -30456,6 +31104,45 @@ function renderizarLista() {
       } catch (err) {
         // Falha silenciosa ao parsear produtos
       }
+
+      const expandirProdutosSemCadastroTabela = (produtos = [], itensOrigem = []) => {
+        const semCadastroNoGrupo = Array.isArray(itensOrigem)
+          && itensOrigem.some(item => String(item?.table_source || '').trim().toLowerCase() === 'compras_sem_cadastro');
+
+        return (Array.isArray(produtos) ? produtos : []).flatMap((prod) => {
+          const tableSourceProd = String(prod?.table_source || '').trim().toLowerCase();
+          const ehSemCadastro = tableSourceProd === 'compras_sem_cadastro' || (semCadastroNoGrupo && !tableSourceProd);
+          if (!ehSemCadastro) return [prod];
+
+          const descricaoBruta = String(prod?.produto_descricao || prod?.descricao || '').trim();
+          const partes = descricaoBruta
+            .split(';')
+            .map(parte => String(parte || '').trim())
+            .filter(Boolean);
+
+          if (!partes.length) return [prod];
+
+          const codigoBase = String(prod?.produto_codigo || prod?.cod_prod || '-').trim() || '-';
+          return partes.map((parte, indice) => {
+            const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
+            const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
+            const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (prod?.n_qtde ?? prod?.qtde ?? '-');
+
+            return {
+              ...prod,
+              produto_codigo: `${codigoBase}.${indice + 1}`,
+              cod_prod: `${codigoBase}.${indice + 1}`,
+              produto_descricao: descricaoItem || '-',
+              descricao: descricaoItem || '-',
+              n_qtde: quantidadeItem,
+              qtde: quantidadeItem
+            };
+          });
+        });
+      };
+
+      produtosLista = expandirProdutosSemCadastroTabela(produtosLista, itensCard);
+
       const produtosHtml = Array.isArray(produtosLista) && produtosLista.length > 0
         ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;">
              <thead>
@@ -30659,6 +31346,10 @@ function renderizarLista() {
       <td style="padding:12px 16px;font-size:12px;color:#059669;font-weight:600;text-align:right;white-space:nowrap;">${valorTotalComAcao}</td>
     `;
     tr.setAttribute('data-row-id', linha.rowId);
+    tr.setAttribute('data-status-filter', statusNormalizadoLinha || '');
+    tr.setAttribute('data-status-label', String(linha.status || '-'));
+    tr.setAttribute('data-solicitante-filter', normalizarTextoFluxoCompras(linha.solicitante || '-'));
+    tr.setAttribute('data-solicitante-label', String(linha.solicitante || '-'));
     
     corpoTabela.appendChild(tr);
 
@@ -30705,8 +31396,14 @@ function renderizarLista() {
     const tr = document.createElement('tr');
     tr.innerHTML = '<td colspan="9" style="padding:32px 16px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td>';
     corpoTabela.appendChild(tr);
+    atualizarIndicadorFiltroStatusLista();
+    atualizarIndicadorFiltroSolicitanteLista();
     return;
   }
+
+  atualizarIndicadorFiltroStatusLista();
+  atualizarIndicadorFiltroSolicitanteLista();
+  aplicarFiltrosModoLista(document.getElementById('kanbanFiltroGlobal')?.value || '');
 
 }
 
@@ -31926,13 +32623,16 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const cardTemBordaVerde = corBorda === '#10b981';
 
           // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
+          const grupoRequisicaoCard = String(primeiroItem.grupo_requisicao || chaveGrupo || '').trim();
+          const grupoRequisicaoCodificado = encodeURIComponent(grupoRequisicaoCard);
+          const tableSourceCard = String(primeiroItem.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
           const onclickCard = (
             status === 'analise de cadastro'
               ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
               : (status === 'cotado aguardando escolha'
                 ? `abrirModalCotadoEscolhaItem('${primeiroItem.id}')`
                 : (status === 'aguardando cotação'
-                  ? `abrirModalCotacaoKanban('${primeiroItem.id}')`
+                  ? `abrirModalCotacaoKanban('${primeiroItem.id}', '${grupoRequisicaoCodificado}', '${tableSourceCard}')`
                   : `abrirModalDetalhesPedidoMinhas('${primeiroItem.numero_pedido}', '${status}', '${todosIds}')`))
           );
           const cursorCard = 'pointer';
@@ -31949,7 +32649,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   n_qtde:            item.quantidade || item.n_qtde || item.qtde || '',
                   n_val_tot:         item.n_val_tot  || item.valor_total || '',
                   c_link_nfe_pdf:    item.c_link_nfe_pdf || '',
-                  c_dados_adicionais_nfe: item.c_dados_adicionais_nfe || ''
+                  c_dados_adicionais_nfe: item.c_dados_adicionais_nfe || '',
+                  table_source:      item.table_source || ''
                 }))
                 .filter(i => i.produto_codigo || i.produto_descricao);
 
@@ -31957,6 +32658,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
+              data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
+              data-table-source="${escapeHtml(tableSourceCard)}"
               data-todos-ids="${todosIds}"
               data-fornecedor="${escapeHtml(primeiroItem.fornecedor_nome || '')}"
               data-solicitante="${escapeHtml(primeiroItem.solicitante || '')}"
@@ -32056,9 +32759,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                             ? escapeHtml(cardTemBordaVerde
                               ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
                               : (primeiroItem.c_cod_int_ped || ''))
-                            : (statusCompactarIdentificador.includes(status)
-                              ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
-                              : escapeHtml(chaveGrupo)))
+                            : (status === 'aguardando cotação'
+                              ? escapeHtml(`ID ${String(primeiroItem.historico_id || primeiroItem.id || '-')}`)
+                              : (statusCompactarIdentificador.includes(status)
+                                ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
+                                : escapeHtml(chaveGrupo))))
                         }
                       </span>
                     `
@@ -32131,8 +32836,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   ${listaProdutos}
                 </div>
               ` : (isSolicitacaoCompra ? `
-                <div id="solicitacao-itens-${cardSolKey}" style="display:none;">
-                  ${listaProdutos}
+                <div
+                  id="solicitacao-itens-${cardSolKey}"
+                  data-status="${escapeHtml(status)}"
+                  data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
+                  data-table-source="${escapeHtml(tableSourceCard)}"
+                  data-loaded="${status === 'aguardando cotação' ? '0' : '1'}"
+                  style="display:none;">
+                  ${status === 'aguardando cotação' ? '' : listaProdutos}
                 </div>
               ` : listaProdutos))))}
             </div>
@@ -36393,6 +37104,162 @@ window.forceUpdateCheck = function() {
   console.log('[UPDATE-CHECK] ✓ Verificação forçada concluída');
   console.log('[UPDATE-CHECK] Dica: Use window.forceUpdateCheck() no console para testar novamente');
 };
+
+// ===== MONITORAMENTO DO AUTO-SYNC OMIE (PÁGINA SINCRONIZAÇÃO) =============
+(function initOmieAutoSyncPainel() {
+  const labels = {
+    produtos_omie: 'Produtos',
+    fornecedores: 'Fornecedores',
+    pedidos_compra: 'Pedidos de Compra',
+    requisicoes_compra: 'Requisições de Compra',
+    recebimentos_nfe: 'Recebimentos NF-e',
+  };
+
+  const fmt = (iso) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString('pt-BR');
+  };
+
+  async function carregarStatusAutoSync() {
+    const resumoEl = document.getElementById('omieAutoSyncResumo');
+    const tarefasEl = document.getElementById('omieAutoSyncExecucaoTabelas');
+    if (!resumoEl || !tarefasEl) return;
+
+    try {
+      const resp = await fetch('/api/omie/autosync/status', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+      const statusCor = data.running
+        ? '#0ea5e9'
+        : String(data.last_status || '').startsWith('error') || data.last_status === 'partial_error'
+          ? '#ef4444'
+          : '#16a34a';
+
+      resumoEl.innerHTML = `
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Status</div>
+          <div style="font-size:16px;font-weight:700;color:${statusCor};">${data.running ? 'Em execução' : (data.last_status || 'Aguardando')}</div>
+        </div>
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Última execução</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;">${fmt(data.last_run_at)}</div>
+        </div>
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Duração</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;">${data.last_duration_ms ? `${Math.round(data.last_duration_ms / 1000)}s` : '-'}</div>
+        </div>
+        <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:#64748b;text-transform:uppercase;">Intervalo</div>
+          <div style="font-size:14px;font-weight:700;color:#0f172a;">${Math.round((data.interval_ms || 0) / 60000)} min</div>
+        </div>
+      `;
+
+      const tasks = Array.isArray(data.last_run_tasks) ? data.last_run_tasks : [];
+      if (!tasks.length) {
+        tarefasEl.innerHTML = '<div style="color:#64748b;font-size:12px;">Sem resultados de execução ainda.</div>';
+      } else {
+        tarefasEl.innerHTML = tasks.map((t) => {
+          const ok = !!t.ok;
+          const cor = ok ? '#16a34a' : '#ef4444';
+          return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+              <div style="font-size:12px;font-weight:700;color:#0f172a;">${labels[t.tabela] || t.tabela}</div>
+              <div style="font-size:12px;color:${cor};font-weight:700;">${ok ? 'OK' : 'Erro'}</div>
+              <div style="font-size:11px;color:#64748b;">${t.duration_ms ? `${Math.round(t.duration_ms / 1000)}s` : '-'}</div>
+              ${!ok && t.error ? `<div style="font-size:11px;color:#b91c1c;margin-top:4px;">${String(t.error).slice(0, 120)}</div>` : ''}
+            </div>
+          `;
+        }).join('');
+      }
+    } catch (err) {
+      resumoEl.innerHTML = `<div style="color:#b91c1c;font-size:12px;">Erro ao carregar status: ${err.message || err}</div>`;
+      tarefasEl.innerHTML = '';
+    }
+  }
+
+  async function carregarHistoricoAutoSync() {
+    const histEl = document.getElementById('omieAutoSyncHistorico');
+    if (!histEl) return;
+
+    try {
+      const resp = await fetch('/api/omie/autosync/history?limit=15', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+      const hist = Array.isArray(data.history) ? data.history : [];
+      if (!hist.length) {
+        histEl.innerHTML = '<div style="color:#64748b;">Sem histórico ainda.</div>';
+        return;
+      }
+
+      histEl.innerHTML = hist.map((h) => {
+        const cor = h.status === 'ok' ? '#16a34a' : (h.status === 'partial_error' ? '#f59e0b' : '#ef4444');
+        const tarefas = Array.isArray(h.tasks) ? h.tasks : [];
+        const resumo = tarefas.map(t => `${labels[t.tabela] || t.tabela}:${t.ok ? 'ok' : 'erro'}`).join(' | ');
+        return `
+          <div style="padding:8px 0;border-bottom:1px solid #e2e8f0;">
+            <div style="font-weight:700;color:#0f172a;">${fmt(h.at)} <span style="color:${cor};font-weight:700;">(${h.status})</span></div>
+            <div style="color:#475569;">Motivo: ${h.reason || '-'}</div>
+            <div style="color:#475569;">Duração: ${h.duration_ms ? `${Math.round(h.duration_ms / 1000)}s` : '-'}</div>
+            <div style="color:#334155;">${resumo || '-'}</div>
+          </div>
+        `;
+      }).join('');
+    } catch (err) {
+      histEl.innerHTML = `<div style="color:#b91c1c;">Erro ao carregar histórico: ${err.message || err}</div>`;
+    }
+  }
+
+  async function executarAutoSyncAgora() {
+    const btn = document.getElementById('btnOmieAutoSyncExecutarAgora');
+    const checked = Array.from(document.querySelectorAll('.agendamento-tabela:checked')).map(cb => cb.value);
+    const tabelas = checked.length ? checked : ['produtos_omie', 'fornecedores', 'pedidos_compra', 'requisicoes_compra', 'recebimentos_nfe'];
+
+    if (!btn) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executando...';
+
+    try {
+      const resp = await fetch('/api/omie/autosync/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motivo: 'manual-ui', tabelas })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      await carregarStatusAutoSync();
+      await carregarHistoricoAutoSync();
+      alert('Sincronização executada com sucesso.');
+    } catch (err) {
+      alert('Erro ao executar sincronização: ' + (err.message || err));
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const btnRun = document.getElementById('btnOmieAutoSyncExecutarAgora');
+    const btnRefresh = document.getElementById('btnOmieAutoSyncAtualizar');
+
+    if (btnRun) btnRun.addEventListener('click', executarAutoSyncAgora);
+    if (btnRefresh) btnRefresh.addEventListener('click', async () => {
+      await carregarStatusAutoSync();
+      await carregarHistoricoAutoSync();
+    });
+
+    carregarStatusAutoSync();
+    carregarHistoricoAutoSync();
+    setInterval(() => {
+      carregarStatusAutoSync();
+    }, 30000);
+  });
+})();
 
 // ===== FIM DO SISTEMA DE DETECÇÃO DE ATUALIZAÇÃO ===========================
 

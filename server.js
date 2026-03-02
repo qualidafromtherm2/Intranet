@@ -2745,6 +2745,24 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       }
       
       const omieData = await response.json();
+
+      // Atualiza também o cadastro do produto na tabela principal
+      try {
+        const upsertObj = { ...omieData };
+        if (!upsertObj.codigo_produto_integracao) {
+          upsertObj.codigo_produto_integracao = upsertObj.codigo || String(upsertObj.codigo_produto || '');
+        }
+
+        const client = await pool.connect();
+        try {
+          await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+          await client.query('SELECT omie_upsert_produto($1::jsonb)', [upsertObj]);
+        } finally {
+          client.release();
+        }
+      } catch (syncErr) {
+        console.error(`[webhooks/omie/produtos] Erro ao atualizar public.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
+      }
       
       // Remove imagens antigas
       await pool.query(
@@ -12386,6 +12404,27 @@ async function ensureComprasSchema() {
       ON compras.cotacoes(status_aprovacao);
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS compras.cotacoes_itens (
+        id SERIAL PRIMARY KEY,
+        cotacao_id INTEGER NOT NULL REFERENCES compras.cotacoes(id) ON DELETE CASCADE,
+        item_origem_id INTEGER NOT NULL,
+        grupo_requisicao TEXT,
+        table_source TEXT NOT NULL DEFAULT 'solicitacao_compras',
+        produto_codigo TEXT,
+        produto_descricao TEXT,
+        quantidade NUMERIC,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (cotacao_id, item_origem_id, table_source)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_cotacoes_itens_cotacao
+      ON compras.cotacoes_itens(cotacao_id);
+
+      CREATE INDEX IF NOT EXISTS idx_cotacoes_itens_origem
+      ON compras.cotacoes_itens(item_origem_id, table_source);
+    `);
+
     // Migration: Remove constraint de foreign key se existir (para aceitar IDs de compras_sem_cadastro também)
     await pool.query(`
       DO $$ 
@@ -12420,6 +12459,22 @@ async function ensureComprasSchema() {
           -- Cria índice para a nova coluna
           CREATE INDEX idx_cotacoes_status_aprovacao 
           ON compras.cotacoes(status_aprovacao);
+        END IF;
+      END $$;
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras'
+          AND table_name = 'cotacoes'
+          AND column_name = 'moeda'
+        ) THEN
+          ALTER TABLE compras.cotacoes
+          ADD COLUMN moeda VARCHAR(3) NOT NULL DEFAULT 'BRL'
+          CHECK (moeda IN ('BRL', 'USD'));
         END IF;
       END $$;
     `);
@@ -14031,142 +14086,23 @@ async function ensurePedidosOmieProdutosNfeVinculo(client) {
   }
 
   await client.query(`
-    ALTER TABLE compras.pedidos_omie
-    ADD COLUMN IF NOT EXISTS "Etapa_NF" VARCHAR(100);
-
-    ALTER TABLE compras.pedidos_omie_produtos
-    ADD COLUMN IF NOT EXISTS c_link_nfe_pdf TEXT;
-
-    ALTER TABLE compras.pedidos_omie_produtos
-    ADD COLUMN IF NOT EXISTS c_dados_adicionais_nfe TEXT;
-
-    CREATE INDEX IF NOT EXISTS idx_pedidos_omie_produtos_link_nfe
-      ON compras.pedidos_omie_produtos(n_cod_ped, n_val_tot);
-  `);
-
-  await client.query(`
-    CREATE OR REPLACE FUNCTION compras.fn_aplicar_vinculo_nfe_por_recebimento(p_n_id_receb BIGINT)
-    RETURNS INTEGER
-    LANGUAGE plpgsql
-    AS $$
-    DECLARE
-      v_rows INTEGER := 0;
-    BEGIN
-      WITH r AS (
-        SELECT
-          rr.n_id_receb,
-          rr.n_id_fornecedor,
-          rr.n_valor_nfe,
-          NULLIF(TRIM(COALESCE(rr.c_etapa::text, '')), '') AS etapa_nf,
-          rr.c_dados_adicionais,
-          NULLIF(
-            COALESCE(
-              (regexp_match(
-                COALESCE(rr.c_dados_adicionais, ''),
-                '(?i)(^|[^a-z0-9])(n[[:space:]]*)?pedido[[:alpha:]]*[^0-9]*([0-9]{2,})'
-              ))[3],
-              ''
-            ),
-            ''
-          ) AS numero_pedido,
-          REPLACE(
-            TO_CHAR(ROUND(rr.n_valor_nfe::numeric, 2), 'FM999999999999990.00'),
-            ',',
-            '.'
-          ) AS valor_fmt
-        FROM logistica.recebimentos_nfe_omie rr
-        WHERE rr.n_id_receb = p_n_id_receb
-          AND rr.n_id_fornecedor IS NOT NULL
-          AND rr.n_valor_nfe IS NOT NULL
-          AND EXISTS (
-            SELECT 1
-            FROM compras.pedidos_omie po2
-            JOIN compras.pedidos_omie_produtos pop2 ON pop2.n_cod_ped = po2.n_cod_ped
-            WHERE po2.n_cod_for IS NOT NULL
-              AND po2.n_cod_for::text = rr.n_id_fornecedor::text
-              AND (po2.inativo IS NULL OR po2.inativo = FALSE)
-              AND pop2.n_val_tot IS NOT NULL
-              AND ABS(pop2.n_val_tot::numeric - rr.n_valor_nfe::numeric) < 0.01
-          )
-      ),
-      alvo AS (
-        SELECT
-          pop.id AS pop_id,
-          pop.n_cod_ped,
-          r.etapa_nf,
-          '/api/compras/pedidos-omie/nfe-pdf-redirect?numero_pedido='
-          || r.numero_pedido
-          || '&valor_total='
-          || r.valor_fmt AS novo_link,
-          r.c_dados_adicionais AS novos_dados
-        FROM r
-        JOIN compras.pedidos_omie po
-          ON TRIM(COALESCE(po.c_numero, '')) = TRIM(r.numero_pedido)
-         AND po.n_cod_for IS NOT NULL
-         AND po.n_cod_for::text = r.n_id_fornecedor::text
-         AND (po.inativo IS NULL OR po.inativo = FALSE)
-        JOIN compras.pedidos_omie_produtos pop
-          ON pop.n_cod_ped = po.n_cod_ped
-         AND pop.n_val_tot IS NOT NULL
-         AND ABS(pop.n_val_tot::numeric - r.n_valor_nfe::numeric) < 0.01
-        WHERE r.numero_pedido IS NOT NULL
-      ),
-      upd_pop AS (
-        UPDATE compras.pedidos_omie_produtos pop
-           SET c_link_nfe_pdf = alvo.novo_link,
-               c_dados_adicionais_nfe = alvo.novos_dados,
-               updated_at = NOW()
-          FROM alvo
-         WHERE pop.id = alvo.pop_id
-           AND (
-             COALESCE(pop.c_link_nfe_pdf, '') IS DISTINCT FROM COALESCE(alvo.novo_link, '')
-             OR COALESCE(pop.c_dados_adicionais_nfe, '') IS DISTINCT FROM COALESCE(alvo.novos_dados, '')
-           )
-        RETURNING pop.id
-      ),
-      upd_pedido AS (
-        UPDATE compras.pedidos_omie po
-           SET "Etapa_NF" = a.etapa_nf,
-               updated_at = NOW()
-          FROM (
-            SELECT DISTINCT n_cod_ped, etapa_nf
-            FROM alvo
-            WHERE etapa_nf IS NOT NULL
-          ) a
-         WHERE po.n_cod_ped = a.n_cod_ped
-           AND COALESCE(TRIM(po."Etapa_NF"), '') IS DISTINCT FROM COALESCE(TRIM(a.etapa_nf), '')
-        RETURNING po.n_cod_ped
-      )
-      SELECT
-        COALESCE((SELECT COUNT(*) FROM upd_pop), 0)
-        + COALESCE((SELECT COUNT(*) FROM upd_pedido), 0)
-      INTO v_rows;
-
-      RETURN v_rows;
-    END;
-    $$;
-
-    CREATE OR REPLACE FUNCTION compras.fn_trg_vincular_recebimento_nfe_produtos()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    AS $$
-    BEGIN
-      PERFORM compras.fn_aplicar_vinculo_nfe_por_recebimento(NEW.n_id_receb);
-      RETURN NEW;
-    END;
-    $$;
-
     DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_produtos
       ON logistica.recebimentos_nfe_omie;
 
     DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_pedido_produto
       ON logistica.recebimentos_nfe_omie;
 
-    CREATE TRIGGER trg_vincular_recebimento_nfe_produtos
-      AFTER INSERT OR UPDATE OF n_id_fornecedor, n_valor_nfe, c_dados_adicionais
-      ON logistica.recebimentos_nfe_omie
-      FOR EACH ROW
-      EXECUTE FUNCTION compras.fn_trg_vincular_recebimento_nfe_produtos();
+    DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_por_pedido
+      ON compras.pedidos_omie;
+
+    DROP TRIGGER IF EXISTS trg_vincular_recebimento_nfe_por_produto_pedido
+      ON compras.pedidos_omie_produtos;
+
+    DROP FUNCTION IF EXISTS compras.fn_trg_vincular_recebimento_nfe_produtos();
+    DROP FUNCTION IF EXISTS compras.fn_trg_vincular_recebimento_nfe_por_pedido();
+    DROP FUNCTION IF EXISTS compras.fn_trg_vincular_recebimento_nfe_por_produto_pedido();
+    DROP FUNCTION IF EXISTS compras.fn_aplicar_vinculo_nfe_por_recebimento(BIGINT);
+    DROP FUNCTION IF EXISTS compras.fn_aplicar_vinculo_nfe_por_pedido(BIGINT);
   `);
 
   _pedidosOmieProdutosNfeVinculoReady = true;
@@ -14176,9 +14112,9 @@ async function ensurePedidosOmieProdutosNfeVinculo(client) {
   try {
     await ensurePedidosOmieProdutosNfeVinculo(pool);
     if (_pedidosOmieProdutosNfeVinculoReady) {
-      console.log('[Compras/NFe] ✓ Vínculo automático de recebimentos -> pedidos_omie_produtos habilitado');
+      console.log('[Compras/NFe] ✓ Automação de vínculo de recebimentos desativada');
     } else {
-      console.log('[Compras/NFe] Vínculo automático pendente (tabelas ainda não disponíveis)');
+      console.log('[Compras/NFe] Desativação de automações pendente (tabelas ainda não disponíveis)');
     }
   } catch (err) {
     console.error('[Compras/NFe] Erro ao preparar vínculo automático de recebimentos:', err.message || err);
@@ -17932,6 +17868,10 @@ app.get('/api/compras/todas', async (req, res) => {
         END
         LIMIT 1
       ) po ON TRUE
+      WHERE TRIM(LOWER(COALESCE(sc.status, ''))) NOT IN (
+        TRIM(LOWER('aguardando cotação')),
+        TRIM(LOWER('aguardando cotacao'))
+      )
       ORDER BY sc.created_at DESC
       LIMIT 1000
     `);
@@ -17974,7 +17914,197 @@ app.get('/api/compras/todas', async (req, res) => {
         updated_at,
         'compras_sem_cadastro' AS table_source
       FROM compras.compras_sem_cadastro
+      WHERE TRIM(LOWER(COALESCE(status, ''))) NOT IN (
+        TRIM(LOWER('aguardando cotação')),
+        TRIM(LOWER('aguardando cotacao'))
+      )
       ORDER BY created_at DESC
+      LIMIT 1000
+    `);
+
+    // Comentário: coluna "aguardando cotação" passa a vir da tabela historico_compras (1 registro por grupo_requisicao)
+    const { rows: solicitacoesHistoricoCotacao } = await pool.query(`
+      WITH origem AS (
+        SELECT
+          'solicitacao_compras'::text AS table_source,
+          sc.id AS origem_id,
+          sc.produto_codigo,
+          sc.produto_descricao,
+          sc.quantidade,
+          po.unidade,
+          sc.prazo_solicitado,
+          sc.previsao_chegada,
+          sc.observacao,
+          sc.observacao_retificacao,
+          sc.solicitante,
+          sc.resp_inspecao_recebimento,
+          sc.responsavel_pela_compra,
+          sc.departamento,
+          sc.centro_custo,
+          sc.objetivo_compra,
+          sc.fornecedor_nome,
+          sc.fornecedor_id::text AS fornecedor_id,
+          sc.familia_produto,
+          sc.grupo_requisicao,
+          sc.retorno_cotacao,
+          sc.categoria_compra_codigo,
+          sc.categoria_compra_nome,
+          sc.codigo_omie::text AS codigo_omie,
+          sc.codigo_produto_omie::text AS codigo_produto_omie,
+          sc.requisicao_direta,
+          sc.anexos::text AS anexos,
+          NULL::text AS link,
+          sc.cnumero::text AS "cNumero",
+          sc.ncodped::text AS "nCodPed",
+          sc.created_at,
+          sc.updated_at,
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
+        FROM compras.solicitacao_compras sc
+        LEFT JOIN LATERAL (
+          SELECT po.unidade
+          FROM public.produtos_omie po
+          WHERE (
+            po.codigo_produto::TEXT = COALESCE(
+              NULLIF(sc.codigo_produto_omie::TEXT, ''),
+              NULLIF(sc.codigo_omie::TEXT, '')
+            )
+            OR po.codigo::TEXT = sc.produto_codigo::TEXT
+          )
+          ORDER BY CASE
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_produto_omie::TEXT, '') THEN 1
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_omie::TEXT, '') THEN 2
+            WHEN po.codigo::TEXT = sc.produto_codigo::TEXT THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        ) po ON TRUE
+        WHERE TRIM(COALESCE(sc.grupo_requisicao, '')) <> ''
+
+        UNION ALL
+
+        SELECT
+          'compras_sem_cadastro'::text AS table_source,
+          csc.id AS origem_id,
+          csc.produto_codigo,
+          csc.produto_descricao,
+          csc.quantidade,
+          NULL::text AS unidade,
+          NULL::date AS prazo_solicitado,
+          NULL::date AS previsao_chegada,
+          csc.observacao_recebimento AS observacao,
+          NULL::text AS observacao_retificacao,
+          csc.solicitante,
+          csc.resp_inspecao_recebimento,
+          NULL::text AS responsavel_pela_compra,
+          csc.departamento,
+          csc.centro_custo,
+          csc.objetivo_compra,
+          NULL::text AS fornecedor_nome,
+          NULL::text AS fornecedor_id,
+          NULL::text AS familia_produto,
+          csc.grupo_requisicao,
+          csc.retorno_cotacao,
+          csc.categoria_compra_codigo,
+          csc.categoria_compra_nome,
+          NULL::text AS codigo_omie,
+          NULL::text AS codigo_produto_omie,
+          NULL::boolean AS requisicao_direta,
+          csc.anexos::text AS anexos,
+          csc.link::text AS link,
+          NULL::text AS "cNumero",
+          NULL::text AS "nCodPed",
+          csc.created_at,
+          csc.updated_at,
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
+        FROM compras.compras_sem_cadastro csc
+        WHERE TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
+      ),
+      origem_primeiro_item AS (
+        SELECT DISTINCT ON (o.table_source, o.grupo_key)
+          o.table_source,
+          o.grupo_key,
+          o.origem_id,
+          o.produto_codigo,
+          o.produto_descricao,
+          o.quantidade,
+          o.unidade,
+          o.prazo_solicitado,
+          o.previsao_chegada,
+          o.observacao,
+          o.observacao_retificacao,
+          o.solicitante,
+          o.resp_inspecao_recebimento,
+          o.responsavel_pela_compra,
+          o.departamento,
+          o.centro_custo,
+          o.objetivo_compra,
+          o.fornecedor_nome,
+          o.fornecedor_id,
+          o.familia_produto,
+          o.grupo_requisicao,
+          o.retorno_cotacao,
+          o.categoria_compra_codigo,
+          o.categoria_compra_nome,
+          o.codigo_omie,
+          o.codigo_produto_omie,
+          o.requisicao_direta,
+          o.anexos,
+          o.link,
+          o."cNumero",
+          o."nCodPed",
+          o.created_at,
+          o.updated_at
+        FROM origem o
+        ORDER BY o.table_source, o.grupo_key, o.created_at ASC NULLS FIRST, o.origem_id ASC
+      )
+      SELECT
+        COALESCE(opi.origem_id, hc.id) AS id,
+        NULL::text AS numero_pedido,
+        opi.produto_codigo,
+        opi.produto_descricao,
+        opi.quantidade,
+        opi.unidade,
+        opi.prazo_solicitado,
+        opi.previsao_chegada,
+        hc.status,
+        opi.observacao,
+        opi.observacao_retificacao,
+        opi.solicitante,
+        opi.resp_inspecao_recebimento,
+        opi.responsavel_pela_compra,
+        opi.departamento,
+        opi.centro_custo,
+        opi.objetivo_compra,
+        opi.fornecedor_nome,
+        opi.fornecedor_id,
+        opi.familia_produto,
+        hc.grupo_requisicao,
+        opi.retorno_cotacao,
+        opi.categoria_compra_codigo,
+        opi.categoria_compra_nome,
+        opi.codigo_omie,
+        opi.codigo_produto_omie,
+        opi.requisicao_direta,
+        opi.anexos,
+        opi.link,
+        opi."cNumero",
+        opi."nCodPed",
+        hc.created_at,
+        COALESCE(opi.updated_at, hc.created_at) AS updated_at,
+        hc.tabela_origem AS table_source,
+        hc.id AS historico_id,
+        COALESCE(opi.origem_id, NULL) AS origem_item_id,
+        true AS is_historico_cotacao
+      FROM compras.historico_compras hc
+      LEFT JOIN origem_primeiro_item opi
+        ON opi.table_source = hc.tabela_origem
+       AND opi.grupo_key = LOWER(TRIM(COALESCE(hc.grupo_requisicao, '')))
+      WHERE TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+        AND TRIM(LOWER(COALESCE(hc.status, ''))) IN (
+          TRIM(LOWER('aguardando cotação')),
+          TRIM(LOWER('aguardando cotacao'))
+        )
+      ORDER BY hc.created_at DESC
       LIMIT 1000
     `);
 
@@ -18078,7 +18208,7 @@ app.get('/api/compras/todas', async (req, res) => {
     solicitacoesBase.forEach(aplicarIdSolicitante);
     solicitacoesSemCadastro.forEach(aplicarIdSolicitante);
 
-    const todasSolicitacoes = [...solicitacoesBase, ...solicitacoesSemCadastro]
+    const todasSolicitacoes = [...solicitacoesBase, ...solicitacoesSemCadastro, ...solicitacoesHistoricoCotacao]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
       .slice(0, 1000);
     
@@ -18086,6 +18216,105 @@ app.get('/api/compras/todas', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar todas solicitações:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar solicitações' });
+  }
+});
+
+// GET /api/compras/grupo-itens - Lista itens por grupo_requisicao e tabela de origem
+app.get('/api/compras/grupo-itens', async (req, res) => {
+  try {
+    const grupoRequisicao = String(req.query?.grupo_requisicao || '').trim();
+    const tableSource = String(req.query?.table_source || '').trim();
+
+    if (!grupoRequisicao) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro grupo_requisicao é obrigatório' });
+    }
+
+    if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro table_source inválido' });
+    }
+
+    if (tableSource === 'solicitacao_compras') {
+      const { rows } = await pool.query(`
+        SELECT
+          sc.id,
+          sc.produto_codigo,
+          sc.produto_descricao,
+          sc.quantidade,
+          po.unidade,
+          sc.status,
+          sc.solicitante,
+          sc.grupo_requisicao,
+          sc.objetivo_compra,
+          sc.observacao,
+          sc.anexos,
+          NULL::text AS link,
+          sc.created_at,
+          sc.updated_at,
+          'solicitacao_compras'::text AS table_source
+        FROM compras.solicitacao_compras sc
+        LEFT JOIN LATERAL (
+          SELECT po.unidade
+          FROM public.produtos_omie po
+          WHERE (
+            po.codigo_produto::TEXT = COALESCE(
+              NULLIF(sc.codigo_produto_omie::TEXT, ''),
+              NULLIF(sc.codigo_omie::TEXT, '')
+            )
+            OR po.codigo::TEXT = sc.produto_codigo::TEXT
+          )
+          ORDER BY CASE
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_produto_omie::TEXT, '') THEN 1
+            WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_omie::TEXT, '') THEN 2
+            WHEN po.codigo::TEXT = sc.produto_codigo::TEXT THEN 3
+            ELSE 4
+          END
+          LIMIT 1
+        ) po ON TRUE
+        WHERE LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) = LOWER(TRIM($1))
+        ORDER BY sc.created_at ASC NULLS FIRST, sc.id ASC
+      `, [grupoRequisicao]);
+
+      return res.json({
+        ok: true,
+        grupo_requisicao: grupoRequisicao,
+        table_source: tableSource,
+        referencia_id: rows[0]?.id || null,
+        itens: rows
+      });
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        csc.id,
+        csc.produto_codigo,
+        csc.produto_descricao,
+        csc.quantidade,
+        NULL::text AS unidade,
+        csc.status,
+        csc.solicitante,
+        csc.grupo_requisicao,
+        csc.objetivo_compra,
+        csc.observacao_recebimento AS observacao,
+        csc.anexos,
+        csc.link,
+        csc.created_at,
+        csc.updated_at,
+        'compras_sem_cadastro'::text AS table_source
+      FROM compras.compras_sem_cadastro csc
+      WHERE LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) = LOWER(TRIM($1))
+      ORDER BY csc.created_at ASC NULLS FIRST, csc.id ASC
+    `, [grupoRequisicao]);
+
+    return res.json({
+      ok: true,
+      grupo_requisicao: grupoRequisicao,
+      table_source: tableSource,
+      referencia_id: rows[0]?.id || null,
+      itens: rows
+    });
+  } catch (err) {
+    console.error('[Compras] Erro ao listar itens do grupo:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao listar itens do grupo' });
   }
 });
 
@@ -19590,7 +19819,7 @@ app.put('/api/compras/item/:id', express.json(), async (req, res) => {
 app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
   try {
     // Objetivo: Aceitar cotações de ambas as tabelas (solicitacao_compras e compras_sem_cadastro)
-    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link, criado_por, table_source } = req.body || {};
+    const { solicitacao_id, fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link, criado_por, table_source, moeda, itens_cotacao } = req.body || {};
         const normalizarLinksCotacao = (valor) => {
           if (Array.isArray(valor)) {
             return valor
@@ -19731,33 +19960,73 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
       }
     }
 
-    const { rows } = await pool.query(`
-      INSERT INTO compras.cotacoes 
-        (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, observacao, link, anexos, criado_por, table_source)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING *
-    `, [
-      solicitacao_id,
-      produtoCodigo,
-      numeroPedido,
-      fornecedor_nome,
-      fornecedor_id || null,
-      valor_cotado || null,
-      observacao || null,
-      linkParaSalvar,
-      anexosUrls ? JSON.stringify(anexosUrls) : null,
-      criado_por || null,
-      table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras'
-    ]);
+    const moedaNormalizada = String(moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+    const tableSourceNormalizado = table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras';
+    const itensCotacaoLista = Array.isArray(itens_cotacao) ? itens_cotacao : [];
+
+    const client = await pool.connect();
+    let cotacaoSalva = null;
+    try {
+      await client.query('BEGIN');
+
+      const { rows } = await client.query(`
+        INSERT INTO compras.cotacoes 
+          (solicitacao_id, produto_codigo, numero_pedido, fornecedor_nome, fornecedor_id, valor_cotado, moeda, observacao, link, anexos, criado_por, table_source)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING *
+      `, [
+        solicitacao_id,
+        produtoCodigo,
+        numeroPedido,
+        fornecedor_nome,
+        fornecedor_id || null,
+        valor_cotado || null,
+        moedaNormalizada,
+        observacao || null,
+        linkParaSalvar,
+        anexosUrls ? JSON.stringify(anexosUrls) : null,
+        criado_por || null,
+        tableSourceNormalizado
+      ]);
+
+      cotacaoSalva = rows[0];
+
+      for (const itemCotacao of itensCotacaoLista) {
+        const itemOrigemId = Number(itemCotacao?.id || itemCotacao?.item_origem_id);
+        if (!Number.isInteger(itemOrigemId)) continue;
+
+        await client.query(`
+          INSERT INTO compras.cotacoes_itens
+            (cotacao_id, item_origem_id, grupo_requisicao, table_source, produto_codigo, produto_descricao, quantidade)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (cotacao_id, item_origem_id, table_source) DO NOTHING
+        `, [
+          cotacaoSalva.id,
+          itemOrigemId,
+          itemCotacao?.grupo_requisicao || null,
+          tableSourceNormalizado,
+          itemCotacao?.produto_codigo || null,
+          itemCotacao?.produto_descricao || null,
+          (itemCotacao?.quantidade ?? null)
+        ]);
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
     
     console.log('[Cotações] Cotação salva:', {
-      id: rows[0].id,
-      fornecedor: rows[0].fornecedor_nome,
-      table_source: rows[0].table_source,
+      id: cotacaoSalva.id,
+      fornecedor: cotacaoSalva.fornecedor_nome,
+      table_source: cotacaoSalva.table_source,
       anexos_count: anexosUrls ? anexosUrls.length : 0
     });
     
-    res.json({ ok: true, cotacao: rows[0] });
+    res.json({ ok: true, cotacao: cotacaoSalva });
   } catch (err) {
     console.error('[Cotações] Erro ao adicionar cotação:', err);
     res.status(500).json({ ok: false, error: 'Erro ao adicionar cotação' });
@@ -19776,10 +20045,27 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
     const table_source = req.query.table_source || 'solicitacao_compras';
     
     const { rows } = await pool.query(`
-      SELECT * FROM compras.cotacoes 
-      WHERE solicitacao_id = $1 
-        AND table_source = $2
-      ORDER BY criado_em DESC
+      SELECT c.*,
+             COALESCE((
+               SELECT jsonb_agg(
+                 jsonb_build_object(
+                   'id', ci.item_origem_id,
+                   'item_origem_id', ci.item_origem_id,
+                   'grupo_requisicao', ci.grupo_requisicao,
+                   'table_source', ci.table_source,
+                   'produto_codigo', ci.produto_codigo,
+                   'produto_descricao', ci.produto_descricao,
+                   'quantidade', ci.quantidade
+                 )
+                 ORDER BY ci.id
+               )
+               FROM compras.cotacoes_itens ci
+               WHERE ci.cotacao_id = c.id
+             ), '[]'::jsonb) AS itens_cotacao
+      FROM compras.cotacoes c
+      WHERE c.solicitacao_id = $1
+        AND c.table_source = $2
+      ORDER BY c.criado_em DESC
     `, [solicitacao_id, table_source]);
     
     res.json({ cotacoes: rows });
@@ -20718,12 +21004,347 @@ app.get('/api/compras/google-sheets/status', async (_req, res) => {
   });
 });
 
+const OMIE_WEBHOOK_AUTOSYNC_ENABLED = (() => {
+  const raw = String(process.env.OMIE_WEBHOOK_AUTOSYNC_ENABLED || '0').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'sim', 'on'].includes(raw);
+})();
+const OMIE_WEBHOOK_AUTOSYNC_RUN_ON_STARTUP = (() => {
+  const raw = String(process.env.OMIE_WEBHOOK_AUTOSYNC_RUN_ON_STARTUP || '0').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'sim', 'on'].includes(raw);
+})();
+const OMIE_WEBHOOK_AUTOSYNC_INTERVAL_MS = (() => {
+  const parsed = Number(process.env.OMIE_WEBHOOK_AUTOSYNC_INTERVAL_MS || 30 * 60 * 1000);
+  if (!Number.isFinite(parsed) || parsed < 60_000) return 30 * 60 * 1000;
+  return parsed;
+})();
+const OMIE_WEBHOOK_AUTOSYNC_PRODUTOS_PAGES_PER_RUN = (() => {
+  const parsed = Number(process.env.OMIE_WEBHOOK_AUTOSYNC_PRODUTOS_PAGES_PER_RUN || 1);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.floor(parsed);
+})();
+
+const OMIE_AUTOSYNC_TABELAS_DISPONIVEIS = [
+  'produtos_omie',
+  'fornecedores',
+  'pedidos_compra',
+  'requisicoes_compra',
+  'recebimentos_nfe',
+];
+
+const omieWebhookAutoSyncState = {
+  running: false,
+  timer: null,
+  lastRunAt: null,
+  lastDurationMs: null,
+  lastStatus: null,
+  lastRunReason: null,
+  lastRunTasks: [],
+  history: [],
+  produtosCursor: {
+    pagina: 1,
+    totalPaginas: 1,
+  },
+};
+
+function normalizarTabelasAutoSync(tabelas) {
+  if (!Array.isArray(tabelas) || tabelas.length === 0) {
+    return [...OMIE_AUTOSYNC_TABELAS_DISPONIVEIS];
+  }
+
+  const normalizadas = tabelas
+    .map(t => String(t || '').trim())
+    .filter(Boolean)
+    .filter(t => OMIE_AUTOSYNC_TABELAS_DISPONIVEIS.includes(t));
+
+  return normalizadas.length > 0 ? Array.from(new Set(normalizadas)) : [...OMIE_AUTOSYNC_TABELAS_DISPONIVEIS];
+}
+
+function obterTarefasAutoSyncOmie(tabelasSelecionadas) {
+  const selecionadas = normalizarTabelasAutoSync(tabelasSelecionadas);
+
+  const mapa = {
+    produtos_omie: {
+      nome: 'produtos_omie',
+      fn: () => syncProdutosOmieIncremental(OMIE_WEBHOOK_AUTOSYNC_PRODUTOS_PAGES_PER_RUN),
+    },
+    fornecedores: {
+      nome: 'fornecedores',
+      fn: () => syncFornecedoresOmie(),
+    },
+    pedidos_compra: {
+      nome: 'pedidos_compra',
+      fn: () => syncPedidosCompraOmie({}),
+    },
+    requisicoes_compra: {
+      nome: 'requisicoes_compra',
+      fn: () => syncRequisicoesCompraOmie({}),
+    },
+    recebimentos_nfe: {
+      nome: 'recebimentos_nfe',
+      fn: () => syncRecebimentosNFeOmie({}),
+    },
+  };
+
+  return selecionadas.map(chave => mapa[chave]).filter(Boolean);
+}
+
+async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return { ok: false, error: 'Credenciais Omie ausentes' };
+  }
+
+  const pagesToRun = Math.max(1, Number(paginasPorExecucao) || 1);
+  let paginaAtual = Math.max(1, Number(omieWebhookAutoSyncState.produtosCursor.pagina) || 1);
+  let totalPaginasConhecidas = Math.max(1, Number(omieWebhookAutoSyncState.produtosCursor.totalPaginas) || 1);
+  let processados = 0;
+  let sucesso = 0;
+  let erros = 0;
+
+  const listarProdutosOmie = async (pagina, tentativa = 1) => {
+    const body = {
+      call: 'ListarProdutos',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        pagina,
+        registros_por_pagina: 100,
+        apenas_importado_api: 'N',
+        filtrar_apenas_omiepdv: 'N'
+      }]
+    };
+
+    const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (response.ok) {
+      return await response.json();
+    }
+
+    const errorText = await response.text();
+    const errorLower = String(errorText || '').toLowerCase();
+    const consumoRedundante = response.status === 500 && errorLower.includes('consumo redundante detectado');
+
+    if (consumoRedundante && tentativa < 3) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return listarProdutosOmie(pagina, tentativa + 1);
+    }
+
+    throw new Error(`ListarProdutos falhou (HTTP ${response.status}): ${errorText}`);
+  };
+
+  for (let rodada = 0; rodada < pagesToRun; rodada++) {
+    let payload;
+    try {
+      payload = await listarProdutosOmie(paginaAtual);
+    } catch (err) {
+      console.error(`[OmieAutoSync][produtos] Erro na página ${paginaAtual}:`, err?.message || err);
+      break;
+    }
+
+    totalPaginasConhecidas = Math.max(1, Number(payload?.total_de_paginas || totalPaginasConhecidas || 1));
+    const produtos = Array.isArray(payload?.produto_servico_cadastro) ? payload.produto_servico_cadastro : [];
+
+    const client = await pool.connect();
+    try {
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_webhook', true)");
+
+      for (const produto of produtos) {
+        processados++;
+        try {
+          const obj = { ...produto };
+          if (!obj.codigo_produto_integracao) {
+            obj.codigo_produto_integracao = obj.codigo || String(obj.codigo_produto || '');
+          }
+          await client.query('SELECT omie_upsert_produto($1::jsonb)', [obj]);
+          sucesso++;
+        } catch (err) {
+          erros++;
+          console.error('[OmieAutoSync][produtos] Erro ao fazer upsert de produto:', err?.message || err);
+        }
+      }
+    } finally {
+      try { client.release(); } catch (_) {}
+    }
+
+    paginaAtual = paginaAtual >= totalPaginasConhecidas ? 1 : paginaAtual + 1;
+  }
+
+  omieWebhookAutoSyncState.produtosCursor.pagina = paginaAtual;
+  omieWebhookAutoSyncState.produtosCursor.totalPaginas = totalPaginasConhecidas;
+
+  console.log(`[OmieAutoSync][produtos] Páginas processadas: ${pagesToRun}, produtos: ${processados}, sucesso: ${sucesso}, erros: ${erros}, próxima página: ${paginaAtual}/${totalPaginasConhecidas}`);
+
+  return { ok: true, processados, sucesso, erros, proxima_pagina: paginaAtual, total_paginas: totalPaginasConhecidas };
+}
+
+async function executarAutoSyncWebhooksOmie(motivo = 'intervalo', tabelasSelecionadas = null) {
+  if (omieWebhookAutoSyncState.running) {
+    console.log(`[OmieAutoSync] Execução ignorada (${motivo}) - sincronização anterior ainda em andamento.`);
+    return { ok: false, error: 'sync_em_andamento' };
+  }
+
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    console.log('[OmieAutoSync] Credenciais Omie ausentes. Auto-sync não executado.');
+    return;
+  }
+
+  const inicio = Date.now();
+  omieWebhookAutoSyncState.running = true;
+  omieWebhookAutoSyncState.lastStatus = 'running';
+  omieWebhookAutoSyncState.lastRunReason = motivo;
+  const tarefasResumo = [];
+
+  try {
+    console.log(`[OmieAutoSync] Iniciando sincronização automática (${motivo})...`);
+
+    const tarefas = obterTarefasAutoSyncOmie(tabelasSelecionadas);
+
+    for (const tarefa of tarefas) {
+      const tarefaInicio = Date.now();
+      try {
+        const resultado = await tarefa.fn();
+        const ok = !!resultado?.ok;
+        tarefasResumo.push({
+          tabela: tarefa.nome,
+          ok,
+          duration_ms: Date.now() - tarefaInicio,
+          details: resultado || null,
+          error: ok ? null : (resultado?.error || 'sem detalhe'),
+        });
+        if (!resultado?.ok) {
+          console.warn(`[OmieAutoSync] ${tarefa.nome} finalizou com aviso: ${resultado?.error || 'sem detalhe'}`);
+        }
+      } catch (err) {
+        tarefasResumo.push({
+          tabela: tarefa.nome,
+          ok: false,
+          duration_ms: Date.now() - tarefaInicio,
+          details: null,
+          error: err?.message || String(err),
+        });
+        console.error(`[OmieAutoSync] Erro em ${tarefa.nome}:`, err?.message || err);
+      }
+    }
+
+    const duracao = Date.now() - inicio;
+    const teveErro = tarefasResumo.some(t => !t.ok);
+    omieWebhookAutoSyncState.lastRunAt = new Date().toISOString();
+    omieWebhookAutoSyncState.lastDurationMs = duracao;
+    omieWebhookAutoSyncState.lastStatus = teveErro ? 'partial_error' : 'ok';
+    omieWebhookAutoSyncState.lastRunTasks = tarefasResumo;
+    omieWebhookAutoSyncState.history.unshift({
+      at: omieWebhookAutoSyncState.lastRunAt,
+      reason: motivo,
+      duration_ms: duracao,
+      status: omieWebhookAutoSyncState.lastStatus,
+      tasks: tarefasResumo,
+    });
+    if (omieWebhookAutoSyncState.history.length > 30) {
+      omieWebhookAutoSyncState.history = omieWebhookAutoSyncState.history.slice(0, 30);
+    }
+    console.log(`[OmieAutoSync] Sincronização automática concluída em ${duracao}ms.`);
+    return {
+      ok: !teveErro,
+      status: omieWebhookAutoSyncState.lastStatus,
+      duration_ms: duracao,
+      tasks: tarefasResumo,
+    };
+  } catch (err) {
+    const duracao = Date.now() - inicio;
+    omieWebhookAutoSyncState.lastRunAt = new Date().toISOString();
+    omieWebhookAutoSyncState.lastDurationMs = duracao;
+    omieWebhookAutoSyncState.lastStatus = `error: ${err?.message || err}`;
+    omieWebhookAutoSyncState.lastRunTasks = tarefasResumo;
+    omieWebhookAutoSyncState.history.unshift({
+      at: omieWebhookAutoSyncState.lastRunAt,
+      reason: motivo,
+      duration_ms: duracao,
+      status: omieWebhookAutoSyncState.lastStatus,
+      tasks: tarefasResumo,
+    });
+    if (omieWebhookAutoSyncState.history.length > 30) {
+      omieWebhookAutoSyncState.history = omieWebhookAutoSyncState.history.slice(0, 30);
+    }
+    console.error('[OmieAutoSync] Falha geral na sincronização automática:', err?.message || err);
+    return { ok: false, error: err?.message || String(err), tasks: tarefasResumo };
+  } finally {
+    omieWebhookAutoSyncState.running = false;
+  }
+}
+
+function iniciarAutoSyncWebhooksOmie() {
+  if (!OMIE_WEBHOOK_AUTOSYNC_ENABLED) {
+    console.log('[OmieAutoSync] Auto-sync desabilitado (defina OMIE_WEBHOOK_AUTOSYNC_ENABLED=1 para habilitar).');
+    return;
+  }
+
+  if (omieWebhookAutoSyncState.timer) {
+    clearInterval(omieWebhookAutoSyncState.timer);
+    omieWebhookAutoSyncState.timer = null;
+  }
+
+  if (OMIE_WEBHOOK_AUTOSYNC_RUN_ON_STARTUP) {
+    setTimeout(() => {
+      executarAutoSyncWebhooksOmie('startup');
+    }, 15000);
+  }
+
+  omieWebhookAutoSyncState.timer = setInterval(() => {
+    executarAutoSyncWebhooksOmie('intervalo');
+  }, OMIE_WEBHOOK_AUTOSYNC_INTERVAL_MS);
+
+  console.log(`[OmieAutoSync] Agendado para cada ${OMIE_WEBHOOK_AUTOSYNC_INTERVAL_MS}ms.`);
+}
+
+app.get('/api/omie/autosync/status', async (_req, res) => {
+  res.json({
+    ok: true,
+    enabled: OMIE_WEBHOOK_AUTOSYNC_ENABLED,
+    interval_ms: OMIE_WEBHOOK_AUTOSYNC_INTERVAL_MS,
+    produtos_pages_per_run: OMIE_WEBHOOK_AUTOSYNC_PRODUTOS_PAGES_PER_RUN,
+    running: omieWebhookAutoSyncState.running,
+    last_run_at: omieWebhookAutoSyncState.lastRunAt,
+    last_duration_ms: omieWebhookAutoSyncState.lastDurationMs,
+    last_status: omieWebhookAutoSyncState.lastStatus,
+    last_run_reason: omieWebhookAutoSyncState.lastRunReason,
+    last_run_tasks: omieWebhookAutoSyncState.lastRunTasks,
+    tabelas_disponiveis: OMIE_AUTOSYNC_TABELAS_DISPONIVEIS,
+    produtos_cursor: omieWebhookAutoSyncState.produtosCursor,
+  });
+});
+
+app.get('/api/omie/autosync/history', async (req, res) => {
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
+  res.json({
+    ok: true,
+    history: omieWebhookAutoSyncState.history.slice(0, limit),
+  });
+});
+
+app.post('/api/omie/autosync/run', express.json(), async (req, res) => {
+  const tabelas = normalizarTabelasAutoSync(req.body?.tabelas || req.body?.tables || []);
+  const motivo = req.body?.motivo ? String(req.body.motivo) : 'manual';
+  const resultado = await executarAutoSyncWebhooksOmie(motivo, tabelas);
+  if (!resultado?.ok && resultado?.error === 'sync_em_andamento') {
+    return res.status(409).json({ ok: false, error: 'Sincronização já está em andamento' });
+  }
+  return res.json({
+    ok: !!resultado?.ok,
+    tabelas,
+    resultado,
+  });
+});
+
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
   iniciarAutoSyncComprasGoogleSheets();
+  iniciarAutoSyncWebhooksOmie();
 });
 
 // DEBUG: sanity check do webhook (GET simples)
