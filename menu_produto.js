@@ -8447,6 +8447,7 @@ function formatarQuantidadeExibicao(valor) {
 
   return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
+window.formatarQuantidadeExibicao = formatarQuantidadeExibicao;
 
 function formatarQtdModal(valor) {
   if (typeof formatarQuantidadeExibicao === 'function') {
@@ -13399,12 +13400,50 @@ function showComprasSubTab(subtabId) {
   }
 }
 
+async function reportComprasClientLog(level, mensagem, contexto = {}) {
+  try {
+    await fetch('/api/client-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        level,
+        origem: 'painel-compras',
+        mensagem,
+        contexto
+      })
+    });
+  } catch (_) {}
+}
+
+if (!window.__comprasClientLogHook) {
+  window.__comprasClientLogHook = true;
+  window.addEventListener('error', (event) => {
+    reportComprasClientLog('error', event?.message || 'window.error', {
+      arquivo: event?.filename || null,
+      linha: event?.lineno || null,
+      coluna: event?.colno || null,
+      stack: event?.error?.stack || null
+    });
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event?.reason;
+    reportComprasClientLog('error', 'unhandledrejection', {
+      reason: typeof reason === 'string' ? reason : (reason?.message || null),
+      stack: reason?.stack || null
+    });
+  });
+}
+
 async function openComprasFormTab() {
   try {
     console.log('[COMPRAS] Abrindo painel de compras...');
+    await reportComprasClientLog('info', 'Abrindo painel de compras');
     const formPane = document.getElementById('comprasFormPane');
     if (!formPane) {
       console.error('[COMPRAS] Elemento #comprasFormPane não encontrado!');
+      await reportComprasClientLog('error', 'Elemento comprasFormPane não encontrado');
       return;
     }
     console.log('[COMPRAS] formPane encontrado:', formPane);
@@ -13433,11 +13472,33 @@ async function openComprasFormTab() {
     window.showOnlyInMain?.(formPane);
     console.log('[COMPRAS] Renderizando carrinho...');
     await carregarCarrinhoComprasDoBanco();
-    renderCarrinhoCompras();
+    try {
+      renderCarrinhoCompras();
+    } catch (errRender) {
+      console.error('[COMPRAS] Erro em renderCarrinhoCompras:', errRender);
+      await reportComprasClientLog('error', 'Erro em renderCarrinhoCompras', {
+        message: errRender?.message || String(errRender),
+        stack: errRender?.stack || null
+      });
+      throw errRender;
+    }
     console.log('[COMPRAS] Carregando minhas solicitações...');
-    loadMinhasSolicitacoes();
+    try {
+      loadMinhasSolicitacoes();
+    } catch (errMinhas) {
+      console.error('[COMPRAS] Erro em loadMinhasSolicitacoes:', errMinhas);
+      await reportComprasClientLog('error', 'Erro em loadMinhasSolicitacoes', {
+        message: errMinhas?.message || String(errMinhas),
+        stack: errMinhas?.stack || null
+      });
+      throw errMinhas;
+    }
   } catch (err) {
     console.error('[COMPRAS] Erro ao abrir formulário:', err);
+    await reportComprasClientLog('error', 'Erro ao abrir formulário de compras', {
+      message: err?.message || String(err),
+      stack: err?.stack || null
+    });
   }
 }
 
@@ -13519,7 +13580,16 @@ async function removerItemCarrinhoNoBanco(item) {
 // Carrega itens do carrinho do banco (apenas do solicitante logado)
 async function carregarCarrinhoComprasDoBanco() {
   try {
-    const resp = await fetch('/api/compras/carrinho', { credentials: 'include' });
+    const resp = await fetch('/api/compras/carrinho', {
+      credentials: 'include',
+      cache: 'no-store'
+    });
+
+    if (resp.status === 304) {
+      console.warn('[CARRINHO] Resposta 304 (Not Modified) em /api/compras/carrinho; mantendo estado atual em memória.');
+      return;
+    }
+
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.ok) {
       throw new Error(data.error || 'Erro ao carregar carrinho');
@@ -13645,6 +13715,26 @@ function renderCarrinhoCompras() {
   // Mostra título e container quando tem itens
   if (tituloCarrinho) tituloCarrinho.style.display = 'flex';
   if (containerCarrinho) containerCarrinho.style.display = 'block';
+
+  const formatarQtdSeguro = (valor) => {
+    if (typeof formatarQuantidadeExibicao === 'function') {
+      return formatarQuantidadeExibicao(valor);
+    }
+    if (typeof window.formatarQuantidadeExibicao === 'function') {
+      return window.formatarQuantidadeExibicao(valor);
+    }
+    if (valor === null || valor === undefined || String(valor).trim() === '') {
+      return '-';
+    }
+    const numero = Number(String(valor).replace(',', '.'));
+    if (!Number.isFinite(numero)) {
+      return String(valor);
+    }
+    if (Math.abs(numero - Math.round(numero)) < 1e-9) {
+      return String(Math.round(numero));
+    }
+    return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  };
   
   tbody.innerHTML = carrinho.map((item, idx) => {
     const prazoFmt = item.prazo_solicitado || '—';
@@ -13661,7 +13751,7 @@ function renderCarrinhoCompras() {
           ${window.escapeHtml(item.produto_descricao || '')}
           ${badgeRequisicaoDireta}
         </td>
-        <td>${formatarQuantidadeExibicao(item.quantidade)}</td>
+        <td>${formatarQtdSeguro(item.quantidade)}</td>
         <td>${prazoFmt}</td>
         <td style="max-width:200px;">${window.escapeHtml(item.observacao || '')}</td>
         <td>
