@@ -66,6 +66,31 @@ app.get('/__ping', (req, res) => {
   res.type('text/plain').send(`[OK] ${new Date().toISOString()}`);
 });
 
+app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
+  try {
+    const payload = req.body || {};
+    const level = String(payload.level || 'info').toLowerCase();
+    const origem = String(payload.origem || 'frontend').slice(0, 120);
+    const mensagem = String(payload.mensagem || '').slice(0, 2000);
+    const contexto = payload.contexto && typeof payload.contexto === 'object' ? payload.contexto : {};
+    const username = resolverUsuarioAuditoria(req) || 'anon';
+
+    const linha = `[ClientLog/${origem}] user=${username} level=${level} msg=${mensagem}`;
+    if (level === 'error') {
+      console.error(linha, contexto);
+    } else if (level === 'warn' || level === 'warning') {
+      console.warn(linha, contexto);
+    } else {
+      console.log(linha, contexto);
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[ClientLog] Falha ao processar payload:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Falha ao registrar log do cliente' });
+  }
+});
+
 
 app.use(session({
   name: 'sid',
@@ -225,6 +250,22 @@ pool.connect = async function connectComContexto(...args) {
 };
 
 // Contexto de auditoria apenas para endpoints de compras.
+app.use('/api/compras', (req, res, next) => {
+  const inicio = Date.now();
+  const usuario = resolverUsuarioAuditoria(req) || 'anon';
+  const metodo = String(req.method || 'GET').toUpperCase();
+  const rota = req.originalUrl || req.url || '/api/compras';
+
+  console.log(`[Compras/Trace] -> ${metodo} ${rota} user=${usuario}`);
+
+  res.on('finish', () => {
+    const duracaoMs = Date.now() - inicio;
+    console.log(`[Compras/Trace] <- ${metodo} ${rota} status=${res.statusCode} duracaoMs=${duracaoMs}`);
+  });
+
+  next();
+});
+
 app.use('/api/compras', async (req, res, next) => {
   const metodo = String(req.method || 'GET').toUpperCase();
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodo)) {
