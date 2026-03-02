@@ -490,9 +490,9 @@
                       <th style="padding:12px 10px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;width:80px;">ID</th>
                       <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Nº Requisição</th>
                       <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Nº Pedido</th>
-                      <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Solicitante</th>
+                      <th id="listaSolicitanteHeaderFiltro" style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;cursor:pointer;user-select:none;">Solicitante ▾</th>
                       <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Fornecedor</th>
-                      <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Status</th>
+                      <th id="listaStatusHeaderFiltro" style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;cursor:pointer;user-select:none;">Status ▾</th>
                       <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Data</th>
                       <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Data Previsão</th>
                       <th style="padding:12px 16px;text-align:right;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Vlr Total</th>
@@ -2343,6 +2343,35 @@
                     <input type="time" id="horarioAgendamento" style="padding:12px 16px;border:2px solid #86efac;border-radius:8px;font-size:16px;font-weight:600;color:#166534;width:200px;background:white;">
                   </div>
 
+                  <!-- Tabelas do agendamento -->
+                  <div style="margin-bottom:20px;">
+                    <label style="display:block;font-size:13px;font-weight:600;color:#166534;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">
+                      <i class="fa-solid fa-database"></i> Tabelas para sincronizar no agendamento
+                    </label>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;" id="agendamentoTabelasGrid">
+                      <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;cursor:pointer;">
+                        <input type="checkbox" class="agendamento-tabela" value="produtos_omie" style="accent-color:#22c55e;">
+                        <span style="font-size:13px;color:#166534;">produtos_omie</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;cursor:pointer;">
+                        <input type="checkbox" class="agendamento-tabela" value="fornecedores" style="accent-color:#22c55e;">
+                        <span style="font-size:13px;color:#166534;">fornecedores</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;cursor:pointer;">
+                        <input type="checkbox" class="agendamento-tabela" value="pedidos_compra" style="accent-color:#22c55e;">
+                        <span style="font-size:13px;color:#166534;">pedidos_compra</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;cursor:pointer;">
+                        <input type="checkbox" class="agendamento-tabela" value="requisicoes_compra" style="accent-color:#22c55e;">
+                        <span style="font-size:13px;color:#166534;">requisicoes_compra</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;cursor:pointer;">
+                        <input type="checkbox" class="agendamento-tabela" value="recebimentos_nfe" style="accent-color:#22c55e;">
+                        <span style="font-size:13px;color:#166534;">recebimentos_nfe</span>
+                      </label>
+                    </div>
+                  </div>
+
                   <!-- Botão Salvar -->
                   <button id="btnSalvarAgendamento" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;border:none;padding:14px 32px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:10px;">
                     <i class="fa-solid fa-save"></i>
@@ -2360,6 +2389,37 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <!-- Card de monitoramento do auto-sync geral -->
+            <div style="margin-bottom:24px;background:#f8fafc;border:2px solid #cbd5e1;border-radius:12px;padding:20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <i class="fa-solid fa-wave-square" style="font-size:20px;color:#334155;"></i>
+                  <div>
+                    <h3 style="margin:0;font-size:16px;font-weight:700;color:#0f172a;">Monitoramento do Auto-Sync Geral</h3>
+                    <p style="margin:3px 0 0 0;font-size:12px;color:#475569;">Histórico, execução imediata e resultado por tabela</p>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button id="btnOmieAutoSyncExecutarAgora" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-bolt"></i>
+                    Executar agora
+                  </button>
+                  <button id="btnOmieAutoSyncAtualizar" style="background:#e2e8f0;color:#0f172a;border:1px solid #cbd5e1;padding:10px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-rotate"></i>
+                    Atualizar status
+                  </button>
+                </div>
+              </div>
+
+              <div id="omieAutoSyncResumo" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:14px;"></div>
+              <div id="omieAutoSyncExecucaoTabelas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px;"></div>
+
+              <div style="margin-top:8px;">
+                <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Histórico recente</div>
+                <div id="omieAutoSyncHistorico" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;max-height:250px;overflow:auto;font-size:12px;color:#334155;"></div>
               </div>
             </div>
 
@@ -5105,6 +5165,7 @@ function attachDropZone(ul) {
   const horarioInput = document.getElementById('horarioAgendamento');
   const proximaExecucaoDiv = document.getElementById('proximaExecucao');
   const proximaExecucaoTexto = document.getElementById('proximaExecucaoTexto');
+  const tabelasCheckboxes = () => Array.from(document.querySelectorAll('.agendamento-tabela'));
 
   // Carregar configuração ao iniciar
   carregarConfiguracao();
@@ -5185,6 +5246,12 @@ function attachDropZone(ul) {
         if (config.horario) {
           horarioInput.value = config.horario;
         }
+
+        // Tabelas do agendamento
+        const tabelasSelecionadas = Array.isArray(config.tabelas) ? config.tabelas : [];
+        tabelasCheckboxes().forEach(cb => {
+          cb.checked = tabelasSelecionadas.length ? tabelasSelecionadas.includes(cb.value) : true;
+        });
         
         // Mostrar próxima execução
         if (config.proxima_execucao) {
@@ -5200,6 +5267,7 @@ function attachDropZone(ul) {
     const diasSelecionados = Array.from(document.querySelectorAll('.dia-semana:checked')).map(cb => parseInt(cb.value));
     const horario = horarioInput.value;
     const ativo = checkboxAtivo.checked;
+    const tabelas = tabelasCheckboxes().filter(cb => cb.checked).map(cb => cb.value);
 
     if (ativo) {
       if (diasSelecionados.length === 0) {
@@ -5210,12 +5278,17 @@ function attachDropZone(ul) {
         alert('Defina o horário de execução!');
         return;
       }
+      if (!tabelas.length) {
+        alert('Selecione pelo menos uma tabela para o agendamento.');
+        return;
+      }
     }
 
     const config = {
       ativo: ativo,
       dias_semana: diasSelecionados,
-      horario: horario
+      horario: horario,
+      tabelas
     };
 
     try {
