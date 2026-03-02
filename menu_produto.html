@@ -942,18 +942,18 @@
 
         <!-- Modal Kanban Cotação -->
         <div id="modalCotacaoKanban" class="modal" style="display:none;justify-content:center;align-items:center;">
-          <div class="modal-content" style="max-width:1200px;width:95%;">
-            <div class="modal-header">
+          <div class="modal-content" style="max-width:1200px;width:95%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+            <div class="modal-header" style="position:sticky;top:0;z-index:20;background:#ffffff;">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-file-invoice-dollar" style="color:#fbbf24;"></i>
                 <span id="modalCotacaoKanbanTitulo">Cotação</span>
               </h3>
               <button class="modal-close" onclick="fecharModalCotacaoKanban()">&times;</button>
             </div>
-            <div class="modal-body" id="modalCotacaoKanbanBody" style="padding:20px;">
+            <div class="modal-body" id="modalCotacaoKanbanBody" style="padding:20px;overflow-y:auto;flex:1;">
               <!-- Conteúdo será inserido dinamicamente -->
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="position:sticky;bottom:0;background:#ffffff;z-index:20;">
               <button class="btn-secondary" onclick="fecharModalCotacaoKanban()">Fechar</button>
             </div>
           </div>
