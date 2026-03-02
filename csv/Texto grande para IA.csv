@@ -1,0 +1,56 @@
+2026-03-02T14:10:19.576360683Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 31 segundos para tentar novamente (CACHED: 7935cb90-1641-11f1-96b5-33900739b07d).","faultcode":"SOAP-ENV:Client-7"}
+2026-03-02T14:10:20.345849672Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 29 segundos para tentar novamente (CACHED: 7935cb90-1641-11f1-96b5-33900739b07d).","faultcode":"SOAP-ENV:Client-7"}
+2026-03-02T14:26:21.795337527Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T14:26:21.82443277Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Excluida" para pedido 10827904791
+2026-03-02T14:26:21.853172952Z [webhooks/omie/pedidos-compra] Pedido 10827904791 marcado como inativo (excluido)
+2026-03-02T14:42:35.900802914Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T14:42:36.020366486Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Alterada" para pedido 10827931575
+2026-03-02T14:42:36.359179348Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T14:42:36.38896642Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.EtapaAlterada" para pedido 10827931575
+2026-03-02T14:42:37.441343392Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T14:42:37.517871777Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10827931575: Error: nCodPed não encontrado no pedido
+2026-03-02T14:42:37.521282303Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Incluida" para pedido 10827931575
+2026-03-02T14:43:06.986264256Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 31 segundos para tentar novamente (CACHED: 0e1f9a70-1646-11f1-8ced-89aea3ba7f90).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T14:43:08.168506918Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 29 segundos para tentar novamente (CACHED: 0e1f9a70-1646-11f1-8ced-89aea3ba7f90).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T16:19:29.333882153Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:19:29.592940096Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Excluida" para pedido 10827931575
+2026-03-02T16:19:29.621887529Z [webhooks/omie/pedidos-compra] Pedido 10827931575 marcado como inativo (excluido)
+2026-03-02T16:38:41.725060276Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:38:41.966107571Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Alterada" para pedido 10828047081
+2026-03-02T16:38:42.30870091Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:38:42.33877954Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.EtapaAlterada" para pedido 10828047081
+2026-03-02T16:38:42.940342467Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:38:42.970244252Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Incluida" para pedido 10828047081
+2026-03-02T16:38:43.364048146Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10828047081: Error: nCodPed não encontrado no pedido
+2026-03-02T16:39:13.860838621Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 29 segundos para tentar novamente (CACHED: 46256390-1656-11f1-8b17-0558b072315e).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T16:39:14.932589935Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 29 segundos para tentar novamente (CACHED: 46256390-1656-11f1-8b17-0558b072315e).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T16:58:27.352124501Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:58:27.580603744Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.EtapaAlterada" para pedido 10827396076
+2026-03-02T16:58:29.251354491Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10827396076: Error: nCodPed não encontrado no pedido
+2026-03-02T16:59:13.417410599Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:59:13.446945725Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Alterada" para pedido 10827396076
+2026-03-02T16:59:13.799424945Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T16:59:13.7995961Z [webhooks/omie/pedidos-compra] Processando evento "RequisicaoProduto.Incluida" para requisição 10828072859
+2026-03-02T16:59:14.666732588Z [webhooks/omie/pedidos-compra] 🔍 Resposta da API (tentativa 1): {
+2026-03-02T16:59:14.666839571Z [webhooks/omie/pedidos-compra] ✅ 1 item(ns) encontrado(s) na tentativa 1
+2026-03-02T16:59:14.756099046Z [webhooks/omie/pedidos-compra] ✅ Requisição 10828072859 incluida com sucesso
+2026-03-02T16:59:14.756110276Z [webhooks/omie/pedidos-compra] 📦 Itens processados: 1
+2026-03-02T16:59:36.093081403Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10827396076: Error: nCodPed não encontrado no pedido
+2026-03-02T17:02:10.12665038Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:02:10.387014166Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Alterada" para pedido 10827396076
+2026-03-02T17:02:11.088000467Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:02:11.116542175Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.EtapaAlterada" para pedido 10827396076
+2026-03-02T17:02:12.099455602Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10827396076: Error: nCodPed não encontrado no pedido
+2026-03-02T17:02:48.674533965Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 31 segundos para tentar novamente (CACHED: 8da5cdb0-1659-11f1-b133-2bcdda1b7da7).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T17:03:53.617549746Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:03:54.023089607Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Excluida" para pedido 10828047081
+2026-03-02T17:03:54.05254376Z [webhooks/omie/pedidos-compra] Pedido 10828047081 marcado como inativo (excluido)
+2026-03-02T17:31:30.889871276Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:31:30.921476789Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Alterada" para pedido 10828121660
+2026-03-02T17:31:31.331196612Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:31:31.359241655Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.EtapaAlterada" para pedido 10828121660
+2026-03-02T17:31:32.466411785Z [webhooks/omie/pedidos-compra] Erro no processamento assíncrono do pedido 10828121660: Error: nCodPed não encontrado no pedido
+2026-03-02T17:31:32.53165856Z [webhooks/omie/pedidos-compra] Webhook recebido: {
+2026-03-02T17:31:32.559299701Z [webhooks/omie/pedidos-compra] Processando evento "CompraProduto.Incluida" para pedido 10828121660
+2026-03-02T17:32:01.982150713Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 31 segundos para tentar novamente (CACHED: a6f96d90-165d-11f1-a6a4-15e8e578b8ce).","faultcode":"SOAP-ENV:Client-8"}
+2026-03-02T17:32:03.208793242Z [webhooks/omie/pedidos-compra] Erro na API Omie: 500 - {"faultstring":"ERROR: Consumo redundante detectado. Aguarde 29 segundos para tentar novamente (CACHED: a6f96d90-165d-11f1-a6a4-15e8e578b8ce).","faultcode":"SOAP-ENV:Client-8"}
