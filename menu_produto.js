@@ -21613,9 +21613,16 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     const html = `
       <!-- Detalhes do Item -->
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
-        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
-          <i class="fa-solid fa-clipboard-check"></i>
-          Detalhes do Item
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <span style="display:inline-flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <span>Detalhes do Item</span>
+          </span>
+          <span id="totalCotacoesKanbanResumo" style="display:inline-flex;align-items:center;gap:6px;background:#ffffff;border:1px solid #c4b5fd;border-radius:999px;padding:4px 10px;font-size:12px;color:#5b21b6;">
+            <i class="fa-solid fa-calculator"></i>
+            <strong>Total das cotações:</strong>
+            <span>R$ 0,00</span>
+          </span>
         </h4>
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
           <div><strong>ID:</strong> ${item.id}</div>
@@ -21957,9 +21964,16 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
 
     const html = `
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
-        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;">
-          <i class="fa-solid fa-clipboard-check"></i>
-          Detalhes do Item
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <span style="display:inline-flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <span>Detalhes do Item</span>
+          </span>
+          <span id="totalCotacoesKanbanResumo" style="display:inline-flex;align-items:center;gap:6px;background:#ffffff;border:1px solid #c4b5fd;border-radius:999px;padding:4px 10px;font-size:12px;color:#5b21b6;">
+            <i class="fa-solid fa-calculator"></i>
+            <strong>Total das cotações:</strong>
+            <span>R$ 0,00</span>
+          </span>
         </h4>
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
           <div><strong>ID de referência:</strong> ${escapeHtml(String(window.cotacaoKanbanItemId || '-'))}</div>
@@ -21997,11 +22011,12 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
             </button>
           </label>
           <input 
-            type="number" 
+            type="text" 
             id="cotacaoKanbanValor"
-            placeholder="0.00"
-            step="0.01"
-            min="0"
+            placeholder="0,00"
+            inputmode="decimal"
+            oninput="mascararValorCotacaoKanban(this)"
+            onblur="mascararValorCotacaoKanban(this)"
             style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
           />
         </div>
@@ -22348,10 +22363,51 @@ window.alternarMoedaCotacaoKanban = function() {
   if (btnMoeda) btnMoeda.textContent = window.cotacaoKanbanMoeda === 'USD' ? '$' : 'R$';
 };
 
+window.mascararValorCotacaoKanban = function(input) {
+  if (!input) return;
+  const apenasDigitos = String(input.value || '').replace(/\D/g, '');
+  if (!apenasDigitos) {
+    input.value = '';
+    return;
+  }
+
+  const valorNumerico = Number(apenasDigitos) / 100;
+  input.value = valorNumerico.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+};
+
+function parseValorCotacaoKanban(valorTexto) {
+  const texto = String(valorTexto || '').trim();
+  if (!texto) return 0;
+
+  const normalizado = texto
+    .replace(/\./g, '')
+    .replace(',', '.')
+    .replace(/[^\d.]/g, '');
+
+  const valor = Number.parseFloat(normalizado);
+  return Number.isFinite(valor) ? valor : 0;
+}
+
+function simboloMoedaCotacaoKanban(moeda) {
+  return String(moeda || 'BRL').toUpperCase() === 'USD' ? '$' : 'R$';
+}
+
+function formatarValorCotacaoKanban(valor, moeda) {
+  const numero = Number(valor || 0);
+  const simbolo = simboloMoedaCotacaoKanban(moeda);
+  const valorFormatado = Number.isFinite(numero)
+    ? numero.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0,00';
+  return `${simbolo} ${valorFormatado}`;
+}
+
 async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
-  const valor = parseFloat(document.getElementById('cotacaoKanbanValor').value || '0');
+  const valor = parseValorCotacaoKanban(document.getElementById('cotacaoKanbanValor')?.value || '0');
 
   if (!fornecedor) {
     alert('Preencha o fornecedor');
@@ -22436,6 +22492,7 @@ async function registrarCotacaoKanban() {
 async function carregarCotacoesKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const container = document.getElementById('listaCotacoesRegistradasKanban');
+  const totalCotacoesResumo = document.getElementById('totalCotacoesKanbanResumo');
   if (!container) return;
 
   try {
@@ -22458,6 +22515,18 @@ async function carregarCotacoesKanban() {
     });
     window.cotacaoKanbanItensUsados = itensUsados;
     renderizarItensGrupoCotacaoKanban();
+
+    const moedaTotalCotacoes = (window.cotacaoKanbanCotacoes[0]?.moeda || window.cotacaoKanbanMoeda || 'BRL').toUpperCase();
+    const somaTotalCotacoes = window.cotacaoKanbanCotacoes.reduce((acc, cotacao) => {
+      return acc + (Number(cotacao?.valor_cotado || 0) || 0);
+    }, 0);
+    if (totalCotacoesResumo) {
+      totalCotacoesResumo.innerHTML = `
+        <i class="fa-solid fa-calculator"></i>
+        <strong>Total das cotações:</strong>
+        <span>${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}</span>
+      `;
+    }
 
     if (window.cotacaoKanbanCotacoes.length === 0) {
       container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
@@ -22539,7 +22608,7 @@ async function carregarCotacoesKanban() {
               <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(cotacao.fornecedor_nome || '-')}</span>
             </div>
             <div style="font-size:11px;color:#6b7280;">
-              <strong>Valor:</strong> ${String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? '$' : 'R$'} ${Number(cotacao.valor_cotado || 0).toFixed(2)}
+              <strong>Valor:</strong> ${formatarValorCotacaoKanban(cotacao.valor_cotado || 0, cotacao.moeda || 'BRL')}
             </div>
             <div style="font-size:11px;color:#6b7280;margin-top:4px;">
               <strong>Itens da cotação:</strong>
@@ -32308,6 +32377,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           numero_pedido: cNumeroValido || comp.n_cod_ped,
           numero: cNumeroValido || comp.n_cod_ped,
           c_numero: cNumeroValido,
+          c_obs: comp.c_obs || '',
+          is_nfe_obs: !!comp.is_nfe_obs || /^\s*nfe\s*:/i.test(String(comp.c_obs || '')),
           n_cod_ped: comp.n_cod_ped,
           fornecedor_nome: comp.fornecedor_nome,
           solicitante: solicitanteRef,
@@ -32860,12 +32931,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             return `${match[2]}-${match[3]}`;
           };
           const cardTemBordaVerde = corBorda === '#10b981';
-          const isCompraRealizadaSemCadastroComNfe = (String(status || '').trim().toLowerCase() === 'compra realizada')
+          const isCompraRealizadaComNfeNoPedido = (String(status || '').trim().toLowerCase() === 'compra realizada')
             && itensGrupo.some((item) => {
-              const source = String(item?.table_source || '').trim().toLowerCase();
-              if (source !== 'compras_sem_cadastro') return false;
-              const objetivo = String(item?.objetivo_compra || '').trim();
-              return /^nfe\s*:/i.test(objetivo);
+              if (item?.is_nfe_obs === true) return true;
+              const obsPedido = String(item?.c_obs || '').trim();
+              return /^nfe\s*:/i.test(obsPedido);
             });
 
           // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
@@ -32929,25 +32999,22 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
 
-              ${isCompraRealizadaSemCadastroComNfe ? `
-                <div title="Compra já realizada (NFe informada)" style="position:absolute;top:8px;left:8px;background:#f59e0b;color:#ffffff;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.2);z-index:3;">
-                  <i class="fa-solid fa-triangle-exclamation"></i>
-                </div>
-              ` : ''}
-              
               ${(!isAprovacao && totalItens > 1) ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
               <!-- Objetivo: Não exibir esse div para os 5 kanbans especiais que usam apenas chaveGrupo -->
               ${!(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação') ? `
               <div style="font-size:12px;color:#374151;margin-bottom:8px;font-weight:600;">
-                ${escapeHtml(
-                  primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
-                  primeiroItem.isCompraRealizada ? ((/^\d+$/.test(String(primeiroItem.c_numero || '').trim()))
-                    ? primeiroItem.c_numero
-                    : '-') :
-                  primeiroItem.isRequisicao ? (primeiroItem.cnumero || primeiroItem.numero_pedido || '-') :
-                  (primeiroItem.numero_pedido || primeiroItem.cNumero || '-')
-                )}
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                  <span>${escapeHtml(
+                    primeiroItem.isPedidoCompra ? (primeiroItem.numero || primeiroItem.n_cod_ped || '-') :
+                    primeiroItem.isCompraRealizada ? ((/^\d+$/.test(String(primeiroItem.c_numero || '').trim()))
+                      ? primeiroItem.c_numero
+                      : '-') :
+                    primeiroItem.isRequisicao ? (primeiroItem.cnumero || primeiroItem.numero_pedido || '-') :
+                    (primeiroItem.numero_pedido || primeiroItem.cNumero || '-')
+                  )}</span>
+                  ${isCompraRealizadaComNfeNoPedido ? `<i class="fa-solid fa-triangle-exclamation" title="Compra realizada com observação iniciando por NFe:" style="color:#f59e0b;font-size:13px;"></i>` : ''}
+                </span>
               </div>
               ` : ''}
               
