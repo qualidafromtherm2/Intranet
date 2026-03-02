@@ -3183,22 +3183,51 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       }
 
       // ====== Tratamento de Pedidos de Compra (CompraProduto.*) ======
-      // Extrai nCodPed do webhook - pode estar em vários lugares
+      // Extrai identificadores do webhook - cNumero (operacional) e nCodPed (técnico Omie)
       const cabecalho = event.cabecalho_consulta || event.cabecalho || {};
+      const cNumero = cabecalho.cNumero ||
+                      cabecalho.c_numero ||
+                      cabecalho['cNúmero'] ||
+                      event.cNumero ||
+                      event.c_numero ||
+                      event['cNúmero'] ||
+                      body.cNumero ||
+                      body.c_numero ||
+                      body['cNúmero'] ||
+                      event.codigo_numero ||
+                      body.codigo_numero;
       
-      const nCodPed = cabecalho.nCodPed ||        // PRIORIDADE: dentro do cabecalho primeiro
-                      cabecalho.n_cod_ped ||
-                      event.nCodPed || 
-                      event.n_cod_ped || 
-                      body.nCodPed ||
-                      body.n_cod_ped ||
-                      event.codigo_pedido ||
-                      body.codigo_pedido;
-      
-      if (!nCodPed) {
-        console.warn('[webhooks/omie/pedidos-compra] Webhook sem nCodPed:', JSON.stringify(body));
-        return res.json({ ok: true, msg: 'Sem nCodPed para processar' });
+      let nCodPed = cabecalho.nCodPed ||        // PRIORIDADE: dentro do cabecalho primeiro
+                    cabecalho.n_cod_ped ||
+                    event.nCodPed || 
+                    event.n_cod_ped || 
+                    body.nCodPed ||
+                    body.n_cod_ped ||
+                    event.codigo_pedido ||
+                    body.codigo_pedido;
+
+      if (!nCodPed && cNumero) {
+        const pedidoExistente = await pool.query(
+          `SELECT n_cod_ped
+             FROM compras.pedidos_omie
+            WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+            LIMIT 1`,
+          [String(cNumero)]
+        );
+
+        if (pedidoExistente.rows.length > 0) {
+          nCodPed = pedidoExistente.rows[0].n_cod_ped;
+          console.log(`[webhooks/omie/pedidos-compra] nCodPed resolvido via cNumero ${cNumero}: ${nCodPed}`);
+        }
       }
+
+      if (!nCodPed && !cNumero) {
+        console.warn('[webhooks/omie/pedidos-compra] Webhook sem identificador de pedido (nCodPed/cNumero):', JSON.stringify(body));
+        return res.json({ ok: true, msg: 'Sem nCodPed/cNumero para processar' });
+      }
+      
+      const identificadorPedido = cNumero || nCodPed;
       
       // ===== DEDUPLICAÇÃO: Verifica se já processamos este messageId =====
       const messageId = body.messageId;
@@ -3213,7 +3242,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
         }
       }
       
-      console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para pedido ${nCodPed}`);
+      console.log(`[webhooks/omie/pedidos-compra] Processando evento "${topic}" para pedido ${identificadorPedido}`);
       
       // Se for exclusão ou cancelamento, apenas marca como inativo no banco
       if (topic.includes('Excluida') || topic.includes('Cancelada') || event.excluido || body.excluido) {
@@ -3224,15 +3253,17 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
               evento_webhook_message_id = $2,
               data_webhook = NOW(),
               updated_at = NOW()
-          WHERE n_cod_ped = $3
-        `, [topic, messageId || null, nCodPed]);
+          WHERE (n_cod_ped = $3)
+             OR (TRIM(COALESCE(c_numero, '')) = TRIM($4))
+        `, [topic, messageId || null, nCodPed || null, cNumero || null]);
         
         const acao = topic.includes('Excluida') ? 'excluido' : 'cancelado';
-        console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} marcado como inativo (${acao})`);
+        console.log(`[webhooks/omie/pedidos-compra] Pedido ${identificadorPedido} marcado como inativo (${acao})`);
         
         return res.json({ 
           ok: true, 
-          n_cod_ped: nCodPed,
+          n_cod_ped: nCodPed || null,
+          c_numero: cNumero || null,
           acao: acao,
           atualizado: true 
         });
@@ -3245,7 +3276,8 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       
       res.json({ 
         ok: true, 
-        n_cod_ped: nCodPed,
+        n_cod_ped: nCodPed || null,
+        c_numero: cNumero || null,
         acao: acao,
         atualizado: true 
       });
@@ -3255,33 +3287,103 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
       (async () => {
         try {
           const etapaWebhook = String(cabecalho.cEtapa || cabecalho.c_etapa || '').trim();
-          const numeroWebhook = String(cabecalho.cNumero || cabecalho.c_numero || '').trim();
+          const numeroWebhook = String(cabecalho.cNumero || cabecalho.c_numero || cabecalho['cNúmero'] || cNumero || '').trim();
 
-          const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              call: 'ConsultarPedCompra',
-              app_key: OMIE_APP_KEY,
-              app_secret: OMIE_APP_SECRET,
-              param: [{
-                nCodPed: parseInt(nCodPed)
-              }]
-            })
+          const montarPedidoFallbackDoWebhook = () => ({
+            cabecalho: {
+              nCodPed: nCodPed ? (Number.parseInt(nCodPed, 10) || null) : null,
+              cCodIntPed: cabecalho.cCodIntPed || cabecalho.c_cod_int_ped || null,
+              cNumero: numeroWebhook || null,
+              cEtapa: etapaWebhook || null,
+              dIncData: cabecalho.dIncData || cabecalho.d_inc_data || null,
+              dDtPrevisao: cabecalho.dDtPrevisao || cabecalho.d_dt_previsao || null,
+              cCodCateg: cabecalho.cCodCateg || cabecalho.c_cod_categ || null,
+              cCodParc: cabecalho.cCodParc || cabecalho.c_cod_parc || null,
+              cObs: cabecalho.cObs || cabecalho.c_obs || null,
+              cObsInt: cabecalho.cObsInt || cabecalho.c_obs_int || null,
+              nCodCC: cabecalho.nCodCC || cabecalho.n_cod_cc || null,
+              nCodCompr: cabecalho.nCodCompr || cabecalho.n_cod_compr || null,
+              nCodFor: cabecalho.nCodFor || cabecalho.n_cod_for || null,
+              nCodProj: cabecalho.nCodProj || cabecalho.n_cod_proj || null,
+              nQtdeParc: cabecalho.nQtdeParc || cabecalho.n_qtde_parc || null
+            },
+            frete: event.frete_consulta || event.frete || {},
+            produtos: [],
+            parcelas: [],
+            departamentos: []
           });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
-            return;
+
+          let pedido = null;
+          const maxTentativas = 4;
+
+          for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
+            if (!nCodPed) {
+              break;
+            }
+            const response = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                call: 'ConsultarPedCompra',
+                app_key: OMIE_APP_KEY,
+                app_secret: OMIE_APP_SECRET,
+                param: [{
+                  nCodPed: parseInt(nCodPed, 10)
+                }]
+              })
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              const ehConsumoRedundante = /Consumo redundante|Client-8/i.test(errorText || '');
+              console.error(`[webhooks/omie/pedidos-compra] Erro na API Omie: ${response.status} - ${errorText}`);
+
+              if (ehConsumoRedundante && tentativa < maxTentativas) {
+                const esperaMs = tentativa * 3000;
+                await new Promise(resolve => setTimeout(resolve, esperaMs));
+                continue;
+              }
+              break;
+            }
+
+            const pedidoApi = await response.json().catch(() => null);
+            const faultstring = String(pedidoApi?.faultstring || '').trim();
+            const faultcode = String(pedidoApi?.faultcode || '').trim();
+
+            if (faultstring) {
+              const ehConsumoRedundante = /Consumo redundante|Client-8/i.test(`${faultstring} ${faultcode}`);
+              console.error(`[webhooks/omie/pedidos-compra] Falha ConsultarPedCompra: ${faultstring}${faultcode ? ` (${faultcode})` : ''}`);
+
+              if (ehConsumoRedundante && tentativa < maxTentativas) {
+                const esperaMs = tentativa * 3000;
+                await new Promise(resolve => setTimeout(resolve, esperaMs));
+                continue;
+              }
+              break;
+            }
+
+            pedido = pedidoApi;
+            break;
           }
-          
-          const pedido = await response.json();
+
+          if (!pedido || typeof pedido !== 'object') {
+            console.warn(`[webhooks/omie/pedidos-compra] ConsultarPedCompra sem payload válido para ${identificadorPedido}. Usando fallback do webhook.`);
+            pedido = montarPedidoFallbackDoWebhook();
+          }
 
           // Webhook tem prioridade para etapa/numero quando vier preenchido,
           // pois a API ConsultarPedCompra pode retornar dados defasados por alguns instantes.
           if (!pedido.cabecalho || typeof pedido.cabecalho !== 'object') {
-            pedido.cabecalho = {};
+            pedido.cabecalho = (pedido.cabecalho_consulta && typeof pedido.cabecalho_consulta === 'object')
+              ? { ...pedido.cabecalho_consulta }
+              : {};
+          }
+
+          if (!pedido.cabecalho.nCodPed && !pedido.cabecalho.n_cod_ped && nCodPed) {
+            pedido.cabecalho.nCodPed = Number.parseInt(nCodPed, 10) || null;
+          }
+          if (!pedido.cabecalho.cCodIntPed && (cabecalho.cCodIntPed || cabecalho.c_cod_int_ped)) {
+            pedido.cabecalho.cCodIntPed = cabecalho.cCodIntPed || cabecalho.c_cod_int_ped;
           }
           if (etapaWebhook) {
             pedido.cabecalho.cEtapa = etapaWebhook;
@@ -3294,7 +3396,9 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
           await upsertPedidoCompra(pedido, topic, messageId);
           
           // Sincroniza com solicitacao_compras
-          await sincronizarPedidoComSolicitacao(nCodPed);
+          if (nCodPed) {
+            await sincronizarPedidoComSolicitacao(nCodPed);
+          }
           
           console.log(`[webhooks/omie/pedidos-compra] Pedido ${nCodPed} ${acao} com sucesso`);
         } catch (err) {
@@ -13403,10 +13507,26 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
     const parcelas = pedido.parcelas || pedido.parcelas_consulta || [];
     const departamentos = pedido.departamentos || pedido.departamentos_consulta || [];
     
-    const nCodPed = cabecalho.nCodPed || cabecalho.n_cod_ped;
+    const cNumero = cabecalho.cNumero || cabecalho.c_numero || cabecalho['cNúmero'] || null;
+    let nCodPed = cabecalho.nCodPed || cabecalho.n_cod_ped;
+
+    if (!nCodPed && cNumero) {
+      const pedidoExistente = await client.query(
+        `SELECT n_cod_ped
+           FROM compras.pedidos_omie
+          WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
+          ORDER BY updated_at DESC NULLS LAST, id DESC
+          LIMIT 1`,
+        [String(cNumero)]
+      );
+
+      if (pedidoExistente.rows.length > 0) {
+        nCodPed = pedidoExistente.rows[0].n_cod_ped;
+      }
+    }
     
     if (!nCodPed) {
-      throw new Error('nCodPed não encontrado no pedido');
+      throw new Error(`nCodPed não encontrado no pedido (cNumero: ${cNumero || 'N/A'})`);
     }
     
     // 1. Upsert do cabeçalho
@@ -14740,11 +14860,12 @@ async function syncRequisicoesCompraOmie(filtros = {}) {
 }
 
 // Função para cadastrar produto provisório na Omie
-async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto) {
+async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto = null) {
   try {
-    console.log(`\n🆕 Cadastrando produto provisório na Omie...`);
-    console.log(`   Código: ${codigoProduto}`);
-    console.log(`   Descrição: ${descricaoProduto}`);
+    const pfx = contexto ? `[${contexto}] ` : '';
+    console.log(`\n${pfx}🆕 Cadastrando produto provisório na Omie...`);
+    console.log(`${pfx}   Código: ${codigoProduto}`);
+    console.log(`${pfx}   Descrição: ${descricaoProduto}`);
     
     const payload = {
       call: 'IncluirProduto',
@@ -14759,7 +14880,7 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto) {
       }]
     };
     
-    console.log('📤 Enviando para API Omie (IncluirProduto)...');
+    console.log(`${pfx}📤 Enviando para API Omie (IncluirProduto)...`);
     const response = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -14768,36 +14889,46 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto) {
     
     const data = await response.json();
     
-    console.log('📥 Resposta da Omie:');
-    console.log(JSON.stringify(data, null, 2));
+    console.log(`${pfx}📥 Resposta da Omie (IncluirProduto):`);
+    console.log(`${pfx}${JSON.stringify(data, null, 2)}`);
     
     if (data.codigo_status === '0' || data.descricao_status?.includes('sucesso')) {
-      console.log(`✅ Produto cadastrado com sucesso!`);
-      console.log(`   Código Produto Omie: ${data.codigo_produto}`);
+      console.log(`${pfx}✅ Produto cadastrado com sucesso!`);
+      console.log(`${pfx}   Código Produto Omie: ${data.codigo_produto}`);
       
       // Atualiza a tabela produtos_omie com o novo produto
       try {
-        await pool.query(
-          `INSERT INTO produtos_omie (codigo, descricao, codigo_produto, ncm, unidade) 
-           VALUES ($1, $2, $3, $4, $5) 
-           ON CONFLICT (codigo) DO UPDATE SET 
-             descricao = EXCLUDED.descricao,
-             codigo_produto = EXCLUDED.codigo_produto`,
+        const { rowCount: updatedCount } = await pool.query(
+          `UPDATE produtos_omie
+           SET descricao = $2,
+               codigo_produto = $3,
+               ncm = $4,
+               unidade = $5
+           WHERE codigo = $1 OR codigo_produto_integracao = $1`,
           [codigoProduto, descricaoProduto, data.codigo_produto, '0000.00.00', 'UN']
         );
-        console.log(`✅ Produto salvo na tabela produtos_omie`);
+
+        if (!updatedCount) {
+          await pool.query(
+            `INSERT INTO produtos_omie (codigo, descricao, codigo_produto, codigo_produto_integracao, ncm, unidade)
+             VALUES ($1, $2, $3, $1, $4, $5)`,
+            [codigoProduto, descricaoProduto, data.codigo_produto, '0000.00.00', 'UN']
+          );
+        }
+        console.log(`${pfx}✅ Produto salvo na tabela produtos_omie`);
       } catch (dbErr) {
-        console.warn(`⚠️ Erro ao salvar na tabela local (não crítico):`, dbErr.message);
+        console.warn(`${pfx}⚠️ Erro ao salvar na tabela local (não crítico):`, dbErr.message);
       }
       
       return { ok: true, codigo_produto: data.codigo_produto };
     } else {
-      console.error(`❌ Erro ao cadastrar produto:`, data);
+      console.error(`${pfx}❌ Erro ao cadastrar produto:`, data);
       const erroDetalhado = data.faultstring || data.descricao_status || 'Erro desconhecido';
       return { ok: false, error: erroDetalhado };
     }
   } catch (err) {
-    console.error(`❌ Erro na função cadastrarProdutoNaOmie:`, err.message);
+    const pfx = contexto ? `[${contexto}] ` : '';
+    console.error(`${pfx}❌ Erro na função cadastrarProdutoNaOmie:`, err.message);
     return { ok: false, error: err.message };
   }
 }
@@ -15939,6 +16070,12 @@ function gerarNumeroGrupoRequisicao() {
 app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
   try {
     const item = req.body || {};
+    const reqId = `SEM-CAD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const t0 = Date.now();
+    const log = (...args) => console.log(`[Compras Direta][${reqId}]`, ...args);
+    const logErr = (...args) => console.error(`[Compras Direta][${reqId}]`, ...args);
+
+    log('🚀 Início processamento');
     
     // Comentário: gera código provisório sequencial (CODPROV - 00001) considerando ambas as tabelas.
     const obterProximoCodigoProvisorio = async () => {
@@ -15960,18 +16097,55 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     };
 
     // Validações obrigatórias
-    let produtoCodigo = String(item.produto_codigo || '').trim();
-    const produtoDescricao = String(item.produto_descricao || '').trim();
-    const quantidade = parseInt(item.quantidade) || 1;
+    const produtoCodigoPayload = String(item.produto_codigo || '').trim();
+    const produtoDescricaoPayload = String(item.produto_descricao || '').trim();
+    const quantidadePayload = parseInt(item.quantidade, 10) || 1;
     const departamento = String(item.departamento || '').trim();
     const centroCusto = String(item.centro_custo || '').trim();
-    
-    if (!produtoCodigo || /^codprov\s*-?/i.test(produtoCodigo)) {
-      produtoCodigo = await obterProximoCodigoProvisorio();
+
+    const normalizarItensSemCadastro = (rawItens, descricaoFallback, qtdFallback) => {
+      const itensPayload = Array.isArray(rawItens)
+        ? rawItens.map((it) => ({
+            descricao: String(it?.descricao || '').trim(),
+            quantidade: Number.parseInt(it?.quantidade, 10)
+          }))
+        : [];
+
+      if (itensPayload.length > 0) {
+        return itensPayload
+          .filter((it) => it.descricao)
+          .map((it) => ({
+            descricao: it.descricao,
+            quantidade: Number.isFinite(it.quantidade) && it.quantidade > 0 ? it.quantidade : 1
+          }));
+      }
+
+      const descricao = String(descricaoFallback || '').trim();
+      if (!descricao) return [];
+
+      const tokens = descricao.split(';').map((s) => String(s || '').trim()).filter(Boolean);
+      if (!tokens.length) {
+        return [{ descricao, quantidade: Number.isFinite(qtdFallback) && qtdFallback > 0 ? qtdFallback : 1 }];
+      }
+
+      return tokens.map((token) => {
+        const matchQtd = token.match(/-(\d+)$/);
+        const quantidadeToken = matchQtd ? Number.parseInt(matchQtd[1], 10) : qtdFallback;
+        const descricaoToken = matchQtd ? token.slice(0, token.lastIndexOf('-')).trim() : token;
+        return {
+          descricao: descricaoToken || token,
+          quantidade: Number.isFinite(quantidadeToken) && quantidadeToken > 0 ? quantidadeToken : 1
+        };
+      }).filter((it) => it.descricao);
+    };
+
+    const itensSemCadastro = normalizarItensSemCadastro(item.itens_sem_cadastro, produtoDescricaoPayload, quantidadePayload);
+    log('Itens normalizados:', itensSemCadastro.map((it, idx) => ({ index: idx, descricao: it.descricao, quantidade: it.quantidade })));
+
+    if (!itensSemCadastro.length) {
+      return res.status(400).json({ ok: false, error: 'produto_descricao ou itens_sem_cadastro é obrigatório' });
     }
-    if (!produtoDescricao) {
-      return res.status(400).json({ ok: false, error: 'produto_descricao é obrigatório' });
-    }
+
     if (!departamento) {
       return res.status(400).json({ ok: false, error: 'departamento é obrigatório' });
     }
@@ -16015,10 +16189,14 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     }
 
     const retornoTexto = String(retornoCotacao || '').trim().toLowerCase();
+    const retornoCompraJaRealizada = 'compra ja realizada';
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
+    const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
     let statusInicial = 'pendente';
 
-    if (retornoTexto) {
+    if (compraJaRealizadaSelecionada) {
+      statusInicial = 'compra realizada';
+    } else if (retornoTexto) {
       if (isDiretor) {
         statusInicial = (retornoTexto === retornoSemValores)
           ? 'Analise de cadastro'
@@ -16069,60 +16247,429 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       ? gerarNumeroGrupoRequisicao()
       : grupoRequisicaoRaw;
     
-    // Insere na tabela compras_sem_cadastro
-    const result = await pool.query(`
-      INSERT INTO compras.compras_sem_cadastro (
-        produto_codigo,
-        produto_descricao,
-        quantidade,
-        departamento,
-        centro_custo,
-        categoria_compra_codigo,
-        categoria_compra_nome,
-        objetivo_compra,
-        retorno_cotacao,
-        resp_inspecao_recebimento,
-        observacao_recebimento,
-        link,
-        anexos,
-        solicitante,
-        status,
-        grupo_requisicao,
-        created_at,
-        updated_at
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
-      )
-      RETURNING id, grupo_requisicao
-    `, [
-      produtoCodigo,
-      produtoDescricao,
-      quantidade,
-      departamento,
-      centroCusto,
-      categoriaCompraCodigo,
-      categoriaCompraNome,
-      objetivoCompra,
-      retornoCotacao,
-      respInspecao,
-      observacaoRecebimento,
-      linksArray ? JSON.stringify(linksArray) : null,
-      anexosArray ? JSON.stringify(anexosArray) : null,
-      solicitante,
-      statusInicial,
-      grupoRequisicao
-    ]);
+    const obterBaseCodprovDisponivel = async () => {
+      const { rows: maxOmie } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM public.produtos_omie
+         WHERE codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSolic } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.solicitacao_compras
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSem } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.compras_sem_cadastro
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+
+      const nums = [maxOmie[0]?.max_num, maxSolic[0]?.max_num, maxSem[0]?.max_num].map((n) => Number(n) || 0);
+      let baseNumero = Math.max(...nums, 0) + 1;
+
+      const montarCodigoBase = (num) => `CODPROV - ${String(num).padStart(5, '0')}`;
+      const baseExiste = async (num) => {
+        const prefixo = `${montarCodigoBase(num)}%`;
+        const { rows: existe } = await pool.query(
+          `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
+          [prefixo]
+        );
+        return existe.length > 0;
+      };
+
+      while (await baseExiste(baseNumero)) {
+        baseNumero += 1;
+      }
+
+      return montarCodigoBase(baseNumero);
+    };
+
+    const baseCodigo = (!produtoCodigoPayload || /^codprov\s*-?/i.test(produtoCodigoPayload))
+      ? await obterBaseCodprovDisponivel()
+      : produtoCodigoPayload;
+    log('Código base selecionado:', baseCodigo);
+
+    const itensComCodigo = itensSemCadastro.map((it, idx) => ({
+      ...it,
+      produto_codigo: itensSemCadastro.length > 1 ? `${baseCodigo}.${idx + 1}` : `${baseCodigo}.1`
+    }));
+    log('Itens com código provisório:', itensComCodigo.map((it, idx) => ({ index: idx, codigo: it.produto_codigo, descricao: it.descricao, quantidade: it.quantidade })));
+
+    const inserirItensNoBanco = async ({ statusParaInsercao, numeroPedido = null, ncodped = null, codReqCompra = null }) => {
+      const ids = [];
+      const linhas = [];
+
+      for (const itemAtual of itensComCodigo) {
+        const result = await pool.query(`
+          INSERT INTO compras.compras_sem_cadastro (
+            produto_codigo,
+            produto_descricao,
+            quantidade,
+            departamento,
+            centro_custo,
+            categoria_compra_codigo,
+            categoria_compra_nome,
+            objetivo_compra,
+            retorno_cotacao,
+            resp_inspecao_recebimento,
+            observacao_recebimento,
+            link,
+            anexos,
+            solicitante,
+            status,
+            grupo_requisicao,
+            numero_pedido,
+            ncodped,
+            cod_req_compra,
+            created_at,
+            updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW()
+          )
+          RETURNING id, grupo_requisicao
+        `, [
+          itemAtual.produto_codigo,
+          itemAtual.descricao,
+          itemAtual.quantidade,
+          departamento,
+          centroCusto,
+          categoriaCompraCodigo,
+          categoriaCompraNome,
+          objetivoCompra,
+          retornoCotacao,
+          respInspecao,
+          observacaoRecebimento,
+          linksArray ? JSON.stringify(linksArray) : null,
+          anexosArray ? JSON.stringify(anexosArray) : null,
+          solicitante,
+          statusParaInsercao,
+          grupoRequisicao,
+          numeroPedido,
+          ncodped,
+          codReqCompra
+        ]);
+
+        const novoIdLinha = result.rows[0]?.id;
+        if (novoIdLinha) ids.push(novoIdLinha);
+        linhas.push({
+          id: novoIdLinha,
+          grupo_requisicao: result.rows[0]?.grupo_requisicao || grupoRequisicao,
+          produto_codigo: itemAtual.produto_codigo,
+          produto_descricao: itemAtual.descricao,
+          quantidade: itemAtual.quantidade
+        });
+      }
+
+      return {
+        ids,
+        linhas,
+        grupoFinal: linhas[0]?.grupo_requisicao || grupoRequisicao
+      };
+    };
+
+    let idsInseridos = [];
+    let linhasInseridas = [];
+    let grupoFinal = grupoRequisicao;
+    let omieNumeroPedido = null;
+    let omieCodPed = null;
+    let omieCodIntPed = null;
+
+    const obterEmailAprovador = async () => {
+      const emailFallback = 'carlos.henrique@fromtherm.com.br';
+
+      if (req.session?.user?.id) {
+        const { rows } = await pool.query(
+          'SELECT email FROM public.auth_user WHERE id = $1 LIMIT 1',
+          [req.session.user.id]
+        );
+        const email = String(rows[0]?.email || '').trim();
+        if (email) return email;
+      }
+
+      if (req.session?.user?.username) {
+        const { rows } = await pool.query(
+          'SELECT email FROM public.auth_user WHERE username = $1 LIMIT 1',
+          [req.session.user.username]
+        );
+        const email = String(rows[0]?.email || '').trim();
+        if (email) return email;
+      }
+
+      return emailFallback;
+    };
+
+    const resolverFornecedorPadrao = async () => {
+      const toInt = (valor) => Number.parseInt(String(valor ?? '').trim(), 10);
+      const fornecedorPadraoFixo = 10746832756;
+
+      if (Number.isFinite(fornecedorPadraoFixo) && fornecedorPadraoFixo > 0) {
+        return { codigo: fornecedorPadraoFixo, origem: 'padrao_fixo_10746832756' };
+      }
+
+      const fornecedorDoPayload = toInt(item?.fornecedor_id);
+      if (Number.isFinite(fornecedorDoPayload) && fornecedorDoPayload > 0) {
+        return { codigo: fornecedorDoPayload, origem: 'payload.fornecedor_id' };
+      }
+
+      const fornecedorDoEnv = toInt(process.env.OMIE_FORNECEDOR_PADRAO_ID);
+      if (Number.isFinite(fornecedorDoEnv) && fornecedorDoEnv > 0) {
+        return { codigo: fornecedorDoEnv, origem: 'env.OMIE_FORNECEDOR_PADRAO_ID' };
+      }
+
+      const { rows: ultimoFornecedorRows } = await pool.query(
+        `SELECT fornecedor_id
+         FROM compras.ped_compra
+         WHERE fornecedor_id IS NOT NULL
+           AND trim(fornecedor_id) <> ''
+         ORDER BY updated_at DESC NULLS LAST, id DESC
+         LIMIT 1`
+      );
+      const fornecedorUltimoPedido = toInt(ultimoFornecedorRows[0]?.fornecedor_id);
+      if (Number.isFinite(fornecedorUltimoPedido) && fornecedorUltimoPedido > 0) {
+        return { codigo: fornecedorUltimoPedido, origem: 'compras.ped_compra.ultimo_fornecedor' };
+      }
+
+      const { rows: fornecedorAtivoRows } = await pool.query(
+        `SELECT codigo_cliente_omie
+         FROM omie.fornecedores
+         WHERE COALESCE(inativo, false) = false
+           AND codigo_cliente_omie IS NOT NULL
+         ORDER BY updated_at DESC NULLS LAST, codigo_cliente_omie DESC
+         LIMIT 1`
+      );
+      const fornecedorAtivo = toInt(fornecedorAtivoRows[0]?.codigo_cliente_omie);
+      if (Number.isFinite(fornecedorAtivo) && fornecedorAtivo > 0) {
+        return { codigo: fornecedorAtivo, origem: 'omie.fornecedores.ativo_recente' };
+      }
+
+      return { codigo: NaN, origem: 'nao_encontrado' };
+    };
+
+    if (compraJaRealizadaSelecionada) {
+      try {
+        log('Fluxo compra direta ativado');
+        const emailAprovador = await obterEmailAprovador();
+        const fornecedorResolvido = await resolverFornecedorPadrao();
+        const fornecedorPadrao = fornecedorResolvido.codigo;
+        const codParcelaPadrao = String(process.env.OMIE_COD_PARCELA_PADRAO || 'A15').trim() || 'A15';
+        log('Parâmetros compra direta:', {
+          emailAprovador,
+          fornecedorPadrao,
+          fornecedorOrigem: fornecedorResolvido.origem,
+          codParcelaPadrao,
+          categoriaCompraCodigo
+        });
+
+        if (!Number.isFinite(fornecedorPadrao) || fornecedorPadrao <= 0) {
+          throw new Error('Nenhum fornecedor válido encontrado para a opção "Compra ja realizada" (payload/env/histórico/base fornecedores).');
+        }
+
+        const gerarCodIntPedCurto = () => {
+          const tsBase36 = Date.now().toString(36).toUpperCase();
+          const randBase36 = Math.floor(Math.random() * 1679616).toString(36).toUpperCase().padStart(4, '0');
+          const grupoNumerico = String(grupoRequisicao || '').replace(/\D/g, '').slice(-6);
+          const cod = `SC${grupoNumerico}${tsBase36}${randBase36}`.slice(0, 20);
+          return cod;
+        };
+
+        const codReqCompra = gerarCodIntPedCurto();
+        log('cCodIntPed gerado para Omie:', { codReqCompra, tamanho: String(codReqCompra).length });
+        const hoje = new Date();
+        const dDtPrevisao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+
+        const cabecalho = {
+          cCodIntPed: codReqCompra,
+          dDtPrevisao,
+          cCodCateg: categoriaCompraCodigo || '2.14.94',
+          cCodParc: codParcelaPadrao,
+          cEmailAprovador: emailAprovador,
+          cObs: (objetivoCompra || observacaoRecebimento || `Solicitação sem cadastro ${reqId}`).toString().slice(0, 500)
+        };
+
+        cabecalho.nCodFor = fornecedorPadrao;
+
+        const produtosIncluir = [];
+        for (const itemLinha of itensComCodigo) {
+          log('Processando item para Omie:', {
+            codigo: itemLinha.produto_codigo,
+            descricao: itemLinha.descricao,
+            quantidade: itemLinha.quantidade
+          });
+          let codigoOmie = null;
+
+          const { rows: prodRows } = await pool.query(
+            `SELECT codigo_produto
+             FROM public.produtos_omie
+             WHERE codigo = $1 OR codigo_produto_integracao = $1
+             LIMIT 1`,
+            [itemLinha.produto_codigo]
+          );
+
+          if (prodRows.length > 0 && prodRows[0].codigo_produto) {
+            codigoOmie = prodRows[0].codigo_produto;
+            log('Produto encontrado localmente:', { codigo: itemLinha.produto_codigo, codigo_omie: codigoOmie });
+          } else {
+            log('Produto não encontrado localmente, cadastrando na Omie');
+            let cadastro = await cadastrarProdutoNaOmie(itemLinha.produto_codigo, itemLinha.descricao, reqId);
+            if (!cadastro.ok) {
+              const msgErro = String(cadastro.error || '');
+              const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
+              const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+
+              if (ehJaCadastrado) {
+                log('Produto já cadastrado na Omie, tentando reaproveitar cadastro existente');
+
+                const matchId = msgErro.match(/ID:\s*(\d+)/i);
+                if (matchId?.[1]) {
+                  cadastro = { ok: true, codigo_produto: Number(matchId[1]) };
+                } else {
+                  try {
+                    const consultaResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        call: 'ConsultarProduto',
+                        app_key: OMIE_APP_KEY,
+                        app_secret: OMIE_APP_SECRET,
+                        param: [{ codigo_produto_integracao: itemLinha.produto_codigo }]
+                      })
+                    });
+                    const consultaData = await consultaResp.json().catch(() => ({}));
+                    if (consultaResp.ok && !consultaData?.faultstring && consultaData?.codigo_produto) {
+                      cadastro = { ok: true, codigo_produto: Number(consultaData.codigo_produto) };
+                    }
+                  } catch (consultaErr) {
+                    log('Falha ao consultar produto já cadastrado na Omie:', consultaErr?.message || consultaErr);
+                  }
+                }
+              }
+
+              if (ehDescricaoDuplicada) {
+                const descricaoComCodigo = itemLinha.descricao.includes(itemLinha.produto_codigo)
+                  ? itemLinha.descricao
+                  : `${itemLinha.descricao} - ${itemLinha.produto_codigo}`;
+                log('Descrição duplicada na Omie, tentando novamente com sufixo de código');
+                cadastro = await cadastrarProdutoNaOmie(itemLinha.produto_codigo, descricaoComCodigo, reqId);
+              }
+            }
+
+            if (!cadastro.ok) {
+              throw new Error(cadastro.error || `Falha ao cadastrar produto ${itemLinha.produto_codigo} na Omie`);
+            }
+
+            codigoOmie = cadastro.codigo_produto;
+            log('Produto cadastrado na Omie:', { codigo: itemLinha.produto_codigo, codigo_omie: codigoOmie });
+          }
+
+          const codigoOmieNumero = Number(codigoOmie);
+          const produtoPayload = {
+            cDescricao: itemLinha.descricao,
+            cUnidade: 'UN',
+            nQtde: Number(itemLinha.quantidade) > 0 ? Number(itemLinha.quantidade) : 1,
+            nValUnit: 0.01,
+            cObs: observacaoRecebimento || null,
+            cCodCateg: categoriaCompraCodigo || '2.14.94'
+          };
+
+          if (Number.isFinite(codigoOmieNumero) && codigoOmieNumero > 0) {
+            produtoPayload.nCodProd = codigoOmieNumero;
+          } else {
+            produtoPayload.cProduto = itemLinha.produto_codigo;
+          }
+
+          produtosIncluir.push(produtoPayload);
+        }
+
+        const pedidoCompra = {
+          cabecalho_incluir: cabecalho,
+          produtos_incluir: produtosIncluir
+        };
+
+        const omiePayload = {
+          call: 'IncluirPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [pedidoCompra]
+        };
+
+        log('Enviando IncluirPedCompra para Omie:', {
+          codIntPed: cabecalho.cCodIntPed,
+          quantidade_itens: produtosIncluir.length,
+          codFornecedor: cabecalho.nCodFor
+        });
+
+        const omieResp = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(omiePayload)
+        });
+
+        const omieData = await omieResp.json().catch(() => ({}));
+        log('Resposta IncluirPedCompra:', {
+          status_http: omieResp.status,
+          faultcode: omieData?.faultcode || null,
+          faultstring: omieData?.faultstring || null,
+          nCodPed: omieData?.nCodPed || null,
+          cNumero: omieData?.cNumero || null,
+          cCodIntPed: omieData?.cCodIntPed || null
+        });
+        if (!omieResp.ok || omieData?.faultstring) {
+          throw new Error(omieData?.faultstring || `Erro HTTP ${omieResp.status} ao criar pedido na Omie`);
+        }
+
+        omieNumeroPedido = omieData?.cNumero || null;
+        omieCodPed = omieData?.nCodPed ? String(omieData.nCodPed) : null;
+        omieCodIntPed = omieData?.cCodIntPed || codReqCompra;
+
+        const insertDireto = await inserirItensNoBanco({
+          statusParaInsercao: 'compra realizada',
+          numeroPedido: omieNumeroPedido,
+          ncodped: omieCodPed,
+          codReqCompra: omieCodIntPed
+        });
+        idsInseridos = insertDireto.ids;
+        linhasInseridas = insertDireto.linhas;
+        grupoFinal = insertDireto.grupoFinal;
+        log('Compra direta concluída e persistida no banco:', {
+          ids: idsInseridos,
+          grupoFinal,
+          omieNumeroPedido,
+          omieCodPed,
+          omieCodIntPed
+        });
+      } catch (omieErr) {
+        logErr('Falha no fluxo compra direta. Nenhuma linha gravada em compras_sem_cadastro.', {
+          erro: omieErr.message,
+          stack: omieErr.stack
+        });
+        return res.status(502).json({
+          ok: false,
+          error: `Falha ao concluir compra direta na Omie. Nada foi gravado em compras_sem_cadastro: ${omieErr.message}`
+        });
+      }
+    } else {
+      const insertPadrao = await inserirItensNoBanco({
+        statusParaInsercao: statusInicial
+      });
+      idsInseridos = insertPadrao.ids;
+      linhasInseridas = insertPadrao.linhas;
+      grupoFinal = insertPadrao.grupoFinal;
+      log('Fluxo padrão concluído:', { ids: idsInseridos, grupoFinal, statusInicial });
+    }
+
+    const novoId = idsInseridos[0] || null;
     
-    const novoId = result.rows[0]?.id;
-    const grupoFinal = result.rows[0]?.grupo_requisicao;
-    
-    console.log(`[Compras Sem Cadastro] Registrado ID ${novoId}, grupo: ${grupoFinal}, produto: ${produtoCodigo}, solicitante: ${solicitante}`);
+    log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
     
     res.json({ 
       ok: true, 
       id: novoId,
+      ids: idsInseridos,
       grupo_requisicao: grupoFinal,
-      message: 'Solicitação de compra registrada com sucesso'
+      numero_pedido: omieNumeroPedido,
+      ncodped: omieCodPed,
+      cod_req_compra: omieCodIntPed,
+      message: `Solicitação de compra registrada com sucesso (${idsInseridos.length} item(ns))`
     });
     
   } catch (err) {

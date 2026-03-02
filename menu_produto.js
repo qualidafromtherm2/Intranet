@@ -24967,6 +24967,82 @@ async function abrirModalCatalogoOmie() {
 // ========== FUNÇÕES PARA GERENCIAR KEYWORDS/TAGS DE DESCRIÇÃO ==========
 // Objetivo: Permitir adicionar palavras-chave ao pressionar Enter e remover ao clicar no X
 
+function abrirDialogoEntradaCatalogo({ titulo, label, placeholder = '', valorInicial = '', tipo = 'text' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100100;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'width:100%;max-width:420px;background:#ffffff;border-radius:10px;box-shadow:0 18px 40px rgba(0,0,0,0.28);padding:16px;display:flex;flex-direction:column;gap:10px;';
+
+    const h = document.createElement('div');
+    h.textContent = titulo || 'Informação necessária';
+    h.style.cssText = 'font-size:15px;font-weight:700;color:#0f172a;';
+
+    const l = document.createElement('label');
+    l.textContent = label || 'Digite o valor';
+    l.style.cssText = 'font-size:12px;font-weight:600;color:#334155;';
+
+    const input = document.createElement('input');
+    input.type = tipo;
+    input.placeholder = placeholder;
+    input.value = valorInicial;
+    input.style.cssText = 'width:100%;padding:10px;border:2px solid #3b82f6;border-radius:8px;font-size:14px;font-weight:600;color:#0f172a;';
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:4px;';
+
+    const btnCancelar = document.createElement('button');
+    btnCancelar.type = 'button';
+    btnCancelar.textContent = 'Cancelar';
+    btnCancelar.style.cssText = 'padding:8px 12px;border:1px solid #cbd5e1;background:#ffffff;color:#334155;border-radius:8px;cursor:pointer;font-weight:600;';
+
+    const btnConfirmar = document.createElement('button');
+    btnConfirmar.type = 'button';
+    btnConfirmar.textContent = 'Confirmar';
+    btnConfirmar.style.cssText = 'padding:8px 12px;border:none;background:#2563eb;color:#ffffff;border-radius:8px;cursor:pointer;font-weight:700;';
+
+    const finalizar = (valor) => {
+      document.removeEventListener('keydown', onKeydown);
+      overlay.remove();
+      resolve(valor);
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finalizar(null);
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finalizar(String(input.value || '').trim());
+      }
+    };
+
+    btnCancelar.addEventListener('click', () => finalizar(null));
+    btnConfirmar.addEventListener('click', () => finalizar(String(input.value || '').trim()));
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) finalizar(null);
+    });
+    document.addEventListener('keydown', onKeydown);
+
+    footer.appendChild(btnCancelar);
+    footer.appendChild(btnConfirmar);
+
+    modal.appendChild(h);
+    modal.appendChild(l);
+    modal.appendChild(input);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  });
+}
+
 function atualizarDescricaoKeywordsHidden() {
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
@@ -24983,27 +25059,43 @@ function atualizarDescricaoKeywordsHidden() {
   return hidden.value;
 }
 
-function adicionarDescricaoKeyword(valor) {
+async function adicionarDescricaoKeyword(valor) {
   const input = document.getElementById('catalogoDescricaoNaoCadastrado');
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
   if (!input || !tagsContainer || !hidden) return;
 
+  const refocarCampoDescricao = () => {
+    setTimeout(() => {
+      input.focus();
+    }, 0);
+  };
+
   const keyword = String(valor || '').trim();
-  if (!keyword) return;
+  if (!keyword) {
+    refocarCampoDescricao();
+    return;
+  }
 
   const existente = Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
     .some(tag => (tag.getAttribute('data-keyword') || '').toLowerCase() === keyword.toLowerCase());
   if (existente) {
     input.value = '';
+    refocarCampoDescricao();
     return;
   }
 
-  // Comentário: solicita quantidade ao usuário
-  const quantidadeStr = prompt(`Digite a quantidade para "${keyword}":`, '1');
+  const quantidadeStr = await abrirDialogoEntradaCatalogo({
+    titulo: 'Quantidade do item',
+    label: `Digite a quantidade para "${keyword}"`,
+    placeholder: 'Ex.: 1',
+    valorInicial: '1',
+    tipo: 'number'
+  });
   if (quantidadeStr === null) {
     // Cancelou
     input.value = '';
+    refocarCampoDescricao();
     return;
   }
   
@@ -25011,6 +25103,7 @@ function adicionarDescricaoKeyword(valor) {
   if (!Number.isFinite(quantidade) || quantidade < 1) {
     alert('Quantidade inválida. Deve ser um número maior que zero.');
     input.value = '';
+    refocarCampoDescricao();
     return;
   }
 
@@ -25048,6 +25141,7 @@ function adicionarDescricaoKeyword(valor) {
 
   input.value = '';
   atualizarDescricaoKeywordsHidden();
+  refocarCampoDescricao();
 }
 
 function limparDescricaoKeywords() {
@@ -25069,7 +25163,7 @@ function inicializarDescricaoKeywords() {
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    adicionarDescricaoKeyword(input.value);
+    void adicionarDescricaoKeyword(input.value);
   });
 
   tagsContainer.addEventListener('click', (event) => {
@@ -25082,6 +25176,28 @@ function inicializarDescricaoKeywords() {
       atualizarDescricaoKeywordsHidden();
     }
   });
+
+  if (!window.__catalogoDescricaoEnterDelegado) {
+    window.__catalogoDescricaoEnterDelegado = true;
+    document.addEventListener('keydown', async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.id !== 'catalogoDescricaoNaoCadastrado') return;
+      if (event.key !== 'Enter') return;
+      if (event.isComposing) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (target.dataset.keywordDialogOpen === '1') return;
+      target.dataset.keywordDialogOpen = '1';
+      try {
+        await adicionarDescricaoKeyword(target.value);
+      } finally {
+        target.dataset.keywordDialogOpen = '0';
+      }
+    }, true);
+  }
 }
 
 // ========== FIM DAS FUNÇÕES DE KEYWORDS/TAGS ==========
@@ -26599,16 +26715,22 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const etapas = selectEtapas ? selectEtapas.value : '';
-  
-  // Extrai a quantidade da primeira palavra-chave (formato: palavra-quantidade)
-  let quantidade = 1;
-  if (descricao) {
-    const primeiraKeyword = descricao.split(';')[0];
-    const match = primeiraKeyword.match(/-(\d+)$/);
-    if (match) {
-      quantidade = parseInt(match[1], 10);
-    }
-  }
+
+  const itensSemCadastro = String(descricao || '')
+    .split(';')
+    .map((token) => String(token || '').trim())
+    .filter(Boolean)
+    .map((token) => {
+      const matchQtd = token.match(/-(\d+)$/);
+      const quantidadeItem = matchQtd ? parseInt(matchQtd[1], 10) : 1;
+      const descricaoItem = matchQtd ? token.slice(0, token.lastIndexOf('-')).trim() : token;
+      return {
+        descricao: descricaoItem,
+        quantidade: Number.isFinite(quantidadeItem) && quantidadeItem > 0 ? quantidadeItem : 1
+      };
+    })
+    .filter((itemToken) => itemToken.descricao);
+  const quantidade = itensSemCadastro[0]?.quantidade || 1;
   
   // Aplica categoria padrão se não selecionada (campo removido)
   const categoriaPadraoCodigo = '2.14.94';
@@ -26617,7 +26739,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   }
   
   console.log('[Catálogo] Descrição (keywords):', descricao);
-  console.log('[Catálogo] Quantidade:', quantidade);
+  console.log('[Catálogo] Itens (keywords):', itensSemCadastro);
   console.log('[Catálogo] Departamento:', departamento);
   console.log('[Catálogo] Categoria:', centroCusto);
   console.log('[Catálogo] Categoria Compra:', categoriaCompra);
@@ -26629,9 +26751,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     inputDescricao?.focus();
     return;
   }
-  
-  if (!quantidade || quantidade < 1) {
-    alert('Informe uma quantidade válida (mínimo 1)!');
+
+  if (!itensSemCadastro.length) {
+    alert('Adicione pelo menos um item válido! Digite e pressione Enter.');
+    inputDescricao?.focus();
+    return;
+  }
+
+  const itemInvalido = itensSemCadastro.find((it) => !it.quantidade || it.quantidade < 1);
+  if (itemInvalido) {
+    alert(`Quantidade inválida para o item "${itemInvalido.descricao}".`);
     return;
   }
   
@@ -26657,24 +26786,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   }
   
   try {
-    // Gera código provisório usando a mesma API do modal de adicionar produto
-    let codigoTemp = '';
-    try {
-      const resp = await fetch('/api/compras/proximo-codigo-provisorio');
-      const data = await resp.json();
-      
-      if (data.ok && data.codigo) {
-        codigoTemp = data.codigo;
-        console.log('[Catálogo] Código provisório gerado:', codigoTemp);
-      } else {
-        throw new Error('API não retornou código válido');
-      }
-    } catch (err) {
-      console.error('[Catálogo] Erro ao gerar código provisório via API:', err);
-      // Fallback: usa TEMP se API falhar
-      codigoTemp = `TEMP-${Date.now()}`;
-      console.warn('[Catálogo] Usando código temporário fallback:', codigoTemp);
-    }
+    const codigoLoteUpload = `LOTE-${Date.now()}`;
     
     // Prepara dados para envio
     const selectRetornoGlobal = document.getElementById('catalogoRetornoCotacoesGlobal');
@@ -26685,7 +26797,37 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     const retornoCotacao = selectRetornoGlobal ? selectRetornoGlobal.value : null;
     const respInspecao = selectRespInspecao ? selectRespInspecao.value.trim() : '';
     const observacaoRecebimento = textareaObsRecebimento ? textareaObsRecebimento.value.trim() : '';
-    const objetivoCompra = textareaObjetivo ? textareaObjetivo.value.trim() : '';
+    let objetivoCompra = textareaObjetivo ? textareaObjetivo.value.trim() : '';
+
+    const compraJaRealizadaSelecionada = String(retornoCotacao || '').trim().toLowerCase() === 'compra ja realizada';
+    if (compraJaRealizadaSelecionada) {
+      const numeroNfe = await abrirDialogoEntradaCatalogo({
+        titulo: 'Número da NFe obrigatório',
+        label: 'Informe o número da NFe para seguir com a compra já realizada',
+        placeholder: 'Ex.: 123456',
+        valorInicial: '',
+        tipo: 'text'
+      });
+      const nfeLimpa = String(numeroNfe || '').trim();
+
+      if (!nfeLimpa) {
+        alert('Para "Compra ja realizada", é obrigatório informar o número da NFe.');
+        if (btn) {
+          btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
+          btn.style.opacity = '1';
+          btn.disabled = false;
+        }
+        return;
+      }
+
+      objetivoCompra = objetivoCompra
+        ? `NFe: ${nfeLimpa} - ${objetivoCompra}`
+        : `NFe: ${nfeLimpa}`;
+
+      if (textareaObjetivo) {
+        textareaObjetivo.value = objetivoCompra;
+      }
+    }
     
     // Processa anexos - UPLOAD via Supabase
     let anexosUrls = [];
@@ -26693,7 +26835,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       for (let i = 0; i < window.catalogoAnexosAcumulados.length; i++) {
         const file = window.catalogoAnexosAcumulados[i];
         try {
-          const url = await uploadCatalogoAnexo(file, codigoTemp);
+          const url = await uploadCatalogoAnexo(file, codigoLoteUpload);
           if (url) {
             anexosUrls.push(url);
             console.log('[Catálogo] Anexo enviado com sucesso:', url);
@@ -26710,15 +26852,17 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       : [];
 
     const payload = {
-      produto_codigo: codigoTemp,
+      produto_codigo: '',
       produto_descricao: descricao,
       quantidade: quantidade,
+      itens_sem_cadastro: itensSemCadastro,
       departamento: departamento,
       centro_custo: centroCusto,
       categoria_compra_codigo: categoriaCompra,
       categoria_compra_nome: categoriaCompra === '2.14.94' ? 'Outros Materiais' : '',
       objetivo_compra: objetivoCompra,
       retorno_cotacao: retornoCotacao,
+      tipo_retorno_solicitado: retornoCotacao,
       resp_inspecao_recebimento: respInspecao,
       observacao_recebimento: observacaoRecebimento,
       anexos: anexosUrls,
@@ -26741,8 +26885,13 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       throw new Error(result.error || `Erro ao salvar (${response.status})`);
     }
     
-    console.log('[Catálogo] Produto não cadastrado salvo com sucesso! ID:', result.id);
-    alert('Solicitação de compra realizada com sucesso.');
+    console.log('[Catálogo] Itens sem cadastro salvos com sucesso! IDs:', result.ids || [result.id]);
+    const totalItensCriados = Array.isArray(result.ids) ? result.ids.length : itensSemCadastro.length;
+    const numeroPedidoOmie = String(result?.numero_pedido || '').trim();
+    const mensagemSucesso = numeroPedidoOmie
+      ? `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`
+      : `Registro realizado com sucesso.`;
+    alert(mensagemSucesso);
     
     // Feedback visual de sucesso
     if (btn) {
@@ -32621,6 +32770,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             return `${match[2]}-${match[3]}`;
           };
           const cardTemBordaVerde = corBorda === '#10b981';
+          const isCompraRealizadaSemCadastroComNfe = (String(status || '').trim().toLowerCase() === 'compra realizada')
+            && itensGrupo.some((item) => {
+              const source = String(item?.table_source || '').trim().toLowerCase();
+              if (source !== 'compras_sem_cadastro') return false;
+              const objetivo = String(item?.objetivo_compra || '').trim();
+              return /^nfe\s*:/i.test(objetivo);
+            });
 
           // Comentário: no kanban "cotado aguardando escolha", "aguardando cotação" e "analise de cadastro", o clique abre modal específico
           const grupoRequisicaoCard = String(primeiroItem.grupo_requisicao || chaveGrupo || '').trim();
@@ -32682,6 +32838,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             "
             onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.15)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)'">
+
+              ${isCompraRealizadaSemCadastroComNfe ? `
+                <div title="Compra já realizada (NFe informada)" style="position:absolute;top:8px;left:8px;background:#f59e0b;color:#ffffff;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.2);z-index:3;">
+                  <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+              ` : ''}
               
               ${(!isAprovacao && totalItens > 1) ? `<div style="position:absolute;top:8px;right:8px;background:#10b981;color:white;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;">${totalItens} itens</div>` : ''}
               
