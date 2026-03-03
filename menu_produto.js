@@ -24084,55 +24084,31 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
   }
 }
 
-// Comentário: envia item do modal para aguardando compra
+// Comentário: envia item do modal para análise de cadastro
 async function enviarCotadoEscolhaParaCompra() {
   if (!window.cotadoEscolhaItemId) return;
-  
-  // Objetivo: Validar se há pelo menos uma cotação aprovada antes de enviar a solicitação
-  // Se não houver, impede o processo e mostra mensagem de erro
-  const cotacoesDb = window.cotadoEscolhaCotacoesDb || [];
-  const temAprovada = cotacoesDb.some(c => (c.status_aprovacao || 'pendente').toString().toLowerCase() === 'aprovado');
-  
-  if (!temAprovada) {
-    alert('⚠️ Erro: Você precisa aprovar pelo menos uma cotação antes de enviar a solicitação!');
-    return;
-  }
-  
+
   const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
   const originalHtml = btn ? btn.innerHTML : '';
-  const tableSource = window.cotadoEscolhaTableSource || 'solicitacao_compras';
   try {
     if (btn) {
       btn.disabled = true;
       btn.style.cursor = 'not-allowed';
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
     }
-    
-    // Comentário: se for compras_sem_cadastro, apenas muda status para "Analise de cadastro"
-    let resp;
-    let mensagem;
-    if (tableSource === 'compras_sem_cadastro') {
-      resp = await fetch(`/api/compras/sem-cadastro/${window.cotadoEscolhaItemId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status: 'Analise de cadastro' })
-      });
-      mensagem = 'Solicitação enviada e status atualizado para "Analise de cadastro".';
-    } else {
-      resp = await fetch(`/api/compras/solicitacoes/${window.cotadoEscolhaItemId}/enviar-requisicao`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include'
-      });
-      mensagem = 'Requisição enviada e status atualizado para "aguardando compra".';
-    }
+
+    const resp = await fetch(`/api/compras/itens/${window.cotadoEscolhaItemId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'Analise de cadastro' })
+    });
     
     if (!resp.ok) {
       const errData = await resp.json();
       throw new Error(errData.error || 'Erro ao atualizar status');
     }
-    alert(mensagem);
+    alert('Status atualizado para "Analise de cadastro".');
     fecharModalCotadoEscolhaItem();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
