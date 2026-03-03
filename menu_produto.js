@@ -21807,40 +21807,6 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     const tableSource = item.table_source === 'compras_sem_cadastro' ? 'compras_sem_cadastro' : 'solicitacao_compras';
     window.cotadoEscolhaTableSource = tableSource;
 
-    const fmtDate = (iso) => {
-      if (!iso) return '-';
-      const d = new Date(iso);
-      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
-    };
-
-    const fmtQtdModal = (valor) => {
-      try {
-        if (typeof formatarQuantidadeExibicao === 'function') return formatarQuantidadeExibicao(valor);
-      } catch (_) {}
-
-      if (valor === null || valor === undefined) return '-';
-      const bruto = String(valor).trim();
-      if (!bruto) return '-';
-
-      let normalizado = bruto;
-      const temVirgula = normalizado.includes(',');
-      const temPonto = normalizado.includes('.');
-      if (temVirgula && temPonto) {
-        if (normalizado.lastIndexOf(',') > normalizado.lastIndexOf('.')) {
-          normalizado = normalizado.replace(/\./g, '').replace(',', '.');
-        } else {
-          normalizado = normalizado.replace(/,/g, '');
-        }
-      } else if (temVirgula) {
-        normalizado = normalizado.replace(',', '.');
-      }
-
-      const numero = Number(normalizado);
-      if (!Number.isFinite(numero)) return bruto;
-      if (Math.abs(numero - Math.round(numero)) < 1e-9) return String(Math.round(numero));
-      return numero.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
-    };
-
     const statusAtual = (item.status || 'cotado').toString().toLowerCase().trim();
     const statusTitulo = statusAtual === 'aguardando cotação'
       ? 'Aguardando cotação'
@@ -21887,13 +21853,60 @@ async function abrirModalCotadoEscolhaItem(itemId) {
 
     const linksSemCadastro = normalizarListaLinks(item.link || item.links);
     const linksAnexoUrlSolicitacao = normalizarListaLinks(item.anexo_url);
+    const linksDetalhesItem = Array.from(new Set([
+      ...linksSemCadastro,
+      ...linksAnexoUrlSolicitacao
+    ]));
+    const linksDetalhesItemHtml = montarHtmlLinks(linksDetalhesItem);
+    const grupoRequisicao = String(item.grupo_requisicao || '').trim();
 
-    const campoLinkSemCadastroHtml = tableSource === 'compras_sem_cadastro'
-      ? `<div><strong>Link:</strong> ${montarHtmlLinks(linksSemCadastro)}</div>`
-      : '';
+    let itensGrupoCotado = [item];
+    if (grupoRequisicao) {
+      try {
+        const respGrupo = await fetch(
+          `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoRequisicao)}&table_source=${encodeURIComponent(tableSource)}`,
+          { credentials: 'include' }
+        );
+        if (respGrupo.ok) {
+          const dataGrupo = await respGrupo.json();
+          const itensApi = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+          if (itensApi.length > 0) itensGrupoCotado = itensApi;
+        }
+      } catch (erroGrupo) {
+        console.error('[COTADO ESCOLHA] Erro ao carregar itens do grupo:', erroGrupo);
+      }
+    }
 
-    const campoAnexoUrlSolicitacaoHtml = tableSource === 'solicitacao_compras'
-      ? `<div><strong>Anexo URL:</strong> ${montarHtmlLinks(linksAnexoUrlSolicitacao)}</div>`
+    const formatarQtdGrupoCotado = (valor) => {
+      try {
+        if (typeof formatarQuantidadeExibicao === 'function') return formatarQuantidadeExibicao(valor);
+      } catch (_) {}
+      if (valor === null || valor === undefined || String(valor).trim() === '') return '-';
+      return String(valor);
+    };
+
+    const itensGrupoHtml = (Array.isArray(itensGrupoCotado) && itensGrupoCotado.length > 0)
+      ? `
+        <div style="margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="font-size:11px;color:#6b7280;"><strong>Itens do Grupo:</strong> <span style="color:#374151;">${itensGrupoCotado.length}</span></div>
+          </div>
+          <div style="margin-top:8px;display:grid;gap:4px;max-height:180px;overflow-y:auto;">
+            ${itensGrupoCotado.map((grupoItem, idx) => {
+              const descricao = grupoItem?.produto_descricao || grupoItem?.descricao || '-';
+              const codigo = grupoItem?.produto_codigo || '-';
+              const quantidade = formatarQtdGrupoCotado(grupoItem?.quantidade);
+              return `
+                <div style="display:grid;gap:2px;background:#ffffff;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;">
+                  <div style="font-size:11px;font-weight:700;color:#1f2937;">#${escapeHtml(String(grupoItem?.id || idx + 1))} • ${escapeHtml(String(codigo))}</div>
+                  <div style="font-size:11px;color:#374151;">${escapeHtml(String(descricao))}</div>
+                  <div style="font-size:10px;color:#6b7280;"><strong>Qtd:</strong> ${escapeHtml(String(quantidade))}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `
       : '';
 
     let anexosItem = item.anexos;
@@ -21926,7 +21939,8 @@ async function abrirModalCotadoEscolhaItem(itemId) {
               <a 
                 href="${escapeHtml(url || 'javascript:void(0)')}" 
                 target="_blank" 
-                style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;">
+                rel="noopener"
+                style="display:flex;align-items:center;gap:6px;background:#f3f4f6;padding:6px 10px;border-radius:6px;text-decoration:none;color:#1f2937;font-size:11px;border:1px solid #d1d5db;">
                 <i class=\"fa-solid fa-paperclip\" style=\"color:#3b82f6;\"></i>
                 <span>${escapeHtml(nome)}</span>
               </a>
@@ -21935,6 +21949,8 @@ async function abrirModalCotadoEscolhaItem(itemId) {
         </div>
       </div>
     ` : '';
+    const grupoModal = String(item.grupo_requisicao || '-').trim() || '-';
+    const objetivoCompra = String(item.objetivo_compra || '-').trim() || '-';
     const html = `
       <!-- Detalhes do Item -->
       <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
@@ -21950,17 +21966,12 @@ async function abrirModalCotadoEscolhaItem(itemId) {
           </span>
         </h4>
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
-          <div><strong>ID:</strong> ${item.id}</div>
-          <div><strong>Código:</strong> ${escapeHtml(item.produto_codigo || '-')}</div>
-          <div><strong>Descrição:</strong> ${escapeHtml(item.produto_descricao || item.descricao || '-')}</div>
-          <div><strong>Quantidade:</strong> ${fmtQtdModal(item.quantidade)}</div>
-          <div><strong>Prazo solicitado:</strong> ${fmtDate(item.prazo_solicitado)}</div>
-          <div><strong>Solicitante:</strong> ${escapeHtml(item.solicitante || '-')}</div>
-          <div><strong>Departamento:</strong> ${escapeHtml(item.departamento || '-')}</div>
-          <div><strong>Retorno Cotação:</strong> ${escapeHtml(item.retorno_cotacao || '-')}</div>
-          ${campoLinkSemCadastroHtml}
-          ${campoAnexoUrlSolicitacaoHtml}
+          <div><strong>ID de referência:</strong> ${escapeHtml(String(item.id || '-'))}</div>
+          <div><strong>Grupo:</strong> ${escapeHtml(grupoModal)}</div>
+          <div><strong>Objetivo da Compra:</strong> ${linkifyText(objetivoCompra)}</div>
+          <div><strong>Link:</strong> ${linksDetalhesItemHtml}</div>
           ${anexosItemHtml}
+          ${itensGrupoHtml}
         </div>
       </div>
 
@@ -23816,10 +23827,30 @@ async function enviarCotacoesKanban() {
 }
 function renderizarCotacoesRegistradasCotadoEscolha() {
   const container = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
+  const totalCotacoesResumo = document.getElementById('totalCotacoesKanbanResumo');
   if (!container) return;
 
   const cotacoesRaw = Array.isArray(window.cotadoEscolhaCotacoesDb) ? window.cotadoEscolhaCotacoesDb : [];
   const cotacoes = cotacoesRaw.filter(c => c && typeof c === 'object');
+
+  const cotacoesAprovadas = cotacoes.filter((cotacao) =>
+    String(cotacao?.status_aprovacao || '').toLowerCase().trim() === 'aprovado'
+  );
+  const moedaTotalCotacoes = (
+    cotacoesAprovadas[0]?.moeda
+    || cotacoes[0]?.moeda
+    || 'BRL'
+  ).toUpperCase();
+  const somaTotalCotacoes = cotacoesAprovadas.reduce((acc, cotacao) => {
+    return acc + (Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0);
+  }, 0);
+  if (totalCotacoesResumo) {
+    totalCotacoesResumo.innerHTML = `
+      <i class="fa-solid fa-calculator"></i>
+      <strong>Total das cotações:</strong>
+      <span>${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}</span>
+    `;
+  }
 
   if (cotacoes.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;font-size:13px;">Nenhuma cotação registrada ainda</div>';
@@ -23920,7 +23951,21 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
             <strong>Fornecedor:</strong> ${escapeHtml(cotacao.fornecedor_nome || cotacao.fornecedor || '-')}
           </div>
           <div style="font-size:11px;color:#6b7280;">
-            <strong>Valor:</strong> R$ ${Number(cotacao.valor_cotado || cotacao.valor_unitario || 0).toFixed(2)}
+            <strong>Valor:</strong> ${formatarValorCotacaoKanban(cotacao.valor_cotado || cotacao.valor_unitario || 0, cotacao.moeda || 'BRL')}
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+            <strong>Itens da cotação:</strong>
+            <div style="margin-top:4px;padding-left:8px;display:flex;flex-direction:column;gap:3px;">
+              ${(Array.isArray(cotacao.itens_cotacao) && cotacao.itens_cotacao.length > 0)
+                ? cotacao.itens_cotacao.map((itemCotado) => {
+                    const codigo = itemCotado?.produto_codigo || '-';
+                    const descricao = itemCotado?.produto_descricao || '-';
+                    const qtd = itemCotado?.quantidade ?? '-';
+                    return `<span style="color:#374151;">• ${escapeHtml(String(codigo))} - ${escapeHtml(String(descricao))} (Qtd: ${escapeHtml(String(qtd))})</span>`;
+                  }).join('')
+                : '<span style="color:#9ca3af;">Sem itens vinculados</span>'
+              }
+            </div>
           </div>
           ${linksHtml}
           ${anexosHtml}
@@ -34147,7 +34192,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                             ? escapeHtml(cardTemBordaVerde
                               ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
                               : (primeiroItem.c_cod_int_ped || ''))
-                            : (status === 'aguardando cotação'
+                            : ((
+                              status === 'aguardando cotação'
+                              || status === 'cotado aguardando escolha'
+                              || status === 'aguardando aprovação da requisição'
+                              || status === 'solicitado revisão'
+                              || status === 'analise de cadastro'
+                            )
                               ? escapeHtml(`ID ${String(primeiroItem.historico_id || primeiroItem.id || '-')}`)
                               : (statusCompactarIdentificador.includes(status)
                                 ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))

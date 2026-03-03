@@ -5,7 +5,7 @@ promts para guardar conversas com a IA:
 Gere um resumo executivo da conversa com foco em retomada futura do tema.
 Mantenha apenas os pontos realmente relevantes: objetivo, decisões, alterações feitas, problemas encontrados, pendências e próximos passos.
 Se a pasta não existir, crie nesta estrutura:
-Historico de conversar IA/
+Historico de conversar IA/Compras/
 Instrução para guardar conversas com a IA/
 Primeira orientação/
 Salve o resumo em arquivo .md com nome no padrão:
