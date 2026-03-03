@@ -675,18 +675,66 @@
                     <option value="">Selecione...</option>
                   </select>
 
+                  <div id="carrinhoPrazoSolicitadoWrapper" style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                      Prazo Solicitado
+                    </label>
+                    <input type="date" id="carrinhoPrazoSolicitadoGlobal"
+                           style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                  </div>
+
                   <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
-                    Prazo Solicitado
+                    Objetivo da Compra
                   </label>
-                  <input type="date" id="carrinhoPrazoSolicitadoGlobal"
-                         style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                  <textarea id="carrinhoObjetivoCompraGlobal"
+                            placeholder="Descreva o objetivo/finalidade da compra..."
+                            style="width:100%;min-height:72px;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:500;color:#e5e7eb;resize:vertical;"></textarea>
+
+                  <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                    Anexar arquivo (opcional)
+                  </label>
+                  <input type="file" id="carrinhoAnexosGlobal"
+                         style="width:100%;padding:8px;border:1px solid #334155;border-radius:6px;font-size:12px;background:#0f172a;color:#e5e7eb;">
+                  <div id="carrinhoAnexosGlobalInfo" style="display:none;font-size:11px;color:#93c5fd;"></div>
+
+                  <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                    Anexo URL (opcional)
+                  </label>
+                  <input type="text" id="carrinhoAnexoUrlGlobal"
+                         placeholder="Cole o link do anexo..."
+                         style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:500;color:#e5e7eb;">
+
+                  <div id="carrinhoRetornoCotacaoWrapper" style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
+                      Retorno Cotação
+                    </label>
+                    <select id="carrinhoRetornoCotacaoGlobal"
+                            style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#0f172a;font-weight:600;color:#e5e7eb;">
+                      <option value="Não" selected>Não</option>
+                      <option value="Sim">Sim</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div style="background:transparent;border:none;border-radius:0;padding:0;display:flex;flex-direction:column;gap:10px;">
-                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                  <label id="carrinhoCompraAutorizadaWrapper" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
                     <input type="checkbox" id="carrinhoCompraAutorizada" style="width:18px;height:18px;cursor:pointer;">
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já autorizada</span>
                   </label>
+
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                    <input type="checkbox" id="carrinhoCompraRealizada" style="width:18px;height:18px;cursor:pointer;">
+                    <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já realizada</span>
+                  </label>
+
+                  <div id="carrinhoNfeGlobalWrapper" style="display:none;flex-direction:column;gap:6px;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                    <label for="carrinhoNfeGlobal" style="display:block;font-size:11px;color:#fca5a5;font-weight:700;">
+                      N nota fiscal *
+                    </label>
+                    <input type="text" id="carrinhoNfeGlobal"
+                           placeholder="Digite o número da nota fiscal"
+                           style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;font-size:13px;background:#020617;font-weight:600;color:#e5e7eb;">
+                  </div>
                   
                   <!-- Botão Colar Lista de Compra -->
                   <button id="btnColarListaCompra" onclick="abrirModalColarLista()" 
@@ -762,6 +810,7 @@
 
               <!-- Status de envio -->
               <div id="modalComprasFormStatus" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;"></div>
+              <div id="modalComprasOmieInfo" style="display:none;margin-top:10px;padding:12px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.45;"></div>
             </div>
           </div>
         </div>

@@ -27,7 +27,13 @@ Subpasta:
 Primeira orientação: Historico de conversar IA/Instrução para guardar conversas com a IA/Primeira orientação
 
 
-(pasta de conversas compras):
+(pasta de conversas compras produtos sem cadastro):
 Historico de conversar IA/Compras
 Subpasta:
 Kanban cotação: Historico de conversar IA/Compras/Kanban cotação
+
+
+(pasta de conversas compras produtos cadastrados):
+Historico de conversar IA/Compras
+Subpasta:
+Kanban cotação: Historico de conversar IA/Compras/Compras com cadastro

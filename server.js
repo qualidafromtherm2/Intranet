@@ -15408,8 +15408,10 @@ app.post('/api/compras/pedido', async (req, res) => {
 // POST /api/compras/solicitacao - Cria solicitações agrupadas por NP (do modal de carrinho)
 app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
   try {
-    const { itens, compra_autorizada } = req.body || {};
+    const { itens, compra_autorizada, compra_realizada, n_nota_fiscal } = req.body || {};
     const compraAutorizada = compra_autorizada === true;
+    const compraRealizada = compra_realizada === true;
+    const notaFiscalGlobal = String(n_nota_fiscal || '').trim();
     
     // Obtém usuário da sessão
     const solicitante = req.session?.user?.username || req.session?.user?.id || 'sistema';
@@ -15453,22 +15455,30 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           requisicao_direta,
           np,
           status_pedido,
-          anexo  // ← ADICIONADO: Captura anexo do item
+          anexo,
+          anexo_url
         } = item;
+
+        const notaFiscalItem = String(item.nota_fiscal || notaFiscalGlobal || '').trim();
+        if (compraRealizada && !notaFiscalItem) {
+          throw new Error('N nota fiscal é obrigatório quando Compra já realizada estiver marcado');
+        }
         
         // Aceita quantidade vazia (para casos de 'Não incluir quantidade')
         if (!produto_codigo || quantidade === undefined || quantidade === null) {
           throw new Error('Cada item precisa ter produto_codigo');
         }
         
-        const requisicaoDiretaFinal = compraAutorizada || requisicao_direta === true;
+        const requisicaoDiretaFinal = compraRealizada || compraAutorizada || requisicao_direta === true;
 
         // Regras:
         // - compra_autorizada = true (checkbox global do carrinho) → força fluxo de requisição direta
         // - requisicao_direta = true (item) → fluxo de requisição direta
         // - demais casos → aguarda aprovação da requisição
         let statusInicial;
-        if (compraAutorizada) {
+        if (compraRealizada) {
+          statusInicial = 'compra realizada';
+        } else if (compraAutorizada) {
           // Regra do modal "Meu Carrinho de Compras":
           // compra já autorizada deve entrar diretamente como Requisição.
           statusInicial = 'Requisição';
@@ -15569,7 +15579,13 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         
         const categoriaCompraCodigo = item.categoria_compra_codigo || categoria_compra || null;
         const categoriaCompraNome = item.categoria_compra_nome || item.categoria_compra_label || item.categoria_compra_texto || null;
-        const objetivoCompraFinal = item.objetivo_compra || item.objetivo_compra_nome || null;
+        const objetivoCompraRaw = item.objetivo_compra || item.objetivo_compra_nome || '';
+        const objetivoSemPrefixo = String(objetivoCompraRaw || '').replace(/^\s*nfe\s*:\s*/i, '').trim();
+        const objetivoCompraFinalBase = objetivoSemPrefixo || 'Compra via catálogo Omie';
+        const objetivoCompraFinal = compraRealizada
+          ? `NFe: ${notaFiscalItem}${objetivoCompraFinalBase ? ` - ${objetivoCompraFinalBase}` : ''}`
+          : objetivoCompraFinalBase;
+        const anexoUrlFinal = item.anexo_url || anexo_url || null;
         const respInspecaoFinal = resp_inspecao_recebimento || solicitante;
         const grupoRequisicao = item.grupo_requisicao || item.np || null;
         const idCarrinho = Number(id_db);
@@ -15595,8 +15611,9 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
                 codigo_omie = $15,
                 grupo_requisicao = $16,
                 anexos = COALESCE($17, anexos),
+                anexo_url = COALESCE($18, anexo_url),
                 updated_at = NOW()
-            WHERE id = $18 AND status = 'carrinho'
+              WHERE id = $19 AND status = 'carrinho'
             RETURNING id
           `, [
             produto_codigo,
@@ -15616,6 +15633,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             codigo_omie || null,
             grupoRequisicao,
             anexosArray ? JSON.stringify(anexosArray) : null,
+            anexoUrlFinal,
             idCarrinho
           ]);
 
@@ -15625,7 +15643,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             if (requisicaoDiretaFinal) {
               idsRequisicaoDireta.push(itemId);
               itensDiretosParaProcessar.push({
-                item: { ...item, requisicao_direta: true },
+                item: { ...item, requisicao_direta: true, compra_realizada: compraRealizada },
                 idDb: itemId
               });
             }
@@ -15653,9 +15671,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
             codigo_omie,
             grupo_requisicao,
             anexos,
+            anexo_url,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
           RETURNING id
         `, [
           produto_codigo,
@@ -15674,7 +15693,8 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
           codigo_produto_omie || null,
           codigo_omie || null,
           item.grupo_requisicao || item.np || null,
-          anexosArray ? JSON.stringify(anexosArray) : null  // ← ADICIONADO: Salva anexos no banco
+          anexosArray ? JSON.stringify(anexosArray) : null,
+          anexoUrlFinal
         ]);
         
         const itemId = result.rows[0].id;
@@ -15684,7 +15704,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         if (requisicaoDiretaFinal) {
           idsRequisicaoDireta.push(itemId);
           itensDiretosParaProcessar.push({
-            item: { ...item, requisicao_direta: true },
+            item: { ...item, requisicao_direta: true, compra_realizada: compraRealizada },
             idDb: itemId
           });
         }
@@ -15697,6 +15717,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
       
       // APÓS inserir/atualizar no banco, processa os itens diretos na Omie (agrupados por NP)
       const gruposNP = {};
+      const omieResultados = [];
       itensDiretosParaProcessar.forEach((itemGroup) => {
         const np = itemGroup.item?.np || 'A';
         if (!gruposNP[np]) gruposNP[np] = [];
@@ -15706,19 +15727,26 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
       // Processa cada grupo de NP
       for (const [np, itemsGroup] of Object.entries(gruposNP)) {
         try {
-          await processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante);
+          const resultadoOmie = await processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante);
+          if (resultadoOmie) omieResultados.push(resultadoOmie);
         } catch (errOmie) {
           console.error(`[Compras-Solicitacao] Erro ao processar requisição Omie para NP ${np}:`, errOmie);
           // Continua processando os outros grupos mesmo se um falhar
         }
       }
+
+      const numerosCompraOmie = omieResultados
+        .filter((r) => r?.tipo === 'pedido_compra' && r?.numero_pedido)
+        .map((r) => String(r.numero_pedido));
       
       res.json({
         ok: true,
         total_itens: itens.length,
         ids: idsInseridos,
         ids_requisicao_direta: idsRequisicaoDireta,
-        solicitante: solicitante
+        solicitante: solicitante,
+        omie_resultados: omieResultados,
+        numeros_compra_omie: numerosCompraOmie
       });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -15744,7 +15772,8 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
     const solicitante = req.session?.user?.username || req.session?.user?.id || item.solicitante || 'sistema';
     const categoriaCompraCodigo = item.categoria_compra_codigo || item.categoria_compra || null;
     const categoriaCompraNome = item.categoria_compra_nome || item.categoria_compra_label || item.categoria_compra_texto || null;
-    const objetivoCompraFinal = item.objetivo_compra || item.objetivo_compra_nome || null;
+    const objetivoCompraRaw = item.objetivo_compra || item.objetivo_compra_nome || '';
+    const objetivoCompraFinal = String(objetivoCompraRaw || '').trim() || 'Compra via catálogo Omie';
     const respInspecaoFinal = item.resp_inspecao_recebimento || item.responsavel || solicitante;
 
     const normalizarAnexos = (raw) => {
@@ -15760,6 +15789,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
     };
 
     const anexosArray = normalizarAnexos(item.anexo || item.anexos);
+    const anexoUrlFinal = item.anexo_url || null;
     const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
     
     // Comentário: Verifica se existe grupo_requisicao do mesmo dia antes de gerar novo
@@ -15810,10 +15840,11 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
         requisicao_direta,
         grupo_requisicao,
         anexos,
+        anexo_url,
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, 'carrinho', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW()
+        $1, $2, $3, $4, $5, 'carrinho', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), NOW()
       )
       RETURNING id
     `, [
@@ -15836,7 +15867,8 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       item.codigo_omie || null,
       item.requisicao_direta || false,
       grupoRequisicao,
-      anexosArray ? JSON.stringify(anexosArray) : null
+      anexosArray ? JSON.stringify(anexosArray) : null,
+      anexoUrlFinal
     ]);
 
     res.json({ ok: true, id: result.rows[0]?.id, grupo_requisicao: grupoRequisicao });
@@ -15858,7 +15890,8 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
     const solicitante = req.session?.user?.username || req.session?.user?.id || item.solicitante || 'sistema';
     const categoriaCompraCodigo = item.categoria_compra_codigo || item.categoria_compra || null;
     const categoriaCompraNome = item.categoria_compra_nome || item.categoria_compra_label || item.categoria_compra_texto || null;
-    const objetivoCompraFinal = item.objetivo_compra || item.objetivo_compra_nome || null;
+    const objetivoCompraRaw = item.objetivo_compra || item.objetivo_compra_nome || '';
+    const objetivoCompraFinal = String(objetivoCompraRaw || '').trim() || 'Compra via catálogo Omie';
     const respInspecaoFinal = item.resp_inspecao_recebimento || item.responsavel || solicitante;
 
     const normalizarAnexos = (raw) => {
@@ -15874,6 +15907,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
     };
 
     const anexosArray = normalizarAnexos(item.anexo || item.anexos);
+    const anexoUrlFinal = item.anexo_url || null;
     const grupoRequisicaoRaw = item.grupo_requisicao || item.np || null;
     const grupoRequisicao = (!grupoRequisicaoRaw || String(grupoRequisicaoRaw).toLowerCase() === 'unica')
       ? gerarNumeroGrupoRequisicao()
@@ -15902,8 +15936,9 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
           requisicao_direta = $18,
           grupo_requisicao = COALESCE($19, grupo_requisicao),
           anexos = COALESCE($20, anexos),
+            anexo_url = COALESCE($21, anexo_url),
           updated_at = NOW()
-      WHERE id = $21 AND status = 'carrinho'
+          WHERE id = $22 AND status = 'carrinho'
       RETURNING id
     `, [
       String(item.produto_codigo || '').trim(),
@@ -15926,6 +15961,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
       item.requisicao_direta || false,
       grupoRequisicao,
       anexosArray ? JSON.stringify(anexosArray) : null,
+      anexoUrlFinal,
       id
     ]);
 
@@ -16009,6 +16045,7 @@ app.get('/api/compras/carrinho', async (req, res) => {
         requisicao_direta,
         grupo_requisicao,
         anexos,
+        anexo_url,
         created_at,
         updated_at
       FROM compras.solicitacao_compras
@@ -17322,6 +17359,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   if (!itemsGroup || itemsGroup.length === 0) return;
   
   const np = itemsGroup[0].item.np || 'A';
+  const compraRealizadaSelecionada = itemsGroup.some((group) => group?.item?.compra_realizada === true);
   console.log(`[Compras-Solicitacao-Omie] Processando ${itemsGroup.length} itens para NP: ${np}`);
   
   // Gera número de pedido único
@@ -17392,8 +17430,9 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     });
   }
   
-  // Monta observação formatada com dados do primeiro item (usada para toda a requisição)
+  // Monta observação formatada com dados do primeiro item (mantida para compatibilidade de log/uso interno)
   const primeiroItem = itemsGroup[0].item;
+  const objetivoCompraPrimeiroItem = String(primeiroItem.objetivo_compra || '').trim();
   const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${primeiroItem.resp_inspecao_recebimento || solicitante}\nNPST: ${numeroPedido}\nNPOM: ${primeiroItem.codigo_omie || ''}\nNP: ${np}\nObjetivo da Compra: ${primeiroItem.objetivo_compra || ''}\nObservação: ${primeiroItem.observacao || ''}`.trim();
   
   // Pega a categoria de compra do primeiro item (todos do mesmo NP devem ter a mesma categoria)
@@ -17401,13 +17440,112 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   const categoriaCompra = primeiroItem.categoria_compra || primeiroItem.categoria_compra_codigo || '';
   console.log(`[Compras-Solicitacao-Omie] Item recebido:`, primeiroItem);
   console.log(`[Compras-Solicitacao-Omie] Categoria da compra (NP ${np}): Código="${categoriaCompra}" | Campos testados="categoria_compra/categoria_compra_codigo"`);
+
+  if (compraRealizadaSelecionada) {
+    const obterEmailAprovadorCarrinho = async () => {
+      const emailFallback = 'carlos.henrique@fromtherm.com.br';
+      const { rows } = await client.query(
+        `SELECT email
+           FROM public.auth_user
+          WHERE username = $1
+          LIMIT 1`,
+        [solicitante]
+      );
+      const email = String(rows[0]?.email || '').trim();
+      return email || emailFallback;
+    };
+
+    const emailAprovador = await obterEmailAprovadorCarrinho();
+    const codParcelaPadrao = String(process.env.OMIE_COD_PARCELA_PADRAO || 'A15').trim() || 'A15';
+    const fornecedorPadrao = Number.parseInt(String(process.env.OMIE_FORNECEDOR_PADRAO_ID || '10746832756').trim(), 10);
+    const codIntPed = `MC${Date.now().toString().slice(-10)}${String(np || '').replace(/\W/g, '').slice(0, 6)}`.slice(0, 20);
+
+    const cabecalhoCompra = {
+      cCodIntPed: codIntPed,
+      dDtPrevisao: itensOmie[0].dtSugestao,
+      cCodCateg: categoriaCompra || '2.14.94',
+      cCodParc: codParcelaPadrao,
+      cEmailAprovador: emailAprovador,
+      cObs: (objetivoCompraPrimeiroItem || `Compra via carrinho (NP ${np}) - ${solicitante}`).slice(0, 500),
+      nCodFor: Number.isFinite(fornecedorPadrao) && fornecedorPadrao > 0 ? fornecedorPadrao : 10746832756
+    };
+
+    const produtosCompra = itensOmie.map((it) => {
+      const codigoOmieNumero = Number(it.codProd);
+      const produtoPayload = {
+        cDescricao: (it.obsItem || primeiroItem.produto_descricao || 'Produto catálogo').toString().slice(0, 120),
+        cUnidade: 'UN',
+        nQtde: Number(it.qtde) > 0 ? Number(it.qtde) : 1,
+        nValUnit: Number(it.precoUnit) > 0 ? Number(it.precoUnit) : 0.01,
+        cObs: it.observacao || null,
+        cCodCateg: categoriaCompra || '2.14.94'
+      };
+
+      if (Number.isFinite(codigoOmieNumero) && codigoOmieNumero > 0) {
+        produtoPayload.nCodProd = codigoOmieNumero;
+      }
+      return produtoPayload;
+    });
+
+    const pedidoCompraPayload = {
+      call: 'IncluirPedCompra',
+      app_key: process.env.OMIE_APP_KEY,
+      app_secret: process.env.OMIE_APP_SECRET,
+      param: [{
+        cabecalho_incluir: cabecalhoCompra,
+        produtos_incluir: produtosCompra
+      }]
+    };
+
+    console.log(`[Compras-Solicitacao-Omie] Enviando para Omie IncluirPedCompra (NP: ${np}):`, JSON.stringify(pedidoCompraPayload.param[0], null, 2));
+
+    await omieRateLimiter.aguardarDisponibilidade();
+
+    const omieResponsePed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pedidoCompraPayload)
+    });
+
+    const omieResultPed = await omieResponsePed.json().catch(() => ({}));
+
+    if (!omieResponsePed.ok || omieResultPed.faultstring) {
+      console.error(`[Compras-Solicitacao-Omie] Erro Omie IncluirPedCompra para NP ${np}:`, omieResultPed);
+      throw new Error(omieResultPed.faultstring || `Erro ao criar pedido de compra Omie para NP ${np}`);
+    }
+
+    const nCodPed = omieResultPed.nCodPed || null;
+    const cNumero = omieResultPed.cNumero || null;
+    const cCodIntPed = omieResultPed.cCodIntPed || codIntPed;
+
+    for (const itemGroup of itemsGroup) {
+      await client.query(`
+        UPDATE compras.solicitacao_compras
+        SET
+          status = 'compra realizada',
+          numero_pedido = $1,
+          ncodped = $2,
+          updated_at = NOW()
+        WHERE id = $3
+      `, [cNumero || cCodIntPed, nCodPed, itemGroup.idDb]);
+
+      console.log(`[Compras-Solicitacao-Omie] Item ${itemGroup.idDb} atualizado - compra realizada - numero_pedido: ${cNumero || cCodIntPed}, ncodped: ${nCodPed}`);
+    }
+
+    return {
+      tipo: 'pedido_compra',
+      np,
+      numero_pedido: cNumero || cCodIntPed || null,
+      ncodped: nCodPed || null
+    };
+  }
   
   // Monta payload para Omie - IncluirReq (seguindo o padrão do aprovar-item)
   const requisicaoOmie = {
     codIntReqCompra: numeroPedido,
     codCateg: categoriaCompra,
     dtSugestao: itensOmie[0].dtSugestao,
-    obsReqCompra: obsReqCompra,
+    obsReqCompra: (objetivoCompraPrimeiroItem || obsReqCompra).slice(0, 500),
     obsIntReqCompra: '',
     ItensReqCompra: itensOmie.map(it => ({
       codProd: it.codProd,
@@ -17460,6 +17598,13 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     
     console.log(`[Compras-Solicitacao-Omie] Item ${itemGroup.idDb} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
   }
+
+  return {
+    tipo: 'requisicao',
+    np,
+    numero_pedido: codIntReqCompra || null,
+    ncodped: codReqCompra || null
+  };
 }
 
 // POST /api/compras/agrupar-itens - Agrupa itens selecionados com um numero_pedido
@@ -20696,7 +20841,7 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
     
-    const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link } = req.body || {};
+    const { fornecedor_nome, fornecedor_id, valor_cotado, observacao, anexos, link, moeda, itens_cotacao } = req.body || {};
     
     const fields = [];
     const values = [];
@@ -20807,23 +20952,107 @@ app.put('/api/compras/cotacoes/:id', express.json(), async (req, res) => {
       fields.push(`link = $${idx++}`);
       values.push(linksNormalizados.length ? JSON.stringify(linksNormalizados) : null);
     }
-    
-    if (fields.length === 0) {
-      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+
+    if (typeof moeda !== 'undefined') {
+      const moedaNormalizada = String(moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+      fields.push(`moeda = $${idx++}`);
+      values.push(moedaNormalizada);
     }
     
-    fields.push(`atualizado_em = NOW()`);
-    values.push(id);
-    
-    const { rows } = await pool.query(`
-      UPDATE compras.cotacoes 
-      SET ${fields.join(', ')}
-      WHERE id = $${idx}
-      RETURNING *
-    `, values);
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
+    const deveAtualizarItens = Array.isArray(itens_cotacao);
+    if (fields.length === 0 && !deveAtualizarItens) {
+      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+    }
+
+    const client = await pool.connect();
+    let rows = [];
+    try {
+      await client.query('BEGIN');
+
+      if (fields.length > 0) {
+        fields.push(`atualizado_em = NOW()`);
+        values.push(id);
+
+        const result = await client.query(`
+          UPDATE compras.cotacoes 
+          SET ${fields.join(', ')}
+          WHERE id = $${idx}
+          RETURNING *
+        `, values);
+        rows = result.rows;
+      } else {
+        const result = await client.query(`
+          SELECT * FROM compras.cotacoes WHERE id = $1
+        `, [id]);
+        rows = result.rows;
+      }
+
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
+      }
+
+      if (deveAtualizarItens) {
+        const cotacaoAtual = rows[0];
+        const tableSourceCotacao = cotacaoAtual.table_source === 'compras_sem_cadastro'
+          ? 'compras_sem_cadastro'
+          : 'solicitacao_compras';
+
+        await client.query(`
+          DELETE FROM compras.cotacoes_itens
+          WHERE cotacao_id = $1
+        `, [id]);
+
+        for (const itemCotacao of itens_cotacao) {
+          const itemOrigemId = Number(itemCotacao?.id || itemCotacao?.item_origem_id);
+          if (!Number.isInteger(itemOrigemId)) continue;
+
+          await client.query(`
+            INSERT INTO compras.cotacoes_itens
+              (cotacao_id, item_origem_id, grupo_requisicao, table_source, produto_codigo, produto_descricao, quantidade)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (cotacao_id, item_origem_id, table_source) DO NOTHING
+          `, [
+            id,
+            itemOrigemId,
+            itemCotacao?.grupo_requisicao || null,
+            tableSourceCotacao,
+            itemCotacao?.produto_codigo || null,
+            itemCotacao?.produto_descricao || null,
+            (itemCotacao?.quantidade ?? null)
+          ]);
+        }
+      }
+
+      const recarregado = await client.query(`
+        SELECT c.*,
+               COALESCE((
+                 SELECT jsonb_agg(
+                   jsonb_build_object(
+                     'id', ci.item_origem_id,
+                     'item_origem_id', ci.item_origem_id,
+                     'grupo_requisicao', ci.grupo_requisicao,
+                     'table_source', ci.table_source,
+                     'produto_codigo', ci.produto_codigo,
+                     'produto_descricao', ci.produto_descricao,
+                     'quantidade', ci.quantidade
+                   )
+                   ORDER BY ci.id
+                 )
+                 FROM compras.cotacoes_itens ci
+                 WHERE ci.cotacao_id = c.id
+               ), '[]'::jsonb) AS itens_cotacao
+        FROM compras.cotacoes c
+        WHERE c.id = $1
+      `, [id]);
+
+      await client.query('COMMIT');
+      rows = recarregado.rows;
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
     }
     
     res.json({ ok: true, cotacao: rows[0] });
