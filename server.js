@@ -13280,6 +13280,144 @@ async function ensureComprasSchema() {
         END IF;
       END $$;
     `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'compras'
+            AND table_name = 'historico_compras'
+        ) THEN
+          CREATE OR REPLACE FUNCTION compras.fn_sync_historico_compras_upsert()
+          RETURNS TRIGGER
+          LANGUAGE plpgsql
+          AS $fn$
+          DECLARE
+            v_row JSONB := to_jsonb(NEW);
+            v_grupo_requisicao TEXT;
+            v_status TEXT;
+            v_referencia TIMESTAMP;
+          BEGIN
+            v_grupo_requisicao := NULLIF(BTRIM(v_row->>'grupo_requisicao'), '');
+            IF v_grupo_requisicao IS NULL THEN
+              RETURN NEW;
+            END IF;
+
+            v_status := NULLIF(BTRIM(v_row->>'status'), '');
+            IF v_status IS NULL OR LOWER(v_status) = 'carrinho' THEN
+              RETURN NEW;
+            END IF;
+
+            v_referencia := COALESCE(
+              NULLIF(v_row->>'updated_at', '')::timestamp,
+              NULLIF(v_row->>'created_at', '')::timestamp,
+              NULLIF(v_row->>'criado_em', '')::timestamp,
+              NOW()
+            );
+
+            UPDATE compras.historico_compras
+               SET status = v_status,
+                   tabela_origem = TG_TABLE_NAME,
+                   dados = v_row,
+                   created_at = v_referencia
+             WHERE grupo_requisicao = v_grupo_requisicao;
+
+            IF NOT FOUND THEN
+              BEGIN
+                INSERT INTO compras.historico_compras (
+                  grupo_requisicao,
+                  status,
+                  tabela_origem,
+                  dados,
+                  created_at
+                ) VALUES (
+                  v_grupo_requisicao,
+                  v_status,
+                  TG_TABLE_NAME,
+                  v_row,
+                  v_referencia
+                );
+              EXCEPTION WHEN unique_violation THEN
+                UPDATE compras.historico_compras
+                   SET status = v_status,
+                       tabela_origem = TG_TABLE_NAME,
+                       dados = v_row,
+                       created_at = v_referencia
+                 WHERE grupo_requisicao = v_grupo_requisicao;
+              END;
+            END IF;
+
+            RETURN NEW;
+          END;
+          $fn$;
+
+          DROP TRIGGER IF EXISTS trg_historico_compras_solicitacao_insert
+          ON compras.solicitacao_compras;
+          DROP TRIGGER IF EXISTS trg_historico_compras_solicitacao_upsert
+          ON compras.solicitacao_compras;
+
+          CREATE TRIGGER trg_historico_compras_solicitacao_upsert
+          AFTER INSERT OR UPDATE
+          ON compras.solicitacao_compras
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_sync_historico_compras_upsert();
+
+          DROP TRIGGER IF EXISTS trg_historico_compras_sem_cadastro_insert
+          ON compras.compras_sem_cadastro;
+          DROP TRIGGER IF EXISTS trg_historico_compras_sem_cadastro_upsert
+          ON compras.compras_sem_cadastro;
+
+          CREATE TRIGGER trg_historico_compras_sem_cadastro_upsert
+          AFTER INSERT OR UPDATE
+          ON compras.compras_sem_cadastro
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_sync_historico_compras_upsert();
+
+          UPDATE compras.historico_compras hc
+             SET status = src.status,
+                 tabela_origem = src.tabela_origem,
+                 dados = src.dados,
+                 created_at = src.referencia_at
+            FROM (
+              SELECT DISTINCT ON (NULLIF(BTRIM(s.grupo_requisicao), ''))
+                NULLIF(BTRIM(s.grupo_requisicao), '') AS grupo_requisicao,
+                NULLIF(BTRIM(s.status), '') AS status,
+                'solicitacao_compras'::text AS tabela_origem,
+                to_jsonb(s) AS dados,
+                COALESCE(
+                  NULLIF(to_jsonb(s)->>'updated_at', '')::timestamp,
+                  NULLIF(to_jsonb(s)->>'created_at', '')::timestamp,
+                  NULLIF(to_jsonb(s)->>'criado_em', '')::timestamp,
+                  NOW()
+                ) AS referencia_at
+              FROM compras.solicitacao_compras s
+              WHERE NULLIF(BTRIM(s.grupo_requisicao), '') IS NOT NULL
+                AND LOWER(COALESCE(BTRIM(s.status), '')) <> 'carrinho'
+              ORDER BY
+                NULLIF(BTRIM(s.grupo_requisicao), ''),
+                COALESCE(
+                  NULLIF(to_jsonb(s)->>'updated_at', '')::timestamp,
+                  NULLIF(to_jsonb(s)->>'created_at', '')::timestamp,
+                  NULLIF(to_jsonb(s)->>'criado_em', '')::timestamp,
+                  NOW()
+                ) DESC,
+                s.id DESC
+            ) src
+           WHERE hc.grupo_requisicao = src.grupo_requisicao
+             AND (
+               hc.status IS DISTINCT FROM src.status
+               OR hc.tabela_origem IS DISTINCT FROM src.tabela_origem
+               OR hc.dados IS DISTINCT FROM src.dados
+               OR hc.created_at IS DISTINCT FROM src.referencia_at
+             );
+
+          DELETE FROM compras.historico_compras
+          WHERE LOWER(COALESCE(BTRIM(status), '')) = 'carrinho';
+        END IF;
+      END $$;
+    `);
     
     console.log('[Compras] Schema e tabela garantidos com migrações aplicadas');
   } catch (e) {
