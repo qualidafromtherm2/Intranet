@@ -22279,14 +22279,14 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
       ? `
         <div style="margin-top:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-            <div style="font-size:11px;color:#6b7280;"><strong>Itens do Grupo:</strong></div>
+            <div style="font-size:11px;color:#6b7280;"><strong>Itens do Grupo:</strong> <span id="qtdItensGrupoCotacaoKanban" style="color:#374151;">0</span></div>
             <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <button
                 type="button"
                 id="btnFiltroItensGrupoCotacaoKanban"
                 onclick="alternarFiltroItensGrupoCotacaoKanban()"
                 style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
-                Mostrar pendentes
+                Mostrar tudo
               </button>
             </span>
           </div>
@@ -22296,6 +22296,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
               type="text"
               placeholder="Digite código ou descrição para buscar produto..."
               oninput="buscarProdutosNovoItemGrupoCotacaoKanban()"
+              onkeydown="atalhoBuscaNovoItemGrupoCotacaoKanban(event)"
               style="padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:11px;" />
             <div id="listaBuscaNovoItemGrupoCotacaoKanban" style="display:none;max-height:140px;overflow-y:auto;border:1px solid #d1d5db;border-radius:6px;background:#fff;"></div>
           </div>
@@ -22810,6 +22811,7 @@ window.removerLinkCotacaoKanban = function(index) {
 function renderizarItensGrupoCotacaoKanban() {
   const lista = document.getElementById('listaItensGrupoCotacaoKanban');
   const btnFiltro = document.getElementById('btnFiltroItensGrupoCotacaoKanban');
+  const qtdItensEl = document.getElementById('qtdItensGrupoCotacaoKanban');
   if (!lista) return;
 
   const todosItens = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
@@ -22818,7 +22820,7 @@ function renderizarItensGrupoCotacaoKanban() {
   const itemEmEdicaoQtd = Number(window.cotacaoKanbanEditQtdItemId || 0);
 
   if (btnFiltro) {
-    btnFiltro.textContent = modoFiltro === 'todos' ? 'Mostrar todos' : 'Mostrar pendentes';
+    btnFiltro.textContent = modoFiltro === 'todos' ? 'Mostrar pendentes' : 'Mostrar tudo';
     btnFiltro.style.background = modoFiltro === 'todos' ? '#ede9fe' : '#f3f4f6';
     btnFiltro.style.borderColor = modoFiltro === 'todos' ? '#c4b5fd' : '#d1d5db';
     btnFiltro.style.color = modoFiltro === 'todos' ? '#5b21b6' : '#374151';
@@ -22827,6 +22829,15 @@ function renderizarItensGrupoCotacaoKanban() {
   const itensFiltrados = modoFiltro === 'todos'
     ? todosItens
     : todosItens.filter(item => !usados.has(Number(item?.id)));
+
+  if (qtdItensEl) {
+    const total = todosItens.length;
+    const exibidos = itensFiltrados.length;
+    qtdItensEl.textContent = modoFiltro === 'todos' ? `${total}` : `${exibidos}/${total}`;
+    qtdItensEl.title = modoFiltro === 'todos'
+      ? `Mostrando ${total} item(ns)`
+      : `Mostrando ${exibidos} pendente(s) de ${total} item(ns)`;
+  }
 
   const itemPendente = window.cotacaoKanbanNovoItemPendente;
   const blocoPendente = itemPendente
@@ -22850,6 +22861,10 @@ function renderizarItensGrupoCotacaoKanban() {
 
   const listaItensHtml = itensFiltrados.map((grupoItem) => {
     const idItem = Number(grupoItem?.id);
+    const quantidadeValor = grupoItem?.quantidade;
+    const quantidadeTexto = (quantidadeValor === null || quantidadeValor === undefined || String(quantidadeValor).trim() === '')
+      ? '-'
+      : String(quantidadeValor);
     const jaSelecionado = (window.cotacaoKanbanItensSelecionados || []).some(item => Number(item?.id) === idItem);
     const editandoQtd = itemEmEdicaoQtd === idItem;
     return `
@@ -22861,11 +22876,11 @@ function renderizarItensGrupoCotacaoKanban() {
         <span style="flex:1;">${escapeHtml(grupoItem.produto_descricao || '-')}</span>
         ${editandoQtd
           ? `<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
-               <input id="inputQtdEditItemGrupoCotacaoKanban-${idItem}" type="number" min="0.0001" step="0.0001" value="${escapeHtml(String(grupoItem.quantidade ?? ''))}" style="width:86px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+               <input id="inputQtdEditItemGrupoCotacaoKanban-${idItem}" type="number" min="0.0001" step="0.0001" value="${escapeHtml(quantidadeTexto === '-' ? '' : quantidadeTexto)}" style="width:86px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
                <button type="button" onclick="event.stopPropagation(); salvarQuantidadeItemGrupoCotacaoKanban(${idItem})" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Salvar quantidade"><i class=\"fa-solid fa-check\"></i></button>
                <button type="button" onclick="event.stopPropagation(); cancelarEdicaoQuantidadeItemGrupoCotacaoKanban()" style="background:#6b7280;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Cancelar"><i class=\"fa-solid fa-times\"></i></button>
              </span>`
-          : `<span style="color:#6b7280;white-space:nowrap;">Qtd: ${escapeHtml(String(grupoItem.quantidade ?? '-'))}</span>
+           : `<span style="color:#1f2937;white-space:nowrap;font-weight:700;">Qtd: ${escapeHtml(quantidadeTexto)}</span>
              <span style="display:inline-flex;align-items:center;gap:6px;">
                <button
                  type="button"
@@ -22942,6 +22957,7 @@ window.buscarProdutosNovoItemGrupoCotacaoKanban = async function() {
   const termo = (input?.value || '').trim();
   const seq = (window.cotacaoKanbanBuscaReqSeq || 0) + 1;
   window.cotacaoKanbanBuscaReqSeq = seq;
+  window.cotacaoKanbanBuscaTermoAtual = termo;
 
   if (termo.length < 2) {
     window.cotacaoKanbanBuscaResultados = [];
@@ -22980,9 +22996,23 @@ function renderizarBuscaNovoItemGrupoCotacaoKanban(mensagemErro = '') {
   }
 
   const resultados = Array.isArray(window.cotacaoKanbanBuscaResultados) ? window.cotacaoKanbanBuscaResultados : [];
+  const termoAtual = String(window.cotacaoKanbanBuscaTermoAtual || '').trim();
   if (resultados.length === 0) {
-    container.style.display = 'none';
-    container.innerHTML = '';
+    if (termoAtual.length >= 2) {
+      container.style.display = 'block';
+      container.innerHTML = `
+        <button
+          type="button"
+          onclick="adicionarProdutoSemCadastroDaBuscaCotacaoKanban()"
+          style="width:100%;text-align:left;border:none;background:#fffbeb;padding:8px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:999px;background:#10b981;color:#fff;font-weight:700;">+</span>
+          <span style="color:#92400e;">Não encontrado. Adicionar sem cadastro: <strong>${escapeHtml(termoAtual)}</strong> (Enter)</span>
+        </button>
+      `;
+    } else {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
     return;
   }
 
@@ -22997,6 +23027,55 @@ function renderizarBuscaNovoItemGrupoCotacaoKanban(mensagemErro = '') {
     </button>
   `).join('');
 }
+
+window.atalhoBuscaNovoItemGrupoCotacaoKanban = async function(event) {
+  if (!event || event.key !== 'Enter') return;
+  const resultados = Array.isArray(window.cotacaoKanbanBuscaResultados) ? window.cotacaoKanbanBuscaResultados : [];
+  const termoAtual = String(window.cotacaoKanbanBuscaTermoAtual || '').trim();
+  if (resultados.length === 0 && termoAtual.length >= 2) {
+    event.preventDefault();
+    await adicionarProdutoSemCadastroDaBuscaCotacaoKanban();
+  }
+};
+
+async function obterCodigoProvisorioCotacaoKanban() {
+  const resp = await fetch('/api/compras/proximo-codigo-provisorio', { credentials: 'include' });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data?.ok || !data?.codigo) {
+    throw new Error(data?.erro || data?.error || 'Erro ao gerar código provisório');
+  }
+  return String(data.codigo || '').trim();
+}
+
+window.adicionarProdutoSemCadastroDaBuscaCotacaoKanban = async function() {
+  const termo = String(window.cotacaoKanbanBuscaTermoAtual || '').trim();
+  if (termo.length < 2) {
+    alert('Digite ao menos 2 caracteres para adicionar sem cadastro.');
+    return;
+  }
+
+  try {
+    const codigoProvisorio = await obterCodigoProvisorioCotacaoKanban();
+    window.cotacaoKanbanNovoItemPendente = {
+      codigo: codigoProvisorio,
+      descricao: termo,
+      codigo_produto_omie: null,
+      quantidade: 1,
+      sem_cadastro: true
+    };
+
+    window.cotacaoKanbanBuscaResultados = [];
+    window.cotacaoKanbanBuscaTermoAtual = '';
+    const input = document.getElementById('novoItemGrupoBuscaCotacaoKanban');
+    if (input) input.value = '';
+
+    renderizarBuscaNovoItemGrupoCotacaoKanban();
+    renderizarItensGrupoCotacaoKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao criar item sem cadastro:', err);
+    alert('Erro ao criar item sem cadastro: ' + err.message);
+  }
+};
 
 window.selecionarProdutoBuscaNovoItemGrupoCotacaoKanban = function(index) {
   const idx = Number(index);

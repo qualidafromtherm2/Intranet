@@ -14978,46 +14978,30 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto 
 // Verifica em produtos_omie E compras.solicitacao_compras para evitar duplicatas
 app.get('/api/compras/proximo-codigo-provisorio', async (req, res) => {
   try {
-    // Busca o último código provisório em produtos_omie
-    const query1 = `
-      SELECT codigo 
-      FROM produtos_omie 
-      WHERE codigo LIKE 'CODPROV - %' 
-      ORDER BY codigo DESC 
-      LIMIT 1
-    `;
-    
-    // Busca o último código provisório em compras.solicitacao_compras
-    const query2 = `
-      SELECT produto_codigo AS codigo
-      FROM compras.solicitacao_compras 
-      WHERE produto_codigo LIKE 'CODPROV - %' 
-      ORDER BY produto_codigo DESC 
-      LIMIT 1
-    `;
-    
-    const result1 = await pool.query(query1);
-    const result2 = await pool.query(query2);
-    
-    let maiorNumero = 0; // Inicia com 0 (próximo será 1)
-    
-    // Verifica o maior número em produtos_omie
-    if (result1.rows.length > 0) {
-      const codigo = result1.rows[0].codigo;
-      const match = codigo.match(/CODPROV - (\d+)/);
-      if (match && match[1]) {
-        maiorNumero = Math.max(maiorNumero, parseInt(match[1], 10));
-      }
-    }
-    
-    // Verifica o maior número em compras.solicitacao_compras
-    if (result2.rows.length > 0) {
-      const codigo = result2.rows[0].codigo;
-      const match = codigo.match(/CODPROV - (\d+)/);
-      if (match && match[1]) {
-        maiorNumero = Math.max(maiorNumero, parseInt(match[1], 10));
-      }
-    }
+    const { rows } = await pool.query(`
+      WITH codigos AS (
+        SELECT SUBSTRING(p.codigo FROM 'CODPROV\\s*-\\s*([0-9]+)')::INT AS numero
+        FROM public.produtos_omie p
+        WHERE p.codigo ILIKE 'CODPROV%'
+
+        UNION ALL
+
+        SELECT SUBSTRING(sc.produto_codigo FROM 'CODPROV\\s*-\\s*([0-9]+)')::INT AS numero
+        FROM compras.solicitacao_compras sc
+        WHERE sc.produto_codigo ILIKE 'CODPROV%'
+
+        UNION ALL
+
+        SELECT SUBSTRING(csc.produto_codigo FROM 'CODPROV\\s*-\\s*([0-9]+)')::INT AS numero
+        FROM compras.compras_sem_cadastro csc
+        WHERE csc.produto_codigo ILIKE 'CODPROV%'
+      )
+      SELECT COALESCE(MAX(numero), 0) AS maior_numero
+      FROM codigos
+      WHERE numero IS NOT NULL
+    `);
+
+    const maiorNumero = Number(rows?.[0]?.maior_numero || 0);
     
     // Próximo número é o maior encontrado + 1
     const proximoNumero = maiorNumero + 1;
