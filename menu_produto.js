@@ -22139,6 +22139,11 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
     window.cotacaoKanbanMoeda = 'BRL';
     window.cotacaoKanbanEdicaoId = null;
+    window.cotacaoKanbanEditandoDetalhes = false;
+    window.cotacaoKanbanEditQtdItemId = null;
+    window.cotacaoKanbanBuscaResultados = [];
+    window.cotacaoKanbanNovoItemPendente = null;
+    window.cotacaoKanbanBuscaReqSeq = 0;
 
     modalTitulo.textContent = grupoModal
       ? `Cotação - Grupo ${grupoModal}`
@@ -22275,13 +22280,24 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
         <div style="margin-top:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
             <div style="font-size:11px;color:#6b7280;"><strong>Itens do Grupo:</strong></div>
-            <button
-              type="button"
-              id="btnFiltroItensGrupoCotacaoKanban"
-              onclick="alternarFiltroItensGrupoCotacaoKanban()"
-              style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
-              Mostrar pendentes
-            </button>
+            <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button
+                type="button"
+                id="btnFiltroItensGrupoCotacaoKanban"
+                onclick="alternarFiltroItensGrupoCotacaoKanban()"
+                style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+                Mostrar pendentes
+              </button>
+            </span>
+          </div>
+          <div style="margin-top:8px;display:grid;gap:6px;">
+            <input
+              id="novoItemGrupoBuscaCotacaoKanban"
+              type="text"
+              placeholder="Digite código ou descrição para buscar produto..."
+              oninput="buscarProdutosNovoItemGrupoCotacaoKanban()"
+              style="padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:11px;" />
+            <div id="listaBuscaNovoItemGrupoCotacaoKanban" style="display:none;max-height:140px;overflow-y:auto;border:1px solid #d1d5db;border-radius:6px;background:#fff;"></div>
           </div>
           <div id="listaItensGrupoCotacaoKanban" style="margin-top:6px;display:grid;gap:4px;max-height:160px;overflow-y:auto;"></div>
         </div>
@@ -22289,27 +22305,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
       : '';
 
     const html = `
-      <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
-        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-          <span style="display:inline-flex;align-items:center;gap:8px;">
-            <i class="fa-solid fa-clipboard-check"></i>
-            <span>Detalhes do Item</span>
-          </span>
-          <span id="totalCotacoesKanbanResumo" style="display:inline-flex;align-items:center;gap:6px;background:#ffffff;border:1px solid #c4b5fd;border-radius:999px;padding:4px 10px;font-size:12px;color:#5b21b6;">
-            <i class="fa-solid fa-calculator"></i>
-            <strong>Total das cotações:</strong>
-            <span>R$ 0,00</span>
-          </span>
-        </h4>
-        <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
-          <div><strong>ID de referência:</strong> ${escapeHtml(String(window.cotacaoKanbanItemId || '-'))}</div>
-          <div><strong>Grupo:</strong> ${escapeHtml(grupoModal || '-')}</div>
-          <div><strong>Objetivo da Compra:</strong> ${linkifyText(itemExibicao.objetivo_compra || '-')}</div>
-          <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
-          ${anexosItemHtml}
-          ${itensGrupoHtml}
-        </div>
-      </div>
+      <div id="detalhesItemCotacaoKanbanContainer"></div>
 
       <div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:20px;">
         <h4 style="margin:0 0 16px 0;font-size:14px;font-weight:700;color:#1f2937;">
@@ -22417,6 +22413,13 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     `;
 
     modalBody.innerHTML = html;
+    window.cotacaoKanbanDetalhesContexto = {
+      grupoModal,
+      linksCotacaoHtml,
+      anexosItemHtml,
+      itensGrupoHtml
+    };
+    renderizarDetalhesItemCotacaoKanban();
     atualizarEstadoFormularioCotacaoKanban();
     renderizarItensGrupoCotacaoKanban();
     renderizarItensSelecionadosCotacaoKanban();
@@ -22443,6 +22446,205 @@ function fecharModalCotacaoKanban() {
   window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
   window.cotacaoKanbanMoeda = 'BRL';
   window.cotacaoKanbanEdicaoId = null;
+  window.cotacaoKanbanEditandoDetalhes = false;
+  window.cotacaoKanbanEditQtdItemId = null;
+  window.cotacaoKanbanBuscaResultados = [];
+  window.cotacaoKanbanNovoItemPendente = null;
+  window.cotacaoKanbanBuscaReqSeq = 0;
+  window.cotacaoKanbanDetalhesContexto = null;
+}
+
+function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
+  const container = document.getElementById('detalhesItemCotacaoKanbanContainer');
+  if (!container) return;
+
+  const contextoFinal = {
+    ...(window.cotacaoKanbanDetalhesContexto || {}),
+    ...(contexto || {})
+  };
+
+  const item = window.cotacaoKanbanItem || {};
+  const itemId = window.cotacaoKanbanItemId || '-';
+  const grupoModal = contextoFinal.grupoModal || window.cotacaoKanbanGrupoRequisicao || '-';
+  const linksCotacaoHtml = contextoFinal.linksCotacaoHtml || '-';
+  const anexosItemHtml = contextoFinal.anexosItemHtml || '<div style="margin-top:8px;"><div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong> -</div></div>';
+  const itensGrupoHtml = contextoFinal.itensGrupoHtml || '';
+  const editando = window.cotacaoKanbanEditandoDetalhes === true;
+
+  const objetivoAtual = String(item.objetivo_compra || '').trim();
+  const linkAtual = (() => {
+    if (window.cotacaoKanbanTableSource === 'compras_sem_cadastro') {
+      const base = item.link || item.links;
+      if (Array.isArray(base)) return String(base[0] || '').trim();
+      return String(base || '').trim();
+    }
+    const base = item.anexo_url;
+    if (Array.isArray(base)) return String(base[0] || '').trim();
+    return String(base || '').trim();
+  })();
+
+  if (!editando) {
+    container.innerHTML = `
+      <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <span style="display:inline-flex;align-items:center;gap:8px;">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <span>Detalhes do Item</span>
+          </span>
+          <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span id="totalCotacoesKanbanResumo" style="display:inline-flex;align-items:center;gap:6px;background:#ffffff;border:1px solid #c4b5fd;border-radius:999px;padding:4px 10px;font-size:12px;color:#5b21b6;">
+              <i class="fa-solid fa-calculator"></i>
+              <strong>Total das cotações:</strong>
+              <span>R$ 0,00</span>
+            </span>
+            <button
+              type="button"
+              onclick="iniciarEdicaoDetalhesCotacaoKanban()"
+              style="background:#2563eb;color:#ffffff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-pen"></i>
+              Editar
+            </button>
+          </span>
+        </h4>
+        <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
+          <div><strong>ID de referência:</strong> ${escapeHtml(String(itemId))}</div>
+          <div><strong>Grupo:</strong> ${escapeHtml(String(grupoModal || '-'))}</div>
+          <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
+          <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
+          ${anexosItemHtml}
+          ${itensGrupoHtml}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
+      <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <span style="display:inline-flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-clipboard-check"></i>
+          <span>Detalhes do Item (Edição)</span>
+        </span>
+        <span id="totalCotacoesKanbanResumo" style="display:inline-flex;align-items:center;gap:6px;background:#ffffff;border:1px solid #c4b5fd;border-radius:999px;padding:4px 10px;font-size:12px;color:#5b21b6;">
+          <i class="fa-solid fa-calculator"></i>
+          <strong>Total das cotações:</strong>
+          <span>R$ 0,00</span>
+        </span>
+      </h4>
+      <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
+        <div><strong>ID de referência:</strong> ${escapeHtml(String(itemId))}</div>
+        <div><strong>Grupo:</strong> ${escapeHtml(String(grupoModal || '-'))}</div>
+        <label style="display:grid;gap:6px;">
+          <span style="font-weight:600;">Objetivo da Compra</span>
+          <textarea id="cotacaoKanbanDetalhesObjetivo" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;min-height:72px;resize:vertical;">${escapeHtml(objetivoAtual)}</textarea>
+        </label>
+        <label style="display:grid;gap:6px;">
+          <span style="font-weight:600;">Link</span>
+          <input id="cotacaoKanbanDetalhesLink" type="text" value="${escapeHtml(linkAtual)}" placeholder="https://..." style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+        </label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button type="button" onclick="cancelarEdicaoDetalhesCotacaoKanban()" style="background:#6b7280;color:#fff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-times"></i>
+          Cancelar
+        </button>
+        <button type="button" id="btnSalvarDetalhesCotacaoKanban" onclick="salvarDetalhesCotacaoKanban()" style="background:#10b981;color:#fff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <i class="fa-solid fa-floppy-disk"></i>
+          Salvar alterações
+        </button>
+      </div>
+      ${itensGrupoHtml}
+    </div>
+  `;
+}
+
+function iniciarEdicaoDetalhesCotacaoKanban() {
+  window.cotacaoKanbanEditandoDetalhes = true;
+  renderizarDetalhesItemCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+}
+
+function cancelarEdicaoDetalhesCotacaoKanban() {
+  window.cotacaoKanbanEditandoDetalhes = false;
+  renderizarDetalhesItemCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+}
+
+async function salvarDetalhesCotacaoKanban() {
+  const itemId = Number(window.cotacaoKanbanItemId);
+  if (!Number.isInteger(itemId)) return;
+
+  const objetivoCompra = (document.getElementById('cotacaoKanbanDetalhesObjetivo')?.value || '').trim();
+  const link = (document.getElementById('cotacaoKanbanDetalhesLink')?.value || '').trim();
+  const tableSource = window.cotacaoKanbanTableSource === 'compras_sem_cadastro'
+    ? 'compras_sem_cadastro'
+    : 'solicitacao_compras';
+
+  const payload = {
+    table_source: tableSource,
+    objetivo_compra: objetivoCompra || null
+  };
+
+  if (tableSource === 'compras_sem_cadastro') {
+    payload.link = link || null;
+  } else {
+    payload.anexo_url = link || null;
+  }
+
+  const btnSalvar = document.getElementById('btnSalvarDetalhesCotacaoKanban');
+  const originalHtml = btnSalvar ? btnSalvar.innerHTML : '';
+  if (btnSalvar) {
+    btnSalvar.disabled = true;
+    btnSalvar.style.cursor = 'not-allowed';
+    btnSalvar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...';
+  }
+
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.error || 'Erro ao salvar detalhes do item');
+    }
+
+    window.cotacaoKanbanItem = {
+      ...(window.cotacaoKanbanItem || {}),
+      ...(data.item || {})
+    };
+
+    const linkExibicao = link
+      ? (() => {
+        const href = /^https?:\/\//i.test(link) ? link : `https://${link}`;
+        return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;">${escapeHtml(link)}</a>`;
+      })()
+      : '-';
+    window.cotacaoKanbanDetalhesContexto = {
+      ...(window.cotacaoKanbanDetalhesContexto || {}),
+      linksCotacaoHtml: linkExibicao
+    };
+
+    window.cotacaoKanbanEditandoDetalhes = false;
+    renderizarDetalhesItemCotacaoKanban();
+    renderizarItensGrupoCotacaoKanban();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+    alert('Detalhes do item atualizados com sucesso.');
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao salvar detalhes do item:', err);
+    alert('Erro ao salvar detalhes do item: ' + err.message);
+    if (btnSalvar) {
+      btnSalvar.disabled = false;
+      btnSalvar.style.cursor = 'pointer';
+      btnSalvar.innerHTML = originalHtml;
+    }
+  }
 }
 
 function atualizarEstadoFormularioCotacaoKanban() {
@@ -22613,6 +22815,7 @@ function renderizarItensGrupoCotacaoKanban() {
   const todosItens = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
   const usados = window.cotacaoKanbanItensUsados instanceof Set ? window.cotacaoKanbanItensUsados : new Set();
   const modoFiltro = window.cotacaoKanbanFiltroItensGrupo === 'todos' ? 'todos' : 'pendentes';
+  const itemEmEdicaoQtd = Number(window.cotacaoKanbanEditQtdItemId || 0);
 
   if (btnFiltro) {
     btnFiltro.textContent = modoFiltro === 'todos' ? 'Mostrar todos' : 'Mostrar pendentes';
@@ -22625,26 +22828,328 @@ function renderizarItensGrupoCotacaoKanban() {
     ? todosItens
     : todosItens.filter(item => !usados.has(Number(item?.id)));
 
-  if (itensFiltrados.length === 0) {
+  const itemPendente = window.cotacaoKanbanNovoItemPendente;
+  const blocoPendente = itemPendente
+    ? `
+      <div style="font-size:11px;color:#1f2937;background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:6px 8px;display:flex;justify-content:space-between;gap:8px;align-items:center;">
+        <span style="font-weight:700;color:#92400e;">${escapeHtml(itemPendente.codigo || '-')}</span>
+        <span style="flex:1;color:#78350f;">${escapeHtml(itemPendente.descricao || '-')}</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+          <input id="inputQtdNovoItemPendenteCotacaoKanban" type="number" min="0.0001" step="0.0001" value="${escapeHtml(String(itemPendente.quantidade || '1'))}" style="width:86px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+          <button type="button" onclick="salvarNovoItemPendenteCotacaoKanban()" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Salvar novo item"><i class=\"fa-solid fa-check\"></i></button>
+          <button type="button" onclick="cancelarNovoItemPendenteCotacaoKanban()" style="background:#6b7280;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Cancelar"><i class=\"fa-solid fa-times\"></i></button>
+        </span>
+      </div>
+    `
+    : '';
+
+  if (itensFiltrados.length === 0 && !blocoPendente) {
     lista.innerHTML = '<div style="font-size:12px;color:#9ca3af;text-align:center;padding:10px;border:1px dashed #d1d5db;border-radius:6px;background:#fafafa;">Nenhum item disponível neste filtro</div>';
     return;
   }
 
-  lista.innerHTML = itensFiltrados.map((grupoItem) => {
+  const listaItensHtml = itensFiltrados.map((grupoItem) => {
     const idItem = Number(grupoItem?.id);
     const jaSelecionado = (window.cotacaoKanbanItensSelecionados || []).some(item => Number(item?.id) === idItem);
+    const editandoQtd = itemEmEdicaoQtd === idItem;
     return `
       <div
-        draggable="true"
+        draggable="${editandoQtd ? 'false' : 'true'}"
         ondragstart="iniciarDragItemCotacaoKanban(event, ${Number.isInteger(idItem) ? idItem : 0})"
-        style="font-size:11px;color:#1f2937;background:${jaSelecionado ? '#dcfce7' : '#f8fafc'};border:1px solid ${jaSelecionado ? '#86efac' : '#e5e7eb'};border-radius:4px;padding:6px 8px;display:flex;justify-content:space-between;gap:8px;cursor:grab;">
+        style="font-size:11px;color:#1f2937;background:${jaSelecionado ? '#dcfce7' : '#f8fafc'};border:1px solid ${jaSelecionado ? '#86efac' : '#e5e7eb'};border-radius:4px;padding:6px 8px;display:flex;justify-content:space-between;gap:8px;cursor:grab;align-items:center;">
         <span style="font-weight:600;">${escapeHtml(grupoItem.produto_codigo || '-')}</span>
         <span style="flex:1;">${escapeHtml(grupoItem.produto_descricao || '-')}</span>
-        <span style="color:#6b7280;white-space:nowrap;">Qtd: ${escapeHtml(String(grupoItem.quantidade ?? '-'))}</span>
+        ${editandoQtd
+          ? `<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+               <input id="inputQtdEditItemGrupoCotacaoKanban-${idItem}" type="number" min="0.0001" step="0.0001" value="${escapeHtml(String(grupoItem.quantidade ?? ''))}" style="width:86px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;" />
+               <button type="button" onclick="event.stopPropagation(); salvarQuantidadeItemGrupoCotacaoKanban(${idItem})" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Salvar quantidade"><i class=\"fa-solid fa-check\"></i></button>
+               <button type="button" onclick="event.stopPropagation(); cancelarEdicaoQuantidadeItemGrupoCotacaoKanban()" style="background:#6b7280;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;" title="Cancelar"><i class=\"fa-solid fa-times\"></i></button>
+             </span>`
+          : `<span style="color:#6b7280;white-space:nowrap;">Qtd: ${escapeHtml(String(grupoItem.quantidade ?? '-'))}</span>
+             <span style="display:inline-flex;align-items:center;gap:6px;">
+               <button
+                 type="button"
+                 onclick="event.stopPropagation(); editarQuantidadeItemGrupoCotacaoKanban(${Number.isInteger(idItem) ? idItem : 0})"
+                 title="Editar quantidade"
+                 style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;">
+                 <i class="fa-solid fa-pen"></i>
+               </button>
+               <button
+                 type="button"
+                 onclick="event.stopPropagation(); excluirItemGrupoCotacaoKanban(${Number.isInteger(idItem) ? idItem : 0})"
+                 title="Excluir item"
+                 style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:4px 6px;font-size:11px;cursor:pointer;">
+                 <i class="fa-solid fa-trash"></i>
+               </button>
+             </span>`}
       </div>
     `;
   }).join('');
+
+  lista.innerHTML = `${blocoPendente}${listaItensHtml}`;
 }
+
+async function recarregarItensGrupoCotacaoKanban() {
+  const grupo = String(window.cotacaoKanbanGrupoRequisicao || '').trim();
+  const tableSource = String(window.cotacaoKanbanTableSource || '').trim();
+  if (!grupo || !tableSource) return;
+
+  const selecionadosAtuais = Array.isArray(window.cotacaoKanbanItensSelecionados)
+    ? window.cotacaoKanbanItensSelecionados
+    : [];
+
+  const resp = await fetch(
+    `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupo)}&table_source=${encodeURIComponent(tableSource)}`,
+    { credentials: 'include' }
+  );
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.error || 'Erro ao recarregar itens do grupo');
+  }
+
+  const itensGrupo = Array.isArray(data.itens) ? data.itens : [];
+  window.cotacaoKanbanItensGrupo = itensGrupo;
+  window.cotacaoKanbanEditQtdItemId = null;
+  window.cotacaoKanbanNovoItemPendente = null;
+
+  const mapaGrupo = new Map(itensGrupo.map(it => [Number(it?.id), it]));
+  window.cotacaoKanbanItensSelecionados = selecionadosAtuais
+    .map((sel) => {
+      const id = Number(sel?.id);
+      const atualizado = mapaGrupo.get(id);
+      if (!atualizado) return null;
+      return {
+        ...sel,
+        produto_codigo: atualizado.produto_codigo || sel.produto_codigo,
+        produto_descricao: atualizado.produto_descricao || sel.produto_descricao,
+        quantidade: atualizado.quantidade ?? sel.quantidade,
+        grupo_requisicao: atualizado.grupo_requisicao || sel.grupo_requisicao,
+        table_source: atualizado.table_source || sel.table_source
+      };
+    })
+    .filter(Boolean);
+
+  renderizarItensSelecionadosCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+}
+
+window.adicionarItemGrupoCotacaoKanban = async function() {
+  await salvarNovoItemPendenteCotacaoKanban();
+};
+
+window.buscarProdutosNovoItemGrupoCotacaoKanban = async function() {
+  const input = document.getElementById('novoItemGrupoBuscaCotacaoKanban');
+  const termo = (input?.value || '').trim();
+  const seq = (window.cotacaoKanbanBuscaReqSeq || 0) + 1;
+  window.cotacaoKanbanBuscaReqSeq = seq;
+
+  if (termo.length < 2) {
+    window.cotacaoKanbanBuscaResultados = [];
+    renderizarBuscaNovoItemGrupoCotacaoKanban();
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/produtos/search?q=${encodeURIComponent(termo)}&limit=20`, { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (seq !== window.cotacaoKanbanBuscaReqSeq) return;
+    if (!resp.ok) throw new Error(data.error || 'Erro ao buscar produtos');
+
+    const produtos = Array.isArray(data.produtos) ? data.produtos : [];
+    window.cotacaoKanbanBuscaResultados = produtos.map((p) => ({
+      codigo: String(p?.codigo || '').trim(),
+      descricao: String(p?.descricao || '').trim(),
+      codigo_produto_omie: (p?.codigo_produto ?? null)
+    })).filter((p) => p.codigo || p.descricao);
+    renderizarBuscaNovoItemGrupoCotacaoKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro na busca de produtos:', err);
+    window.cotacaoKanbanBuscaResultados = [];
+    renderizarBuscaNovoItemGrupoCotacaoKanban('Falha ao buscar produtos');
+  }
+};
+
+function renderizarBuscaNovoItemGrupoCotacaoKanban(mensagemErro = '') {
+  const container = document.getElementById('listaBuscaNovoItemGrupoCotacaoKanban');
+  if (!container) return;
+
+  if (mensagemErro) {
+    container.style.display = 'block';
+    container.innerHTML = `<div style="padding:8px;font-size:11px;color:#b91c1c;">${escapeHtml(mensagemErro)}</div>`;
+    return;
+  }
+
+  const resultados = Array.isArray(window.cotacaoKanbanBuscaResultados) ? window.cotacaoKanbanBuscaResultados : [];
+  if (resultados.length === 0) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'block';
+  container.innerHTML = resultados.map((produto, idx) => `
+    <button
+      type="button"
+      onclick="selecionarProdutoBuscaNovoItemGrupoCotacaoKanban(${idx})"
+      style="width:100%;text-align:left;border:none;border-bottom:1px solid #eef2f7;background:#fff;padding:7px 8px;cursor:pointer;font-size:11px;display:grid;gap:2px;">
+      <span style="font-weight:700;color:#1f2937;">${escapeHtml(produto.codigo || '-')}</span>
+      <span style="color:#4b5563;">${escapeHtml(produto.descricao || '-')}</span>
+    </button>
+  `).join('');
+}
+
+window.selecionarProdutoBuscaNovoItemGrupoCotacaoKanban = function(index) {
+  const idx = Number(index);
+  const resultados = Array.isArray(window.cotacaoKanbanBuscaResultados) ? window.cotacaoKanbanBuscaResultados : [];
+  const escolhido = resultados[idx];
+  if (!escolhido) return;
+
+  window.cotacaoKanbanNovoItemPendente = {
+    codigo: escolhido.codigo,
+    descricao: escolhido.descricao,
+    codigo_produto_omie: escolhido.codigo_produto_omie ?? null,
+    quantidade: 1
+  };
+
+  window.cotacaoKanbanBuscaResultados = [];
+  const input = document.getElementById('novoItemGrupoBuscaCotacaoKanban');
+  if (input) input.value = '';
+  renderizarBuscaNovoItemGrupoCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.cancelarNovoItemPendenteCotacaoKanban = function() {
+  window.cotacaoKanbanNovoItemPendente = null;
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.salvarNovoItemPendenteCotacaoKanban = async function() {
+  const grupo = String(window.cotacaoKanbanGrupoRequisicao || '').trim();
+  const tableSource = String(window.cotacaoKanbanTableSource || '').trim();
+  if (!grupo || !tableSource) {
+    alert('Grupo não identificado para adicionar item.');
+    return;
+  }
+
+  const pendente = window.cotacaoKanbanNovoItemPendente;
+  if (!pendente) {
+    alert('Selecione um produto na lista de busca antes de salvar.');
+    return;
+  }
+
+  const codigo = String(pendente.codigo || '').trim();
+  const descricao = String(pendente.descricao || '').trim();
+  const codigoProdutoOmie = pendente.codigo_produto_omie ?? null;
+  const qtdInput = document.getElementById('inputQtdNovoItemPendenteCotacaoKanban');
+  const quantidadeTxt = (qtdInput?.value || '').trim();
+
+  const quantidade = Number(String(quantidadeTxt).replace(',', '.'));
+  if (!codigo || !descricao) {
+    alert('Código e descrição são obrigatórios.');
+    return;
+  }
+  if (!Number.isFinite(quantidade) || quantidade <= 0) {
+    alert('Quantidade inválida.');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/compras/grupo-itens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        grupo_requisicao: grupo,
+        table_source: tableSource,
+        produto_codigo: String(codigo).trim(),
+        produto_descricao: String(descricao).trim(),
+        codigo_produto_omie: codigoProdutoOmie,
+        quantidade
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao adicionar item no grupo');
+
+    await recarregarItensGrupoCotacaoKanban();
+    if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+    alert('Item adicionado ao grupo com sucesso.');
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao adicionar item no grupo:', err);
+    alert('Erro ao adicionar item no grupo: ' + err.message);
+  }
+};
+
+window.editarQuantidadeItemGrupoCotacaoKanban = function(itemId) {
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id <= 0) return;
+
+  window.cotacaoKanbanEditQtdItemId = id;
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.cancelarEdicaoQuantidadeItemGrupoCotacaoKanban = function() {
+  window.cotacaoKanbanEditQtdItemId = null;
+  renderizarItensGrupoCotacaoKanban();
+};
+
+window.salvarQuantidadeItemGrupoCotacaoKanban = async function(itemId) {
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id <= 0) return;
+
+  const tableSource = String(window.cotacaoKanbanTableSource || '').trim();
+  const inputQtd = document.getElementById(`inputQtdEditItemGrupoCotacaoKanban-${id}`);
+  const novaQtdTxt = (inputQtd?.value || '').trim();
+
+  const novaQtd = Number(String(novaQtdTxt).replace(',', '.'));
+  if (!Number.isFinite(novaQtd) || novaQtd <= 0) {
+    alert('Quantidade inválida.');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/compras/itens/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource, quantidade: novaQtd })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao atualizar quantidade');
+
+    window.cotacaoKanbanEditQtdItemId = null;
+    await recarregarItensGrupoCotacaoKanban();
+    if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao editar quantidade do item:', err);
+    alert('Erro ao editar quantidade: ' + err.message);
+  }
+};
+
+window.excluirItemGrupoCotacaoKanban = async function(itemId) {
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id <= 0) return;
+  const tableSource = String(window.cotacaoKanbanTableSource || '').trim();
+
+  if (!confirm('Deseja excluir este item do grupo?')) return;
+
+  try {
+    const resp = await fetch(`/api/compras/itens/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao excluir item');
+
+    window.cotacaoKanbanEditQtdItemId = null;
+    await recarregarItensGrupoCotacaoKanban();
+    if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao excluir item do grupo:', err);
+    alert('Erro ao excluir item: ' + err.message);
+  }
+};
 
 function renderizarItensSelecionadosCotacaoKanban() {
   const lista = document.getElementById('listaItensSelecionadosCotacaoKanban');
@@ -23763,6 +24268,9 @@ window.retificarCotadoEscolha = retificarCotadoEscolha;
 window.cancelarCotadoEscolha = cancelarCotadoEscolha;
 window.abrirModalCotacaoKanban = abrirModalCotacaoKanban;
 window.fecharModalCotacaoKanban = fecharModalCotacaoKanban;
+window.iniciarEdicaoDetalhesCotacaoKanban = iniciarEdicaoDetalhesCotacaoKanban;
+window.cancelarEdicaoDetalhesCotacaoKanban = cancelarEdicaoDetalhesCotacaoKanban;
+window.salvarDetalhesCotacaoKanban = salvarDetalhesCotacaoKanban;
 window.registrarCotacaoKanban = registrarCotacaoKanban;
 window.adicionarAnexoCotacaoKanban = adicionarAnexoCotacaoKanban;
 window.removerAnexoCotacaoKanban = removerAnexoCotacaoKanban;

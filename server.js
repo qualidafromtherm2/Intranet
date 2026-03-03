@@ -17856,18 +17856,35 @@ app.get('/api/compras/minhas', async (req, res) => {
     }
     
     const { rows } = await pool.query(`
-      SELECT *
-      FROM (
+      WITH historico_recente AS (
+        SELECT DISTINCT ON (
+          hc.tabela_origem,
+          LOWER(TRIM(COALESCE(hc.grupo_requisicao, '')))
+        )
+          hc.id AS historico_id,
+          hc.tabela_origem AS table_source,
+          hc.grupo_requisicao,
+          hc.status,
+          hc.created_at
+        FROM compras.historico_compras hc
+        WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
+          AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+        ORDER BY
+          hc.tabela_origem,
+          LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
+          hc.created_at DESC NULLS LAST,
+          hc.id DESC
+      ),
+      origem AS (
         SELECT
           sc.id,
-          sc.numero_pedido,
+          sc.numero_pedido::text AS numero_pedido,
           sc.produto_codigo,
           sc.produto_descricao,
           sc.quantidade,
           po.unidade,
           sc.prazo_solicitado,
           sc.previsao_chegada,
-          sc.status,
           sc.observacao,
           sc.observacao_reprovacao,
           sc.observacao_retificacao,
@@ -17875,25 +17892,26 @@ app.get('/api/compras/minhas', async (req, res) => {
           sc.resp_inspecao_recebimento,
           sc.responsavel_pela_compra,
           sc.departamento,
-          sc.centro_custo,
+          sc.centro_custo::text AS centro_custo,
           sc.objetivo_compra,
           sc.fornecedor_nome,
-          sc.fornecedor_id,
+          sc.fornecedor_id::text AS fornecedor_id,
           sc.familia_produto,
           sc.grupo_requisicao,
-          sc.retorno_cotacao,
-          sc.categoria_compra_codigo,
+          sc.retorno_cotacao::text AS retorno_cotacao,
+          sc.categoria_compra_codigo::text AS categoria_compra_codigo,
           sc.categoria_compra_nome,
-          sc.codigo_omie,
-          sc.codigo_produto_omie,
+          sc.codigo_omie::text AS codigo_omie,
+          sc.codigo_produto_omie::text AS codigo_produto_omie,
           sc.requisicao_direta,
-          sc.anexos,
+          sc.anexos::text AS anexos,
           NULL::text AS link,
-          sc.cnumero AS "cNumero",
-          sc.ncodped AS "nCodPed",
+          sc.cnumero::text AS "cNumero",
+          sc.ncodped::text AS "nCodPed",
           sc.created_at,
           sc.updated_at,
-          'solicitacao_compras'::text AS table_source
+          'solicitacao_compras'::text AS table_source,
+          LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
@@ -17914,6 +17932,7 @@ app.get('/api/compras/minhas', async (req, res) => {
           LIMIT 1
         ) po ON TRUE
         WHERE TRIM(LOWER(COALESCE(sc.solicitante, ''))) = TRIM(LOWER($1))
+          AND TRIM(COALESCE(sc.grupo_requisicao, '')) <> ''
 
         UNION ALL
 
@@ -17926,7 +17945,6 @@ app.get('/api/compras/minhas', async (req, res) => {
           NULL::text AS unidade,
           NULL::date AS prazo_solicitado,
           NULL::date AS previsao_chegada,
-          csc.status,
           csc.observacao_recebimento AS observacao,
           csc.observacao_reprovacao,
           NULL::text AS observacao_retificacao,
@@ -17934,29 +17952,79 @@ app.get('/api/compras/minhas', async (req, res) => {
           csc.resp_inspecao_recebimento,
           NULL::text AS responsavel_pela_compra,
           csc.departamento,
-          csc.centro_custo,
+          csc.centro_custo::text AS centro_custo,
           csc.objetivo_compra,
           NULL::text AS fornecedor_nome,
-          NULL::integer AS fornecedor_id,
+          NULL::text AS fornecedor_id,
           NULL::text AS familia_produto,
           csc.grupo_requisicao,
-          csc.retorno_cotacao,
-          csc.categoria_compra_codigo,
+          csc.retorno_cotacao::text AS retorno_cotacao,
+          csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
           NULL::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
           NULL::boolean AS requisicao_direta,
-          csc.anexos,
-          csc.link,
+          csc.anexos::text AS anexos,
+          csc.link::text AS link,
           NULL::text AS "cNumero",
           NULL::text AS "nCodPed",
           csc.created_at,
           csc.updated_at,
-          'compras_sem_cadastro'::text AS table_source
+          'compras_sem_cadastro'::text AS table_source,
+          LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(LOWER(COALESCE(csc.solicitante, ''))) = TRIM(LOWER($1))
-      ) src
-      ORDER BY src.created_at DESC
+          AND TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
+      ),
+      origem_primeiro_item AS (
+        SELECT DISTINCT ON (o.table_source, o.grupo_key)
+          o.*
+        FROM origem o
+        ORDER BY o.table_source, o.grupo_key, o.created_at ASC NULLS FIRST, o.id ASC
+      )
+      SELECT
+        COALESCE(opi.id, hr.historico_id) AS id,
+        opi.numero_pedido,
+        opi.produto_codigo,
+        opi.produto_descricao,
+        opi.quantidade,
+        opi.unidade,
+        opi.prazo_solicitado,
+        opi.previsao_chegada,
+        hr.status,
+        opi.observacao,
+        opi.observacao_reprovacao,
+        opi.observacao_retificacao,
+        opi.solicitante,
+        opi.resp_inspecao_recebimento,
+        opi.responsavel_pela_compra,
+        opi.departamento,
+        opi.centro_custo,
+        opi.objetivo_compra,
+        opi.fornecedor_nome,
+        opi.fornecedor_id,
+        opi.familia_produto,
+        COALESCE(opi.grupo_requisicao, hr.grupo_requisicao) AS grupo_requisicao,
+        opi.retorno_cotacao,
+        opi.categoria_compra_codigo,
+        opi.categoria_compra_nome,
+        opi.codigo_omie,
+        opi.codigo_produto_omie,
+        opi.requisicao_direta,
+        opi.anexos,
+        opi.link,
+        opi."cNumero",
+        opi."nCodPed",
+        COALESCE(opi.created_at, hr.created_at) AS created_at,
+        COALESCE(opi.updated_at, hr.created_at) AS updated_at,
+        hr.table_source,
+        hr.historico_id,
+        hr.historico_id::text AS id_solicitante
+      FROM historico_recente hr
+      LEFT JOIN origem_primeiro_item opi
+        ON opi.table_source = hr.table_source
+       AND opi.grupo_key = LOWER(TRIM(COALESCE(hr.grupo_requisicao, '')))
+      ORDER BY COALESCE(opi.created_at, hr.created_at) DESC
       LIMIT 1000
     `, [solicitante]);
     
@@ -18546,121 +18614,30 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
 // GET /api/compras/todas - Lista todas as solicitações (para gestores)
 app.get('/api/compras/todas', async (req, res) => {
   try {
-    // Comentário: Traz itens de solicitacao_compras com identificação de origem
-    const { rows: solicitacoesBase } = await pool.query(`
-      SELECT 
-        sc.id,
-        sc.numero_pedido,
-        sc.produto_codigo,
-        sc.produto_descricao,
-        sc.quantidade,
-        po.unidade,
-        sc.prazo_solicitado,
-        sc.previsao_chegada,
-        sc.status,
-        sc.observacao,
-        sc.observacao_retificacao,
-        sc.solicitante,
-        sc.resp_inspecao_recebimento,
-        sc.responsavel_pela_compra,
-        sc.departamento,
-        sc.centro_custo,
-        sc.objetivo_compra,
-        sc.fornecedor_nome,
-        sc.fornecedor_id,
-        sc.familia_produto,
-        sc.grupo_requisicao,
-        sc.retorno_cotacao,
-        sc.categoria_compra_codigo,
-        sc.categoria_compra_nome,
-        sc.codigo_omie,
-        sc.codigo_produto_omie,
-        sc.requisicao_direta,
-        sc.anexos,
-        sc.cnumero AS "cNumero",
-        sc.ncodped AS "nCodPed",
-        sc.created_at,
-        sc.updated_at,
-        'solicitacao_compras' AS table_source
-      FROM compras.solicitacao_compras sc
-      LEFT JOIN LATERAL (
-        SELECT po.unidade
-        FROM public.produtos_omie po
-        WHERE (
-          po.codigo_produto::TEXT = COALESCE(
-            NULLIF(sc.codigo_produto_omie::TEXT, ''),
-            NULLIF(sc.codigo_omie::TEXT, '')
-          )
-          OR po.codigo::TEXT = sc.produto_codigo::TEXT
+    const { rows: solicitacoesHistorico } = await pool.query(`
+      WITH historico_recente AS (
+        SELECT DISTINCT ON (
+          hc.tabela_origem,
+          LOWER(TRIM(COALESCE(hc.grupo_requisicao, '')))
         )
-        ORDER BY CASE
-          WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_produto_omie::TEXT, '') THEN 1
-          WHEN po.codigo_produto::TEXT = NULLIF(sc.codigo_omie::TEXT, '') THEN 2
-          WHEN po.codigo::TEXT = sc.produto_codigo::TEXT THEN 3
-          ELSE 4
-        END
-        LIMIT 1
-      ) po ON TRUE
-      WHERE TRIM(LOWER(COALESCE(sc.status, ''))) NOT IN (
-        TRIM(LOWER('aguardando cotação')),
-        TRIM(LOWER('aguardando cotacao'))
-      )
-      ORDER BY sc.created_at DESC
-      LIMIT 1000
-    `);
-    
-    // Comentário: inclui itens de compras_sem_cadastro e mantém table_source para identificar origem dos dados
-    const { rows: solicitacoesSemCadastro } = await pool.query(`
-      SELECT
-        id,
-        NULL::text AS numero_pedido,
-        produto_codigo,
-        produto_descricao,
-        quantidade,
-        NULL::text AS unidade,
-        NULL::date AS prazo_solicitado,
-        NULL::date AS previsao_chegada,
-        status,
-        observacao_recebimento AS observacao,
-        NULL::text AS observacao_retificacao,
-        solicitante,
-        resp_inspecao_recebimento,
-        NULL::text AS responsavel_pela_compra,
-        departamento,
-        centro_custo,
-        objetivo_compra,
-        NULL::text AS fornecedor_nome,
-        NULL::integer AS fornecedor_id,
-        NULL::text AS familia_produto,
-        grupo_requisicao,
-        retorno_cotacao,
-        categoria_compra_codigo,
-        categoria_compra_nome,
-        NULL::text AS codigo_omie,
-        NULL::text AS codigo_produto_omie,
-        NULL::boolean AS requisicao_direta,
-        anexos,
-        link,
-        NULL::text AS "cNumero",
-        NULL::text AS "nCodPed",
-        created_at,
-        updated_at,
-        'compras_sem_cadastro' AS table_source
-      FROM compras.compras_sem_cadastro
-      WHERE TRIM(LOWER(COALESCE(status, ''))) NOT IN (
-        TRIM(LOWER('aguardando cotação')),
-        TRIM(LOWER('aguardando cotacao'))
-      )
-      ORDER BY created_at DESC
-      LIMIT 1000
-    `);
-
-    // Comentário: coluna "aguardando cotação" passa a vir da tabela historico_compras (1 registro por grupo_requisicao)
-    const { rows: solicitacoesHistoricoCotacao } = await pool.query(`
-      WITH origem AS (
+          hc.id AS historico_id,
+          hc.tabela_origem AS table_source,
+          hc.grupo_requisicao,
+          hc.status,
+          hc.created_at
+        FROM compras.historico_compras hc
+        WHERE hc.tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')
+          AND TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
+        ORDER BY
+          hc.tabela_origem,
+          LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))),
+          hc.created_at DESC NULLS LAST,
+          hc.id DESC
+      ),
+      origem AS (
         SELECT
-          'solicitacao_compras'::text AS table_source,
-          sc.id AS origem_id,
+          sc.id,
+          sc.numero_pedido::text AS numero_pedido,
           sc.produto_codigo,
           sc.produto_descricao,
           sc.quantidade,
@@ -18668,19 +18645,20 @@ app.get('/api/compras/todas', async (req, res) => {
           sc.prazo_solicitado,
           sc.previsao_chegada,
           sc.observacao,
+          sc.observacao_reprovacao,
           sc.observacao_retificacao,
           sc.solicitante,
           sc.resp_inspecao_recebimento,
           sc.responsavel_pela_compra,
           sc.departamento,
-          sc.centro_custo,
+          sc.centro_custo::text AS centro_custo,
           sc.objetivo_compra,
           sc.fornecedor_nome,
           sc.fornecedor_id::text AS fornecedor_id,
           sc.familia_produto,
           sc.grupo_requisicao,
-          sc.retorno_cotacao,
-          sc.categoria_compra_codigo,
+          sc.retorno_cotacao::text AS retorno_cotacao,
+          sc.categoria_compra_codigo::text AS categoria_compra_codigo,
           sc.categoria_compra_nome,
           sc.codigo_omie::text AS codigo_omie,
           sc.codigo_produto_omie::text AS codigo_produto_omie,
@@ -18691,6 +18669,7 @@ app.get('/api/compras/todas', async (req, res) => {
           sc.ncodped::text AS "nCodPed",
           sc.created_at,
           sc.updated_at,
+          'solicitacao_compras'::text AS table_source,
           LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) AS grupo_key
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
@@ -18716,8 +18695,8 @@ app.get('/api/compras/todas', async (req, res) => {
         UNION ALL
 
         SELECT
-          'compras_sem_cadastro'::text AS table_source,
-          csc.id AS origem_id,
+          csc.id,
+          NULL::text AS numero_pedido,
           csc.produto_codigo,
           csc.produto_descricao,
           csc.quantidade,
@@ -18725,19 +18704,20 @@ app.get('/api/compras/todas', async (req, res) => {
           NULL::date AS prazo_solicitado,
           NULL::date AS previsao_chegada,
           csc.observacao_recebimento AS observacao,
+          csc.observacao_reprovacao,
           NULL::text AS observacao_retificacao,
           csc.solicitante,
           csc.resp_inspecao_recebimento,
           NULL::text AS responsavel_pela_compra,
           csc.departamento,
-          csc.centro_custo,
+          csc.centro_custo::text AS centro_custo,
           csc.objetivo_compra,
           NULL::text AS fornecedor_nome,
           NULL::text AS fornecedor_id,
           NULL::text AS familia_produto,
           csc.grupo_requisicao,
-          csc.retorno_cotacao,
-          csc.categoria_compra_codigo,
+          csc.retorno_cotacao::text AS retorno_cotacao,
+          csc.categoria_compra_codigo::text AS categoria_compra_codigo,
           csc.categoria_compra_nome,
           NULL::text AS codigo_omie,
           NULL::text AS codigo_produto_omie,
@@ -18748,59 +18728,29 @@ app.get('/api/compras/todas', async (req, res) => {
           NULL::text AS "nCodPed",
           csc.created_at,
           csc.updated_at,
+          'compras_sem_cadastro'::text AS table_source,
           LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
       ),
       origem_primeiro_item AS (
         SELECT DISTINCT ON (o.table_source, o.grupo_key)
-          o.table_source,
-          o.grupo_key,
-          o.origem_id,
-          o.produto_codigo,
-          o.produto_descricao,
-          o.quantidade,
-          o.unidade,
-          o.prazo_solicitado,
-          o.previsao_chegada,
-          o.observacao,
-          o.observacao_retificacao,
-          o.solicitante,
-          o.resp_inspecao_recebimento,
-          o.responsavel_pela_compra,
-          o.departamento,
-          o.centro_custo,
-          o.objetivo_compra,
-          o.fornecedor_nome,
-          o.fornecedor_id,
-          o.familia_produto,
-          o.grupo_requisicao,
-          o.retorno_cotacao,
-          o.categoria_compra_codigo,
-          o.categoria_compra_nome,
-          o.codigo_omie,
-          o.codigo_produto_omie,
-          o.requisicao_direta,
-          o.anexos,
-          o.link,
-          o."cNumero",
-          o."nCodPed",
-          o.created_at,
-          o.updated_at
+          o.*
         FROM origem o
-        ORDER BY o.table_source, o.grupo_key, o.created_at ASC NULLS FIRST, o.origem_id ASC
+        ORDER BY o.table_source, o.grupo_key, o.created_at ASC NULLS FIRST, o.id ASC
       )
       SELECT
-        COALESCE(opi.origem_id, hc.id) AS id,
-        NULL::text AS numero_pedido,
+        COALESCE(opi.id, hr.historico_id) AS id,
+        opi.numero_pedido,
         opi.produto_codigo,
         opi.produto_descricao,
         opi.quantidade,
         opi.unidade,
         opi.prazo_solicitado,
         opi.previsao_chegada,
-        hc.status,
+        hr.status,
         opi.observacao,
+        opi.observacao_reprovacao,
         opi.observacao_retificacao,
         opi.solicitante,
         opi.resp_inspecao_recebimento,
@@ -18811,7 +18761,7 @@ app.get('/api/compras/todas', async (req, res) => {
         opi.fornecedor_nome,
         opi.fornecedor_id,
         opi.familia_produto,
-        hc.grupo_requisicao,
+        COALESCE(opi.grupo_requisicao, hr.grupo_requisicao) AS grupo_requisicao,
         opi.retorno_cotacao,
         opi.categoria_compra_codigo,
         opi.categoria_compra_nome,
@@ -18822,126 +18772,24 @@ app.get('/api/compras/todas', async (req, res) => {
         opi.link,
         opi."cNumero",
         opi."nCodPed",
-        hc.created_at,
-        COALESCE(opi.updated_at, hc.created_at) AS updated_at,
-        hc.tabela_origem AS table_source,
-        hc.id AS historico_id,
-        COALESCE(opi.origem_id, NULL) AS origem_item_id,
-        true AS is_historico_cotacao
-      FROM compras.historico_compras hc
+        COALESCE(opi.created_at, hr.created_at) AS created_at,
+        COALESCE(opi.updated_at, hr.created_at) AS updated_at,
+        hr.table_source,
+        hr.historico_id,
+        hr.historico_id::text AS id_solicitante
+      FROM historico_recente hr
       LEFT JOIN origem_primeiro_item opi
-        ON opi.table_source = hc.tabela_origem
-       AND opi.grupo_key = LOWER(TRIM(COALESCE(hc.grupo_requisicao, '')))
-      WHERE TRIM(COALESCE(hc.grupo_requisicao, '')) <> ''
-        AND TRIM(LOWER(COALESCE(hc.status, ''))) IN (
-          TRIM(LOWER('aguardando cotação')),
-          TRIM(LOWER('aguardando cotacao'))
-        )
-      ORDER BY hc.created_at DESC
+        ON opi.table_source = hr.table_source
+       AND opi.grupo_key = LOWER(TRIM(COALESCE(hr.grupo_requisicao, '')))
+      ORDER BY COALESCE(opi.created_at, hr.created_at) DESC
       LIMIT 1000
     `);
 
-    // Objetivo: gerar ID no formato "<auth_user.id>.<sequencia_por_created_at>"
-    // usando a sequência por solicitante considerando as duas tabelas base.
-    const { rows: idsSolicitanteRows } = await pool.query(`
-      WITH base AS (
-        SELECT
-          'solicitacao_compras'::text AS table_source,
-          sc.id::text AS item_id,
-          sc.solicitante,
-          sc.created_at,
-          NULLIF(TRIM(sc.grupo_requisicao), '') AS grupo_requisicao
-        FROM compras.solicitacao_compras sc
-        UNION ALL
-        SELECT
-          'compras_sem_cadastro'::text AS table_source,
-          csc.id::text AS item_id,
-          csc.solicitante,
-          csc.created_at,
-          NULLIF(TRIM(csc.grupo_requisicao), '') AS grupo_requisicao
-        FROM compras.compras_sem_cadastro csc
-      ),
-      base_normalizada AS (
-        SELECT
-          b.table_source,
-          b.item_id,
-          LOWER(TRIM(COALESCE(b.solicitante, ''))) AS solicitante_norm,
-          b.created_at,
-          CASE
-            WHEN b.grupo_requisicao IS NOT NULL
-              THEN LOWER(TRIM(b.grupo_requisicao))
-            ELSE ('__sem_grupo__:' || b.table_source || ':' || b.item_id)
-          END AS grupo_seq_key
-        FROM base b
-        WHERE TRIM(COALESCE(b.solicitante, '')) <> ''
-      ),
-      usuarios AS (
-        SELECT
-          au.id AS usuario_id,
-          LOWER(TRIM(COALESCE(au.username, ''))) AS username_norm
-        FROM public.auth_user au
-        WHERE TRIM(COALESCE(au.username, '')) <> ''
-      ),
-      grupos AS (
-        SELECT
-          bn.solicitante_norm,
-          bn.grupo_seq_key,
-          MIN(bn.created_at) AS created_at_grupo,
-          MIN(bn.item_id::bigint) AS item_ordem
-        FROM base_normalizada bn
-        GROUP BY bn.solicitante_norm, bn.grupo_seq_key
-      ),
-      grupos_ranqueados AS (
-        SELECT
-          g.solicitante_norm,
-          g.grupo_seq_key,
-          ROW_NUMBER() OVER (
-            PARTITION BY g.solicitante_norm
-            ORDER BY g.created_at_grupo ASC NULLS FIRST, g.item_ordem ASC, g.grupo_seq_key ASC
-          ) AS sequencia
-        FROM grupos g
-      ),
-      itens_ranqueados AS (
-        SELECT
-          bn.table_source,
-          bn.item_id,
-          bn.solicitante_norm,
-          gr.sequencia
-        FROM base_normalizada bn
-        INNER JOIN grupos_ranqueados gr
-          ON gr.solicitante_norm = bn.solicitante_norm
-         AND gr.grupo_seq_key = bn.grupo_seq_key
-      )
-      SELECT
-        ir.table_source,
-        ir.item_id,
-        u.usuario_id,
-        ir.sequencia,
-        CASE
-          WHEN u.usuario_id IS NULL THEN NULL
-          ELSE (u.usuario_id::text || '.' || ir.sequencia::text)
-        END AS id_solicitante
-      FROM itens_ranqueados ir
-      LEFT JOIN usuarios u
-        ON u.username_norm = ir.solicitante_norm
-    `);
+    solicitacoesHistorico.forEach((item) => {
+      item.id_solicitante = String(item?.historico_id || '').trim() || '-';
+    });
 
-    const mapaIdSolicitante = new Map();
-    for (const row of idsSolicitanteRows) {
-      const chave = `${row.table_source}:${row.item_id}`;
-      mapaIdSolicitante.set(chave, row.id_solicitante || '-');
-    }
-
-    const aplicarIdSolicitante = (item) => {
-      const chave = `${item.table_source}:${item.id}`;
-      item.id_solicitante = mapaIdSolicitante.get(chave) || '-';
-      return item;
-    };
-
-    solicitacoesBase.forEach(aplicarIdSolicitante);
-    solicitacoesSemCadastro.forEach(aplicarIdSolicitante);
-
-    const todasSolicitacoes = [...solicitacoesBase, ...solicitacoesSemCadastro, ...solicitacoesHistoricoCotacao]
+    const todasSolicitacoes = [...solicitacoesHistorico]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
       .slice(0, 1000);
     
@@ -19048,6 +18896,219 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao listar itens do grupo:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao listar itens do grupo' });
+  }
+});
+
+// POST /api/compras/grupo-itens - Adiciona novo item em um grupo_requisicao
+app.post('/api/compras/grupo-itens', express.json(), async (req, res) => {
+  try {
+    const grupoRequisicao = String(req.body?.grupo_requisicao || '').trim();
+    const tableSource = String(req.body?.table_source || '').trim();
+    const produtoCodigo = String(req.body?.produto_codigo || '').trim();
+    const produtoDescricao = String(req.body?.produto_descricao || '').trim();
+    const codigoProdutoOmieBody = String(req.body?.codigo_produto_omie ?? req.body?.produto_codigo_omie ?? '').trim();
+    const quantidadeRaw = req.body?.quantidade;
+    const quantidade = Number(String(quantidadeRaw ?? '').replace(',', '.'));
+
+    if (!grupoRequisicao) {
+      return res.status(400).json({ ok: false, error: 'grupo_requisicao é obrigatório' });
+    }
+    if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
+      return res.status(400).json({ ok: false, error: 'table_source inválido' });
+    }
+    if (!produtoCodigo) {
+      return res.status(400).json({ ok: false, error: 'produto_codigo é obrigatório' });
+    }
+    if (!produtoDescricao) {
+      return res.status(400).json({ ok: false, error: 'produto_descricao é obrigatório' });
+    }
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      return res.status(400).json({ ok: false, error: 'quantidade inválida' });
+    }
+
+    if (tableSource === 'solicitacao_compras') {
+      let codigoProdutoOmie = codigoProdutoOmieBody || null;
+
+      if (!codigoProdutoOmie) {
+        try {
+          const { rows: produtoRows } = await pool.query(
+            `
+              SELECT codigo_produto
+              FROM public.produtos_omie
+              WHERE TRIM(codigo::text) = TRIM($1::text)
+              ORDER BY codigo_produto ASC
+              LIMIT 1
+            `,
+            [produtoCodigo]
+          );
+          codigoProdutoOmie = produtoRows[0]?.codigo_produto != null
+            ? String(produtoRows[0].codigo_produto).trim()
+            : null;
+        } catch (lookupErr) {
+          console.warn('[Compras] Aviso ao resolver codigo_produto_omie por produto_codigo:', lookupErr.message);
+        }
+      }
+
+      const codigoProdutoOmieParam = (() => {
+        if (codigoProdutoOmie == null) return null;
+        const valor = String(codigoProdutoOmie).trim();
+        if (!valor) return null;
+        return /^\d+$/.test(valor) ? valor : null;
+      })();
+
+      const { rows } = await pool.query(`
+        WITH ref AS (
+          SELECT *
+          FROM compras.solicitacao_compras
+          WHERE LOWER(TRIM(COALESCE(grupo_requisicao, ''))) = LOWER(TRIM($1))
+          ORDER BY created_at ASC NULLS FIRST, id ASC
+          LIMIT 1
+        )
+        INSERT INTO compras.solicitacao_compras (
+          numero_pedido,
+          produto_codigo,
+          produto_descricao,
+          quantidade,
+          prazo_solicitado,
+          previsao_chegada,
+          status,
+          observacao,
+          observacao_reprovacao,
+          observacao_retificacao,
+          solicitante,
+          resp_inspecao_recebimento,
+          responsavel_pela_compra,
+          departamento,
+          centro_custo,
+          objetivo_compra,
+          fornecedor_nome,
+          fornecedor_id,
+          familia_produto,
+          grupo_requisicao,
+          retorno_cotacao,
+          categoria_compra_codigo,
+          categoria_compra_nome,
+          codigo_omie,
+          codigo_produto_omie,
+          requisicao_direta,
+          anexos,
+          anexo_url,
+          cnumero,
+          ncodped,
+          created_at,
+          updated_at
+        )
+        SELECT
+          ref.numero_pedido,
+          $2,
+          $3,
+          $4,
+          ref.prazo_solicitado,
+          ref.previsao_chegada,
+          ref.status,
+          ref.observacao,
+          ref.observacao_reprovacao,
+          ref.observacao_retificacao,
+          ref.solicitante,
+          ref.resp_inspecao_recebimento,
+          ref.responsavel_pela_compra,
+          ref.departamento,
+          ref.centro_custo,
+          ref.objetivo_compra,
+          ref.fornecedor_nome,
+          ref.fornecedor_id,
+          ref.familia_produto,
+          ref.grupo_requisicao,
+          ref.retorno_cotacao,
+          ref.categoria_compra_codigo,
+          ref.categoria_compra_nome,
+          ref.codigo_omie,
+          CAST(NULLIF(TRIM($5::text), '') AS BIGINT),
+          ref.requisicao_direta,
+          ref.anexos,
+          ref.anexo_url,
+          ref.cnumero,
+          ref.ncodped,
+          NOW(),
+          NOW()
+        FROM ref
+        RETURNING *
+      `, [grupoRequisicao, produtoCodigo, produtoDescricao, quantidade, codigoProdutoOmieParam]);
+
+      if (!rows.length) {
+        return res.status(404).json({ ok: false, error: 'Grupo não encontrado para adicionar item' });
+      }
+
+      return res.json({ ok: true, item: rows[0], table_source: tableSource });
+    }
+
+    const { rows } = await pool.query(`
+      WITH ref AS (
+        SELECT *
+        FROM compras.compras_sem_cadastro
+        WHERE LOWER(TRIM(COALESCE(grupo_requisicao, ''))) = LOWER(TRIM($1))
+        ORDER BY created_at ASC NULLS FIRST, id ASC
+        LIMIT 1
+      )
+      INSERT INTO compras.compras_sem_cadastro (
+        produto_codigo,
+        produto_descricao,
+        quantidade,
+        departamento,
+        centro_custo,
+        categoria_compra_codigo,
+        categoria_compra_nome,
+        objetivo_compra,
+        retorno_cotacao,
+        resp_inspecao_recebimento,
+        observacao_recebimento,
+        status,
+        solicitante,
+        anexos,
+        link,
+        grupo_requisicao,
+        numero_pedido,
+        ncodped,
+        cod_req_compra,
+        cod_int_req_compra,
+        created_at,
+        updated_at
+      )
+      SELECT
+        $2,
+        $3,
+        $4,
+        ref.departamento,
+        ref.centro_custo,
+        ref.categoria_compra_codigo,
+        ref.categoria_compra_nome,
+        ref.objetivo_compra,
+        ref.retorno_cotacao,
+        ref.resp_inspecao_recebimento,
+        ref.observacao_recebimento,
+        ref.status,
+        ref.solicitante,
+        ref.anexos,
+        ref.link,
+        ref.grupo_requisicao,
+        ref.numero_pedido,
+        ref.ncodped,
+        ref.cod_req_compra,
+        ref.cod_int_req_compra,
+        NOW(),
+        NOW()
+      FROM ref
+      RETURNING *
+    `, [grupoRequisicao, produtoCodigo, produtoDescricao, quantidade]);
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Grupo não encontrado para adicionar item' });
+    }
+
+    return res.json({ ok: true, item: rows[0], table_source: tableSource });
+  } catch (err) {
+    console.error('[Compras] Erro ao adicionar item no grupo:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao adicionar item no grupo' });
   }
 });
 
@@ -21118,6 +21179,137 @@ app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
   } catch (err) {
     console.error('[Cotações] Erro ao atualizar status:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar status da cotação' });
+  }
+});
+
+// Endpoint para editar detalhes de um item de compra
+app.put('/api/compras/itens/:id', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const {
+      table_source,
+      produto_codigo,
+      produto_descricao,
+      quantidade,
+      departamento,
+      retorno_cotacao,
+      objetivo_compra,
+      prazo_solicitado,
+      link,
+      anexo_url
+    } = req.body || {};
+
+    let tableSource = table_source;
+
+    if (!tableSource) {
+      const { rows: fromSolicitacao } = await pool.query(
+        'SELECT id FROM compras.solicitacao_compras WHERE id = $1',
+        [id]
+      );
+
+      if (fromSolicitacao.length > 0) {
+        tableSource = 'solicitacao_compras';
+      } else {
+        const { rows: fromSemCadastro } = await pool.query(
+          'SELECT id FROM compras.compras_sem_cadastro WHERE id = $1',
+          [id]
+        );
+        if (fromSemCadastro.length > 0) {
+          tableSource = 'compras_sem_cadastro';
+        }
+      }
+    }
+
+    if (!tableSource) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado em nenhuma tabela' });
+    }
+
+    const tableName = tableSource === 'compras_sem_cadastro'
+      ? 'compras.compras_sem_cadastro'
+      : 'compras.solicitacao_compras';
+
+    const sets = [];
+    const values = [];
+    let idx = 1;
+
+    if (typeof produto_codigo !== 'undefined') {
+      sets.push(`produto_codigo = $${idx++}`);
+      values.push(String(produto_codigo || '').trim() || null);
+    }
+
+    if (typeof produto_descricao !== 'undefined') {
+      sets.push(`produto_descricao = $${idx++}`);
+      values.push(String(produto_descricao || '').trim() || null);
+    }
+
+    if (typeof quantidade !== 'undefined') {
+      const qtdNumber = Number(String(quantidade).replace(',', '.'));
+      if (!Number.isFinite(qtdNumber) || qtdNumber <= 0) {
+        return res.status(400).json({ ok: false, error: 'Quantidade inválida' });
+      }
+      sets.push(`quantidade = $${idx++}`);
+      values.push(qtdNumber);
+    }
+
+    if (typeof departamento !== 'undefined') {
+      sets.push(`departamento = $${idx++}`);
+      values.push(String(departamento || '').trim() || null);
+    }
+
+    if (typeof retorno_cotacao !== 'undefined') {
+      sets.push(`retorno_cotacao = $${idx++}`);
+      values.push(String(retorno_cotacao || '').trim() || null);
+    }
+
+    if (typeof objetivo_compra !== 'undefined') {
+      sets.push(`objetivo_compra = $${idx++}`);
+      values.push(String(objetivo_compra || '').trim() || null);
+    }
+
+    if (tableSource === 'solicitacao_compras' && typeof prazo_solicitado !== 'undefined') {
+      sets.push(`prazo_solicitado = $${idx++}`);
+      values.push(prazo_solicitado || null);
+    }
+
+    if (tableSource === 'compras_sem_cadastro' && typeof link !== 'undefined') {
+      sets.push(`link = $${idx++}`);
+      values.push(String(link || '').trim() || null);
+    }
+
+    if (tableSource === 'solicitacao_compras' && typeof anexo_url !== 'undefined') {
+      sets.push(`anexo_url = $${idx++}`);
+      values.push(String(anexo_url || '').trim() || null);
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+    }
+
+    sets.push('updated_at = NOW()');
+    values.push(id);
+
+    const { rows } = await pool.query(
+      `
+        UPDATE ${tableName}
+        SET ${sets.join(', ')}
+        WHERE id = $${idx}
+        RETURNING *
+      `,
+      values
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    res.json({ ok: true, item: rows[0], table_source: tableSource });
+  } catch (err) {
+    console.error('[Compras] Erro ao editar detalhes do item:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao editar detalhes do item' });
   }
 });
 
