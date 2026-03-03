@@ -13628,9 +13628,11 @@ async function carregarCarrinhoComprasDoBanco() {
         categoria_compra_nome: item.categoria_compra_nome,
         codigo_omie: item.codigo_omie,
         requisicao_direta: item.requisicao_direta,
+        anexo_url: item.anexo_url || null,
         grupo_requisicao: item.grupo_requisicao || null,
         np: item.grupo_requisicao || item.np || null,
         anexo: item.anexos || null,
+        anexos: item.anexos || null,
         url_imagem: urlImagem  // Adiciona URL da imagem do cache
       };
     });
@@ -13907,7 +13909,231 @@ function configurarPrazoSolicitadoGlobal() {
   input.value = primeiroComPrazo?.prazo_solicitado || '';
 }
 
+async function converterArquivoParaBase64(file) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        resolve(String(reader.result || '').split(',')[1] || '');
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function atualizarInfoAnexoGlobalCarrinho(fileName = '') {
+  const info = document.getElementById('carrinhoAnexosGlobalInfo');
+  if (!info) return;
+  if (!fileName) {
+    info.style.display = 'none';
+    info.textContent = '';
+    return;
+  }
+  info.style.display = 'block';
+  info.textContent = `Arquivo selecionado: ${fileName}`;
+}
+
+function configurarObjetivoCompraGlobalCarrinho() {
+  const input = document.getElementById('carrinhoObjetivoCompraGlobal');
+  if (!input) return;
+
+  if (!input.dataset.bound) {
+    input.addEventListener('change', async () => {
+      const valor = (input.value || '').trim();
+      const carrinho = window.carrinhoCompras || [];
+      await Promise.all(carrinho.map(async (item) => {
+        item.objetivo_compra = valor;
+        await atualizarItemCarrinhoNoBanco(item);
+      }));
+    });
+    input.dataset.bound = '1';
+  }
+
+  const carrinho = window.carrinhoCompras || [];
+  const primeiroComObjetivo = carrinho.find(item => String(item.objetivo_compra || '').trim());
+  input.value = primeiroComObjetivo?.objetivo_compra || '';
+}
+
+function configurarAnexoUrlGlobalCarrinho() {
+  const input = document.getElementById('carrinhoAnexoUrlGlobal');
+  if (!input) return;
+
+  if (!input.dataset.bound) {
+    input.addEventListener('change', async () => {
+      const valor = (input.value || '').trim();
+      const carrinho = window.carrinhoCompras || [];
+      await Promise.all(carrinho.map(async (item) => {
+        item.anexo_url = valor || null;
+        await atualizarItemCarrinhoNoBanco(item);
+      }));
+    });
+    input.dataset.bound = '1';
+  }
+
+  const carrinho = window.carrinhoCompras || [];
+  const primeiroComUrl = carrinho.find(item => String(item.anexo_url || '').trim());
+  input.value = primeiroComUrl?.anexo_url || '';
+}
+
+function configurarAnexoArquivoGlobalCarrinho() {
+  const input = document.getElementById('carrinhoAnexosGlobal');
+  if (!input) return;
+
+  if (!input.dataset.bound) {
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files.length > 0 ? input.files[0] : null;
+      atualizarInfoAnexoGlobalCarrinho(file?.name || '');
+      if (!file) return;
+
+      const anexoMeta = {
+        nome: file.name,
+        tipo: file.type,
+        tamanho: file.size
+      };
+
+      const carrinho = window.carrinhoCompras || [];
+      await Promise.all(carrinho.map(async (item) => {
+        item.anexo = anexoMeta;
+        item.anexos = [anexoMeta];
+        await atualizarItemCarrinhoNoBanco(item);
+      }));
+    });
+    input.dataset.bound = '1';
+  }
+
+  const carrinho = window.carrinhoCompras || [];
+  const primeiroComAnexo = carrinho.find(item => {
+    if (Array.isArray(item.anexos) && item.anexos.length > 0) return true;
+    if (item.anexo && typeof item.anexo === 'object' && item.anexo.nome) return true;
+    return false;
+  });
+
+  let nomeArquivo = '';
+  if (primeiroComAnexo) {
+    if (Array.isArray(primeiroComAnexo.anexos) && primeiroComAnexo.anexos[0]?.nome) {
+      nomeArquivo = primeiroComAnexo.anexos[0].nome;
+    } else if (primeiroComAnexo.anexo?.nome) {
+      nomeArquivo = primeiroComAnexo.anexo.nome;
+    }
+  }
+  atualizarInfoAnexoGlobalCarrinho(nomeArquivo);
+}
+
+function configurarRetornoCotacaoGlobalCarrinho() {
+  const select = document.getElementById('carrinhoRetornoCotacaoGlobal');
+  if (!select) return;
+
+  if (!select.dataset.bound) {
+    select.addEventListener('change', async () => {
+      const valor = (select.value || 'Não').trim() || 'Não';
+      const carrinho = window.carrinhoCompras || [];
+      await Promise.all(carrinho.map(async (item) => {
+        item.retorno_cotacao = valor;
+        await atualizarItemCarrinhoNoBanco(item);
+      }));
+    });
+    select.dataset.bound = '1';
+  }
+
+  const carrinho = window.carrinhoCompras || [];
+  const primeiroComRetorno = carrinho.find(item => {
+    const retorno = String(item.retorno_cotacao || '').trim().toLowerCase();
+    return retorno === 'sim' || retorno === 'não' || retorno === 'nao';
+  });
+
+  const retornoInicial = String(primeiroComRetorno?.retorno_cotacao || 'Não').trim().toLowerCase();
+  select.value = retornoInicial === 'sim' ? 'Sim' : 'Não';
+}
+
+function configurarCompraRealizadaGlobalCarrinho() {
+  const checkbox = document.getElementById('carrinhoCompraRealizada');
+  const wrapperNfe = document.getElementById('carrinhoNfeGlobalWrapper');
+  const inputNfe = document.getElementById('carrinhoNfeGlobal');
+  const wrapperCompraAutorizada = document.getElementById('carrinhoCompraAutorizadaWrapper');
+  const checkboxCompraAutorizada = document.getElementById('carrinhoCompraAutorizada');
+  const wrapperRetornoCotacao = document.getElementById('carrinhoRetornoCotacaoWrapper');
+  const selectRetornoCotacao = document.getElementById('carrinhoRetornoCotacaoGlobal');
+  const wrapperPrazoSolicitado = document.getElementById('carrinhoPrazoSolicitadoWrapper');
+  const inputPrazoSolicitado = document.getElementById('carrinhoPrazoSolicitadoGlobal');
+  if (!checkbox || !wrapperNfe || !inputNfe) return;
+
+  const atualizarVisibilidadeNfe = () => {
+    if (checkbox.checked) {
+      wrapperNfe.style.display = 'flex';
+      inputNfe.setAttribute('required', 'required');
+
+      if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'none';
+      if (checkboxCompraAutorizada) checkboxCompraAutorizada.checked = false;
+
+      if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'none';
+      if (selectRetornoCotacao) selectRetornoCotacao.value = 'Não';
+
+      if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'none';
+      if (inputPrazoSolicitado) inputPrazoSolicitado.value = '';
+    } else {
+      wrapperNfe.style.display = 'none';
+      inputNfe.removeAttribute('required');
+      inputNfe.value = '';
+
+      if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'flex';
+      if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'flex';
+      if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'flex';
+    }
+  };
+
+  if (!checkbox.dataset.boundCompraRealizada) {
+    checkbox.addEventListener('change', atualizarVisibilidadeNfe);
+    checkbox.dataset.boundCompraRealizada = '1';
+  }
+
+  atualizarVisibilidadeNfe();
+}
+
 // Abre o modal do carrinho e sincroniza com os dados atuais
+function atualizarBlocoCompraOmieModal(numeros = []) {
+  const blocoInfo = document.getElementById('modalComprasOmieInfo');
+  if (!blocoInfo) return;
+
+  const numerosUnicos = Array.from(new Set(
+    (Array.isArray(numeros) ? numeros : [])
+      .map(n => String(n || '').trim())
+      .filter(Boolean)
+  ));
+
+  if (numerosUnicos.length === 0) {
+    blocoInfo.style.display = 'none';
+    blocoInfo.innerHTML = '';
+    return;
+  }
+
+  const escape = (valor) => {
+    const texto = String(valor || '');
+    if (typeof window.escapeHtml === 'function') return window.escapeHtml(texto);
+    return texto
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const orientacoes = numerosUnicos.map((numeroPedidoOmie) => (
+    `<div style="margin-top:6px;">Registro realizado com sucesso. Informe o cNumero "<strong>${escape(numeroPedidoOmie)}</strong>" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.</div>`
+  )).join('');
+
+  blocoInfo.style.display = 'block';
+  blocoInfo.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;font-weight:700;">
+      <i class="fa-solid fa-circle-info" style="color:#2563eb;"></i>
+      <span>Orientação para Nota Fiscal</span>
+    </div>
+    ${orientacoes}
+  `;
+}
+
 window.abrirModalCarrinhoCompras = async function() {
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
@@ -13920,10 +14146,16 @@ window.abrirModalCarrinhoCompras = async function() {
   // Sincroniza os dados do carrinho no modal
   await carregarCarrinhoComprasDoBanco();
   configurarPrazoSolicitadoGlobal();
+  configurarObjetivoCompraGlobalCarrinho();
+  configurarAnexoUrlGlobalCarrinho();
+  configurarAnexoArquivoGlobalCarrinho();
+  configurarRetornoCotacaoGlobalCarrinho();
+  configurarCompraRealizadaGlobalCarrinho();
   await carregarCategoriasPorDepartamento();
   await carregarDepartamentosCarrinho();
   await carregarCategoriaCompraDropdown();
   await carregarGruposRequisicaoDisponiveis();
+  atualizarBlocoCompraOmieModal();
   renderModalCarrinhoCompras();
   
   // Exibe o modal
@@ -14874,13 +15106,49 @@ async function enviarPedidoModal() {
   // Captura valores dos campos globais do modal
   const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value?.trim() || null;
   const centroCustoGlobal = document.getElementById('carrinhoCentroCustoGlobal')?.value?.trim() || null;
-  const prazoSolicitadoGlobal = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || null;
-  const compraAutorizada = document.getElementById('carrinhoCompraAutorizada')?.checked === true;
+  const prazoSolicitadoGlobalBruto = document.getElementById('carrinhoPrazoSolicitadoGlobal')?.value || null;
+  const objetivoCompraGlobal = document.getElementById('carrinhoObjetivoCompraGlobal')?.value?.trim() || null;
+  const anexoUrlGlobal = document.getElementById('carrinhoAnexoUrlGlobal')?.value?.trim() || null;
+  const retornoCotacaoGlobalBruto = document.getElementById('carrinhoRetornoCotacaoGlobal')?.value?.trim() || 'Não';
+  const anexoArquivoGlobal = document.getElementById('carrinhoAnexosGlobal')?.files?.[0] || null;
+  const compraRealizada = document.getElementById('carrinhoCompraRealizada')?.checked === true;
+  const compraAutorizada = (document.getElementById('carrinhoCompraAutorizada')?.checked === true) && !compraRealizada;
+  const prazoSolicitadoGlobal = compraRealizada ? null : prazoSolicitadoGlobalBruto;
+  const retornoCotacaoGlobal = compraRealizada ? 'Não' : retornoCotacaoGlobalBruto;
+  const notaFiscalGlobal = document.getElementById('carrinhoNfeGlobal')?.value?.trim() || '';
+
+  if (compraRealizada && !notaFiscalGlobal) {
+    alert('Campo N nota fiscal é obrigatório quando Compra já realizada estiver marcado.');
+    const inputNfe = document.getElementById('carrinhoNfeGlobal');
+    if (inputNfe) inputNfe.focus();
+    return;
+  }
+
+  let anexoDataGlobal = null;
+  if (anexoArquivoGlobal) {
+    try {
+      const base64 = await converterArquivoParaBase64(anexoArquivoGlobal);
+      anexoDataGlobal = {
+        nome: anexoArquivoGlobal.name,
+        tipo: anexoArquivoGlobal.type,
+        tamanho: anexoArquivoGlobal.size,
+        base64
+      };
+    } catch (errAnexo) {
+      alert('Erro ao processar anexo global do carrinho.');
+      throw errAnexo;
+    }
+  }
   
   console.log('[Enviar Pedido] Valores globais capturados:', {
     departamento: departamentoGlobal,
     centro_custo: centroCustoGlobal,
-    prazo_solicitado: prazoSolicitadoGlobal
+    prazo_solicitado: prazoSolicitadoGlobal,
+    objetivo_compra: objetivoCompraGlobal,
+    anexo_url: anexoUrlGlobal,
+    retorno_cotacao: retornoCotacaoGlobal,
+    compra_realizada: compraRealizada,
+    n_nota_fiscal: notaFiscalGlobal
   });
   
   // Aplica os valores globais a TODOS os itens do carrinho
@@ -14897,7 +15165,32 @@ async function enviarPedidoModal() {
       item.prazo_solicitado = prazoSolicitadoGlobal;
       console.log(`[Enviar Pedido] Item ${idx}: prazo_solicitado aplicado = ${prazoSolicitadoGlobal}`);
     }
-    if (compraAutorizada) {
+    if (objetivoCompraGlobal) {
+      item.objetivo_compra = objetivoCompraGlobal;
+    }
+
+    if (compraRealizada) {
+      const objetivoBase = String(item.objetivo_compra || '').replace(/^\s*nfe\s*:\s*/i, '').trim();
+      item.nota_fiscal = notaFiscalGlobal;
+      item.objetivo_compra = objetivoBase
+        ? `NFe: ${notaFiscalGlobal} - ${objetivoBase}`
+        : `NFe: ${notaFiscalGlobal}`;
+    }
+
+    if (anexoUrlGlobal) {
+      item.anexo_url = anexoUrlGlobal;
+    }
+    item.retorno_cotacao = retornoCotacaoGlobal || 'Não';
+    if (anexoDataGlobal) {
+      item.anexo = anexoDataGlobal;
+      item.anexos = [{
+        nome: anexoDataGlobal.nome,
+        tipo: anexoDataGlobal.tipo,
+        tamanho: anexoDataGlobal.tamanho,
+        url: anexoUrlGlobal || null
+      }];
+    }
+    if (compraAutorizada || compraRealizada) {
       item.requisicao_direta = true;
     }
   });
@@ -14920,6 +15213,7 @@ async function enviarPedidoModal() {
       statusEl.style.color = '#92400e';
       statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando solicitação...';
     }
+    atualizarBlocoCompraOmieModal();
     
     // Separar itens: com requisição direta e sem requisição direta
     const itensComRequisicao = carrinho.filter(item => item.requisicao_direta === true);
@@ -14954,6 +15248,7 @@ async function enviarPedidoModal() {
     let respostasOk = 0;
     respostasErro = 0;
     const erros = [];
+    const numerosCompraOmieGerados = [];
     
     for (let i = 0; i < solicitacoes.length; i++) {
       const sol = solicitacoes[i];
@@ -14967,7 +15262,9 @@ async function enviarPedidoModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             itens: sol.itens,
-            compra_autorizada: compraAutorizada
+            compra_autorizada: compraAutorizada,
+            compra_realizada: compraRealizada,
+            n_nota_fiscal: notaFiscalGlobal
           })
         });
         
@@ -14975,6 +15272,11 @@ async function enviarPedidoModal() {
         
         if (result.ok) {
           respostasOk++;
+          const numerosRetornados = Array.isArray(result.numeros_compra_omie) ? result.numeros_compra_omie : [];
+          numerosRetornados.forEach((numero) => {
+            const numeroTexto = String(numero || '').trim();
+            if (numeroTexto) numerosCompraOmieGerados.push(numeroTexto);
+          });
           console.log(`[Compras] ✓ ${descricao} enviada com sucesso`);
         } else {
           respostasErro++;
@@ -14992,14 +15294,20 @@ async function enviarPedidoModal() {
     // Atualizar status
     if (statusEl) {
       if (respostasErro === 0) {
+        const numerosUnicos = Array.from(new Set(numerosCompraOmieGerados));
         statusEl.style.background = '#d1fae5';
         statusEl.style.color = '#065f46';
         statusEl.innerHTML = `<i class="fa-solid fa-check-circle"></i> ${respostasOk} solicitação(ões) enviada(s) com sucesso!`;
+        if (compraRealizada && numerosUnicos.length > 0) {
+          statusEl.innerHTML += `<br><small>Compra(s) gerada(s) na Omie: <strong>${numerosUnicos.join(', ')}</strong></small>`;
+          atualizarBlocoCompraOmieModal(numerosUnicos);
+        }
       } else {
         statusEl.style.background = '#fee2e2';
         statusEl.style.color = '#991b1b';
         const erroTexto = erros.length > 0 ? `<br><small>${erros.join('<br>')}</small>` : '';
         statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle"></i> ${respostasOk} de ${solicitacoes.length} solicitação(ões) enviada(s)${erroTexto}`;
+        atualizarBlocoCompraOmieModal();
       }
     }
 
@@ -15013,16 +15321,33 @@ async function enviarPedidoModal() {
     // Comentário: sucesso total segue o mesmo padrão do modal Cotado (alerta + fechar)
     if (respostasErro === 0) {
       window.carrinhoCompras = [];
-      
-      alert('Solicitação(ões) enviada(s) com sucesso.');
-      setTimeout(() => {
+
+      const numerosUnicos = Array.from(new Set(numerosCompraOmieGerados));
+      if (compraRealizada && numerosUnicos.length > 0) {
+        const orientacoesAlerta = numerosUnicos
+          .map((numeroPedidoOmie) => `Registro realizado com sucesso. Informe o cNumero "${numeroPedidoOmie}" na NFe e encaminhe ao setor de Compras para identificação e vínculo do pedido.`)
+          .join('\n');
+        alert(`Solicitação(ões) enviada(s) com sucesso.\n${orientacoesAlerta}`);
+      } else {
+        alert('Solicitação(ões) enviada(s) com sucesso.');
+      }
+
+      if (compraRealizada && numerosUnicos.length > 0) {
         renderModalCarrinhoCompras();
         renderCarrinhoCompras();
-        fecharModalCarrinhoCompras();
         if (typeof recarregarKanbanMinhasCompras === 'function') {
           recarregarKanbanMinhasCompras();
         }
-      }, 1500);
+      } else {
+        setTimeout(() => {
+          renderModalCarrinhoCompras();
+          renderCarrinhoCompras();
+          fecharModalCarrinhoCompras();
+          if (typeof recarregarKanbanMinhasCompras === 'function') {
+            recarregarKanbanMinhasCompras();
+          }
+        }, 1500);
+      }
     }
   } catch (err) {
     console.error('Erro ao enviar pedido:', err);
@@ -21813,6 +22138,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     window.cotacaoKanbanItensUsados = new Set();
     window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
     window.cotacaoKanbanMoeda = 'BRL';
+    window.cotacaoKanbanEdicaoId = null;
 
     modalTitulo.textContent = grupoModal
       ? `Cotação - Grupo ${grupoModal}`
@@ -22053,12 +22379,23 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
           />
           <div id="listaLinksCotacaoKanban" style="margin-top:10px;display:grid;gap:6px;"></div>
         </div>
-        <button 
-          onclick="registrarCotacaoKanban()"
-          style="width:100%;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
-          <i class="fa-solid fa-plus"></i>
-          Registrar Cotação
-        </button>
+        <div id="cotacaoKanbanModoEdicaoInfo" style="display:none;margin:0 0 10px 0;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e;font-weight:600;"></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button
+            id="cotacaoKanbanSalvarBtn"
+            onclick="registrarCotacaoKanban()"
+            style="flex:1;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">
+            <i class="fa-solid fa-plus"></i>
+            Registrar Cotação
+          </button>
+          <button
+            type="button"
+            id="cotacaoKanbanCancelarEdicaoBtn"
+            onclick="cancelarEdicaoCotacaoKanban()"
+            style="display:none;background:#e5e7eb;color:#111827;border:none;padding:12px 14px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">
+            Cancelar edição
+          </button>
+        </div>
       </div>
 
       <h4 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;">
@@ -22080,6 +22417,7 @@ async function abrirModalCotacaoKanban(itemId, grupoRequisicaoEncoded = '', tabl
     `;
 
     modalBody.innerHTML = html;
+    atualizarEstadoFormularioCotacaoKanban();
     renderizarItensGrupoCotacaoKanban();
     renderizarItensSelecionadosCotacaoKanban();
     await carregarCotacoesKanban();
@@ -22104,6 +22442,35 @@ function fecharModalCotacaoKanban() {
   window.cotacaoKanbanItensUsados = new Set();
   window.cotacaoKanbanFiltroItensGrupo = 'pendentes';
   window.cotacaoKanbanMoeda = 'BRL';
+  window.cotacaoKanbanEdicaoId = null;
+}
+
+function atualizarEstadoFormularioCotacaoKanban() {
+  const idEdicao = Number(window.cotacaoKanbanEdicaoId);
+  const emEdicao = Number.isInteger(idEdicao) && idEdicao > 0;
+  const info = document.getElementById('cotacaoKanbanModoEdicaoInfo');
+  const btnSalvar = document.getElementById('cotacaoKanbanSalvarBtn');
+  const btnCancelar = document.getElementById('cotacaoKanbanCancelarEdicaoBtn');
+
+  if (info) {
+    info.style.display = emEdicao ? 'block' : 'none';
+    info.innerHTML = emEdicao
+      ? `<i class="fa-solid fa-pen-to-square"></i> Editando cotação #${escapeHtml(String(window.cotacaoKanbanEdicaoId))}`
+      : '';
+  }
+
+  if (btnSalvar) {
+    btnSalvar.innerHTML = emEdicao
+      ? '<i class="fa-solid fa-floppy-disk"></i> Salvar alterações'
+      : '<i class="fa-solid fa-plus"></i> Registrar Cotação';
+    btnSalvar.style.background = emEdicao
+      ? 'linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)'
+      : 'linear-gradient(135deg,#10b981 0%,#059669 100%)';
+  }
+
+  if (btnCancelar) {
+    btnCancelar.style.display = emEdicao ? 'inline-flex' : 'none';
+  }
 }
 
 window.adicionarAnexoCotacaoKanban = function() {
@@ -22408,6 +22775,8 @@ async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
   const valor = parseValorCotacaoKanban(document.getElementById('cotacaoKanbanValor')?.value || '0');
+  const cotacaoEdicaoId = Number(window.cotacaoKanbanEdicaoId);
+  const emEdicao = Number.isInteger(cotacaoEdicaoId) && cotacaoEdicaoId > 0;
 
   if (!fornecedor) {
     alert('Preencha o fornecedor');
@@ -22448,20 +22817,32 @@ async function registrarCotacaoKanban() {
     const itensCotacao = Array.isArray(window.cotacaoKanbanItensSelecionados) ? window.cotacaoKanbanItensSelecionados : [];
     const moeda = window.cotacaoKanbanMoeda === 'USD' ? 'USD' : 'BRL';
 
-    const resp = await fetch('/api/compras/cotacoes', {
-      method: 'POST',
+    const payload = {
+      fornecedor_nome: fornecedor,
+      valor_cotado: valor,
+      moeda,
+      link: linksCotacao,
+      itens_cotacao: itensCotacao,
+      table_source: tableSource
+    };
+
+    if (!emEdicao) {
+      payload.solicitacao_id = window.cotacaoKanbanItemId;
+    }
+    if (Array.isArray(anexosArray) && anexosArray.length > 0) {
+      payload.anexos = anexosArray;
+    }
+
+    const endpoint = emEdicao
+      ? `/api/compras/cotacoes/${cotacaoEdicaoId}`
+      : '/api/compras/cotacoes';
+    const method = emEdicao ? 'PUT' : 'POST';
+
+    const resp = await fetch(endpoint, {
+      method,
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        solicitacao_id: window.cotacaoKanbanItemId,
-        fornecedor_nome: fornecedor,
-        valor_cotado: valor,
-        moeda,
-        link: linksCotacao,
-        anexos: anexosArray,
-        itens_cotacao: itensCotacao,
-        table_source: tableSource
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!resp.ok) {
@@ -22477,8 +22858,10 @@ async function registrarCotacaoKanban() {
     window.cotacaoKanbanLinks = [];
     window.cotacaoKanbanItensSelecionados = [];
     window.cotacaoKanbanMoeda = 'BRL';
+    window.cotacaoKanbanEdicaoId = null;
     const btnMoeda = document.getElementById('btnMoedaCotacaoKanban');
     if (btnMoeda) btnMoeda.textContent = 'R$';
+    atualizarEstadoFormularioCotacaoKanban();
     renderizarListaAnexosCotacaoKanban();
     renderizarListaLinksCotacaoKanban();
     renderizarItensSelecionadosCotacaoKanban();
@@ -22645,12 +23028,20 @@ async function carregarCotacoesKanban() {
               </button>
             </div>
           </div>
-          <button
-            onclick="excluirCotacaoKanban(${cotacao.id})"
-            title="Excluir cotação"
-            style="background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
-            <i class="fa-solid fa-trash"></i>
-          </button>
+          <div style="display:grid;gap:6px;">
+            <button
+              onclick="editarCotacaoKanban(${cotacao.id})"
+              title="Editar cotação"
+              style="background:#2563eb;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+            <button
+              onclick="excluirCotacaoKanban(${cotacao.id})"
+              title="Excluir cotação"
+              style="background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
         </div>
       `;
     }).join('');
@@ -22661,6 +23052,97 @@ async function carregarCotacoesKanban() {
     container.innerHTML = '<div style="text-align:center;padding:20px;color:#ef4444;font-size:13px;">Erro ao carregar cotações.</div>';
   }
 }
+
+window.editarCotacaoKanban = function(cotacaoId) {
+  const id = Number(cotacaoId);
+  if (!Number.isInteger(id)) return;
+
+  const cotacao = (Array.isArray(window.cotacaoKanbanCotacoes) ? window.cotacaoKanbanCotacoes : []).find(c => Number(c?.id) === id);
+  if (!cotacao) {
+    alert('Cotação não encontrada para edição.');
+    return;
+  }
+
+  const inputFornecedor = document.getElementById('cotacaoKanbanFornecedor');
+  const inputValor = document.getElementById('cotacaoKanbanValor');
+  if (inputFornecedor) inputFornecedor.value = cotacao.fornecedor_nome || '';
+  if (inputValor) {
+    const valor = Number(cotacao.valor_cotado || 0);
+    inputValor.value = Number.isFinite(valor)
+      ? valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '';
+  }
+
+  const moedaCotacao = String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+  window.cotacaoKanbanMoeda = moedaCotacao;
+  const btnMoeda = document.getElementById('btnMoedaCotacaoKanban');
+  if (btnMoeda) btnMoeda.textContent = moedaCotacao === 'USD' ? '$' : 'R$';
+
+  const linksArray = (() => {
+    const bruto = cotacao.link;
+    if (!bruto) return [];
+    if (Array.isArray(bruto)) return bruto.map(v => String(v || '').trim()).filter(Boolean);
+    if (typeof bruto === 'string') {
+      const texto = bruto.trim();
+      if (!texto) return [];
+      try {
+        const parsed = JSON.parse(texto);
+        if (Array.isArray(parsed)) return parsed.map(v => String(v || '').trim()).filter(Boolean);
+      } catch (err) {
+      }
+      return [texto];
+    }
+    return [];
+  })();
+
+  window.cotacaoKanbanLinks = linksArray;
+  window.cotacaoKanbanAnexos = [];
+  window.cotacaoKanbanItensSelecionados = Array.isArray(cotacao.itens_cotacao)
+    ? cotacao.itens_cotacao.map((item) => ({
+        id: Number(item?.item_origem_id || item?.id),
+        item_origem_id: Number(item?.item_origem_id || item?.id),
+        grupo_requisicao: item?.grupo_requisicao || window.cotacaoKanbanGrupoRequisicao || null,
+        produto_codigo: item?.produto_codigo || null,
+        produto_descricao: item?.produto_descricao || null,
+        quantidade: item?.quantidade ?? null,
+        table_source: item?.table_source || window.cotacaoKanbanTableSource || 'solicitacao_compras'
+      })).filter((item) => Number.isInteger(Number(item.id)))
+    : [];
+  window.cotacaoKanbanEdicaoId = id;
+
+  atualizarEstadoFormularioCotacaoKanban();
+  renderizarListaAnexosCotacaoKanban();
+  renderizarListaLinksCotacaoKanban();
+  renderizarItensSelecionadosCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+
+  const boxInfo = document.getElementById('cotacaoKanbanModoEdicaoInfo');
+  if (boxInfo) {
+    boxInfo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+};
+
+window.cancelarEdicaoCotacaoKanban = function() {
+  window.cotacaoKanbanEdicaoId = null;
+  const inputFornecedor = document.getElementById('cotacaoKanbanFornecedor');
+  const inputValor = document.getElementById('cotacaoKanbanValor');
+  const inputLink = document.getElementById('cotacaoKanbanLink');
+  if (inputFornecedor) inputFornecedor.value = '';
+  if (inputValor) inputValor.value = '';
+  if (inputLink) inputLink.value = '';
+  window.cotacaoKanbanAnexos = [];
+  window.cotacaoKanbanLinks = [];
+  window.cotacaoKanbanItensSelecionados = [];
+  window.cotacaoKanbanMoeda = 'BRL';
+  const btnMoeda = document.getElementById('btnMoedaCotacaoKanban');
+  if (btnMoeda) btnMoeda.textContent = 'R$';
+
+  atualizarEstadoFormularioCotacaoKanban();
+  renderizarListaAnexosCotacaoKanban();
+  renderizarListaLinksCotacaoKanban();
+  renderizarItensSelecionadosCotacaoKanban();
+  renderizarItensGrupoCotacaoKanban();
+};
 
 async function adicionarObservacaoCotacaoKanban(cotacaoId) {
   const textarea = document.getElementById(`obs-cotacao-${cotacaoId}`);
