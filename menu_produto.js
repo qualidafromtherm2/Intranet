@@ -22184,7 +22184,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
     }
 
     try {
-      renderizarCotacoesRegistradasCotadoEscolha();
+      await renderizarCotacoesRegistradasCotadoEscolha();
     } catch (errRender) {
       const containerCot = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
       if (containerCot) {
@@ -23518,6 +23518,58 @@ function formatarValorCotacaoKanban(valor, moeda) {
   return `${simbolo} ${valorFormatado}`;
 }
 
+const COTACAO_KANBAN_CAMBIO_CACHE_MS = 5 * 60 * 1000;
+
+async function obterTaxaUsdBrlCotacaoKanban() {
+  const cache = window.cotacaoKanbanCambioUsdBrl;
+  const agora = Date.now();
+  if (
+    cache
+    && Number.isFinite(Number(cache.valor))
+    && Number(cache.valor) > 0
+    && Number(cache.expiraEm || 0) > agora
+  ) {
+    return Number(cache.valor);
+  }
+
+  try {
+    const resp = await _origFetch('https://economia.awesomeapi.com.br/json/last/USD-BRL', {
+      method: 'GET',
+      mode: 'cors',
+      credentials: 'omit',
+      cache: 'no-store'
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const taxa = Number(data?.USDBRL?.bid || 0);
+    if (!Number.isFinite(taxa) || taxa <= 0) {
+      throw new Error('Taxa inválida');
+    }
+
+    window.cotacaoKanbanCambioUsdBrl = {
+      valor: taxa,
+      expiraEm: agora + COTACAO_KANBAN_CAMBIO_CACHE_MS
+    };
+    return taxa;
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Falha ao consultar câmbio USD/BRL:', err);
+    return null;
+  }
+}
+
+function formatarConversaoUsdParaBrlCotacaoKanban(valor, moeda, taxaUsdBrl) {
+  const moedaNormalizada = String(moeda || 'BRL').toUpperCase();
+  if (moedaNormalizada !== 'USD') return '';
+
+  const valorNumero = Number(valor || 0);
+  const taxaNumero = Number(taxaUsdBrl || 0);
+  if (!Number.isFinite(valorNumero) || valorNumero <= 0) return '';
+  if (!Number.isFinite(taxaNumero) || taxaNumero <= 0) return '';
+
+  const valorConvertido = valorNumero * taxaNumero;
+  return ` <span style="color:#2563eb;">(≈ ${formatarValorCotacaoKanban(valorConvertido, 'BRL')})</span>`;
+}
+
 async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
@@ -23635,6 +23687,11 @@ async function carregarCotacoesKanban() {
     const data = await resp.json();
     window.cotacaoKanbanCotacoes = Array.isArray(data.cotacoes) ? data.cotacoes : [];
 
+    const possuiCotacaoUsd = window.cotacaoKanbanCotacoes.some((cotacao) =>
+      String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD'
+    );
+    const taxaUsdBrl = possuiCotacaoUsd ? await obterTaxaUsdBrlCotacaoKanban() : null;
+
     const itensUsados = new Set();
     window.cotacaoKanbanCotacoes.forEach((cotacao) => {
       const itens = Array.isArray(cotacao?.itens_cotacao) ? cotacao.itens_cotacao : [];
@@ -23650,11 +23707,26 @@ async function carregarCotacoesKanban() {
     const somaTotalCotacoes = window.cotacaoKanbanCotacoes.reduce((acc, cotacao) => {
       return acc + (Number(cotacao?.valor_cotado || 0) || 0);
     }, 0);
+    const somaTotalCotacoesBrl = window.cotacaoKanbanCotacoes.reduce((acc, cotacao) => {
+      const valor = Number(cotacao?.valor_cotado || 0) || 0;
+      const moeda = String(cotacao?.moeda || 'BRL').toUpperCase();
+      if (moeda === 'USD') {
+        if (!Number.isFinite(Number(taxaUsdBrl || 0)) || Number(taxaUsdBrl || 0) <= 0) return acc;
+        return acc + (valor * Number(taxaUsdBrl));
+      }
+      return acc + valor;
+    }, 0);
     if (totalCotacoesResumo) {
       totalCotacoesResumo.innerHTML = `
         <i class="fa-solid fa-calculator"></i>
         <strong>Total das cotações:</strong>
-        <span>${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}</span>
+        <span>
+          ${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}
+          ${moedaTotalCotacoes === 'USD' ? formatarConversaoUsdParaBrlCotacaoKanban(somaTotalCotacoes, 'USD', taxaUsdBrl) : ''}
+          ${moedaTotalCotacoes !== 'USD' && possuiCotacaoUsd && Number.isFinite(Number(taxaUsdBrl || 0)) && Number(taxaUsdBrl || 0) > 0
+            ? ` <span style="color:#2563eb;">(inclui itens em USD, total convertido ≈ ${formatarValorCotacaoKanban(somaTotalCotacoesBrl, 'BRL')})</span>`
+            : ''}
+        </span>
       `;
     }
 
@@ -23664,6 +23736,9 @@ async function carregarCotacoesKanban() {
     }
 
     const html = window.cotacaoKanbanCotacoes.map(cotacao => {
+      const moedaCotacao = String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+      const valorCotacao = Number(cotacao.valor_cotado || 0) || 0;
+      const valorCotacaoHtml = `${formatarValorCotacaoKanban(valorCotacao, moedaCotacao)}${formatarConversaoUsdParaBrlCotacaoKanban(valorCotacao, moedaCotacao, taxaUsdBrl)}`;
       const observacaoTexto = cotacao.observacao || '';
       let linksHtml = '';
       const linksArray = (() => {
@@ -23738,7 +23813,7 @@ async function carregarCotacoesKanban() {
               <span style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(cotacao.fornecedor_nome || '-')}</span>
             </div>
             <div style="font-size:11px;color:#6b7280;">
-              <strong>Valor:</strong> ${formatarValorCotacaoKanban(cotacao.valor_cotado || 0, cotacao.moeda || 'BRL')}
+              <strong>Valor:</strong> ${valorCotacaoHtml}
             </div>
             <div style="font-size:11px;color:#6b7280;margin-top:4px;">
               <strong>Itens da cotação:</strong>
@@ -23977,7 +24052,7 @@ async function enviarCotacoesKanban() {
     alert('Erro ao enviar cotações: ' + err.message);
   }
 }
-function renderizarCotacoesRegistradasCotadoEscolha() {
+async function renderizarCotacoesRegistradasCotadoEscolha() {
   const container = document.getElementById('listaCotacoesRegistradasCotadoEscolha');
   const totalCotacoesResumo = document.getElementById('totalCotacoesKanbanResumo');
   if (!container) return;
@@ -23988,6 +24063,10 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
   const cotacoesAprovadas = cotacoes.filter((cotacao) =>
     String(cotacao?.status_aprovacao || '').toLowerCase().trim() === 'aprovado'
   );
+  const possuiCotacaoUsd = cotacoes.some((cotacao) =>
+    String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD'
+  );
+  const taxaUsdBrl = possuiCotacaoUsd ? await obterTaxaUsdBrlCotacaoKanban() : null;
   const moedaTotalCotacoes = (
     cotacoesAprovadas[0]?.moeda
     || cotacoes[0]?.moeda
@@ -23996,11 +24075,26 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
   const somaTotalCotacoes = cotacoesAprovadas.reduce((acc, cotacao) => {
     return acc + (Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0);
   }, 0);
+  const somaTotalCotacoesBrl = cotacoesAprovadas.reduce((acc, cotacao) => {
+    const valor = Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0;
+    const moeda = String(cotacao?.moeda || 'BRL').toUpperCase();
+    if (moeda === 'USD') {
+      if (!Number.isFinite(Number(taxaUsdBrl || 0)) || Number(taxaUsdBrl || 0) <= 0) return acc;
+      return acc + (valor * Number(taxaUsdBrl));
+    }
+    return acc + valor;
+  }, 0);
   if (totalCotacoesResumo) {
     totalCotacoesResumo.innerHTML = `
       <i class="fa-solid fa-calculator"></i>
       <strong>Total das cotações:</strong>
-      <span>${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}</span>
+      <span>
+        ${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}
+        ${moedaTotalCotacoes === 'USD' ? formatarConversaoUsdParaBrlCotacaoKanban(somaTotalCotacoes, 'USD', taxaUsdBrl) : ''}
+        ${moedaTotalCotacoes !== 'USD' && possuiCotacaoUsd && Number.isFinite(Number(taxaUsdBrl || 0)) && Number(taxaUsdBrl || 0) > 0
+          ? ` <span style="color:#2563eb;">(inclui itens em USD, total convertido ≈ ${formatarValorCotacaoKanban(somaTotalCotacoesBrl, 'BRL')})</span>`
+          : ''}
+      </span>
     `;
   }
 
@@ -24011,6 +24105,9 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
 
   const item = window.cotadoEscolhaItem || {};
   const html = cotacoes.map((cotacao) => {
+    const moedaCotacao = String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+    const valorCotacao = Number(cotacao.valor_cotado || cotacao.valor_unitario || 0) || 0;
+    const valorCotacaoHtml = `${formatarValorCotacaoKanban(valorCotacao, moedaCotacao)}${formatarConversaoUsdParaBrlCotacaoKanban(valorCotacao, moedaCotacao, taxaUsdBrl)}`;
     const statusAprovacao = (cotacao.status_aprovacao || 'pendente').toString().toLowerCase();
     const aprovado = statusAprovacao === 'aprovado';
     const observacaoTexto = cotacao.observacao || '';
@@ -24103,7 +24200,7 @@ function renderizarCotacoesRegistradasCotadoEscolha() {
             <strong>Fornecedor:</strong> ${escapeHtml(cotacao.fornecedor_nome || cotacao.fornecedor || '-')}
           </div>
           <div style="font-size:11px;color:#6b7280;">
-            <strong>Valor:</strong> ${formatarValorCotacaoKanban(cotacao.valor_cotado || cotacao.valor_unitario || 0, cotacao.moeda || 'BRL')}
+            <strong>Valor:</strong> ${valorCotacaoHtml}
           </div>
           <div style="font-size:11px;color:#6b7280;margin-top:4px;">
             <strong>Itens da cotação:</strong>
@@ -24186,7 +24283,7 @@ async function aprovarCotacaoCotadoEscolha(cotacaoId) {
       window.cotadoEscolhaCotacoesDb[idx].status_aprovacao = data.cotacao.status_aprovacao;
     }
 
-    renderizarCotacoesRegistradasCotadoEscolha();
+    await renderizarCotacoesRegistradasCotadoEscolha();
   } catch (err) {
     console.error('[COTADO ESCOLHA] Erro ao aprovar cotação:', err);
     alert('Erro ao aprovar cotação: ' + err.message);
@@ -24229,7 +24326,7 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
     if (idx !== -1) {
       window.cotadoEscolhaCotacoesDb[idx].observacao = observacaoAtualizada;
     }
-    renderizarCotacoesRegistradasCotadoEscolha();
+    await renderizarCotacoesRegistradasCotadoEscolha();
   } catch (err) {
     console.error('[COTADO ESCOLHA] Erro ao adicionar observação:', err);
     alert('Erro ao adicionar observação: ' + err.message);
