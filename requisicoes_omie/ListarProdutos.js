@@ -433,6 +433,7 @@ export async function initListarProdutosUI(
     _filterPanel          : document.getElementById('filterPanel'),
     onFiltered: itens => {
       renderListaView(itens);
+      const title = pane?.querySelector('.content-section-title');
       if (title) title.textContent = `Lista de produtos (${itens.length})`;
       populateFilters();
     }

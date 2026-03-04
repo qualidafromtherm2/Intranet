@@ -1773,7 +1773,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao } = req.body || {};
+    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao, produto_descricao } = req.body || {};
     
     const allowedStatus = [
       'aguardando aprovação',
@@ -1844,6 +1844,11 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
 
       fields.push(`retorno_cotacao = $${idx++}`);
       values.push(retornoNormalizado);
+    }
+
+    if (typeof produto_descricao !== 'undefined') {
+      fields.push(`produto_descricao = $${idx++}`);
+      values.push(produto_descricao || null);
     }
     
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
@@ -2086,6 +2091,180 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
   } catch (err) {
     console.error('[API] POST /api/compras/solicitacoes/:id/enviar-requisicao erro:', err);
     return res.status(err.status || 500).json({ error: err.message || 'Falha ao enviar requisição' });
+  }
+});
+
+// POST /api/compras/solicitacoes/:id/cadastrar-omie - Cadastra itens CODPROV na Omie para solicitacao_compras
+app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ ok: false, error: 'ID inválido' });
+    }
+
+    const { itens: itensRequest } = req.body || {};
+
+    const { rows } = await pool.query(
+      `SELECT id, produto_codigo, produto_descricao, quantidade
+       FROM compras.solicitacao_compras
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const itemDb = rows[0];
+    const descricaoBase = String(itemDb.produto_descricao || '').trim();
+    const quantidadeBase = Number(itemDb.quantidade) || 1;
+
+    const processarItensDescricao = (descricao) => {
+      if (!descricao || typeof descricao !== 'string') return [];
+      return [{ descricao: String(descricao).trim(), quantidade: String(quantidadeBase) }].filter(i => i.descricao);
+    };
+
+    const itens = Array.isArray(itensRequest) && itensRequest.length
+      ? itensRequest.map(i => ({
+          descricao: String(i?.descricao || '').trim(),
+          quantidade: String(i?.quantidade || '').trim(),
+          codigo_omie: String(i?.codigo_omie || '').trim()
+        })).filter(i => i.descricao)
+      : processarItensDescricao(descricaoBase);
+
+    if (!itens.length) {
+      return res.status(400).json({ ok: false, error: 'Nenhum item válido para cadastro' });
+    }
+
+    const codigoBaseRaw = String(itemDb.produto_codigo || '').trim();
+    const matchBase = codigoBaseRaw.match(/(CODPROV\s*-\s*)(\d{1,})/i);
+    const baseNumeroAtual = matchBase ? parseInt(matchBase[2], 10) : null;
+    const basePadLength = matchBase ? matchBase[2].length : 5;
+
+    const buscarMaximoCodprov = async () => {
+      const { rows: maxOmie } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM public.produtos_omie
+         WHERE codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSolic } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.solicitacao_compras
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+      const { rows: maxSem } = await pool.query(
+        `SELECT MAX(CAST(regexp_replace(produto_codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
+         FROM compras.compras_sem_cadastro
+         WHERE produto_codigo LIKE 'CODPROV - %'`
+      );
+
+      const nums = [maxOmie[0]?.max_num, maxSolic[0]?.max_num, maxSem[0]?.max_num]
+        .map(n => Number(n) || 0);
+      return Math.max(...nums, 0);
+    };
+
+    const maxExistente = await buscarMaximoCodprov();
+    let baseNumero = Number.isFinite(baseNumeroAtual) ? baseNumeroAtual : (maxExistente + 1);
+    if (baseNumero <= maxExistente) baseNumero = maxExistente + 1;
+
+    const formatarBase = (num) => String(num).padStart(basePadLength, '0');
+    const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
+
+    const baseExiste = async (num) => {
+      const prefixo = `${montarCodigoBase(num)}%`;
+      const { rows: existe } = await pool.query(
+        `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
+        [prefixo]
+      );
+      return existe.length > 0;
+    };
+
+    while (await baseExiste(baseNumero)) {
+      baseNumero += 1;
+    }
+
+    const baseCodigo = montarCodigoBase(baseNumero);
+
+    if (baseCodigo !== codigoBaseRaw) {
+      await pool.query(
+        `UPDATE compras.solicitacao_compras
+         SET produto_codigo = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [baseCodigo, id]
+      );
+    }
+
+    const resultados = [];
+    for (let i = 0; i < itens.length; i++) {
+      const itemAtual = itens[i];
+      const codigoIntegracao = `${baseCodigo}.${i + 1}`;
+      const descricaoProduto = itemAtual.descricao || `Produto ${codigoIntegracao}`;
+
+      if (itemAtual?.codigo_omie) {
+        resultados.push({
+          index: i,
+          codigo_integracao: codigoIntegracao,
+          codigo_produto: itemAtual.codigo_omie,
+          ja_existe: true
+        });
+        continue;
+      }
+
+      const { rows: prodRows } = await pool.query(
+        `SELECT codigo_produto
+         FROM public.produtos_omie
+         WHERE codigo = $1 OR codigo_produto_integracao = $1
+         LIMIT 1`,
+        [codigoIntegracao]
+      );
+
+      if (prodRows.length > 0) {
+        resultados.push({
+          index: i,
+          codigo_integracao: codigoIntegracao,
+          codigo_produto: prodRows[0].codigo_produto || null,
+          ja_existe: true
+        });
+        continue;
+      }
+
+      let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
+      if (!cadastro.ok) {
+        const msgErro = String(cadastro.error || '');
+        const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+
+        if (ehDescricaoDuplicada) {
+          const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
+            ? descricaoProduto
+            : `${descricaoProduto} - ${codigoIntegracao}`;
+          cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoComCodigo);
+        }
+
+        if (!cadastro.ok) {
+          return res.status(500).json({
+            ok: false,
+            error: cadastro.error || 'Erro ao cadastrar produto na Omie',
+            resultados
+          });
+        }
+      }
+
+      resultados.push({
+        index: i,
+        codigo_integracao: codigoIntegracao,
+        codigo_produto: cadastro.codigo_produto || null,
+        ja_existe: false
+      });
+    }
+
+    return res.json({
+      ok: true,
+      base_codigo: baseCodigo,
+      itens: resultados
+    });
+  } catch (err) {
+    console.error('[Solicitações] Erro ao cadastrar itens na Omie:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Erro ao cadastrar itens na Omie' });
   }
 });
 
@@ -15551,6 +15730,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
     const idsInseridos = [];
     const idsRequisicaoDireta = [];
     const itensDiretosParaProcessar = [];
+    const statusPorGrupo = new Map();
     
     try {
       await client.query('BEGIN');
@@ -15712,6 +15892,10 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
         const grupoRequisicao = item.grupo_requisicao || item.np || null;
         const idCarrinho = Number(id_db);
 
+        if (grupoRequisicao) {
+          statusPorGrupo.set(String(grupoRequisicao).trim(), statusInicial);
+        }
+
         // Se o item veio do carrinho (status carrinho), atualiza ao invés de inserir
         if (Number.isFinite(idCarrinho) && idCarrinho > 0) {
           const updateResult = await client.query(`
@@ -15735,7 +15919,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
                 anexos = COALESCE($17, anexos),
                 anexo_url = COALESCE($18, anexo_url),
                 updated_at = NOW()
-              WHERE id = $19 AND status = 'carrinho'
+              WHERE id = $19
             RETURNING id
           `, [
             produto_codigo,
@@ -15860,6 +16044,15 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
       const numerosCompraOmie = omieResultados
         .filter((r) => r?.tipo === 'pedido_compra' && r?.numero_pedido)
         .map((r) => String(r.numero_pedido));
+
+      for (const [grupoRequisicao, statusGrupo] of statusPorGrupo.entries()) {
+        await upsertStatusHistoricoCompras({
+          grupoRequisicao,
+          status: statusGrupo,
+          tableSource: 'solicitacao_compras',
+          client
+        });
+      }
       
       res.json({
         ok: true,
@@ -15920,13 +16113,15 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       // Busca grupo_requisicao mais recente (ORDER BY created_at DESC) do mesmo dia do usuário
       const dataHoje = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
       const buscaGrupoResult = await pool.query(`
-        SELECT grupo_requisicao 
-        FROM compras.solicitacao_compras 
-        WHERE solicitante = $1 
-          AND status = 'carrinho'
-          AND grupo_requisicao IS NOT NULL
-          AND DATE(created_at) = $2
-        ORDER BY created_at DESC
+        SELECT sc.grupo_requisicao
+        FROM compras.solicitacao_compras sc
+        JOIN compras.historico_compras hc
+          ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
+        WHERE sc.solicitante = $1
+          AND LOWER(TRIM(COALESCE(hc.status, ''))) = LOWER('carrinho')
+          AND sc.grupo_requisicao IS NOT NULL
+          AND DATE(sc.created_at) = $2
+        ORDER BY sc.created_at DESC
         LIMIT 1
       `, [solicitante, dataHoje]);
       
@@ -15993,6 +16188,12 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       anexoUrlFinal
     ]);
 
+    await upsertStatusHistoricoCompras({
+      grupoRequisicao,
+      status: 'carrinho',
+      tableSource: 'solicitacao_compras'
+    });
+
     res.json({ ok: true, id: result.rows[0]?.id, grupo_requisicao: grupoRequisicao });
   } catch (err) {
     console.error('[Compras] Erro ao registrar carrinho:', err);
@@ -16042,7 +16243,6 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
           quantidade = $3,
           prazo_solicitado = $4,
           familia_produto = $5,
-          status = 'carrinho',
           observacao = $6,
           solicitante = $7,
           departamento = $8,
@@ -16060,7 +16260,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
           anexos = COALESCE($20, anexos),
             anexo_url = COALESCE($21, anexo_url),
           updated_at = NOW()
-          WHERE id = $22 AND status = 'carrinho'
+          WHERE id = $22
       RETURNING id
     `, [
       String(item.produto_codigo || '').trim(),
@@ -16091,6 +16291,12 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Item não encontrado no carrinho' });
     }
 
+    await upsertStatusHistoricoCompras({
+      grupoRequisicao,
+      status: 'carrinho',
+      tableSource: 'solicitacao_compras'
+    });
+
     res.json({ ok: true, id: result.rows[0]?.id });
   } catch (err) {
     console.error('[Compras] Erro ao atualizar carrinho:', err);
@@ -16106,13 +16312,35 @@ app.delete('/api/compras/carrinho/:id', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
 
+    const { rows: itemRows } = await pool.query(
+      `SELECT id, grupo_requisicao FROM compras.solicitacao_compras WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (!itemRows.length) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado no carrinho' });
+    }
+
+    const grupoRequisicao = String(itemRows[0]?.grupo_requisicao || '').trim();
+
     const result = await pool.query(
-      `DELETE FROM compras.solicitacao_compras WHERE id = $1 AND status = 'carrinho' RETURNING id`,
+      `DELETE FROM compras.solicitacao_compras WHERE id = $1 RETURNING id`,
       [id]
     );
 
     if (!result.rowCount) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado no carrinho' });
+    }
+
+    if (grupoRequisicao) {
+      const { rows: restantes } = await pool.query(
+        `SELECT id FROM compras.solicitacao_compras WHERE LOWER(TRIM(COALESCE(grupo_requisicao, ''))) = LOWER(TRIM($1)) LIMIT 1`,
+        [grupoRequisicao]
+      );
+
+      if (!restantes.length) {
+        await pool.query(`DELETE FROM compras.historico_compras WHERE grupo_requisicao = $1`, [grupoRequisicao]);
+      }
     }
 
     res.json({ ok: true, id: result.rows[0]?.id });
@@ -16145,35 +16373,37 @@ app.get('/api/compras/carrinho', async (req, res) => {
 
     const { rows } = await pool.query(`
       SELECT
-        id,
-        produto_codigo,
-        produto_descricao,
-        quantidade,
-        prazo_solicitado,
-        familia_produto,
-        observacao,
-        observacao_reprovacao,
-        solicitante,
-        departamento,
-        centro_custo,
-        objetivo_compra,
-        resp_inspecao_recebimento,
-        responsavel_pela_compra,
-        retorno_cotacao,
-        codigo_produto_omie,
-        categoria_compra_codigo,
-        categoria_compra_nome,
-        codigo_omie,
-        requisicao_direta,
-        grupo_requisicao,
-        anexos,
-        anexo_url,
-        created_at,
-        updated_at
-      FROM compras.solicitacao_compras
-      WHERE status = 'carrinho'
-        AND solicitante = $1
-      ORDER BY created_at DESC, id DESC
+        sc.id,
+        sc.produto_codigo,
+        sc.produto_descricao,
+        sc.quantidade,
+        sc.prazo_solicitado,
+        sc.familia_produto,
+        sc.observacao,
+        sc.observacao_reprovacao,
+        sc.solicitante,
+        sc.departamento,
+        sc.centro_custo,
+        sc.objetivo_compra,
+        sc.resp_inspecao_recebimento,
+        sc.responsavel_pela_compra,
+        sc.retorno_cotacao,
+        sc.codigo_produto_omie,
+        sc.categoria_compra_codigo,
+        sc.categoria_compra_nome,
+        sc.codigo_omie,
+        sc.requisicao_direta,
+        sc.grupo_requisicao,
+        sc.anexos,
+        sc.anexo_url,
+        sc.created_at,
+        sc.updated_at
+      FROM compras.solicitacao_compras sc
+      JOIN compras.historico_compras hc
+        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
+      WHERE LOWER(TRIM(COALESCE(hc.status, ''))) = LOWER('carrinho')
+        AND sc.solicitante = $1
+      ORDER BY sc.created_at DESC, sc.id DESC
     `, [solicitante]);
 
     res.json({ ok: true, itens: rows });
@@ -16192,12 +16422,14 @@ app.get('/api/compras/grupos-requisicao', async (req, res) => {
     }
 
     const { rows } = await pool.query(`
-      SELECT DISTINCT grupo_requisicao
-      FROM compras.solicitacao_compras
-      WHERE grupo_requisicao IS NOT NULL
-        AND status IN ('aguardando aprovação da requisição', 'carrinho')
-        AND solicitante = $1
-      ORDER BY grupo_requisicao ASC
+      SELECT DISTINCT sc.grupo_requisicao
+      FROM compras.solicitacao_compras sc
+      JOIN compras.historico_compras hc
+        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
+      WHERE sc.grupo_requisicao IS NOT NULL
+        AND LOWER(TRIM(COALESCE(hc.status, ''))) IN (LOWER('aguardando aprovação da requisição'), LOWER('carrinho'))
+        AND sc.solicitante = $1
+      ORDER BY sc.grupo_requisicao ASC
     `, [solicitante]);
 
     res.json({ ok: true, grupos: rows.map(r => r.grupo_requisicao) });
@@ -16264,6 +16496,60 @@ function gerarNumeroGrupoRequisicao() {
   const segundo = String(agora.getSeconds()).padStart(2, '0');
   const milisegundo = String(agora.getMilliseconds()).padStart(3, '0');
   return `${ano}${mes}${dia}-${hora}${minuto}${segundo}-${milisegundo}`;
+}
+
+async function upsertStatusHistoricoCompras({ grupoRequisicao, status, tableSource = null, client = null, dados = null }) {
+  const grupo = String(grupoRequisicao || '').trim();
+  const novoStatus = String(status || '').trim();
+  if (!grupo || !novoStatus) return;
+  const dadosPayload = dados && typeof dados === 'object'
+    ? dados
+    : {
+        origem: 'upsertStatusHistoricoCompras',
+        status: novoStatus,
+        tabela_origem: tableSource || null,
+        grupo_requisicao: grupo,
+        ts: new Date().toISOString()
+      };
+
+  const executor = client || pool;
+  await executor.query(`
+    INSERT INTO compras.historico_compras (
+      grupo_requisicao,
+      status,
+      tabela_origem,
+      dados,
+      created_at
+    ) VALUES (
+      $1,
+      $2,
+      $3,
+      $4,
+      NOW()
+    )
+    ON CONFLICT (grupo_requisicao)
+    DO UPDATE SET
+      status = EXCLUDED.status,
+      tabela_origem = COALESCE(EXCLUDED.tabela_origem, compras.historico_compras.tabela_origem),
+      dados = COALESCE(EXCLUDED.dados, compras.historico_compras.dados),
+      created_at = NOW()
+  `, [
+    grupo,
+    novoStatus,
+    tableSource,
+    JSON.stringify(dadosPayload)
+  ]);
+}
+
+async function obterStatusHistoricoPorGrupo({ grupoRequisicao, client = null }) {
+  const grupo = String(grupoRequisicao || '').trim();
+  if (!grupo) return null;
+  const executor = client || pool;
+  const { rows } = await executor.query(
+    `SELECT status FROM compras.historico_compras WHERE grupo_requisicao = $1 LIMIT 1`,
+    [grupo]
+  );
+  return rows[0]?.status || null;
 }
 
 // POST /api/compras/sem-cadastro - Registra solicitação de compra para produto SEM cadastro na Omie
@@ -16855,6 +17141,12 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     }
 
     const novoId = idsInseridos[0] || null;
+
+    await upsertStatusHistoricoCompras({
+      grupoRequisicao: grupoFinal,
+      status: compraJaRealizadaSelecionada ? 'compra realizada' : statusInicial,
+      tableSource: 'compras_sem_cadastro'
+    });
     
     log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
     
@@ -18846,56 +19138,50 @@ app.get('/api/compras/todas', async (req, res) => {
           LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) AS grupo_key
         FROM compras.compras_sem_cadastro csc
         WHERE TRIM(COALESCE(csc.grupo_requisicao, '')) <> ''
-      ),
-      origem_primeiro_item AS (
-        SELECT DISTINCT ON (o.table_source, o.grupo_key)
-          o.*
-        FROM origem o
-        ORDER BY o.table_source, o.grupo_key, o.created_at ASC NULLS FIRST, o.id ASC
       )
       SELECT
-        COALESCE(opi.id, hr.historico_id) AS id,
-        opi.numero_pedido,
-        opi.produto_codigo,
-        opi.produto_descricao,
-        opi.quantidade,
-        opi.unidade,
-        opi.prazo_solicitado,
-        opi.previsao_chegada,
+        COALESCE(o.id, hr.historico_id) AS id,
+        o.numero_pedido,
+        o.produto_codigo,
+        o.produto_descricao,
+        o.quantidade,
+        o.unidade,
+        o.prazo_solicitado,
+        o.previsao_chegada,
         hr.status,
-        opi.observacao,
-        opi.observacao_reprovacao,
-        opi.observacao_retificacao,
-        opi.solicitante,
-        opi.resp_inspecao_recebimento,
-        opi.responsavel_pela_compra,
-        opi.departamento,
-        opi.centro_custo,
-        opi.objetivo_compra,
-        opi.fornecedor_nome,
-        opi.fornecedor_id,
-        opi.familia_produto,
-        COALESCE(opi.grupo_requisicao, hr.grupo_requisicao) AS grupo_requisicao,
-        opi.retorno_cotacao,
-        opi.categoria_compra_codigo,
-        opi.categoria_compra_nome,
-        opi.codigo_omie,
-        opi.codigo_produto_omie,
-        opi.requisicao_direta,
-        opi.anexos,
-        opi.link,
-        opi."cNumero",
-        opi."nCodPed",
-        COALESCE(opi.created_at, hr.created_at) AS created_at,
-        COALESCE(opi.updated_at, hr.created_at) AS updated_at,
+        o.observacao,
+        o.observacao_reprovacao,
+        o.observacao_retificacao,
+        o.solicitante,
+        o.resp_inspecao_recebimento,
+        o.responsavel_pela_compra,
+        o.departamento,
+        o.centro_custo,
+        o.objetivo_compra,
+        o.fornecedor_nome,
+        o.fornecedor_id,
+        o.familia_produto,
+        COALESCE(o.grupo_requisicao, hr.grupo_requisicao) AS grupo_requisicao,
+        o.retorno_cotacao,
+        o.categoria_compra_codigo,
+        o.categoria_compra_nome,
+        o.codigo_omie,
+        o.codigo_produto_omie,
+        o.requisicao_direta,
+        o.anexos,
+        o.link,
+        o."cNumero",
+        o."nCodPed",
+        COALESCE(o.created_at, hr.created_at) AS created_at,
+        COALESCE(o.updated_at, hr.created_at) AS updated_at,
         hr.table_source,
         hr.historico_id,
         hr.historico_id::text AS id_solicitante
       FROM historico_recente hr
-      LEFT JOIN origem_primeiro_item opi
-        ON opi.table_source = hr.table_source
-       AND opi.grupo_key = LOWER(TRIM(COALESCE(hr.grupo_requisicao, '')))
-      ORDER BY COALESCE(opi.created_at, hr.created_at) DESC
+      LEFT JOIN origem o
+        ON o.table_source = hr.table_source
+       AND o.grupo_key = LOWER(TRIM(COALESCE(hr.grupo_requisicao, '')))
+      ORDER BY COALESCE(o.created_at, hr.created_at) DESC
       LIMIT 1000
     `);
 
@@ -18937,7 +19223,7 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
           sc.produto_descricao,
           sc.quantidade,
           po.unidade,
-          sc.status,
+          COALESCE(hc.status, sc.status) AS status,
           sc.solicitante,
           sc.departamento,
           sc.centro_custo::text AS centro_custo,
@@ -18971,6 +19257,8 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
           END
           LIMIT 1
         ) po ON TRUE
+        LEFT JOIN compras.historico_compras hc
+          ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
         WHERE LOWER(TRIM(COALESCE(sc.grupo_requisicao, ''))) = LOWER(TRIM($1))
         ORDER BY sc.created_at ASC NULLS FIRST, sc.id ASC
       `, [grupoRequisicao]);
@@ -18992,7 +19280,7 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
         csc.produto_descricao,
         csc.quantidade,
         NULL::text AS unidade,
-        csc.status,
+        COALESCE(hc.status, csc.status) AS status,
         csc.solicitante,
         csc.departamento,
         csc.centro_custo::text AS centro_custo,
@@ -19008,6 +19296,8 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
         csc.updated_at,
         'compras_sem_cadastro'::text AS table_source
       FROM compras.compras_sem_cadastro csc
+      LEFT JOIN compras.historico_compras hc
+        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(csc.grupo_requisicao, '')))
       WHERE LOWER(TRIM(COALESCE(csc.grupo_requisicao, ''))) = LOWER(TRIM($1))
       ORDER BY csc.created_at ASC NULLS FIRST, csc.id ASC
     `, [grupoRequisicao]);
@@ -19298,6 +19588,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
     const { rows: solicitacoes } = await pool.query(`
       SELECT 
         sc.*,
+        COALESCE(hc.status, sc.status) AS status,
         po.codigo AS produto_codigo,
         po.descricao AS produto_descricao,
         ro.numero AS cnumero,
@@ -19308,8 +19599,10 @@ app.get('/api/compras/requisicoes', async (req, res) => {
       LEFT JOIN public.produtos_omie po ON po.codigo_produto = sc.codigo_omie
       INNER JOIN compras.requisicoes_omie ro
         ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+      LEFT JOIN compras.historico_compras hc
+        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
       WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
-        AND TRIM(LOWER(COALESCE(sc.status, ''))) IN (
+        AND TRIM(LOWER(COALESCE(hc.status, sc.status, ''))) IN (
           TRIM(LOWER('Requisição')),
           TRIM(LOWER('Requisicao'))
         )
@@ -19326,6 +19619,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
     const { rows: semCadastro } = await pool.query(`
       SELECT
         sc.*,
+        COALESCE(hc.status, sc.status) AS status,
         sc.produto_codigo AS produto_codigo,
         sc.produto_descricao AS produto_descricao,
         ro.numero AS cnumero,
@@ -19335,8 +19629,10 @@ app.get('/api/compras/requisicoes', async (req, res) => {
       FROM compras.compras_sem_cadastro sc
       INNER JOIN compras.requisicoes_omie ro
         ON TRIM(COALESCE(ro.cod_int_req_compra, '')) = TRIM(COALESCE(sc.numero_pedido, ''))
+      LEFT JOIN compras.historico_compras hc
+        ON LOWER(TRIM(COALESCE(hc.grupo_requisicao, ''))) = LOWER(TRIM(COALESCE(sc.grupo_requisicao, '')))
       WHERE TRIM(COALESCE(sc.numero_pedido, '')) <> ''
-        AND TRIM(LOWER(COALESCE(sc.status, ''))) IN (
+        AND TRIM(LOWER(COALESCE(hc.status, sc.status, ''))) IN (
           TRIM(LOWER('Requisição')),
           TRIM(LOWER('Requisicao'))
         )
@@ -21308,126 +21604,189 @@ app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
   }
 });
 
-// Endpoint para enviar cotações aprovadas do modal "Cotado aguardando escolha"
-app.post('/api/compras/cotado-escolha/enviar-solicitacao', express.json(), async (req, res) => {
+// Endpoint para realizar requisição a partir de uma cotação (desmembra grupo_requisicao dos itens da cotação)
+app.post('/api/compras/cotacoes/:id/realizar-requisicao', express.json(), async (req, res) => {
   const client = await pool.connect();
   try {
-    const itemId = Number(req.body?.item_id || req.body?.itemId);
-    if (!Number.isInteger(itemId)) {
-      return res.status(400).json({ ok: false, error: 'item_id inválido' });
+    const cotacaoId = Number(req.params.id);
+    if (!Number.isInteger(cotacaoId)) {
+      return res.status(400).json({ ok: false, error: 'ID da cotação inválido' });
     }
 
-    let tableSource = String(req.body?.table_source || '').trim();
-    if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
-      const { rows: fromSolicitacao } = await client.query(
-        'SELECT id FROM compras.solicitacao_compras WHERE id = $1 LIMIT 1',
-        [itemId]
-      );
-      tableSource = fromSolicitacao.length > 0 ? 'solicitacao_compras' : 'compras_sem_cadastro';
+    await client.query('BEGIN');
+
+    const { rows: cotacaoRows } = await client.query(
+      `
+        SELECT id, solicitacao_id, table_source, status_aprovacao
+        FROM compras.cotacoes
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [cotacaoId]
+    );
+
+    if (!cotacaoRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Cotação não encontrada' });
     }
 
+    const cotacao = cotacaoRows[0];
+    if (String(cotacao.status_aprovacao || '').toLowerCase() === 'aprovado') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Esta cotação já teve a requisição realizada' });
+    }
+
+    const tableSource = String(cotacao.table_source || '').trim() === 'compras_sem_cadastro'
+      ? 'compras_sem_cadastro'
+      : 'solicitacao_compras';
     const tableName = tableSource === 'compras_sem_cadastro'
       ? 'compras.compras_sem_cadastro'
       : 'compras.solicitacao_compras';
 
-    await client.query('BEGIN');
-
-    const { rows: itemRows } = await client.query(
-      `SELECT id, grupo_requisicao FROM ${tableName} WHERE id = $1 FOR UPDATE`,
-      [itemId]
-    );
-
-    if (itemRows.length === 0) {
+    const solicitacaoId = Number(cotacao.solicitacao_id);
+    if (!Number.isInteger(solicitacaoId)) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+      return res.status(400).json({ ok: false, error: 'Cotação sem solicitacao_id válido' });
     }
 
-    const grupoOriginal = String(itemRows[0]?.grupo_requisicao || '').trim();
-    if (!grupoOriginal) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'Grupo de requisição não informado no item' });
-    }
-
-    const { rows: cotacoesAprovadas } = await client.query(
+    const { rows: grupoPaiRows } = await client.query(
       `
-        SELECT c.id,
-               COALESCE((
-                 SELECT jsonb_agg(
-                   jsonb_build_object(
-                     'item_origem_id', ci.item_origem_id,
-                     'produto_codigo', ci.produto_codigo,
-                     'produto_descricao', ci.produto_descricao,
-                     'quantidade', ci.quantidade
-                   )
-                   ORDER BY ci.id
-                 )
-                 FROM compras.cotacoes_itens ci
-                 WHERE ci.cotacao_id = c.id
-                   AND ci.table_source = $2
-               ), '[]'::jsonb) AS itens_cotacao
-        FROM compras.cotacoes c
-        WHERE c.solicitacao_id = $1
-          AND c.table_source = $2
-          AND c.status_aprovacao = 'aprovado'
-        ORDER BY c.id ASC
+        SELECT grupo_requisicao
+        FROM ${tableName}
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
       `,
-      [itemId, tableSource]
+      [solicitacaoId]
     );
 
-    if (!cotacoesAprovadas.length) {
+    if (!grupoPaiRows.length) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'É necessário aprovar pelo menos uma cotação' });
+      return res.status(404).json({ ok: false, error: 'Item de referência da cotação não encontrado na tabela de origem' });
     }
 
-    const itensParaMover = new Map();
-    cotacoesAprovadas.forEach((cotacao, idxCotacao) => {
-      const novoGrupo = `${grupoOriginal}.${idxCotacao + 1}`;
-      const itensCotacao = Array.isArray(cotacao?.itens_cotacao) ? cotacao.itens_cotacao : [];
+    const grupoPaiOriginal = String(grupoPaiRows[0]?.grupo_requisicao || '').trim();
+    if (!grupoPaiOriginal) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Grupo de requisição não encontrado no item de referência' });
+    }
 
-      itensCotacao.forEach((itemCotacao) => {
-        const itemOrigemId = Number(itemCotacao?.item_origem_id || itemCotacao?.id);
-        if (!Number.isInteger(itemOrigemId)) return;
-        if (itensParaMover.has(itemOrigemId)) return;
-        itensParaMover.set(itemOrigemId, novoGrupo);
-      });
+    const grupoPaiBase = grupoPaiOriginal.split('.').shift();
+    if (!grupoPaiBase) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Grupo de requisição base inválido' });
+    }
+
+    const { rows: cotacaoItensRows } = await client.query(
+      `
+        SELECT item_origem_id
+        FROM compras.cotacoes_itens
+        WHERE cotacao_id = $1
+          AND table_source = $2
+        ORDER BY id ASC
+      `,
+      [cotacaoId, tableSource]
+    );
+
+    const itensOrigemIds = Array.from(new Set(
+      cotacaoItensRows
+        .map((row) => Number(row.item_origem_id))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    ));
+
+    if (!itensOrigemIds.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Cotação sem itens vinculados para desmembrar' });
+    }
+
+    const { rows: gruposExistentesRows } = await client.query(
+      `
+        SELECT grupo_requisicao
+        FROM compras.solicitacao_compras
+        WHERE LOWER(TRIM(COALESCE(grupo_requisicao, ''))) = LOWER(TRIM($1))
+           OR LOWER(TRIM(COALESCE(grupo_requisicao, ''))) LIKE LOWER(TRIM($1)) || '.%'
+        UNION
+        SELECT grupo_requisicao
+        FROM compras.compras_sem_cadastro
+        WHERE LOWER(TRIM(COALESCE(grupo_requisicao, ''))) = LOWER(TRIM($1))
+           OR LOWER(TRIM(COALESCE(grupo_requisicao, ''))) LIKE LOWER(TRIM($1)) || '.%'
+      `,
+      [grupoPaiBase]
+    );
+
+    let maiorSufixo = 0;
+    gruposExistentesRows.forEach((row) => {
+      const grupo = String(row?.grupo_requisicao || '').trim();
+      if (!grupo) return;
+      const match = grupo.match(/^(.+)\.(\d+)$/);
+      if (!match) return;
+      if (match[1] !== grupoPaiBase) return;
+      const numero = Number(match[2]);
+      if (Number.isInteger(numero) && numero > maiorSufixo) {
+        maiorSufixo = numero;
+      }
     });
 
-    if (itensParaMover.size === 0) {
-      itensParaMover.set(itemId, `${grupoOriginal}.1`);
+    const novoGrupoRequisicao = `${grupoPaiBase}.${maiorSufixo + 1}`;
+
+    const { rows: itensExistentesRows } = await client.query(
+      `
+        SELECT id
+        FROM ${tableName}
+        WHERE id = ANY($1::int[])
+      `,
+      [itensOrigemIds]
+    );
+
+    const itensExistentes = new Set(itensExistentesRows.map((row) => Number(row.id)));
+    const itensParaAtualizar = itensOrigemIds.filter((id) => itensExistentes.has(id));
+
+    if (!itensParaAtualizar.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Itens da cotação não encontrados na tabela de origem' });
     }
 
-    const itensMovidos = [];
-    for (const [itemOrigemId, novoGrupo] of itensParaMover.entries()) {
-      const { rows: updatedRows } = await client.query(
-        `
-          UPDATE ${tableName}
-          SET grupo_requisicao = $1,
-              status = 'Analise de cadastro',
-              updated_at = NOW()
-          WHERE id = $2
-          RETURNING id, grupo_requisicao, status
-        `,
-        [novoGrupo, itemOrigemId]
-      );
+    const { rows: itensAtualizadosRows } = await client.query(
+      `
+        UPDATE ${tableName}
+        SET grupo_requisicao = $1,
+            status = 'Analise de cadastro',
+            updated_at = NOW()
+        WHERE id = ANY($2::int[])
+        RETURNING id, grupo_requisicao, status
+      `,
+      [novoGrupoRequisicao, itensParaAtualizar]
+    );
 
-      if (updatedRows.length > 0) {
-        itensMovidos.push(updatedRows[0]);
-      }
-    }
+    await upsertStatusHistoricoCompras({
+      grupoRequisicao: novoGrupoRequisicao,
+      status: 'Analise de cadastro',
+      tableSource,
+      client
+    });
+
+    const { rows: cotacaoAtualizadaRows } = await client.query(
+      `
+        UPDATE compras.cotacoes
+        SET status_aprovacao = 'aprovado', atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [cotacaoId]
+    );
 
     await client.query('COMMIT');
     return res.json({
       ok: true,
-      grupo_original: grupoOriginal,
-      table_source: tableSource,
-      total_cotacoes_aprovadas: cotacoesAprovadas.length,
-      total_itens_movidos: itensMovidos.length,
-      itens_movidos: itensMovidos
+      cotacao: cotacaoAtualizadaRows[0],
+      grupo_pai: grupoPaiBase,
+      novo_grupo_requisicao: novoGrupoRequisicao,
+      itens_movidos: itensAtualizadosRows
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('[COTADO ESCOLHA] Erro ao enviar solicitação fracionada:', err);
-    return res.status(500).json({ ok: false, error: 'Erro ao enviar solicitação fracionada' });
+    console.error('[COTACOES] Erro ao realizar requisição por cotação:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao realizar requisição por cotação' });
   } finally {
     client.release();
   }
@@ -21569,30 +21928,24 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, observacao_retificacao, observacao_reprovacao, usuario_comentario } = req.body;
-    
-    // Valida status
+
     const statusValidos = ['pendente', 'aguardando cotação', 'cotada', 'aguardando compra', 'aprovado', 'recusado', 'retificar', 'aguardando aprovação da requisição', 'carrinho', 'Analise de cadastro', 'Carrinho'];
     if (!status || !statusValidos.includes(status)) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: `Status inválido. Use: ${statusValidos.join(', ')}` 
+      return res.status(400).json({
+        ok: false,
+        error: `Status inválido. Use: ${statusValidos.join(', ')}`
       });
     }
-    
-    // Objetivo: Detectar de qual tabela o item vem (solicitacao_compras ou compras_sem_cadastro)
-    // e fazer a atualização na tabela correta
+
     let tableSource = null;
-    
-    // Tenta encontrar em solicitacao_compras primeiro
     const { rows: fromSolicitacao } = await pool.query(
       'SELECT id FROM compras.solicitacao_compras WHERE id = $1',
       [id]
     );
-    
+
     if (fromSolicitacao.length > 0) {
       tableSource = 'solicitacao_compras';
     } else {
-      // Se não encontrou, tenta compras_sem_cadastro
       const { rows: fromSemCadastro } = await pool.query(
         'SELECT id FROM compras.compras_sem_cadastro WHERE id = $1',
         [id]
@@ -21601,30 +21954,35 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
         tableSource = 'compras_sem_cadastro';
       }
     }
-    
+
     if (!tableSource) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado em nenhuma tabela' });
     }
 
-    // Se o status for 'retificar', exige observação (para solicitacao_compras)
     if (tableSource === 'solicitacao_compras' && status === 'retificar' && (!observacao_retificacao || observacao_retificacao.trim() === '')) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Observação é obrigatória ao solicitar retificação' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Observação é obrigatória ao solicitar retificação'
       });
     }
 
-    // Se for voltar para carrinho a partir de aprovação, exige motivo
+    const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
+    const { rows: grupoRows } = await pool.query(
+      `SELECT grupo_requisicao FROM ${tableName} WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (!grupoRows.length) {
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const grupoRequisicao = String(grupoRows[0]?.grupo_requisicao || '').trim();
+    if (!grupoRequisicao) {
+      return res.status(400).json({ ok: false, error: 'Item sem grupo_requisicao para atualizar status no histórico' });
+    }
+
     if (status === 'carrinho' || status === 'Carrinho') {
-      const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
-      const { rows: currentRows } = await pool.query(
-        `SELECT status FROM ${tableName} WHERE id = $1`,
-        [id]
-      );
-      if (currentRows.length === 0) {
-        return res.status(404).json({ ok: false, error: 'Item não encontrado' });
-      }
-      const statusAtual = currentRows[0]?.status;
+      const statusAtual = await obterStatusHistoricoPorGrupo({ grupoRequisicao });
       if (statusAtual === 'aguardando aprovação da requisição' && (!observacao_reprovacao || observacao_reprovacao.trim() === '')) {
         return res.status(400).json({
           ok: false,
@@ -21632,74 +21990,72 @@ app.put('/api/compras/itens/:id/status', async (req, res) => {
         });
       }
     }
-    
-    // Atualiza status do item (e observação se houver comentário)
-    let query, params;
-    const tableName = tableSource === 'solicitacao_compras' ? 'compras.solicitacao_compras' : 'compras.compras_sem_cadastro';
-    
-    // Objetivo: Usar a coluna correta de observação dependendo da tabela
-    // - solicitacao_compras usa: observacao_retificacao
-    // - compras_sem_cadastro usa: observacao_reprovacao
-    
-    // Se tiver observação (retificar ou voltando de retificar), acrescenta ao histórico
+
+    let query = null;
+    let params = null;
+
     if (observacao_retificacao && observacao_retificacao.trim() !== '') {
       const nomeUsuario = usuario_comentario || 'Usuário';
       const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
       const novaLinha = `User ${nomeUsuario} - ${dataHora}\n${observacao_retificacao}\n`;
-      
+
       if (tableSource === 'solicitacao_compras') {
-        // Para solicitacao_compras: usar observacao_retificacao com histórico
         const { rows: existingRows } = await pool.query(
           `SELECT observacao_retificacao FROM ${tableName} WHERE id = $1`,
           [id]
         );
-        
+
         const historicoExistente = existingRows[0]?.observacao_retificacao || '';
         const novoHistorico = historicoExistente ? `${historicoExistente}\n${novaLinha}` : novaLinha;
-        
+
         query = `
           UPDATE ${tableName}
-          SET status = $1, observacao_retificacao = $2, updated_at = NOW()
+          SET observacao_retificacao = $1, updated_at = NOW()
+          WHERE id = $2
+          RETURNING *
+        `;
+        params = [novoHistorico, id];
+      } else {
+        query = `
+          UPDATE ${tableName}
+          SET observacao_reprovacao = $1, usuario_comentario = $2, updated_at = NOW()
           WHERE id = $3
           RETURNING *
         `;
-        params = [status, novoHistorico, id];
-      } else {
-        // Para compras_sem_cadastro: usar observacao_reprovacao (sem histórico, apenas sobrescreve)
-        query = `
-          UPDATE ${tableName}
-          SET status = $1, observacao_reprovacao = $2, usuario_comentario = $3, updated_at = NOW()
-          WHERE id = $4
-          RETURNING *
-        `;
-        params = [status, observacao_retificacao.trim(), nomeUsuario, id];
+        params = [observacao_retificacao.trim(), nomeUsuario, id];
       }
     } else if (observacao_reprovacao && observacao_reprovacao.trim() !== '') {
       query = `
         UPDATE ${tableName}
-        SET status = $1, observacao_reprovacao = $2, updated_at = NOW()
-        WHERE id = $3
-        RETURNING *
-      `;
-      params = [status, observacao_reprovacao.trim(), id];
-    } else {
-      query = `
-        UPDATE ${tableName}
-        SET status = $1, updated_at = NOW()
+        SET observacao_reprovacao = $1, updated_at = NOW()
         WHERE id = $2
         RETURNING *
       `;
-      params = [status, id];
+      params = [observacao_reprovacao.trim(), id];
     }
-    
-    const { rows } = await pool.query(query, params);
-    
+
+    const rows = query
+      ? (await pool.query(query, params)).rows
+      : (await pool.query(`SELECT * FROM ${tableName} WHERE id = $1`, [id])).rows;
+
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: 'Item não encontrado' });
     }
-    
-    res.json({ ok: true, item: rows[0], table_source: tableSource });
-    
+
+    await upsertStatusHistoricoCompras({
+      grupoRequisicao,
+      status,
+      tableSource,
+      dados: {
+        item_id: Number(id),
+        observacao_retificacao: observacao_retificacao || null,
+        observacao_reprovacao: observacao_reprovacao || null,
+        usuario_comentario: usuario_comentario || null
+      }
+    });
+
+    const itemResposta = { ...rows[0], status, grupo_requisicao: grupoRequisicao };
+    res.json({ ok: true, item: itemResposta, table_source: tableSource });
   } catch (err) {
     console.error('[Compras] Erro ao atualizar status do item:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar status do item' });

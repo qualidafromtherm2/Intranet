@@ -21072,6 +21072,16 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         }
       }));
     }
+
+    const cotacoesParaAprovacao = statusColuna === 'cotado aguardando escolha'
+      ? Array.from(cotacoesMap.values()).flat()
+      : [];
+    const possuiCotacaoUsdParaAprovacao = cotacoesParaAprovacao.some((cotacao) =>
+      String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD'
+    );
+    const taxaUsdBrlParaAprovacao = possuiCotacaoUsdParaAprovacao
+      ? await obterTaxaUsdBrlCotacaoKanban()
+      : null;
     
     let html = '<div style="display:flex;flex-direction:column;gap:20px;">';
     
@@ -21150,6 +21160,8 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                 const fornecedorEscaped = escapeHtml(cotacao.fornecedor_nome || '-');
                 const observacaoEscaped = cotacao.observacao ? escapeHtml(cotacao.observacao) : '';
                 const valorCotado = Number(cotacao.valor_cotado) || 0;
+                const moedaCotada = String(cotacao.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+                const valorCotadoHtml = `${formatarValorCotacaoKanban(valorCotado, moedaCotada)}${formatarConversaoUsdParaBrlCotacaoKanban(valorCotado, moedaCotada, taxaUsdBrlParaAprovacao)}`;
                 
                 return `
                 <div style="background:white;padding:12px;border-radius:6px;border:1px solid #e5e7eb;">
@@ -21160,7 +21172,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
                     </div>
                     <div>
                       <div style="font-size:11px;color:#6b7280;">Valor Cotado</div>
-                      <div style="font-weight:600;color:#059669;">R$ ${valorCotado.toFixed(2)}</div>
+                      <div style="font-weight:600;color:#059669;">${valorCotadoHtml}</div>
                     </div>
                     <button 
                       id="btn-aprovar-cotacao-${item.id}-${cotacao.id}"
@@ -21344,7 +21356,7 @@ async function abrirModalAnaliseCadastro(itemId) {
       return;
     }
 
-    modalTitulo.textContent = `Item ${item.id} - Análise de Cadastro`;
+    modalTitulo.textContent = `Item ${item.id} - Organizando requisição`;
 
     const fmtDate = (iso) => {
       if (!iso) return '-';
@@ -21395,7 +21407,6 @@ async function abrirModalAnaliseCadastro(itemId) {
     window.analiseCadastroItemId = item.id;
     window.analiseCadastroTableSource = tableSourceAnalise;
     window.analiseCadastroDirty = false;
-    const analiseCadastroEhSemCadastro = window.analiseCadastroTableSource === 'compras_sem_cadastro';
 
     // Comentário: renderiza detalhes do item de compras_sem_cadastro
     let anexosItem = item.anexos;
@@ -21457,28 +21468,18 @@ async function abrirModalAnaliseCadastro(itemId) {
         </h4>
         <div id="listaItensAnaliseCadastro" style="display:grid;gap:8px;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
-          <button id="btnMoverCotadoAnaliseCadastro" onclick="moverAnaliseCadastroParaCotado()" style="background:#8b5cf6;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-            <i class="fa-solid fa-arrow-right"></i>
-            Mover para Cotado
-          </button>
-          <button id="btnCriarItensOmieAnaliseCadastro" onclick="criarItensOmieAnaliseCadastro()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Criar itens na Omie' : 'Disponível apenas para itens de compras_sem_cadastro'}">
+          <button id="btnCriarItensOmieAnaliseCadastro" onclick="criarItensOmieAnaliseCadastro()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;opacity:1;display:inline-flex;align-items:center;gap:6px;" title="Criar itens na Omie">
             <i class="fa-solid fa-cloud-arrow-up"></i>
             Criar itens na Omie
           </button>
-          <button id="btnCriarRequisicaoCompraAnaliseCadastro" onclick="criarRequisicaoCompraAnaliseCadastro()" style="background:#7c3aed;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Criar requisição de compra' : 'Disponível apenas para itens de compras_sem_cadastro'}">
+          <button id="btnCriarRequisicaoCompraAnaliseCadastro" onclick="criarRequisicaoCompraAnaliseCadastro()" style="background:#7c3aed;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;opacity:1;display:inline-flex;align-items:center;gap:6px;" title="Criar requisição de compra">
             <i class="fa-solid fa-cart-shopping"></i>
             Criar requisição de compra
           </button>
-          <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Salvar alterações' : 'Disponível apenas para itens de compras_sem_cadastro'}">
+          <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;opacity:1;display:inline-flex;align-items:center;gap:6px;" title="Salvar alterações">
             <i class="fa-solid fa-floppy-disk"></i>
             Salvar alterações
           </button>
-          ${analiseCadastroEhSemCadastro ? '' : `
-          <div style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
-            <i class="fa-solid fa-circle-info"></i>
-            Dados exibidos via histórico de compras
-          </div>
-          `}
         </div>
       </div>
     `;
@@ -21613,16 +21614,9 @@ window.atualizarItemAnaliseCadastro = function(index, campo, valor) {
 function atualizarBotaoSalvarAnaliseCadastro() {
   const btn = document.getElementById('btnSalvarItensAnaliseCadastro');
   if (!btn) return;
-  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
-    btn.disabled = true;
-    btn.style.opacity = '0.5';
-    btn.style.cursor = 'not-allowed';
-    return;
-  }
-  const dirty = !!window.analiseCadastroDirty;
-  btn.disabled = !dirty;
-  btn.style.opacity = dirty ? '1' : '0.5';
-  btn.style.cursor = dirty ? 'pointer' : 'not-allowed';
+  btn.disabled = false;
+  btn.style.opacity = '1';
+  btn.style.cursor = 'pointer';
 }
 
 // Comentário: duplica o item mantendo o sequencial do CODPROV
@@ -21664,10 +21658,7 @@ window.removerItemAnaliseCadastro = function(index) {
 window.salvarItensAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
-  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
-    alert('Este item está em modo histórico e não permite salvar descrição por este modal.');
-    return;
-  }
+  const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   const descricaoFinal = itens.map((item) => {
@@ -21677,7 +21668,11 @@ window.salvarItensAnaliseCadastro = async function() {
   }).join(';');
 
   try {
-    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}`, {
+    const endpoint = tableSource === 'compras_sem_cadastro'
+      ? `/api/compras/sem-cadastro/${itemId}`
+      : `/api/compras/solicitacoes/${itemId}`;
+
+    const resp = await fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -21698,66 +21693,33 @@ window.salvarItensAnaliseCadastro = async function() {
   }
 };
 
-// Comentário: move item da análise de cadastro para cotado
-window.moverAnaliseCadastroParaCotado = async function() {
-  const itemId = window.analiseCadastroItemId;
-  if (!itemId) return;
-
-  const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
-  const btn = document.getElementById('btnMoverCotadoAnaliseCadastro');
-  const originalHtml = btn ? btn.innerHTML : '';
-
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.style.cursor = 'not-allowed';
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Movendo...';
-    }
-
-    const endpoint = tableSource === 'compras_sem_cadastro'
-      ? `/api/compras/sem-cadastro/${itemId}`
-      : `/api/compras/solicitacoes/${itemId}`;
-
-    const resp = await fetch(endpoint, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ status: 'cotado' })
-    });
-
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || 'Erro ao atualizar status para cotado');
-    }
-
-    alert('Status atualizado para "cotado".');
-    fecharModalAnaliseCadastro();
-    if (typeof loadMinhasSolicitacoes === 'function') {
-      loadMinhasSolicitacoes();
-    }
-  } catch (err) {
-    console.error('[ANALISE CADASTRO] Erro ao mover para cotado:', err);
-    alert('Erro ao mover para cotado: ' + err.message);
-    if (btn) {
-      btn.disabled = false;
-      btn.style.cursor = 'pointer';
-      btn.innerHTML = originalHtml;
-    }
-  }
-};
-
 // Comentário: cadastra os itens do modal na Omie e retorna os códigos criados
 window.criarItensOmieAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
-  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
-    alert('Este item não pertence a compras_sem_cadastro.');
-    return;
-  }
+  const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   if (!itens.length) {
     alert('Nenhum item para cadastrar na Omie.');
+    return;
+  }
+
+  const indicesOriginaisCodprov = [];
+  const itensCodprov = itens
+    .map((item, indexOriginal) => ({ item, indexOriginal }))
+    .filter(({ item }) => /^CODPROV\s*-/i.test(String(item?.produto_codigo || '').trim()))
+    .map(({ item, indexOriginal }) => {
+      indicesOriginaisCodprov.push(indexOriginal);
+      return {
+        descricao: item?.descricao,
+        quantidade: item?.quantidade,
+        codigo_omie: item?.codigo_omie || null
+      };
+    });
+
+  if (!itensCodprov.length) {
+    alert('Não há itens com código CODPROV na lista para cadastrar na Omie.');
     return;
   }
 
@@ -21771,11 +21733,15 @@ window.criarItensOmieAnaliseCadastro = async function() {
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cadastrando...';
     }
 
-    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}/cadastrar-omie`, {
+    const endpoint = tableSource === 'compras_sem_cadastro'
+      ? `/api/compras/sem-cadastro/${itemId}/cadastrar-omie`
+      : `/api/compras/solicitacoes/${itemId}/cadastrar-omie`;
+
+    const resp = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ itens })
+      body: JSON.stringify({ itens: itensCodprov })
     });
 
     if (!resp.ok) {
@@ -21787,7 +21753,8 @@ window.criarItensOmieAnaliseCadastro = async function() {
     const resultados = Array.isArray(data.itens) ? data.itens : [];
 
     resultados.forEach((r) => {
-      const alvo = itens[r.index];
+      const indexOriginal = Number(indicesOriginaisCodprov[r.index]);
+      const alvo = itens[indexOriginal];
       if (alvo) {
         alvo.codigo_omie = r.codigo_produto || '';
         alvo.ja_existe_omie = !!r.ja_existe;
@@ -21817,10 +21784,7 @@ window.criarItensOmieAnaliseCadastro = async function() {
 window.criarRequisicaoCompraAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
-  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
-    alert('Este item não pertence a compras_sem_cadastro.');
-    return;
-  }
+  const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   if (!itens.length) {
@@ -21828,10 +21792,12 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     return;
   }
 
-  const semCodigoOmie = itens.find(i => !i.codigo_omie);
-  if (semCodigoOmie) {
-    alert('Todos os itens precisam ter código Omie antes de criar a requisição.');
-    return;
+  if (tableSource === 'compras_sem_cadastro') {
+    const semCodigoOmie = itens.find(i => !i.codigo_omie);
+    if (semCodigoOmie) {
+      alert('Todos os itens precisam ter código Omie antes de criar a requisição.');
+      return;
+    }
   }
 
   const btn = document.getElementById('btnCriarRequisicaoCompraAnaliseCadastro');
@@ -21844,12 +21810,29 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Criando...';
     }
 
-    const resp = await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ itens })
-    });
+    const resp = tableSource === 'compras_sem_cadastro'
+      ? await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ itens })
+        })
+      : await (async () => {
+          const ids = Array.from(new Set(
+            itens
+              .map((item) => Number(item?.item_origem_id || item?.id))
+              .filter((id) => Number.isInteger(id) && id > 0)
+          ));
+
+          const idsPayload = ids.length ? ids : [Number(itemId)].filter((id) => Number.isInteger(id) && id > 0);
+
+          return fetch('/api/compras/aprovar-grupo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ ids: idsPayload })
+          });
+        })();
 
     if (!resp.ok) {
       const errData = await resp.json();
@@ -21857,7 +21840,9 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     }
 
     const data = await resp.json();
-    alert(`Requisição criada com sucesso!\nCódigo interno: ${data.codIntReqCompra || '-'}\nCódigo Omie: ${data.codReqCompra || '-'}`);
+    const codigoInterno = data.codIntReqCompra || data.numero_pedido || '-';
+    const codigoOmie = data.codReqCompra || data.ncodped || '-';
+    alert(`Requisição criada com sucesso!\nCódigo interno: ${codigoInterno}\nCódigo Omie: ${codigoOmie}`);
     fecharModalAnaliseCadastro();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
@@ -22155,13 +22140,6 @@ async function abrirModalCotadoEscolhaItem(itemId) {
             style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
             <i class="fa-solid fa-ban"></i>
             <span>Excluir</span>
-          </button>
-          <button 
-            onclick="enviarCotadoEscolhaParaCompra()"
-            id="btn-enviar-requisicao-cotado-escolha"
-            style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;padding:12px 20px;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:8px;">
-            <i class="fa-solid fa-paper-plane"></i>
-            <span>Enviar solicitação</span>
           </button>
         </div>
       </div>
@@ -23570,6 +23548,44 @@ function formatarConversaoUsdParaBrlCotacaoKanban(valor, moeda, taxaUsdBrl) {
   return ` <span style="color:#2563eb;">(≈ ${formatarValorCotacaoKanban(valorConvertido, 'BRL')})</span>`;
 }
 
+function montarResumoTotalCotacoesKanban(cotacoes = [], taxaUsdBrl = null, obterValor = null) {
+  const lista = Array.isArray(cotacoes) ? cotacoes : [];
+  const getValor = typeof obterValor === 'function'
+    ? obterValor
+    : (cotacao) => Number(cotacao?.valor_cotado || 0) || 0;
+
+  let somaBrl = 0;
+  let somaUsd = 0;
+
+  lista.forEach((cotacao) => {
+    const moeda = String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD' ? 'USD' : 'BRL';
+    const valor = Number(getValor(cotacao));
+    if (!Number.isFinite(valor) || valor <= 0) return;
+
+    if (moeda === 'USD') {
+      somaUsd += valor;
+    } else {
+      somaBrl += valor;
+    }
+  });
+
+  const temBrl = somaBrl > 0;
+  const temUsd = somaUsd > 0;
+  const taxaValida = Number.isFinite(Number(taxaUsdBrl || 0)) && Number(taxaUsdBrl || 0) > 0;
+
+  if (temBrl && temUsd) {
+    const totalConvertidoBrl = somaBrl + (taxaValida ? somaUsd * Number(taxaUsdBrl) : 0);
+    return `${formatarValorCotacaoKanban(somaBrl, 'BRL')} + ${formatarValorCotacaoKanban(somaUsd, 'USD')}`
+      + (taxaValida ? ` <span style="color:#2563eb;">(≈ ${formatarValorCotacaoKanban(totalConvertidoBrl, 'BRL')})</span>` : '');
+  }
+
+  if (temUsd) {
+    return `${formatarValorCotacaoKanban(somaUsd, 'USD')}${formatarConversaoUsdParaBrlCotacaoKanban(somaUsd, 'USD', taxaUsdBrl)}`;
+  }
+
+  return formatarValorCotacaoKanban(somaBrl, 'BRL');
+}
+
 async function registrarCotacaoKanban() {
   if (!window.cotacaoKanbanItemId) return;
   const fornecedor = document.getElementById('cotacaoKanbanFornecedor').value.trim();
@@ -23703,30 +23719,16 @@ async function carregarCotacoesKanban() {
     window.cotacaoKanbanItensUsados = itensUsados;
     renderizarItensGrupoCotacaoKanban();
 
-    const moedaTotalCotacoes = (window.cotacaoKanbanCotacoes[0]?.moeda || window.cotacaoKanbanMoeda || 'BRL').toUpperCase();
-    const somaTotalCotacoes = window.cotacaoKanbanCotacoes.reduce((acc, cotacao) => {
-      return acc + (Number(cotacao?.valor_cotado || 0) || 0);
-    }, 0);
-    const somaTotalCotacoesBrl = window.cotacaoKanbanCotacoes.reduce((acc, cotacao) => {
-      const valor = Number(cotacao?.valor_cotado || 0) || 0;
-      const moeda = String(cotacao?.moeda || 'BRL').toUpperCase();
-      if (moeda === 'USD') {
-        if (!Number.isFinite(Number(taxaUsdBrl || 0)) || Number(taxaUsdBrl || 0) <= 0) return acc;
-        return acc + (valor * Number(taxaUsdBrl));
-      }
-      return acc + valor;
-    }, 0);
+    const resumoTotalHtml = montarResumoTotalCotacoesKanban(
+      window.cotacaoKanbanCotacoes,
+      taxaUsdBrl,
+      (cotacao) => Number(cotacao?.valor_cotado || 0) || 0
+    );
     if (totalCotacoesResumo) {
       totalCotacoesResumo.innerHTML = `
         <i class="fa-solid fa-calculator"></i>
         <strong>Total das cotações:</strong>
-        <span>
-          ${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}
-          ${moedaTotalCotacoes === 'USD' ? formatarConversaoUsdParaBrlCotacaoKanban(somaTotalCotacoes, 'USD', taxaUsdBrl) : ''}
-          ${moedaTotalCotacoes !== 'USD' && possuiCotacaoUsd && Number.isFinite(Number(taxaUsdBrl || 0)) && Number(taxaUsdBrl || 0) > 0
-            ? ` <span style="color:#2563eb;">(inclui itens em USD, total convertido ≈ ${formatarValorCotacaoKanban(somaTotalCotacoesBrl, 'BRL')})</span>`
-            : ''}
-        </span>
+        <span>${resumoTotalHtml}</span>
       `;
     }
 
@@ -24020,29 +24022,46 @@ async function excluirCotacaoKanban(cotacaoId) {
 async function enviarCotacoesKanban() {
   if (!window.cotacaoKanbanItemId) return;
   try {
-    // Objetivo: Mudar status para "cotado" na tabela correta (compras_sem_cadastro ou solicitacao_compras)
-    const tableSource = window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
-    
-    let endpoint = '';
-    if (tableSource === 'compras_sem_cadastro') {
-      endpoint = `/api/compras/sem-cadastro/${window.cotacaoKanbanItemId}`;
-    } else {
-      endpoint = `/api/compras/solicitacoes/${window.cotacaoKanbanItemId}`;
+    // Objetivo: Mudar status para "cotado" de todos os itens do grupo na tabela correta
+    const tableSource = window.cotacaoKanbanTableSource || window.cotacaoKanbanItem?.table_source || 'solicitacao_compras';
+    const itensGrupo = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
+    const idsGrupo = itensGrupo
+      .map(item => Number(item?.id))
+      .filter(id => Number.isInteger(id) && id > 0);
+
+    const idsParaAtualizar = idsGrupo.length > 0
+      ? Array.from(new Set(idsGrupo))
+      : [Number(window.cotacaoKanbanItemId)].filter(id => Number.isInteger(id) && id > 0);
+
+    if (idsParaAtualizar.length === 0) {
+      throw new Error('Nenhum item válido encontrado para atualizar status.');
     }
-    
-    const resp = await fetch(endpoint, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ status: 'cotado' })
-    });
-    
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || 'Erro ao atualizar status');
+
+    let totalAtualizados = 0;
+    for (const itemId of idsParaAtualizar) {
+      let endpoint = '';
+      if (tableSource === 'compras_sem_cadastro') {
+        endpoint = `/api/compras/sem-cadastro/${itemId}`;
+      } else {
+        endpoint = `/api/compras/solicitacoes/${itemId}`;
+      }
+
+      const resp = await fetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'cotado' })
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro ao atualizar status do item ${itemId}`);
+      }
+
+      totalAtualizados += 1;
     }
-    
-    alert('Cotações enviadas com sucesso! Status atualizado para "cotado".');
+
+    alert(`Cotações enviadas com sucesso! ${totalAtualizados} item(ns) atualizado(s) para "cotado".`);
     fecharModalCotacaoKanban();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
@@ -24067,34 +24086,16 @@ async function renderizarCotacoesRegistradasCotadoEscolha() {
     String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD'
   );
   const taxaUsdBrl = possuiCotacaoUsd ? await obterTaxaUsdBrlCotacaoKanban() : null;
-  const moedaTotalCotacoes = (
-    cotacoesAprovadas[0]?.moeda
-    || cotacoes[0]?.moeda
-    || 'BRL'
-  ).toUpperCase();
-  const somaTotalCotacoes = cotacoesAprovadas.reduce((acc, cotacao) => {
-    return acc + (Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0);
-  }, 0);
-  const somaTotalCotacoesBrl = cotacoesAprovadas.reduce((acc, cotacao) => {
-    const valor = Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0;
-    const moeda = String(cotacao?.moeda || 'BRL').toUpperCase();
-    if (moeda === 'USD') {
-      if (!Number.isFinite(Number(taxaUsdBrl || 0)) || Number(taxaUsdBrl || 0) <= 0) return acc;
-      return acc + (valor * Number(taxaUsdBrl));
-    }
-    return acc + valor;
-  }, 0);
+  const resumoTotalHtml = montarResumoTotalCotacoesKanban(
+    cotacoesAprovadas,
+    taxaUsdBrl,
+    (cotacao) => Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0
+  );
   if (totalCotacoesResumo) {
     totalCotacoesResumo.innerHTML = `
       <i class="fa-solid fa-calculator"></i>
       <strong>Total das cotações:</strong>
-      <span>
-        ${escapeHtml(formatarValorCotacaoKanban(somaTotalCotacoes, moedaTotalCotacoes))}
-        ${moedaTotalCotacoes === 'USD' ? formatarConversaoUsdParaBrlCotacaoKanban(somaTotalCotacoes, 'USD', taxaUsdBrl) : ''}
-        ${moedaTotalCotacoes !== 'USD' && possuiCotacaoUsd && Number.isFinite(Number(taxaUsdBrl || 0)) && Number(taxaUsdBrl || 0) > 0
-          ? ` <span style="color:#2563eb;">(inclui itens em USD, total convertido ≈ ${formatarValorCotacaoKanban(somaTotalCotacoesBrl, 'BRL')})</span>`
-          : ''}
-      </span>
+      <span>${resumoTotalHtml}</span>
     `;
   }
 
@@ -24239,11 +24240,12 @@ async function renderizarCotacoesRegistradasCotadoEscolha() {
         </div>
         <button 
           id="btn-aprovar-cotacao-${cotacao.id}"
-          onclick="aprovarCotacaoCotadoEscolha(${cotacao.id})"
-          title="${aprovado ? 'Cancelar aprovação' : 'Aprovar cotação'}"
-          style="background:${aprovado ? '#f97316' : '#10b981'};color:#ffffff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;">
+          onclick="realizarRequisicaoCotadoEscolha(${cotacao.id})"
+          title="${aprovado ? 'Requisição já realizada para esta cotação' : 'Realizar requisição desta cotação'}"
+          ${aprovado ? 'disabled' : ''}
+          style="background:${aprovado ? '#9ca3af' : '#10b981'};color:#ffffff;border:none;padding:8px 12px;border-radius:6px;cursor:${aprovado ? 'not-allowed' : 'pointer'};font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;opacity:${aprovado ? '0.9' : '1'};">
           <i class="fa-solid fa-check"></i>
-          ${aprovado ? 'Cancelar aprovação' : 'Aprovar'}
+          ${aprovado ? 'Requisição realizada' : 'Realizar requisição'}
         </button>
       </div>
     `;
@@ -24252,41 +24254,37 @@ async function renderizarCotacoesRegistradasCotadoEscolha() {
   container.innerHTML = html;
 }
 
-// Comentário: aprova uma cotação no modal "Cotado aguardando escolha"
-async function aprovarCotacaoCotadoEscolha(cotacaoId) {
+// Comentário: realiza requisição de uma cotação no modal "Cotado aguardando escolha"
+async function realizarRequisicaoCotadoEscolha(cotacaoId) {
   if (!cotacaoId) return;
   const btn = document.getElementById(`btn-aprovar-cotacao-${cotacaoId}`);
   const originalHtml = btn ? btn.innerHTML : null;
   if (btn) {
     btn.disabled = true;
     btn.style.cursor = 'not-allowed';
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Atualizando...';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processando...';
   }
   try {
-    const cotacaoAtual = window.cotadoEscolhaCotacoesDb.find(c => c.id === cotacaoId);
-    const statusAtual = (cotacaoAtual?.status_aprovacao || 'pendente').toString().toLowerCase();
-    const novoStatus = statusAtual === 'aprovado' ? 'pendente' : 'aprovado';
-    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}/status`, {
-      method: 'PUT',
+    const resp = await fetch(`/api/compras/cotacoes/${cotacaoId}/realizar-requisicao`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ status: novoStatus })
+      credentials: 'include'
     });
     if (!resp.ok) {
       const errData = await resp.json();
-      throw new Error(errData.error || 'Erro ao aprovar cotação');
+      throw new Error(errData.error || 'Erro ao realizar requisição');
     }
 
     const data = await resp.json();
-    const idx = window.cotadoEscolhaCotacoesDb.findIndex(c => c.id === data.cotacao?.id);
-    if (idx !== -1) {
-      window.cotadoEscolhaCotacoesDb[idx].status_aprovacao = data.cotacao.status_aprovacao;
+    const novoGrupo = String(data?.novo_grupo_requisicao || '').trim();
+    alert(`Requisição realizada com sucesso. Novo grupo do(s) item(ns): ${novoGrupo || '-'}.`);
+    fecharModalCotadoEscolhaItem();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
     }
-
-    await renderizarCotacoesRegistradasCotadoEscolha();
   } catch (err) {
-    console.error('[COTADO ESCOLHA] Erro ao aprovar cotação:', err);
-    alert('Erro ao aprovar cotação: ' + err.message);
+    console.error('[COTADO ESCOLHA] Erro ao realizar requisição da cotação:', err);
+    alert('Erro ao realizar requisição: ' + err.message);
     if (btn && originalHtml) {
       btn.disabled = false;
       btn.style.cursor = 'pointer';
@@ -24330,61 +24328,6 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
   } catch (err) {
     console.error('[COTADO ESCOLHA] Erro ao adicionar observação:', err);
     alert('Erro ao adicionar observação: ' + err.message);
-  }
-}
-
-// Comentário: envia item do modal para análise de cadastro
-async function enviarCotadoEscolhaParaCompra() {
-  if (!window.cotadoEscolhaItemId) return;
-
-  const cotacoesDb = Array.isArray(window.cotadoEscolhaCotacoesDb) ? window.cotadoEscolhaCotacoesDb : [];
-  const cotacoesAprovadas = cotacoesDb.filter((c) =>
-    String(c?.status_aprovacao || '').toLowerCase().trim() === 'aprovado'
-  );
-
-  if (cotacoesAprovadas.length === 0) {
-    alert('Você precisa aprovar pelo menos uma cotação antes de enviar a solicitação.');
-    return;
-  }
-
-  const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
-  const originalHtml = btn ? btn.innerHTML : '';
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.style.cursor = 'not-allowed';
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
-    }
-
-    const resp = await fetch('/api/compras/cotado-escolha/enviar-solicitacao', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        item_id: window.cotadoEscolhaItemId,
-        table_source: window.cotadoEscolhaTableSource || 'solicitacao_compras'
-      })
-    });
-    
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || 'Erro ao atualizar status');
-    }
-    const data = await resp.json();
-    const qtdMovidos = Number(data?.total_itens_movidos || 0);
-    alert(`Solicitação enviada com sucesso. ${qtdMovidos} item(ns) movido(s) para "Analise de cadastro".`);
-    fecharModalCotadoEscolhaItem();
-    if (typeof loadMinhasSolicitacoes === 'function') {
-      loadMinhasSolicitacoes();
-    }
-  } catch (err) {
-    console.error('[COTADO ESCOLHA] Erro ao enviar:', err);
-    alert('Erro ao enviar: ' + err.message);
-    if (btn) {
-      btn.disabled = false;
-      btn.style.cursor = 'pointer';
-      btn.innerHTML = originalHtml;
-    }
   }
 }
 
@@ -24625,9 +24568,8 @@ window.abrirModalAnaliseCadastro = abrirModalAnaliseCadastro;
 window.fecharModalAnaliseCadastro = fecharModalAnaliseCadastro;
 window.abrirModalCotadoEscolhaItem = abrirModalCotadoEscolhaItem;
 window.fecharModalCotadoEscolhaItem = fecharModalCotadoEscolhaItem;
-window.aprovarCotacaoCotadoEscolha = aprovarCotacaoCotadoEscolha;
+window.realizarRequisicaoCotadoEscolha = realizarRequisicaoCotadoEscolha;
 window.adicionarObservacaoCotadoEscolha = adicionarObservacaoCotadoEscolha;
-window.enviarCotadoEscolhaParaCompra = enviarCotadoEscolhaParaCompra;
 window.retificarCotadoEscolha = retificarCotadoEscolha;
 window.cancelarCotadoEscolha = cancelarCotadoEscolha;
 window.abrirModalCotacaoKanban = abrirModalCotacaoKanban;
@@ -29868,7 +29810,7 @@ async function abrirModalFiltroKanbans() {
     'aguardando cotação': 'Cotação com compras',
     'aguardando compra preparação': 'Requisições',
     'aguardando compra': 'Pedido de compra',
-    'analise de cadastro': 'Analise de cadastro'
+    'analise de cadastro': 'Organizando requisição'
   };
   
   // Badges identificadores para cada kanban
@@ -30655,7 +30597,7 @@ async function aprovarItemRequisicao(itemId, tableSource, retornoCotacaoRawOrigi
   const novoStatusSolicitacao = retornoCotacaoEhSimSolicitacao ? 'aguardando cotação' : 'Requisição';
 
   const mensagemConfirmacao = isSemCadastro
-    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Analise de cadastro'}.`
+    ? `Deseja aprovar este item? O status será atualizado para ${retornoCotacaoEhSim ? 'aguardando cotação' : 'Organizando requisição'}.`
     : 'Deseja aprovar este item? Será criada uma requisição na Omie e o item será movido para "Pedido de compra".';
 
   if (!confirm(mensagemConfirmacao)) return;
@@ -30951,7 +30893,7 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
     if (totalSemCadastroCotacao > 0 || totalSemCadastroAnalise > 0) {
       mensagem += `\n\nItens sem cadastro aprovados via grupo:`;
       if (totalSemCadastroCotacao > 0) mensagem += `\n- Aguardando cotação: ${totalSemCadastroCotacao}`;
-      if (totalSemCadastroAnalise > 0) mensagem += `\n- Análise de cadastro: ${totalSemCadastroAnalise}`;
+      if (totalSemCadastroAnalise > 0) mensagem += `\n- Organizando requisição: ${totalSemCadastroAnalise}`;
     }
     
     alert(mensagem);
@@ -32364,7 +32306,7 @@ const STATUS_PARA_ETAPA_COMPRAS = {
   'aguardando cotacao': 'Cotação',
   'cotado aguardando escolha': 'Cotado',
   cotado: 'Cotado',
-  'analise de cadastro': 'Analise de cadastro',
+  'analise de cadastro': 'Organizando requisição',
   'aguardando compra preparacao': 'Requisições',
   requisicao: 'Requisições',
   'aguardando compra': 'Pedido de compra',
@@ -32400,7 +32342,7 @@ const FLUXOS_ETAPAS_COMPRAS = {
   sem_cadastro_analise: [
     'Aprovação',
     'Revisão',
-    'Analise de cadastro',
+    'Organizando requisição',
     'Requisições',
     'Pedido de compra',
     'Compra realizada',
@@ -32413,7 +32355,7 @@ const FLUXOS_ETAPAS_COMPRAS = {
     'Revisão',
     'Cotação',
     'Cotado',
-    'Analise de cadastro',
+    'Organizando requisição',
     'Requisições',
     'Pedido de compra',
     'Compra realizada',
