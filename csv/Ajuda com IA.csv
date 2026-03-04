@@ -9,8 +9,19 @@ Historico de conversar IA/Compras/
 Instrução para guardar conversas com a IA/
 Primeira orientação/
 Salve o resumo em arquivo .md com nome no padrão:
-AAAA-MM-DD_HH-mm_resumo_conversa.md
+resumo_conversa.md
 No final do arquivo, inclua um bloco “Como retomar na próxima conversa” com um texto curto que eu possa colar para continuar o trabalho.
+Formato obrigatório do resumo:
+Tema
+Objetivo
+Contexto inicial
+O que foi decidido
+O que foi implementado
+Pendências
+
+
+para atualização:
+Atualize o Historico de conversar IA/Compras/Kanban cotação/resumo_conversa.md
 Formato obrigatório do resumo:
 Tema
 Objetivo
