@@ -8420,9 +8420,49 @@ function sanitizeQtd(value, fallback = 1) {
   return Number.isFinite(num) && num > 0 ? num : fallback;
 }
 
+function obterQuantidadeConfiavel(itemOuValor, fallback = null) {
+  const pareceData = (valor) => {
+    const texto = String(valor || '').trim();
+    if (!texto) return false;
+    if (/^\d{4}-\d{2}-\d{2}T/.test(texto)) return true;
+    if (/^\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/.test(texto)) return true;
+    return false;
+  };
+
+  const mesmoValorDoCreatedAt = (item, valor) => {
+    const createdAtBruto = String(item?.created_at || item?.createdAt || '').trim();
+    if (!createdAtBruto) return false;
+    const valorDigitos = String(valor || '').replace(/\D/g, '');
+    const createdAtDigitos = createdAtBruto.replace(/\D/g, '');
+    if (!valorDigitos || !createdAtDigitos) return false;
+    return valorDigitos.length >= 10 && valorDigitos === createdAtDigitos;
+  };
+
+  if (itemOuValor && typeof itemOuValor === 'object' && !Array.isArray(itemOuValor)) {
+    const item = itemOuValor;
+    const candidatos = [item.quantidade, item.n_qtde, item.qtde, item.quantidade_item];
+    for (const candidato of candidatos) {
+      if (candidato === null || candidato === undefined || String(candidato).trim() === '') continue;
+      if (pareceData(candidato)) continue;
+      if (mesmoValorDoCreatedAt(item, candidato)) continue;
+      return candidato;
+    }
+    return fallback;
+  }
+
+  if (itemOuValor === null || itemOuValor === undefined || String(itemOuValor).trim() === '') {
+    return fallback;
+  }
+
+  if (pareceData(itemOuValor)) return fallback;
+  return itemOuValor;
+}
+window.obterQuantidadeConfiavel = obterQuantidadeConfiavel;
+
 function formatarQuantidadeExibicao(valor) {
-  if (valor === null || valor === undefined) return '-';
-  const bruto = String(valor).trim();
+  const valorNormalizado = obterQuantidadeConfiavel(valor, valor);
+  if (valorNormalizado === null || valorNormalizado === undefined) return '-';
+  const bruto = String(valorNormalizado).trim();
   if (!bruto) return '-';
 
   let normalizado = bruto;
@@ -20711,6 +20751,31 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       modalBody.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Nenhum item encontrado.</div>';
       return;
     }
+
+    const primeiroItemPedido = itensPedido[0] || null;
+    const grupoRequisicaoModal = String(primeiroItemPedido?.grupo_requisicao || '').trim();
+    const tableSourceModal = String(primeiroItemPedido?.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+    if (grupoRequisicaoModal && ['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSourceModal)) {
+      try {
+        const respGrupo = await fetch(
+          `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoRequisicaoModal)}&table_source=${encodeURIComponent(tableSourceModal)}`,
+          { credentials: 'include' }
+        );
+        if (respGrupo.ok) {
+          const dataGrupo = await respGrupo.json();
+          const itensGrupo = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+          if (itensGrupo.length > 0) {
+            itensPedido = [{
+              ...primeiroItemPedido,
+              table_source: tableSourceModal,
+              itens: itensGrupo
+            }];
+          }
+        }
+      } catch (erroGrupo) {
+        console.error('[MODAL MINHAS] Erro ao carregar itens do grupo:', erroGrupo);
+      }
+    }
     
     modalTitulo.textContent = numeroPedido && numeroPedido !== 'undefined' && numeroPedido !== 'null' 
       ? `Meu Pedido ${numeroPedido}` 
@@ -20910,39 +20975,21 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
         const tableSource = String(item?.table_source || '').trim().toLowerCase();
         const descricaoBruta = String(item?.produto_descricao || item?.descricao || '').trim();
         const codigoBase = String(item?.produto_codigo || '-').trim() || '-';
+        const quantidadeBase = obterQuantidadeConfiavel(item, item?.quantidade);
 
         if (tableSource !== 'compras_sem_cadastro' || !descricaoBruta) {
           return [{
             produto_codigo: codigoBase,
             produto_descricao: descricaoBruta || '-',
-            quantidade: item?.quantidade
+            quantidade: quantidadeBase
           }];
         }
 
-        const partes = descricaoBruta
-          .split(';')
-          .map(parte => String(parte || '').trim())
-          .filter(Boolean);
-
-        if (!partes.length) {
-          return [{
-            produto_codigo: codigoBase,
-            produto_descricao: descricaoBruta,
-            quantidade: item?.quantidade
-          }];
-        }
-
-        return partes.map((parte, indice) => {
-          const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
-          const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
-          const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (item?.quantidade ?? '1');
-
-          return {
-            produto_codigo: `${codigoBase}.${indice + 1}`,
-            produto_descricao: descricaoItem || '-',
-            quantidade: quantidadeItem
-          };
-        });
+        return [{
+          produto_codigo: codigoBase,
+          produto_descricao: descricaoBruta || '-',
+          quantidade: quantidadeBase
+        }];
       };
 
       const itensTabela = itensDetalhe.flatMap(expandirItensTabelaModal);
@@ -20950,7 +20997,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
       const linhasItens = itensTabela.map(item => {
         const codigo = escapeHtml(item.produto_codigo || '-');
         const descricao = escapeHtml(item.produto_descricao || item.descricao || '-');
-        const quantidade = fmtQtdModal(item.quantidade);
+        const quantidade = fmtQtdModal(obterQuantidadeConfiavel(item, item.quantidade));
         return `
           <tr>
             <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${codigo}</td>
@@ -21223,7 +21270,7 @@ async function abrirModalDetalhesPedidoMinhas(numeroPedido, statusColuna, itemId
   }
 }
 
-// Comentário: modal específico para o kanban "Analise de cadastro" (exibe dados de compras_sem_cadastro)
+// Comentário: modal específico para o kanban "Analise de cadastro" (aceita dados vindos do histórico)
 async function abrirModalAnaliseCadastro(itemId) {
   const modal = document.getElementById('modalAnaliseCadastro');
   const modalBody = document.getElementById('modalAnaliseCadastroBody');
@@ -21243,20 +21290,20 @@ async function abrirModalAnaliseCadastro(itemId) {
 
   try {
     const alvoId = String(itemId || '').trim();
-    const isItemSemCadastro = (cand) => {
+    const isItemAnaliseCadastro = (cand) => {
       if (!cand) return false;
-      const tableSource = String(cand.table_source || '').trim().toLowerCase();
-      if (tableSource === 'compras_sem_cadastro') return true;
-      return !!(cand.link || cand.links);
+      const status = String(cand.statusNormalizado || cand.status || '').toLowerCase().trim();
+      return status === 'analise de cadastro';
     };
 
     const localizarItemAnalise = (lista) => {
       if (!Array.isArray(lista) || !alvoId) return null;
       return lista.find((cand) => {
-        if (!isItemSemCadastro(cand)) return false;
+        if (!isItemAnaliseCadastro(cand)) return false;
         const candId = String(cand.id || '').trim();
+        const candHistoricoId = String(cand.historico_id || '').trim();
         const candIdSolicitante = String(cand.id_solicitante || '').trim();
-        return candId === alvoId || candIdSolicitante === alvoId;
+        return candId === alvoId || candHistoricoId === alvoId || candIdSolicitante === alvoId;
       }) || null;
     };
 
@@ -21305,23 +21352,50 @@ async function abrirModalAnaliseCadastro(itemId) {
       return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
     };
 
-    // Comentário: processa descrições separadas por ";" e quantidades no formato "descricao-quantidade"
+    // Comentário: cada registro representa 1 item por linha; não extrair quantidade da descrição
     const processarItensDescricao = (descricao) => {
       if (!descricao || typeof descricao !== 'string') return [];
-      
-      const itens = descricao.split(';').map(s => s.trim()).filter(s => s);
-      return itens.map((item) => {
-        const partes = item.split('-');
-        const desc = partes.slice(0, -1).join('-').trim() || item.trim();
-        const qtd = partes.length > 1 ? partes[partes.length - 1].trim() : '';
-        return { descricao: desc, quantidade: qtd };
-      });
+
+      return [{
+        descricao: String(descricao || '').trim(),
+        quantidade: obterQuantidadeConfiavel(item, item?.quantidade)
+      }].filter((it) => it.descricao);
     };
 
+    const tableSourceAnalise = String(item.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+    const grupoRequisicaoAnalise = String(item.grupo_requisicao || '').trim();
+    let itensGrupoAnalise = [];
+
+    if (grupoRequisicaoAnalise) {
+      try {
+        const respGrupo = await fetch(
+          `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoRequisicaoAnalise)}&table_source=${encodeURIComponent(tableSourceAnalise)}`,
+          { credentials: 'include' }
+        );
+        if (respGrupo.ok) {
+          const dataGrupo = await respGrupo.json();
+          itensGrupoAnalise = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+        }
+      } catch (erroGrupo) {
+        console.error('[ANALISE CADASTRO] Erro ao carregar itens do grupo:', erroGrupo);
+      }
+    }
+
+    const itensAnaliseNormalizados = (Array.isArray(itensGrupoAnalise) && itensGrupoAnalise.length > 0)
+      ? itensGrupoAnalise.map((it) => ({
+          descricao: String(it?.produto_descricao || '').trim(),
+          quantidade: it?.quantidade,
+          produto_codigo: String(it?.produto_codigo || '').trim(),
+          item_origem_id: it?.id
+        })).filter((it) => it.descricao || it.produto_codigo)
+      : processarItensDescricao(item.produto_descricao);
+
     window.analiseCadastroCodprovBase = item.produto_codigo || '';
-    window.analiseCadastroItens = processarItensDescricao(item.produto_descricao);
+    window.analiseCadastroItens = itensAnaliseNormalizados;
     window.analiseCadastroItemId = item.id;
+    window.analiseCadastroTableSource = tableSourceAnalise;
     window.analiseCadastroDirty = false;
+    const analiseCadastroEhSemCadastro = window.analiseCadastroTableSource === 'compras_sem_cadastro';
 
     // Comentário: renderiza detalhes do item de compras_sem_cadastro
     let anexosItem = item.anexos;
@@ -21383,18 +21457,28 @@ async function abrirModalAnaliseCadastro(itemId) {
         </h4>
         <div id="listaItensAnaliseCadastro" style="display:grid;gap:8px;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
-          <button id="btnCriarItensOmieAnaliseCadastro" onclick="criarItensOmieAnaliseCadastro()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <button id="btnMoverCotadoAnaliseCadastro" onclick="moverAnaliseCadastroParaCotado()" style="background:#8b5cf6;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-arrow-right"></i>
+            Mover para Cotado
+          </button>
+          <button id="btnCriarItensOmieAnaliseCadastro" onclick="criarItensOmieAnaliseCadastro()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Criar itens na Omie' : 'Disponível apenas para itens de compras_sem_cadastro'}">
             <i class="fa-solid fa-cloud-arrow-up"></i>
             Criar itens na Omie
           </button>
-          <button id="btnCriarRequisicaoCompraAnaliseCadastro" onclick="criarRequisicaoCompraAnaliseCadastro()" style="background:#7c3aed;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <button id="btnCriarRequisicaoCompraAnaliseCadastro" onclick="criarRequisicaoCompraAnaliseCadastro()" style="background:#7c3aed;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Criar requisição de compra' : 'Disponível apenas para itens de compras_sem_cadastro'}">
             <i class="fa-solid fa-cart-shopping"></i>
             Criar requisição de compra
           </button>
-          <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <button id="btnSalvarItensAnaliseCadastro" onclick="salvarItensAnaliseCadastro()" style="background:#22c55e;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:${analiseCadastroEhSemCadastro ? 'pointer' : 'not-allowed'};opacity:${analiseCadastroEhSemCadastro ? '1' : '0.5'};display:inline-flex;align-items:center;gap:6px;" ${analiseCadastroEhSemCadastro ? '' : 'disabled'} title="${analiseCadastroEhSemCadastro ? 'Salvar alterações' : 'Disponível apenas para itens de compras_sem_cadastro'}">
             <i class="fa-solid fa-floppy-disk"></i>
             Salvar alterações
           </button>
+          ${analiseCadastroEhSemCadastro ? '' : `
+          <div style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-circle-info"></i>
+            Dados exibidos via histórico de compras
+          </div>
+          `}
         </div>
       </div>
     `;
@@ -21413,6 +21497,7 @@ async function abrirModalAnaliseCadastro(itemId) {
 function fecharModalAnaliseCadastro() {
   const modal = document.getElementById('modalAnaliseCadastro');
   if (modal) modal.style.display = 'none';
+  window.analiseCadastroTableSource = null;
 }
 
 // Comentário: formatador local de quantidade exclusivo do modal de Análise de Cadastro
@@ -21459,6 +21544,7 @@ function renderizarListaItensAnaliseCadastro() {
   container.innerHTML = itens.map((item, idx) => {
     const subIndice = (idx + 1).toString();
     const codprov = `CODPROV - ${codBaseNumero}.${subIndice}`;
+    const codigoExibicao = String(item.produto_codigo || '').trim() || codprov;
     const descricao = item.descricao ? escapeHtml(item.descricao) : '';
     const quantidade = escapeHtml(formatarQuantidadeAnaliseCadastro(item.quantidade));
 
@@ -21468,7 +21554,7 @@ function renderizarListaItensAnaliseCadastro() {
     return `
       <div style="background:white;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:grid;grid-template-columns:170px 1fr 110px 150px;gap:12px;align-items:center;">
         <div style="font-weight:600;color:#1e40af;font-size:13px;display:flex;flex-direction:column;gap:6px;">
-          <span>${codprov}</span>
+          <span>${escapeHtml(codigoExibicao)}</span>
           ${codigoOmie ? `
             <span style="font-size:11px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 6px;border-radius:6px;width:max-content;">
               Omie: ${codigoOmie}
@@ -21527,6 +21613,12 @@ window.atualizarItemAnaliseCadastro = function(index, campo, valor) {
 function atualizarBotaoSalvarAnaliseCadastro() {
   const btn = document.getElementById('btnSalvarItensAnaliseCadastro');
   if (!btn) return;
+  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+    return;
+  }
   const dirty = !!window.analiseCadastroDirty;
   btn.disabled = !dirty;
   btn.style.opacity = dirty ? '1' : '0.5';
@@ -21572,6 +21664,10 @@ window.removerItemAnaliseCadastro = function(index) {
 window.salvarItensAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
+  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
+    alert('Este item está em modo histórico e não permite salvar descrição por este modal.');
+    return;
+  }
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   const descricaoFinal = itens.map((item) => {
@@ -21602,10 +21698,62 @@ window.salvarItensAnaliseCadastro = async function() {
   }
 };
 
+// Comentário: move item da análise de cadastro para cotado
+window.moverAnaliseCadastroParaCotado = async function() {
+  const itemId = window.analiseCadastroItemId;
+  if (!itemId) return;
+
+  const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
+  const btn = document.getElementById('btnMoverCotadoAnaliseCadastro');
+  const originalHtml = btn ? btn.innerHTML : '';
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.style.cursor = 'not-allowed';
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Movendo...';
+    }
+
+    const endpoint = tableSource === 'compras_sem_cadastro'
+      ? `/api/compras/sem-cadastro/${itemId}`
+      : `/api/compras/solicitacoes/${itemId}`;
+
+    const resp = await fetch(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'cotado' })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json();
+      throw new Error(errData.error || 'Erro ao atualizar status para cotado');
+    }
+
+    alert('Status atualizado para "cotado".');
+    fecharModalAnaliseCadastro();
+    if (typeof loadMinhasSolicitacoes === 'function') {
+      loadMinhasSolicitacoes();
+    }
+  } catch (err) {
+    console.error('[ANALISE CADASTRO] Erro ao mover para cotado:', err);
+    alert('Erro ao mover para cotado: ' + err.message);
+    if (btn) {
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = originalHtml;
+    }
+  }
+};
+
 // Comentário: cadastra os itens do modal na Omie e retorna os códigos criados
 window.criarItensOmieAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
+  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
+    alert('Este item não pertence a compras_sem_cadastro.');
+    return;
+  }
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   if (!itens.length) {
@@ -21669,6 +21817,10 @@ window.criarItensOmieAnaliseCadastro = async function() {
 window.criarRequisicaoCompraAnaliseCadastro = async function() {
   const itemId = window.analiseCadastroItemId;
   if (!itemId) return;
+  if (window.analiseCadastroTableSource !== 'compras_sem_cadastro') {
+    alert('Este item não pertence a compras_sem_cadastro.');
+    return;
+  }
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
   if (!itens.length) {
@@ -24088,6 +24240,16 @@ async function adicionarObservacaoCotadoEscolha(cotacaoId) {
 async function enviarCotadoEscolhaParaCompra() {
   if (!window.cotadoEscolhaItemId) return;
 
+  const cotacoesDb = Array.isArray(window.cotadoEscolhaCotacoesDb) ? window.cotadoEscolhaCotacoesDb : [];
+  const cotacoesAprovadas = cotacoesDb.filter((c) =>
+    String(c?.status_aprovacao || '').toLowerCase().trim() === 'aprovado'
+  );
+
+  if (cotacoesAprovadas.length === 0) {
+    alert('Você precisa aprovar pelo menos uma cotação antes de enviar a solicitação.');
+    return;
+  }
+
   const btn = document.getElementById('btn-enviar-requisicao-cotado-escolha');
   const originalHtml = btn ? btn.innerHTML : '';
   try {
@@ -24097,18 +24259,23 @@ async function enviarCotadoEscolhaParaCompra() {
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>';
     }
 
-    const resp = await fetch(`/api/compras/itens/${window.cotadoEscolhaItemId}/status`, {
-      method: 'PUT',
+    const resp = await fetch('/api/compras/cotado-escolha/enviar-solicitacao', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ status: 'Analise de cadastro' })
+      body: JSON.stringify({
+        item_id: window.cotadoEscolhaItemId,
+        table_source: window.cotadoEscolhaTableSource || 'solicitacao_compras'
+      })
     });
     
     if (!resp.ok) {
       const errData = await resp.json();
       throw new Error(errData.error || 'Erro ao atualizar status');
     }
-    alert('Status atualizado para "Analise de cadastro".');
+    const data = await resp.json();
+    const qtdMovidos = Number(data?.total_itens_movidos || 0);
+    alert(`Solicitação enviada com sucesso. ${qtdMovidos} item(ns) movido(s) para "Analise de cadastro".`);
     fecharModalCotadoEscolhaItem();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
@@ -27969,15 +28136,10 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     .split(';')
     .map((token) => String(token || '').trim())
     .filter(Boolean)
-    .map((token) => {
-      const matchQtd = token.match(/-(\d+)$/);
-      const quantidadeItem = matchQtd ? parseInt(matchQtd[1], 10) : 1;
-      const descricaoItem = matchQtd ? token.slice(0, token.lastIndexOf('-')).trim() : token;
-      return {
-        descricao: descricaoItem,
-        quantidade: Number.isFinite(quantidadeItem) && quantidadeItem > 0 ? quantidadeItem : 1
-      };
-    })
+    .map((token) => ({
+      descricao: token,
+      quantidade: 1
+    }))
     .filter((itemToken) => itemToken.descricao);
   const quantidade = itensSemCadastro[0]?.quantidade || 1;
   
@@ -30052,9 +30214,62 @@ async function abrirModalAprovacaoRequisicao() {
     };
     
     // Filtra apenas as que estão aguardando aprovação
-    const itensAprovacao = todasSolicitacoes.filter(item => 
+    const itensAprovacaoResumo = todasSolicitacoes.filter(item => 
       (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição'
     );
+
+    // Expande por grupo_requisicao para garantir que o modal mostre todos os itens do pedido
+    const cacheGrupoItens = new Map();
+    const itensAprovacaoExpandidos = [];
+
+    for (const itemResumo of itensAprovacaoResumo) {
+      const grupoRequisicao = String(itemResumo?.grupo_requisicao || '').trim();
+      const tableSource = String(itemResumo?.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+      const podeExpandir = grupoRequisicao && ['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource);
+
+      if (!podeExpandir) {
+        itensAprovacaoExpandidos.push(itemResumo);
+        continue;
+      }
+
+      const chaveCache = `${tableSource}::${grupoRequisicao.toLowerCase()}`;
+      if (!cacheGrupoItens.has(chaveCache)) {
+        try {
+          const respGrupo = await fetch(
+            `/api/compras/grupo-itens?grupo_requisicao=${encodeURIComponent(grupoRequisicao)}&table_source=${encodeURIComponent(tableSource)}`,
+            { credentials: 'include' }
+          );
+
+          if (respGrupo.ok) {
+            const dataGrupo = await respGrupo.json();
+            const itensGrupo = Array.isArray(dataGrupo.itens) ? dataGrupo.itens : [];
+            const itensNormalizados = itensGrupo.length > 0
+              ? itensGrupo.map((it) => ({
+                  ...itemResumo,
+                  ...it,
+                  grupo_requisicao: String(it?.grupo_requisicao || itemResumo?.grupo_requisicao || '').trim(),
+                  table_source: String(it?.table_source || tableSource).trim() || tableSource
+                }))
+              : [itemResumo];
+            cacheGrupoItens.set(chaveCache, itensNormalizados);
+          } else {
+            cacheGrupoItens.set(chaveCache, [itemResumo]);
+          }
+        } catch (erroGrupo) {
+          console.error('[Modal Aprovação] Erro ao expandir grupo:', erroGrupo);
+          cacheGrupoItens.set(chaveCache, [itemResumo]);
+        }
+      }
+
+      itensAprovacaoExpandidos.push(...(cacheGrupoItens.get(chaveCache) || [itemResumo]));
+    }
+
+    const itensAprovacao = itensAprovacaoExpandidos
+      .filter(item => (item.status || '').toLowerCase().trim() === 'aguardando aprovação da requisição')
+      .filter((item, idx, arr) => {
+        const chave = `${String(item?.table_source || '').trim()}::${String(item?.id || '').trim()}`;
+        return arr.findIndex((cand) => `${String(cand?.table_source || '').trim()}::${String(cand?.id || '').trim()}` === chave) === idx;
+      });
     
     if (itensAprovacao.length === 0) {
       alert('Nenhuma solicitação aguardando aprovação');
@@ -30204,35 +30419,15 @@ async function abrirModalAprovacaoRequisicao() {
                       return [{
                         codigo: item.produto_codigo || '-',
                         descricao: item.produto_descricao || '-',
-                        quantidade: item.quantidade
+                        quantidade: obterQuantidadeConfiavel(item, item.quantidade)
                       }];
                     }
 
-                    const descricaoBruta = String(item.produto_descricao || '').trim();
-                    const partes = descricaoBruta
-                      .split(';')
-                      .map(parte => String(parte || '').trim())
-                      .filter(Boolean);
-
-                    const baseCodigo = String(item.produto_codigo || '-').trim() || '-';
-                    if (!partes.length) {
-                      return [{
-                        codigo: `${baseCodigo}.1`,
-                        descricao: descricaoBruta || '-',
-                        quantidade: item.quantidade || '1'
-                      }];
-                    }
-
-                    return partes.map((parte, i) => {
-                      const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
-                      const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
-                      const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (item.quantidade || '1');
-                      return {
-                        codigo: `${baseCodigo}.${i + 1}`,
-                        descricao: descricaoItem || '-',
-                        quantidade: quantidadeItem
-                      };
-                    });
+                    return [{
+                      codigo: String(item.produto_codigo || '-').trim() || '-',
+                      descricao: String(item.produto_descricao || '').trim() || '-',
+                      quantidade: obterQuantidadeConfiavel(item, item.quantidade) ?? '1'
+                    }];
                   })();
 
                   const numeroRequisicaoHtml = isSemCadastro
@@ -30274,7 +30469,7 @@ async function abrirModalAprovacaoRequisicao() {
                               type="number"
                               min="1"
                               step="1"
-                              value="${item.quantidade || ''}"
+                              value="${obterQuantidadeConfiavel(item, item.quantidade) ?? ''}"
                               style="width:70px;padding:6px;border:1px solid #cbd5e1;border-radius:6px;text-align:center;font-weight:700;color:#1f2937;font-size:14px;"
                               onkeydown="if(event.key==='Enter'){this.blur();}"
                               onblur="atualizarQuantidadeItemAprovacao(${item.id}, this)"
@@ -32512,30 +32707,19 @@ function renderizarLista() {
           const ehSemCadastro = tableSourceProd === 'compras_sem_cadastro' || (semCadastroNoGrupo && !tableSourceProd);
           if (!ehSemCadastro) return [prod];
 
-          const descricaoBruta = String(prod?.produto_descricao || prod?.descricao || '').trim();
-          const partes = descricaoBruta
-            .split(';')
-            .map(parte => String(parte || '').trim())
-            .filter(Boolean);
+          const quantidadeConfiavel = obterQuantidadeConfiavel(prod, prod?.n_qtde ?? prod?.qtde ?? '-');
+          const codigoConfiavel = String(prod?.produto_codigo || prod?.cod_prod || '-').trim() || '-';
+          const descricaoConfiavel = String(prod?.produto_descricao || prod?.descricao || '-').trim() || '-';
 
-          if (!partes.length) return [prod];
-
-          const codigoBase = String(prod?.produto_codigo || prod?.cod_prod || '-').trim() || '-';
-          return partes.map((parte, indice) => {
-            const matchQtdFinal = parte.match(/^(.*?)-\s*(\d+(?:[.,]\d+)?)\s*$/);
-            const descricaoItem = matchQtdFinal ? String(matchQtdFinal[1] || '').trim() : parte;
-            const quantidadeItem = matchQtdFinal ? String(matchQtdFinal[2] || '').trim() : (prod?.n_qtde ?? prod?.qtde ?? '-');
-
-            return {
-              ...prod,
-              produto_codigo: `${codigoBase}.${indice + 1}`,
-              cod_prod: `${codigoBase}.${indice + 1}`,
-              produto_descricao: descricaoItem || '-',
-              descricao: descricaoItem || '-',
-              n_qtde: quantidadeItem,
-              qtde: quantidadeItem
-            };
-          });
+          return [{
+            ...prod,
+            produto_codigo: codigoConfiavel,
+            cod_prod: codigoConfiavel,
+            produto_descricao: descricaoConfiavel,
+            descricao: descricaoConfiavel,
+            n_qtde: quantidadeConfiavel,
+            qtde: quantidadeConfiavel
+          }];
         });
       };
 

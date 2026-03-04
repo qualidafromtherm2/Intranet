@@ -16329,12 +16329,9 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       }
 
       return tokens.map((token) => {
-        const matchQtd = token.match(/-(\d+)$/);
-        const quantidadeToken = matchQtd ? Number.parseInt(matchQtd[1], 10) : qtdFallback;
-        const descricaoToken = matchQtd ? token.slice(0, token.lastIndexOf('-')).trim() : token;
         return {
-          descricao: descricaoToken || token,
-          quantidade: Number.isFinite(quantidadeToken) && quantidadeToken > 0 ? quantidadeToken : 1
+          descricao: token,
+          quantidade: Number.isFinite(qtdFallback) && qtdFallback > 0 ? qtdFallback : 1
         };
       }).filter((it) => it.descricao);
     };
@@ -17000,7 +16997,7 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
     const { itens: itensRequest } = req.body || {};
 
     const { rows } = await pool.query(
-      `SELECT id, produto_codigo, produto_descricao
+      `SELECT id, produto_codigo, produto_descricao, quantidade
        FROM compras.compras_sem_cadastro
        WHERE id = $1`,
       [id]
@@ -17012,16 +17009,11 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
 
     const itemDb = rows[0];
     const descricaoBase = String(itemDb.produto_descricao || '').trim();
+    const quantidadeBase = Number(itemDb.quantidade) || 1;
 
     const processarItensDescricao = (descricao) => {
       if (!descricao || typeof descricao !== 'string') return [];
-      const itens = descricao.split(';').map(s => s.trim()).filter(s => s);
-      return itens.map((texto) => {
-        const partes = texto.split('-');
-        const desc = partes.slice(0, -1).join('-').trim() || texto.trim();
-        const qtd = partes.length > 1 ? partes[partes.length - 1].trim() : '';
-        return { descricao: desc, quantidade: qtd };
-      });
+      return [{ descricao: String(descricao).trim(), quantidade: String(quantidadeBase) }].filter(i => i.descricao);
     };
 
     const itens = Array.isArray(itensRequest) && itensRequest.length
@@ -18940,15 +18932,21 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
       const { rows } = await pool.query(`
         SELECT
           sc.id,
+          sc.numero_pedido::text AS numero_pedido,
           sc.produto_codigo,
           sc.produto_descricao,
           sc.quantidade,
           po.unidade,
           sc.status,
           sc.solicitante,
+          sc.departamento,
+          sc.centro_custo::text AS centro_custo,
           sc.grupo_requisicao,
           sc.objetivo_compra,
+          sc.retorno_cotacao::text AS retorno_cotacao,
           sc.observacao,
+          sc.observacao_reprovacao,
+          sc.observacao_retificacao,
           sc.anexos,
           NULL::text AS link,
           sc.created_at,
@@ -18989,15 +18987,21 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT
         csc.id,
+        csc.numero_pedido::text AS numero_pedido,
         csc.produto_codigo,
         csc.produto_descricao,
         csc.quantidade,
         NULL::text AS unidade,
         csc.status,
         csc.solicitante,
+        csc.departamento,
+        csc.centro_custo::text AS centro_custo,
         csc.grupo_requisicao,
         csc.objetivo_compra,
+        csc.retorno_cotacao::text AS retorno_cotacao,
         csc.observacao_recebimento AS observacao,
+        csc.observacao_reprovacao,
+        NULL::text AS observacao_retificacao,
         csc.anexos,
         csc.link,
         csc.created_at,
@@ -21301,6 +21305,131 @@ app.put('/api/compras/cotacoes/:id/status', async (req, res) => {
   } catch (err) {
     console.error('[Cotações] Erro ao atualizar status:', err);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar status da cotação' });
+  }
+});
+
+// Endpoint para enviar cotações aprovadas do modal "Cotado aguardando escolha"
+app.post('/api/compras/cotado-escolha/enviar-solicitacao', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const itemId = Number(req.body?.item_id || req.body?.itemId);
+    if (!Number.isInteger(itemId)) {
+      return res.status(400).json({ ok: false, error: 'item_id inválido' });
+    }
+
+    let tableSource = String(req.body?.table_source || '').trim();
+    if (!['solicitacao_compras', 'compras_sem_cadastro'].includes(tableSource)) {
+      const { rows: fromSolicitacao } = await client.query(
+        'SELECT id FROM compras.solicitacao_compras WHERE id = $1 LIMIT 1',
+        [itemId]
+      );
+      tableSource = fromSolicitacao.length > 0 ? 'solicitacao_compras' : 'compras_sem_cadastro';
+    }
+
+    const tableName = tableSource === 'compras_sem_cadastro'
+      ? 'compras.compras_sem_cadastro'
+      : 'compras.solicitacao_compras';
+
+    await client.query('BEGIN');
+
+    const { rows: itemRows } = await client.query(
+      `SELECT id, grupo_requisicao FROM ${tableName} WHERE id = $1 FOR UPDATE`,
+      [itemId]
+    );
+
+    if (itemRows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    }
+
+    const grupoOriginal = String(itemRows[0]?.grupo_requisicao || '').trim();
+    if (!grupoOriginal) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Grupo de requisição não informado no item' });
+    }
+
+    const { rows: cotacoesAprovadas } = await client.query(
+      `
+        SELECT c.id,
+               COALESCE((
+                 SELECT jsonb_agg(
+                   jsonb_build_object(
+                     'item_origem_id', ci.item_origem_id,
+                     'produto_codigo', ci.produto_codigo,
+                     'produto_descricao', ci.produto_descricao,
+                     'quantidade', ci.quantidade
+                   )
+                   ORDER BY ci.id
+                 )
+                 FROM compras.cotacoes_itens ci
+                 WHERE ci.cotacao_id = c.id
+                   AND ci.table_source = $2
+               ), '[]'::jsonb) AS itens_cotacao
+        FROM compras.cotacoes c
+        WHERE c.solicitacao_id = $1
+          AND c.table_source = $2
+          AND c.status_aprovacao = 'aprovado'
+        ORDER BY c.id ASC
+      `,
+      [itemId, tableSource]
+    );
+
+    if (!cotacoesAprovadas.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'É necessário aprovar pelo menos uma cotação' });
+    }
+
+    const itensParaMover = new Map();
+    cotacoesAprovadas.forEach((cotacao, idxCotacao) => {
+      const novoGrupo = `${grupoOriginal}.${idxCotacao + 1}`;
+      const itensCotacao = Array.isArray(cotacao?.itens_cotacao) ? cotacao.itens_cotacao : [];
+
+      itensCotacao.forEach((itemCotacao) => {
+        const itemOrigemId = Number(itemCotacao?.item_origem_id || itemCotacao?.id);
+        if (!Number.isInteger(itemOrigemId)) return;
+        if (itensParaMover.has(itemOrigemId)) return;
+        itensParaMover.set(itemOrigemId, novoGrupo);
+      });
+    });
+
+    if (itensParaMover.size === 0) {
+      itensParaMover.set(itemId, `${grupoOriginal}.1`);
+    }
+
+    const itensMovidos = [];
+    for (const [itemOrigemId, novoGrupo] of itensParaMover.entries()) {
+      const { rows: updatedRows } = await client.query(
+        `
+          UPDATE ${tableName}
+          SET grupo_requisicao = $1,
+              status = 'Analise de cadastro',
+              updated_at = NOW()
+          WHERE id = $2
+          RETURNING id, grupo_requisicao, status
+        `,
+        [novoGrupo, itemOrigemId]
+      );
+
+      if (updatedRows.length > 0) {
+        itensMovidos.push(updatedRows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.json({
+      ok: true,
+      grupo_original: grupoOriginal,
+      table_source: tableSource,
+      total_cotacoes_aprovadas: cotacoesAprovadas.length,
+      total_itens_movidos: itensMovidos.length,
+      itens_movidos: itensMovidos
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[COTADO ESCOLHA] Erro ao enviar solicitação fracionada:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao enviar solicitação fracionada' });
+  } finally {
+    client.release();
   }
 });
 
