@@ -5455,6 +5455,110 @@ app.post('/api/compras/pedido/dados', express.json(), async (req, res) => {
 
 // Endpoint para gerar pedido de compra na Omie
 // Objetivo: Montar o JSON completo do pedido e enviar para IncluirPedCompra da Omie
+async function obterIdHistoricoComprasParaOmie({
+  db = pool,
+  grupoRequisicao = null,
+  itemId = null,
+  itemIds = [],
+  numeroPedido = null,
+  tabelaOrigem = 'solicitacao_compras'
+} = {}) {
+  const tabelaBase = tabelaOrigem === 'compras_sem_cadastro'
+    ? 'compras.compras_sem_cadastro'
+    : 'compras.solicitacao_compras';
+
+  const buscarPorGrupo = async (grupo) => {
+    const grupoLimpo = String(grupo || '').trim();
+    if (!grupoLimpo) return null;
+    const { rows } = await db.query(
+      `SELECT id
+       FROM compras.historico_compras
+       WHERE grupo_requisicao = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [grupoLimpo]
+    );
+    return rows[0]?.id ? Number(rows[0].id) : null;
+  };
+
+  const buscarGrupoPorItem = async (id) => {
+    const itemIdNumero = Number(id);
+    if (!Number.isInteger(itemIdNumero) || itemIdNumero <= 0) return null;
+    const { rows } = await db.query(
+      `SELECT NULLIF(BTRIM(grupo_requisicao), '') AS grupo_requisicao
+       FROM ${tabelaBase}
+       WHERE id = $1
+       LIMIT 1`,
+      [itemIdNumero]
+    );
+    return rows[0]?.grupo_requisicao || null;
+  };
+
+  const buscarGrupoPorItens = async (ids) => {
+    const idsValidos = (Array.isArray(ids) ? ids : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (!idsValidos.length) return null;
+
+    const { rows } = await db.query(
+      `SELECT NULLIF(BTRIM(grupo_requisicao), '') AS grupo_requisicao
+       FROM ${tabelaBase}
+       WHERE id = ANY($1::int[])
+         AND NULLIF(BTRIM(grupo_requisicao), '') IS NOT NULL
+       ORDER BY id
+       LIMIT 1`,
+      [idsValidos]
+    );
+    return rows[0]?.grupo_requisicao || null;
+  };
+
+  const buscarGrupoPorNumeroPedido = async (numero) => {
+    const numeroLimpo = String(numero || '').trim();
+    if (!numeroLimpo) return null;
+    const { rows } = await db.query(
+      `SELECT NULLIF(BTRIM(grupo_requisicao), '') AS grupo_requisicao
+       FROM ${tabelaBase}
+       WHERE numero_pedido = $1
+         AND NULLIF(BTRIM(grupo_requisicao), '') IS NOT NULL
+       ORDER BY updated_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [numeroLimpo]
+    );
+    return rows[0]?.grupo_requisicao || null;
+  };
+
+  let historicoId = await buscarPorGrupo(grupoRequisicao);
+  if (historicoId) return historicoId;
+
+  const grupoPorItem = await buscarGrupoPorItem(itemId);
+  historicoId = await buscarPorGrupo(grupoPorItem);
+  if (historicoId) return historicoId;
+
+  const grupoPorItens = await buscarGrupoPorItens(itemIds);
+  historicoId = await buscarPorGrupo(grupoPorItens);
+  if (historicoId) return historicoId;
+
+  const grupoPorNumero = await buscarGrupoPorNumeroPedido(numeroPedido);
+  historicoId = await buscarPorGrupo(grupoPorNumero);
+  if (historicoId) return historicoId;
+
+  const itemIdNumero = Number(itemId);
+  if (Number.isInteger(itemIdNumero) && itemIdNumero > 0) {
+    const { rows } = await db.query(
+      `SELECT id
+       FROM compras.historico_compras
+       WHERE (dados->>'id') ~ '^\\d+$'
+         AND (dados->>'id')::int = $1
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [itemIdNumero]
+    );
+    if (rows[0]?.id) return Number(rows[0].id);
+  }
+
+  return null;
+}
+
 app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async (req, res) => {
   try {
     const { numero_pedido } = req.params;
@@ -5513,6 +5617,18 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       console.log('❌ Nenhum item encontrado para este pedido!');
       return res.status(400).json({ ok: false, error: 'Nenhum item encontrado no pedido' });
     }
+
+    const historicoCompraId = await obterIdHistoricoComprasParaOmie({
+      db: pool,
+      grupoRequisicao: itens[0]?.grupo_requisicao || null,
+      itemIds: itens.map((item) => item.id),
+      numeroPedido: numero_pedido,
+      tabelaOrigem: 'solicitacao_compras'
+    });
+
+    if (!historicoCompraId) {
+      throw new Error('Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido.');
+    }
     
     console.log(`✅ ${itens.length} item(ns) encontrado(s):`);
     itens.forEach((item, idx) => {
@@ -5525,6 +5641,7 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
     console.log('\n🔧 Montando JSON para envio à Omie...');
     const cabecalho = {
       cCodIntPed: numero_pedido,
+      cNumPedido: String(historicoCompraId),
       dDtPrevisao: pedido.previsao_entrega ? new Date(pedido.previsao_entrega).toISOString().split('T')[0].split('-').reverse().join('/') : null,
       nCodFor: pedido.fornecedor_id ? parseInt(pedido.fornecedor_id) : null,
       cCodCateg: pedido.categoria_compra_codigo || null,
@@ -16676,6 +16793,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
     const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
     let statusInicial = 'pendente';
+    let historicoCompraIdSemCadastro = null;
 
     if (compraJaRealizadaSelecionada) {
       statusInicial = 'compra realizada';
@@ -16931,6 +17049,29 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     if (compraJaRealizadaSelecionada) {
       try {
         log('Fluxo compra direta ativado');
+
+        await upsertStatusHistoricoCompras({
+          grupoRequisicao,
+          status: 'compra realizada',
+          tableSource: 'compras_sem_cadastro',
+          dados: {
+            origem: 'pre-envio-omie-compra-direta-sem-cadastro',
+            grupo_requisicao: grupoRequisicao,
+            solicitante,
+            reqId
+          }
+        });
+
+        historicoCompraIdSemCadastro = await obterIdHistoricoComprasParaOmie({
+          db: pool,
+          grupoRequisicao,
+          tabelaOrigem: 'compras_sem_cadastro'
+        });
+
+        if (!historicoCompraIdSemCadastro) {
+          throw new Error('Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido (compra sem cadastro).');
+        }
+
         const emailAprovador = await obterEmailAprovador();
         const fornecedorResolvido = await resolverFornecedorPadrao();
         const fornecedorPadrao = fornecedorResolvido.codigo;
@@ -16962,6 +17103,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
 
         const cabecalho = {
           cCodIntPed: codReqCompra,
+          cNumPedido: String(historicoCompraIdSemCadastro),
           dDtPrevisao,
           cCodCateg: categoriaCompraCodigo || '2.14.94',
           cCodParc: codParcelaPadrao,
@@ -17473,7 +17615,7 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     const itensPayload = Array.isArray(itensRequest) ? itensRequest : [];
 
     const { rows } = await pool.query(
-      `SELECT id, categoria_compra_codigo, objetivo_compra, solicitante, resp_inspecao_recebimento, observacao_recebimento
+      `SELECT id, grupo_requisicao, categoria_compra_codigo, objetivo_compra, solicitante, resp_inspecao_recebimento, observacao_recebimento
        FROM compras.compras_sem_cadastro
        WHERE id = $1`,
       [id]
@@ -17484,6 +17626,21 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     }
 
     const itemDb = rows[0];
+
+    const historicoCompraId = await obterIdHistoricoComprasParaOmie({
+      db: pool,
+      grupoRequisicao: itemDb.grupo_requisicao || null,
+      itemId: id,
+      tabelaOrigem: 'compras_sem_cadastro'
+    });
+
+    if (!historicoCompraId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido neste item sem cadastro.'
+      });
+    }
+
     if (!itemDb.categoria_compra_codigo || !String(itemDb.categoria_compra_codigo).trim()) {
       return res.status(400).json({ ok: false, error: 'Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de criar a requisição.' });
     }
@@ -17838,6 +17995,17 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   
   // Monta observação formatada com dados do primeiro item (mantida para compatibilidade de log/uso interno)
   const primeiroItem = itemsGroup[0].item;
+  const historicoCompraId = await obterIdHistoricoComprasParaOmie({
+    db: client,
+    grupoRequisicao: primeiroItem?.grupo_requisicao || null,
+    itemIds: itemsGroup.map((group) => group?.idDb),
+    tabelaOrigem: 'solicitacao_compras'
+  });
+
+  if (!historicoCompraId) {
+    throw new Error(`Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido (NP ${np}).`);
+  }
+
   const objetivoCompraPrimeiroItem = String(primeiroItem.objetivo_compra || '').trim();
   const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${primeiroItem.resp_inspecao_recebimento || solicitante}\nNPST: ${numeroPedido}\nNPOM: ${primeiroItem.codigo_omie || ''}\nNP: ${np}\nObjetivo da Compra: ${primeiroItem.objetivo_compra || ''}\nObservação: ${primeiroItem.observacao || ''}`.trim();
   
@@ -17868,6 +18036,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
 
     const cabecalhoCompra = {
       cCodIntPed: codIntPed,
+      cNumPedido: String(historicoCompraId),
       dDtPrevisao: itensOmie[0].dtSugestao,
       cCodCateg: categoriaCompra || '2.14.94',
       cCodParc: codParcelaPadrao,
@@ -18605,6 +18774,17 @@ async function atualizarObservacaoComCotacoes(item, itemId) {
 async function criarRequisicaoOmieParaItem(item, itemId) {
   await atualizarObservacaoComCotacoes(item, itemId);
 
+  const historicoCompraId = await obterIdHistoricoComprasParaOmie({
+    db: pool,
+    grupoRequisicao: item?.grupo_requisicao || null,
+    itemId,
+    tabelaOrigem: 'solicitacao_compras'
+  });
+
+  if (!historicoCompraId) {
+    throw new Error(`Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido (item ${itemId}).`);
+  }
+
   // Gera número de pedido único
   const agora = new Date();
   const ano = agora.getFullYear();
@@ -18766,6 +18946,17 @@ async function criarRequisicaoOmieParaItens(itens) {
   }
 
   const primeiroItem = itens[0];
+  const historicoCompraId = await obterIdHistoricoComprasParaOmie({
+    db: pool,
+    grupoRequisicao: primeiroItem?.grupo_requisicao || null,
+    itemIds: itens.map((item) => item?.id),
+    tabelaOrigem: 'solicitacao_compras'
+  });
+
+  if (!historicoCompraId) {
+    throw new Error('Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido (aprovação em grupo).');
+  }
+
   const solicitante = primeiroItem.solicitante || '';
   const respInspecao = primeiroItem.resp_inspecao_recebimento || '';
   const objetivoCompra = primeiroItem.objetivo_compra || '';
