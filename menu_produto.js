@@ -22147,17 +22147,47 @@ async function abrirModalCotadoEscolhaItem(itemId) {
 
     modalBody.innerHTML = html;
 
-    // Comentário: carrega cotações do banco usando solicitacao_id e table_source
-    const solicitacaoId = String(item.id || '').trim();
-    if (/^\d+$/.test(solicitacaoId)) {
+    // Comentário: carrega cotações do banco para TODOS os itens do grupo.
+    // Em alguns fluxos o item exibido no kanban pode ser histórico/representante do grupo,
+    // então consultar apenas item.id pode retornar vazio mesmo com cotações já registradas.
+    const idsSolicitacaoGrupo = Array.from(new Set(
+      (Array.isArray(itensGrupoCotado) ? itensGrupoCotado : [])
+        .map((grupoItem) => Number(grupoItem?.id))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    ));
+    const idFallback = Number(item?.id);
+    if (idsSolicitacaoGrupo.length === 0 && Number.isInteger(idFallback) && idFallback > 0) {
+      idsSolicitacaoGrupo.push(idFallback);
+    }
+
+    if (idsSolicitacaoGrupo.length > 0) {
       try {
-        const respCot = await fetch(`/api/compras/cotacoes/${solicitacaoId}?table_source=${encodeURIComponent(tableSource)}`, { credentials: 'include' });
-        if (respCot.ok) {
-          const data = await respCot.json();
-          window.cotadoEscolhaCotacoesDb = Array.isArray(data.cotacoes) ? data.cotacoes : (Array.isArray(data) ? data : []);
-        }
+        const respostasCotacoes = await Promise.all(
+          idsSolicitacaoGrupo.map(async (solicitacaoIdGrupo) => {
+            const respCot = await fetch(
+              `/api/compras/cotacoes/${solicitacaoIdGrupo}?table_source=${encodeURIComponent(tableSource)}`,
+              { credentials: 'include' }
+            );
+            if (!respCot.ok) return [];
+            const data = await respCot.json();
+            return Array.isArray(data?.cotacoes)
+              ? data.cotacoes
+              : (Array.isArray(data) ? data : []);
+          })
+        );
+
+        const mapaCotacoes = new Map();
+        respostasCotacoes.flat().forEach((cotacao) => {
+          if (!cotacao || typeof cotacao !== 'object') return;
+          const chave = Number(cotacao.id);
+          if (!Number.isInteger(chave) || chave <= 0) return;
+          if (!mapaCotacoes.has(chave)) {
+            mapaCotacoes.set(chave, cotacao);
+          }
+        });
+        window.cotadoEscolhaCotacoesDb = Array.from(mapaCotacoes.values());
       } catch (e) {
-        console.error('[COTADO ESCOLHA] Erro ao buscar cotações:', e);
+        console.error('[COTADO ESCOLHA] Erro ao buscar cotações do grupo:', e);
       }
     }
 
