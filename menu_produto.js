@@ -31586,9 +31586,15 @@ function montarCardsKanbanMinhas(status, itens) {
       return '#eab308';
     };
 
-    const corBorda = (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada)
-      ? determinCorBorda(primeiroItem.c_cod_int_ped)
-      : '#e5e7eb';
+    const comprasCard = String(primeiroItem.compras || '').trim().toLowerCase();
+    const ehCardFaturadaOrigemReceb = String(primeiroItem.statusNormalizado || primeiroItem.status || '').trim().toLowerCase() === 'faturada pelo fornecedor'
+      && !!primeiroItem.origem_recebimento_nfe;
+
+    const corBorda = ehCardFaturadaOrigemReceb
+      ? (comprasCard === 'sim' ? '#10b981' : '#ef4444')
+      : ((primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada)
+        ? determinCorBorda(primeiroItem.c_cod_int_ped)
+        : '#e5e7eb');
 
     const itemStatusLower = String(primeiroItem.statusNormalizado || primeiroItem.status || '').toLowerCase();
     const itemStatusNorm = itemStatusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -31741,12 +31747,94 @@ function togglePedidoCompraItens(cardKey, event) {
 }
 
 // Objetivo: Alterna exibição dos itens no kanban de Compra Realizada (status "compra realizada" com isCompraRealizada=true)
-function toggleCompraRealizadaItens(cardKey, event) {
+async function toggleCompraRealizadaItens(cardKey, event) {
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const container = document.getElementById(`compra-itens-${cardKey}`);
   if (!container) return;
   const btn = event?.currentTarget;
   const fechado = container.style.display === 'none' || container.style.display === '';
+
+  const statusContainer = String(container.getAttribute('data-status') || '').trim().toLowerCase();
+  const origemRecebimentoNfe = String(container.getAttribute('data-origem-recebimento-nfe') || '') === '1';
+  const nIdReceb = Number(container.getAttribute('data-n-id-receb') || 0);
+  const precisaCarregarItensNfe = fechado
+    && statusContainer === 'faturada pelo fornecedor'
+    && origemRecebimentoNfe
+    && nIdReceb > 0
+    && container.getAttribute('data-loaded') !== '1';
+
+  if (precisaCarregarItensNfe) {
+    container.innerHTML = '<div style="text-align:center;padding:10px;color:#6b7280;font-size:12px;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando itens da NF-e...</div>';
+    try {
+      const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb))}`, {
+        method: 'GET',
+        credentials: 'include'
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        throw new Error(data?.error || `Falha ao consultar recebimento (HTTP ${resp.status})`);
+      }
+
+      const itens = Array.isArray(data?.dados?.itens) ? data.dados.itens : [];
+      if (!itens.length) {
+        container.innerHTML = '<div style="text-align:center;padding:10px;color:#9ca3af;font-size:12px;">Sem itens disponíveis na NF-e</div>';
+      } else {
+        container.innerHTML = itens.map((item, itemIdx) => {
+          const codigo = String(item?.cCodigoProduto || '-');
+          const desc = String(item?.cDescricaoProduto || '-');
+          const tooltipId = `tooltip-faturada-nfe-${cardKey}-${itemIdx}`;
+          return `
+            <div style="margin-bottom:4px;padding-bottom:4px;${itens.length > 1 ? 'border-bottom:1px solid #f3f4f6;' : ''}">
+              <div style="font-size:12px;color:#374151;font-weight:600;">${escapeHtml(codigo)}</div>
+              <div>
+                <div
+                  class="desc-truncada"
+                  data-tooltip-id="${tooltipId}"
+                  style="font-size:11px;color:#6b7280;cursor:help;line-height:1.3;max-height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"
+                  onmouseover="
+                    event.stopPropagation();
+                    const tooltipId = this.getAttribute('data-tooltip-id');
+                    let tooltip = document.getElementById(tooltipId);
+                    if (!tooltip) {
+                      tooltip = document.createElement('div');
+                      tooltip.id = tooltipId;
+                      tooltip.className = 'tooltip-descricao';
+                      tooltip.style.cssText = 'display:none;position:fixed;background:#1f2937;color:white;padding:8px;border-radius:4px;font-size:10px;z-index:99999;white-space:pre-wrap;word-break:break-word;box-shadow:0 4px 6px rgba(0,0,0,0.3);min-width:200px;max-width:250px;pointer-events:none;';
+                      tooltip.textContent = '${desc.replace(/'/g, "\\'")}';
+                      document.body.appendChild(tooltip);
+                    }
+                    tooltip.style.display='block';
+                    tooltip.style.visibility='hidden';
+                    setTimeout(() => {
+                      const rect = this.getBoundingClientRect();
+                      const tooltipHeight = tooltip.offsetHeight;
+                      tooltip.style.top = (rect.top - tooltipHeight - 8) + 'px';
+                      tooltip.style.left = rect.left + 'px';
+                      tooltip.style.visibility='visible';
+                    }, 0);
+                  "
+                  onmouseout="
+                    event.stopPropagation();
+                    const tooltipId = this.getAttribute('data-tooltip-id');
+                    const tooltip = document.getElementById(tooltipId);
+                    if (tooltip) tooltip.style.display='none';
+                  "
+                  onclick="event.stopPropagation();">
+                  ${escapeHtml(desc)}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      container.setAttribute('data-loaded', '1');
+    } catch (err) {
+      container.innerHTML = `<div style="text-align:center;padding:10px;color:#ef4444;font-size:12px;">${escapeHtml(String(err?.message || 'Erro ao carregar itens da NF-e'))}</div>`;
+    }
+  }
+
   container.style.display = fechado ? 'block' : 'none';
   if (btn) {
     btn.innerHTML = fechado
@@ -32534,6 +32622,428 @@ function montarValorTotalComLinkNfe(linha) {
     </div>
   `;
 }
+
+function obterModalAssociarPedidoNfeEl() {
+  return document.getElementById('modalAssociarPedidoNfe');
+}
+
+function fecharModalAssociarPedidoNfe() {
+  const modal = obterModalAssociarPedidoNfeEl();
+  if (!modal) return;
+  modal.style.display = 'none';
+}
+
+function setStatusModalAssociarPedidoNfe(mensagem, tipo = 'info') {
+  const statusEl = document.getElementById('modalAssociarPedidoNfeStatus');
+  if (!statusEl) return;
+
+  const estilos = {
+    info: { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+    sucesso: { bg: '#ecfdf5', border: '#bbf7d0', color: '#166534' },
+    erro: { bg: '#fef2f2', border: '#fecaca', color: '#b91c1c' }
+  };
+  const tema = estilos[tipo] || estilos.info;
+
+  statusEl.style.display = mensagem ? 'block' : 'none';
+  statusEl.style.background = tema.bg;
+  statusEl.style.border = `1px solid ${tema.border}`;
+  statusEl.style.color = tema.color;
+  statusEl.textContent = mensagem || '';
+}
+
+function limparEtapaPedidoModalAssociarNfe() {
+  const blocoPedido = document.getElementById('modalAssociarPedidoNfeBlocoPedido');
+  const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
+  const previewWrap = document.getElementById('modalAssociarPedidoNfePreviewWrap');
+  const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (blocoPedido) blocoPedido.style.display = 'none';
+  if (pedidoInput) pedidoInput.value = '';
+  if (previewWrap) previewWrap.style.display = 'none';
+  if (previewConteudo) previewConteudo.innerHTML = '';
+  if (btnAssociar) btnAssociar.disabled = true;
+  if (window.__associarNfeRecebimentoAtual) {
+    window.__associarNfeRecebimentoAtual = null;
+  }
+  if (window.__associarNfePreviewAtual) {
+    window.__associarNfePreviewAtual = null;
+  }
+}
+
+function renderPreviewAssociacaoPedidoNfe(preview) {
+  const previewWrap = document.getElementById('modalAssociarPedidoNfePreviewWrap');
+  const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
+  if (!previewWrap || !previewConteudo) return;
+
+  const itens = Array.isArray(preview?.itens) ? preview.itens : [];
+  const resumoHtml = `
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px;">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">NF-e</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(String(preview?.numero_nfe || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Pedido</div>
+        <div style="font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(String(preview?.c_numero_pedido || preview?.n_cod_ped || '-'))}</div>
+      </div>
+      <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#166534;">Itens com match</div>
+        <div style="font-size:13px;font-weight:700;color:#166534;">${Number(preview?.itens_match_total || 0)}</div>
+      </div>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#991b1b;">Itens sem match</div>
+        <div style="font-size:13px;font-weight:700;color:#991b1b;">${Number(preview?.itens_sem_match_total || 0)}</div>
+      </div>
+    </div>
+  `;
+
+  const linhasHtml = itens.length
+    ? itens.map((item) => {
+        const encontrou = !!item?.pedido_item_encontrado;
+        const criterio = item?.criterio_match === 'id_produto'
+          ? 'ID produto'
+          : (item?.criterio_match === 'codigo_produto' ? 'Código produto' : 'Sem match');
+        return `
+          <tr style="border-bottom:1px solid #e2e8f0;background:${encontrou ? '#f8fafc' : '#fff7ed'};">
+            <td style="padding:6px 8px;font-size:11px;color:#0f172a;text-align:center;">${Number(item?.n_sequencia || 0) || '-'}</td>
+            <td style="padding:6px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.nf_codigo_produto || '-'))}</td>
+            <td style="padding:6px 8px;font-size:11px;color:#0f172a;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(String(item?.nf_descricao_produto || '-'))}">${escapeHtml(String(item?.nf_descricao_produto || '-'))}</td>
+            <td style="padding:6px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</td>
+            <td style="padding:6px 8px;font-size:11px;color:#0f172a;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</td>
+            <td style="padding:6px 8px;font-size:11px;text-align:center;color:${encontrou ? '#166534' : '#9a3412'};font-weight:700;">${escapeHtml(criterio)}</td>
+          </tr>
+        `;
+      }).join('')
+    : '<tr><td colspan="6" style="padding:8px;font-size:11px;color:#64748b;text-align:center;">Sem itens para pré-visualização.</td></tr>';
+
+  previewConteudo.innerHTML = `
+    ${resumoHtml}
+    <div style="max-height:210px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:center;">Seq</th>
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Código NF</th>
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Descrição NF</th>
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Código Pedido</th>
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Descrição Pedido</th>
+            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:center;">Match</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml}</tbody>
+      </table>
+    </div>
+  `;
+
+  previewWrap.style.display = 'block';
+}
+
+async function previsualizarAssociacaoPedidoNfeOmie() {
+  const nfeInput = document.getElementById('modalAssociarNfeNumeroInput');
+  const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
+  const btnPreview = document.getElementById('modalAssociarPedidoBtnPreview');
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+
+  if (!nfeInput || !pedidoInput || !btnPreview || !btnAssociar) return;
+
+  const numeroNfe = String(nfeInput.value || '').trim();
+  const numeroPedido = String(pedidoInput.value || '').trim();
+
+  if (!numeroNfe) {
+    setStatusModalAssociarPedidoNfe('Informe o número da NF-e.', 'erro');
+    return;
+  }
+  if (!numeroPedido) {
+    setStatusModalAssociarPedidoNfe('Informe o número do pedido para gerar a prévia.', 'erro');
+    return;
+  }
+
+  const textoOriginal = btnPreview.innerHTML;
+  btnPreview.disabled = true;
+  btnAssociar.disabled = true;
+  btnPreview.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+  setStatusModalAssociarPedidoNfe('Gerando prévia dos itens da NF-e e do pedido...', 'info');
+
+  try {
+    const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        numero_nfe: numeroNfe,
+        numero_pedido: numeroPedido
+      })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `Falha ao gerar prévia (HTTP ${resp.status})`);
+    }
+
+    window.__associarNfePreviewAtual = {
+      numeroNfe,
+      numeroPedido,
+      preview: data.preview
+    };
+
+    renderPreviewAssociacaoPedidoNfe(data.preview);
+
+    if (Number(data?.preview?.itens_sem_match_total || 0) > 0) {
+      setStatusModalAssociarPedidoNfe('Prévia gerada. Existem itens sem match; revise antes de confirmar.', 'erro');
+    } else {
+      setStatusModalAssociarPedidoNfe('Prévia gerada. Itens prontos para associação.', 'sucesso');
+    }
+
+    btnAssociar.disabled = false;
+  } catch (err) {
+    setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao gerar prévia de associação.', 'erro');
+  } finally {
+    btnPreview.disabled = false;
+    btnPreview.innerHTML = textoOriginal;
+  }
+}
+
+async function localizarNfeParaAssociacaoOmie() {
+  const nfeInput = document.getElementById('modalAssociarNfeNumeroInput');
+  const btnLocalizar = document.getElementById('modalAssociarNfeBtnLocalizar');
+  const blocoPedido = document.getElementById('modalAssociarPedidoNfeBlocoPedido');
+
+  if (!nfeInput || !btnLocalizar || !blocoPedido) return;
+
+  const numeroNfe = String(nfeInput.value || '').trim();
+  if (!numeroNfe) {
+    setStatusModalAssociarPedidoNfe('Informe o número da NF-e para localizar.', 'erro');
+    return;
+  }
+
+  limparEtapaPedidoModalAssociarNfe();
+  setStatusModalAssociarPedidoNfe('Localizando NF-e na Omie...', 'info');
+
+  const textoOriginal = btnLocalizar.innerHTML;
+  btnLocalizar.disabled = true;
+  btnLocalizar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+  try {
+    const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ numero_nfe: numeroNfe })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `Falha ao consultar NF-e (HTTP ${resp.status})`);
+    }
+
+    window.__associarNfeRecebimentoAtual = data?.recebimento || null;
+    blocoPedido.style.display = 'block';
+
+    const numeroNfeEncontrada = data?.recebimento?.c_numero_nfe || numeroNfe;
+    const pedidosJaVinculados = Array.isArray(data?.recebimento?.pedidos_vinculados)
+      ? data.recebimento.pedidos_vinculados.filter(Boolean)
+      : [];
+
+    if (pedidosJaVinculados.length > 0) {
+      setStatusModalAssociarPedidoNfe(
+        `NF-e ${numeroNfeEncontrada} localizada. Já vinculada aos pedidos: ${pedidosJaVinculados.join(', ')}.`,
+        'info'
+      );
+    } else {
+      setStatusModalAssociarPedidoNfe(`NF-e ${numeroNfeEncontrada} localizada. Informe o pedido para associar.`, 'sucesso');
+    }
+
+    const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
+    if (pedidoInput) pedidoInput.focus();
+  } catch (err) {
+    setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao localizar NF-e na Omie.', 'erro');
+  } finally {
+    btnLocalizar.disabled = false;
+    btnLocalizar.innerHTML = textoOriginal;
+  }
+}
+
+async function confirmarAssociacaoPedidoNfeOmie() {
+  const nfeInput = document.getElementById('modalAssociarNfeNumeroInput');
+  const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+
+  if (!nfeInput || !pedidoInput || !btnAssociar) return;
+
+  const numeroNfe = String(nfeInput.value || '').trim();
+  const numeroPedido = String(pedidoInput.value || '').trim();
+
+  if (!numeroNfe) {
+    setStatusModalAssociarPedidoNfe('Informe o número da NF-e.', 'erro');
+    return;
+  }
+  if (!numeroPedido) {
+    setStatusModalAssociarPedidoNfe('Informe o número do pedido para associar.', 'erro');
+    return;
+  }
+
+  const previewAtual = window.__associarNfePreviewAtual;
+  const previewValida = !!previewAtual
+    && String(previewAtual.numeroNfe || '').trim() === numeroNfe
+    && String(previewAtual.numeroPedido || '').trim() === numeroPedido;
+
+  if (!previewValida) {
+    setStatusModalAssociarPedidoNfe('Gere a prévia atualizada antes de confirmar a associação.', 'erro');
+    await previsualizarAssociacaoPedidoNfeOmie();
+    return;
+  }
+
+  const confirmar = window.confirm(`Confirma associar a NF-e ${numeroNfe} ao pedido ${numeroPedido} na Omie após revisar a prévia?`);
+  if (!confirmar) return;
+
+  const textoOriginal = btnAssociar.innerHTML;
+  btnAssociar.disabled = true;
+  btnAssociar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+  setStatusModalAssociarPedidoNfe('Associando NF-e ao pedido na Omie...', 'info');
+
+  try {
+    const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        numero_nfe: numeroNfe,
+        numero_pedido: numeroPedido
+      })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `Falha ao associar NF-e (HTTP ${resp.status})`);
+    }
+
+    setStatusModalAssociarPedidoNfe(
+      data?.message || `NF-e ${numeroNfe} associada com sucesso ao pedido ${numeroPedido}.`,
+      'sucesso'
+    );
+  } catch (err) {
+    setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao associar NF-e ao pedido.', 'erro');
+  } finally {
+    btnAssociar.disabled = false;
+    btnAssociar.innerHTML = textoOriginal;
+  }
+}
+
+function criarModalAssociarPedidoNfeSeNecessario() {
+  if (obterModalAssociarPedidoNfeEl()) return;
+
+  const modal = document.createElement('div');
+  modal.id = 'modalAssociarPedidoNfe';
+  modal.style.display = 'none';
+  modal.style.position = 'fixed';
+  modal.style.inset = '0';
+  modal.style.background = 'rgba(15, 23, 42, 0.68)';
+  modal.style.zIndex = '10040';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.padding = '18px';
+
+  modal.innerHTML = `
+    <div style="width:min(560px,100%);background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-link" style="color:#0369a1;"></i>
+          Associar NF-e a Pedido (Omie)
+        </strong>
+        <button type="button" id="modalAssociarPedidoNfeFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label for="modalAssociarNfeNumeroInput" style="font-size:12px;color:#334155;font-weight:700;">Número da NF-e</label>
+          <div style="display:flex;gap:8px;">
+            <input id="modalAssociarNfeNumeroInput" type="text" placeholder="Ex.: 3542" style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
+            <button id="modalAssociarNfeBtnLocalizar" type="button" style="padding:10px 14px;border:none;border-radius:8px;background:#0284c7;color:#ffffff;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:110px;">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              Localizar
+            </button>
+          </div>
+        </div>
+
+        <div id="modalAssociarPedidoNfeBlocoPedido" style="display:none;flex-direction:column;gap:6px;">
+          <label for="modalAssociarPedidoNumeroInput" style="font-size:12px;color:#334155;font-weight:700;">Número do Pedido</label>
+          <div style="display:flex;gap:8px;">
+            <input id="modalAssociarPedidoNumeroInput" type="text" placeholder="Ex.: 540" style="flex:1;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;color:#0f172a;" />
+            <button id="modalAssociarPedidoBtnPreview" type="button" style="padding:10px 14px;border:none;border-radius:8px;background:#0f766e;color:#ffffff;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:120px;">
+              <i class="fa-solid fa-table-list"></i>
+              Pré-visualizar
+            </button>
+            <button id="modalAssociarPedidoBtnConfirmar" type="button" style="padding:10px 14px;border:none;border-radius:8px;background:#16a34a;color:#ffffff;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:110px;">
+              <i class="fa-solid fa-check"></i>
+              Associar
+            </button>
+          </div>
+        </div>
+
+        <div id="modalAssociarPedidoNfePreviewWrap" style="display:none;">
+          <div style="font-size:12px;color:#334155;font-weight:700;margin-bottom:6px;">Prévia de associação (NF-e x Pedido)</div>
+          <div id="modalAssociarPedidoNfePreviewConteudo"></div>
+        </div>
+
+        <div id="modalAssociarPedidoNfeStatus" style="display:none;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.45;"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal) fecharModalAssociarPedidoNfe();
+  });
+
+  document.getElementById('modalAssociarPedidoNfeFechar')?.addEventListener('click', fecharModalAssociarPedidoNfe);
+  document.getElementById('modalAssociarNfeBtnLocalizar')?.addEventListener('click', localizarNfeParaAssociacaoOmie);
+  document.getElementById('modalAssociarPedidoBtnPreview')?.addEventListener('click', previsualizarAssociacaoPedidoNfeOmie);
+  document.getElementById('modalAssociarPedidoBtnConfirmar')?.addEventListener('click', confirmarAssociacaoPedidoNfeOmie);
+
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  if (btnAssociar) btnAssociar.disabled = true;
+
+  const inputNfe = document.getElementById('modalAssociarNfeNumeroInput');
+  inputNfe?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      localizarNfeParaAssociacaoOmie();
+    }
+  });
+
+  const inputPedido = document.getElementById('modalAssociarPedidoNumeroInput');
+  inputPedido?.addEventListener('input', () => {
+    const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+    if (btnAssociar) btnAssociar.disabled = true;
+    if (window.__associarNfePreviewAtual) window.__associarNfePreviewAtual = null;
+  });
+  inputPedido?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      previsualizarAssociacaoPedidoNfeOmie();
+    }
+  });
+}
+
+function abrirModalAssociarPedidoNfe() {
+  criarModalAssociarPedidoNfeSeNecessario();
+  const modal = obterModalAssociarPedidoNfeEl();
+  if (!modal) return;
+
+  limparEtapaPedidoModalAssociarNfe();
+  setStatusModalAssociarPedidoNfe('', 'info');
+
+  const inputNfe = document.getElementById('modalAssociarNfeNumeroInput');
+  if (inputNfe) inputNfe.value = '';
+
+  modal.style.display = 'flex';
+  inputNfe?.focus();
+}
+
+window.abrirModalAssociarPedidoNfe = abrirModalAssociarPedidoNfe;
 
 async function precarregarLinksNfeLista(linhas = []) {
   const cache = obterMapaLinksNfeLista();
@@ -33523,6 +34033,563 @@ function obterIdSolicitantePorGrupo(mapa, solicitante, grupoRequisicao) {
   return String(valor || '').trim() || '-';
 }
 
+function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus = null) {
+  if (!kanbanContainer) return;
+
+  const itensNormalizados = (Array.isArray(lista) ? lista : []).map(item => ({
+    ...item,
+    statusNormalizado: (item.status || '').toLowerCase().trim()
+  }));
+
+  const statusPrimeiraFase = [
+    'aguardando aprovação da requisição',
+    'solicitado revisão',
+    'aguardando cotação',
+    'cotado aguardando escolha',
+    'analise de cadastro',
+    'aguardando compra preparação'
+  ];
+
+  const statusPermitidosSet = Array.isArray(filtroStatus) && filtroStatus.length > 0
+    ? new Set(filtroStatus.map(s => String(s || '').toLowerCase().trim()))
+    : null;
+
+  const statusColunas = {
+    'aguardando aprovação da requisição': itensNormalizados.filter(i => i.statusNormalizado === 'aguardando aprovação da requisição'),
+    'solicitado revisão': itensNormalizados.filter(i => i.statusNormalizado === 'retificar' || (i.table_source === 'compras_sem_cadastro' && i.statusNormalizado === 'carrinho')),
+    'aguardando cotação': itensNormalizados.filter(i => i.statusNormalizado === 'aguardando cotação'),
+    'cotado aguardando escolha': itensNormalizados.filter(i => i.statusNormalizado === 'cotado'),
+    'analise de cadastro': itensNormalizados.filter(i => i.statusNormalizado === 'analise de cadastro'),
+    'aguardando compra preparação': itensNormalizados.filter(i => i.statusNormalizado === 'aguardando compra preparação')
+  };
+
+  const cores = {
+    'aguardando aprovação da requisição': { bg: '#9333ea', bgLight: '#f3e8ff', text: '#581c87', icon: 'fa-clock' },
+    'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
+    'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
+    'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
+    'analise de cadastro': { bg: '#0ea5e9', bgLight: '#e0f2fe', text: '#0c4a6e', icon: 'fa-magnifying-glass' },
+    'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' }
+  };
+
+  const titulos = {
+    'aguardando aprovação da requisição': 'Aprovação',
+    'solicitado revisão': 'Revisão',
+    'aguardando cotação': 'Cotação',
+    'cotado aguardando escolha': 'Cotado',
+    'analise de cadastro': 'Analise de cadastro',
+    'aguardando compra preparação': 'Requisições'
+  };
+
+  kanbanContainer.innerHTML = statusPrimeiraFase
+    .filter(status => !statusPermitidosSet || statusPermitidosSet.has(status))
+    .map((status) => {
+      const itens = statusColunas[status] || [];
+      const cor = cores[status];
+
+      const cardsHtml = itens.length > 0
+        ? '<div style="text-align:center;padding:24px;color:#64748b;font-size:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;">Carregando itens...</div>'
+        : '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+
+      return `
+        <div class="kanban-column-minhas" data-status="${status}" style="flex:1;min-width:200px;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);border:2px solid ${cor.bg};border-top:4px solid ${cor.bg};">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;">
+            <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
+              <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
+              ${titulos[status]}
+            </h3>
+            <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;"></div>
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;max-height:500px;overflow-y:auto;overflow-x:hidden;padding-right:4px;">
+            ${cardsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  aplicarFiltroKanbans();
+
+  if (!modoVisualizacaoKanban) {
+    mostrarVisualizacaoLista();
+  } else {
+    mostrarVisualizacaoKanban();
+  }
+}
+
+function obterModalNfePedidosEl() {
+  return document.getElementById('modalNfePedidos');
+}
+
+function fecharModalNfePedidos() {
+  const modal = obterModalNfePedidosEl();
+  if (!modal) return;
+  modal.style.display = 'none';
+}
+
+function obterListaNavegacaoModalNfePedidos() {
+  const colunaFaturada = document.querySelector('.kanban-column-minhas[data-status="faturada pelo fornecedor"]');
+  if (!colunaFaturada) return [];
+
+  const cards = Array.from(colunaFaturada.querySelectorAll('.kanban-card[data-n-id-receb]'));
+  const vistos = new Set();
+
+  return cards
+    .map((card) => {
+      const nIdReceb = String(card.getAttribute('data-n-id-receb') || '').trim();
+      const numero = String(card.getAttribute('data-numero-pedido') || '').trim();
+      return { nIdReceb, numero };
+    })
+    .filter((item) => {
+      if (!item.nIdReceb || vistos.has(item.nIdReceb)) return false;
+      vistos.add(item.nIdReceb);
+      return true;
+    });
+}
+
+function atualizarControlesNavegacaoModalNfePedidos() {
+  const btnProximo = document.getElementById('modalNfePedidosProximo');
+  const infoNav = document.getElementById('modalNfePedidosNavInfo');
+  const nav = window.__modalNfePedidosNav || { lista: [], index: -1 };
+
+  const total = Array.isArray(nav.lista) ? nav.lista.length : 0;
+  const idx = Number.isFinite(nav.index) ? nav.index : -1;
+
+  if (infoNav) {
+    infoNav.textContent = (total > 0 && idx >= 0) ? `${idx + 1}/${total}` : '0/0';
+  }
+
+  if (btnProximo) {
+    btnProximo.disabled = !(total > 0 && idx >= 0 && idx < total - 1);
+    btnProximo.style.opacity = btnProximo.disabled ? '0.5' : '1';
+    btnProximo.style.cursor = btnProximo.disabled ? 'not-allowed' : 'pointer';
+  }
+}
+
+function configurarNavegacaoModalNfePedidos(nIdRecebAtual, numeroAtual = '') {
+  const atual = String(nIdRecebAtual || '').trim();
+  const lista = obterListaNavegacaoModalNfePedidos();
+
+  let index = lista.findIndex((item) => item.nIdReceb === atual);
+  if (atual && index === -1) {
+    lista.push({ nIdReceb: atual, numero: String(numeroAtual || '').trim() });
+    index = lista.length - 1;
+  }
+
+  window.__modalNfePedidosNav = {
+    lista,
+    index
+  };
+
+  atualizarControlesNavegacaoModalNfePedidos();
+}
+
+async function abrirProximoModalNfePedidos() {
+  const nav = window.__modalNfePedidosNav || { lista: [], index: -1 };
+  const lista = Array.isArray(nav.lista) ? nav.lista : [];
+  const idx = Number.isFinite(nav.index) ? nav.index : -1;
+
+  if (idx < 0 || idx >= lista.length - 1) return;
+
+  const proximo = lista[idx + 1];
+  if (!proximo?.nIdReceb) return;
+
+  await abrirModalNfePedidos(proximo.nIdReceb, proximo.numero || '');
+}
+
+function formatarValorMoedaNfePedidos(valor) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return '-';
+  return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function renderTabelaItensModalNfePedidos(itens = []) {
+  if (!Array.isArray(itens) || !itens.length) {
+    return '<div style="font-size:12px;color:#64748b;padding:10px 0;">Nenhum item retornado para este recebimento.</div>';
+  }
+
+  const linhas = itens.map((item) => `
+    <tr style="border-bottom:1px solid #e2e8f0;">
+      <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cCodigoProduto || '-'))}</td>
+      <td style="padding:8px;font-size:12px;color:#0f172a;">${escapeHtml(String(item?.cDescricaoProduto || '-'))}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cNCM || '-'))}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;text-align:center;">${escapeHtml(String(item?.cUnidadeNfe || '-'))}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nPrecoUnit)) ? Number(item.nPrecoUnit).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 6 }) : '-'}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;text-align:right;">${Number.isFinite(Number(item?.nQtdeNFe)) ? Number(item.nQtdeNFe).toLocaleString('pt-BR') : '-'}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;">${escapeHtml(String(item?.cCFOPEntrada || '-'))}</td>
+      <td style="padding:8px;font-size:12px;color:#334155;line-height:1.4;">
+        ${escapeHtml(String(item?.cCFOPDescricao || '-'))}
+        ${item?.cCFOP ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">CFOP item: ${escapeHtml(String(item.cCFOP))}</div>` : ''}
+      </td>
+    </tr>
+  `).join('');
+
+  return `
+    <div style="border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:320px;">
+      <table style="width:100%;border-collapse:collapse;min-width:980px;">
+        <thead>
+          <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Código</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">NCM</th>
+            <th style="padding:8px;text-align:center;font-size:12px;color:#334155;">Unid.</th>
+            <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Preço Unit.</th>
+            <th style="padding:8px;text-align:right;font-size:12px;color:#334155;">Qtd NF-e</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">CFOP Entrada</th>
+            <th style="padding:8px;text-align:left;font-size:12px;color:#334155;">Descrição CFOP (item)</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function criarModalNfePedidosSeNecessario() {
+  if (obterModalNfePedidosEl()) return;
+
+  const modal = document.createElement('div');
+  modal.id = 'modalNfePedidos';
+  modal.style.display = 'none';
+  modal.style.position = 'fixed';
+  modal.style.inset = '0';
+  modal.style.background = 'rgba(15, 23, 42, 0.68)';
+  modal.style.zIndex = '10045';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.padding = '18px';
+
+  modal.innerHTML = `
+    <div style="width:min(1020px,100%);max-height:92vh;overflow:auto;background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+        <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-file-invoice-dollar" style="color:#92400e;"></i>
+          <span>NFe dos pedidos</span>
+          <span id="modalNfePedidosNumero" style="color:#92400e;"></span>
+        </strong>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="modalNfePedidosNavInfo" style="font-size:12px;color:#64748b;min-width:36px;text-align:center;">0/0</span>
+          <button type="button" id="modalNfePedidosProximo" style="border:1px solid #cbd5e1;background:#ffffff;color:#334155;font-size:12px;cursor:pointer;border-radius:6px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;">
+            Próximo
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+          <button type="button" id="modalNfePedidosFechar" style="border:none;background:transparent;color:#475569;font-size:18px;cursor:pointer;">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div id="modalNfePedidosInfo" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;"></div>
+        <div id="modalNfePedidosCfopInfo"></div>
+        <div id="modalNfePedidosItens"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal) fecharModalNfePedidos();
+  });
+
+  document.getElementById('modalNfePedidosFechar')?.addEventListener('click', fecharModalNfePedidos);
+  document.getElementById('modalNfePedidosProximo')?.addEventListener('click', abrirProximoModalNfePedidos);
+}
+
+function normalizarComprasNfe(valor) {
+  const texto = String(valor || '').trim().toLowerCase();
+  if (texto === 'sim') return 'sim';
+  if (texto === 'nao') return 'nao';
+  return '';
+}
+
+function atualizarApenasKanbanFaturadaAposCompras(nIdReceb, comprasValor) {
+  const statusAlvo = 'faturada pelo fornecedor';
+  const nIdAlvo = String(nIdReceb || '').trim();
+  const valorNormalizado = normalizarComprasNfe(comprasValor);
+
+  if (!nIdAlvo) return;
+
+  if (Array.isArray(window.kanbanMinhasItens)) {
+    window.kanbanMinhasItens = window.kanbanMinhasItens.map((item) => {
+      const itemNIdReceb = String(item?.n_id_receb || '').trim();
+      if (itemNIdReceb !== nIdAlvo) return item;
+      return {
+        ...item,
+        compras: valorNormalizado || null
+      };
+    });
+  }
+
+  if (valorNormalizado !== 'nao') return;
+
+  const coluna = document.querySelector(`.kanban-column-minhas[data-status="${statusAlvo}"]`);
+  if (!coluna) return;
+
+  const cardsContainer = coluna.querySelector('.kanban-cards-minhas');
+  if (!cardsContainer) return;
+
+  const cards = Array.from(cardsContainer.querySelectorAll('.kanban-card'));
+  let removeu = false;
+
+  cards.forEach((card) => {
+    const cardNIdReceb = String(card.getAttribute('data-n-id-receb') || '').trim();
+    if (cardNIdReceb === nIdAlvo) {
+      card.remove();
+      removeu = true;
+    }
+  });
+
+  if (!removeu) return;
+
+  const totalRestante = cardsContainer.querySelectorAll('.kanban-card').length;
+  const countEl = coluna.querySelector('.kanban-count-minhas');
+  if (countEl) {
+    countEl.textContent = String(totalRestante);
+  }
+
+  if (totalRestante === 0) {
+    cardsContainer.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">Nenhum item</div>';
+  }
+}
+
+async function atualizarComprasRecebimentoNfe(nIdReceb, compras) {
+  const resp = await fetch(`/api/compras/recebimentos-nfe/compras/${encodeURIComponent(String(nIdReceb || ''))}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ compras: compras || null })
+  });
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data?.ok) {
+    throw new Error(data?.error || `Falha ao atualizar campo compras (HTTP ${resp.status})`);
+  }
+
+  return data;
+}
+
+async function abrirModalNfePedidos(nIdReceb, numeroNfeRef = '') {
+  criarModalNfePedidosSeNecessario();
+  const modal = obterModalNfePedidosEl();
+  if (!modal) return;
+
+  const numeroEl = document.getElementById('modalNfePedidosNumero');
+  const infoEl = document.getElementById('modalNfePedidosInfo');
+  const cfopInfoEl = document.getElementById('modalNfePedidosCfopInfo');
+  const itensEl = document.getElementById('modalNfePedidosItens');
+  if (!numeroEl || !infoEl || !cfopInfoEl || !itensEl) return;
+
+  modal.style.display = 'flex';
+  numeroEl.textContent = numeroNfeRef ? `• ${numeroNfeRef}` : '';
+  configurarNavegacaoModalNfePedidos(nIdReceb, numeroNfeRef);
+  infoEl.innerHTML = '<div style="grid-column:1/-1;font-size:13px;color:#64748b;">Carregando dados da NF-e na Omie...</div>';
+  cfopInfoEl.innerHTML = '';
+  itensEl.innerHTML = '';
+
+  try {
+    const resp = await fetch(`/api/compras/recebimentos-nfe/detalhes/${encodeURIComponent(String(nIdReceb || ''))}`, {
+      method: 'GET',
+      credentials: 'include'
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `Falha ao consultar recebimento (HTTP ${resp.status})`);
+    }
+
+    const dados = data?.dados || {};
+    const cNumeroNFe = String(dados?.cNumeroNFe || '').trim();
+    const linkPdfPorNumeroNfe = cNumeroNFe
+      ? `/api/compras/pedidos-omie/nfe-pdf-redirect-por-numero?numero_nfe=${encodeURIComponent(cNumeroNFe)}`
+      : '';
+    if (cNumeroNFe) {
+      const numeroLimpo = cNumeroNFe.replace(/^0+/, '') || cNumeroNFe;
+      numeroEl.textContent = `• ${numeroLimpo}`;
+    }
+
+    const chaveNfeTexto = String(dados?.cChaveNFe || '-');
+    const chaveNfeHtml = (linkPdfPorNumeroNfe && chaveNfeTexto !== '-')
+      ? `
+        <div style="display:inline-flex;align-items:center;gap:6px;word-break:break-all;">
+          <a
+            href="${linkPdfPorNumeroNfe}"
+            target="_blank"
+            rel="noopener"
+            title="Abrir PDF da NF-e"
+            style="color:#0f172a;font-weight:700;text-decoration:underline;word-break:break-all;">
+            ${escapeHtml(chaveNfeTexto)}
+          </a>
+          <a
+            href="${linkPdfPorNumeroNfe}"
+            target="_blank"
+            rel="noopener"
+            title="Abrir PDF da NF-e"
+            style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;cursor:pointer;text-decoration:none;flex-shrink:0;">
+            <i class="fa-solid fa-link" style="font-size:10px;"></i>
+          </a>
+        </div>
+      `
+      : `<div style="font-size:12px;color:#0f172a;font-weight:700;word-break:break-all;">${escapeHtml(chaveNfeTexto)}</div>`;
+
+    infoEl.innerHTML = `
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Nome</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;">${escapeHtml(String(dados?.cNome || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Número NF-e</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;">${escapeHtml(String(dados?.cNumeroNFe || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Chave NF-e</div>
+        ${chaveNfeHtml}
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Emissão</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;">${escapeHtml(String(dados?.dEmissaoNFe || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Valor NF-e</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;">${escapeHtml(formatarValorMoedaNfePedidos(dados?.nValorNFe))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;">
+        <div style="font-size:11px;color:#64748b;">Compras?</div>
+        <select id="modalNfePedidosComprasSelect" style="border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;font-size:12px;color:#0f172a;background:#fff;">
+          <option value="" ${normalizarComprasNfe(dados?.compras) === '' ? 'selected' : ''}>Selecione</option>
+          <option value="sim" ${normalizarComprasNfe(dados?.compras) === 'sim' ? 'selected' : ''}>Sim</option>
+          <option value="nao" ${normalizarComprasNfe(dados?.compras) === 'nao' ? 'selected' : ''}>Não</option>
+        </select>
+        <div id="modalNfePedidosComprasMsg" style="font-size:11px;color:#64748b;min-height:14px;"></div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Categoria compra (Descrição)</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.4;">${escapeHtml(String(dados?.categoriaCompra?.descricao || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Categoria compra (Natureza)</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.4;">${escapeHtml(String(dados?.categoriaCompra?.natureza || '-'))}</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">Possíveis compras (mesmo valor)</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.5;word-break:break-word;">
+          ${(() => {
+            const lista = Array.isArray(dados?.possiveisComprasMesmoValor) ? dados.possiveisComprasMesmoValor : [];
+            return lista.length ? escapeHtml(lista.join(', ')) : '-';
+          })()}
+        </div>
+      </div>
+      <div style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+        <div style="font-size:11px;color:#64748b;">cObs</div>
+        <div style="font-size:12px;color:#0f172a;font-weight:700;line-height:1.5;white-space:pre-wrap;">${escapeHtml(String(dados?.cObs || '-'))}</div>
+      </div>
+    `;
+
+    const comprasSelectEl = document.getElementById('modalNfePedidosComprasSelect');
+    const comprasMsgEl = document.getElementById('modalNfePedidosComprasMsg');
+    if (comprasSelectEl) {
+      comprasSelectEl.addEventListener('change', async (ev) => {
+        const valorSelecionado = normalizarComprasNfe(ev?.target?.value);
+        const valorAnterior = normalizarComprasNfe(dados?.compras);
+
+        if (comprasMsgEl) {
+          comprasMsgEl.textContent = 'Salvando...';
+          comprasMsgEl.style.color = '#64748b';
+        }
+
+        comprasSelectEl.disabled = true;
+        try {
+          await atualizarComprasRecebimentoNfe(nIdReceb, valorSelecionado || null);
+          dados.compras = valorSelecionado || null;
+
+          if (comprasMsgEl) {
+            comprasMsgEl.textContent = 'Atualizado com sucesso';
+            comprasMsgEl.style.color = '#059669';
+          }
+
+          atualizarApenasKanbanFaturadaAposCompras(nIdReceb, valorSelecionado || null);
+        } catch (errSave) {
+          if (comprasMsgEl) {
+            comprasMsgEl.textContent = String(errSave?.message || 'Erro ao salvar');
+            comprasMsgEl.style.color = '#b91c1c';
+          }
+          comprasSelectEl.value = valorAnterior;
+        } finally {
+          comprasSelectEl.disabled = false;
+        }
+      });
+    }
+
+    const itensNfe = Array.isArray(dados?.itens) ? dados.itens : [];
+    const cfopCabecalho = String(dados?.cCFOPEntrada || '').trim();
+    const cfopsEntrada = [...new Set([
+      ...itensNfe
+        .map((item) => String(item?.cCFOPEntrada || '').trim())
+        .filter(Boolean),
+      ...(cfopCabecalho ? [cfopCabecalho] : [])
+    ])];
+    const cfopPrincipalRaw = cfopsEntrada[0] || '';
+    const cfopPrincipalDigitos = cfopPrincipalRaw.replace(/\D/g, '');
+
+    if (cfopPrincipalDigitos) {
+      cfopInfoEl.innerHTML = '<div style="font-size:12px;color:#64748b;padding:10px;border:1px dashed #cbd5e1;border-radius:8px;"><i class="fa-solid fa-spinner fa-spin"></i> Consultando CFOP na base local...</div>';
+      try {
+        const respCfop = await fetch(`/api/configuracoes/cfop/${encodeURIComponent(cfopPrincipalDigitos)}`, {
+          method: 'GET',
+          credentials: 'include'
+        });
+
+        const dataCfop = await respCfop.json().catch(() => ({}));
+        if (!respCfop.ok || !dataCfop?.ok) {
+          throw new Error(dataCfop?.error || 'CFOP não encontrado na base local');
+        }
+
+        const cfop = dataCfop?.cfop || {};
+        const mostrarCfopsOriginais = cfopsEntrada.length > 1
+          ? `<div style="font-size:11px;color:#64748b;margin-top:6px;">CFOPs encontrados na NF-e: ${escapeHtml(cfopsEntrada.join(', '))}</div>`
+          : '';
+
+        cfopInfoEl.innerHTML = `
+          <div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#f8fafc;">
+            <div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+              <i class="fa-solid fa-receipt" style="color:#92400e;"></i>
+              <span>CFOP ${escapeHtml(String(cfop?.codigo || cfopPrincipalRaw || cfopPrincipalDigitos))}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Descrição</div>
+                <div style="font-size:12px;color:#0f172a;font-weight:600;line-height:1.5;">${escapeHtml(String(cfop?.descricao || '-'))}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+                <div style="font-size:11px;color:#64748b;text-transform:uppercase;margin-bottom:4px;">Aplicação</div>
+                <div style="font-size:12px;color:#0f172a;font-weight:600;line-height:1.5;">${escapeHtml(String(cfop?.aplicacao || '-'))}</div>
+              </div>
+            </div>
+            ${mostrarCfopsOriginais}
+          </div>
+        `;
+      } catch (errCfop) {
+        cfopInfoEl.innerHTML = `
+          <div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px;">
+            <strong>CFOP ${escapeHtml(cfopPrincipalRaw || cfopPrincipalDigitos)}</strong>: ${escapeHtml(String(errCfop?.message || 'não encontrado na base local'))}
+          </div>
+        `;
+      }
+    } else {
+      cfopInfoEl.innerHTML = '<div style="font-size:12px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">CFOP Entrada não informado para este recebimento.</div>';
+    }
+
+    itensEl.innerHTML = renderTabelaItensModalNfePedidos(dados?.itens || []);
+  } catch (err) {
+    infoEl.innerHTML = `<div style="grid-column:1/-1;font-size:13px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px;">${escapeHtml(String(err?.message || 'Erro ao carregar dados da NF-e'))}</div>`;
+    cfopInfoEl.innerHTML = '';
+    itensEl.innerHTML = '';
+  }
+}
+
+window.abrirModalNfePedidos = abrirModalNfePedidos;
+
 async function loadMinhasSolicitacoes(filtroStatus = null) {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const wrapper = document.getElementById('minhasComprasWrapper');
@@ -33628,9 +34695,28 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       lista = [...lista, ...requisicoes];
     }
+
+    // Primeira fase: renderiza imediatamente os kanbans baseados no histórico/requisições
+    // (Aprovação, Revisão, Cotação, Cotado, Analise de cadastro, Requisições).
+    const listaPrimeiraFase = lista.filter(item => {
+      const status = String(item?.status || '').toLowerCase().trim();
+      return status !== 'requisição'
+        && status !== 'requisicao'
+        && status !== 'compra realizada'
+        && status !== 'excluido'
+        && status !== 'excluído';
+    });
+
+    renderizarKanbanPrimeiraFaseRapida(kanbanContainer, listaPrimeiraFase, filtroStatus);
     
-    // Busca pedidos de compra da tabela pedidos_omie (c_etapa = '10')
-    const respPed = await fetch(`/api/compras/pedidos-compra`, { credentials: 'include' });
+    // Segunda fase: carrega dados mais pesados de pedidos/compras em paralelo.
+    const [respPed, respCompra, respEtapaNf] = await Promise.all([
+      fetch(`/api/compras/pedidos-compra`, { credentials: 'include' }),
+      fetch(`/api/compras/compras-realizadas`, { credentials: 'include' }),
+      fetch(`/api/compras/pedidos-etapa-nf`, { credentials: 'include' })
+    ]);
+
+    // Busca pedidos de compra da tabela pedidos_omie (c_etapa = '10' e Etapa_NF vazia)
     let pedidosCompra = [];
     if (respPed.ok) {
       const dataPed = await respPed.json();
@@ -33689,9 +34775,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       lista = [...lista, ...pedidosCompra];
     }
     
-    // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15')
+    // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15' e Etapa_NF vazia)
     console.log('[DEBUG] Buscando compras realizadas...');
-    const respCompra = await fetch(`/api/compras/compras-realizadas`, { credentials: 'include' });
     console.log('[DEBUG] Resposta do fetch compras realizadas:', respCompra.status, respCompra.ok);
     let comprasRealizadas = [];
     if (respCompra.ok) {
@@ -33767,7 +34852,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Busca pedidos por Etapa_NF (40/50/60/80) para kanbans:
     // 40 -> faturada pelo fornecedor | 50/60 -> recebido | 80 -> concluído
     console.log('[DEBUG] Buscando pedidos por Etapa_NF...');
-    const respEtapaNf = await fetch(`/api/compras/pedidos-etapa-nf`, { credentials: 'include' });
     console.log('[DEBUG] Resposta do fetch Etapa_NF:', respEtapaNf.status, respEtapaNf.ok);
     let pedidosEtapaNf = [];
     if (respEtapaNf.ok) {
@@ -33789,12 +34873,13 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
         const statusNf = String(ped.status_nf || '').trim().toLowerCase();
         const statusFinal = statusNf || 'faturada pelo fornecedor';
+        const idBase = ped.n_cod_ped || ped.n_id_receb || cNumeroValido || Math.random().toString(36).slice(2, 10);
 
         return {
           ...ped,
-          id: `nf_${ped.n_cod_ped}_${statusFinal.replace(/\s+/g, '_')}`,
-          numero_pedido: cNumeroValido || ped.n_cod_ped,
-          numero: cNumeroValido || ped.n_cod_ped,
+          id: `nf_${idBase}_${statusFinal.replace(/\s+/g, '_')}`,
+          numero_pedido: cNumeroValido || ped.n_cod_ped || ped.n_id_receb,
+          numero: cNumeroValido || ped.n_cod_ped || ped.n_id_receb,
           c_numero: cNumeroValido,
           n_cod_ped: ped.n_cod_ped,
           fornecedor_nome: ped.fornecedor_nome,
@@ -33802,6 +34887,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           id_solicitante: (itemRef && String(itemRef.id_solicitante || '').trim()) || idSolicitantePorGrupo || '-',
           status: statusFinal,
           statusNormalizado: statusFinal,
+          origem_recebimento_nfe: !!ped.origem_recebimento_nfe,
+          compras: String(ped.compras || '').trim().toLowerCase() || null,
+          n_valor_nfe: ped.n_valor_nfe ?? null,
           isCompraRealizada: true,
           itens: ped.itens || []
         };
@@ -33810,6 +34898,8 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       if (filtroSolicitante === 'minhas') {
         const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
         pedidosEtapaNf = pedidosEtapaNf.filter(ped => {
+          if (ped.origem_recebimento_nfe) return false;
+
           const solicitantePedido = normalizarSolicitanteParaId(ped.solicitante);
           if (solicitantePedido && solicitantePedido === usuarioNormalizado) return true;
 
@@ -33870,7 +34960,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
       'aguardando compra': filtrarItensPorDataLimite('aguardando compra', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra')),
       'compra realizada': filtrarItensPorDataLimite('compra realizada', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada')),
-      'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor')),
+      'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor' && String(i.compras || '').trim().toLowerCase() !== 'nao')),
       'recebido': filtrarItensPorDataLimite('recebido', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido')),
       'concluído': filtrarItensPorDataLimite('concluído', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'concluído' || i.statusNormalizado === 'concluido'))
     };
@@ -34244,16 +35334,23 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
             return '#eab308';
           };
           
-          const corBorda = (primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada) 
-            ? determinCorBorda(primeiroItem.c_cod_int_ped) 
-            : '#e5e7eb';
+          const comprasCard = String(primeiroItem.compras || '').trim().toLowerCase();
+          const ehCardFaturadaOrigemReceb = String(status || '').trim().toLowerCase() === 'faturada pelo fornecedor'
+            && !!primeiroItem.origem_recebimento_nfe;
+
+          const corBorda = ehCardFaturadaOrigemReceb
+            ? (comprasCard === 'sim' ? '#10b981' : '#ef4444')
+            : ((primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada)
+              ? determinCorBorda(primeiroItem.c_cod_int_ped)
+              : '#e5e7eb');
 
           const statusLower = String(status || '').toLowerCase();
           const statusNormalizado = statusLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
           const isAprovacao = statusNormalizado.includes('aguardando aprovacao') || statusNormalizado.includes('aprovacao');
           const isRequisicoes = statusNormalizado.includes('aguardando compra preparacao');
           const isPedidoCompraCard = statusNormalizado.includes('aguardando compra') && primeiroItem.isPedidoCompra;
-          const isCompraRealizadaCard = (status === 'compra realizada' || statusNormalizado.includes('compra realizada')) && primeiroItem.isCompraRealizada;
+          const statusCompraExpandivel = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluido', 'concluído'];
+          const isCompraRealizadaCard = statusCompraExpandivel.includes(statusNormalizado) && primeiroItem.isCompraRealizada;
           const isSolicitacaoCompra = statusNormalizado.includes('solicitado revisao') || statusNormalizado.includes('aguardando cotacao') || statusNormalizado.includes('cotado aguardando escolha') || statusNormalizado.includes('analise de cadastro');
           const cardKey = `aprovacao-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
           const cardReqKey = `requisicoes-${String(chaveGrupo).replace(/[^a-zA-Z0-9_-]/g, '_')}-${primeiroItem.id}`;
@@ -34286,6 +35383,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const grupoRequisicaoCodificado = encodeURIComponent(grupoRequisicaoCard);
           const tableSourceCard = String(primeiroItem.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
           const onclickCard = (
+            (status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
+              ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}')`
+              :
             status === 'analise de cadastro'
               ? `abrirModalAnaliseCadastro('${primeiroItem.id}')`
               : (status === 'cotado aguardando escolha'
@@ -34317,6 +35417,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           return `
             <div class="kanban-card" 
               data-item-id="${primeiroItem.id}"
+              data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
               data-grupo-requisicao="${escapeHtml(grupoRequisicaoCard)}"
               data-table-source="${escapeHtml(tableSourceCard)}"
               data-todos-ids="${todosIds}"
@@ -34392,7 +35493,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
               ` : ''}
               
               <!-- Objetivo: Exibir o valor de agrupamento (grupo_requisicao ou nCodPed) nos 5 kanbans específicos + Requisições + Pedido de Compra + Compra Realizada -->
-              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada') && chaveGrupo && chaveGrupo !== '-' ? `
+              ${(status === 'aguardando aprovação da requisição' || status === 'solicitado revisão' || status === 'aguardando cotação' || status === 'cotado aguardando escolha' || status === 'analise de cadastro' || status === 'aguardando compra preparação' || status === 'aguardando compra' || status === 'compra realizada' || status === 'faturada pelo fornecedor' || status === 'recebido' || status === 'concluído') && chaveGrupo && chaveGrupo !== '-' ? `
                 <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:4px 8px;background:#f3f4f6;border-radius:4px;word-break:break-all;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                   ${status === 'aguardando compra preparação'
                     ? `
@@ -34421,17 +35522,19 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                             ? escapeHtml(cardTemBordaVerde
                               ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
                               : (primeiroItem.c_cod_int_ped || ''))
-                            : ((
-                              status === 'aguardando cotação'
-                              || status === 'cotado aguardando escolha'
-                              || status === 'aguardando aprovação da requisição'
-                              || status === 'solicitado revisão'
-                              || status === 'analise de cadastro'
-                            )
-                              ? escapeHtml(`ID ${String(primeiroItem.historico_id || primeiroItem.id || '-')}`)
-                              : (statusCompactarIdentificador.includes(status)
-                                ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
-                                : escapeHtml(chaveGrupo))))
+                            : (status === 'faturada pelo fornecedor'
+                              ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor_nfe))
+                              : ((
+                                status === 'aguardando cotação'
+                                || status === 'cotado aguardando escolha'
+                                || status === 'aguardando aprovação da requisição'
+                                || status === 'solicitado revisão'
+                                || status === 'analise de cadastro'
+                              )
+                                ? escapeHtml(`ID ${String(primeiroItem.historico_id || primeiroItem.id || '-')}`)
+                                : (statusCompactarIdentificador.includes(status)
+                                  ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
+                                  : escapeHtml(chaveGrupo)))))
                         }
                       </span>
                     `
@@ -34500,8 +35603,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   ${listaProdutos}
                 </div>
               ` : (isCompraRealizadaCard ? `
-                <div id="compra-itens-${cardCompKey}" style="display:none;">
-                  ${listaProdutos}
+                <div
+                  id="compra-itens-${cardCompKey}"
+                  data-status="${escapeHtml(statusNormalizado)}"
+                  data-origem-recebimento-nfe="${primeiroItem.origem_recebimento_nfe ? '1' : '0'}"
+                  data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
+                  data-loaded="${status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe ? '0' : '1'}"
+                  style="display:none;">
+                  ${status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe ? '' : listaProdutos}
                 </div>
               ` : (isSolicitacaoCompra ? `
                 <div
@@ -38790,6 +39899,134 @@ window.forceUpdateCheck = function() {
     return d.toLocaleString('pt-BR');
   };
 
+  const montarResumoContagem = (details) => {
+    if (!details || typeof details !== 'object') return '-';
+
+    const atualizados = Number(details.total ?? details.sucesso ?? details.processados);
+    const avaliados = Number(details.total_avaliados ?? details.totalRegistros ?? details.total_registros);
+    const ignorados = Number(details.ignorados_etapa_80 ?? details.ignorados ?? 0);
+
+    if (Number.isFinite(atualizados) && Number.isFinite(avaliados) && avaliados > 0) {
+      return `${atualizados}/${avaliados}${ignorados > 0 ? ` (ignorados: ${ignorados})` : ''}`;
+    }
+
+    if (Number.isFinite(atualizados)) {
+      return `${atualizados}`;
+    }
+
+    return '-';
+  };
+
+  function garantirBotoesExecucaoPorTabela() {
+    const grid = document.getElementById('agendamentoTabelasGrid');
+    if (!grid) return;
+
+    const itens = Array.from(grid.querySelectorAll('label'));
+    itens.forEach((item) => {
+      const checkbox = item.querySelector('.agendamento-tabela');
+      if (!checkbox) return;
+
+      checkbox.style.setProperty('width', '18px', 'important');
+      checkbox.style.setProperty('height', '18px', 'important');
+      checkbox.style.setProperty('min-width', '18px', 'important');
+      checkbox.style.setProperty('min-height', '18px', 'important');
+      checkbox.style.setProperty('max-width', '18px', 'important');
+      checkbox.style.setProperty('max-height', '18px', 'important');
+      checkbox.style.setProperty('transform', 'none', 'important');
+      checkbox.style.setProperty('appearance', 'auto', 'important');
+      checkbox.style.setProperty('-webkit-appearance', 'auto', 'important');
+
+      if (item.querySelector('.btn-omie-run-tabela')) return;
+
+      item.style.display = 'grid';
+      item.style.gridTemplateColumns = 'minmax(0, 1fr) auto';
+      item.style.alignItems = 'center';
+      item.style.columnGap = '10px';
+      item.style.rowGap = '8px';
+      item.style.padding = '12px';
+      item.style.minHeight = '52px';
+
+      const texto = item.querySelector('span');
+      if (texto) {
+        texto.style.flex = '1';
+        texto.style.fontWeight = '600';
+        texto.style.whiteSpace = 'nowrap';
+        texto.style.overflow = 'hidden';
+        texto.style.textOverflow = 'ellipsis';
+      }
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-omie-run-tabela';
+      btn.dataset.tabela = checkbox.value;
+      btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Sincronizar';
+      btn.style.background = 'linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%)';
+      btn.style.color = 'white';
+      btn.style.border = 'none';
+      btn.style.padding = '7px 10px';
+      btn.style.borderRadius = '6px';
+      btn.style.fontSize = '12px';
+      btn.style.fontWeight = '700';
+      btn.style.cursor = 'pointer';
+      btn.style.display = 'inline-flex';
+      btn.style.alignItems = 'center';
+      btn.style.gap = '5px';
+      btn.style.whiteSpace = 'nowrap';
+      btn.title = 'Executar sincronização somente desta tabela';
+
+      item.appendChild(btn);
+    });
+  }
+
+  function montarParametrosAutoSync(tabelasSelecionadas = []) {
+    const payload = {};
+
+    const dataInicialInput = document.getElementById('agendamentoDataInicial');
+    const dataInicial = String(dataInicialInput?.value || '').trim();
+    if (dataInicial) {
+      payload.data_inicial = dataInicial;
+    }
+
+    return payload;
+  }
+
+  async function executarAutoSyncTabelaUnica(tabela, btn) {
+    if (!tabela) return;
+    const nomeTabela = labels[tabela] || tabela;
+    const original = btn?.innerHTML || '';
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executando';
+    }
+
+    try {
+      const resp = await fetch('/api/omie/autosync/run', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          motivo: `manual-ui-${tabela}`,
+          tabelas: [tabela],
+          ...montarParametrosAutoSync([tabela])
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+      await carregarStatusAutoSync();
+      await carregarHistoricoAutoSync();
+      alert(`Sincronização de ${nomeTabela} concluída com sucesso.`);
+    } catch (err) {
+      alert(`Erro ao sincronizar ${nomeTabela}: ${err.message || err}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    }
+  }
+
   async function carregarStatusAutoSync() {
     const resumoEl = document.getElementById('omieAutoSyncResumo');
     const tarefasEl = document.getElementById('omieAutoSyncExecucaoTabelas');
@@ -38836,6 +40073,7 @@ window.forceUpdateCheck = function() {
             <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
               <div style="font-size:12px;font-weight:700;color:#0f172a;">${labels[t.tabela] || t.tabela}</div>
               <div style="font-size:12px;color:${cor};font-weight:700;">${ok ? 'OK' : 'Erro'}</div>
+              <div style="font-size:11px;color:#334155;">Atualizados: ${montarResumoContagem(t.details)}</div>
               <div style="font-size:11px;color:#64748b;">${t.duration_ms ? `${Math.round(t.duration_ms / 1000)}s` : '-'}</div>
               ${!ok && t.error ? `<div style="font-size:11px;color:#b91c1c;margin-top:4px;">${String(t.error).slice(0, 120)}</div>` : ''}
             </div>
@@ -38866,7 +40104,12 @@ window.forceUpdateCheck = function() {
       histEl.innerHTML = hist.map((h) => {
         const cor = h.status === 'ok' ? '#16a34a' : (h.status === 'partial_error' ? '#f59e0b' : '#ef4444');
         const tarefas = Array.isArray(h.tasks) ? h.tasks : [];
-        const resumo = tarefas.map(t => `${labels[t.tabela] || t.tabela}:${t.ok ? 'ok' : 'erro'}`).join(' | ');
+        const resumo = tarefas.map(t => {
+          const tabela = labels[t.tabela] || t.tabela;
+          const status = t.ok ? 'ok' : 'erro';
+          const contagem = montarResumoContagem(t.details);
+          return `${tabela}:${status} (${contagem})`;
+        }).join(' | ');
         return `
           <div style="padding:8px 0;border-bottom:1px solid #e2e8f0;">
             <div style="font-weight:700;color:#0f172a;">${fmt(h.at)} <span style="color:${cor};font-weight:700;">(${h.status})</span></div>
@@ -38878,6 +40121,28 @@ window.forceUpdateCheck = function() {
       }).join('');
     } catch (err) {
       histEl.innerHTML = `<div style="color:#b91c1c;">Erro ao carregar histórico: ${err.message || err}</div>`;
+    }
+  }
+
+  async function carregarLogAutoSyncAtual() {
+    const logEl = document.getElementById('omieAutoSyncLogAtual');
+    if (!logEl) return;
+
+    try {
+      const resp = await fetch('/api/omie/autosync/live-log?limit=120', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+      const linhas = Array.isArray(data.lines) ? data.lines : [];
+      if (!linhas.length) {
+        logEl.textContent = 'Sem linhas de log recentes para o auto-sync.';
+        return;
+      }
+
+      logEl.textContent = linhas.join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    } catch (err) {
+      logEl.textContent = `Erro ao carregar log atual: ${err.message || err}`;
     }
   }
 
@@ -38896,12 +40161,17 @@ window.forceUpdateCheck = function() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ motivo: 'manual-ui', tabelas })
+        body: JSON.stringify({
+          motivo: 'manual-ui',
+          tabelas,
+          ...montarParametrosAutoSync(tabelas)
+        })
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
       await carregarStatusAutoSync();
       await carregarHistoricoAutoSync();
+      await carregarLogAutoSyncAtual();
       alert('Sincronização executada com sucesso.');
     } catch (err) {
       alert('Erro ao executar sincronização: ' + (err.message || err));
@@ -38916,13 +40186,33 @@ window.forceUpdateCheck = function() {
     const btnRefresh = document.getElementById('btnOmieAutoSyncAtualizar');
 
     if (btnRun) btnRun.addEventListener('click', executarAutoSyncAgora);
+    document.addEventListener('click', async (event) => {
+      const botaoTabela = event.target.closest('.btn-omie-run-tabela');
+      if (!botaoTabela) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const tabela = String(botaoTabela.dataset.tabela || '').trim();
+      await executarAutoSyncTabelaUnica(tabela, botaoTabela);
+    });
     if (btnRefresh) btnRefresh.addEventListener('click', async () => {
-      await carregarStatusAutoSync();
-      await carregarHistoricoAutoSync();
+      const original = btnRefresh.innerHTML;
+      btnRefresh.disabled = true;
+      btnRefresh.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Atualizando...';
+      try {
+        await carregarStatusAutoSync();
+        await carregarHistoricoAutoSync();
+        await carregarLogAutoSyncAtual();
+      } finally {
+        btnRefresh.disabled = false;
+        btnRefresh.innerHTML = original;
+      }
     });
 
+    garantirBotoesExecucaoPorTabela();
     carregarStatusAutoSync();
     carregarHistoricoAutoSync();
+    carregarLogAutoSyncAtual();
     setInterval(() => {
       carregarStatusAutoSync();
     }, 30000);

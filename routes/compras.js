@@ -255,21 +255,77 @@ module.exports = (pool) => {
     const client = await pool.connect();
     try {
       const { rows } = await client.query(`
+        WITH referencias_grupo AS (
+          SELECT
+            NULLIF(BTRIM(sc.grupo_requisicao), '') AS grupo_requisicao,
+            NULLIF(BTRIM(sc.solicitante), '') AS solicitante,
+            NULLIF(BTRIM(sc.resp_inspecao_recebimento), '') AS resp_inspecao_recebimento,
+            COALESCE(sc.updated_at, sc.created_at) AS ref_data,
+            1 AS origem_ordem
+          FROM compras.solicitacao_compras sc
+          WHERE NULLIF(BTRIM(sc.grupo_requisicao), '') IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            NULLIF(BTRIM(csc.grupo_requisicao), '') AS grupo_requisicao,
+            NULLIF(BTRIM(csc.solicitante), '') AS solicitante,
+            NULLIF(BTRIM(csc.resp_inspecao_recebimento), '') AS resp_inspecao_recebimento,
+            COALESCE(csc.updated_at, csc.created_at) AS ref_data,
+            2 AS origem_ordem
+          FROM compras.compras_sem_cadastro csc
+          WHERE NULLIF(BTRIM(csc.grupo_requisicao), '') IS NOT NULL
+        ),
+        referencia_escolhida AS (
+          SELECT DISTINCT ON (rg.grupo_requisicao)
+            rg.grupo_requisicao,
+            rg.solicitante,
+            rg.resp_inspecao_recebimento
+          FROM referencias_grupo rg
+          ORDER BY
+            rg.grupo_requisicao,
+            CASE WHEN rg.solicitante IS NOT NULL THEN 0 ELSE 1 END,
+            CASE WHEN rg.resp_inspecao_recebimento IS NOT NULL THEN 0 ELSE 1 END,
+            rg.ref_data DESC NULLS LAST,
+            rg.origem_ordem ASC
+        )
         SELECT 
-          cnumero,
-          id,
-          produto_codigo,
-          produto_descricao,
-          quantidade,
-          solicitante,
-          previsao_chegada,
-          resp_inspecao_recebimento,
-          observacao,
-          created_at
-        FROM compras.solicitacao_compras
-        WHERE status = 'compra realizada'
-        AND cnumero IS NOT NULL
-        ORDER BY cnumero DESC, id ASC
+          po.c_numero AS cnumero,
+          pop.id,
+          pop.c_produto AS produto_codigo,
+          pop.c_descricao AS produto_descricao,
+          pop.n_qtde AS quantidade,
+          pop.c_unidade AS unidade,
+          COALESCE(pop.n_val_tot, 0) AS valor_item,
+          SUM(COALESCE(pop.n_val_tot, 0)) OVER (PARTITION BY po.n_cod_ped) AS valor_total_pedido,
+          re.solicitante,
+          po.d_dt_previsao AS previsao_chegada,
+          re.resp_inspecao_recebimento,
+          f.nome_fantasia AS fornecedor_nome_fantasia,
+          f.razao_social AS fornecedor_razao_social,
+          f.cnpj_cpf AS fornecedor_cnpj_cpf,
+          f.cidade AS fornecedor_cidade,
+          f.estado AS fornecedor_estado,
+          f.telefone1_ddd AS fornecedor_telefone1_ddd,
+          f.telefone1_numero AS fornecedor_telefone1_numero,
+          COALESCE(pop.c_obs, po.c_obs) AS observacao,
+          po.created_at
+        FROM compras.pedidos_omie po
+        INNER JOIN compras.pedidos_omie_produtos pop
+          ON pop.n_cod_ped = po.n_cod_ped
+        LEFT JOIN omie.fornecedores f
+          ON f.codigo_cliente_omie = po.n_cod_for
+        LEFT JOIN referencia_escolhida re
+          ON re.grupo_requisicao = NULLIF(BTRIM(po.c_obs_int), '')
+        WHERE po.c_numero IS NOT NULL
+          AND COALESCE(po.inativo, FALSE) = FALSE
+          AND NULLIF(BTRIM(po.c_obs_int), '') IS NOT NULL
+          AND BTRIM(po.c_obs_int) ~ '^[0-9]{8}-[0-9]{6}-[0-9]{3}$'
+          AND (
+            COALESCE(BTRIM(po."Etapa_NF"), '') = ''
+            OR BTRIM(po."Etapa_NF") IN ('50', '60')
+          )
+        ORDER BY po.c_numero DESC, pop.id ASC
       `);
       res.json(rows);
     } catch (e) {

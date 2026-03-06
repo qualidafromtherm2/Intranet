@@ -2231,9 +2231,14 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
       let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
       if (!cadastro.ok) {
         const msgErro = String(cadastro.error || '');
+        const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
         const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
 
-        if (ehDescricaoDuplicada) {
+        if (ehJaCadastrado) {
+          cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `solicitacao:${id}`);
+        }
+
+        if (!cadastro.ok && ehDescricaoDuplicada) {
           const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
             ? descricaoProduto
             : `${descricaoProduto} - ${codigoIntegracao}`;
@@ -3633,7 +3638,7 @@ app.post(['/webhooks/omie/pedidos-compra', '/api/webhooks/omie/pedidos-compra'],
 );
 
 // ============================================================================
-// WEBHOOK - Recebimentos de NF-e (RecebimentoProduto.*)
+// WEBHOOK - Recebimentos de NF-e (RecebimentoProduto.* e NotaEntrada.*)
 // ============================================================================
 app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nfe'],
   express.json(),
@@ -3650,8 +3655,10 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
       // Log do webhook recebido
       console.log('[webhooks/omie/recebimentos-nfe] Webhook recebido:', JSON.stringify(body, null, 2));
       
-      const topic = body.topic || event.topic || '';  // Ex: "RecebimentoProduto.Incluido"
+      const topic = body.topic || event.topic || '';  // Ex: "RecebimentoProduto.Incluido" ou "NotaEntrada.Incluida"
       const messageId = body.messageId || body.message_id || null;
+      const author = body.author || event.author || null;
+      const statusPorTopic = inferNotaEntradaStatusFromTopic(topic);
       
       // Extrai nIdReceb ou cChaveNfe do evento
       // Omie pode enviar em: event.nIdReceb, event.cabec.nIdReceb, event.cabecalho.nIdReceb, etc
@@ -3667,13 +3674,19 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         || null;
         
       const cChaveNfe = event.cChaveNfe
+        || event.cChaveNFe
         || event.c_chave_nfe
         || body.cChaveNfe
+        || body.cChaveNFe
         || body.c_chave_nfe
         || event.cabec?.cChaveNfe
+        || event.cabec?.cChaveNFe
         || body.cabec?.cChaveNfe
+        || body.cabec?.cChaveNFe
         || event.cabecalho?.cChaveNfe       // ← Para consistência
+        || event.cabecalho?.cChaveNFe
         || body.cabecalho?.cChaveNfe
+        || body.cabecalho?.cChaveNFe
         || null;
 
       const cDadosAdicionaisWebhook = event.cDadosAdicionais
@@ -3692,6 +3705,10 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         console.warn('[webhooks/omie/recebimentos-nfe] Webhook sem nIdReceb/cChaveNfe:', JSON.stringify(body));
         return res.json({ ok: true, msg: 'Sem nIdReceb/cChaveNfe para processar' });
       }
+
+      if (!isRecebimentoNfeLifecycleTopic(topic)) {
+        return res.json({ ok: true, msg: 'Topic nao tratado por este endpoint', topic });
+      }
       
       console.log(`[webhooks/omie/recebimentos-nfe] Processando evento "${topic}" para recebimento ${nIdReceb || cChaveNfe}`);
       
@@ -3705,26 +3722,12 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
       
       // ===== PROCESSAMENTO ASSÍNCRONO =====
       (async () => {
+        let processadoComSucesso = false;
+        let erroProcessamento = null;
+        let statusFinal = statusPorTopic;
         try {
-          // Determina a ação baseada no evento
-          let acao = 'processado';
-          
-          if (topic.includes('Incluido')) {
-            acao = 'incluído';
-          } else if (topic.includes('Alterado')) {
-            acao = 'alterado';
-          } else if (topic.includes('Concluido')) {
-            acao = 'concluído';
-          } else if (topic.includes('Devolvido')) {
-            acao = 'devolvido';
-          } else if (topic.includes('Revertido')) {
-            acao = 'revertido';
-          } else if (topic.includes('Excluido')) {
-            acao = 'excluído';
-          }
-          
-          // Para exclusão, marca como inativo
-          if (topic.includes('Excluido')) {
+          // Para eventos finais (cancelamento/exclusao), marca como cancelado localmente
+          if (statusPorTopic === 'Cancelada' || statusPorTopic === 'Excluida') {
             if (nIdReceb) {
               await pool.query(`
                 UPDATE logistica.recebimentos_nfe_omie
@@ -3740,53 +3743,137 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
                 WHERE c_chave_nfe = $1
               `, [cChaveNfe]);
             }
-            
-            console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} marcado como cancelado`);
-            return;
+
+            processadoComSucesso = true;
+            console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} marcado como ${statusPorTopic.toLowerCase()}`);
+          } else {
+            // Para os demais eventos, busca dados completos na API
+            let recebimento = null;
+            const param = nIdReceb
+              ? { nIdReceb: parseInt(nIdReceb, 10) }
+              : { cChaveNfe: String(cChaveNfe) };
+
+            // Delay para dar tempo da Omie consolidar os dados
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            console.log(`[webhooks/omie/recebimentos-nfe] Consultando dados completos do recebimento com nIdReceb=${nIdReceb || 'N/A'}...`);
+
+            const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                call: 'ConsultarRecebimento',
+                app_key: OMIE_APP_KEY,
+                app_secret: OMIE_APP_SECRET,
+                param: [param]
+              })
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              throw new Error(`Omie API HTTP ${response.status}: ${errorText}`);
+            }
+
+            recebimento = await response.json();
+
+            // Atualiza no banco - passa cChaveNfe e cDadosAdicionais vindos do webhook como fallback
+            await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe, cDadosAdicionaisWebhook, body);
+
+            const cabec = recebimento?.cabec || {};
+            const infoCadastro = recebimento?.infoCadastro || {};
+            const statusPorSnapshot = inferNotaEntradaStatusFromSnapshot(cabec, infoCadastro);
+            statusFinal = statusPorTopic !== 'Desconhecida' ? statusPorTopic : statusPorSnapshot;
+            processadoComSucesso = true;
+
+            console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} processado com sucesso (${statusFinal})`);
           }
-          
-          // Para os demais eventos, busca dados completos na API
-          let recebimento = null;
-          const param = nIdReceb 
-            ? { nIdReceb: parseInt(nIdReceb) }
-            : { cChaveNfe: String(cChaveNfe) };
-          
-          // Delay de 2 segundos para dar tempo da Omie processar
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          console.log(`[webhooks/omie/recebimentos-nfe] Consultando dados completos do recebimento com nIdReceb=${nIdReceb}...`);
-          
-          const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              call: 'ConsultarRecebimento',
-              app_key: OMIE_APP_KEY,
-              app_secret: OMIE_APP_SECRET,
-              param: [param]
-            })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`[webhooks/omie/recebimentos-nfe] Erro na API Omie: ${response.status} - ${errorText}`);
-            return;
-          }
-          
-          recebimento = await response.json();
-          
-          // Atualiza no banco - passa cChaveNfe e cDadosAdicionais vindos do webhook como fallback
-          await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe, cDadosAdicionaisWebhook);
-          
-          console.log(`[webhooks/omie/recebimentos-nfe] ✓ Recebimento ${nIdReceb || cChaveNfe} ${acao} com sucesso`);
-          
         } catch (err) {
+          erroProcessamento = err;
           console.error(`[webhooks/omie/recebimentos-nfe] Erro no processamento assíncrono:`, err);
+        } finally {
+          const client = await pool.connect();
+          try {
+            const statusEvento = sanitizeNotaEntradaStatus(statusFinal || statusPorTopic || 'Desconhecida');
+
+            if ((statusEvento === 'Cancelada' || statusEvento === 'Excluida' || !processadoComSucesso) && (nIdReceb || cChaveNfe)) {
+              await upsertNotaEntradaEstado(client, {
+                nIdReceb: nIdReceb || null,
+                cChaveNfe: cChaveNfe || null,
+                status: statusEvento,
+                topic,
+                messageId,
+                origemEvento: 'omie_webhook',
+                ativo: isNotaEntradaAtiva(statusEvento),
+                snapshot: body,
+              });
+            }
+
+            await registrarEventoNotaEntrada(client, {
+              nIdReceb: nIdReceb || null,
+              cChaveNfe: cChaveNfe || null,
+              topic,
+              status: statusEvento,
+              messageId,
+              author,
+              payload: body,
+              origemEvento: 'omie_webhook',
+              processadoEm: new Date(),
+              processadoComSucesso,
+              erro: erroProcessamento ? (erroProcessamento.message || String(erroProcessamento)) : null,
+            });
+          } catch (eventErr) {
+            console.error('[webhooks/omie/recebimentos-nfe] Falha ao registrar evento de nota de entrada:', eventErr);
+          } finally {
+            try { client.release(); } catch (_) {}
+          }
         }
       })();
       
     } catch (err) {
       console.error('[webhooks/omie/recebimentos-nfe] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+// ============================================================================
+// WEBHOOK - Notas de Entrada (somente NotaEntrada.*)
+// Encaminha para o mesmo pipeline de recebimentos-nfe para manter uma única regra
+// ============================================================================
+app.post([
+    '/webhooks/omie/notas-entrada',
+    '/api/webhooks/omie/notas-entrada',
+    '/webhooks/omie/notas-entrada/',
+    '/api/webhooks/omie/notas-entrada/',
+  ],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    try {
+      const body = (req.body && typeof req.body === 'object') ? req.body : {};
+      const topic = body.topic || body?.event?.topic || body?.evento?.topic || '';
+
+      if (!isNotaEntradaTopic(topic)) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Este endpoint aceita apenas topicos NotaEntrada.*',
+          topic: topic || null,
+        });
+      }
+
+      const porta = Number(process.env.PORT || 5001);
+      const resposta = await fetch(`http://127.0.0.1:${porta}/webhooks/omie/recebimentos-nfe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const texto = await resposta.text();
+      res.status(resposta.status);
+      res.type('application/json');
+      return res.send(texto);
+    } catch (err) {
+      console.error('[webhooks/omie/notas-entrada] erro:', err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
     }
   }
@@ -3833,6 +3920,26 @@ app.post('/api/logistica/recebimentos-nfe/sync', express.json(), async (req, res
     res.json(result);
   } catch (err) {
     console.error('[API /api/logistica/recebimentos-nfe/sync] erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ============================================================================
+// Endpoint para sincronizar Notas de Entrada (estado em logistica.notas_entrada_omie)
+// ============================================================================
+app.post('/api/logistica/notas-entrada/sync', express.json(), async (req, res) => {
+  try {
+    const filtros = req.body || {};
+
+    console.log('[API] Iniciando sincronização de notas de entrada da Omie...');
+    const result = await syncRecebimentosNFeOmie(filtros);
+
+    res.json({
+      ...result,
+      destino: 'logistica.notas_entrada_omie',
+    });
+  } catch (err) {
+    console.error('[API /api/logistica/notas-entrada/sync] erro:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -5559,6 +5666,26 @@ async function obterIdHistoricoComprasParaOmie({
   return null;
 }
 
+function montarObsInternaComGrupo(grupoRequisicao, observacaoOriginal = null) {
+  const grupo = String(grupoRequisicao || '').trim();
+  const observacao = String(observacaoOriginal || '').trim();
+
+  if (!grupo) {
+    return observacao || null;
+  }
+
+  const prefixo = `Grupo: ${grupo}`;
+  const observacaoSemPrefixoGrupo = observacao
+    .replace(/^Grupo:\s*[^\r\n]*(\r?\n)?/i, '')
+    .trim();
+
+  if (!observacaoSemPrefixoGrupo) {
+    return prefixo;
+  }
+
+  return `${prefixo}\n${observacaoSemPrefixoGrupo}`;
+}
+
 app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async (req, res) => {
   try {
     const { numero_pedido } = req.params;
@@ -5645,7 +5772,11 @@ app.post('/api/compras/pedido/gerar-omie/:numero_pedido', express.json(), async 
       dDtPrevisao: pedido.previsao_entrega ? new Date(pedido.previsao_entrega).toISOString().split('T')[0].split('-').reverse().join('/') : null,
       nCodFor: pedido.fornecedor_id ? parseInt(pedido.fornecedor_id) : null,
       cCodCateg: pedido.categoria_compra_codigo || null,
-      cCodParc: pedido.cod_parcela || null
+      cCodParc: pedido.cod_parcela || null,
+      cObsInt: montarObsInternaComGrupo(
+        itens[0]?.grupo_requisicao || null,
+        pedido.obsIntReqCompra || pedido.cObsInt || pedido.c_obs_int || null
+      )
     };
     
     // Adiciona email do aprovador se disponível
@@ -9078,8 +9209,262 @@ function pickLocalFromPayload(body) {
   );
 }
 
+const OMIE_REQUEST_DELAY_MS = 350; // 3 req/s (aprox)
+let _notasEntradaOmieTablesReady = false;
+
 function isRecebimentoProdutoTopic(topic = '') {
   return /^RecebimentoProduto\./i.test(String(topic || ''));
+}
+
+function isNotaEntradaTopic(topic = '') {
+  return /^NotaEntrada\./i.test(String(topic || ''));
+}
+
+function isRecebimentoNfeLifecycleTopic(topic = '') {
+  return isRecebimentoProdutoTopic(topic) || isNotaEntradaTopic(topic);
+}
+
+function inferNotaEntradaStatusFromTopic(topic = '') {
+  const normalizado = String(topic || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (!normalizado) return 'Desconhecida';
+  if (normalizado.includes('incluid')) return 'Incluida';
+  if (normalizado.includes('alterad')) return 'Alterada';
+  if (normalizado.includes('concluid')) return 'Concluida';
+  if (normalizado.includes('cancelad')) return 'Cancelada';
+  if (normalizado.includes('excluid')) return 'Excluida';
+  if (normalizado.includes('devolvid')) return 'Cancelada';
+  if (normalizado.includes('revertid')) return 'Alterada';
+  return 'Desconhecida';
+}
+
+function inferNotaEntradaStatusFromSnapshot(cabec = {}, infoCadastro = {}) {
+  const cancelada = String(
+    infoCadastro.cCancelada
+    || infoCadastro.c_cancelada
+    || cabec.cCancelada
+    || cabec.c_cancelada
+    || ''
+  ).trim().toUpperCase() === 'S';
+
+  if (cancelada) return 'Cancelada';
+
+  const recebida = String(
+    infoCadastro.cRecebido
+    || infoCadastro.c_recebido
+    || cabec.cRecebido
+    || cabec.c_recebido
+    || ''
+  ).trim().toUpperCase() === 'S';
+
+  const etapa = String(cabec.cEtapa || cabec.c_etapa || '').trim();
+  if (recebida || ['60', '80', '100'].includes(etapa)) return 'Concluida';
+
+  return 'Incluida';
+}
+
+function sanitizeNotaEntradaStatus(status = '') {
+  const permitido = new Set(['Incluida', 'Alterada', 'Concluida', 'Cancelada', 'Excluida', 'Desconhecida', 'Sincronizada']);
+  return permitido.has(status) ? status : 'Desconhecida';
+}
+
+function isNotaEntradaAtiva(status = '') {
+  return !['Cancelada', 'Excluida'].includes(sanitizeNotaEntradaStatus(status));
+}
+
+async function ensureNotasEntradaOmieTables(client) {
+  if (_notasEntradaOmieTablesReady) return;
+
+  await client.query(`
+    CREATE SCHEMA IF NOT EXISTS logistica;
+
+    CREATE TABLE IF NOT EXISTS logistica.notas_entrada_omie (
+      id BIGSERIAL PRIMARY KEY,
+      n_id_receb BIGINT,
+      c_chave_nfe VARCHAR(50),
+      c_numero_nfe VARCHAR(20),
+      c_serie_nfe VARCHAR(10),
+      c_modelo_nfe VARCHAR(10),
+      d_emissao_nfe DATE,
+      d_entrada DATE,
+      d_registro DATE,
+      n_valor_nfe NUMERIC(15,2),
+      n_id_fornecedor BIGINT,
+      c_nome_fornecedor VARCHAR(200),
+      c_cnpj_cpf_fornecedor VARCHAR(20),
+      c_etapa VARCHAR(20),
+      c_desc_etapa VARCHAR(100),
+      c_status VARCHAR(20) NOT NULL DEFAULT 'Incluida',
+      c_ultimo_topico VARCHAR(100),
+      message_id_ultimo VARCHAR(120),
+      d_ultima_ocorrencia TIMESTAMP WITHOUT TIME ZONE,
+      c_origem_ultimo_evento VARCHAR(40) NOT NULL DEFAULT 'omie',
+      c_ativo BOOLEAN NOT NULL DEFAULT TRUE,
+      snapshot JSONB,
+      created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+      CONSTRAINT ck_notas_entrada_omie_status
+        CHECK (c_status IN ('Incluida', 'Alterada', 'Concluida', 'Cancelada', 'Excluida', 'Desconhecida', 'Sincronizada')),
+      CONSTRAINT uq_notas_entrada_omie_n_id_receb UNIQUE (n_id_receb),
+      CONSTRAINT uq_notas_entrada_omie_chave_nfe UNIQUE (c_chave_nfe)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_omie_chave ON logistica.notas_entrada_omie(c_chave_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_omie_numero ON logistica.notas_entrada_omie(c_numero_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_omie_fornecedor ON logistica.notas_entrada_omie(n_id_fornecedor);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_omie_status ON logistica.notas_entrada_omie(c_status);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_omie_ultima_ocorrencia ON logistica.notas_entrada_omie(d_ultima_ocorrencia DESC);
+
+    CREATE TABLE IF NOT EXISTS logistica.notas_entrada_omie_eventos (
+      id BIGSERIAL PRIMARY KEY,
+      n_id_receb BIGINT,
+      c_chave_nfe VARCHAR(50),
+      topic VARCHAR(100) NOT NULL,
+      c_status VARCHAR(20),
+      message_id VARCHAR(120),
+      author VARCHAR(120),
+      payload JSONB,
+      origem_evento VARCHAR(40) NOT NULL DEFAULT 'omie',
+      recebido_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+      processado_em TIMESTAMP WITHOUT TIME ZONE,
+      processado_com_sucesso BOOLEAN,
+      erro TEXT,
+      CONSTRAINT ck_notas_entrada_eventos_status
+        CHECK (c_status IS NULL OR c_status IN ('Incluida', 'Alterada', 'Concluida', 'Cancelada', 'Excluida', 'Desconhecida', 'Sincronizada'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_eventos_receb ON logistica.notas_entrada_omie_eventos(n_id_receb);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_eventos_chave ON logistica.notas_entrada_omie_eventos(c_chave_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_eventos_topic ON logistica.notas_entrada_omie_eventos(topic);
+    CREATE INDEX IF NOT EXISTS idx_notas_entrada_eventos_recebido_em ON logistica.notas_entrada_omie_eventos(recebido_em DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_entrada_eventos_message_topic
+      ON logistica.notas_entrada_omie_eventos(message_id, topic)
+      WHERE message_id IS NOT NULL;
+  `);
+
+  _notasEntradaOmieTablesReady = true;
+}
+
+async function upsertNotaEntradaEstado(client, dados = {}) {
+  await ensureNotasEntradaOmieTables(client);
+
+  const nIdReceb = Number.isFinite(Number(dados.nIdReceb)) && Number(dados.nIdReceb) > 0
+    ? Number(dados.nIdReceb)
+    : null;
+  const cChaveNfe = dados.cChaveNfe ? String(dados.cChaveNfe).trim() || null : null;
+
+  if (!nIdReceb && !cChaveNfe) {
+    return { ok: false, reason: 'missing_identity' };
+  }
+
+  const cStatus = sanitizeNotaEntradaStatus(String(dados.status || 'Desconhecida'));
+  const cAtivo = (dados.ativo !== undefined && dados.ativo !== null)
+    ? !!dados.ativo
+    : isNotaEntradaAtiva(cStatus);
+  const dUltimaOcorrencia = dados.dUltimaOcorrencia || new Date();
+  const snapshot = (dados.snapshot && typeof dados.snapshot === 'object') ? dados.snapshot : null;
+
+  const sql = `
+    INSERT INTO logistica.notas_entrada_omie (
+      n_id_receb, c_chave_nfe, c_numero_nfe, c_serie_nfe, c_modelo_nfe,
+      d_emissao_nfe, d_entrada, d_registro,
+      n_valor_nfe, n_id_fornecedor, c_nome_fornecedor, c_cnpj_cpf_fornecedor,
+      c_etapa, c_desc_etapa, c_status,
+      c_ultimo_topico, message_id_ultimo, d_ultima_ocorrencia,
+      c_origem_ultimo_evento, c_ativo, snapshot, updated_at
+    )
+    VALUES (
+      $1, $2, $3, $4, $5,
+      $6, $7, $8,
+      $9, $10, $11, $12,
+      $13, $14, $15,
+      $16, $17, $18,
+      $19, $20, $21, NOW()
+    )
+    ON CONFLICT ${nIdReceb ? '(n_id_receb)' : '(c_chave_nfe)'}
+    DO UPDATE SET
+      n_id_receb = COALESCE(EXCLUDED.n_id_receb, logistica.notas_entrada_omie.n_id_receb),
+      c_chave_nfe = COALESCE(EXCLUDED.c_chave_nfe, logistica.notas_entrada_omie.c_chave_nfe),
+      c_numero_nfe = COALESCE(EXCLUDED.c_numero_nfe, logistica.notas_entrada_omie.c_numero_nfe),
+      c_serie_nfe = COALESCE(EXCLUDED.c_serie_nfe, logistica.notas_entrada_omie.c_serie_nfe),
+      c_modelo_nfe = COALESCE(EXCLUDED.c_modelo_nfe, logistica.notas_entrada_omie.c_modelo_nfe),
+      d_emissao_nfe = COALESCE(EXCLUDED.d_emissao_nfe, logistica.notas_entrada_omie.d_emissao_nfe),
+      d_entrada = COALESCE(EXCLUDED.d_entrada, logistica.notas_entrada_omie.d_entrada),
+      d_registro = COALESCE(EXCLUDED.d_registro, logistica.notas_entrada_omie.d_registro),
+      n_valor_nfe = COALESCE(EXCLUDED.n_valor_nfe, logistica.notas_entrada_omie.n_valor_nfe),
+      n_id_fornecedor = COALESCE(EXCLUDED.n_id_fornecedor, logistica.notas_entrada_omie.n_id_fornecedor),
+      c_nome_fornecedor = COALESCE(EXCLUDED.c_nome_fornecedor, logistica.notas_entrada_omie.c_nome_fornecedor),
+      c_cnpj_cpf_fornecedor = COALESCE(EXCLUDED.c_cnpj_cpf_fornecedor, logistica.notas_entrada_omie.c_cnpj_cpf_fornecedor),
+      c_etapa = COALESCE(EXCLUDED.c_etapa, logistica.notas_entrada_omie.c_etapa),
+      c_desc_etapa = COALESCE(EXCLUDED.c_desc_etapa, logistica.notas_entrada_omie.c_desc_etapa),
+      c_status = EXCLUDED.c_status,
+      c_ultimo_topico = COALESCE(EXCLUDED.c_ultimo_topico, logistica.notas_entrada_omie.c_ultimo_topico),
+      message_id_ultimo = COALESCE(EXCLUDED.message_id_ultimo, logistica.notas_entrada_omie.message_id_ultimo),
+      d_ultima_ocorrencia = EXCLUDED.d_ultima_ocorrencia,
+      c_origem_ultimo_evento = COALESCE(EXCLUDED.c_origem_ultimo_evento, logistica.notas_entrada_omie.c_origem_ultimo_evento),
+      c_ativo = EXCLUDED.c_ativo,
+      snapshot = COALESCE(EXCLUDED.snapshot, logistica.notas_entrada_omie.snapshot),
+      updated_at = NOW();
+  `;
+
+  await client.query(sql, [
+    nIdReceb,
+    cChaveNfe,
+    dados.cNumeroNfe || null,
+    dados.cSerieNfe || null,
+    dados.cModeloNfe || null,
+    dados.dEmissaoNfe || null,
+    dados.dEntrada || null,
+    dados.dRegistro || null,
+    dados.nValorNfe || null,
+    dados.nIdFornecedor || null,
+    dados.cNomeFornecedor || null,
+    dados.cCnpjCpfFornecedor || null,
+    dados.cEtapa || null,
+    dados.cDescEtapa || null,
+    cStatus,
+    dados.topic || null,
+    dados.messageId || null,
+    dUltimaOcorrencia,
+    dados.origemEvento || 'omie',
+    cAtivo,
+    snapshot,
+  ]);
+
+  return { ok: true, nIdReceb, cChaveNfe, cStatus };
+}
+
+async function registrarEventoNotaEntrada(client, dados = {}) {
+  await ensureNotasEntradaOmieTables(client);
+
+  const topic = String(dados.topic || '').trim();
+  if (!topic) return { ok: false, reason: 'missing_topic' };
+
+  await client.query(`
+    INSERT INTO logistica.notas_entrada_omie_eventos (
+      n_id_receb, c_chave_nfe, topic, c_status, message_id, author,
+      payload, origem_evento, recebido_em, processado_em, processado_com_sucesso, erro
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11)
+    ON CONFLICT DO NOTHING
+  `, [
+    Number.isFinite(Number(dados.nIdReceb)) && Number(dados.nIdReceb) > 0 ? Number(dados.nIdReceb) : null,
+    dados.cChaveNfe ? String(dados.cChaveNfe).trim() || null : null,
+    topic,
+    dados.status ? sanitizeNotaEntradaStatus(String(dados.status)) : null,
+    dados.messageId ? String(dados.messageId) : null,
+    dados.author ? String(dados.author) : null,
+    (dados.payload && typeof dados.payload === 'object') ? dados.payload : null,
+    dados.origemEvento || 'omie',
+    dados.processadoEm || null,
+    (typeof dados.processadoComSucesso === 'boolean') ? dados.processadoComSucesso : null,
+    dados.erro ? String(dados.erro) : null,
+  ]);
+
+  return { ok: true };
 }
 
 async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
@@ -9102,13 +9487,20 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
     || (body.info_adicionais && typeof body.info_adicionais === 'object' ? body.info_adicionais : null)
     || {};
 
+  const topic = body.topic || event.topic || '';
+  const messageId = body.messageId || body.message_id || null;
+  const author = body.author || event.author || null;
+  const cChaveNfe = cab.cChaveNFe || cab.cChaveNfe || body.cChaveNfe || body.c_chave_nfe || null;
+  const statusPorTopic = inferNotaEntradaStatusFromTopic(topic);
+
   const nIdRecebRaw = cab.nIdReceb ?? cab.n_id_receb ?? null;
   const nIdReceb = nIdRecebRaw !== null && nIdRecebRaw !== undefined && String(nIdRecebRaw).trim() !== ''
     ? Number(nIdRecebRaw)
     : null;
 
-  if (!Number.isFinite(nIdReceb) || nIdReceb <= 0) {
-    return { ok: false, reason: 'missing_n_id_receb' };
+  const nIdRecebValido = Number.isFinite(nIdReceb) && nIdReceb > 0;
+  if (!nIdRecebValido && !cChaveNfe) {
+    return { ok: false, reason: 'missing_n_id_receb_and_c_chave_nfe' };
   }
 
   const cDadosAdicionais =
@@ -9117,98 +9509,144 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
     || cab.cObsNFe
     || null;
 
-  await pool.query(`
-    INSERT INTO logistica.recebimentos_nfe_omie (
-      n_id_receb,
-      c_chave_nfe,
-      c_numero_nfe,
-      c_serie_nfe,
-      c_modelo_nfe,
-      d_emissao_nfe,
-      d_registro,
-      n_valor_nfe,
-      n_id_fornecedor,
-      c_nome_fornecedor,
-      c_cnpj_cpf_fornecedor,
-      c_etapa,
-      n_id_conta,
-      c_categ_compra,
-      c_dados_adicionais,
-      c_obs_nfe,
-      updated_at
-    )
-    VALUES (
-      $1,
-      COALESCE($2, $3),
-      COALESCE($4, $5),
-      COALESCE($6, $7),
-      COALESCE($8, $9),
-      CASE
-        WHEN COALESCE($10, $11) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($10, $11), 'DD/MM/YYYY')
-        ELSE NULL
-      END,
-      CASE
-        WHEN COALESCE($12, $13) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($12, $13), 'DD/MM/YYYY')
-        ELSE NULL
-      END,
-      NULLIF($14::text, '')::numeric,
-      NULLIF($15::text, '')::bigint,
-      COALESCE($16, $17),
-      COALESCE($18, $19, $20),
-      $21,
-      NULLIF($22::text, '')::bigint,
-      $23,
-      $24,
-      COALESCE($25, $24),
-      NOW()
-    )
-    ON CONFLICT (n_id_receb)
-    DO UPDATE SET
-      c_chave_nfe = COALESCE(EXCLUDED.c_chave_nfe, logistica.recebimentos_nfe_omie.c_chave_nfe),
-      c_numero_nfe = COALESCE(EXCLUDED.c_numero_nfe, logistica.recebimentos_nfe_omie.c_numero_nfe),
-      c_serie_nfe = COALESCE(EXCLUDED.c_serie_nfe, logistica.recebimentos_nfe_omie.c_serie_nfe),
-      c_modelo_nfe = COALESCE(EXCLUDED.c_modelo_nfe, logistica.recebimentos_nfe_omie.c_modelo_nfe),
-      d_emissao_nfe = COALESCE(EXCLUDED.d_emissao_nfe, logistica.recebimentos_nfe_omie.d_emissao_nfe),
-      d_registro = COALESCE(EXCLUDED.d_registro, logistica.recebimentos_nfe_omie.d_registro),
-      n_valor_nfe = COALESCE(EXCLUDED.n_valor_nfe, logistica.recebimentos_nfe_omie.n_valor_nfe),
-      n_id_fornecedor = COALESCE(EXCLUDED.n_id_fornecedor, logistica.recebimentos_nfe_omie.n_id_fornecedor),
-      c_nome_fornecedor = COALESCE(EXCLUDED.c_nome_fornecedor, logistica.recebimentos_nfe_omie.c_nome_fornecedor),
-      c_cnpj_cpf_fornecedor = COALESCE(EXCLUDED.c_cnpj_cpf_fornecedor, logistica.recebimentos_nfe_omie.c_cnpj_cpf_fornecedor),
-      c_etapa = COALESCE(EXCLUDED.c_etapa, logistica.recebimentos_nfe_omie.c_etapa),
-      n_id_conta = COALESCE(EXCLUDED.n_id_conta, logistica.recebimentos_nfe_omie.n_id_conta),
-      c_categ_compra = COALESCE(EXCLUDED.c_categ_compra, logistica.recebimentos_nfe_omie.c_categ_compra),
-      c_dados_adicionais = COALESCE(EXCLUDED.c_dados_adicionais, logistica.recebimentos_nfe_omie.c_dados_adicionais),
-      c_obs_nfe = COALESCE(EXCLUDED.c_obs_nfe, logistica.recebimentos_nfe_omie.c_obs_nfe),
-      updated_at = NOW();
-  `, [
-    nIdReceb,
-    cab.cChaveNFe,
-    cab.cChaveNfe,
-    cab.cNumeroNFe,
-    cab.cNumeroNF,
-    cab.cSerieNFe,
-    cab.cSerie,
-    cab.cModeloNFe,
-    cab.cModelo,
-    cab.dEmissaoNFe,
-    cab.dDataEmissao,
-    infoAdicionais.dRegistro,
-    cab.dDataRegistro,
-    cab.nValorNFe || cab.nValorNF,
-    cab.nIdFornecedor || cab.nCodFor,
-    cab.cNome,
-    cab.cRazaoSocial,
-    cab.cCNPJ_CPF,
-    cab.cCNPJ,
-    cab.cCpfCnpj,
-    cab.cEtapa,
-    infoAdicionais.nIdConta || cab.nCodCC,
-    infoAdicionais.cCategCompra || cab.cCodCateg,
-    cDadosAdicionais,
-    cab.cObsNFe || null,
-  ]);
+  if (nIdRecebValido) {
+    await pool.query(`
+      INSERT INTO logistica.recebimentos_nfe_omie (
+        n_id_receb,
+        c_chave_nfe,
+        c_numero_nfe,
+        c_serie_nfe,
+        c_modelo_nfe,
+        d_emissao_nfe,
+        d_registro,
+        n_valor_nfe,
+        n_id_fornecedor,
+        c_nome_fornecedor,
+        c_cnpj_cpf_fornecedor,
+        c_etapa,
+        n_id_conta,
+        c_categ_compra,
+        c_dados_adicionais,
+        c_obs_nfe,
+        updated_at
+      )
+      VALUES (
+        $1,
+        COALESCE($2, $3),
+        COALESCE($4, $5),
+        COALESCE($6, $7),
+        COALESCE($8, $9),
+        CASE
+          WHEN COALESCE($10, $11) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($10, $11), 'DD/MM/YYYY')
+          ELSE NULL
+        END,
+        CASE
+          WHEN COALESCE($12, $13) ~ '^\\d{2}/\\d{2}/\\d{4}$' THEN to_date(COALESCE($12, $13), 'DD/MM/YYYY')
+          ELSE NULL
+        END,
+        NULLIF($14::text, '')::numeric,
+        NULLIF($15::text, '')::bigint,
+        COALESCE($16, $17),
+        COALESCE($18, $19, $20),
+        $21,
+        NULLIF($22::text, '')::bigint,
+        $23,
+        $24,
+        COALESCE($25, $24),
+        NOW()
+      )
+      ON CONFLICT (n_id_receb)
+      DO UPDATE SET
+        c_chave_nfe = COALESCE(EXCLUDED.c_chave_nfe, logistica.recebimentos_nfe_omie.c_chave_nfe),
+        c_numero_nfe = COALESCE(EXCLUDED.c_numero_nfe, logistica.recebimentos_nfe_omie.c_numero_nfe),
+        c_serie_nfe = COALESCE(EXCLUDED.c_serie_nfe, logistica.recebimentos_nfe_omie.c_serie_nfe),
+        c_modelo_nfe = COALESCE(EXCLUDED.c_modelo_nfe, logistica.recebimentos_nfe_omie.c_modelo_nfe),
+        d_emissao_nfe = COALESCE(EXCLUDED.d_emissao_nfe, logistica.recebimentos_nfe_omie.d_emissao_nfe),
+        d_registro = COALESCE(EXCLUDED.d_registro, logistica.recebimentos_nfe_omie.d_registro),
+        n_valor_nfe = COALESCE(EXCLUDED.n_valor_nfe, logistica.recebimentos_nfe_omie.n_valor_nfe),
+        n_id_fornecedor = COALESCE(EXCLUDED.n_id_fornecedor, logistica.recebimentos_nfe_omie.n_id_fornecedor),
+        c_nome_fornecedor = COALESCE(EXCLUDED.c_nome_fornecedor, logistica.recebimentos_nfe_omie.c_nome_fornecedor),
+        c_cnpj_cpf_fornecedor = COALESCE(EXCLUDED.c_cnpj_cpf_fornecedor, logistica.recebimentos_nfe_omie.c_cnpj_cpf_fornecedor),
+        c_etapa = COALESCE(EXCLUDED.c_etapa, logistica.recebimentos_nfe_omie.c_etapa),
+        n_id_conta = COALESCE(EXCLUDED.n_id_conta, logistica.recebimentos_nfe_omie.n_id_conta),
+        c_categ_compra = COALESCE(EXCLUDED.c_categ_compra, logistica.recebimentos_nfe_omie.c_categ_compra),
+        c_dados_adicionais = COALESCE(EXCLUDED.c_dados_adicionais, logistica.recebimentos_nfe_omie.c_dados_adicionais),
+        c_obs_nfe = COALESCE(EXCLUDED.c_obs_nfe, logistica.recebimentos_nfe_omie.c_obs_nfe),
+        updated_at = NOW();
+    `, [
+      nIdReceb,
+      cab.cChaveNFe,
+      cab.cChaveNfe,
+      cab.cNumeroNFe,
+      cab.cNumeroNF,
+      cab.cSerieNFe,
+      cab.cSerie,
+      cab.cModeloNFe,
+      cab.cModelo,
+      cab.dEmissaoNFe,
+      cab.dDataEmissao,
+      infoAdicionais.dRegistro,
+      cab.dDataRegistro,
+      cab.nValorNFe || cab.nValorNF,
+      cab.nIdFornecedor || cab.nCodFor,
+      cab.cNome,
+      cab.cRazaoSocial,
+      cab.cCNPJ_CPF,
+      cab.cCNPJ,
+      cab.cCpfCnpj,
+      cab.cEtapa,
+      infoAdicionais.nIdConta || cab.nCodCC,
+      infoAdicionais.cCategCompra || cab.cCodCateg,
+      cDadosAdicionais,
+      cab.cObsNFe || null,
+    ]);
+  }
 
-  return { ok: true, nIdReceb };
+  const statusPorSnapshot = inferNotaEntradaStatusFromSnapshot(cab, infoAdicionais);
+  const statusFinal = statusPorTopic !== 'Desconhecida' ? statusPorTopic : statusPorSnapshot;
+
+  const client = await pool.connect();
+  try {
+    await upsertNotaEntradaEstado(client, {
+      nIdReceb: nIdRecebValido ? nIdReceb : null,
+      cChaveNfe,
+      cNumeroNfe: cab.cNumeroNFe || cab.cNumeroNF || null,
+      cSerieNfe: cab.cSerieNFe || cab.cSerie || null,
+      cModeloNfe: cab.cModeloNFe || cab.cModelo || null,
+      dEmissaoNfe: convertOmieDate(cab.dEmissaoNFe || cab.dDataEmissao),
+      dRegistro: convertOmieDate(infoAdicionais.dRegistro || cab.dDataRegistro),
+      nValorNfe: cab.nValorNFe || cab.nValorNF || null,
+      nIdFornecedor: cab.nIdFornecedor || cab.nCodFor || null,
+      cNomeFornecedor: cab.cNome || cab.cRazaoSocial || null,
+      cCnpjCpfFornecedor: cab.cCNPJ_CPF || cab.cCNPJ || cab.cCpfCnpj || null,
+      cEtapa: cab.cEtapa || null,
+      cDescEtapa: cab.cDescEtapa || null,
+      status: statusFinal,
+      topic: topic || null,
+      messageId,
+      origemEvento: 'omie_webhook',
+      snapshot: body,
+    });
+
+    if (isRecebimentoNfeLifecycleTopic(topic)) {
+      await registrarEventoNotaEntrada(client, {
+        nIdReceb: nIdRecebValido ? nIdReceb : null,
+        cChaveNfe,
+        topic,
+        status: statusFinal,
+        messageId,
+        author,
+        payload: body,
+        origemEvento: 'omie_webhook',
+        processadoEm: new Date(),
+        processadoComSucesso: true,
+      });
+    }
+  } finally {
+    try { client.release(); } catch (_) {}
+  }
+
+  return { ok: true, nIdReceb: nIdRecebValido ? nIdReceb : null, cChaveNfe, status: statusFinal };
 }
 
 // ====== rota do webhook ======
@@ -9233,7 +9671,7 @@ app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, re
       [ body?.event_id || body?.messageId || body?.message_id || null, tipo, body ]
     );
 
-    if (isRecebimentoProdutoTopic(topic)) {
+    if (isRecebimentoNfeLifecycleTopic(topic)) {
       const upsertInfo = await upsertRecebimentoFromWebhookPayload(body);
       return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
     }
@@ -9267,7 +9705,7 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
       [ body?.event_id || body?.messageId || body?.message_id || null, body?.event_type || topic || 'estoque', body ]
     );
 
-    if (isRecebimentoProdutoTopic(topic)) {
+    if (isRecebimentoNfeLifecycleTopic(topic)) {
       const upsertInfo = await upsertRecebimentoFromWebhookPayload(body);
       return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
     }
@@ -14651,6 +15089,88 @@ async function syncPedidosCompraOmie(filtros = {}) {
   }
 }
 
+async function atualizarEtapaNFPedidosPorBanco(opcoes = {}) {
+  const manterEtapa80 = opcoes.manterEtapa80 !== false;
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(`
+      SELECT codigo, descricao, descricao_customizada
+      FROM logistica.etapas_recebimento_nfe
+    `);
+
+    const buscarCodigo = (regex, fallback) => {
+      const item = rows.find((r) => regex.test(`${r.descricao || ''} ${r.descricao_customizada || ''}`));
+      return String(item?.codigo || fallback);
+    };
+
+    const codParcial = buscarCodigo(/recebido\s*parcial/i, '50');
+    const codTotal = buscarCodigo(/recebido\s*total/i, '60');
+    const codConferido = buscarCodigo(/conferid|recebido\s*e\s*conferido/i, '80');
+
+    const condicao80 = manterEtapa80
+      ? `AND COALESCE(BTRIM(p."Etapa_NF"), '') <> $3`
+      : '';
+
+    const params = manterEtapa80
+      ? [codParcial, codTotal, codConferido]
+      : [codParcial, codTotal];
+
+    const updateSql = `
+      WITH base AS (
+        SELECT
+          p.n_cod_ped,
+          COALESCE(BTRIM(p."Etapa_NF"), '') AS etapa_atual,
+          COUNT(*) FILTER (WHERE COALESCE(pp.n_qtde, 0) > 0) AS itens_validos,
+          BOOL_AND(COALESCE(pp.n_qtde_rec, 0) >= COALESCE(pp.n_qtde, 0))
+            FILTER (WHERE COALESCE(pp.n_qtde, 0) > 0) AS all_full,
+          BOOL_OR(COALESCE(pp.n_qtde_rec, 0) > 0) AS any_received
+        FROM compras.pedidos_omie p
+        LEFT JOIN compras.pedidos_omie_produtos pp
+          ON pp.n_cod_ped = p.n_cod_ped
+        WHERE COALESCE(p.inativo, false) = false
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') IN ('', $1, $2)
+          ${condicao80}
+        GROUP BY p.n_cod_ped, p."Etapa_NF"
+      ), calc AS (
+        SELECT
+          n_cod_ped,
+          etapa_atual,
+          CASE
+            WHEN itens_validos > 0 AND all_full THEN $2
+            WHEN any_received THEN $1
+            ELSE ''
+          END AS etapa_nova
+        FROM base
+      )
+      UPDATE compras.pedidos_omie p
+      SET "Etapa_NF" = NULLIF(calc.etapa_nova, ''),
+          updated_at = NOW()
+      FROM calc
+      WHERE p.n_cod_ped = calc.n_cod_ped
+        AND COALESCE(BTRIM(p."Etapa_NF"), '') IS DISTINCT FROM calc.etapa_nova
+    `;
+
+    const resultado = await client.query(updateSql, params);
+
+    return {
+      ok: true,
+      atualizados: resultado.rowCount || 0,
+      codigos: {
+        parcial: codParcial,
+        total: codTotal,
+        conferido: codConferido,
+      },
+      modo: 'sql_local_rapido',
+    };
+  } catch (e) {
+    console.error('[PedidosCompra/EtapaNF] Erro ao atualizar Etapa_NF por SQL:', e);
+    return { ok: false, error: e.message || String(e) };
+  } finally {
+    client.release();
+  }
+}
+
 // ============================================================================
 // FUNÇÕES DE SINCRONIZAÇÃO DE RECEBIMENTOS DE NF-e
 // ============================================================================
@@ -14718,7 +15238,7 @@ async function ensurePedidosOmieProdutosNfeVinculo(client) {
 
 // Função para fazer upsert de um recebimento de NF-e no banco
 // Aceita cChaveNfe e cDadosAdicionais vindos do webhook como fallback
-async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null, cDadosAdicionaisWebhook = null) {
+async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId = null, cChaveNfeWebhook = null, cDadosAdicionaisWebhook = null, rawPayload = null) {
   const client = await pool.connect();
   try {
     await ensureRecebimentosNfeDadosAdicionaisColumn(client);
@@ -14741,9 +15261,14 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     }
     
     // Usa cChaveNfe do webhook (se disponível) ou do cabec da API (raramente vem)
-    const cChaveNfeFinal = cChaveNfeWebhook || cabec.cChaveNfe || null;
+    const cChaveNfeFinal = cChaveNfeWebhook || cabec.cChaveNFe || cabec.cChaveNfe || null;
     const cDadosAdicionaisFinal = cabec.cDadosAdicionais || cabec.c_dados_adicionais || cabec.cObsNFe || cDadosAdicionaisWebhook || null;
     const cObsNFeFinal = cabec.cObsNFe || cDadosAdicionaisFinal || null;
+    const statusPorSnapshot = inferNotaEntradaStatusFromSnapshot(cabec, infoCadastro);
+    const statusPorEvento = inferNotaEntradaStatusFromTopic(eventoWebhook);
+    const statusFinal = eventoWebhook
+      ? (statusPorEvento !== 'Desconhecida' ? statusPorEvento : statusPorSnapshot)
+      : statusPorSnapshot;
     
     // 1. Upsert do cabeçalho do recebimento
     await client.query(`
@@ -15001,7 +15526,30 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         frete.cUfVeiculo || null
       ]);
     }
-    
+
+    await upsertNotaEntradaEstado(client, {
+      nIdReceb,
+      cChaveNfe: cChaveNfeFinal,
+      cNumeroNfe: cabec.cNumeroNFe || null,
+      cSerieNfe: cabec.cSerieNFe || null,
+      cModeloNfe: cabec.cModeloNFe || null,
+      dEmissaoNfe: convertOmieDate(cabec.dEmissaoNFe),
+      dEntrada: convertOmieDate(cabec.dEntrada),
+      dRegistro: convertOmieDate(cabec.dRegistro),
+      nValorNfe: cabec.nValorNFe || null,
+      nIdFornecedor: fornecedor.nIdFornecedor || null,
+      cNomeFornecedor: fornecedor.cNomeFornecedor || null,
+      cCnpjCpfFornecedor: fornecedor.cCnpjCpfFornecedor || null,
+      cEtapa: cabec.cEtapa || null,
+      cDescEtapa: cabec.cDescEtapa || null,
+      status: statusFinal,
+      topic: eventoWebhook || 'sync.recebimentonfe',
+      messageId,
+      origemEvento: eventoWebhook ? 'omie_webhook' : 'omie_sync',
+      ativo: isNotaEntradaAtiva(statusFinal),
+      snapshot: (rawPayload && typeof rawPayload === 'object') ? rawPayload : recebimento,
+    });
+
     await client.query('COMMIT');
     console.log(`[RecebimentosNFe] ✓ Recebimento ${nIdReceb} sincronizado`);
     
@@ -15020,21 +15568,98 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
     console.log('[RecebimentosNFe] Iniciando sincronização com Omie...');
     let pagina = 1;
     let totalSincronizados = 0;
+    let totalAvaliados = 0;
+    let totalRegistrosOmie = 0;
     let continuar = true;
+
+    const normalizarDataFiltroOmie = (valor) => {
+      const texto = String(valor || '').trim();
+      if (!texto) return null;
+
+      // Já no padrão DD/MM/YYYY
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(texto)) {
+        return texto;
+      }
+
+      // Aceita YYYY-MM-DD e converte para DD/MM/YYYY
+      const matchIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (matchIso) {
+        const [, ano, mes, dia] = matchIso;
+        return `${dia}/${mes}/${ano}`;
+      }
+
+      return null;
+    };
+
+    let dataInicialOmie = normalizarDataFiltroOmie(
+      filtros.data_inicial || filtros.dtEmissaoDe || filtros.dt_emissao_de
+    );
+    let dataFinalOmie = normalizarDataFiltroOmie(
+      filtros.data_final || filtros.dtEmissaoAte || filtros.dt_emissao_ate
+    );
+    const dataInicialAltOmie = normalizarDataFiltroOmie(
+      filtros.dtAltDe || filtros.dt_alt_de
+    );
+    const dataFinalAltOmie = normalizarDataFiltroOmie(
+      filtros.dtAltAte || filtros.dt_alt_ate
+    );
+
+    if (dataInicialAltOmie) dataInicialOmie = dataInicialAltOmie;
+    if (dataFinalAltOmie) dataFinalOmie = dataFinalAltOmie;
+
+    const tipoDataRaw = String(filtros.tipo_data || filtros.tipoData || '').trim().toLowerCase();
+    const preferirAlteracaoPorPadrao = !!(dataInicialOmie || dataFinalOmie);
+    const usarFiltroPorAlteracao = tipoDataRaw
+      ? ['alteracao', 'alteração', 'dtalt', 'alt'].includes(tipoDataRaw)
+      : preferirAlteracaoPorPadrao;
+
+    if (dataInicialOmie && !dataFinalOmie) {
+      const hoje = new Date();
+      const dia = String(hoje.getDate()).padStart(2, '0');
+      const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+      const ano = String(hoje.getFullYear());
+      dataFinalOmie = `${dia}/${mes}/${ano}`;
+    }
+
+    const nRegistrosPorPaginaInformado = Number(
+      filtros.nRegistrosPorPagina || filtros.n_registros_por_pagina || 0
+    );
+    const nRegistrosPorPagina = Number.isFinite(nRegistrosPorPaginaInformado) && nRegistrosPorPaginaInformado > 0
+      ? Math.floor(nRegistrosPorPaginaInformado)
+      : (preferirAlteracaoPorPadrao ? 500 : 100);
+
+    if ((filtros.data_inicial || filtros.dtEmissaoDe || filtros.dt_emissao_de) && !dataInicialOmie) {
+      throw new Error('Data inicial inválida. Use DD/MM/YYYY ou YYYY-MM-DD.');
+    }
+    if ((filtros.data_final || filtros.dtEmissaoAte || filtros.dt_emissao_ate) && !dataFinalOmie) {
+      throw new Error('Data final inválida. Use DD/MM/YYYY ou YYYY-MM-DD.');
+    }
+
+    console.log(
+      `[RecebimentosNFe] Filtros aplicados -> tipo_data=${usarFiltroPorAlteracao ? 'alteracao' : 'emissao'} | data_de=${dataInicialOmie || '-'} | data_ate=${dataFinalOmie || '-'} | nRegistrosPorPagina=${nRegistrosPorPagina}`
+    );
     
     while (continuar) {
       // Monta os parâmetros da requisição
       const param = {
         nPagina: pagina,
-        nRegistrosPorPagina: 50
+        nRegistrosPorPagina
       };
       
       // Adiciona filtros se definidos
-      if (filtros.data_inicial) {
-        param.dDataInicial = filtros.data_inicial;
+      if (dataInicialOmie) {
+        if (usarFiltroPorAlteracao) {
+          param.dtAltDe = dataInicialOmie;
+        } else {
+          param.dtEmissaoDe = dataInicialOmie;
+        }
       }
-      if (filtros.data_final) {
-        param.dDataFinal = filtros.data_final;
+      if (dataFinalOmie) {
+        if (usarFiltroPorAlteracao) {
+          param.dtAltAte = dataFinalOmie;
+        } else {
+          param.dtEmissaoAte = dataFinalOmie;
+        }
       }
       
       const body = {
@@ -15051,17 +15676,28 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
+      await new Promise(resolve => setTimeout(resolve, OMIE_REQUEST_DELAY_MS));
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[RecebimentosNFe] Erro na API Omie: ${response.status} - ${errorText}`);
-        throw new Error(`Omie API retornou ${response.status}`);
+        let faultMsg = '';
+        try {
+          const maybeJson = JSON.parse(errorText);
+          faultMsg = maybeJson?.faultstring || maybeJson?.faultcode || '';
+        } catch (_e) {
+          faultMsg = '';
+        }
+        console.error(`[RecebimentosNFe] Erro na API Omie: ${response.status} - ${faultMsg || errorText}`);
+        throw new Error(faultMsg || `Omie API retornou ${response.status}`);
       }
       
       const data = await response.json();
       const recebimentos = data.recebimentos || [];
       const totalPaginas = data.nTotalPaginas || 1;
       const totalRegistros = data.nTotalRegistros || 0;
+      if (!totalRegistrosOmie && Number.isFinite(Number(totalRegistros))) {
+        totalRegistrosOmie = Number(totalRegistros);
+      }
       
       console.log(`[RecebimentosNFe] Página ${pagina}/${totalPaginas} - ${recebimentos.length} recebimentos (Total na Omie: ${totalRegistros})`);
       
@@ -15071,14 +15707,23 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
       }
       
       // Para cada recebimento, busca os detalhes completos
-      for (const recebimentoResumo of recebimentos) {
+      for (let indice = 0; indice < recebimentos.length; indice++) {
+        const recebimentoResumo = recebimentos[indice];
         try {
+          if (indice === 0 || (indice + 1) % 5 === 0 || indice + 1 === recebimentos.length) {
+            console.log(
+              `[RecebimentosNFe] Página ${pagina}/${totalPaginas} - processando item ${indice + 1}/${recebimentos.length} | sincronizados=${totalSincronizados}`
+            );
+          }
+
           const nIdReceb = recebimentoResumo.cabec?.nIdReceb;
           
           if (!nIdReceb) {
             console.warn('[RecebimentosNFe] Recebimento sem nIdReceb, pulando:', recebimentoResumo);
             continue;
           }
+
+          totalAvaliados++;
           
           // Consulta detalhes completos do recebimento
           const detalhesResponse = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
@@ -15088,9 +15733,10 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
               call: 'ConsultarRecebimento',
               app_key: OMIE_APP_KEY,
               app_secret: OMIE_APP_SECRET,
-              param: [{ nIdReceb: parseInt(nIdReceb) }]
+              param: [{ nIdReceb: parseInt(nIdReceb, 10) }]
             })
           });
+          await new Promise(resolve => setTimeout(resolve, OMIE_REQUEST_DELAY_MS));
           
           if (!detalhesResponse.ok) {
             console.error(`[RecebimentosNFe] Erro ao consultar recebimento ${nIdReceb}:`, detalhesResponse.status);
@@ -15105,17 +15751,18 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
           
           // Log a cada 10 recebimentos
           if (totalSincronizados % 10 === 0) {
-            console.log(`[RecebimentosNFe] ✓ Progresso: ${totalSincronizados} recebimentos sincronizados...`);
+            console.log(`[RecebimentosNFe] ✓ Progresso: atualizados ${totalSincronizados}/${totalAvaliados} recebimentos...`);
           }
-          
-          // Pequeno delay para não sobrecarregar a API da Omie
-          await new Promise(resolve => setTimeout(resolve, 100));
           
         } catch (recebimentoError) {
           console.error('[RecebimentosNFe] Erro ao processar recebimento:', recebimentoError);
           // Continua com o próximo recebimento
         }
       }
+
+      console.log(
+        `[RecebimentosNFe] Página ${pagina}/${totalPaginas} concluída | atualizados=${totalSincronizados}/${totalAvaliados}`
+      );
       
       // Verifica se tem mais páginas
       if (pagina >= totalPaginas) {
@@ -15125,8 +15772,13 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
       }
     }
     
-    console.log(`[RecebimentosNFe] ✓✓✓ Sincronização concluída: ${totalSincronizados} recebimentos sincronizados com sucesso!`);
-    return { ok: true, total: totalSincronizados };
+    console.log(`[RecebimentosNFe] ✓✓✓ Sincronização concluída: atualizados ${totalSincronizados}/${totalAvaliados}`);
+    return {
+      ok: true,
+      total: totalSincronizados,
+      total_avaliados: totalAvaliados,
+      total_registros: totalRegistrosOmie
+    };
   } catch (e) {
     console.error('[RecebimentosNFe] ✗ Erro na sincronização:', e);
     return { ok: false, error: e.message };
@@ -15144,7 +15796,7 @@ app.post('/api/admin/sync/recebimentos-nfe', express.json(), async (req, res) =>
   try {
     console.log('[API] Iniciando sincronização de recebimentos de NF-e...');
     
-    const resultado = await syncRecebimentosNFeOmie({});
+    const resultado = await syncRecebimentosNFeOmie(req.body || {});
     
     const duracao = Date.now() - startTime;
     
@@ -15405,6 +16057,79 @@ async function cadastrarProdutoNaOmie(codigoProduto, descricaoProduto, contexto 
     const pfx = contexto ? `[${contexto}] ` : '';
     console.error(`${pfx}❌ Erro na função cadastrarProdutoNaOmie:`, err.message);
     return { ok: false, error: err.message };
+  }
+}
+
+async function sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoFallback = null, contexto = null) {
+  const pfx = contexto ? `[${contexto}] ` : '';
+
+  try {
+    const consultaResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{ codigo_produto_integracao: codigoIntegracao }]
+      })
+    });
+
+    const consultaData = await consultaResp.json().catch(() => ({}));
+    if (!consultaResp.ok || consultaData?.faultstring || !consultaData?.codigo_produto) {
+      return { ok: false, error: consultaData?.faultstring || `Falha ao consultar produto ${codigoIntegracao} na Omie` };
+    }
+
+    const descricao = String(
+      consultaData?.descricao ||
+      consultaData?.desc_prod ||
+      descricaoFallback ||
+      codigoIntegracao
+    ).trim();
+
+    const codigoProdutoOmie = Number(consultaData.codigo_produto);
+    if (!Number.isFinite(codigoProdutoOmie) || codigoProdutoOmie <= 0) {
+      return { ok: false, error: `Código de produto inválido retornado pela Omie para ${codigoIntegracao}` };
+    }
+
+    try {
+      const { rowCount: updatedCount } = await pool.query(
+        `UPDATE produtos_omie
+         SET descricao = $2,
+             codigo_produto = $3,
+             ncm = COALESCE($4, ncm),
+             unidade = COALESCE($5, unidade),
+             codigo_produto_integracao = $1
+         WHERE codigo = $1 OR codigo_produto_integracao = $1`,
+        [
+          codigoIntegracao,
+          descricao,
+          codigoProdutoOmie,
+          consultaData?.ncm || null,
+          consultaData?.unidade || 'UN'
+        ]
+      );
+
+      if (!updatedCount) {
+        await pool.query(
+          `INSERT INTO produtos_omie (codigo, descricao, codigo_produto, codigo_produto_integracao, ncm, unidade)
+           VALUES ($1, $2, $3, $1, $4, $5)`,
+          [
+            codigoIntegracao,
+            descricao,
+            codigoProdutoOmie,
+            consultaData?.ncm || '0000.00.00',
+            consultaData?.unidade || 'UN'
+          ]
+        );
+      }
+    } catch (dbErr) {
+      console.warn(`${pfx}⚠️ Falha ao sincronizar produto existente no banco local:`, dbErr?.message || dbErr);
+    }
+
+    return { ok: true, codigo_produto: codigoProdutoOmie, ja_existe: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'Erro ao consultar produto existente na Omie' };
   }
 }
 
@@ -17108,7 +17833,8 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           cCodCateg: categoriaCompraCodigo || '2.14.94',
           cCodParc: codParcelaPadrao,
           cEmailAprovador: emailAprovador,
-          cObs: (objetivoCompra || observacaoRecebimento || `Solicitação sem cadastro ${reqId}`).toString().slice(0, 500)
+          cObs: (objetivoCompra || observacaoRecebimento || `Solicitação sem cadastro ${reqId}`).toString().slice(0, 500),
+          cObsInt: montarObsInternaComGrupo(grupoRequisicao, observacaoRecebimento || null)
         };
 
         cabecalho.nCodFor = fornecedorPadrao;
@@ -17559,9 +18285,14 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
       let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
       if (!cadastro.ok) {
         const msgErro = String(cadastro.error || '');
+        const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
         const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
 
-        if (ehDescricaoDuplicada) {
+        if (ehJaCadastrado) {
+          cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `sem-cadastro:${id}`);
+        }
+
+        if (!cadastro.ok && ehDescricaoDuplicada) {
           const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
             ? descricaoProduto
             : `${descricaoProduto} - ${codigoIntegracao}`;
@@ -17707,7 +18438,7 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
       codProj: 0,
       dtSugestao: dtSugestao,
       obsReqCompra: obsReqCompra,
-      obsIntReqCompra: String(itemDb.observacao_recebimento || '').trim(),
+      obsIntReqCompra: montarObsInternaComGrupo(itemDb.grupo_requisicao, itemDb.observacao_recebimento || null),
       ItensReqCompra: itensReqCompra
     };
 
@@ -18042,6 +18773,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
       cCodParc: codParcelaPadrao,
       cEmailAprovador: emailAprovador,
       cObs: (objetivoCompraPrimeiroItem || `Compra via carrinho (NP ${np}) - ${solicitante}`).slice(0, 500),
+      cObsInt: montarObsInternaComGrupo(primeiroItem?.grupo_requisicao || null, primeiroItem?.observacao || null),
       nCodFor: Number.isFinite(fornecedorPadrao) && fornecedorPadrao > 0 ? fornecedorPadrao : 10746832756
     };
 
@@ -18121,7 +18853,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     codCateg: categoriaCompra,
     dtSugestao: itensOmie[0].dtSugestao,
     obsReqCompra: (objetivoCompraPrimeiroItem || obsReqCompra).slice(0, 500),
-    obsIntReqCompra: '',
+    obsIntReqCompra: montarObsInternaComGrupo(primeiroItem?.grupo_requisicao || null, primeiroItem?.observacao || null),
     ItensReqCompra: itensOmie.map(it => ({
       codProd: it.codProd,
       obsItem: it.obsItem,
@@ -18842,7 +19574,7 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
     codProj: 0,
     dtSugestao: dtSugestao,
     obsReqCompra: obsReqCompra,
-    obsIntReqCompra: item.observacao || '',
+    obsIntReqCompra: montarObsInternaComGrupo(item?.grupo_requisicao || null, item?.observacao || null),
     ItensReqCompra: [
       {
         codProd: item.codigo_omie || item.codigo_produto_omie || null,
@@ -18997,7 +19729,7 @@ async function criarRequisicaoOmieParaItens(itens) {
     codProj: 0,
     dtSugestao: dtSugestao,
     obsReqCompra: obsReqCompra,
-    obsIntReqCompra: primeiroItem.observacao || '',
+    obsIntReqCompra: montarObsInternaComGrupo(primeiroItem?.grupo_requisicao || null, primeiroItem?.observacao || null),
     ItensReqCompra: itensReqCompra
   };
 
@@ -19060,7 +19792,8 @@ app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
         codigo_omie,
         retorno_cotacao,
         observacao,
-        resp_inspecao_recebimento
+        resp_inspecao_recebimento,
+        grupo_requisicao
       FROM compras.solicitacao_compras
       WHERE id = $1
     `, [itemId]);
@@ -19150,7 +19883,8 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
         codigo_omie,
         retorno_cotacao,
         observacao,
-        resp_inspecao_recebimento
+        resp_inspecao_recebimento,
+        grupo_requisicao
       FROM compras.solicitacao_compras
       WHERE id = ANY($1)
     `, [ids]);
@@ -20223,6 +20957,43 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
     `;
 
     const { rows } = await pool.query(query);
+
+    await pool.query(`
+      ALTER TABLE logistica.recebimentos_nfe_omie
+      ADD COLUMN IF NOT EXISTS compras VARCHAR(3) NULL
+    `);
+
+    const recebimentosEtapa40Query = `
+      SELECT
+        r.n_id_receb,
+        r.c_chave_nfe,
+        COALESCE(
+          NULLIF(LTRIM(REGEXP_REPLACE(COALESCE(r.c_numero_nfe, ''), '\\D', '', 'g'), '0'), ''),
+          NULLIF(LTRIM(SUBSTRING(r.c_chave_nfe FROM 26 FOR 9), '0'), ''),
+          '0'
+        ) AS numero_nfe_exibicao,
+        r.c_nome_fornecedor,
+        r.c_dados_adicionais,
+        r.c_numero_nfe,
+        r.n_valor_nfe,
+        LOWER(BTRIM(COALESCE(r.compras, ''))) AS compras,
+        r.d_emissao_nfe,
+        r.updated_at
+      FROM logistica.recebimentos_nfe_omie r
+      WHERE COALESCE(BTRIM(r.c_etapa), '') = '40'
+        AND UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+      ORDER BY
+        CASE
+          WHEN COALESCE(NULLIF(LTRIM(REGEXP_REPLACE(COALESCE(r.c_numero_nfe, ''), '\\D', '', 'g'), '0'), ''), NULLIF(LTRIM(SUBSTRING(r.c_chave_nfe FROM 26 FOR 9), '0'), '')) ~ '^\\d+$'
+            THEN COALESCE(NULLIF(LTRIM(REGEXP_REPLACE(COALESCE(r.c_numero_nfe, ''), '\\D', '', 'g'), '0'), ''), NULLIF(LTRIM(SUBSTRING(r.c_chave_nfe FROM 26 FOR 9), '0'), ''))::BIGINT
+          ELSE NULL
+        END DESC,
+        r.updated_at DESC NULLS LAST
+    `;
+
+    const { rows: recebimentosEtapa40Rows } = await pool.query(recebimentosEtapa40Query);
+
     const pedidosMap = new Map();
     const pedidos = [];
 
@@ -20275,6 +21046,49 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       }
     }
 
+    for (const row of recebimentosEtapa40Rows) {
+      const numeroNfe = String(row.numero_nfe_exibicao || '').trim() || '0';
+      const chavePedido = `${numeroNfe}::faturada pelo fornecedor::receb_${row.n_id_receb}`;
+
+      const novoRegistro = {
+        numero: numeroNfe,
+        c_numero: numeroNfe,
+        n_cod_ped: null,
+        n_id_receb: row.n_id_receb,
+        c_cod_int_ped: null,
+        c_etapa: '40',
+        etapa_nf: '40',
+        status_nf: 'faturada pelo fornecedor',
+        n_cod_for: null,
+        d_inc_data: row.d_emissao_nfe || null,
+        d_dt_previsao: null,
+        solicitante: null,
+        grupo_requisicao: null,
+        fornecedor_nome: row.c_nome_fornecedor || 'Sem fornecedor',
+        c_chave_nfe: row.c_chave_nfe || null,
+        c_dados_adicionais: row.c_dados_adicionais || null,
+        n_valor_nfe: row.n_valor_nfe ?? null,
+        compras: row.compras || null,
+        origem_recebimento_nfe: true,
+        created_at: null,
+        updated_at: row.updated_at || null,
+        itens: [
+          {
+            produto_codigo: 'Dados adicionais',
+            produto_descricao: row.c_dados_adicionais || 'Sem dados adicionais',
+            c_unidade: '-',
+            n_qtde: 1,
+            n_val_tot: 0,
+            c_link_nfe_pdf: null,
+            c_dados_adicionais_nfe: row.c_dados_adicionais || null
+          }
+        ]
+      };
+
+      pedidosMap.set(chavePedido, novoRegistro);
+      pedidos.push(novoRegistro);
+    }
+
     const parseNumero = valor => {
       const texto = (valor || '').toString().trim();
       return /^\d+$/.test(texto) ? parseInt(texto, 10) : null;
@@ -20294,6 +21108,287 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   } catch (err) {
     console.error('[Compras/PedidosEtapaNF] Erro ao listar pedidos por Etapa_NF:', err);
     res.status(500).json({ ok: false, error: 'Erro ao listar pedidos por Etapa_NF' });
+  }
+});
+
+app.get('/api/compras/recebimentos-nfe/detalhes/:nIdReceb', async (req, res) => {
+  try {
+    const nIdReceb = Number(req.params.nIdReceb);
+    if (!Number.isFinite(nIdReceb) || nIdReceb <= 0) {
+      return res.status(400).json({ ok: false, error: 'nIdReceb inválido' });
+    }
+
+    await pool.query(`
+      ALTER TABLE logistica.recebimentos_nfe_omie
+      ADD COLUMN IF NOT EXISTS compras VARCHAR(3) NULL
+    `);
+
+    const { rows: recebimentoLocalRows } = await pool.query(
+      `SELECT LOWER(BTRIM(COALESCE(compras, ''))) AS compras
+         FROM logistica.recebimentos_nfe_omie
+        WHERE n_id_receb = $1
+        LIMIT 1`,
+      [nIdReceb]
+    );
+
+    const comprasLocal = recebimentoLocalRows[0]?.compras || null;
+
+    const recebimento = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb });
+    const cabec = recebimento?.cabec || {};
+    const infoCadastro = recebimento?.infoCadastro || {};
+    const infoAdicionais = recebimento?.infoAdicionais || {};
+    const itensRaw = Array.isArray(recebimento?.itensRecebimento) ? recebimento.itensRecebimento : [];
+
+    const cCategCompraRaw = String(
+      infoAdicionais?.cCategCompra
+      || cabec?.cCategCompra
+      || cabec?.c_categoria_compra
+      || ''
+    ).trim();
+    const cObsRaw = String(
+      cabec?.cObs
+      || cabec?.c_obs
+      || cabec?.cObsNFe
+      || cabec?.c_obs_nfe
+      || infoCadastro?.cObsRec
+      || ''
+    ).trim();
+
+    let categoriaCompra = null;
+    if (cCategCompraRaw) {
+      const codigoSemPontuacao = cCategCompraRaw.replace(/\./g, '');
+      const { rows: categoriaRows } = await pool.query(
+        `SELECT codigo, descricao, natureza
+           FROM configuracoes."ListarCategorias"
+          WHERE codigo = $1
+             OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+          ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+          LIMIT 1`,
+        [cCategCompraRaw, codigoSemPontuacao]
+      );
+
+      if (categoriaRows.length) {
+        categoriaCompra = {
+          codigo: categoriaRows[0].codigo || cCategCompraRaw,
+          descricao: categoriaRows[0].descricao || null,
+          natureza: categoriaRows[0].natureza || null
+        };
+      } else {
+        categoriaCompra = {
+          codigo: cCategCompraRaw,
+          descricao: null,
+          natureza: null
+        };
+      }
+    }
+
+    const itens = itensRaw.map((item) => {
+      const itensCabec = item?.itensCabec || {};
+      const itensAjustes = item?.itensAjustes || {};
+      const itensInfoAdic = item?.itensInfoAdic || {};
+      const cCFOPItem = String(
+        itensCabec?.cCFOP
+        || itensCabec?.cCfop
+        || item?.cCFOP
+        || item?.cCfop
+        || itensAjustes?.cCFOP
+        || itensAjustes?.cCfop
+        || itensInfoAdic?.cCFOP
+        || itensInfoAdic?.cCfop
+        || ''
+      ).trim();
+
+      return {
+        cCodigoProduto: itensCabec?.cCodigoProduto || null,
+        cDescricaoProduto: itensCabec?.cDescricaoProduto || null,
+        cNCM: itensCabec?.cNCM || null,
+        cUnidadeNfe: itensCabec?.cUnidadeNfe || null,
+        nPrecoUnit: itensCabec?.nPrecoUnit ?? null,
+        nQtdeNFe: itensCabec?.nQtdeNFe ?? null,
+        cCFOPEntrada: itensAjustes?.cCFOPEntrada || itensInfoAdic?.cCfopEntrada || null,
+        cCFOP: cCFOPItem || null
+      };
+    });
+
+    const cfopDigitosItens = [...new Set(
+      itens
+        .map((item) => String(item?.cCFOP || '').replace(/\D/g, ''))
+        .filter(Boolean)
+    )];
+
+    let mapaDescricaoCfop = new Map();
+    if (cfopDigitosItens.length > 0) {
+      const { rows: cfopRowsItens } = await pool.query(
+        `SELECT codigo, descricao
+           FROM configuracoes.cfop
+          WHERE ativo = TRUE
+            AND REGEXP_REPLACE(COALESCE(codigo, ''), '\\D', '', 'g') = ANY($1::text[])`,
+        [cfopDigitosItens]
+      );
+
+      mapaDescricaoCfop = new Map(
+        (cfopRowsItens || []).map((row) => [
+          String(row?.codigo || '').replace(/\D/g, ''),
+          row?.descricao || null
+        ])
+      );
+    }
+
+    const itensComDescricaoCfop = itens.map((item) => {
+      const digitosCfop = String(item?.cCFOP || '').replace(/\D/g, '');
+      return {
+        ...item,
+        cCFOPDescricao: digitosCfop ? (mapaDescricaoCfop.get(digitosCfop) || null) : null
+      };
+    });
+
+    let possiveisComprasMesmoValor = [];
+    const valorNfeNumero = Number(cabec?.nValorNFe ?? null);
+    if (Number.isFinite(valorNfeNumero)) {
+      const { rows: pedidosMesmoValorRows } = await pool.query(
+        `SELECT DISTINCT TRIM(COALESCE(c_numero, '')) AS c_numero
+           FROM compras.pedidos_omie
+          WHERE COALESCE(inativo, false) = false
+            AND COALESCE(BTRIM("Etapa_NF"), '') <> '80'
+            AND TRIM(COALESCE(c_numero, '')) <> ''
+            AND ABS(COALESCE(n_valor, 0)::NUMERIC - $1::NUMERIC) <= 0.01
+          ORDER BY TRIM(COALESCE(c_numero, '')) DESC
+          LIMIT 25`,
+        [valorNfeNumero]
+      );
+
+      possiveisComprasMesmoValor = (pedidosMesmoValorRows || [])
+        .map((row) => String(row?.c_numero || '').trim())
+        .filter(Boolean);
+    }
+
+    return res.json({
+      ok: true,
+      dados: {
+        cNome: cabec?.cNome || null,
+        cNumeroNFe: cabec?.cNumeroNFe || null,
+        cChaveNFe: cabec?.cChaveNFe || null,
+        dEmissaoNFe: cabec?.dEmissaoNFe || null,
+        nValorNFe: cabec?.nValorNFe ?? null,
+        cCategCompra: cCategCompraRaw || null,
+        categoriaCompra,
+        cObs: cObsRaw || null,
+        cCFOPEntrada: cabec?.cCfopEntrada || cabec?.cCFOPEntrada || null,
+        possiveisComprasMesmoValor,
+        compras: comprasLocal,
+        itens: itensComDescricaoCfop
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/RecebimentosNFe/Detalhes] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao consultar recebimento na Omie' });
+  }
+});
+
+app.put('/api/compras/recebimentos-nfe/compras/:nIdReceb', async (req, res) => {
+  try {
+    const nIdReceb = Number(req.params.nIdReceb);
+    if (!Number.isFinite(nIdReceb) || nIdReceb <= 0) {
+      return res.status(400).json({ ok: false, error: 'nIdReceb inválido' });
+    }
+
+    await pool.query(`
+      ALTER TABLE logistica.recebimentos_nfe_omie
+      ADD COLUMN IF NOT EXISTS compras VARCHAR(3) NULL
+    `);
+
+    const comprasRaw = req.body?.compras;
+    const comprasNormalizada = (comprasRaw === null || comprasRaw === undefined)
+      ? null
+      : String(comprasRaw).trim().toLowerCase();
+
+    if (comprasNormalizada !== null && comprasNormalizada !== '' && comprasNormalizada !== 'sim' && comprasNormalizada !== 'nao') {
+      return res.status(400).json({ ok: false, error: 'Valor inválido para compras. Use sim, nao ou null.' });
+    }
+
+    const valorFinal = (!comprasNormalizada || comprasNormalizada === '') ? null : comprasNormalizada;
+
+    const { rows } = await pool.query(
+      `UPDATE logistica.recebimentos_nfe_omie
+          SET compras = $2,
+              updated_at = NOW()
+        WHERE n_id_receb = $1
+      RETURNING n_id_receb, compras`,
+      [nIdReceb, valorFinal]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Recebimento não encontrado' });
+    }
+
+    return res.json({
+      ok: true,
+      recebimento: {
+        n_id_receb: rows[0].n_id_receb,
+        compras: rows[0].compras || null
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/RecebimentosNFe/Compras] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao atualizar campo compras' });
+  }
+});
+
+// GET /api/configuracoes/cfop/:codigo
+// Objetivo: consultar descrição e aplicação do CFOP em base local (configuracoes.cfop)
+app.get('/api/configuracoes/cfop/:codigo', async (req, res) => {
+  try {
+    const codigoRaw = String(req.params.codigo || '').trim();
+    const codigoDigitos = codigoRaw.replace(/\D/g, '');
+
+    if (!codigoDigitos) {
+      return res.status(400).json({ ok: false, error: 'Código CFOP inválido' });
+    }
+
+    await pool.query('CREATE SCHEMA IF NOT EXISTS configuracoes');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracoes.cfop (
+        id BIGSERIAL PRIMARY KEY,
+        codigo VARCHAR(10) NOT NULL,
+        descricao TEXT NOT NULL,
+        aplicacao TEXT NOT NULL,
+        fonte_url TEXT NULL,
+        ativo BOOLEAN NOT NULL DEFAULT TRUE,
+        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT cfop_codigo_unico UNIQUE (codigo)
+      )
+    `);
+
+    const { rows } = await pool.query(
+      `SELECT codigo, descricao, aplicacao, fonte_url, atualizado_em
+         FROM configuracoes.cfop
+        WHERE ativo = TRUE
+          AND REGEXP_REPLACE(COALESCE(codigo, ''), '\\D', '', 'g') = $1
+        ORDER BY atualizado_em DESC NULLS LAST, updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [codigoDigitos]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'CFOP não encontrado na base local' });
+    }
+
+    const item = rows[0];
+    return res.json({
+      ok: true,
+      cfop: {
+        codigo: item.codigo,
+        descricao: item.descricao,
+        aplicacao: item.aplicacao,
+        fonte_url: item.fonte_url,
+        atualizado_em: item.atualizado_em
+      }
+    });
+  } catch (err) {
+    console.error('[Configuracoes/CFOP] Erro ao consultar CFOP:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao consultar CFOP' });
   }
 });
 
@@ -20637,6 +21732,54 @@ async function localizarRecebimentoNfePorPedidoValor(numeroPedidoRaw, valorTotal
 }
 
 async function obterPdfNfeViaOmie(numeroNfeDigitos) {
+  if (!(global.__omieNfePdfCache instanceof Map)) {
+    global.__omieNfePdfCache = new Map();
+  }
+  if (!global.__omieNfePdfRateLimit) {
+    global.__omieNfePdfRateLimit = {
+      blockedUntilMs: 0,
+      reason: ''
+    };
+  }
+
+  const normalizarNumeroNfeCache = (valor) => {
+    const digitos = String(valor || '').replace(/\D/g, '');
+    if (!digitos) return '';
+    return digitos.replace(/^0+/, '') || '0';
+  };
+
+  const extrairCooldownSegundos = (mensagem) => {
+    const match = String(mensagem || '').match(/tente novamente em\s*(\d+)\s*segundos/i);
+    if (!match) return 0;
+    const segundos = Number(match[1]);
+    return Number.isFinite(segundos) && segundos > 0 ? segundos : 0;
+  };
+
+  const chaveCache = normalizarNumeroNfeCache(numeroNfeDigitos);
+  const agora = Date.now();
+  const cachePdf = global.__omieNfePdfCache;
+  const estadoRateLimit = global.__omieNfePdfRateLimit;
+
+  if (chaveCache) {
+    const cacheItem = cachePdf.get(chaveCache);
+    if (cacheItem && cacheItem.expiresAtMs > agora && /^https?:\/\//i.test(String(cacheItem.cPdf || ''))) {
+      return {
+        ok: true,
+        cPdf: cacheItem.cPdf,
+        n_id_nfe: cacheItem.n_id_nfe || null,
+        from_cache: true
+      };
+    }
+  }
+
+  if (estadoRateLimit.blockedUntilMs > agora) {
+    const restanteSegundos = Math.ceil((estadoRateLimit.blockedUntilMs - agora) / 1000);
+    return {
+      ok: false,
+      error: `API bloqueada por consumo indevido. Tente novamente em ${restanteSegundos} segundos.`
+    };
+  }
+
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     return { ok: false, error: 'Credenciais Omie não configuradas no servidor' };
   }
@@ -20667,6 +21810,13 @@ async function obterPdfNfeViaOmie(numeroNfeDigitos) {
     const faultConsulta = consultaData?.faultstring || consultaData?.faultcode || '';
 
     if (!consultaResp.ok || faultConsulta) {
+      if (/api bloqueada por consumo indevido/i.test(String(faultConsulta || ''))) {
+        const cooldownSegundos = extrairCooldownSegundos(faultConsulta);
+        if (cooldownSegundos > 0) {
+          estadoRateLimit.blockedUntilMs = Date.now() + (cooldownSegundos * 1000);
+          estadoRateLimit.reason = faultConsulta;
+        }
+      }
       ultimaFalhaConsulta = faultConsulta || `HTTP ${consultaResp.status}`;
       continue;
     }
@@ -20703,6 +21853,13 @@ async function obterPdfNfeViaOmie(numeroNfeDigitos) {
   const obterNfeData = await obterNfeResp.json().catch(() => ({}));
   const faultObter = obterNfeData?.faultstring || obterNfeData?.faultcode || '';
   if (!obterNfeResp.ok || faultObter) {
+    if (/api bloqueada por consumo indevido/i.test(String(faultObter || ''))) {
+      const cooldownSegundos = extrairCooldownSegundos(faultObter);
+      if (cooldownSegundos > 0) {
+        estadoRateLimit.blockedUntilMs = Date.now() + (cooldownSegundos * 1000);
+        estadoRateLimit.reason = faultObter;
+      }
+    }
     return {
       ok: false,
       error: faultObter || `Erro HTTP ${obterNfeResp.status} ao obter XML/PDF da NF`
@@ -20714,8 +21871,368 @@ async function obterPdfNfeViaOmie(numeroNfeDigitos) {
     return { ok: false, error: 'Link cPdf não encontrado na resposta da Omie' };
   }
 
+  if (chaveCache) {
+    cachePdf.set(chaveCache, {
+      cPdf,
+      n_id_nfe: nIdNf,
+      expiresAtMs: Date.now() + (20 * 60 * 1000)
+    });
+  }
+
+  estadoRateLimit.blockedUntilMs = 0;
+  estadoRateLimit.reason = '';
+
   return { ok: true, cPdf, n_id_nfe: nIdNf };
 }
+
+function normalizarNumeroNfeComparacao(valor) {
+  const digitos = String(valor || '').replace(/\D/g, '');
+  if (!digitos) return '';
+  return digitos.replace(/^0+/, '') || '0';
+}
+
+async function chamarApiRecebimentoNfeOmie(call, param = {}) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('Credenciais Omie não configuradas no servidor');
+  }
+
+  const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call,
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [param]
+    })
+  });
+
+  const data = await response.json().catch(() => ({}));
+  const fault = data?.faultstring || data?.faultcode || '';
+
+  if (!response.ok || fault) {
+    throw new Error(fault || `Omie retornou HTTP ${response.status} em ${call}`);
+  }
+
+  return data;
+}
+
+function extrairPedidosVinculadosDoRecebimento(recebimento) {
+  const itens = Array.isArray(recebimento?.itensRecebimento)
+    ? recebimento.itensRecebimento
+    : [];
+
+  const pedidos = new Set();
+
+  for (const item of itens) {
+    const nIdPedido = item?.itensCabec?.nIdPedido;
+    const nNumPedCompra = item?.itensInfoAdic?.nNumPedCompra;
+
+    if (nIdPedido !== null && nIdPedido !== undefined && String(nIdPedido).trim() !== '') {
+      pedidos.add(String(nIdPedido).trim());
+    }
+    if (nNumPedCompra !== null && nNumPedCompra !== undefined && String(nNumPedCompra).trim() !== '') {
+      pedidos.add(String(nNumPedCompra).trim());
+    }
+  }
+
+  return [...pedidos];
+}
+
+async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada) {
+  const numeroNfeNormalizado = normalizarNumeroNfeComparacao(numeroNfeInformada);
+  if (!numeroNfeNormalizado) {
+    throw new Error('Número de NF-e inválido');
+  }
+
+  let pagina = 1;
+  let totalPaginas = 1;
+  let recebimentoResumo = null;
+
+  while (pagina <= totalPaginas && pagina <= 40) {
+    const lista = await chamarApiRecebimentoNfeOmie('ListarRecebimentos', {
+      nPagina: pagina,
+      nRegistrosPorPagina: 100,
+      cExibirDetalhes: 'S'
+    });
+
+    totalPaginas = Number(lista?.nTotalPaginas || 1);
+    const recebimentos = Array.isArray(lista?.recebimentos) ? lista.recebimentos : [];
+
+    recebimentoResumo = recebimentos.find((rec) => {
+      const numeroApi = rec?.cabec?.cNumeroNFe;
+      return normalizarNumeroNfeComparacao(numeroApi) === numeroNfeNormalizado;
+    }) || null;
+
+    if (recebimentoResumo) break;
+    pagina += 1;
+  }
+
+  if (!recebimentoResumo?.cabec?.nIdReceb) {
+    return null;
+  }
+
+  const nIdReceb = Number(recebimentoResumo.cabec.nIdReceb);
+  if (!Number.isFinite(nIdReceb) || nIdReceb <= 0) {
+    return null;
+  }
+
+  const recebimentoCompleto = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb });
+  return recebimentoCompleto;
+}
+
+async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
+  const pedidoResult = await pool.query(
+    `SELECT n_cod_ped, c_numero
+       FROM compras.pedidos_omie
+      WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
+         OR n_cod_ped::text = TRIM($1)
+      ORDER BY updated_at DESC NULLS LAST, id DESC
+      LIMIT 1`,
+    [numeroPedido]
+  );
+
+  if (!pedidoResult.rows.length) {
+    throw new Error('Pedido não encontrado em compras.pedidos_omie');
+  }
+
+  const pedido = pedidoResult.rows[0];
+  const nCodPed = Number(pedido.n_cod_ped);
+  if (!Number.isFinite(nCodPed) || nCodPed <= 0) {
+    throw new Error('Pedido encontrado com n_cod_ped inválido');
+  }
+
+  const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe);
+  if (!recebimento?.cabec?.nIdReceb) {
+    throw new Error('NF-e não encontrada na API de recebimentos da Omie');
+  }
+
+  const itensReceb = Array.isArray(recebimento?.itensRecebimento)
+    ? recebimento.itensRecebimento
+    : [];
+
+  if (!itensReceb.length) {
+    throw new Error('Recebimento localizado sem itens para associação');
+  }
+
+  const itensPedidoResult = await pool.query(
+    `SELECT n_cod_item, c_produto, c_descricao, n_qtde, n_val_unit, n_val_tot, n_cod_prod
+       FROM compras.pedidos_omie_produtos
+      WHERE n_cod_ped = $1`,
+    [nCodPed]
+  );
+
+  const itensPedido = itensPedidoResult.rows;
+  const mapaPorCodigoProduto = new Map();
+  const mapaPorIdProduto = new Map();
+
+  for (const item of itensPedido) {
+    const codigo = String(item?.c_produto || '').trim();
+    const idProduto = Number(item?.n_cod_prod);
+
+    if (codigo) {
+      if (!mapaPorCodigoProduto.has(codigo)) mapaPorCodigoProduto.set(codigo, []);
+      mapaPorCodigoProduto.get(codigo).push(item);
+    }
+
+    if (Number.isFinite(idProduto) && idProduto > 0) {
+      if (!mapaPorIdProduto.has(idProduto)) mapaPorIdProduto.set(idProduto, []);
+      mapaPorIdProduto.get(idProduto).push(item);
+    }
+  }
+
+  const previewItens = [];
+
+  const itensRecebimentoEditar = itensReceb.map((item, idx) => {
+    const itensCabec = item?.itensCabec || {};
+    const nSequencia = Number(itensCabec?.nSequencia || idx + 1);
+    const codigoProdutoRec = String(itensCabec?.cCodigoProduto || '').trim();
+    const nIdProdutoRec = Number(itensCabec?.nIdProduto);
+
+    let itemPedidoVinculo = null;
+    let criterioMatch = null;
+
+    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
+      const candidatos = mapaPorIdProduto.get(nIdProdutoRec);
+      if (Array.isArray(candidatos) && candidatos.length === 1) {
+        itemPedidoVinculo = candidatos[0];
+        criterioMatch = 'id_produto';
+      }
+    }
+
+    if (!itemPedidoVinculo && codigoProdutoRec && mapaPorCodigoProduto.has(codigoProdutoRec)) {
+      const candidatos = mapaPorCodigoProduto.get(codigoProdutoRec);
+      if (Array.isArray(candidatos) && candidatos.length === 1) {
+        itemPedidoVinculo = candidatos[0];
+        criterioMatch = 'codigo_produto';
+      }
+    }
+
+    const itensIde = {
+      nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
+      cAcao: 'A',
+      nIdPedidoExistente: nCodPed
+    };
+
+    const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
+    if (Number.isFinite(nCodItem) && nCodItem > 0) {
+      itensIde.nIdItPedidoExistente = nCodItem;
+    }
+
+    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0) {
+      itensIde.nIdProdutoExistente = nIdProdutoRec;
+    }
+
+    previewItens.push({
+      n_sequencia: itensIde.nSequencia,
+      nf_codigo_produto: codigoProdutoRec || null,
+      nf_descricao_produto: String(itensCabec?.cDescricaoProduto || '').trim() || null,
+      nf_qtde: itensCabec?.nQtdeNFe ?? null,
+      nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+      nf_valor_total: itensCabec?.vTotalItem ?? null,
+      pedido_item_encontrado: !!itemPedidoVinculo,
+      pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
+      pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
+      pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
+      pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
+      pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
+      criterio_match: criterioMatch
+    });
+
+    return { itensIde };
+  });
+
+  return {
+    numero_nfe: String(recebimento?.cabec?.cNumeroNFe || '').trim() || String(numeroNfe || '').trim(),
+    n_id_receb: Number(recebimento?.cabec?.nIdReceb || 0) || null,
+    n_cod_ped: nCodPed,
+    c_numero_pedido: String(pedido?.c_numero || '').trim() || null,
+    itens_pedido_total: itensPedido.length,
+    itens_nf_total: itensReceb.length,
+    itens_match_total: previewItens.filter(item => item.pedido_item_encontrado).length,
+    itens_sem_match_total: previewItens.filter(item => !item.pedido_item_encontrado).length,
+    itens_preview: previewItens,
+    itensRecebimentoEditar
+  };
+}
+
+// POST /api/compras/pedidos-omie/nfe-associar-pedido/consultar
+// Objetivo: localizar NF-e na Omie e exibir contexto antes da associação.
+app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json(), async (req, res) => {
+  try {
+    const numeroNfe = String(req.body?.numero_nfe || '').trim();
+    if (!numeroNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    }
+
+    const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe);
+    if (!recebimento) {
+      return res.status(404).json({ ok: false, error: 'NF-e não encontrada na API de recebimentos da Omie' });
+    }
+
+    const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimento);
+
+    return res.json({
+      ok: true,
+      recebimento: {
+        n_id_receb: recebimento?.cabec?.nIdReceb || null,
+        c_numero_nfe: recebimento?.cabec?.cNumeroNFe || null,
+        c_chave_nfe: recebimento?.cabec?.cChaveNfe || null,
+        c_nome_fornecedor: recebimento?.cabec?.cRazaoSocial || recebimento?.cabec?.cNome || null,
+        itens_total: Array.isArray(recebimento?.itensRecebimento) ? recebimento.itensRecebimento.length : 0,
+        pedidos_vinculados: pedidosVinculados
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/NFeAssociarPedido/Consultar] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao consultar NF-e na Omie' });
+  }
+});
+
+app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json(), async (req, res) => {
+  try {
+    const numeroNfe = String(req.body?.numero_nfe || '').trim();
+    const numeroPedido = String(req.body?.numero_pedido || '').trim();
+
+    if (!numeroNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    }
+    if (!numeroPedido) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido é obrigatório' });
+    }
+
+    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido);
+
+    return res.json({
+      ok: true,
+      preview: {
+        numero_nfe: plano.numero_nfe,
+        n_id_receb: plano.n_id_receb,
+        n_cod_ped: plano.n_cod_ped,
+        c_numero_pedido: plano.c_numero_pedido,
+        itens_nf_total: plano.itens_nf_total,
+        itens_pedido_total: plano.itens_pedido_total,
+        itens_match_total: plano.itens_match_total,
+        itens_sem_match_total: plano.itens_sem_match_total,
+        itens: plano.itens_preview
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/NFeAssociarPedido/Preview] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao gerar prévia de associação' });
+  }
+});
+
+// POST /api/compras/pedidos-omie/nfe-associar-pedido
+// Objetivo: associar manualmente uma NF-e a um pedido de compra na Omie.
+app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async (req, res) => {
+  try {
+    const numeroNfe = String(req.body?.numero_nfe || '').trim();
+    const numeroPedido = String(req.body?.numero_pedido || '').trim();
+
+    if (!numeroNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    }
+    if (!numeroPedido) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido é obrigatório' });
+    }
+
+    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido);
+
+    const payloadAlterar = {
+      ide: { nIdReceb: Number(plano.n_id_receb) },
+      itensRecebimentoEditar: plano.itensRecebimentoEditar
+    };
+
+    await chamarApiRecebimentoNfeOmie('AlterarRecebimento', payloadAlterar);
+
+    const recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
+      nIdReceb: Number(plano.n_id_receb)
+    });
+
+    const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimentoAposAlteracao);
+    const vinculoConfirmado = pedidosVinculados.includes(String(plano.n_cod_ped))
+      || pedidosVinculados.includes(String(plano.c_numero_pedido || '').trim())
+      || pedidosVinculados.includes(String(numeroPedido).trim());
+
+    return res.json({
+      ok: true,
+      message: vinculoConfirmado
+        ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.`
+        : 'Alteração enviada à Omie. Consulte novamente em instantes para confirmar a vinculação.',
+      dados: {
+        n_id_receb: recebimentoAposAlteracao?.cabec?.nIdReceb || plano.n_id_receb || null,
+        c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
+        n_cod_ped: plano.n_cod_ped,
+        c_numero_pedido: plano.c_numero_pedido || null,
+        pedidos_vinculados: pedidosVinculados
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/NFeAssociarPedido] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao associar NF-e ao pedido na Omie' });
+  }
+});
 
 // POST /api/compras/pedidos-omie/nfe-disponibilidade
 // Objetivo: validar em lote apenas no banco se existe c_numero_nfe para cada pedido/valor (sem chamar Omie).
@@ -20820,6 +22337,29 @@ app.get('/api/compras/pedidos-omie/nfe-pdf-redirect', async (req, res) => {
   } catch (err) {
     console.error('[Compras/NFePdfRedirect] Erro:', err);
     return res.status(500).send('Erro ao abrir PDF da NF-e');
+  }
+});
+
+// GET /api/compras/pedidos-omie/nfe-pdf-redirect-por-numero
+// Objetivo: abrir o PDF diretamente via número da NF-e informado.
+app.get('/api/compras/pedidos-omie/nfe-pdf-redirect-por-numero', async (req, res) => {
+  try {
+    const numeroNfeRaw = String(req.query.numero_nfe || '').trim();
+    const numeroNfeDigitos = numeroNfeRaw.replace(/\D/g, '');
+
+    if (!numeroNfeDigitos) {
+      return res.status(400).send('Número da NF-e inválido');
+    }
+
+    const omieResult = await obterPdfNfeViaOmie(numeroNfeDigitos);
+    if (!omieResult?.ok) {
+      return res.status(404).send(omieResult?.error || 'PDF da NF-e não encontrado');
+    }
+
+    return res.redirect(302, omieResult.cPdf);
+  } catch (err) {
+    console.error('[Compras/NFePdfRedirectPorNumero] Erro:', err);
+    return res.status(500).send('Erro ao abrir PDF da NF-e por número');
   }
 });
 
@@ -22840,6 +24380,7 @@ const OMIE_AUTOSYNC_TABELAS_DISPONIVEIS = [
   'pedidos_compra',
   'requisicoes_compra',
   'recebimentos_nfe',
+  'notas_entrada',
 ];
 
 const omieWebhookAutoSyncState = {
@@ -22870,8 +24411,56 @@ function normalizarTabelasAutoSync(tabelas) {
   return normalizadas.length > 0 ? Array.from(new Set(normalizadas)) : [...OMIE_AUTOSYNC_TABELAS_DISPONIVEIS];
 }
 
-function obterTarefasAutoSyncOmie(tabelasSelecionadas) {
+function normalizarDataAutoSync(valor) {
+  const texto = String(valor || '').trim();
+  if (!texto) return null;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(texto)) return texto;
+  const iso = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  return null;
+}
+
+function dataHojePtBr() {
+  const hoje = new Date();
+  const dia = String(hoje.getDate()).padStart(2, '0');
+  const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+  const ano = String(hoje.getFullYear());
+  return `${dia}/${mes}/${ano}`;
+}
+
+function parseBoolAutoSync(valor, padrao = false) {
+  if (valor === undefined || valor === null || valor === '') return padrao;
+  const texto = String(valor).trim().toLowerCase();
+  if (['1', 'true', 'sim', 'yes', 'on'].includes(texto)) return true;
+  if (['0', 'false', 'nao', 'não', 'no', 'off'].includes(texto)) return false;
+  return !!valor;
+}
+
+function normalizarOpcoesAutoSync(opcoes = {}) {
+  const dataInicial = normalizarDataAutoSync(opcoes.data_inicial || opcoes.dtEmissaoDe || opcoes.dt_emissao_de);
+  let dataFinal = normalizarDataAutoSync(opcoes.data_final || opcoes.dtEmissaoAte || opcoes.dt_emissao_ate);
+
+  if ((opcoes.data_inicial || opcoes.dtEmissaoDe || opcoes.dt_emissao_de) && !dataInicial) {
+    throw new Error('Data inicial inválida. Use DD/MM/YYYY ou YYYY-MM-DD.');
+  }
+  if ((opcoes.data_final || opcoes.dtEmissaoAte || opcoes.dt_emissao_ate) && !dataFinal) {
+    throw new Error('Data final inválida. Use DD/MM/YYYY ou YYYY-MM-DD.');
+  }
+
+  if (dataInicial && !dataFinal) {
+    dataFinal = dataHojePtBr();
+  }
+
+  const filtrosData = {};
+  if (dataInicial) filtrosData.data_inicial = dataInicial;
+  if (dataFinal) filtrosData.data_final = dataFinal;
+
+  return { filtrosData };
+}
+
+function obterTarefasAutoSyncOmie(tabelasSelecionadas, opcoes = {}) {
   const selecionadas = normalizarTabelasAutoSync(tabelasSelecionadas);
+  const { filtrosData } = normalizarOpcoesAutoSync(opcoes);
 
   const mapa = {
     produtos_omie: {
@@ -22884,15 +24473,27 @@ function obterTarefasAutoSyncOmie(tabelasSelecionadas) {
     },
     pedidos_compra: {
       nome: 'pedidos_compra',
-      fn: () => syncPedidosCompraOmie({}),
+      fn: async () => {
+        const syncPedidos = await syncPedidosCompraOmie({ ...filtrosData });
+        const syncEtapaNf = await atualizarEtapaNFPedidosPorBanco({ manterEtapa80: true });
+        return {
+          ok: !!syncPedidos?.ok && !!syncEtapaNf?.ok,
+          pedidos_compra: syncPedidos,
+          etapa_nf: syncEtapaNf,
+        };
+      },
     },
     requisicoes_compra: {
       nome: 'requisicoes_compra',
-      fn: () => syncRequisicoesCompraOmie({}),
+      fn: () => syncRequisicoesCompraOmie({ ...filtrosData }),
     },
     recebimentos_nfe: {
       nome: 'recebimentos_nfe',
-      fn: () => syncRecebimentosNFeOmie({}),
+      fn: () => syncRecebimentosNFeOmie({ ...filtrosData }),
+    },
+    notas_entrada: {
+      nome: 'notas_entrada',
+      fn: () => syncRecebimentosNFeOmie({ ...filtrosData }),
     },
   };
 
@@ -22991,7 +24592,7 @@ async function syncProdutosOmieIncremental(paginasPorExecucao = 1) {
   return { ok: true, processados, sucesso, erros, proxima_pagina: paginaAtual, total_paginas: totalPaginasConhecidas };
 }
 
-async function executarAutoSyncWebhooksOmie(motivo = 'intervalo', tabelasSelecionadas = null) {
+async function executarAutoSyncWebhooksOmie(motivo = 'intervalo', tabelasSelecionadas = null, opcoes = {}) {
   if (omieWebhookAutoSyncState.running) {
     console.log(`[OmieAutoSync] Execução ignorada (${motivo}) - sincronização anterior ainda em andamento.`);
     return { ok: false, error: 'sync_em_andamento' };
@@ -23011,7 +24612,7 @@ async function executarAutoSyncWebhooksOmie(motivo = 'intervalo', tabelasSelecio
   try {
     console.log(`[OmieAutoSync] Iniciando sincronização automática (${motivo})...`);
 
-    const tarefas = obterTarefasAutoSyncOmie(tabelasSelecionadas);
+    const tarefas = obterTarefasAutoSyncOmie(tabelasSelecionadas, opcoes);
 
     for (const tarefa of tarefas) {
       const tarefaInicio = Date.now();
@@ -23135,10 +24736,60 @@ app.get('/api/omie/autosync/history', async (req, res) => {
   });
 });
 
+app.get('/api/omie/autosync/live-log', async (req, res) => {
+  try {
+    const limit = Math.max(20, Math.min(300, Number(req.query.limit) || 120));
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const logPath = path.join(homeDir, '.pm2', 'logs', 'intranet-api-out.log');
+
+    let stats;
+    try {
+      stats = await fsp.stat(logPath);
+    } catch (_err) {
+      return res.json({ ok: true, lines: [], source: 'pm2-out', path: logPath });
+    }
+
+    const bytesToRead = Math.min(300 * 1024, Number(stats.size) || 0);
+    if (!bytesToRead) {
+      return res.json({ ok: true, lines: [], source: 'pm2-out', path: logPath });
+    }
+
+    const start = Math.max(0, Number(stats.size) - bytesToRead);
+    const fd = await fsp.open(logPath, 'r');
+    const buffer = Buffer.alloc(bytesToRead);
+    try {
+      await fd.read(buffer, 0, bytesToRead, start);
+    } finally {
+      await fd.close();
+    }
+
+    const texto = buffer.toString('utf8');
+    const regexTags = /\[(OmieAutoSync|RecebimentosNFe|PedidosCompra|RequisicoesCompra|Fornecedores)\]/;
+    const linhas = texto
+      .split(/\r?\n/)
+      .map(l => String(l || '').trim())
+      .filter(Boolean)
+      .filter(l => regexTags.test(l));
+
+    return res.json({
+      ok: true,
+      source: 'pm2-out',
+      path: logPath,
+      lines: linhas.slice(-limit)
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao carregar log atual do auto-sync' });
+  }
+});
+
 app.post('/api/omie/autosync/run', express.json(), async (req, res) => {
   const tabelas = normalizarTabelasAutoSync(req.body?.tabelas || req.body?.tables || []);
   const motivo = req.body?.motivo ? String(req.body.motivo) : 'manual';
-  const resultado = await executarAutoSyncWebhooksOmie(motivo, tabelas);
+  const opcoes = {
+    data_inicial: req.body?.data_inicial,
+    data_final: req.body?.data_final,
+  };
+  const resultado = await executarAutoSyncWebhooksOmie(motivo, tabelas, opcoes);
   if (!resultado?.ok && resultado?.error === 'sync_em_andamento') {
     return res.status(409).json({ ok: false, error: 'Sincronização já está em andamento' });
   }
