@@ -3850,13 +3850,31 @@ app.post([
   async (req, res) => {
     try {
       const body = (req.body && typeof req.body === 'object') ? req.body : {};
-      const topic = body.topic || body?.event?.topic || body?.evento?.topic || '';
+      const topic =
+        String(
+          body.topic
+          || body.topico
+          || body?.event?.topic
+          || body?.evento?.topic
+          || body?.evento?.topico
+          || body?.payload?.topic
+          || body?.data?.topic
+          || ''
+        ).trim();
+
+      // A Omie costuma validar o endpoint sem enviar um topic de negócio.
+      if (!topic) {
+        return res.status(200).json({
+          ok: true,
+          msg: 'validacao recebida (sem topic)',
+        });
+      }
 
       if (!isNotaEntradaTopic(topic)) {
-        return res.status(400).json({
-          ok: false,
-          error: 'Este endpoint aceita apenas topicos NotaEntrada.*',
-          topic: topic || null,
+        return res.status(200).json({
+          ok: true,
+          msg: 'topic ignorado por este endpoint',
+          topic,
         });
       }
 
