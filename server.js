@@ -3846,7 +3846,6 @@ app.post([
     '/webhooks/omie/notas-entrada/',
     '/api/webhooks/omie/notas-entrada/',
   ],
-  chkOmieToken,
   express.json(),
   async (req, res) => {
     try {
