@@ -13,6 +13,11 @@ module.exports = (pool) => {
       ALTER TABLE public.agendamento_sincronizacao
       ADD COLUMN IF NOT EXISTS tabelas TEXT[] DEFAULT ARRAY['produtos_omie', 'fornecedores', 'pedidos_compra', 'requisicoes_compra', 'recebimentos_nfe']::TEXT[];
     `);
+    await client.query(`
+      ALTER TABLE public.agendamento_sincronizacao
+      ADD COLUMN IF NOT EXISTS data_inicial DATE,
+      ADD COLUMN IF NOT EXISTS recebimentos_ignorar_etapa_80 BOOLEAN DEFAULT false;
+    `);
   }
 
   /**
@@ -25,7 +30,7 @@ module.exports = (pool) => {
     try {
       await ensureAgendamentoColumns(client);
       const result = await client.query(`
-        SELECT id, ativo, dias_semana, horario::text as horario, tabelas, ultima_execucao, proxima_execucao, updated_at
+        SELECT id, ativo, dias_semana, horario::text as horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80, ultima_execucao, proxima_execucao, updated_at
         FROM public.agendamento_sincronizacao
         ORDER BY id DESC
         LIMIT 1
@@ -34,9 +39,9 @@ module.exports = (pool) => {
       if (result.rows.length === 0) {
         // Criar configuração padrão se não existir
         const insertResult = await client.query(`
-          INSERT INTO public.agendamento_sincronizacao (ativo, dias_semana, horario, tabelas)
-          VALUES (false, ARRAY[1, 5], '09:00:00', $1)
-          RETURNING id, ativo, dias_semana, horario::text as horario, tabelas, ultima_execucao, proxima_execucao, updated_at
+          INSERT INTO public.agendamento_sincronizacao (ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80)
+          VALUES (false, ARRAY[1, 5], '09:00:00', $1, NULL, false)
+          RETURNING id, ativo, dias_semana, horario::text as horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80, ultima_execucao, proxima_execucao, updated_at
         `, [TABELAS_PADRAO]);
         return res.json(insertResult.rows[0]);
       }
@@ -59,7 +64,7 @@ module.exports = (pool) => {
    */
   router.post('/config', async (req, res) => {
     const client = await pool.connect();
-    const { ativo, dias_semana, horario, tabelas } = req.body;
+    const { ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80 } = req.body;
 
     try {
       await ensureAgendamentoColumns(client);
@@ -84,22 +89,35 @@ module.exports = (pool) => {
         return res.status(400).json({ error: 'Selecione ao menos uma tabela para sincronizar' });
       }
 
+      let dataInicialNormalizada = null;
+      if (data_inicial !== undefined && data_inicial !== null && String(data_inicial).trim() !== '') {
+        const valorData = String(data_inicial).trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(valorData)) {
+          return res.status(400).json({ error: 'Campo "data_inicial" deve estar no formato YYYY-MM-DD' });
+        }
+        dataInicialNormalizada = valorData;
+      }
+
+      const ignorarEtapa80 = !!recebimentos_ignorar_etapa_80;
+
       // Calcular próxima execução
       const proximaExecucao = calcularProximaExecucao(dias_semana, horario, ativo);
 
       // Atualizar ou inserir configuração
       const result = await client.query(`
-        INSERT INTO public.agendamento_sincronizacao (id, ativo, dias_semana, horario, tabelas, proxima_execucao)
-        VALUES (1, $1, $2, $3, $4, $5)
+        INSERT INTO public.agendamento_sincronizacao (id, ativo, dias_semana, horario, tabelas, proxima_execucao, data_inicial, recebimentos_ignorar_etapa_80)
+        VALUES (1, $1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (id) DO UPDATE SET
           ativo = $1,
           dias_semana = $2,
           horario = $3,
           tabelas = $4,
           proxima_execucao = $5,
+          data_inicial = $6,
+          recebimentos_ignorar_etapa_80 = $7,
           updated_at = CURRENT_TIMESTAMP
-        RETURNING id, ativo, dias_semana, horario::text as horario, tabelas, proxima_execucao, updated_at
-      `, [ativo, dias_semana, horario, tabelasNormalizadas, proximaExecucao]);
+        RETURNING id, ativo, dias_semana, horario::text as horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80, proxima_execucao, updated_at
+      `, [ativo, dias_semana, horario, tabelasNormalizadas, proximaExecucao, dataInicialNormalizada, ignorarEtapa80]);
 
       console.log('[Agendamento] Configuração salva:', result.rows[0]);
       
@@ -127,7 +145,7 @@ module.exports = (pool) => {
       await ensureAgendamentoColumns(client);
       // Buscar configuração
       const configResult = await client.query(`
-        SELECT ativo, dias_semana, horario, tabelas
+        SELECT ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80
         FROM public.agendamento_sincronizacao
         ORDER BY id DESC
         LIMIT 1
@@ -168,6 +186,8 @@ module.exports = (pool) => {
           body: JSON.stringify({
             motivo: 'agendamento',
             tabelas,
+            data_inicial: config.data_inicial || null,
+            recebimentos_ignorar_etapa_80: !!config.recebimentos_ignorar_etapa_80,
           })
         });
         resultadoExecucao = await execResp.json().catch(() => null);

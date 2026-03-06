@@ -5,9 +5,7 @@ promts para guardar conversas com a IA:
 Gere um resumo executivo da conversa com foco em retomada futura do tema.
 Mantenha apenas os pontos realmente relevantes: objetivo, decisões, alterações feitas, problemas encontrados, pendências e próximos passos.
 Se a pasta não existir, crie nesta estrutura:
-Historico de conversar IA/Compras/
-Instrução para guardar conversas com a IA/
-Primeira orientação/
+Historico de conversar IA/Compras/AssocoarNFe ao pedido/
 Salve o resumo em arquivo .md com nome no padrão:
 resumo_conversa.md
 No final do arquivo, inclua um bloco “Como retomar na próxima conversa” com um texto curto que eu possa colar para continuar o trabalho.
@@ -20,15 +18,23 @@ O que foi implementado
 Pendências
 
 
-para atualização:
-Atualize o Historico de conversar IA/Compras/Kanban cotação/resumo_conversa.md
-Formato obrigatório do resumo:
+## Prompt de atualização (copiar e colar)
+Atualize o arquivo `Historico de conversar IA/Compras/AssocoarNFe ao pedido/resumo_conversa.md` sem apagar o que já existe. Faça evolução cronológica (histórico antigo + novidades), mantendo lógica contínua.
+
+Formato obrigatório:
 Tema
 Objetivo
 Contexto inicial
 O que foi decidido
 O que foi implementado
 Pendências
+
+Regras:
+1) Não sobrescrever contexto anterior; apenas consolidar e evoluir.
+2) Registrar claramente regra antiga → regra nova quando houver mudança.
+3) Listar endpoints/arquivos alterados de forma objetiva.
+4) Em Pendências, manter só itens realmente abertos.
+
 
 
 Historico de conversar IA/

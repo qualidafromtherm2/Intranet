@@ -458,6 +458,9 @@
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
+                  <button id="comprasAssociarPedidoNfeBtn" class="content-button" type="button" onclick="abrirModalAssociarPedidoNfe()" style="background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Associar NF-e a Pedido">
+                    <i class="fa-solid fa-link" style="font-size:18px;"></i>
+                  </button>
                   <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Solicitação">
                     <i class="fa-solid fa-file-circle-plus" style="font-size:20px;"></i>
                   </button>
@@ -1529,14 +1532,16 @@
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Solicitante</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Previsão</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Responsável</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Fornecedor</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Observação</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Criado em</th>
+                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Vlr.</th>
                         <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Ações</th>
                       </tr>
                     </thead>
                     <tbody id="recebimentoTbody">
                       <tr>
-                        <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+                        <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
                           <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
                           <div>Carregando dados...</div>
                         </td>
@@ -2420,6 +2425,22 @@
                         <span style="font-size:13px;color:#166534;">recebimentos_nfe</span>
                       </label>
                     </div>
+
+                    <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;">
+                      <div style="display:flex;flex-direction:column;gap:6px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+                        <label for="agendamentoDataInicial" style="font-size:12px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:0.4px;">
+                          Data inicial (opcional)
+                        </label>
+                        <input type="date" id="agendamentoDataInicial" style="padding:8px 10px;border:1px solid #86efac;border-radius:6px;font-size:13px;color:#166534;background:white;">
+                        <small style="font-size:11px;color:#15803d;">A data final será sempre o dia atual.</small>
+                      </div>
+
+                      <div style="display:flex;align-items:flex-start;gap:8px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+                        <span style="font-size:12px;color:#166534;line-height:1.35;">
+                          Em <b>recebimentos_nfe</b>, a sincronização atualiza <b>todas as etapas</b>.
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- Botão Salvar -->
@@ -2470,6 +2491,11 @@
               <div style="margin-top:8px;">
                 <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Histórico recente</div>
                 <div id="omieAutoSyncHistorico" style="background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;max-height:250px;overflow:auto;font-size:12px;color:#334155;"></div>
+              </div>
+
+              <div style="margin-top:10px;">
+                <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px;">Log atual</div>
+                <div id="omieAutoSyncLogAtual" style="background:#0b1220;border:1px solid #1e293b;border-radius:8px;padding:10px;max-height:220px;overflow:auto;font-size:11px;color:#cbd5e1;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">Carregando log...</div>
               </div>
             </div>
 
@@ -2533,22 +2559,6 @@
               </div>
             </div>
 
-            <!-- Informações -->
-            <div style="margin-top:20px;padding:16px;background:#fef3c7;border:2px solid #fbbf24;border-radius:8px;">
-              <div style="display:flex;gap:12px;">
-                <i class="fa-solid fa-info-circle" style="color:#f59e0b;font-size:20px;flex-shrink:0;"></i>
-                <div style="color:#92400e;font-size:13px;line-height:1.6;">
-                  <div style="font-weight:700;margin-bottom:8px;">Sobre a Sincronização Completa:</div>
-                  <ul style="margin:0;padding-left:20px;">
-                    <li>Sincroniza <strong>todos os produtos</strong> da Omie para o banco de dados local</li>
-                    <li>Consulta <strong>detalhes completos</strong> de cada produto individualmente</li>
-                    <li>Tempo estimado: <strong>30-60 minutos</strong> dependendo da quantidade de produtos</li>
-                    <li>Atualizações a cada <strong>50 produtos</strong> processados</li>
-                    <li>Após a sincronização, o webhook manterá tudo atualizado automaticamente</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -5215,10 +5225,31 @@ function attachDropZone(ul) {
   const horarioInput = document.getElementById('horarioAgendamento');
   const proximaExecucaoDiv = document.getElementById('proximaExecucao');
   const proximaExecucaoTexto = document.getElementById('proximaExecucaoTexto');
+  const dataInicialInput = document.getElementById('agendamentoDataInicial');
   const tabelasCheckboxes = () => Array.from(document.querySelectorAll('.agendamento-tabela'));
+  const aplicarTamanhoCheckboxesAgendamento = () => {
+    const checkboxes = [
+      ...Array.from(document.querySelectorAll('.dia-semana')),
+      ...Array.from(document.querySelectorAll('.agendamento-tabela'))
+    ].filter(Boolean);
+
+    checkboxes.forEach((cb) => {
+      cb.style.setProperty('width', '18px', 'important');
+      cb.style.setProperty('height', '18px', 'important');
+      cb.style.setProperty('min-width', '18px', 'important');
+      cb.style.setProperty('min-height', '18px', 'important');
+      cb.style.setProperty('max-width', '18px', 'important');
+      cb.style.setProperty('max-height', '18px', 'important');
+      cb.style.setProperty('transform', 'none', 'important');
+      cb.style.setProperty('appearance', 'auto', 'important');
+      cb.style.setProperty('-webkit-appearance', 'auto', 'important');
+      cb.style.setProperty('flex', '0 0 auto', 'important');
+    });
+  };
 
   // Carregar configuração ao iniciar
   carregarConfiguracao();
+  aplicarTamanhoCheckboxesAgendamento();
 
   // Event listener do checkbox ativar/desativar
   if (checkboxAtivo) {
@@ -5302,7 +5333,12 @@ function attachDropZone(ul) {
         tabelasCheckboxes().forEach(cb => {
           cb.checked = tabelasSelecionadas.length ? tabelasSelecionadas.includes(cb.value) : true;
         });
-        
+        aplicarTamanhoCheckboxesAgendamento();
+
+        if (dataInicialInput) {
+          dataInicialInput.value = config.data_inicial ? String(config.data_inicial).slice(0, 10) : '';
+        }
+
         // Mostrar próxima execução
         if (config.proxima_execucao) {
           mostrarProximaExecucao(config.proxima_execucao);
@@ -5318,6 +5354,7 @@ function attachDropZone(ul) {
     const horario = horarioInput.value;
     const ativo = checkboxAtivo.checked;
     const tabelas = tabelasCheckboxes().filter(cb => cb.checked).map(cb => cb.value);
+    const dataInicial = dataInicialInput?.value ? String(dataInicialInput.value) : null;
 
     if (ativo) {
       if (diasSelecionados.length === 0) {
@@ -5338,7 +5375,8 @@ function attachDropZone(ul) {
       ativo: ativo,
       dias_semana: diasSelecionados,
       horario: horario,
-      tabelas
+      tabelas,
+      data_inicial: dataInicial
     };
 
     try {
@@ -5688,12 +5726,37 @@ function attachDropZone(ul) {
   const countBadge = document.getElementById('recebimentoCount');
   const menuRecebimento = document.getElementById('menu-recebimento');
 
+  const formatarQuantidade = (valor) => {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return '0';
+    return numero.toLocaleString('pt-BR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4
+    });
+  };
+
+  const formatarMoeda = (valor) => {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return 'R$ 0,00';
+    return numero.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    });
+  };
+
+  const formatarTelefone = (ddd, numero) => {
+    const dddTxt = String(ddd || '').trim();
+    const numeroTxt = String(numero || '').trim();
+    if (dddTxt && numeroTxt) return `(${dddTxt}) ${numeroTxt}`;
+    return numeroTxt || '-';
+  };
+
   // Função para carregar os dados de recebimento
   async function carregarRecebimento() {
     try {
       tbody.innerHTML = `
         <tr>
-          <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+          <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
             <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
             <div>Carregando dados...</div>
           </td>
@@ -5711,10 +5774,10 @@ function attachDropZone(ul) {
       if (!Array.isArray(dados) || dados.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+            <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
               <i class="fa-solid fa-inbox" style="font-size:48px;margin-bottom:10px;opacity:0.3;"></i>
               <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Nenhum item para recebimento</div>
-              <div style="font-size:13px;">Não há solicitações com status "compra realizada"</div>
+              <div style="font-size:13px;">Não há pedidos elegíveis (Etapa_NF vazia/50/60 com c_obs_int preenchido)</div>
             </td>
           </tr>
         `;
@@ -5732,8 +5795,16 @@ function attachDropZone(ul) {
             solicitante: item.solicitante,
             previsao_chegada: item.previsao_chegada,
             resp_inspecao_recebimento: item.resp_inspecao_recebimento,
+            fornecedor_nome_fantasia: item.fornecedor_nome_fantasia,
+            fornecedor_razao_social: item.fornecedor_razao_social,
+            fornecedor_cnpj_cpf: item.fornecedor_cnpj_cpf,
+            fornecedor_cidade: item.fornecedor_cidade,
+            fornecedor_estado: item.fornecedor_estado,
+            fornecedor_telefone1_ddd: item.fornecedor_telefone1_ddd,
+            fornecedor_telefone1_numero: item.fornecedor_telefone1_numero,
             observacao: item.observacao,
             created_at: item.created_at,
+            valor_total_pedido: item.valor_total_pedido,
             itens: []
           };
         }
@@ -5755,14 +5826,19 @@ function attachDropZone(ul) {
           : '-';
         
         const criadoEm = pedido.created_at
-          ? new Date(pedido.created_at).toLocaleString('pt-BR', { 
-              day: '2-digit', 
-              month: '2-digit', 
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
+          ? new Date(pedido.created_at).toLocaleDateString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
             })
           : '-';
+
+        const valorPedido = formatarMoeda(pedido.valor_total_pedido);
+  const fornecedorNome = pedido.fornecedor_nome_fantasia || '-';
+  const fornecedorRazao = pedido.fornecedor_razao_social || '-';
+        const fornecedorCnpj = pedido.fornecedor_cnpj_cpf || '-';
+  const fornecedorCidadeEstado = [pedido.fornecedor_cidade, pedido.fornecedor_estado].filter(Boolean).join(' / ') || '-';
+  const fornecedorTelefone = formatarTelefone(pedido.fornecedor_telefone1_ddd, pedido.fornecedor_telefone1_numero);
 
         // Linha do Pedido (grupo)
         const trPedido = document.createElement('tr');
@@ -5778,18 +5854,25 @@ function attachDropZone(ul) {
             <i class="fa-solid fa-chevron-right" style="color:#64748b;font-size:12px;transition:transform 0.3s;"></i>
           </td>
           <td style="padding:12px 16px;font-weight:700;color:#0369a1 !important;white-space:nowrap;font-size:14px;">
-            ${pedido.cnumero || '-'}
-            <span style="margin-left:8px;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:11px;font-weight:600;">${numItens} ${numItens === 1 ? 'item' : 'itens'}</span>
+            <div>${pedido.cnumero || '-'}</div>
+            <div style="margin-top:4px;display:inline-block;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:11px;font-weight:600;">${numItens} ${numItens === 1 ? 'item' : 'itens'}</div>
           </td>
           <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.solicitante || '-'}</td>
           <td style="padding:12px 16px;color:#334155 !important;white-space:nowrap;font-size:13px;">${previsao}</td>
           <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.resp_inspecao_recebimento || '-'}</td>
+          <td style="padding:12px 16px;color:#334155 !important;font-size:12px;line-height:1.35;min-width:260px;">
+            <div style="font-weight:700;color:#0f172a;">${fornecedorNome}</div>
+            <div style="color:#475569;">${fornecedorRazao}</div>
+            <div style="color:#64748b;font-size:11px;">CNPJ: ${fornecedorCnpj}</div>
+            <div style="color:#64748b;font-size:11px;">${fornecedorCidadeEstado}</div>
+            <div style="color:#64748b;font-size:11px;">${fornecedorTelefone}</div>
+          </td>
           <td style="padding:12px 16px;color:#475569 !important;font-size:12px;max-width:300px;">${pedido.observacao || '-'}</td>
           <td style="padding:12px 16px;color:#64748b !important;font-size:11px;white-space:nowrap;">${criadoEm}</td>
+          <td style="padding:12px 16px;color:#065f46 !important;font-size:13px;white-space:nowrap;text-align:right;font-weight:700;">${valorPedido}</td>
           <td style="padding:12px 16px;text-align:center;">
-            <button class="btn-receber-produto" data-pedido="${pedidoNum}" style="background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:6px;margin:0 auto;">
-              <i class="fa-solid fa-clipboard-check"></i>
-              <span>Receber Produto</span>
+            <button class="btn-receber-produto" data-pedido="${pedidoNum}" style="background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:white;border:none;width:36px;height:36px;border-radius:999px;font-size:14px;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;margin:0 auto;" title="Associar NF-e com pedido">
+              <i class="fa-solid fa-link"></i>
             </button>
           </td>
         `;
@@ -5842,6 +5925,10 @@ function attachDropZone(ul) {
         const btnReceber = trPedido.querySelector('.btn-receber-produto');
         btnReceber.addEventListener('click', (e) => {
           e.stopPropagation(); // Evita que o clique expanda/colapse a linha
+          if (typeof window.abrirModalAssociarPedidoNfe === 'function') {
+            window.abrirModalAssociarPedidoNfe();
+            return;
+          }
           abrirModalRecebimento(pedidoNum, pedido);
         });
 
@@ -5869,8 +5956,8 @@ function attachDropZone(ul) {
           
           trItem.innerHTML = `
             <td style="padding:8px 16px;"></td>
-            <td colspan="6" style="padding:8px 16px;">
-              <div style="display:grid;grid-template-columns:80px 150px 1fr 80px;gap:16px;align-items:center;background:white;padding:12px 16px;border-radius:8px;border-left:3px solid #0ea5e9;">
+            <td colspan="9" style="padding:8px 16px;">
+              <div style="display:grid;grid-template-columns:80px 150px 1fr 130px 130px;gap:16px;align-items:center;background:white;padding:12px 16px;border-radius:8px;border-left:3px solid #0ea5e9;">
                 <div>
                   <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">ID</div>
                   <div style="font-size:13px;color:#334155 !important;font-weight:500;">${item.id || '-'}</div>
@@ -5885,7 +5972,11 @@ function attachDropZone(ul) {
                 </div>
                 <div style="text-align:center;">
                   <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">Qtd</div>
-                  <div style="font-size:14px;color:#15803d !important;font-weight:700;background:#f0fdf4;padding:4px 12px;border-radius:6px;display:inline-block;">${item.quantidade || 0}</div>
+                  <div style="font-size:14px;color:#15803d !important;font-weight:700;background:#f0fdf4;padding:4px 12px;border-radius:6px;display:inline-block;">${formatarQuantidade(item.quantidade)} ${item.unidade || ''}</div>
+                </div>
+                <div style="text-align:center;">
+                  <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">Vlr. Item</div>
+                  <div style="font-size:14px;color:#065f46 !important;font-weight:700;background:#ecfdf5;padding:4px 12px;border-radius:6px;display:inline-block;">${formatarMoeda(item.valor_item)}</div>
                 </div>
               </div>
             </td>
@@ -5904,7 +5995,7 @@ function attachDropZone(ul) {
       console.error('❌ Erro ao carregar recebimento:', error);
       tbody.innerHTML = `
         <tr>
-          <td colspan="8" style="text-align:center;padding:40px;color:#ef4444;">
+          <td colspan="10" style="text-align:center;padding:40px;color:#ef4444;">
             <i class="fa-solid fa-exclamation-triangle" style="font-size:48px;margin-bottom:10px;opacity:0.5;"></i>
             <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Erro ao carregar dados</div>
             <div style="font-size:13px;">${error.message}</div>
@@ -5928,7 +6019,7 @@ function attachDropZone(ul) {
     // Renderizar itens
     modalItens.innerHTML = pedidoData.itens.map((item, index) => `
       <div style="background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);border:2px solid #e2e8f0;border-radius:12px;padding:16px;display:flex;align-items:center;gap:16px;transition:all 0.2s;" onmouseenter="this.style.borderColor='#0ea5e9';this.style.boxShadow='0 4px 12px rgba(14,165,233,0.2)';" onmouseleave="this.style.borderColor='#e2e8f0';this.style.boxShadow='none';">
-        <div style="flex:1;display:grid;grid-template-columns:80px 150px 1fr 100px;gap:16px;align-items:center;">
+        <div style="flex:1;display:grid;grid-template-columns:80px 150px 1fr 120px 140px;gap:16px;align-items:center;">
           <div>
             <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">ID</div>
             <div style="font-size:14px;color:#334155;font-weight:600;">${item.id || '-'}</div>
@@ -5943,7 +6034,11 @@ function attachDropZone(ul) {
           </div>
           <div style="text-align:center;">
             <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Qtd</div>
-            <div style="font-size:16px;color:#15803d;font-weight:700;background:#f0fdf4;padding:6px 16px;border-radius:8px;display:inline-block;">${item.quantidade || 0}</div>
+            <div style="font-size:16px;color:#15803d;font-weight:700;background:#f0fdf4;padding:6px 16px;border-radius:8px;display:inline-block;">${formatarQuantidade(item.quantidade)} ${item.unidade || ''}</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:4px;">Vlr. Item</div>
+            <div style="font-size:15px;color:#065f46;font-weight:700;background:#ecfdf5;padding:6px 12px;border-radius:8px;display:inline-block;">${formatarMoeda(item.valor_item)}</div>
           </div>
         </div>
         <button class="btn-receber-item" data-item-id="${item.id}" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;border:none;padding:12px 24px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:8px;white-space:nowrap;" onmouseenter="this.style.transform='scale(1.05)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.4)';" onmouseleave="this.style.transform='scale(1)';this.style.boxShadow='none';">
