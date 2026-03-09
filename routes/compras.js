@@ -4,6 +4,145 @@ const omieCall = require('../utils/omieCall');
 const router = express.Router();
 
 module.exports = (pool) => {
+  const formatarDataBr = (valor) => {
+    if (!valor) return null;
+    const data = valor instanceof Date ? valor : new Date(valor);
+    if (!(data instanceof Date) || Number.isNaN(data.getTime())) return null;
+    const dd = String(data.getDate()).padStart(2, '0');
+    const mm = String(data.getMonth() + 1).padStart(2, '0');
+    const yyyy = String(data.getFullYear());
+    return `${dd}/${mm}/${yyyy}`;
+  };
+
+  const formatarHoraBr = (valor) => {
+    if (!valor) return null;
+    const texto = String(valor).trim();
+    if (!texto) return null;
+    return texto.slice(0, 8);
+  };
+
+  const montarPayloadRecebimentoLocal = async (client, chaveNfe) => {
+    const recebResult = await client.query(
+      `SELECT
+         r.n_id_receb,
+         r.n_id_fornecedor,
+         r.c_chave_nfe,
+         r.c_numero_nfe,
+         r.c_serie_nfe,
+         r.c_modelo_nfe,
+         r.d_emissao_nfe,
+         r.n_valor_nfe,
+         r.v_total_produtos,
+         r.c_nome_fornecedor,
+         r.c_cnpj_cpf_fornecedor,
+         r.c_etapa,
+         r.c_natureza_operacao,
+         r.c_faturado,
+         r.c_recebido,
+         r.updated_at
+       FROM logistica.recebimentos_nfe_omie r
+       WHERE REGEXP_REPLACE(COALESCE(r.c_chave_nfe, ''), '\\D', '', 'g') = $1
+       ORDER BY r.updated_at DESC NULLS LAST, r.n_id_receb DESC
+       LIMIT 1`,
+      [chaveNfe]
+    );
+
+    if (!recebResult.rows.length) return null;
+    const receb = recebResult.rows[0];
+
+    const itensResult = await client.query(
+      `SELECT
+         i.n_sequencia,
+         i.c_codigo_produto,
+         i.c_descricao_produto,
+         i.n_qtde_nfe,
+         i.c_unidade_nfe,
+         i.n_preco_unit,
+         i.v_total_item,
+         i.n_id_produto,
+         i.n_qtde_recebida,
+         i.c_cfop_entrada,
+         i.codigo_local_estoque
+       FROM logistica.recebimentos_nfe_itens i
+       WHERE i.n_id_receb = $1
+       ORDER BY i.n_sequencia ASC NULLS LAST, i.id ASC`,
+      [receb.n_id_receb]
+    );
+
+    const freteResult = await client.query(
+      `SELECT
+         f.c_modalidade_frete,
+         f.c_nome_transportadora,
+         f.c_cnpj_cpf_transportadora,
+         f.n_quantidade_volumes,
+         f.n_peso_bruto
+       FROM logistica.recebimentos_nfe_frete f
+       WHERE f.n_id_receb = $1
+       ORDER BY f.id DESC
+       LIMIT 1`,
+      [receb.n_id_receb]
+    ).catch(() => ({ rows: [] }));
+
+    const frete = freteResult.rows[0] || {};
+    const itens = Array.isArray(itensResult.rows) ? itensResult.rows : [];
+    if (!itens.length) return null;
+
+    return {
+      cabec: {
+        nIdReceb: receb.n_id_receb,
+        nIdFornecedor: receb.n_id_fornecedor,
+        cCNPJ_CPF: receb.c_cnpj_cpf_fornecedor,
+        cNome: receb.c_nome_fornecedor,
+        cRazaoSocial: receb.c_nome_fornecedor,
+        cChaveNFe: receb.c_chave_nfe,
+        cEtapa: receb.c_etapa,
+        cNumeroNFe: receb.c_numero_nfe,
+        cSerieNFe: receb.c_serie_nfe,
+        cModeloNFe: receb.c_modelo_nfe,
+        dEmissaoNFe: formatarDataBr(receb.d_emissao_nfe),
+        nValorNFe: receb.n_valor_nfe,
+        cNaturezaOperacao: receb.c_natureza_operacao
+      },
+      totais: {
+        vTotalNFe: receb.n_valor_nfe,
+        vTotalProdutos: receb.v_total_produtos
+      },
+      transporte: {
+        cTipoFrete: frete.c_modalidade_frete || null,
+        cNomeTransp: frete.c_nome_transportadora || null,
+        cRazaoTransp: frete.c_nome_transportadora || null,
+        cCnpjCpfTransp: frete.c_cnpj_cpf_transportadora || null,
+        nQtdeVolume: frete.n_quantidade_volumes ?? null,
+        nPesoBruto: frete.n_peso_bruto ?? null
+      },
+      infoCadastro: {
+        cFaturado: receb.c_faturado || null,
+        cRecebido: receb.c_recebido || null,
+        dAlt: formatarDataBr(receb.updated_at),
+        hAlt: formatarHoraBr(receb.updated_at),
+        cOperacao: receb.c_natureza_operacao || null
+      },
+      itensRecebimento: itens.map((item, idx) => ({
+        itensCabec: {
+          nSequencia: Number(item.n_sequencia || idx + 1),
+          cCodigoProduto: item.c_codigo_produto || null,
+          cDescricaoProduto: item.c_descricao_produto || null,
+          nQtdeNFe: item.n_qtde_nfe,
+          cUnidadeNfe: item.c_unidade_nfe || null,
+          nPrecoUnit: item.n_preco_unit,
+          vTotalItem: item.v_total_item,
+          nIdProduto: item.n_id_produto
+        },
+        itensAjustes: {
+          cUnidade: item.c_unidade_nfe || null,
+          cCFOPEntrada: item.c_cfop_entrada || null,
+          nQtdeRecebida: item.n_qtde_recebida,
+          codigo_local_estoque: item.codigo_local_estoque
+        }
+      }))
+    };
+  };
+
   // Lista atividades de compras por família
   router.get('/atividades/:familiaCodigo', async (req, res) => {
     const client = await pool.connect();
@@ -383,6 +522,7 @@ module.exports = (pool) => {
           f.estado AS fornecedor_estado,
           f.telefone1_ddd AS fornecedor_telefone1_ddd,
           f.telefone1_numero AS fornecedor_telefone1_numero,
+          po."NFe vinculada" AS nfe_vinculada,
           rpf.lista_numeros_nfe AS fornecedor_lista_numeros_nfe,
           rpf.lista_nfes AS fornecedor_lista_nfes,
           COALESCE(pop.c_obs, po.c_obs) AS observacao,
@@ -412,6 +552,12 @@ module.exports = (pool) => {
             AND (
               po.d_inc_data IS NULL
               OR (rb.d_emissao_nfe IS NOT NULL AND rb.d_emissao_nfe >= po.d_inc_data::date)
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM compras.pedidos_omie po_v
+              WHERE NULLIF(BTRIM(po_v."NFe vinculada"), '') = rb.numero_nfe
+                AND po_v.n_cod_ped IS DISTINCT FROM po.n_cod_ped
             )
         ) rpf ON TRUE
         LEFT JOIN referencia_escolhida re
@@ -446,31 +592,13 @@ module.exports = (pool) => {
         });
       }
 
-      const appKey = process.env.OMIE_APP_KEY;
-      const appSecret = process.env.OMIE_APP_SECRET;
-      if (!appKey || !appSecret) {
-        return res.status(500).json({
-          ok: false,
-          error: 'Credenciais Omie não configuradas no servidor'
-        });
-      }
-
-      const retorno = await omieCall('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
-        call: 'ConsultarRecebimento',
-        param: [{
-          cChaveNfe: chaveNfe
-        }],
-        app_key: appKey,
-        app_secret: appSecret
-      });
-
-      const fault = retorno?.faultstring || retorno?.faultcode || '';
-      if (fault) {
-        return res.status(502).json({
-          ok: false,
-          error: String(fault)
-        });
-      }
+      const extrairSegundosRedundant = (mensagem) => {
+        const texto = String(mensagem || '');
+        const match = texto.match(/Aguarde\s+(\d+)\s+segundos?/i);
+        if (!match) return null;
+        const segundos = Number(match[1]);
+        return Number.isFinite(segundos) && segundos >= 0 ? segundos : null;
+      };
 
       const etapasLegendaQuery = await pool.query(`
         SELECT
@@ -489,6 +617,128 @@ module.exports = (pool) => {
       `);
 
       const etapasLegenda = Array.isArray(etapasLegendaQuery.rows) ? etapasLegendaQuery.rows : [];
+      const client = await pool.connect();
+      let retorno = null;
+      let source = 'omie';
+      try {
+        retorno = await montarPayloadRecebimentoLocal(client, chaveNfe);
+        if (retorno?.cabec?.nIdReceb) {
+          source = 'sql-cache';
+        }
+      } finally {
+        client.release();
+      }
+
+      if (!retorno?.cabec?.nIdReceb) {
+        const appKey = process.env.OMIE_APP_KEY;
+        const appSecret = process.env.OMIE_APP_SECRET;
+        if (!appKey || !appSecret) {
+          return res.status(500).json({
+            ok: false,
+            error: 'Credenciais Omie não configuradas no servidor'
+          });
+        }
+
+        try {
+          retorno = await omieCall('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
+            call: 'ConsultarRecebimento',
+            param: [{
+              cChaveNfe: chaveNfe
+            }],
+            app_key: appKey,
+            app_secret: appSecret
+          }, {
+            retryRedundant: false
+          });
+        } catch (erroOmie) {
+          const mensagem = String(erroOmie?.message || erroOmie || '');
+          const isRedundant = /REDUNDANT|consumo redundante/i.test(mensagem);
+          if (isRedundant) {
+            const segundosOmie = extrairSegundosRedundant(mensagem);
+            const retryAfterSeconds = Math.max(5, (Number.isFinite(segundosOmie) ? segundosOmie : 0) + 5);
+            return res.status(429).json({
+              ok: false,
+              redundant: true,
+              retry_after_seconds: retryAfterSeconds,
+              error: mensagem
+            });
+          }
+          throw erroOmie;
+        }
+
+        const fault = retorno?.faultstring || retorno?.faultcode || '';
+        if (fault) {
+          return res.status(502).json({
+            ok: false,
+            error: String(fault)
+          });
+        }
+      }
+
+      try {
+        const clientItens = await pool.connect();
+        try {
+          let nIdRecebItens = Number(retorno?.cabec?.nIdReceb || 0);
+          if (!Number.isFinite(nIdRecebItens) || nIdRecebItens <= 0) {
+            const recebLocal = await clientItens.query(
+              `SELECT r.n_id_receb
+                 FROM logistica.recebimentos_nfe_omie r
+                WHERE REGEXP_REPLACE(COALESCE(r.c_chave_nfe, ''), '\\D', '', 'g') = $1
+                ORDER BY r.updated_at DESC NULLS LAST, r.n_id_receb DESC
+                LIMIT 1`,
+              [chaveNfe]
+            );
+            nIdRecebItens = Number(recebLocal.rows?.[0]?.n_id_receb || 0);
+          }
+
+          if (Number.isFinite(nIdRecebItens) && nIdRecebItens > 0) {
+            const itensLocalQuery = await clientItens.query(
+              `SELECT
+                 i.n_sequencia,
+                 NULLIF(BTRIM(i.c_codigo_produto), '') AS c_codigo_produto,
+                 NULLIF(BTRIM(i.c_descricao_produto), '') AS c_descricao_produto
+               FROM logistica.recebimentos_nfe_itens i
+               WHERE i.n_id_receb = $1
+               ORDER BY i.n_sequencia ASC NULLS LAST, i.id ASC`,
+              [nIdRecebItens]
+            );
+
+            const itensLocais = Array.isArray(itensLocalQuery.rows) ? itensLocalQuery.rows : [];
+            const itensRecebimento = Array.isArray(retorno?.itensRecebimento) ? retorno.itensRecebimento : [];
+
+            if (itensLocais.length && itensRecebimento.length) {
+              const mapaPorSequencia = new Map();
+              itensLocais.forEach((item, idx) => {
+                const seq = Number(item?.n_sequencia || idx + 1);
+                if (Number.isFinite(seq) && seq > 0 && !mapaPorSequencia.has(seq)) {
+                  mapaPorSequencia.set(seq, item);
+                }
+              });
+
+              retorno.itensRecebimento = itensRecebimento.map((item, idx) => {
+                const cabec = item?.itensCabec || {};
+                const seqAtual = Number(cabec?.nSequencia || idx + 1);
+                const itemLocal = mapaPorSequencia.get(seqAtual) || itensLocais[idx] || null;
+                if (!itemLocal) return item;
+
+                return {
+                  ...item,
+                  itensCabec: {
+                    ...cabec,
+                    cCodigoProduto: itemLocal.c_codigo_produto || cabec.cCodigoProduto || null,
+                    cDescricaoProduto: itemLocal.c_descricao_produto || cabec.cDescricaoProduto || null
+                  }
+                };
+              });
+            }
+          }
+        } finally {
+          clientItens.release();
+        }
+      } catch (erroItensLocal) {
+        console.warn('[GET /api/compras/nfe-xml-detalhes] aviso ao aplicar itens locais:', erroItensLocal?.message || erroItensLocal);
+      }
+
       const etapaCodigo = String(retorno?.cabec?.cEtapa || '').trim();
       const etapaInfo = etapaCodigo
         ? (etapasLegenda.find((etapa) => String(etapa?.codigo || '').trim() === etapaCodigo) || null)
@@ -499,6 +749,7 @@ module.exports = (pool) => {
         chave_nfe: chaveNfe,
         call: 'ConsultarRecebimento',
         data: retorno,
+        source,
         etapa_info: etapaInfo,
         etapas_legenda: etapasLegenda
       });
