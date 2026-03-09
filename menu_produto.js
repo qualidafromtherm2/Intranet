@@ -26331,6 +26331,51 @@ window.enviarCotacoes = enviarCotacoes;
 // Armazena produtos do catálogo
 window.produtosCatalogoOmie = [];
 
+function atualizarLayoutModeloCompraCatalogo() {
+  const selectRetorno = document.getElementById('catalogoRetornoCotacoesGlobal');
+  const gridConfig = document.getElementById('catalogoGridConfiguracoes');
+  const coluna3 = document.getElementById('catalogoColuna3');
+  const modalContent = document.getElementById('modalCatalogoOmieContent');
+  if (!selectRetorno || !gridConfig || !coluna3 || !modalContent) return;
+
+  const retornoTexto = String(selectRetorno.value || '').trim().toLowerCase();
+  const ocultarColuna3 = retornoTexto === 'compra ja realizada' || retornoTexto === 'registro rapido de compra';
+
+  coluna3.style.display = ocultarColuna3 ? 'none' : 'flex';
+  gridConfig.style.gridTemplateColumns = ocultarColuna3 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)';
+  modalContent.style.maxWidth = ocultarColuna3 ? '1400px' : '1800px';
+}
+
+function atualizarTooltipModeloCompraCatalogo() {
+  const selectRetorno = document.getElementById('catalogoRetornoCotacoesGlobal');
+  const tooltip = document.getElementById('catalogoRetornoModeloTooltip');
+  if (!selectRetorno || !tooltip) return;
+
+  const mensagensPorModelo = {
+    '': 'Selecione um modelo para ver como a solicitação será tratada no fluxo de compras.',
+    'Apenas realizar compra sem retorno de valores ou caracteristica': 'Compra direta sem retorno de cotação; o fluxo segue para análise/cadastro normalmente.',
+    'Compra ja realizada': 'Use quando a compra já foi concluída; pode solicitar informações complementares como NFe.',
+    'Compra com retorno de valores e caracteristica tecnica': 'Solicita retorno completo da cotação com valores e características técnicas no kanban.',
+    'Registro rapido de compra': 'Registro rápido para compras que não seguem fluxo de kanban, apenas para registro.'
+  };
+
+  const valorAtual = String(selectRetorno.value || '');
+  tooltip.textContent = mensagensPorModelo[valorAtual] || mensagensPorModelo[''];
+  atualizarLayoutModeloCompraCatalogo();
+}
+
+function inicializarTooltipModeloCompraCatalogo() {
+  const selectRetorno = document.getElementById('catalogoRetornoCotacoesGlobal');
+  if (!selectRetorno) return;
+
+  if (!selectRetorno.dataset.tooltipModeloBound) {
+    selectRetorno.addEventListener('change', atualizarTooltipModeloCompraCatalogo);
+    selectRetorno.dataset.tooltipModeloBound = '1';
+  }
+
+  atualizarTooltipModeloCompraCatalogo();
+}
+
 // Carrega responsáveis para inspeção no painel de compra
 async function carregarResponsaveisCatalogoInspecao() {
   const select = document.getElementById('catalogoRespInspecaoRecebimento');
@@ -26361,6 +26406,8 @@ async function carregarResponsaveisCatalogoInspecao() {
 async function abrirModalCatalogoOmie() {
   const modal = document.getElementById('modalCatalogoOmie');
   if (!modal) return;
+
+  inicializarTooltipModeloCompraCatalogo();
   
   const lista = document.getElementById('listaProdutosCatalogo');
   if (lista) {
@@ -28278,8 +28325,10 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     const respInspecao = selectRespInspecao ? selectRespInspecao.value.trim() : '';
     const observacaoRecebimento = textareaObsRecebimento ? textareaObsRecebimento.value.trim() : '';
     let objetivoCompra = textareaObjetivo ? textareaObjetivo.value.trim() : '';
+    let valorGastoRegistroRapido = null;
 
     const compraJaRealizadaSelecionada = String(retornoCotacao || '').trim().toLowerCase() === 'compra ja realizada';
+    const registroRapidoSelecionado = String(retornoCotacao || '').trim().toLowerCase() === 'registro rapido de compra';
     if (compraJaRealizadaSelecionada) {
       const numeroNfe = await abrirDialogoEntradaCatalogo({
         titulo: 'Número da NFe obrigatório',
@@ -28307,6 +28356,32 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       if (textareaObjetivo) {
         textareaObjetivo.value = objetivoCompra;
       }
+    }
+
+    if (registroRapidoSelecionado) {
+      const valorGastoInput = await abrirDialogoEntradaCatalogo({
+        titulo: 'Valor gasto obrigatório',
+        label: 'Informe o valor gasto para concluir o registro rápido',
+        placeholder: 'Ex.: 1500,00',
+        valorInicial: '',
+        tipo: 'text'
+      });
+
+      const valorTexto = String(valorGastoInput || '').trim();
+      const valorNormalizado = valorTexto.replace(/\./g, '').replace(',', '.');
+      const valorNumero = Number(valorNormalizado);
+
+      if (!Number.isFinite(valorNumero) || valorNumero <= 0) {
+        alert('Para "Registro rapido de compra", informe um valor gasto válido maior que zero.');
+        if (btn) {
+          btn.innerHTML = '<i class="fa-solid fa-cart-plus" style="font-size:18px;"></i><span>Realizar solicitação de compra</span>';
+          btn.style.opacity = '1';
+          btn.disabled = false;
+        }
+        return;
+      }
+
+      valorGastoRegistroRapido = Number(valorNumero.toFixed(2));
     }
     
     // Processa anexos - UPLOAD via Supabase
@@ -28345,6 +28420,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       tipo_retorno_solicitado: retornoCotacao,
       resp_inspecao_recebimento: respInspecao,
       observacao_recebimento: observacaoRecebimento,
+      valor_gasto: valorGastoRegistroRapido,
       anexos: anexosUrls,
       link: linksCatalogo
     };
@@ -32324,7 +32400,7 @@ function limparFiltroGlobal() {
 }
 
 // Variável global para ratrear o modo de visualização atual
-let modoVisualizacaoKanban = false;
+let modoVisualizacaoKanban = true;
 
 function atualizarOffsetCabecalhoListaCompras() {
   const wrapper = document.getElementById('minhasComprasWrapper');

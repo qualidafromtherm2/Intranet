@@ -458,9 +458,6 @@
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;">
-                  <button id="comprasAssociarPedidoNfeBtn" class="content-button" type="button" onclick="abrirModalAssociarPedidoNfe()" style="background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Associar NF-e a Pedido">
-                    <i class="fa-solid fa-link" style="font-size:18px;"></i>
-                  </button>
                   <button id="comprasCatalogoOmieBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Solicitação">
                     <i class="fa-solid fa-file-circle-plus" style="font-size:20px;"></i>
                   </button>
@@ -1215,8 +1212,8 @@
         </div>
 
         <!-- Modal Catálogo Omie -->
-        <div id="modalCatalogoOmie" class="modal" style="display:none;z-index:10020;">
-          <div class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
+        <div id="modalCatalogoOmie" class="modal" style="display:none;z-index:10020;justify-content:center;align-items:flex-start;padding:20px 0;">
+          <div id="modalCatalogoOmieContent" class="modal-content" style="max-width:1800px;width:95%;max-height:90vh;overflow-y:auto;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-book" style="color:#3b82f6;"></i>
@@ -1229,10 +1226,32 @@
             <div class="modal-body" style="padding:20px;">
               
               <!-- Configurações Globais em 2 Colunas -->
-              <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;align-items:flex-start;">
+              <div id="catalogoGridConfiguracoes" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:16px;margin-bottom:20px;padding:16px;background:#f9fafb;border:2px solid #3b82f6;border-radius:8px;align-items:flex-start;">
                 
                 <!-- COLUNA ESQUERDA -->
                 <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
+                      Modelo de compra
+                      <span title="Selecione o modelo de compra para definir se a requisição exige retorno de cotação ou se será apenas um registro rápido." style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#0f172a;font-size:11px;cursor:help;">
+                        ?
+                      </span>
+                    </label>
+                    <select 
+                      id="catalogoRetornoCotacoesGlobal"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione...</option>
+                      <option value="Apenas realizar compra sem retorno de valores ou caracteristica" selected>🛒 Apenas realizar compra sem retorno de valores ou caracteristica</option>
+                      <option value="Compra ja realizada">✅ Compra ja realizada</option>
+                      <option value="Compra com retorno de valores e caracteristica tecnica">💰🔧 Compra com retorno de valores e caracteristica tecnica</option>
+                      <option value="Registro rapido de compra">⚡ Registro rapido de compra</option>
+                    </select>
+                    <div id="catalogoRetornoModeloTooltip" style="font-size:11px;line-height:1.45;color:#475569;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 10px;">
+                      Compra direta sem retorno de cotação; o fluxo segue para análise/cadastro normalmente.
+                    </div>
+                  </div>
+
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-building" style="color:#3b82f6;margin-right:4px;"></i>
@@ -1256,6 +1275,11 @@
                       <option value="">Selecione...</option>
                     </select>
                   </div>
+
+                </div>
+
+                <!-- COLUNA 2 -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
 
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
@@ -1282,54 +1306,6 @@
                       style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
                     <input type="hidden" id="catalogoDescricaoKeywords" value="" />
                     <div id="catalogoDescricaoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
-                  </div>
-
-                </div>
-
-                <!-- COLUNA DIREITA -->
-                <div style="display:flex;flex-direction:column;gap:12px;">
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-clipboard-question" style="color:#3b82f6;"></i>
-                      Tipo de retorno solicitado
-                      <span title="Se é compra direta, deixe em branco, ou selecione umas das opções para que o responsavel de comprar possa retornar no kanban cotado as informações que vc escolher." style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#e2e8f0;color:#0f172a;font-size:11px;cursor:help;">
-                        ?
-                      </span>
-                    </label>
-                    <select 
-                      id="catalogoRetornoCotacoesGlobal"
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                      <option value="">Selecione...</option>
-                      <option value="Apenas realizar compra sem retorno de valores ou caracteristica" selected>🛒 Apenas realizar compra sem retorno de valores ou caracteristica</option>
-                      <option value="Compra ja realizada">✅ Compra ja realizada</option>
-                      <option value="Solicitar retorno de valores e caracteristica tecnica">💰🔧 Solicitar retorno de valores e caracteristica tecnica</option>
-                      <option value="Solicitar retorno somente de caracteristica tecnica">🔧 Solicitar retorno somente de caracteristica tecnica</option>
-                      <option value="Solicitar retorno somente de valores">💰 Solicitar retorno somente de valores</option>
-                    </select>
-                  </div>
-
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
-                      Responsável pela inspeção do produto ao chegar na fábrica
-                    </label>
-                    <select 
-                      id="catalogoRespInspecaoRecebimento"
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
-                      <option value="">Selecione o responsável...</option>
-                    </select>
-                  </div>
-
-                  <div style="display:flex;flex-direction:column;gap:6px;">
-                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
-                      <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
-                      Observação para recebimento
-                    </label>
-                    <textarea 
-                      id="catalogoObservacaoRecebimento"
-                      rows="2"
-                      placeholder="Observações sobre o recebimento do produto..."
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;height:80px;"></textarea>
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:6px;">
@@ -1359,7 +1335,35 @@
                     </div>
                   </div>
 
-                  <div style="display:flex;flex-direction:column;gap:6px;">
+                </div>
+
+                <!-- COLUNA 3 -->
+                <div id="catalogoColuna3" style="display:flex;flex-direction:column;gap:12px;">
+                  <div id="catalogoCampoObservacaoRecebimento" style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-comment-dots" style="color:#3b82f6;margin-right:4px;"></i>
+                      Observação para recebimento
+                    </label>
+                    <textarea 
+                      id="catalogoObservacaoRecebimento"
+                      rows="2"
+                      placeholder="Observações sobre o recebimento do produto..."
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;resize:vertical;height:80px;"></textarea>
+                  </div>
+
+                  <div id="catalogoCampoRespInspecao" style="display:flex;flex-direction:column;gap:6px;">
+                    <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
+                      <i class="fa-solid fa-user-check" style="color:#3b82f6;margin-right:4px;"></i>
+                      Responsável pela inspeção do produto ao chegar na fábrica
+                    </label>
+                    <select 
+                      id="catalogoRespInspecaoRecebimento"
+                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;">
+                      <option value="">Selecione o responsável...</option>
+                    </select>
+                  </div>
+
+                  <div id="catalogoCampoLink" style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-link" style="color:#3b82f6;margin-right:4px;"></i>
                       Link (opcional)
@@ -1523,25 +1527,26 @@
               </div>
               
               <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-                <div style="overflow-x:auto;">
-                  <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                <div style="overflow:auto;max-height:calc(100vh - 260px);">
+                  <table style="width:100%;border-collapse:separate;border-spacing:0;font-size:14px;">
                     <thead>
                       <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;width:40px;"></th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Nº Pedido</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Solicitante</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Previsão</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Responsável</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Fornecedor</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Observação</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Criado em</th>
-                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Vlr.</th>
-                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;">Ações</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;width:40px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);"></th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Nº Pedido</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Etapa_NF</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Solicitante</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Previsão</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Responsável</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Fornecedor</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);width:150px;max-width:150px;">Observação</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Criado em</th>
+                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Vlr.</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Ações</th>
                       </tr>
                     </thead>
                     <tbody id="recebimentoTbody">
                       <tr>
-                        <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
+                        <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
                           <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
                           <div>Carregando dados...</div>
                         </td>
@@ -5725,6 +5730,7 @@ function attachDropZone(ul) {
   const tbody = document.getElementById('recebimentoTbody');
   const countBadge = document.getElementById('recebimentoCount');
   const menuRecebimento = document.getElementById('menu-recebimento');
+  const pedidosComparacaoMap = {};
 
   const formatarQuantidade = (valor) => {
     const numero = Number(valor);
@@ -5751,12 +5757,473 @@ function attachDropZone(ul) {
     return numeroTxt || '-';
   };
 
+  const escaparHtml = (valor) => String(valor ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const normalizarListaNfesFornecedor = (valor) => {
+    let lista = valor;
+    if (typeof lista === 'string') {
+      try {
+        lista = JSON.parse(lista);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    if (!Array.isArray(lista)) return [];
+
+    return lista
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const numeroNfe = String(item.numero_nfe || item.numeroNfe || '').trim();
+        const chaveNfe = String(item.chave_nfe || item.chaveNfe || '').replace(/\D/g, '');
+        if (!numeroNfe || !/^\d{44}$/.test(chaveNfe)) return null;
+        return { numeroNfe, chaveNfe };
+      })
+      .filter(Boolean);
+  };
+
+  const montarListaNfesHtml = (listaNfes, listaFallback) => {
+    if (Array.isArray(listaNfes) && listaNfes.length > 0) {
+      return listaNfes
+        .map((nfe) => (
+          `<a href="#" class="link-nfe-omie" data-chave-nfe="${escaparHtml(nfe.chaveNfe)}" data-numero-nfe="${escaparHtml(nfe.numeroNfe)}" style="color:#0369a1;text-decoration:underline;font-weight:600;">${escaparHtml(nfe.numeroNfe)}</a>`
+        ))
+        .join(' · ');
+    }
+
+    const fallback = String(listaFallback || '').trim();
+    return fallback ? escaparHtml(fallback) : '-';
+  };
+
+  const formatarDataBr = (valor) => {
+    if (!valor) return '-';
+    const data = new Date(valor);
+    if (Number.isNaN(data.getTime())) return escaparHtml(String(valor));
+    return data.toLocaleDateString('pt-BR');
+  };
+
+  const normalizarIconeEtapa = (iconeValor) => {
+    const iconeBruto = String(iconeValor || '').trim();
+    const iconeNormalizado = iconeBruto
+      .toLowerCase()
+      .replace(/^fa[srlbd]?\s+/g, '')
+      .replace(/^fa-/g, '')
+      .replace(/[^a-z0-9-]/g, '');
+    return iconeNormalizado;
+  };
+
+  const renderizarIconeEtapa = (iconeValor) => {
+    const iconeNormalizado = normalizarIconeEtapa(iconeValor);
+    return iconeNormalizado
+      ? `<i class="fa-solid fa-${escaparHtml(iconeNormalizado)}" aria-hidden="true" style="font-size:12px;line-height:1;"></i>`
+      : '';
+  };
+
+  const renderizarBadgeEtapa = (codigoEtapa, etapaInfo) => {
+    const codigo = String(codigoEtapa || '').trim();
+    const descricao = String(etapaInfo?.descricao || '').trim() || (codigo ? `Etapa ${codigo}` : 'Sem etapa');
+    const cor = String(etapaInfo?.cor || '').trim() || '#0ea5e9';
+    const iconeHtml = renderizarIconeEtapa(etapaInfo?.icone);
+
+    return `
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid ${escaparHtml(cor)};background:${escaparHtml(cor)}22;color:${escaparHtml(cor)};font-weight:700;">
+        ${iconeHtml}
+        <span style="color:${escaparHtml(cor)};">${escaparHtml(descricao)}</span>
+      </span>
+    `;
+  };
+
+  const normalizarTextoComparacao = (valor) => String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+  const renderizarSequenciaTopoNfe = (etapaInfo, codigoEtapaAtual = '', etapasLegenda = []) => {
+    const sequencia = ['Faturado', 'Recebido Parcial', 'Recebido Total', 'Conferido'];
+    const etapaAtualTxt = normalizarTextoComparacao(etapaInfo?.descricao_customizada || etapaInfo?.descricao);
+    const codigoAtual = String(codigoEtapaAtual || '').trim();
+
+    let indiceAtual = -1;
+
+    const ordemAtual = Number(etapaInfo?.ordem);
+    if (Number.isFinite(ordemAtual)) {
+      const idxPorOrdem = Math.trunc(ordemAtual) - 4;
+      if (idxPorOrdem >= 0 && idxPorOrdem < sequencia.length) {
+        indiceAtual = idxPorOrdem;
+      }
+    }
+
+    if (indiceAtual < 0 && etapaAtualTxt) {
+      indiceAtual = sequencia.findIndex((item) => normalizarTextoComparacao(item) === etapaAtualTxt);
+    }
+
+    if (indiceAtual < 0 && codigoAtual && Array.isArray(etapasLegenda) && etapasLegenda.length) {
+      const etapaPorCodigo = etapasLegenda.find((etapa) => String(etapa?.codigo || '').trim() === codigoAtual);
+      const ordemPorCodigo = Number(etapaPorCodigo?.ordem);
+      if (Number.isFinite(ordemPorCodigo)) {
+        const idxPorCodigo = Math.trunc(ordemPorCodigo) - 4;
+        if (idxPorCodigo >= 0 && idxPorCodigo < sequencia.length) {
+          indiceAtual = idxPorCodigo;
+        }
+      }
+    }
+
+    return sequencia.map((etapa, index) => {
+      const ativo = index === indiceAtual;
+      const concluido = indiceAtual >= 0 && index <= indiceAtual;
+      const bg = concluido ? (ativo ? '#15803d' : '#dcfce7') : '#e2e8f0';
+      const cor = concluido ? (ativo ? '#ffffff' : '#166534') : '#64748b';
+      const linhaConectada = index > 0
+        ? `<span style="display:inline-block;width:14px;height:2px;border-radius:2px;background:${(indiceAtual >= 0 && index <= indiceAtual) ? '#22c55e' : '#94a3b8'};"></span>`
+        : '';
+      return `${linhaConectada}<span style="padding:3px 8px;border-radius:999px;background:${bg};color:${cor};font-size:11px;font-weight:${ativo ? '700' : '600'};white-space:nowrap;">${escaparHtml(etapa)}</span>`;
+    }).join('');
+  };
+
+  const renderizarResumoRecebimentoOmie = (dados, etapaInfo = null, etapasLegenda = [], pedidoContexto = null) => {
+    const cabec = dados?.cabec || {};
+    const totais = dados?.totais || {};
+    const transporte = dados?.transporte || {};
+    const infoCadastro = dados?.infoCadastro || {};
+    const itens = Array.isArray(dados?.itensRecebimento) ? dados.itensRecebimento : [];
+    const itensPedido = Array.isArray(pedidoContexto?.itens) ? pedidoContexto.itens : [];
+    const pedidoCriadoEm = pedidoContexto?.created_at
+      ? new Date(pedidoContexto.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : '-';
+    const pedidoObservacao = String(pedidoContexto?.observacao || '-');
+    const numeroPedidoContexto = String(pedidoContexto?.cnumero || '').trim();
+
+    const itensHtml = itens.length
+      ? itens.map((item, idx) => {
+          const cab = item?.itensCabec || {};
+          const ajustes = item?.itensAjustes || {};
+          return `
+            <tr>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${idx + 1}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;font-family:monospace;color:#0f172a;">${escaparHtml(cab.cCodigoProduto || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(cab.cDescricaoProduto || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarQuantidade(cab.nQtdeNFe)}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(cab.cUnidadeNfe || ajustes.cUnidade || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(cab.nPrecoUnit)}</td>
+              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(cab.vTotalItem)}</td>
+            </tr>
+          `;
+        }).join('')
+      : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Nenhum item retornado.</td></tr>`;
+
+    const itensPedidoHtml = itensPedido.length
+      ? itensPedido.map((item, idx) => `
+          <tr>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${idx + 1}</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;font-family:monospace;color:#0f172a;">${escaparHtml(item.produto_codigo || '-')}</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(item.produto_descricao || '-')}</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarQuantidade(item.quantidade)}</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(item.unidade || '-')}</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">-</td>
+            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(item.valor_item)}</td>
+          </tr>
+        `).join('')
+      : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Sem itens do pedido para comparação.</td></tr>`;
+
+    const blocoAcaoVinculo = numeroPedidoContexto
+      ? `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+          <div style="font-size:12px;color:#1e3a8a;">
+            <strong>Pedido selecionado:</strong> ${escaparHtml(numeroPedidoContexto)}
+          </div>
+          <button
+            id="vincularNfePedidoBtn"
+            type="button"
+            style="background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#ffffff;border:none;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"
+          >
+            <i class="fa-solid fa-link"></i>
+            <span>Vincular NF-e x Pedido</span>
+          </button>
+          <div id="vincularNfePedidoStatus" style="width:100%;font-size:12px;color:#1e3a8a;display:none;"></div>
+        </div>
+      `
+      : '';
+
+    return `
+      ${blocoAcaoVinculo}
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;font-size:12px;color:#0f172a;">
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Cabeçalho</div>
+          <div><strong>Número:</strong> ${escaparHtml(cabec.cNumeroNFe || '-')}</div>
+          <div><strong>Série:</strong> ${escaparHtml(cabec.cSerieNFe || '-')}</div>
+          <div><strong>Emissão:</strong> ${escaparHtml(cabec.dEmissaoNFe || '-')}</div>
+          <div><strong>Fornecedor:</strong> ${escaparHtml(cabec.cRazaoSocial || cabec.cNome || '-')}</div>
+          <div><strong>CNPJ/CPF:</strong> ${escaparHtml(cabec.cCNPJ_CPF || '-')}</div>
+          <div><strong>Etapa:</strong> ${renderizarBadgeEtapa(cabec.cEtapa, etapaInfo)}</div>
+        </div>
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Totais e Status</div>
+          <div><strong>Valor NF-e:</strong> ${formatarMoeda(cabec.nValorNFe ?? totais.vTotalNFe)}</div>
+          <div><strong>Total Produtos:</strong> ${formatarMoeda(totais.vTotalProdutos)}</div>
+          <div><strong>Operação:</strong> ${escaparHtml(cabec.cNaturezaOperacao || infoCadastro.cOperacao || '-')}</div>
+          <div><strong>Recebido:</strong> ${escaparHtml(infoCadastro.cRecebido || '-')}</div>
+          <div><strong>Faturado:</strong> ${escaparHtml(infoCadastro.cFaturado || '-')}</div>
+          <div><strong>Atualização:</strong> ${escaparHtml(infoCadastro.dAlt || '-')} ${escaparHtml(infoCadastro.hAlt || '')}</div>
+        </div>
+        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Transporte</div>
+          <div><strong>Transportador:</strong> ${escaparHtml(transporte.cRazaoTransp || transporte.cNomeTransp || '-')}</div>
+          <div><strong>CNPJ/CPF:</strong> ${escaparHtml(transporte.cCnpjCpfTransp || '-')}</div>
+          <div><strong>Frete:</strong> ${escaparHtml(transporte.cTipoFrete || '-')}</div>
+          <div><strong>Volumes:</strong> ${escaparHtml(transporte.nQtdeVolume || transporte.cNumeroVolume || '-')}</div>
+          <div><strong>Peso Bruto:</strong> ${escaparHtml(transporte.nPesoBruto || '-')}</div>
+        </div>
+      </div>
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px;">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Itens do recebimento (NF-e)</div>
+        <div style="overflow:auto;max-height:300px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+            <colgroup>
+              <col style="width:6%;">
+              <col style="width:18%;">
+              <col style="width:30%;">
+              <col style="width:10%;">
+              <col style="width:10%;">
+              <col style="width:13%;">
+              <col style="width:13%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#f8fafc;">
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">#</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Código</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Descrição</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Qtd</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Unid.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Preço Unit.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Total Item</th>
+              </tr>
+            </thead>
+            <tbody>${itensHtml}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:12px;">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Comparação com itens do pedido</div>
+        <div style="overflow:auto;max-height:300px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+            <colgroup>
+              <col style="width:6%;">
+              <col style="width:18%;">
+              <col style="width:30%;">
+              <col style="width:10%;">
+              <col style="width:10%;">
+              <col style="width:13%;">
+              <col style="width:13%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#dcfce7;">
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">#</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Código</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Descrição</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Qtd</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Unid.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Preço Unit.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Total Item</th>
+              </tr>
+            </thead>
+            <tbody>${itensPedidoHtml}</tbody>
+          </table>
+        </div>
+        <div style="display:grid;grid-template-columns:95px 1fr;gap:6px;font-size:12px;margin-top:10px;color:#0f172a;">
+          <div style="font-weight:700;">Criado em</div><div>${escaparHtml(pedidoCriadoEm)}</div>
+          <div style="font-weight:700;">Observação</div><div style="word-break:break-word;">${escaparHtml(pedidoObservacao)}</div>
+        </div>
+      </div>
+    `;
+  };
+
+  const fecharModalNfeOmieDetalhes = () => {
+    const modal = document.getElementById('modalNfeOmieDetalhes');
+    if (!modal) return;
+    modal.style.opacity = '0';
+    const modalContent = modal.querySelector('div > div');
+    if (modalContent) {
+      modalContent.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    }
+    setTimeout(() => {
+      modal.style.display = 'none';
+    }, 180);
+  };
+
+  window.fecharModalNfeOmieDetalhes = fecharModalNfeOmieDetalhes;
+
+  const abrirModalNfeOmieDetalhes = async (chaveNfe, numeroNfe, pedidoContexto = null) => {
+    const modal = document.getElementById('modalNfeOmieDetalhes');
+    const modalTitulo = document.getElementById('modalNfeOmieTitulo');
+    const modalSubtitulo = document.getElementById('modalNfeOmieSubtitulo');
+    const modalFluxoTopo = document.getElementById('modalNfeOmieFluxoTopo');
+    const modalConteudo = document.getElementById('modalNfeOmieConteudo');
+
+    if (!modal || !modalTitulo || !modalSubtitulo || !modalConteudo || !modalFluxoTopo) return;
+
+    modalTitulo.textContent = `NF-e ${numeroNfe || '-'}`;
+    modalSubtitulo.textContent = `Chave: ${chaveNfe || '-'}`;
+    modalFluxoTopo.innerHTML = '';
+    modalConteudo.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;">
+        <i class="fa-solid fa-spinner fa-spin" style="color:#0ea5e9;"></i>
+        <span>Consultando dados na Omie...</span>
+      </div>
+    `;
+
+    modal.style.display = 'block';
+    setTimeout(() => {
+      modal.style.opacity = '1';
+      const modalContent = modal.querySelector('div > div');
+      if (modalContent) {
+        modalContent.style.transform = 'translate(-50%, -50%) scale(1)';
+      }
+    }, 10);
+
+    try {
+      const response = await fetch(`/api/compras/nfe-xml-detalhes?chave_nfe=${encodeURIComponent(chaveNfe)}`);
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || `Erro HTTP ${response.status}`);
+      }
+
+      const dadosConsulta = payload?.data || {};
+      const etapaInfo = payload?.etapa_info || null;
+      const etapasLegenda = Array.isArray(payload?.etapas_legenda) ? payload.etapas_legenda : [];
+      modalFluxoTopo.innerHTML = renderizarSequenciaTopoNfe(etapaInfo, dadosConsulta?.cabec?.cEtapa, etapasLegenda);
+      const resumoHtml = renderizarResumoRecebimentoOmie(dadosConsulta, etapaInfo, etapasLegenda, pedidoContexto);
+      modalConteudo.innerHTML = resumoHtml;
+
+      const btnVincular = document.getElementById('vincularNfePedidoBtn');
+      const statusVinculo = document.getElementById('vincularNfePedidoStatus');
+      if (btnVincular && statusVinculo) {
+        btnVincular.addEventListener('click', async () => {
+          const numeroPedido = String(pedidoContexto?.cnumero || '').trim();
+          const numeroNfeTexto = String(numeroNfe || dadosConsulta?.cabec?.cNumeroNFe || '').trim();
+
+          if (!numeroPedido) {
+            statusVinculo.style.display = 'block';
+            statusVinculo.style.color = '#9f1239';
+            statusVinculo.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i>Pedido não identificado para vinculação.';
+            return;
+          }
+
+          const textoOriginal = btnVincular.innerHTML;
+          btnVincular.disabled = true;
+          btnVincular.style.opacity = '0.7';
+          btnVincular.style.cursor = 'not-allowed';
+          btnVincular.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando prévia...</span>';
+
+          statusVinculo.style.display = 'block';
+          statusVinculo.style.color = '#1e3a8a';
+          statusVinculo.innerHTML = '<i class="fa-solid fa-clock" style="margin-right:6px;"></i>Consultando prévia de associação...';
+
+          try {
+            const respostaPreview = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido/preview', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                numero_nfe: numeroNfeTexto,
+                chave_nfe: String(chaveNfe || '').trim(),
+                numero_pedido: numeroPedido,
+                n_cod_ped: Number(pedidoContexto?.n_cod_ped || 0) || null
+              })
+            });
+
+            const payloadPreview = await respostaPreview.json().catch(() => ({}));
+            if (!respostaPreview.ok || payloadPreview?.ok === false) {
+              throw new Error(payloadPreview?.error || `Erro HTTP ${respostaPreview.status}`);
+            }
+
+            const prev = payloadPreview?.preview || {};
+            const itensNfTotal = Number(prev?.itens_nf_total || 0);
+            const itensPedidoTotal = Number(prev?.itens_pedido_total || 0);
+            const itensMatchTotal = Number(prev?.itens_match_total || 0);
+            const itensSemMatchTotal = Number(prev?.itens_sem_match_total || 0);
+
+            statusVinculo.style.color = itensSemMatchTotal > 0 ? '#92400e' : '#166534';
+            statusVinculo.innerHTML = `
+              <i class="fa-solid ${itensSemMatchTotal > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'}" style="margin-right:6px;"></i>
+              Prévia: ${itensMatchTotal} item(ns) com match, ${itensSemMatchTotal} sem match (NF: ${itensNfTotal}, Pedido: ${itensPedidoTotal}).
+            `;
+
+            const confirmar = window.confirm(
+              `Prévia da vinculação\n\n` +
+              `NF-e: ${numeroNfeTexto || '-'}\n` +
+              `Pedido: ${numeroPedido}\n` +
+              `Itens NF: ${itensNfTotal}\n` +
+              `Itens Pedido: ${itensPedidoTotal}\n` +
+              `Com match: ${itensMatchTotal}\n` +
+              `Sem match: ${itensSemMatchTotal}\n\n` +
+              `Deseja continuar com a vinculação?`
+            );
+            if (!confirmar) {
+              statusVinculo.style.color = '#334155';
+              statusVinculo.innerHTML = '<i class="fa-solid fa-ban" style="margin-right:6px;"></i>Vinculação cancelada pelo usuário após visualizar a prévia.';
+              return;
+            }
+
+            btnVincular.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Vinculando...</span>';
+            statusVinculo.style.color = '#1e3a8a';
+            statusVinculo.innerHTML = '<i class="fa-solid fa-clock" style="margin-right:6px;"></i>Enviando associação para a Omie...';
+
+            const respostaAssoc = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                numero_nfe: numeroNfeTexto,
+                chave_nfe: String(chaveNfe || '').trim(),
+                numero_pedido: numeroPedido,
+                n_cod_ped: Number(pedidoContexto?.n_cod_ped || 0) || null
+              })
+            });
+
+            const payloadAssoc = await respostaAssoc.json().catch(() => ({}));
+            if (!respostaAssoc.ok || payloadAssoc?.ok === false) {
+              throw new Error(payloadAssoc?.error || `Erro HTTP ${respostaAssoc.status}`);
+            }
+
+            statusVinculo.style.color = '#166534';
+            statusVinculo.innerHTML = `<i class="fa-solid fa-circle-check" style="margin-right:6px;"></i>${escaparHtml(payloadAssoc?.message || 'Associação concluída com sucesso.')}`;
+
+            setTimeout(() => {
+              abrirModalNfeOmieDetalhes(chaveNfe, numeroNfeTexto, pedidoContexto);
+            }, 700);
+          } catch (erroAssoc) {
+            statusVinculo.style.color = '#9f1239';
+            statusVinculo.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${escaparHtml(erroAssoc?.message || 'Falha ao vincular NF-e ao pedido.')}`;
+          } finally {
+            btnVincular.disabled = false;
+            btnVincular.style.opacity = '1';
+            btnVincular.style.cursor = 'pointer';
+            btnVincular.innerHTML = textoOriginal;
+          }
+        });
+      }
+    } catch (error) {
+      modalConteudo.innerHTML = `
+        <div style="padding:12px;border:1px solid #fecaca;background:#fff1f2;color:#9f1239;border-radius:8px;font-size:13px;">
+          <i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>
+          ${escaparHtml(error?.message || 'Falha ao consultar dados da NF-e na Omie.')}
+        </div>
+      `;
+    }
+  };
+
   // Função para carregar os dados de recebimento
   async function carregarRecebimento() {
     try {
       tbody.innerHTML = `
         <tr>
-          <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
+          <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
             <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
             <div>Carregando dados...</div>
           </td>
@@ -5774,7 +6241,7 @@ function attachDropZone(ul) {
       if (!Array.isArray(dados) || dados.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
+            <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
               <i class="fa-solid fa-inbox" style="font-size:48px;margin-bottom:10px;opacity:0.3;"></i>
               <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Nenhum item para recebimento</div>
               <div style="font-size:13px;">Não há pedidos elegíveis (Etapa_NF vazia/50/60 com c_obs_int preenchido)</div>
@@ -5785,13 +6252,19 @@ function attachDropZone(ul) {
         return;
       }
 
-      // Agrupar itens por cnumero (Nº Pedido)
+      // Agrupar itens por n_cod_ped (ID técnico Omie) para evitar colisão de cnumero
       const pedidosAgrupados = {};
       dados.forEach(item => {
-        const pedido = item.cnumero || 'Sem Pedido';
-        if (!pedidosAgrupados[pedido]) {
-          pedidosAgrupados[pedido] = {
+        const pedidoKey = String(item.n_cod_ped || item.cnumero || 'Sem Pedido');
+        if (!pedidosAgrupados[pedidoKey]) {
+          pedidosAgrupados[pedidoKey] = {
+            n_cod_ped: item.n_cod_ped,
             cnumero: item.cnumero,
+            etapa_nf: item.etapa_nf,
+            etapa_nf_codigo: item.etapa_nf_codigo,
+            etapa_nf_descricao: item.etapa_nf_descricao,
+            etapa_nf_cor: item.etapa_nf_cor,
+            etapa_nf_icone: item.etapa_nf_icone,
             solicitante: item.solicitante,
             previsao_chegada: item.previsao_chegada,
             resp_inspecao_recebimento: item.resp_inspecao_recebimento,
@@ -5802,13 +6275,20 @@ function attachDropZone(ul) {
             fornecedor_estado: item.fornecedor_estado,
             fornecedor_telefone1_ddd: item.fornecedor_telefone1_ddd,
             fornecedor_telefone1_numero: item.fornecedor_telefone1_numero,
+            fornecedor_lista_nfes: item.fornecedor_lista_nfes,
+            fornecedor_lista_numeros_nfe: item.fornecedor_lista_numeros_nfe,
             observacao: item.observacao,
             created_at: item.created_at,
             valor_total_pedido: item.valor_total_pedido,
             itens: []
           };
         }
-        pedidosAgrupados[pedido].itens.push(item);
+        pedidosAgrupados[pedidoKey].itens.push(item);
+      });
+
+      Object.keys(pedidosComparacaoMap).forEach((chave) => delete pedidosComparacaoMap[chave]);
+      Object.entries(pedidosAgrupados).forEach(([pedidoNum, pedidoData]) => {
+        pedidosComparacaoMap[pedidoNum] = pedidoData;
       });
 
       tbody.innerHTML = '';
@@ -5834,9 +6314,16 @@ function attachDropZone(ul) {
           : '-';
 
         const valorPedido = formatarMoeda(pedido.valor_total_pedido);
+        const badgeEtapaNf = renderizarBadgeEtapa(pedido.etapa_nf_codigo, {
+          descricao: pedido.etapa_nf_descricao || pedido.etapa_nf,
+          cor: pedido.etapa_nf_cor,
+          icone: pedido.etapa_nf_icone
+        });
   const fornecedorNome = pedido.fornecedor_nome_fantasia || '-';
   const fornecedorRazao = pedido.fornecedor_razao_social || '-';
         const fornecedorCnpj = pedido.fornecedor_cnpj_cpf || '-';
+          const fornecedorListaNfes = normalizarListaNfesFornecedor(pedido.fornecedor_lista_nfes);
+          const fornecedorListaNfesHtml = montarListaNfesHtml(fornecedorListaNfes, pedido.fornecedor_lista_numeros_nfe);
   const fornecedorCidadeEstado = [pedido.fornecedor_cidade, pedido.fornecedor_estado].filter(Boolean).join(' / ') || '-';
   const fornecedorTelefone = formatarTelefone(pedido.fornecedor_telefone1_ddd, pedido.fornecedor_telefone1_numero);
 
@@ -5857,6 +6344,9 @@ function attachDropZone(ul) {
             <div>${pedido.cnumero || '-'}</div>
             <div style="margin-top:4px;display:inline-block;padding:2px 8px;background:#e0f2fe;color:#0369a1;border-radius:12px;font-size:11px;font-weight:600;">${numItens} ${numItens === 1 ? 'item' : 'itens'}</div>
           </td>
+          <td style="padding:12px 16px;color:#0f172a !important;white-space:nowrap;font-size:12px;">
+            ${badgeEtapaNf}
+          </td>
           <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.solicitante || '-'}</td>
           <td style="padding:12px 16px;color:#334155 !important;white-space:nowrap;font-size:13px;">${previsao}</td>
           <td style="padding:12px 16px;color:#1e293b !important;white-space:nowrap;font-size:13px;">${pedido.resp_inspecao_recebimento || '-'}</td>
@@ -5866,8 +6356,9 @@ function attachDropZone(ul) {
             <div style="color:#64748b;font-size:11px;">CNPJ: ${fornecedorCnpj}</div>
             <div style="color:#64748b;font-size:11px;">${fornecedorCidadeEstado}</div>
             <div style="color:#64748b;font-size:11px;">${fornecedorTelefone}</div>
+            <div style="color:#64748b;font-size:11px;word-break:break-word;">NF-es: ${fornecedorListaNfesHtml}</div>
           </td>
-          <td style="padding:12px 16px;color:#475569 !important;font-size:12px;max-width:300px;">${pedido.observacao || '-'}</td>
+          <td style="padding:12px 16px;color:#475569 !important;font-size:12px;max-width:150px;width:150px;white-space:normal;word-break:break-word;overflow-wrap:anywhere;line-height:1.35;">${pedido.observacao || '-'}</td>
           <td style="padding:12px 16px;color:#64748b !important;font-size:11px;white-space:nowrap;">${criadoEm}</td>
           <td style="padding:12px 16px;color:#065f46 !important;font-size:13px;white-space:nowrap;text-align:right;font-weight:700;">${valorPedido}</td>
           <td style="padding:12px 16px;text-align:center;">
@@ -5956,7 +6447,7 @@ function attachDropZone(ul) {
           
           trItem.innerHTML = `
             <td style="padding:8px 16px;"></td>
-            <td colspan="9" style="padding:8px 16px;">
+            <td colspan="10" style="padding:8px 16px;">
               <div style="display:grid;grid-template-columns:80px 150px 1fr 130px 130px;gap:16px;align-items:center;background:white;padding:12px 16px;border-radius:8px;border-left:3px solid #0ea5e9;">
                 <div>
                   <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;margin-bottom:2px;">ID</div>
@@ -5995,7 +6486,7 @@ function attachDropZone(ul) {
       console.error('❌ Erro ao carregar recebimento:', error);
       tbody.innerHTML = `
         <tr>
-          <td colspan="10" style="text-align:center;padding:40px;color:#ef4444;">
+          <td colspan="11" style="text-align:center;padding:40px;color:#ef4444;">
             <i class="fa-solid fa-exclamation-triangle" style="font-size:48px;margin-bottom:10px;opacity:0.5;"></i>
             <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Erro ao carregar dados</div>
             <div style="font-size:13px;">${error.message}</div>
@@ -6078,6 +6569,29 @@ function attachDropZone(ul) {
     });
   }
 
+  if (!tbody.dataset.nfeLinksListenerAdded) {
+    tbody.dataset.nfeLinksListenerAdded = 'true';
+    tbody.addEventListener('click', (event) => {
+      const link = event.target.closest('.link-nfe-omie');
+      if (!link) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const chaveNfe = String(link.dataset.chaveNfe || '').trim();
+      const numeroNfe = String(link.dataset.numeroNfe || '').trim();
+      const linhaPedido = link.closest('tr.pedido-grupo');
+      const pedidoNum = String(linhaPedido?.dataset?.pedido || '').trim();
+      const pedidoContexto = pedidoNum ? pedidosComparacaoMap[pedidoNum] || null : null;
+      if (!/^\d{44}$/.test(chaveNfe)) {
+        alert('Chave da NF-e inválida para consulta.');
+        return;
+      }
+
+      abrirModalNfeOmieDetalhes(chaveNfe, numeroNfe, pedidoContexto);
+    }, true);
+  }
+
   // Event listener do menu lateral (protegido contra duplicação)
   if (menuRecebimento && !menuRecebimento.dataset.listenerAdded) {
     menuRecebimento.dataset.listenerAdded = 'true';
@@ -6103,6 +6617,43 @@ function attachDropZone(ul) {
       carregarRecebimento();
     });
   }
+})();
+</script>
+
+<div id="modalNfeOmieDetalhes" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.68);z-index:100001;backdrop-filter:blur(3px);opacity:0;transition:opacity 0.18s;">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%) scale(0.9);transition:transform 0.18s;background:#ffffff;border-radius:14px;box-shadow:0 24px 70px rgba(15,23,42,0.35);width:min(980px, 94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);border-bottom:3px solid #0ea5e9;color:#f8fafc;">
+      <div>
+        <h3 id="modalNfeOmieTitulo" style="margin:0;font-size:18px;font-weight:700;">NF-e</h3>
+        <div style="margin-top:4px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div id="modalNfeOmieSubtitulo" style="font-size:12px;color:#cbd5e1;word-break:break-all;">Chave: -</div>
+          <div id="modalNfeOmieFluxoTopo" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;"></div>
+        </div>
+      </div>
+      <button type="button" onclick="window.fecharModalNfeOmieDetalhes && window.fecharModalNfeOmieDetalhes()" style="background:transparent;border:none;color:#f8fafc;font-size:24px;cursor:pointer;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="modalNfeOmieConteudo" style="padding:16px;overflow:auto;flex:1;background:#f8fafc;"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const modal = document.getElementById('modalNfeOmieDetalhes');
+  if (!modal) return;
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal && window.fecharModalNfeOmieDetalhes) {
+      window.fecharModalNfeOmieDetalhes();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modal.style.display === 'block' && window.fecharModalNfeOmieDetalhes) {
+      window.fecharModalNfeOmieDetalhes();
+    }
+  });
 })();
 </script>
 
