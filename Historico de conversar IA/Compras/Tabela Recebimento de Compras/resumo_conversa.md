@@ -1,4 +1,4 @@
-# Tema
+<!-- # Tema -->
 Ajuste da página “Recebimento de Compras” para nova fonte de dados em `compras.pedidos_omie` com regra de filtro por `Etapa_NF`.
 
 # Objetivo

@@ -10,27 +10,46 @@
  */
 const PLANILHA_ID = '1xJT96JbXxqb2SPdCwsNAI55E8EGuEofDOiXbn5iFCDE';
 const NOME_ABA = 'KANBAN';
+const NOME_ABA_HISTORICO = 'historico';
 
 function doPost(e) {
   try {
     const payload = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    const abasPayload = payload && typeof payload.abas === 'object' && payload.abas ? payload.abas : null;
     const linhas = Array.isArray(payload.linhas) ? payload.linhas : [];
+    const historicoLinhas = Array.isArray(payload.historicoLinhas) ? payload.historicoLinhas : [];
 
-    if (!linhas.length) {
+    const ss = SpreadsheetApp.openById(PLANILHA_ID);
+
+    const abas = abasPayload || {
+      [NOME_ABA]: linhas,
+      [NOME_ABA_HISTORICO]: historicoLinhas
+    };
+
+    const nomesAbas = Object.keys(abas).filter((nome) => Array.isArray(abas[nome]));
+    if (!nomesAbas.length) {
       return jsonResponse({ ok: false, error: 'Sem linhas para atualizar' });
     }
 
-    const ss = SpreadsheetApp.openById(PLANILHA_ID);
-    const aba = ss.getSheetByName(NOME_ABA) || ss.insertSheet(NOME_ABA);
+    const resumo = {};
+    nomesAbas.forEach((nomeAba) => {
+      const linhasAba = Array.isArray(abas[nomeAba]) ? abas[nomeAba] : [];
+      const aba = ss.getSheetByName(nomeAba) || ss.insertSheet(nomeAba);
+      aba.clearContents();
 
-    const headers = Object.keys(linhas[0]);
-    const valores = linhas.map((obj) => headers.map((header) => obj[header] ?? ''));
+      if (!linhasAba.length) {
+        resumo[nomeAba] = 0;
+        return;
+      }
 
-    aba.clearContents();
-    aba.getRange(1, 1, 1, headers.length).setValues([headers]);
-    aba.getRange(2, 1, valores.length, headers.length).setValues(valores);
+      const headers = Object.keys(linhasAba[0]);
+      const valores = linhasAba.map((obj) => headers.map((header) => obj[header] ?? ''));
+      aba.getRange(1, 1, 1, headers.length).setValues([headers]);
+      aba.getRange(2, 1, valores.length, headers.length).setValues(valores);
+      resumo[nomeAba] = valores.length;
+    });
 
-    return jsonResponse({ ok: true, linhasAtualizadas: valores.length });
+    return jsonResponse({ ok: true, abasAtualizadas: resumo });
   } catch (erro) {
     return jsonResponse({ ok: false, error: String(erro && erro.message ? erro.message : erro) });
   }

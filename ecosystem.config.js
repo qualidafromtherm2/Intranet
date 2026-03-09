@@ -18,12 +18,12 @@ module.exports = {
   env: {
     PORT: 5001,
     TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6',
-    GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbzx6G90GOPNcGagv_vckRM1qyyF1In3OXtvBmE7K3OJP9X1-r2osEViQg1ebN3JHI-Tag/exec'
+    GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbyEepc3p-QLo6YbMloGLK5nUhcXti6-nUmjp4bTS258VwWUT40QMdMiM1uqAbhgIkboAA/exec'
   },
   env_pg: {
     PORT: 5001,
     TRACKINGMORE_API_KEY: 'h5mfcv6x-mwn8-89iz-nl6i-g3m0139q02k6',
-    GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbzx6G90GOPNcGagv_vckRM1qyyF1In3OXtvBmE7K3OJP9X1-r2osEViQg1ebN3JHI-Tag/exec'
+    GOOGLE_SHEETS_WEBHOOK_URL: 'https://script.google.com/macros/s/AKfycbyEepc3p-QLo6YbMloGLK5nUhcXti6-nUmjp4bTS258VwWUT40QMdMiM1uqAbhgIkboAA/exec'
   }   // se você usa o profile "pg"
 }
 

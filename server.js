@@ -3725,6 +3725,7 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         let processadoComSucesso = false;
         let erroProcessamento = null;
         let statusFinal = statusPorTopic;
+        let eventoJaRegistrado = false;
         try {
           // Para eventos finais (cancelamento/exclusao), marca como cancelado localmente
           if (statusPorTopic === 'Cancelada' || statusPorTopic === 'Excluida') {
@@ -3775,6 +3776,9 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
             }
 
             recebimento = await response.json();
+            if (recebimento?.faultstring || recebimento?.faultcode) {
+              throw new Error(recebimento.faultstring || recebimento.faultcode || 'Falha em ConsultarRecebimento');
+            }
 
             // Atualiza no banco - passa cChaveNfe e cDadosAdicionais vindos do webhook como fallback
             await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe, cDadosAdicionaisWebhook, body);
@@ -3790,6 +3794,20 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
         } catch (err) {
           erroProcessamento = err;
           console.error(`[webhooks/omie/recebimentos-nfe] Erro no processamento assíncrono:`, err);
+
+          // Fallback: persiste dados mínimos vindos do webhook (inclui nCodFor/nIdFornecedor)
+          // para não perder atualização de fornecedor quando ConsultarRecebimento falha.
+          try {
+            const fallback = await upsertRecebimentoFromWebhookPayload(body);
+            if (fallback?.ok) {
+              processadoComSucesso = true;
+              statusFinal = fallback.status || statusFinal;
+              eventoJaRegistrado = true; // upsertRecebimentoFromWebhookPayload já registra evento
+              console.warn(`[webhooks/omie/recebimentos-nfe] Fallback aplicado via payload para recebimento ${nIdReceb || cChaveNfe}`);
+            }
+          } catch (fallbackErr) {
+            console.error('[webhooks/omie/recebimentos-nfe] Falha no fallback por payload:', fallbackErr);
+          }
         } finally {
           const client = await pool.connect();
           try {
@@ -3808,19 +3826,21 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
               });
             }
 
-            await registrarEventoNotaEntrada(client, {
-              nIdReceb: nIdReceb || null,
-              cChaveNfe: cChaveNfe || null,
-              topic,
-              status: statusEvento,
-              messageId,
-              author,
-              payload: body,
-              origemEvento: 'omie_webhook',
-              processadoEm: new Date(),
-              processadoComSucesso,
-              erro: erroProcessamento ? (erroProcessamento.message || String(erroProcessamento)) : null,
-            });
+            if (!eventoJaRegistrado) {
+              await registrarEventoNotaEntrada(client, {
+                nIdReceb: nIdReceb || null,
+                cChaveNfe: cChaveNfe || null,
+                topic,
+                status: statusEvento,
+                messageId,
+                author,
+                payload: body,
+                origemEvento: 'omie_webhook',
+                processadoEm: new Date(),
+                processadoComSucesso,
+                erro: erroProcessamento ? (erroProcessamento.message || String(erroProcessamento)) : null,
+              });
+            }
           } catch (eventErr) {
             console.error('[webhooks/omie/recebimentos-nfe] Falha ao registrar evento de nota de entrada:', eventErr);
           } finally {
@@ -9292,6 +9312,65 @@ function isNotaEntradaAtiva(status = '') {
   return !['Cancelada', 'Excluida'].includes(sanitizeNotaEntradaStatus(status));
 }
 
+function extrairCnpjEmitenteDaChaveNfe(chaveNfe = '') {
+  const digitos = String(chaveNfe || '').replace(/\D/g, '');
+  if (digitos.length !== 44) return null;
+  return digitos.slice(6, 20);
+}
+
+async function buscarFornecedorLocalPorChaveNfe(chaveNfe, db = pool) {
+  const cnpjEmitente = extrairCnpjEmitenteDaChaveNfe(chaveNfe);
+  if (!cnpjEmitente) return null;
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        codigo_cliente_omie AS n_id_fornecedor,
+        COALESCE(NULLIF(BTRIM(razao_social), ''), NULLIF(BTRIM(nome_fantasia), '')) AS c_nome_fornecedor,
+        NULLIF(BTRIM(cnpj_cpf), '') AS c_cnpj_cpf_fornecedor
+      FROM omie.fornecedores
+      WHERE regexp_replace(COALESCE(cnpj_cpf, ''), '[^0-9]', '', 'g') = $1
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [cnpjEmitente]
+  );
+
+  return rows[0] || null;
+}
+
+async function resolverFornecedorRecebimentoFallback(dados = {}, db = pool) {
+  const nIdFornecedor = Number.isFinite(Number(dados.nIdFornecedor)) && Number(dados.nIdFornecedor) > 0
+    ? Number(dados.nIdFornecedor)
+    : null;
+
+  if (nIdFornecedor) {
+    return {
+      nIdFornecedor,
+      cNomeFornecedor: dados.cNomeFornecedor ? String(dados.cNomeFornecedor).trim() || null : null,
+      cCnpjCpfFornecedor: dados.cCnpjCpfFornecedor ? String(dados.cCnpjCpfFornecedor).trim() || null : null,
+      origem: 'payload',
+    };
+  }
+
+  const fornecedorLocal = await buscarFornecedorLocalPorChaveNfe(dados.cChaveNfe, db);
+  if (fornecedorLocal?.n_id_fornecedor) {
+    return {
+      nIdFornecedor: Number(fornecedorLocal.n_id_fornecedor),
+      cNomeFornecedor: fornecedorLocal.c_nome_fornecedor || null,
+      cCnpjCpfFornecedor: fornecedorLocal.c_cnpj_cpf_fornecedor || null,
+      origem: 'chave_nfe->omie.fornecedores',
+    };
+  }
+
+  return {
+    nIdFornecedor: null,
+    cNomeFornecedor: dados.cNomeFornecedor ? String(dados.cNomeFornecedor).trim() || null : null,
+    cCnpjCpfFornecedor: dados.cCnpjCpfFornecedor ? String(dados.cCnpjCpfFornecedor).trim() || null : null,
+    origem: 'sem_match',
+  };
+}
+
 async function ensureNotasEntradaOmieTables(client) {
   if (_notasEntradaOmieTablesReady) return;
 
@@ -9526,6 +9605,13 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
     || cab.cObsNFe
     || null;
 
+  const fornecedorResolvido = await resolverFornecedorRecebimentoFallback({
+    cChaveNfe,
+    nIdFornecedor: cab.nIdFornecedor || cab.nCodFor || null,
+    cNomeFornecedor: cab.cNome || cab.cRazaoSocial || null,
+    cCnpjCpfFornecedor: cab.cCNPJ_CPF || cab.cCNPJ || cab.cCpfCnpj || null,
+  });
+
   if (nIdRecebValido) {
     await pool.query(`
       INSERT INTO logistica.recebimentos_nfe_omie (
@@ -9605,12 +9691,12 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
       infoAdicionais.dRegistro,
       cab.dDataRegistro,
       cab.nValorNFe || cab.nValorNF,
-      cab.nIdFornecedor || cab.nCodFor,
-      cab.cNome,
-      cab.cRazaoSocial,
-      cab.cCNPJ_CPF,
-      cab.cCNPJ,
-      cab.cCpfCnpj,
+      fornecedorResolvido.nIdFornecedor,
+      fornecedorResolvido.cNomeFornecedor,
+      null,
+      fornecedorResolvido.cCnpjCpfFornecedor,
+      fornecedorResolvido.cCnpjCpfFornecedor,
+      fornecedorResolvido.cCnpjCpfFornecedor,
       cab.cEtapa,
       infoAdicionais.nIdConta || cab.nCodCC,
       infoAdicionais.cCategCompra || cab.cCodCateg,
@@ -9633,9 +9719,9 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
       dEmissaoNfe: convertOmieDate(cab.dEmissaoNFe || cab.dDataEmissao),
       dRegistro: convertOmieDate(infoAdicionais.dRegistro || cab.dDataRegistro),
       nValorNfe: cab.nValorNFe || cab.nValorNF || null,
-      nIdFornecedor: cab.nIdFornecedor || cab.nCodFor || null,
-      cNomeFornecedor: cab.cNome || cab.cRazaoSocial || null,
-      cCnpjCpfFornecedor: cab.cCNPJ_CPF || cab.cCNPJ || cab.cCpfCnpj || null,
+      nIdFornecedor: fornecedorResolvido.nIdFornecedor,
+      cNomeFornecedor: fornecedorResolvido.cNomeFornecedor,
+      cCnpjCpfFornecedor: fornecedorResolvido.cCnpjCpfFornecedor,
       cEtapa: cab.cEtapa || null,
       cDescEtapa: cab.cDescEtapa || null,
       status: statusFinal,
@@ -13752,6 +13838,88 @@ async function ensureComprasSchema() {
       END $$;
     `);
 
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'compras'
+            AND table_name = 'historico_compras'
+        ) THEN
+          ALTER TABLE compras.historico_compras
+          ADD COLUMN IF NOT EXISTS valor_pedido NUMERIC(15,2);
+
+          CREATE OR REPLACE FUNCTION compras.fn_sync_historico_compras_valor_pedido()
+          RETURNS TRIGGER
+          LANGUAGE plpgsql
+          AS $fn$
+          DECLARE
+            v_grupo_requisicao TEXT;
+            v_valor_pedido NUMERIC(15,2);
+          BEGIN
+            v_grupo_requisicao := NULLIF(BTRIM(to_jsonb(NEW)->>'c_obs_int'), '');
+            IF v_grupo_requisicao IS NULL THEN
+              RETURN NEW;
+            END IF;
+
+            BEGIN
+              v_valor_pedido := NULLIF(BTRIM(to_jsonb(NEW)->>'n_valor'), '')::numeric(15,2);
+            EXCEPTION WHEN others THEN
+              v_valor_pedido := NULL;
+            END;
+
+            UPDATE compras.historico_compras
+               SET valor_pedido = v_valor_pedido
+             WHERE grupo_requisicao = v_grupo_requisicao
+               AND valor_pedido IS DISTINCT FROM v_valor_pedido;
+
+            RETURN NEW;
+          END;
+          $fn$;
+
+          IF EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'compras'
+              AND table_name = 'pedidos_omie'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'compras'
+              AND table_name = 'pedidos_omie'
+              AND column_name = 'n_valor'
+          ) THEN
+            DROP TRIGGER IF EXISTS trg_sync_historico_compras_valor_pedido
+            ON compras.pedidos_omie;
+
+            CREATE TRIGGER trg_sync_historico_compras_valor_pedido
+            AFTER INSERT OR UPDATE OF c_obs_int, n_valor
+            ON compras.pedidos_omie
+            FOR EACH ROW
+            EXECUTE FUNCTION compras.fn_sync_historico_compras_valor_pedido();
+
+            UPDATE compras.historico_compras hc
+               SET valor_pedido = src.n_valor
+              FROM (
+                SELECT DISTINCT ON (NULLIF(BTRIM(po.c_obs_int), ''))
+                  NULLIF(BTRIM(po.c_obs_int), '') AS grupo_requisicao,
+                  po.n_valor
+                FROM compras.pedidos_omie po
+                WHERE NULLIF(BTRIM(po.c_obs_int), '') IS NOT NULL
+                ORDER BY
+                  NULLIF(BTRIM(po.c_obs_int), ''),
+                  po.updated_at DESC NULLS LAST,
+                  po.n_cod_ped DESC
+              ) src
+             WHERE hc.grupo_requisicao = src.grupo_requisicao
+               AND hc.valor_pedido IS DISTINCT FROM src.n_valor;
+          END IF;
+        END IF;
+      END $$;
+    `);
+
     // Backfill inicial: sincroniza descrições já existentes
     try {
       const backfillDesc = await pool.query(`
@@ -15270,6 +15438,17 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     const itens = Array.isArray(recebimento.itensRecebimento) ? recebimento.itensRecebimento : [];
     const parcelas = Array.isArray(recebimento.parcelas) ? recebimento.parcelas : [];
     const frete = recebimento.transporte || recebimento.frete || {};
+    const rawBody = (rawPayload && typeof rawPayload === 'object') ? rawPayload : {};
+    const rawEvent =
+      (rawBody.event && typeof rawBody.event === 'object' ? rawBody.event : null)
+      || (rawBody.evento && typeof rawBody.evento === 'object' ? rawBody.evento : null)
+      || rawBody;
+    const rawCab =
+      (rawEvent.cabecalho && typeof rawEvent.cabecalho === 'object' ? rawEvent.cabecalho : null)
+      || (rawEvent.cabec && typeof rawEvent.cabec === 'object' ? rawEvent.cabec : null)
+      || (rawBody.cabecalho && typeof rawBody.cabecalho === 'object' ? rawBody.cabecalho : null)
+      || (rawBody.cabec && typeof rawBody.cabec === 'object' ? rawBody.cabec : null)
+      || {};
     
     const nIdReceb = cabec.nIdReceb;
     
@@ -15286,6 +15465,12 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     const statusFinal = eventoWebhook
       ? (statusPorEvento !== 'Desconhecida' ? statusPorEvento : statusPorSnapshot)
       : statusPorSnapshot;
+    const fornecedorResolvido = await resolverFornecedorRecebimentoFallback({
+      cChaveNfe: cChaveNfeFinal,
+      nIdFornecedor: fornecedor.nIdFornecedor || cabec.nIdFornecedor || cabec.nCodFor || rawCab.nIdFornecedor || rawCab.nCodFor || null,
+      cNomeFornecedor: fornecedor.cNomeFornecedor || cabec.cNome || cabec.cRazaoSocial || rawCab.cNome || rawCab.cRazaoSocial || null,
+      cCnpjCpfFornecedor: fornecedor.cCnpjCpfFornecedor || cabec.cCNPJ_CPF || cabec.cCNPJ || cabec.cCpfCnpj || rawCab.cCNPJ_CPF || rawCab.cCNPJ || rawCab.cCpfCnpj || null,
+    }, client);
     
     // 1. Upsert do cabeçalho do recebimento
     await client.query(`
@@ -15338,9 +15523,9 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
         v_outras = EXCLUDED.v_outras,
         v_ipi = EXCLUDED.v_ipi,
         v_icms_st = EXCLUDED.v_icms_st,
-        n_id_fornecedor = EXCLUDED.n_id_fornecedor,
-        c_nome_fornecedor = EXCLUDED.c_nome_fornecedor,
-        c_cnpj_cpf_fornecedor = EXCLUDED.c_cnpj_cpf_fornecedor,
+        n_id_fornecedor = COALESCE(EXCLUDED.n_id_fornecedor, logistica.recebimentos_nfe_omie.n_id_fornecedor),
+        c_nome_fornecedor = COALESCE(EXCLUDED.c_nome_fornecedor, logistica.recebimentos_nfe_omie.c_nome_fornecedor),
+        c_cnpj_cpf_fornecedor = COALESCE(EXCLUDED.c_cnpj_cpf_fornecedor, logistica.recebimentos_nfe_omie.c_cnpj_cpf_fornecedor),
         c_etapa = EXCLUDED.c_etapa,
         c_desc_etapa = EXCLUDED.c_desc_etapa,
         c_faturado = EXCLUDED.c_faturado,
@@ -15385,9 +15570,9 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       cabec.vOutras || null,
       impostos.vIPI || null,
       impostos.vICMSST || null,
-      fornecedor.nIdFornecedor || null,
-      fornecedor.cNomeFornecedor || null,
-      fornecedor.cCnpjCpfFornecedor || null,
+      fornecedorResolvido.nIdFornecedor,
+      fornecedorResolvido.cNomeFornecedor,
+      fornecedorResolvido.cCnpjCpfFornecedor,
       cabec.cEtapa || null,
       cabec.cDescEtapa || null,
       infoCadastro.cFaturado || null,
@@ -15554,9 +15739,9 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
       dEntrada: convertOmieDate(cabec.dEntrada),
       dRegistro: convertOmieDate(cabec.dRegistro),
       nValorNfe: cabec.nValorNFe || null,
-      nIdFornecedor: fornecedor.nIdFornecedor || null,
-      cNomeFornecedor: fornecedor.cNomeFornecedor || null,
-      cCnpjCpfFornecedor: fornecedor.cCnpjCpfFornecedor || null,
+      nIdFornecedor: fornecedorResolvido.nIdFornecedor,
+      cNomeFornecedor: fornecedorResolvido.cNomeFornecedor,
+      cCnpjCpfFornecedor: fornecedorResolvido.cCnpjCpfFornecedor,
       cEtapa: cabec.cEtapa || null,
       cDescEtapa: cabec.cDescEtapa || null,
       status: statusFinal,
@@ -17503,6 +17688,19 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const respInspecao = item.resp_inspecao_recebimento || solicitante;
     const observacaoRecebimento = item.observacao_recebimento || item.observacao || null;
 
+    const normalizarValorMonetario = (valor) => {
+      if (valor === null || typeof valor === 'undefined') return null;
+      const texto = String(valor).trim();
+      if (!texto) return null;
+      const semSeparadorMilhar = texto.replace(/\./g, '');
+      const comPontoDecimal = semSeparadorMilhar.replace(',', '.');
+      const numero = Number(comPontoDecimal);
+      if (!Number.isFinite(numero)) return null;
+      return Number(numero.toFixed(2));
+    };
+
+    const valorGastoInformado = normalizarValorMonetario(item.valor_gasto ?? item.valor_pedido);
+
     // Normaliza links (array de strings)
     const normalizarLinks = (raw) => {
       if (!raw) return null;
@@ -17532,13 +17730,17 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
 
     const retornoTexto = String(retornoCotacao || '').trim().toLowerCase();
     const retornoCompraJaRealizada = 'compra ja realizada';
+    const retornoRegistroRapido = 'registro rapido de compra';
     const retornoSemValores = 'apenas realizar compra sem retorno de valores ou caracteristica';
     const compraJaRealizadaSelecionada = retornoTexto === retornoCompraJaRealizada;
+    const registroRapidoSelecionado = retornoTexto === retornoRegistroRapido;
     let statusInicial = 'pendente';
     let historicoCompraIdSemCadastro = null;
 
     if (compraJaRealizadaSelecionada) {
       statusInicial = 'compra realizada';
+    } else if (registroRapidoSelecionado) {
+      statusInicial = 'Concluido';
     } else if (retornoTexto) {
       if (isDiretor) {
         statusInicial = (retornoTexto === retornoSemValores)
@@ -17627,15 +17829,34 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       return montarCodigoBase(baseNumero);
     };
 
-    const baseCodigo = (!produtoCodigoPayload || /^codprov\s*-?/i.test(produtoCodigoPayload))
-      ? await obterBaseCodprovDisponivel()
-      : produtoCodigoPayload;
-    log('Código base selecionado:', baseCodigo);
+    const obterSequencialInicialRegistroRapido = async () => {
+      const { rows } = await pool.query(
+        `SELECT COALESCE(MAX(CAST(NULLIF(regexp_replace(produto_codigo, '\\D', '', 'g'), '') AS INTEGER)), 0) AS max_num
+         FROM compras.compras_sem_cadastro
+         WHERE produto_codigo ILIKE 'CMPR%'`
+      );
+      const atual = Number(rows[0]?.max_num || 0);
+      return atual + 1;
+    };
 
-    const itensComCodigo = itensSemCadastro.map((it, idx) => ({
-      ...it,
-      produto_codigo: itensSemCadastro.length > 1 ? `${baseCodigo}.${idx + 1}` : `${baseCodigo}.1`
-    }));
+    let itensComCodigo = [];
+    if (registroRapidoSelecionado) {
+      const sequencialInicial = await obterSequencialInicialRegistroRapido();
+      itensComCodigo = itensSemCadastro.map((it, idx) => ({
+        ...it,
+        produto_codigo: `CMPR${String(sequencialInicial + idx).padStart(5, '0')}`
+      }));
+    } else {
+      const baseCodigo = (!produtoCodigoPayload || /^codprov\s*-?/i.test(produtoCodigoPayload))
+        ? await obterBaseCodprovDisponivel()
+        : produtoCodigoPayload;
+      log('Código base selecionado:', baseCodigo);
+      itensComCodigo = itensSemCadastro.map((it, idx) => ({
+        ...it,
+        produto_codigo: itensSemCadastro.length > 1 ? `${baseCodigo}.${idx + 1}` : `${baseCodigo}.1`
+      }));
+    }
+
     log('Itens com código provisório:', itensComCodigo.map((it, idx) => ({ index: idx, codigo: it.produto_codigo, descricao: it.descricao, quantidade: it.quantidade })));
 
     const inserirItensNoBanco = async ({ statusParaInsercao, numeroPedido = null, ncodped = null, codReqCompra = null }) => {
@@ -18015,6 +18236,22 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
           error: `Falha ao concluir compra direta na Omie. Nada foi gravado em compras_sem_cadastro: ${omieErr.message}`
         });
       }
+    } else if (registroRapidoSelecionado) {
+      if (!Number.isFinite(valorGastoInformado) || valorGastoInformado <= 0) {
+        return res.status(400).json({ ok: false, error: 'Para "Registro rapido de compra", o valor gasto é obrigatório e deve ser maior que zero.' });
+      }
+
+      const insertRapido = await inserirItensNoBanco({
+        statusParaInsercao: 'Concluido'
+      });
+      idsInseridos = insertRapido.ids;
+      linhasInseridas = insertRapido.linhas;
+      grupoFinal = insertRapido.grupoFinal;
+      log('Fluxo registro rápido concluído:', {
+        ids: idsInseridos,
+        grupoFinal,
+        valorGastoInformado
+      });
     } else {
       const insertPadrao = await inserirItensNoBanco({
         statusParaInsercao: statusInicial
@@ -18027,11 +18264,24 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
 
     const novoId = idsInseridos[0] || null;
 
+    const statusHistoricoFinal = compraJaRealizadaSelecionada
+      ? 'compra realizada'
+      : (registroRapidoSelecionado ? 'Concluido' : statusInicial);
+
     await upsertStatusHistoricoCompras({
       grupoRequisicao: grupoFinal,
-      status: compraJaRealizadaSelecionada ? 'compra realizada' : statusInicial,
+      status: statusHistoricoFinal,
       tableSource: 'compras_sem_cadastro'
     });
+
+    if (registroRapidoSelecionado && Number.isFinite(valorGastoInformado) && valorGastoInformado > 0) {
+      await pool.query(
+        `UPDATE compras.historico_compras
+            SET valor_pedido = $1
+          WHERE grupo_requisicao = $2`,
+        [valorGastoInformado, grupoFinal]
+      );
+    }
     
     log(`🏁 Finalizado em ${Date.now() - t0}ms`, { idsInseridos, grupoFinal, solicitante });
     
@@ -21908,6 +22158,64 @@ function normalizarNumeroNfeComparacao(valor) {
   return digitos.replace(/^0+/, '') || '0';
 }
 
+function normalizarChaveNfeComparacao(valor) {
+  const digitos = String(valor || '').replace(/\D/g, '');
+  return digitos.length === 44 ? digitos : '';
+}
+
+function extrairCooldownSegundosOmie(mensagem) {
+  const texto = String(mensagem || '');
+  const match = texto.match(/aguarde\s+(\d+)\s+segundos/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function obterCacheRecebimentoNfeOmie() {
+  if (!global.__omieRecebimentoNfeCache) {
+    global.__omieRecebimentoNfeCache = new Map();
+  }
+  return global.__omieRecebimentoNfeCache;
+}
+
+function gravarCacheRecebimentoNfeOmie(recebimento, chaveNfe = '', numeroNfe = '') {
+  const cache = obterCacheRecebimentoNfeOmie();
+  const ttlMs = 2 * 60 * 1000;
+  const expiraEm = Date.now() + ttlMs;
+  const valor = { recebimento, expiraEm };
+
+  const chaveNormalizada = normalizarChaveNfeComparacao(chaveNfe || recebimento?.cabec?.cChaveNFe || recebimento?.cabec?.cChaveNfe);
+  if (chaveNormalizada) {
+    cache.set(`chave:${chaveNormalizada}`, valor);
+  }
+
+  const numeroNormalizado = normalizarNumeroNfeComparacao(numeroNfe || recebimento?.cabec?.cNumeroNFe || recebimento?.cabec?.cNumeroNfe);
+  if (numeroNormalizado) {
+    cache.set(`numero:${numeroNormalizado}`, valor);
+  }
+}
+
+function lerCacheRecebimentoNfeOmie(chaveNfe = '', numeroNfe = '') {
+  const cache = obterCacheRecebimentoNfeOmie();
+  const agora = Date.now();
+
+  const buscar = (chave) => {
+    if (!chave) return null;
+    const item = cache.get(chave);
+    if (!item) return null;
+    if (!item.expiraEm || item.expiraEm <= agora) {
+      cache.delete(chave);
+      return null;
+    }
+    return item.recebimento || null;
+  };
+
+  const chaveNormalizada = normalizarChaveNfeComparacao(chaveNfe);
+  const porChave = buscar(chaveNormalizada ? `chave:${chaveNormalizada}` : '');
+  if (porChave) return porChave;
+
+  const numeroNormalizado = normalizarNumeroNfeComparacao(numeroNfe);
+  return buscar(numeroNormalizado ? `numero:${numeroNormalizado}` : '');
+}
+
 async function chamarApiRecebimentoNfeOmie(call, param = {}) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     throw new Error('Credenciais Omie não configuradas no servidor');
@@ -21956,10 +22264,39 @@ function extrairPedidosVinculadosDoRecebimento(recebimento) {
   return [...pedidos];
 }
 
-async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada) {
+async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada, chaveNfeInformada = null) {
+  const recebimentoCacheInicial = lerCacheRecebimentoNfeOmie(chaveNfeInformada, numeroNfeInformada);
+  if (recebimentoCacheInicial?.cabec?.nIdReceb) {
+    return recebimentoCacheInicial;
+  }
+
+  const chaveNfeNormalizada = normalizarChaveNfeComparacao(chaveNfeInformada);
+  if (chaveNfeNormalizada) {
+    try {
+      const recebimentoPorChave = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
+        cChaveNfe: chaveNfeNormalizada
+      });
+      if (recebimentoPorChave?.cabec?.nIdReceb) {
+        gravarCacheRecebimentoNfeOmie(recebimentoPorChave, chaveNfeNormalizada, recebimentoPorChave?.cabec?.cNumeroNFe || numeroNfeInformada);
+        return recebimentoPorChave;
+      }
+    } catch (erroChave) {
+      const msgErro = String(erroChave?.message || erroChave || '');
+      if (/consumo redundante|REDUNDANT|SOAP-ENV:Client-6|SOAP-ENV:Client-8/i.test(msgErro)) {
+        const espera = extrairCooldownSegundosOmie(msgErro);
+        throw new Error(
+          espera > 0
+            ? `API Omie bloqueou temporariamente por consumo redundante. Aguarde ${espera} segundos e tente novamente.`
+            : 'API Omie bloqueou temporariamente por consumo redundante. Tente novamente em instantes.'
+        );
+      }
+      console.warn('[Compras/NFeAssociarPedido] Falha ao consultar recebimento por chave, tentando por número:', msgErro);
+    }
+  }
+
   const numeroNfeNormalizado = normalizarNumeroNfeComparacao(numeroNfeInformada);
   if (!numeroNfeNormalizado) {
-    throw new Error('Número de NF-e inválido');
+    return null;
   }
 
   let pagina = 1;
@@ -21995,19 +22332,33 @@ async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada) {
   }
 
   const recebimentoCompleto = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb });
+  if (recebimentoCompleto?.cabec?.nIdReceb) {
+    gravarCacheRecebimentoNfeOmie(recebimentoCompleto, recebimentoCompleto?.cabec?.cChaveNFe || recebimentoCompleto?.cabec?.cChaveNfe || chaveNfeInformada, numeroNfeInformada);
+  }
   return recebimentoCompleto;
 }
 
-async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
-  const pedidoResult = await pool.query(
-    `SELECT n_cod_ped, c_numero
-       FROM compras.pedidos_omie
-      WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
-         OR n_cod_ped::text = TRIM($1)
-      ORDER BY updated_at DESC NULLS LAST, id DESC
-      LIMIT 1`,
-    [numeroPedido]
-  );
+async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
+  const nCodPedNumerico = Number(nCodPedInformado);
+  const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
+
+  const pedidoResult = usarIdDireto
+    ? await pool.query(
+      `SELECT n_cod_ped, c_numero
+         FROM compras.pedidos_omie
+        WHERE n_cod_ped = $1
+        LIMIT 1`,
+      [nCodPedNumerico]
+    )
+    : await pool.query(
+      `SELECT n_cod_ped, c_numero
+         FROM compras.pedidos_omie
+        WHERE TRIM(COALESCE(c_numero, '')) = TRIM($1)
+           OR n_cod_ped::text = TRIM($1)
+        ORDER BY updated_at DESC NULLS LAST, n_cod_ped DESC
+        LIMIT 1`,
+      [numeroPedido]
+    );
 
   if (!pedidoResult.rows.length) {
     throw new Error('Pedido não encontrado em compras.pedidos_omie');
@@ -22019,7 +22370,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
     throw new Error('Pedido encontrado com n_cod_ped inválido');
   }
 
-  const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe);
+  const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
   if (!recebimento?.cabec?.nIdReceb) {
     throw new Error('NF-e não encontrada na API de recebimentos da Omie');
   }
@@ -22040,6 +22391,11 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
   );
 
   const itensPedido = itensPedidoResult.rows;
+  const itensPedidoOrdenados = [...itensPedido].sort((a, b) => {
+    const aItem = Number(a?.n_cod_item || 0);
+    const bItem = Number(b?.n_cod_item || 0);
+    return aItem - bItem;
+  });
   const mapaPorCodigoProduto = new Map();
   const mapaPorIdProduto = new Map();
 
@@ -22085,19 +22441,25 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
       }
     }
 
+    if (!itemPedidoVinculo && itensPedido.length === 1) {
+      itemPedidoVinculo = itensPedido[0];
+      criterioMatch = 'fallback_item_unico_pedido';
+    }
+
+    if (!itemPedidoVinculo && itensPedido.length === itensReceb.length && itensPedidoOrdenados[idx]) {
+      itemPedidoVinculo = itensPedidoOrdenados[idx];
+      criterioMatch = 'fallback_sequencia';
+    }
+
     const itensIde = {
       nSequencia: Number.isFinite(nSequencia) && nSequencia > 0 ? nSequencia : (idx + 1),
-      cAcao: 'A',
+      cAcao: 'ASSOCIAR-PEDIDO',
       nIdPedidoExistente: nCodPed
     };
 
     const nCodItem = Number(itemPedidoVinculo?.n_cod_item);
     if (Number.isFinite(nCodItem) && nCodItem > 0) {
       itensIde.nIdItPedidoExistente = nCodItem;
-    }
-
-    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0) {
-      itensIde.nIdProdutoExistente = nIdProdutoRec;
     }
 
     previewItens.push({
@@ -22119,6 +22481,17 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
     return { itensIde };
   });
 
+  const itensSemIdItemPedido = previewItens.filter(
+    (item) => !Number.isFinite(Number(item?.pedido_n_cod_item || NaN))
+  );
+
+  if (itensSemIdItemPedido.length > 0) {
+    throw new Error(
+      `Não foi possível mapear nIdItPedidoExistente para ${itensSemIdItemPedido.length} item(ns) da NF-e. ` +
+      'Verifique se os itens do pedido Omie correspondem aos itens do recebimento.'
+    );
+  }
+
   return {
     numero_nfe: String(recebimento?.cabec?.cNumeroNFe || '').trim() || String(numeroNfe || '').trim(),
     n_id_receb: Number(recebimento?.cabec?.nIdReceb || 0) || null,
@@ -22138,11 +22511,12 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido) {
 app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json(), async (req, res) => {
   try {
     const numeroNfe = String(req.body?.numero_nfe || '').trim();
-    if (!numeroNfe) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    const chaveNfe = String(req.body?.chave_nfe || '').trim();
+    if (!numeroNfe && !chaveNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe ou chave_nfe é obrigatório' });
     }
 
-    const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe);
+    const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
     if (!recebimento) {
       return res.status(404).json({ ok: false, error: 'NF-e não encontrada na API de recebimentos da Omie' });
     }
@@ -22170,15 +22544,17 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
   try {
     const numeroNfe = String(req.body?.numero_nfe || '').trim();
     const numeroPedido = String(req.body?.numero_pedido || '').trim();
+    const chaveNfe = String(req.body?.chave_nfe || '').trim();
+    const nCodPed = Number(req.body?.n_cod_ped || 0);
 
-    if (!numeroNfe) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    if (!numeroNfe && !chaveNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe ou chave_nfe é obrigatório' });
     }
-    if (!numeroPedido) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido é obrigatório' });
+    if (!numeroPedido && !(Number.isFinite(nCodPed) && nCodPed > 0)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido ou n_cod_ped é obrigatório' });
     }
 
-    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido);
+    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe, nCodPed);
 
     return res.json({
       ok: true,
@@ -22206,22 +22582,34 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
   try {
     const numeroNfe = String(req.body?.numero_nfe || '').trim();
     const numeroPedido = String(req.body?.numero_pedido || '').trim();
+    const chaveNfe = String(req.body?.chave_nfe || '').trim();
+    const nCodPed = Number(req.body?.n_cod_ped || 0);
 
-    if (!numeroNfe) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe é obrigatório' });
+    if (!numeroNfe && !chaveNfe) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe ou chave_nfe é obrigatório' });
     }
-    if (!numeroPedido) {
-      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido é obrigatório' });
+    if (!numeroPedido && !(Number.isFinite(nCodPed) && nCodPed > 0)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido ou n_cod_ped é obrigatório' });
     }
 
-    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido);
+    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe, nCodPed);
 
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
       itensRecebimentoEditar: plano.itensRecebimentoEditar
     };
 
-    await chamarApiRecebimentoNfeOmie('AlterarRecebimento', payloadAlterar);
+    let alertaItemAssociacao = '';
+    try {
+      await chamarApiRecebimentoNfeOmie('AlterarRecebimento', payloadAlterar);
+    } catch (erroAssociacao) {
+      const msgErro = String(erroAssociacao?.message || erroAssociacao || '');
+      const erroItemPedidoInvalido = /Código do Pedido .* e do Item .* devem ser válidos/i.test(msgErro);
+      if (!erroItemPedidoInvalido) {
+        throw erroAssociacao;
+      }
+      alertaItemAssociacao = msgErro;
+    }
 
     const recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
       nIdReceb: Number(plano.n_id_receb)
@@ -22232,17 +22620,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       || pedidosVinculados.includes(String(plano.c_numero_pedido || '').trim())
       || pedidosVinculados.includes(String(numeroPedido).trim());
 
+    if (alertaItemAssociacao && !vinculoConfirmado) {
+      throw new Error(alertaItemAssociacao);
+    }
+
     return res.json({
       ok: true,
-      message: vinculoConfirmado
-        ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.`
-        : 'Alteração enviada à Omie. Consulte novamente em instantes para confirmar a vinculação.',
+      message: alertaItemAssociacao
+        ? `Pedido ${plano.c_numero_pedido || plano.n_cod_ped} vinculado à NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} na Omie, com alerta de item: ${alertaItemAssociacao}`
+        : (vinculoConfirmado
+          ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.`
+          : 'Alteração enviada à Omie. Consulte novamente em instantes para confirmar a vinculação.'),
       dados: {
         n_id_receb: recebimentoAposAlteracao?.cabec?.nIdReceb || plano.n_id_receb || null,
         c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
         n_cod_ped: plano.n_cod_ped,
         c_numero_pedido: plano.c_numero_pedido || null,
-        pedidos_vinculados: pedidosVinculados
+        pedidos_vinculados: pedidosVinculados,
+        alerta_item: alertaItemAssociacao || null
       }
     });
   } catch (err) {
@@ -24008,6 +24403,27 @@ const comprasGoogleSheetsSyncState = {
   lastSyncError: null,
 };
 
+let historicoComprasHasValorPedidoColumn = null;
+
+async function verificarColunaValorPedidoHistoricoCompras(force = false) {
+  if (!force && historicoComprasHasValorPedidoColumn !== null) {
+    return historicoComprasHasValorPedidoColumn;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'compras'
+        AND table_name = 'historico_compras'
+        AND column_name = 'valor_pedido'
+    ) AS exists_col
+  `);
+
+  historicoComprasHasValorPedidoColumn = !!rows[0]?.exists_col;
+  return historicoComprasHasValorPedidoColumn;
+}
+
 function formatarDataHoraPtBr(valor) {
   if (!valor) return '-';
   const data = new Date(valor);
@@ -24038,13 +24454,16 @@ async function obterFingerprintComprasParaSheets() {
       (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.solicitacao_compras) AS max_sol,
       (SELECT COUNT(*) FROM compras.solicitacao_compras) AS qtd_sol,
       (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.compras_sem_cadastro) AS max_sem,
-      (SELECT COUNT(*) FROM compras.compras_sem_cadastro) AS qtd_sem
+      (SELECT COUNT(*) FROM compras.compras_sem_cadastro) AS qtd_sem,
+      (SELECT COALESCE(MAX(created_at), to_timestamp(0)) FROM compras.historico_compras) AS max_hist,
+      (SELECT COUNT(*) FROM compras.historico_compras) AS qtd_hist
   `);
 
   const row = rows[0] || {};
   const maxSol = row.max_sol ? new Date(row.max_sol).toISOString() : '0';
   const maxSem = row.max_sem ? new Date(row.max_sem).toISOString() : '0';
-  return `${maxSol}|${row.qtd_sol || 0}|${maxSem}|${row.qtd_sem || 0}`;
+  const maxHist = row.max_hist ? new Date(row.max_hist).toISOString() : '0';
+  return `${maxSol}|${row.qtd_sol || 0}|${maxSem}|${row.qtd_sem || 0}|${maxHist}|${row.qtd_hist || 0}`;
 }
 
 async function montarLinhasComprasParaSheets() {
@@ -24155,7 +24574,43 @@ async function montarLinhasComprasParaSheets() {
   }));
 }
 
-async function enviarLinhasComprasParaGoogleSheets(linhas) {
+async function montarLinhasHistoricoComprasParaSheets() {
+  const possuiValorPedido = await verificarColunaValorPedidoHistoricoCompras();
+  const { rows } = possuiValorPedido
+    ? await pool.query(`
+      SELECT
+        id,
+        grupo_requisicao,
+        status,
+        tabela_origem,
+        valor_pedido,
+        created_at
+      FROM compras.historico_compras
+      ORDER BY created_at DESC, id DESC
+    `)
+    : await pool.query(`
+      SELECT
+        id,
+        grupo_requisicao,
+        status,
+        tabela_origem,
+        NULL::numeric AS valor_pedido,
+        created_at
+      FROM compras.historico_compras
+      ORDER BY created_at DESC, id DESC
+    `);
+
+  return rows.map((item) => ({
+    'ID': item.id || '-',
+    'Grupo Requisição': item.grupo_requisicao || '-',
+    'Status': item.status || '-',
+    'Tabela Origem': item.tabela_origem || '-',
+    'Valor Pedido': item.valor_pedido == null ? '-' : Number(item.valor_pedido),
+    'Criado em': formatarDataHoraPtBr(item.created_at)
+  }));
+}
+
+async function enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas = []) {
   const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
   if (!webhookUrl) {
     throw new Error('GOOGLE_SHEETS_WEBHOOK_URL não configurada');
@@ -24169,7 +24624,14 @@ async function enviarLinhasComprasParaGoogleSheets(linhas) {
   const resposta = await fetchFn(webhookUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ linhas })
+    body: JSON.stringify({
+      linhas,
+      historicoLinhas,
+      abas: {
+        KANBAN: linhas,
+        historico: historicoLinhas
+      }
+    })
   });
 
   const contentType = String(resposta.headers.get('content-type') || '').toLowerCase();
@@ -24208,7 +24670,8 @@ async function sincronizarComprasGoogleSheets({ force = false, motivo = 'auto' }
     }
 
     const linhas = await montarLinhasComprasParaSheets();
-    if (!linhas.length) {
+    const historicoLinhas = await montarLinhasHistoricoComprasParaSheets();
+    if (!linhas.length && !historicoLinhas.length) {
       comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
       comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
       comprasGoogleSheetsSyncState.lastSyncReason = motivo;
@@ -24218,14 +24681,14 @@ async function sincronizarComprasGoogleSheets({ force = false, motivo = 'auto' }
       return;
     }
 
-    await enviarLinhasComprasParaGoogleSheets(linhas);
+    await enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas);
     comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
     comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
     comprasGoogleSheetsSyncState.lastSyncReason = motivo;
     comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
-    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length;
+    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length + historicoLinhas.length;
     comprasGoogleSheetsSyncState.lastSyncError = null;
-    console.log(`[SheetsAuto] Sincronização concluída (${motivo}) com ${linhas.length} linha(s).`);
+    console.log(`[SheetsAuto] Sincronização concluída (${motivo}) com ${linhas.length} linha(s) em KANBAN e ${historicoLinhas.length} linha(s) em historico.`);
   } catch (err) {
     comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
     comprasGoogleSheetsSyncState.lastSyncReason = motivo;
@@ -24277,6 +24740,17 @@ async function garantirTriggersNotificacaoGoogleSheets() {
     CREATE TRIGGER trg_notify_google_sheets_sync_sem_cadastro
     AFTER INSERT OR UPDATE OR DELETE
     ON compras.compras_sem_cadastro
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
+  `);
+
+  await pool.query(`
+    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_historico
+    ON compras.historico_compras;
+
+    CREATE TRIGGER trg_notify_google_sheets_sync_historico
+    AFTER INSERT OR UPDATE OR DELETE
+    ON compras.historico_compras
     FOR EACH STATEMENT
     EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
   `);
