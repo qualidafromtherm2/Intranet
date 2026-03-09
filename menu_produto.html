@@ -309,6 +309,18 @@
 
   <div class="side-menu">
     <a href="#"
+       id="menu-produto-recebido"
+       class="menu-link"
+       data-nav-key="side:compras:produto-recebido"
+       data-nav-parent="side:compras"
+       data-nav-pos="side"
+       data-nav-label="Produtos recebidos"
+       data-nav-selector="#menu-produto-recebido">
+      <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
+      Produtos recebidos
+    </a>
+
+    <a href="#"
        id="menu-compras-configuracoes"
        class="menu-link"
        data-nav-key="side:compras:configuracoes"
@@ -1545,6 +1557,57 @@
                       </tr>
                     </thead>
                     <tbody id="recebimentoTbody">
+                      <tr>
+                        <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
+                          <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
+                          <div>Carregando dados...</div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Produtos Recebidos: cópia de recebimento para configurações independentes -->
+        <div id="produtoRecebidoPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:20px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;">
+                    <i class="fa-solid fa-box-open" style="color:#f59e0b;font-size:24px;"></i>
+                    <span>Produtos recebidos</span>
+                  </div>
+                  <div id="produtoRecebidoCount" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">0 itens</div>
+                </div>
+                <button id="produtoRecebidoRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:10px 20px;border-radius:8px;display:flex;align-items:center;gap:8px;font-weight:500;border:none;cursor:pointer;transition:all 0.2s;">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Recarregar</span>
+                </button>
+              </div>
+
+              <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+                <div style="overflow:auto;max-height:calc(100vh - 260px);">
+                  <table style="width:100%;border-collapse:separate;border-spacing:0;font-size:14px;">
+                    <thead>
+                      <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;width:40px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);"></th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Nº Pedido</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Etapa_NF</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Solicitante</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Previsão</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Responsável</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Fornecedor</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);width:150px;max-width:150px;">Observação</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Criado em</th>
+                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Vlr.</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="produtoRecebidoTbody">
                       <tr>
                         <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
                           <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
@@ -5730,7 +5793,63 @@ function attachDropZone(ul) {
   const tbody = document.getElementById('recebimentoTbody');
   const countBadge = document.getElementById('recebimentoCount');
   const menuRecebimento = document.getElementById('menu-recebimento');
-  const pedidosComparacaoMap = {};
+  const btnRecarregarProdutoRecebido = document.getElementById('produtoRecebidoRefreshBtn');
+  const tbodyProdutoRecebido = document.getElementById('produtoRecebidoTbody');
+  const countBadgeProdutoRecebido = document.getElementById('produtoRecebidoCount');
+  const menuProdutoRecebido = document.getElementById('menu-produto-recebido');
+  const bloqueiosConsultaNfe = new Map();
+
+  const configPainelRecebimento = {
+    key: 'recebimento',
+    paneId: 'recebimentoPane',
+    btnRecarregar,
+    tbody,
+    countBadge,
+    menuLink: menuRecebimento,
+    filtroStatus: 'excluir-recebidos',
+    mensagemVazia: 'Não há pedidos elegíveis após excluir Recebido Totalmente/Parcialmente.',
+    pedidosComparacaoMap: {}
+  };
+
+  const configPainelProdutoRecebido = {
+    key: 'produto-recebido',
+    paneId: 'produtoRecebidoPane',
+    btnRecarregar: btnRecarregarProdutoRecebido,
+    tbody: tbodyProdutoRecebido,
+    countBadge: countBadgeProdutoRecebido,
+    menuLink: menuProdutoRecebido,
+    filtroStatus: 'somente-recebidos',
+    mensagemVazia: 'Não há pedidos com status Recebido Totalmente/Parcialmente.',
+    pedidosComparacaoMap: {}
+  };
+
+  const normalizarStatusEtapa = (item) => {
+    const codigo = String(item?.etapa_nf_codigo || item?.etapa_nf || '').trim();
+    const descricao = String(item?.etapa_nf_descricao || item?.etapa_nf || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+    return { codigo, descricao };
+  };
+
+  const statusEhRecebido = (item) => {
+    const { codigo, descricao } = normalizarStatusEtapa(item);
+    if (codigo === '50' || codigo === '60') return true;
+    return descricao === 'recebido parcialmente' || descricao === 'recebido totalmente';
+  };
+
+  const filtrarDadosPorPainel = (dados, configPainel) => {
+    if (!Array.isArray(dados)) return [];
+    const filtro = String(configPainel?.filtroStatus || '').trim();
+    if (filtro === 'somente-recebidos') {
+      return dados.filter(statusEhRecebido);
+    }
+    if (filtro === 'excluir-recebidos') {
+      return dados.filter((item) => !statusEhRecebido(item));
+    }
+    return dados;
+  };
 
   const formatarQuantidade = (valor) => {
     const numero = Number(valor);
@@ -5798,6 +5917,20 @@ function attachDropZone(ul) {
 
     const fallback = String(listaFallback || '').trim();
     return fallback ? escaparHtml(fallback) : '-';
+  };
+
+  const montarListaNfesHtmlVinculada = (listaNfes, nfeVinculada) => {
+    const nfe = String(nfeVinculada || '').trim();
+    if (!nfe) return '-';
+
+    if (Array.isArray(listaNfes) && listaNfes.length > 0) {
+      const nfeEncontrada = listaNfes.find((item) => String(item?.numeroNfe || '').trim() === nfe);
+      if (nfeEncontrada?.chaveNfe && /^\d{44}$/.test(String(nfeEncontrada.chaveNfe))) {
+        return `<a href="#" class="link-nfe-omie" data-chave-nfe="${escaparHtml(nfeEncontrada.chaveNfe)}" data-numero-nfe="${escaparHtml(nfe)}" style="color:#0369a1;text-decoration:underline;font-weight:600;">${escaparHtml(nfe)}</a>`;
+      }
+    }
+
+    return escaparHtml(nfe);
   };
 
   const formatarDataBr = (valor) => {
@@ -6087,12 +6220,127 @@ function attachDropZone(ul) {
       }
     }, 10);
 
-    try {
-      const response = await fetch(`/api/compras/nfe-xml-detalhes?chave_nfe=${encodeURIComponent(chaveNfe)}`);
-      const payload = await response.json().catch(() => ({}));
+    const extrairSegundosRedundant = (mensagemErro) => {
+      const texto = String(mensagemErro || '');
+      const match = texto.match(/Aguarde\s+(\d+)\s+segundos?/i);
+      if (!match) return null;
+      const segundos = Number(match[1]);
+      return Number.isFinite(segundos) && segundos >= 0 ? segundos : null;
+    };
 
-      if (!response.ok || payload?.ok === false) {
-        throw new Error(payload?.error || `Erro HTTP ${response.status}`);
+    const ehErroRedundant = (mensagemErro) => /REDUNDANT|consumo redundante/i.test(String(mensagemErro || ''));
+
+    const aguardar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const bloquearBotaoVincularComContador = async (btnVincular, statusVinculo, segundos) => {
+      if (!btnVincular) return;
+      let segundosRestantes = Math.max(1, Number(segundos) || 1);
+      const textoOriginal = btnVincular.dataset.textoOriginal || btnVincular.innerHTML;
+      btnVincular.dataset.textoOriginal = textoOriginal;
+      btnVincular.disabled = true;
+      btnVincular.style.opacity = '0.7';
+      btnVincular.style.cursor = 'not-allowed';
+      btnVincular.innerHTML = '<i class="fa-solid fa-clock"></i><span>Aguardando...</span>';
+
+      if (statusVinculo) {
+        statusVinculo.style.display = 'block';
+        statusVinculo.style.color = '#1e3a8a';
+        statusVinculo.innerHTML = `<i class="fa-solid fa-clock" style="margin-right:6px;"></i>Bloqueado por consumo redundante da Omie. Tente novamente em <strong id="vincularRetryCountdown">${segundosRestantes}</strong> segundo(s).`;
+      }
+
+      const countdownEl = statusVinculo?.querySelector('#vincularRetryCountdown');
+      const intervalo = setInterval(() => {
+        segundosRestantes -= 1;
+        if (countdownEl && segundosRestantes >= 0) {
+          countdownEl.textContent = String(segundosRestantes);
+        }
+        if (segundosRestantes <= 0) {
+          clearInterval(intervalo);
+        }
+      }, 1000);
+
+      try {
+        await aguardar(Math.max(1000, Number(segundos) * 1000));
+      } finally {
+        clearInterval(intervalo);
+        btnVincular.disabled = false;
+        btnVincular.style.opacity = '1';
+        btnVincular.style.cursor = 'pointer';
+        btnVincular.innerHTML = textoOriginal;
+      }
+    };
+
+    const esperarComContador = async (segundos, mensagem) => {
+      let segundosRestantes = Math.max(1, Number(segundos) || 1);
+      modalConteudo.innerHTML = `
+        <div style="padding:12px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-clock" style="color:#2563eb;"></i>
+          <span>${mensagem} <strong id="nfeRetryCountdown">${segundosRestantes}</strong> segundo(s)...</span>
+        </div>
+      `;
+
+      const countdownEl = modalConteudo.querySelector('#nfeRetryCountdown');
+      const intervalo = setInterval(() => {
+        segundosRestantes -= 1;
+        if (countdownEl && segundosRestantes >= 0) {
+          countdownEl.textContent = String(segundosRestantes);
+        }
+        if (segundosRestantes <= 0) {
+          clearInterval(intervalo);
+        }
+      }, 1000);
+
+      try {
+        await aguardar(Math.max(1000, Number(segundos) * 1000));
+      } finally {
+        clearInterval(intervalo);
+      }
+    };
+
+    const chaveBloqueio = String(chaveNfe || '').trim();
+    const bloqueadoAte = bloqueiosConsultaNfe.get(chaveBloqueio) || 0;
+    if (bloqueadoAte > Date.now()) {
+      const segundosRestantesBloqueio = Math.ceil((bloqueadoAte - Date.now()) / 1000);
+      await esperarComContador(
+        segundosRestantesBloqueio,
+        'Consulta temporariamente bloqueada para esta NF-e. Nova tentativa em'
+      );
+    }
+
+    try {
+      let payload = null;
+      const maxTentativasConsulta = 4;
+
+      for (let tentativa = 1; tentativa <= maxTentativasConsulta; tentativa += 1) {
+        const response = await fetch(`/api/compras/nfe-xml-detalhes?chave_nfe=${encodeURIComponent(chaveNfe)}`);
+        payload = await response.json().catch(() => ({}));
+
+        const mensagemErro = payload?.error || `Erro HTTP ${response.status}`;
+        const retryAfterPayload = Number(payload?.retry_after_seconds || 0);
+        const erroRedundant = ehErroRedundant(mensagemErro) || !!payload?.redundant;
+        const podeRepetir = tentativa < maxTentativasConsulta && (!response.ok || payload?.ok === false) && erroRedundant;
+
+        if (podeRepetir) {
+          const segundosDoPayload = Number.isFinite(retryAfterPayload) && retryAfterPayload > 0
+            ? retryAfterPayload
+            : null;
+          const segundosOmie = extrairSegundosRedundant(mensagemErro);
+          const segundosComMargem = segundosDoPayload || Math.max(5, (Number.isFinite(segundosOmie) ? segundosOmie : 0) + 5);
+          bloqueiosConsultaNfe.set(chaveBloqueio, Date.now() + (segundosComMargem * 1000));
+          await esperarComContador(
+            segundosComMargem,
+            'Omie pediu aguardo por consumo redundante. Tentando novamente em'
+          );
+          continue;
+        }
+
+        if (!response.ok || payload?.ok === false) {
+          throw new Error(mensagemErro);
+        }
+
+        bloqueiosConsultaNfe.delete(chaveBloqueio);
+
+        break;
       }
 
       const dadosConsulta = payload?.data || {};
@@ -6106,6 +6354,13 @@ function attachDropZone(ul) {
       const statusVinculo = document.getElementById('vincularNfePedidoStatus');
       if (btnVincular && statusVinculo) {
         btnVincular.addEventListener('click', async () => {
+          const bloqueioVinculoAte = bloqueiosConsultaNfe.get(chaveBloqueio) || 0;
+          if (bloqueioVinculoAte > Date.now()) {
+            const segundosRestantesBloqueio = Math.ceil((bloqueioVinculoAte - Date.now()) / 1000);
+            await bloquearBotaoVincularComContador(btnVincular, statusVinculo, segundosRestantesBloqueio);
+            return;
+          }
+
           const numeroPedido = String(pedidoContexto?.cnumero || '').trim();
           const numeroNfeTexto = String(numeroNfe || dadosConsulta?.cabec?.cNumeroNFe || '').trim();
 
@@ -6219,7 +6474,12 @@ function attachDropZone(ul) {
   };
 
   // Função para carregar os dados de recebimento
-  async function carregarRecebimento() {
+  async function carregarRecebimento(configPainel) {
+    if (!configPainel?.tbody) return;
+    const tbody = configPainel.tbody;
+    const countBadge = configPainel.countBadge;
+    const pedidosComparacaoMap = configPainel.pedidosComparacaoMap;
+
     try {
       tbody.innerHTML = `
         <tr>
@@ -6236,15 +6496,16 @@ function attachDropZone(ul) {
       }
 
       const dados = await response.json();
-      console.log('📦 Dados recebidos:', dados);
+      const dadosFiltrados = filtrarDadosPorPainel(dados, configPainel);
+      console.log('📦 Dados recebidos:', dadosFiltrados);
 
-      if (!Array.isArray(dados) || dados.length === 0) {
+      if (!Array.isArray(dadosFiltrados) || dadosFiltrados.length === 0) {
         tbody.innerHTML = `
           <tr>
             <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
               <i class="fa-solid fa-inbox" style="font-size:48px;margin-bottom:10px;opacity:0.3;"></i>
               <div style="font-size:16px;font-weight:500;margin-bottom:4px;">Nenhum item para recebimento</div>
-              <div style="font-size:13px;">Não há pedidos elegíveis (Etapa_NF vazia/50/60 com c_obs_int preenchido)</div>
+              <div style="font-size:13px;">${configPainel?.mensagemVazia || 'Não há pedidos elegíveis para este painel.'}</div>
             </td>
           </tr>
         `;
@@ -6254,7 +6515,7 @@ function attachDropZone(ul) {
 
       // Agrupar itens por n_cod_ped (ID técnico Omie) para evitar colisão de cnumero
       const pedidosAgrupados = {};
-      dados.forEach(item => {
+      dadosFiltrados.forEach(item => {
         const pedidoKey = String(item.n_cod_ped || item.cnumero || 'Sem Pedido');
         if (!pedidosAgrupados[pedidoKey]) {
           pedidosAgrupados[pedidoKey] = {
@@ -6275,6 +6536,7 @@ function attachDropZone(ul) {
             fornecedor_estado: item.fornecedor_estado,
             fornecedor_telefone1_ddd: item.fornecedor_telefone1_ddd,
             fornecedor_telefone1_numero: item.fornecedor_telefone1_numero,
+            nfe_vinculada: item.nfe_vinculada,
             fornecedor_lista_nfes: item.fornecedor_lista_nfes,
             fornecedor_lista_numeros_nfe: item.fornecedor_lista_numeros_nfe,
             observacao: item.observacao,
@@ -6323,7 +6585,9 @@ function attachDropZone(ul) {
   const fornecedorRazao = pedido.fornecedor_razao_social || '-';
         const fornecedorCnpj = pedido.fornecedor_cnpj_cpf || '-';
           const fornecedorListaNfes = normalizarListaNfesFornecedor(pedido.fornecedor_lista_nfes);
-          const fornecedorListaNfesHtml = montarListaNfesHtml(fornecedorListaNfes, pedido.fornecedor_lista_numeros_nfe);
+          const fornecedorListaNfesHtml = configPainel?.key === 'produto-recebido'
+            ? montarListaNfesHtmlVinculada(fornecedorListaNfes, pedido.nfe_vinculada)
+            : montarListaNfesHtml(fornecedorListaNfes, pedido.fornecedor_lista_numeros_nfe);
   const fornecedorCidadeEstado = [pedido.fornecedor_cidade, pedido.fornecedor_estado].filter(Boolean).join(' / ') || '-';
   const fornecedorTelefone = formatarTelefone(pedido.fornecedor_telefone1_ddd, pedido.fornecedor_telefone1_numero);
 
@@ -6556,20 +6820,26 @@ function attachDropZone(ul) {
   }
 
   // Event listener do botão recarregar (protegido contra duplicação)
-  if (btnRecarregar && !btnRecarregar.dataset.listenerAdded) {
-    btnRecarregar.dataset.listenerAdded = 'true';
-    btnRecarregar.addEventListener('click', carregarRecebimento);
-    btnRecarregar.addEventListener('mouseenter', function() {
+  function registrarListenerRefresh(configPainel) {
+    const btn = configPainel?.btnRecarregar;
+    if (!btn || btn.dataset.listenerAdded) return;
+    btn.dataset.listenerAdded = 'true';
+    btn.addEventListener('click', () => carregarRecebimento(configPainel));
+    btn.addEventListener('mouseenter', function() {
       this.style.transform = 'scale(1.05)';
       this.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
     });
-    btnRecarregar.addEventListener('mouseleave', function() {
+    btn.addEventListener('mouseleave', function() {
       this.style.transform = 'scale(1)';
       this.style.boxShadow = 'none';
     });
   }
 
-  if (!tbody.dataset.nfeLinksListenerAdded) {
+  function registrarListenerNfe(configPainel) {
+    const tbody = configPainel?.tbody;
+    const pedidosComparacaoMap = configPainel?.pedidosComparacaoMap;
+    if (!tbody || !pedidosComparacaoMap || tbody.dataset.nfeLinksListenerAdded) return;
+
     tbody.dataset.nfeLinksListenerAdded = 'true';
     tbody.addEventListener('click', (event) => {
       const link = event.target.closest('.link-nfe-omie');
@@ -6592,31 +6862,42 @@ function attachDropZone(ul) {
     }, true);
   }
 
-  // Event listener do menu lateral (protegido contra duplicação)
-  if (menuRecebimento && !menuRecebimento.dataset.listenerAdded) {
-    menuRecebimento.dataset.listenerAdded = 'true';
-    menuRecebimento.addEventListener('click', (e) => {
+  function registrarListenerMenu(configPainel) {
+    const menuLink = configPainel?.menuLink;
+    if (!menuLink || menuLink.dataset.listenerAdded) return;
+
+    menuLink.dataset.listenerAdded = 'true';
+    menuLink.addEventListener('click', (e) => {
       e.preventDefault();
-      
+
       // Esconde todos os painéis
       document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
-      
-      // Mostra o painel de recebimento
-      const painelRecebimento = document.getElementById('recebimentoPane');
-      if (painelRecebimento) {
-        painelRecebimento.style.display = 'block';
+
+      // Mostra o painel do menu clicado
+      const painel = document.getElementById(configPainel.paneId);
+      if (painel) {
+        painel.style.display = 'block';
       }
-      
+
       // Atualiza menu ativo
       document.querySelectorAll('.menu-link').forEach(link => {
         link.classList.remove('is-active');
       });
-      menuRecebimento.classList.add('is-active');
+      menuLink.classList.add('is-active');
 
       // Carrega os dados
-      carregarRecebimento();
+      carregarRecebimento(configPainel);
     });
   }
+
+  registrarListenerRefresh(configPainelRecebimento);
+  registrarListenerRefresh(configPainelProdutoRecebido);
+
+  registrarListenerNfe(configPainelRecebimento);
+  registrarListenerNfe(configPainelProdutoRecebido);
+
+  registrarListenerMenu(configPainelRecebimento);
+  registrarListenerMenu(configPainelProdutoRecebido);
 })();
 </script>
 

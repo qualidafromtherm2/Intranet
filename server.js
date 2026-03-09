@@ -22169,6 +22169,43 @@ function extrairCooldownSegundosOmie(mensagem) {
   return match ? Number(match[1]) : 0;
 }
 
+function ehErroRedundanteOmie(erro) {
+  const msg = String(erro?.message || erro || '');
+  return /consumo redundante|REDUNDANT|SOAP-ENV:Client-6|SOAP-ENV:Client-8/i.test(msg);
+}
+
+async function chamarApiRecebimentoNfeOmieComRetryRedundant(call, param = {}, opcoes = {}) {
+  const tentativasMaximas = Number.isFinite(Number(opcoes?.tentativasMaximas))
+    ? Math.max(1, Number(opcoes.tentativasMaximas))
+    : 2;
+  const margemSegundos = Number.isFinite(Number(opcoes?.margemSegundos))
+    ? Math.max(0, Number(opcoes.margemSegundos))
+    : 5;
+  const esperaMinimaSegundos = Number.isFinite(Number(opcoes?.esperaMinimaSegundos))
+    ? Math.max(0, Number(opcoes.esperaMinimaSegundos))
+    : 2;
+
+  let ultimaFalha = null;
+  for (let tentativa = 1; tentativa <= tentativasMaximas; tentativa += 1) {
+    try {
+      return await chamarApiRecebimentoNfeOmie(call, param);
+    } catch (erro) {
+      ultimaFalha = erro;
+      const redundante = ehErroRedundanteOmie(erro);
+      if (!redundante || tentativa >= tentativasMaximas) {
+        throw erro;
+      }
+
+      const msg = String(erro?.message || erro || '');
+      const cooldown = extrairCooldownSegundosOmie(msg);
+      const esperaSegundos = Math.max(esperaMinimaSegundos, cooldown + margemSegundos);
+      await new Promise((resolve) => setTimeout(resolve, esperaSegundos * 1000));
+    }
+  }
+
+  throw ultimaFalha || new Error(`Falha ao chamar ${call} na Omie`);
+}
+
 function obterCacheRecebimentoNfeOmie() {
   if (!global.__omieRecebimentoNfeCache) {
     global.__omieRecebimentoNfeCache = new Map();
@@ -22262,6 +22299,42 @@ function extrairPedidosVinculadosDoRecebimento(recebimento) {
   }
 
   return [...pedidos];
+}
+
+function obterCachePlanoAssociacaoNfePedido() {
+  if (!global.__cachePlanoAssociacaoNfePedido) {
+    global.__cachePlanoAssociacaoNfePedido = new Map();
+  }
+  return global.__cachePlanoAssociacaoNfePedido;
+}
+
+function criarChavePlanoAssociacaoNfePedido(numeroNfe = '', chaveNfe = '', nCodPed = 0, numeroPedido = '') {
+  const chaveNormalizada = normalizarChaveNfeComparacao(chaveNfe);
+  const numeroNormalizado = normalizarNumeroNfeComparacao(numeroNfe);
+  const pedidoId = Number(nCodPed);
+  const pedidoNumero = String(numeroPedido || '').trim();
+  return [chaveNormalizada || '-', numeroNormalizado || '-', Number.isFinite(pedidoId) && pedidoId > 0 ? String(pedidoId) : '-', pedidoNumero || '-'].join('|');
+}
+
+function gravarCachePlanoAssociacaoNfePedido(chave, plano, ttlMs = 120000) {
+  if (!chave || !plano) return;
+  const cache = obterCachePlanoAssociacaoNfePedido();
+  cache.set(chave, {
+    expiraEm: Date.now() + Math.max(1000, Number(ttlMs) || 120000),
+    plano
+  });
+}
+
+function lerCachePlanoAssociacaoNfePedido(chave) {
+  if (!chave) return null;
+  const cache = obterCachePlanoAssociacaoNfePedido();
+  const item = cache.get(chave);
+  if (!item) return null;
+  if (!item.expiraEm || item.expiraEm <= Date.now()) {
+    cache.delete(chave);
+    return null;
+  }
+  return item.plano || null;
 }
 
 async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada, chaveNfeInformada = null) {
@@ -22555,6 +22628,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
     }
 
     const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe, nCodPed);
+    const chaveCachePlano = criarChavePlanoAssociacaoNfePedido(
+      plano?.numero_nfe || numeroNfe,
+      chaveNfe,
+      plano?.n_cod_ped || nCodPed,
+      plano?.c_numero_pedido || numeroPedido
+    );
+    gravarCachePlanoAssociacaoNfePedido(chaveCachePlano, plano, 120000);
 
     return res.json({
       ok: true,
@@ -22592,7 +22672,19 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       return res.status(400).json({ ok: false, error: 'Parâmetro numero_pedido ou n_cod_ped é obrigatório' });
     }
 
-    const plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe, nCodPed);
+    let plano = null;
+    const chaveCachePlano = criarChavePlanoAssociacaoNfePedido(numeroNfe, chaveNfe, nCodPed, numeroPedido);
+    plano = lerCachePlanoAssociacaoNfePedido(chaveCachePlano);
+    if (!plano) {
+      plano = await montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe, nCodPed);
+      const chaveCachePlanoResolvida = criarChavePlanoAssociacaoNfePedido(
+        plano?.numero_nfe || numeroNfe,
+        chaveNfe,
+        plano?.n_cod_ped || nCodPed,
+        plano?.c_numero_pedido || numeroPedido
+      );
+      gravarCachePlanoAssociacaoNfePedido(chaveCachePlanoResolvida, plano, 120000);
+    }
 
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
@@ -22600,8 +22692,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     };
 
     let alertaItemAssociacao = '';
+    const etapaAlvoRecebimentoTotal = '60';
     try {
-      await chamarApiRecebimentoNfeOmie('AlterarRecebimento', payloadAlterar);
+      await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadAlterar, {
+        tentativasMaximas: 2
+      });
     } catch (erroAssociacao) {
       const msgErro = String(erroAssociacao?.message || erroAssociacao || '');
       const erroItemPedidoInvalido = /Código do Pedido .* e do Item .* devem ser válidos/i.test(msgErro);
@@ -22611,14 +22706,92 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       alertaItemAssociacao = msgErro;
     }
 
-    const recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
+    try {
+      await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarEtapaRecebimento', {
+        nIdReceb: Number(plano.n_id_receb),
+        cEtapa: etapaAlvoRecebimentoTotal
+      }, {
+        tentativasMaximas: 2
+      });
+    } catch (erroEtapa) {
+      const msgEtapa = String(erroEtapa?.message || erroEtapa || '');
+      const recebimentoEtapaFallback = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
+        nIdReceb: Number(plano.n_id_receb)
+      }, {
+        tentativasMaximas: 2
+      }).catch(() => null);
+      const etapaAtualFallback = String(recebimentoEtapaFallback?.cabec?.cEtapa || '').trim();
+      const etapaJaCompativel = etapaAtualFallback === '60' || etapaAtualFallback === '80';
+      if (!etapaJaCompativel) {
+        throw new Error(`NF-e associada, mas falhou ao alterar etapa para Recebido Totalmente: ${msgEtapa}`);
+      }
+    }
+
+    let recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
       nIdReceb: Number(plano.n_id_receb)
+    }, {
+      tentativasMaximas: 2
     });
+
+    let etapaFinalRecebimento = String(recebimentoAposAlteracao?.cabec?.cEtapa || '').trim();
+
+    if (etapaFinalRecebimento === '40') {
+      const tentativasConclusao = 3;
+      for (let tentativa = 1; tentativa <= tentativasConclusao; tentativa += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
+          nIdReceb: Number(plano.n_id_receb),
+          cEtapa: etapaAlvoRecebimentoTotal
+        }, {
+          tentativasMaximas: 2
+        });
+
+        recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
+          nIdReceb: Number(plano.n_id_receb)
+        }, {
+          tentativasMaximas: 2
+        });
+
+        etapaFinalRecebimento = String(recebimentoAposAlteracao?.cabec?.cEtapa || '').trim();
+        if (etapaFinalRecebimento === '60' || etapaFinalRecebimento === '80') {
+          break;
+        }
+      }
+    }
+
+    if (etapaFinalRecebimento !== '60' && etapaFinalRecebimento !== '80') {
+      throw new Error(
+        `NF-e associada, porém etapa final na Omie permaneceu em ${etapaFinalRecebimento || 'vazia'} (esperado 60/80).`
+      );
+    }
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimentoAposAlteracao);
     const vinculoConfirmado = pedidosVinculados.includes(String(plano.n_cod_ped))
       || pedidosVinculados.includes(String(plano.c_numero_pedido || '').trim())
       || pedidosVinculados.includes(String(numeroPedido).trim());
+
+    const numeroNfeVinculada = String(
+      recebimentoAposAlteracao?.cabec?.cNumeroNFe ||
+      plano.numero_nfe ||
+      numeroNfe ||
+      ''
+    ).trim();
+
+    if (numeroNfeVinculada) {
+      await pool.query(`
+        ALTER TABLE compras.pedidos_omie
+        ADD COLUMN IF NOT EXISTS "NFe vinculada" TEXT
+      `);
+
+      await pool.query(
+        `UPDATE compras.pedidos_omie
+            SET "NFe vinculada" = $1,
+                "Etapa_NF" = $2
+          WHERE n_cod_ped = $3`,
+        [numeroNfeVinculada, etapaFinalRecebimento || etapaAlvoRecebimentoTotal, plano.n_cod_ped]
+      );
+    }
 
     if (alertaItemAssociacao && !vinculoConfirmado) {
       throw new Error(alertaItemAssociacao);
@@ -22636,6 +22809,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
         n_cod_ped: plano.n_cod_ped,
         c_numero_pedido: plano.c_numero_pedido || null,
+        nfe_vinculada: numeroNfeVinculada || null,
+        etapa_nf_omie: etapaFinalRecebimento || null,
         pedidos_vinculados: pedidosVinculados,
         alerta_item: alertaItemAssociacao || null
       }
