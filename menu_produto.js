@@ -39647,6 +39647,15 @@ function obterNomeUsuarioHeaderAgenda() {
   return String(document.getElementById('userNameDisplay')?.textContent || '').trim();
 }
 
+function nomeUsuarioValidoAgenda(nome) {
+  const valor = String(nome || '').trim();
+  if (!valor) return false;
+  const normalizado = valor.toLowerCase();
+  if (['usuário', 'usuario', 'user', '-', '—', '--', '...'].includes(normalizado)) return false;
+  if (!/[a-z0-9]/i.test(valor)) return false;
+  return true;
+}
+
 function agendaSetProcessando(ativo) {
   const overlay = document.getElementById('agendaProcessingOverlay');
   if (!overlay) return;
@@ -39691,8 +39700,8 @@ function obterUsuarioLogadoAgenda() {
 }
 
 function usuarioAutenticadoAgenda() {
-  const nomeTela = (document.getElementById('userNameDisplay')?.textContent || '').trim();
-  return Boolean(nomeTela);
+  const nomeTela = obterNomeUsuarioHeaderAgenda();
+  return nomeUsuarioValidoAgenda(nomeTela);
 }
 
 function gerarIdReservaAgenda() {
@@ -39734,7 +39743,7 @@ async function carregarLembretesMesAgenda() {
   const ano = agendaMesReferencia.getFullYear();
   const mes = agendaMesReferencia.getMonth() + 1;
   const usuarioHeader = obterNomeUsuarioHeaderAgenda();
-  if (!usuarioHeader) {
+  if (!nomeUsuarioValidoAgenda(usuarioHeader)) {
     agendaLembretesPorDia = {};
     return;
   }
@@ -39770,7 +39779,7 @@ function iniciarObserverUsuarioAgenda() {
   let ultimoNome = obterNomeUsuarioHeaderAgenda();
   const observer = new MutationObserver(async () => {
     const nomeAtual = obterNomeUsuarioHeaderAgenda();
-    if (!nomeAtual || nomeAtual === ultimoNome || !agendaUiInicializada) return;
+    if (!nomeUsuarioValidoAgenda(nomeAtual) || nomeAtual === ultimoNome || !agendaUiInicializada) return;
     ultimoNome = nomeAtual;
     agendaSetProcessando(true);
     try {

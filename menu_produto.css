@@ -6417,10 +6417,17 @@ table.tabela td.num {
   max-height: calc(100vh - 48px);
   overflow: auto;
   background: #111827;
+  color: var(--theme-color, #e5e7eb);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 16px;
   position: relative;
+}
+
+.agenda-modal-card h3,
+.agenda-modal-card label,
+.agenda-modal-card span {
+  color: var(--theme-color, #e5e7eb);
 }
 
 .agenda-modal-close {
@@ -6469,8 +6476,13 @@ table.tabela td.num {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--theme-bg-color);
-  color: var(--theme-color);
+  color: var(--theme-color, #e5e7eb);
   padding: 8px 10px;
+}
+
+.agenda-form-grid input::placeholder,
+.agenda-form-grid textarea::placeholder {
+  color: var(--inactive-color);
 }
 
 .agenda-weekdays-checks {
