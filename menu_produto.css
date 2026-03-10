@@ -6210,6 +6210,327 @@ table.tabela td.num {
   font-size: 12px;
 }
 
+.agenda-calendario-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agenda-cal-head {
+  font-size: 12px;
+  color: var(--inactive-color);
+  text-align: center;
+  font-weight: 700;
+  padding: 6px 0;
+}
+
+.agenda-cal-day {
+  min-height: 92px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--content-bg);
+  color: var(--theme-color);
+  padding: 8px;
+  cursor: pointer;
+  transition: border-color .2s, transform .12s;
+}
+
+.agenda-cal-day:hover {
+  border-color: #3a6df0;
+  transform: translateY(-1px);
+}
+
+.agenda-cal-day.is-today {
+  box-shadow: 0 0 0 1px rgba(58,109,240,.45) inset;
+}
+
+.agenda-cal-day.is-out {
+  opacity: .45;
+}
+
+.agenda-cal-num {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.agenda-cal-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--inactive-color);
+}
+
+.agenda-cal-reservas {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.agenda-cal-lembretes {
+  margin-top: 4px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.agenda-processing-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: rgba(9, 15, 35, 0.55);
+  backdrop-filter: blur(1px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 40;
+  pointer-events: all;
+}
+
+.agenda-processing-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #60a5fa;
+  animation: agenda-spin 0.8s linear infinite;
+}
+
+.agenda-processing-text {
+  font-size: 12px;
+  color: #e5e7eb;
+  font-weight: 600;
+}
+
+@keyframes agenda-spin {
+  to { transform: rotate(360deg); }
+}
+
+.agenda-cal-lembrete-item {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: rgba(251,191,36,.18);
+  border: 1px solid rgba(251,191,36,.45);
+  color: #fde68a;
+}
+
+.links-rapidos-item {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--theme-bg-color);
+  margin-bottom: 8px;
+}
+
+.links-rapidos-anchor {
+  color: var(--content-title-color);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.links-rapidos-anchor:hover {
+  text-decoration: underline;
+}
+
+.links-rapidos-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--inactive-color);
+}
+
+.agenda-cal-reserva-item {
+  font-size: 10px;
+  line-height: 1.2;
+  background: rgba(37,99,235,.18);
+  border: 1px solid rgba(37,99,235,.35);
+  color: #bfdbfe;
+  border-radius: 6px;
+  padding: 3px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.agenda-cal-reserva-item.is-convocado {
+  background: rgba(16,185,129,.20);
+  border-color: rgba(16,185,129,.45);
+  color: #d1fae5;
+}
+
+.agenda-convocado-icon {
+  margin-right: 4px;
+  color: #34d399;
+}
+
+.agenda-cafe-icon {
+  margin-right: 4px;
+  color: #fbbf24;
+}
+
+.agenda-cafe-check {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.agenda-cafe-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+#agendaToggleMinhasReunioes.is-active {
+  background: rgba(16,185,129,.25);
+  border: 1px solid rgba(16,185,129,.55);
+  color: #a7f3d0;
+}
+
+#agendaLembreteTexto {
+  resize: vertical;
+}
+
+#agendaEtapaFormulario input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 1;
+}
+
+.agenda-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12050;
+  background: rgba(0,0,0,.86);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.agenda-modal-card {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: #111827;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  position: relative;
+}
+
+.agenda-modal-close {
+  position: absolute;
+  right: 10px;
+  top: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--theme-color);
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+}
+
+.agenda-opcao-btn {
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--theme-bg-color);
+  color: var(--theme-color);
+  cursor: pointer;
+}
+
+.agenda-opcao-btn:hover {
+  border-color: #3a6df0;
+}
+
+.agenda-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agenda-form-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.agenda-form-grid input:not([type="checkbox"]),
+.agenda-form-grid select {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--theme-bg-color);
+  color: var(--theme-color);
+  padding: 8px 10px;
+}
+
+.agenda-weekdays-checks {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.agenda-weekdays-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.agenda-weekdays-checks input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+#agendaParticipantesSelect {
+  cursor: pointer;
+}
+
+.agenda-participantes-selecionados {
+  min-height: 38px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agenda-participante-chip {
+  padding: 4px 6px 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(58,109,240,.18);
+  color: #9db6ff;
+  border: 1px solid rgba(58,109,240,.35);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agenda-participante-remover {
+  border: none;
+  background: transparent;
+  color: #dbeafe;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
 /* status icons cores */
 .status-excluido { color: #ef4444; }
 .status-produzindo { color: #f59e0b; }

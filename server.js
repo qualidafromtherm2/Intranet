@@ -222,8 +222,17 @@ const originalPoolConnect = pool.connect.bind(pool);
 
 function resolverUsuarioAuditoria(req) {
   const user = req?.session?.user || {};
-  const candidato = user.username || user.fullName || user.login || user.id || null;
+  const candidato = user.username || user.login || user.fullName || user.id || null;
   return String(candidato || '').trim() || null;
+}
+
+function resolverIdentificadoresAuditoria(req) {
+  const user = req?.session?.user || {};
+  const candidatos = [user.username, user.login, user.fullName, user.id]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .map((item) => item.toLowerCase());
+  return Array.from(new Set(candidatos));
 }
 
 // Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
@@ -308,6 +317,104 @@ pool.query('SELECT 1').then(() => {
 }).catch(err => {
   console.error('[pg] falha conexão:', err?.message || err);
 });
+
+async function ensureRhReservasSchema() {
+  try {
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS rh`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.reservas_ambientes (
+        id BIGSERIAL PRIMARY KEY,
+        tipo_espaco TEXT NOT NULL CHECK (tipo_espaco IN ('Auditório', 'Sala de reunião')),
+        tema_reuniao TEXT NOT NULL,
+        data_reserva DATE NOT NULL,
+        hora_inicio TIME NOT NULL,
+        hora_fim TIME NOT NULL,
+        repetir BOOLEAN NOT NULL DEFAULT false,
+        repetir_todos_meses BOOLEAN NOT NULL DEFAULT false,
+        dias_semana TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        cafe BOOLEAN NOT NULL DEFAULT false,
+        criado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT reservas_ambientes_hora_ck CHECK (hora_fim > hora_inicio)
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.reservas_participantes (
+        id BIGSERIAL PRIMARY KEY,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        username TEXT NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS reservas_participantes_unq
+      ON rh.reservas_participantes (reserva_id, username)
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS reservas_ambientes_data_tipo_idx
+      ON rh.reservas_ambientes (data_reserva, tipo_espaco)
+    `);
+
+    await pool.query(`
+      ALTER TABLE rh.reservas_ambientes
+      ADD COLUMN IF NOT EXISTS repetir_todos_meses BOOLEAN NOT NULL DEFAULT false
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.lembretes_calendario (
+        id BIGSERIAL PRIMARY KEY,
+        data_lembrete DATE NOT NULL,
+        texto TEXT NOT NULL,
+        criado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.lembretes_destinatarios (
+        id BIGSERIAL PRIMARY KEY,
+        lembrete_id BIGINT NOT NULL REFERENCES rh.lembretes_calendario(id) ON DELETE CASCADE,
+        username TEXT NOT NULL
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS lembretes_destinatarios_unq
+      ON rh.lembretes_destinatarios (lembrete_id, username)
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS lembretes_calendario_data_idx
+      ON rh.lembretes_calendario (data_lembrete)
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.links_rapidos (
+        id BIGSERIAL PRIMARY KEY,
+        nome_link TEXT NOT NULL,
+        url_link TEXT NOT NULL,
+        criado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS links_rapidos_url_unq
+      ON rh.links_rapidos (url_link)
+    `);
+
+    console.log('[RH] Schema de reservas pronto');
+  } catch (err) {
+    console.error('[RH] Erro ao garantir schema/tabelas de reservas:', err?.message || err);
+  }
+}
+
+ensureRhReservasSchema();
 
 
 function parseDateBR(s){ if(!s) return null; const t=String(s).trim();
@@ -2286,6 +2393,458 @@ app.get('/api/users/ativos', async (_req, res) => {
   } catch (err) {
     console.error('[API] /api/users/ativos erro:', err);
     res.status(500).json({ error: 'Falha ao listar usuários ativos' });
+  }
+});
+
+function validarTipoEspacoReservaRh(tipo) {
+  const t = String(tipo || '').trim().toLowerCase();
+  if (t === 'auditório' || t === 'auditorio') return 'Auditório';
+  if (t === 'sala de reunião' || t === 'sala de reuniao') return 'Sala de reunião';
+  return null;
+}
+
+function normalizarDiasSemanaRh(dias) {
+  if (!Array.isArray(dias)) return [];
+  const permitidos = new Set(['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom']);
+  return Array.from(new Set(dias.map((d) => String(d || '').trim().toLowerCase()).filter((d) => permitidos.has(d))));
+}
+
+async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaInicio, horaFim, ignorarId = null }) {
+  const { rows } = await client.query(
+    `SELECT id
+       FROM rh.reservas_ambientes
+      WHERE data_reserva = $1
+        AND tipo_espaco = $2
+        AND ($3::bigint IS NULL OR id <> $3::bigint)
+        AND hora_inicio < $5::time
+        AND hora_fim > $4::time
+      LIMIT 1`,
+    [dataReserva, tipoEspaco, ignorarId, horaInicio, horaFim]
+  );
+  return rows.length > 0;
+}
+
+app.get('/api/rh/reservas', async (req, res) => {
+  try {
+    const ano = Number(req.query?.ano);
+    const mes = Number(req.query?.mes);
+    if (!Number.isInteger(ano) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+      return res.status(400).json({ error: 'Parâmetros inválidos. Use ano e mes (1-12).' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT r.id,
+              r.tipo_espaco,
+              r.tema_reuniao,
+              r.data_reserva,
+              to_char(r.hora_inicio, 'HH24:MI') AS hora_inicio,
+              to_char(r.hora_fim, 'HH24:MI') AS hora_fim,
+              r.repetir,
+              r.repetir_todos_meses,
+              r.dias_semana,
+              r.cafe,
+              r.criado_por,
+              COALESCE(array_agg(p.username ORDER BY p.username)
+                FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
+         FROM rh.reservas_ambientes r
+         LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
+        WHERE EXTRACT(YEAR FROM r.data_reserva) = $1
+          AND EXTRACT(MONTH FROM r.data_reserva) = $2
+        GROUP BY r.id
+        ORDER BY r.data_reserva ASC, r.hora_inicio ASC`,
+      [ano, mes]
+    );
+
+    const reservas = rows.map((r) => ({
+      id: r.id,
+      tipo: r.tipo_espaco,
+      tema: r.tema_reuniao,
+      data: r.data_reserva,
+      inicio: r.hora_inicio,
+      fim: r.hora_fim,
+      repetir: !!r.repetir,
+      repetirTodosMeses: !!r.repetir_todos_meses,
+      diasSemana: Array.isArray(r.dias_semana) ? r.dias_semana : [],
+      cafe: !!r.cafe,
+      criadoPor: r.criado_por,
+      participantes: Array.isArray(r.participantes) ? r.participantes : []
+    }));
+
+    return res.json({ ok: true, reservas });
+  } catch (err) {
+    console.error('[API] /api/rh/reservas GET erro:', err);
+    return res.status(500).json({ error: 'Falha ao listar reservas RH' });
+  }
+});
+
+app.post('/api/rh/reservas', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).json({ error: 'Usuário não autenticado para registrar reserva' });
+  }
+  const body = req.body || {};
+
+  const tipoEspaco = validarTipoEspacoReservaRh(body.tipo);
+  const tema = String(body.tema || '').trim();
+  const dataReserva = String(body.data || '').trim();
+  const horaInicio = String(body.inicio || '').trim();
+  const horaFim = String(body.fim || '').trim();
+  const repetir = !!body.repetir;
+  const repetirTodosMeses = !!body.repetirTodosMeses;
+  const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
+  const cafe = !!body.cafe;
+  const datasBody = Array.isArray(body.datas)
+    ? body.datas.map((d) => String(d || '').trim()).filter(Boolean)
+    : [];
+  const participantes = Array.isArray(body.participantes)
+    ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
+    : [];
+
+  if (!tipoEspaco || !tema || !dataReserva || !horaInicio || !horaFim) {
+    return res.status(400).json({ error: 'Campos obrigatórios: tipo, tema, data, inicio, fim' });
+  }
+  if (horaFim <= horaInicio) {
+    return res.status(400).json({ error: 'Horário fim deve ser maior que horário início' });
+  }
+
+  const datasReserva = datasBody.length > 0 ? datasBody : [dataReserva];
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    for (const dataItem of datasReserva) {
+      const conflito = await existeConflitoReservaRh(client, {
+        dataReserva: dataItem,
+        tipoEspaco,
+        horaInicio,
+        horaFim,
+        ignorarId: null
+      });
+      if (conflito) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: `Conflito de horário para o mesmo espaço na data ${dataItem}` });
+      }
+    }
+
+    const idsCriados = [];
+    for (const dataItem of datasReserva) {
+      const insertReserva = await client.query(
+        `INSERT INTO rh.reservas_ambientes
+          (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, criado_por)
+         VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10)
+         RETURNING id`,
+        [tipoEspaco, tema, dataItem, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, userLogado]
+      );
+
+      const reservaId = insertReserva.rows[0].id;
+      idsCriados.push(reservaId);
+      for (const username of participantes) {
+        await client.query(
+          `INSERT INTO rh.reservas_participantes (reserva_id, username)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [reservaId, username]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, ids: idsCriados });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[API] /api/rh/reservas POST erro:', err);
+    return res.status(500).json({ error: 'Falha ao criar reserva RH' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/rh/reservas/:id', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) {
+    return res.status(401).json({ error: 'Usuário não autenticado para alterar reserva' });
+  }
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const body = req.body || {};
+  const tipoEspaco = validarTipoEspacoReservaRh(body.tipo);
+  const tema = String(body.tema || '').trim();
+  const dataReserva = String(body.data || '').trim();
+  const horaInicio = String(body.inicio || '').trim();
+  const horaFim = String(body.fim || '').trim();
+  const repetir = !!body.repetir;
+  const repetirTodosMeses = !!body.repetirTodosMeses;
+  const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
+  const cafe = !!body.cafe;
+  const participantes = Array.isArray(body.participantes)
+    ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
+    : [];
+
+  if (!tipoEspaco || !tema || !dataReserva || !horaInicio || !horaFim) {
+    return res.status(400).json({ error: 'Campos obrigatórios: tipo, tema, data, inicio, fim' });
+  }
+  if (horaFim <= horaInicio) {
+    return res.status(400).json({ error: 'Horário fim deve ser maior que horário início' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: atualRows } = await client.query(
+      `SELECT id, criado_por FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      [reservaId]
+    );
+    if (!atualRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Reserva não encontrada' });
+    }
+
+    const criador = String(atualRows[0].criado_por || '').trim().toLowerCase();
+    const userNorm = String(userLogado || '').trim().toLowerCase();
+    if (!userNorm || criador !== userNorm) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Somente o criador pode alterar esta reserva' });
+    }
+
+    const conflito = await existeConflitoReservaRh(client, {
+      dataReserva,
+      tipoEspaco,
+      horaInicio,
+      horaFim,
+      ignorarId: reservaId
+    });
+    if (conflito) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Conflito de horário para o mesmo espaço na data informada' });
+    }
+
+    await client.query(
+      `UPDATE rh.reservas_ambientes
+          SET tipo_espaco = $1,
+              tema_reuniao = $2,
+              data_reserva = $3::date,
+              hora_inicio = $4::time,
+              hora_fim = $5::time,
+              repetir = $6,
+              repetir_todos_meses = $7,
+              dias_semana = $8::text[],
+              cafe = $9,
+              atualizado_em = NOW()
+        WHERE id = $10`,
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, reservaId]
+    );
+
+    await client.query(`DELETE FROM rh.reservas_participantes WHERE reserva_id = $1`, [reservaId]);
+    for (const username of participantes) {
+      await client.query(
+        `INSERT INTO rh.reservas_participantes (reserva_id, username)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [reservaId, username]
+      );
+    }
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, id: reservaId });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[API] /api/rh/reservas PUT erro:', err);
+    return res.status(500).json({ error: 'Falha ao atualizar reserva RH' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/rh/lembretes', async (req, res) => {
+  const identificadoresSessao = resolverIdentificadoresAuditoria(req);
+  const userHint = String(req.query?.user || '').trim().toLowerCase();
+  const identificadores = Array.from(new Set([
+    ...identificadoresSessao,
+    ...(userHint ? [userHint] : [])
+  ]));
+  if (!identificadores.length) {
+    console.warn('[RH][Lembretes] Sem identificador de usuário para filtrar lembretes', {
+      userHint,
+      sessionUser: req?.session?.user ? {
+        id: req.session.user.id,
+        username: req.session.user.username,
+        login: req.session.user.login,
+        fullName: req.session.user.fullName
+      } : null
+    });
+    return res.json({ ok: true, lembretes: [] });
+  }
+  try {
+    const ano = Number(req.query?.ano);
+    const mes = Number(req.query?.mes);
+    if (!Number.isInteger(ano) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
+      return res.status(400).json({ error: 'Parâmetros inválidos. Use ano e mes (1-12).' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT l.id,
+              l.data_lembrete,
+              l.texto,
+              l.criado_por,
+              COALESCE(array_agg(d.username ORDER BY d.username)
+                FILTER (WHERE d.username IS NOT NULL), ARRAY[]::TEXT[]) AS destinatarios
+         FROM rh.lembretes_calendario l
+         LEFT JOIN rh.lembretes_destinatarios d ON d.lembrete_id = l.id
+        WHERE EXTRACT(YEAR FROM l.data_lembrete) = $1
+          AND EXTRACT(MONTH FROM l.data_lembrete) = $2
+          AND (
+            lower(l.criado_por) = ANY($3::text[])
+            OR EXISTS (
+              SELECT 1 FROM rh.lembretes_destinatarios dx
+               WHERE dx.lembrete_id = l.id
+                 AND lower(dx.username) = ANY($3::text[])
+            )
+          )
+        GROUP BY l.id
+        ORDER BY l.data_lembrete ASC, l.id ASC`,
+      [ano, mes, identificadores]
+    );
+
+    const totalMesResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+         FROM rh.lembretes_calendario
+        WHERE EXTRACT(YEAR FROM data_lembrete) = $1
+          AND EXTRACT(MONTH FROM data_lembrete) = $2`,
+      [ano, mes]
+    );
+    const totalMes = Number(totalMesResult.rows?.[0]?.total || 0);
+
+    if (totalMes > 0 && rows.length === 0) {
+      console.warn('[RH][Lembretes] Existem lembretes no mês, mas nenhum visível para o usuário', {
+        ano,
+        mes,
+        userHint,
+        identificadores,
+        totalMes
+      });
+    }
+
+    const lembretes = rows.map((r) => ({
+      id: r.id,
+      data: r.data_lembrete,
+      texto: r.texto,
+      criadoPor: r.criado_por,
+      destinatarios: Array.isArray(r.destinatarios) ? r.destinatarios : []
+    }));
+    return res.json({ ok: true, lembretes });
+  } catch (err) {
+    console.error('[API] /api/rh/lembretes GET erro:', err);
+    return res.status(500).json({ error: 'Falha ao listar lembretes RH' });
+  }
+});
+
+app.post('/api/rh/lembretes', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  const identificadoresCriador = resolverIdentificadoresAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).json({ error: 'Usuário não autenticado para registrar lembrete' });
+  }
+  const body = req.body || {};
+
+  const dataLembrete = String(body.data || '').trim();
+  const texto = String(body.texto || '').trim();
+  const destinatariosBody = Array.isArray(body.destinatarios)
+    ? body.destinatarios.map((u) => String(u || '').trim()).filter(Boolean)
+    : [];
+  const destinatarios = Array.from(new Set([
+    userLogado,
+    ...identificadoresCriador,
+    ...destinatariosBody
+  ]));
+
+  if (!dataLembrete || !texto) {
+    return res.status(400).json({ error: 'Campos obrigatórios: data e texto' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const ins = await client.query(
+      `INSERT INTO rh.lembretes_calendario (data_lembrete, texto, criado_por)
+       VALUES ($1::date, $2, $3)
+       RETURNING id`,
+      [dataLembrete, texto, userLogado]
+    );
+    const lembreteId = ins.rows[0].id;
+
+    for (const username of destinatarios) {
+      await client.query(
+        `INSERT INTO rh.lembretes_destinatarios (lembrete_id, username)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [lembreteId, username]
+      );
+    }
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, id: lembreteId });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[API] /api/rh/lembretes POST erro:', err);
+    return res.status(500).json({ error: 'Falha ao criar lembrete RH' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/rh/links', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome_link, url_link, criado_por, criado_em
+         FROM rh.links_rapidos
+        ORDER BY criado_em DESC, id DESC`
+    );
+
+    const links = rows.map((r) => ({
+      id: r.id,
+      nome: r.nome_link,
+      url: r.url_link,
+      criadoPor: r.criado_por,
+      criadoEm: r.criado_em
+    }));
+
+    return res.json({ ok: true, links });
+  } catch (err) {
+    console.error('[API] /api/rh/links GET erro:', err);
+    return res.status(500).json({ error: 'Falha ao listar links RH' });
+  }
+});
+
+app.post('/api/rh/links', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req) || 'anon';
+  const body = req.body || {};
+
+  const nome = String(body.nome || '').trim();
+  const url = String(body.url || '').trim();
+
+  if (!nome || !url) {
+    return res.status(400).json({ error: 'Campos obrigatórios: nome e url' });
+  }
+
+  try {
+    const ins = await pool.query(
+      `INSERT INTO rh.links_rapidos (nome_link, url_link, criado_por)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (url_link) DO UPDATE
+         SET nome_link = EXCLUDED.nome_link
+       RETURNING id`,
+      [nome, url, userLogado]
+    );
+    return res.json({ ok: true, id: ins.rows[0].id });
+  } catch (err) {
+    console.error('[API] /api/rh/links POST erro:', err);
+    return res.status(500).json({ error: 'Falha ao cadastrar link RH' });
   }
 });
 

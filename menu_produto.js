@@ -11708,6 +11708,127 @@ const avatar     = document.getElementById('profile-icon');
 const etiquetasModal = document.getElementById('etiquetasModal');
 const listaEtiq       = document.getElementById('listaEtiquetas');
 const cartBtn    = document.getElementById('cart-icon');
+const linksBtn   = document.getElementById('links-icon');
+const linksModal = document.getElementById('linksRapidosModal');
+const linksFecharBtn = document.getElementById('linksRapidosFecharModal');
+const linksSalvarBtn = document.getElementById('linksRapidosSalvar');
+const linksNomeInput = document.getElementById('linksRapidosNome');
+const linksUrlInput = document.getElementById('linksRapidosUrl');
+const linksListaEl = document.getElementById('linksRapidosLista');
+
+let linksRapidosCache = [];
+
+function normalizarUrlLinkRapido(url) {
+  const valor = String(url || '').trim();
+  if (!valor) return '';
+  if (/^https?:\/\//i.test(valor)) return valor;
+  return `https://${valor}`;
+}
+
+function renderLinksRapidosLista() {
+  if (!linksListaEl) return;
+
+  if (!Array.isArray(linksRapidosCache) || linksRapidosCache.length === 0) {
+    linksListaEl.innerHTML = '<span style="font-size:12px;color:var(--inactive-color);">Nenhum link registrado.</span>';
+    return;
+  }
+
+  linksListaEl.innerHTML = linksRapidosCache
+    .map((item) => {
+      const nome = escapeHtml(String(item?.nome || 'Sem nome'));
+      const url = escapeHtml(String(item?.url || '#'));
+      const criadoPor = escapeHtml(String(item?.criadoPor || ''));
+      const criadoEm = item?.criadoEm ? new Date(item.criadoEm).toLocaleString('pt-BR') : '';
+      const criadoEmTxt = escapeHtml(String(criadoEm || ''));
+      return `
+        <div class="links-rapidos-item">
+          <a class="links-rapidos-anchor" href="${url}" target="_blank" rel="noopener noreferrer">${nome}</a>
+          <div class="links-rapidos-meta">${criadoPor ? `Por ${criadoPor}` : ''}${criadoEmTxt ? `${criadoPor ? ' • ' : ''}${criadoEmTxt}` : ''}</div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+async function carregarLinksRapidos() {
+  try {
+    const resp = await fetch('/api/rh/links', { credentials: 'include' });
+    if (!resp.ok) {
+      throw new Error(`Erro ao carregar links (${resp.status})`);
+    }
+    const payload = await resp.json();
+    linksRapidosCache = Array.isArray(payload?.links) ? payload.links : [];
+  } catch (err) {
+    console.error('[LINKS] Falha ao carregar links rápidos:', err);
+    linksRapidosCache = [];
+  }
+
+  renderLinksRapidosLista();
+}
+
+async function abrirModalLinksRapidos() {
+  if (!linksModal) return;
+  if (linksNomeInput) linksNomeInput.value = '';
+  if (linksUrlInput) linksUrlInput.value = '';
+  await carregarLinksRapidos();
+  linksModal.style.display = 'flex';
+}
+
+function fecharModalLinksRapidos() {
+  if (!linksModal) return;
+  linksModal.style.display = 'none';
+}
+
+async function salvarLinkRapido() {
+  const nome = String(linksNomeInput?.value || '').trim();
+  const urlNormalizada = normalizarUrlLinkRapido(linksUrlInput?.value || '');
+
+  if (!nome) {
+    alert('Informe o nome do link.');
+    linksNomeInput?.focus();
+    return;
+  }
+
+  if (!urlNormalizada) {
+    alert('Informe o link.');
+    linksUrlInput?.focus();
+    return;
+  }
+
+  let urlValida = false;
+  try {
+    const parsed = new URL(urlNormalizada);
+    urlValida = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch (_err) {
+    urlValida = false;
+  }
+
+  if (!urlValida) {
+    alert('Informe uma URL válida (http/https).');
+    linksUrlInput?.focus();
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/rh/links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome, url: urlNormalizada })
+    });
+
+    if (!resp.ok) {
+      const erro = await resp.json().catch(() => ({}));
+      throw new Error(erro.error || `Erro ao registrar link (${resp.status})`);
+    }
+
+    if (linksNomeInput) linksNomeInput.value = '';
+    if (linksUrlInput) linksUrlInput.value = '';
+    await carregarLinksRapidos();
+  } catch (err) {
+    alert(`Não foi possível registrar o link: ${err.message}`);
+  }
+}
 
   /* –– SINO –– */
   bell?.addEventListener('click', e => {
@@ -11723,6 +11844,22 @@ const cartBtn    = document.getElementById('cart-icon');
     e.preventDefault();
     openComprasFormTab();
   });
+
+  linksBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    abrirModalLinksRapidos();
+  });
+
+  linksFecharBtn?.addEventListener('click', fecharModalLinksRapidos);
+  linksSalvarBtn?.addEventListener('click', salvarLinkRapido);
+
+  if (linksModal) {
+    linksModal.addEventListener('click', (event) => {
+      if (event.target === linksModal) {
+        fecharModalLinksRapidos();
+      }
+    });
+  }
 
   /* –– ÍCONE DE ATUALIZAÇÃO –– */
   const updateIcon = document.getElementById('config-icon');
@@ -24109,15 +24246,12 @@ async function renderizarCotacoesRegistradasCotadoEscolha() {
   const cotacoesRaw = Array.isArray(window.cotadoEscolhaCotacoesDb) ? window.cotadoEscolhaCotacoesDb : [];
   const cotacoes = cotacoesRaw.filter(c => c && typeof c === 'object');
 
-  const cotacoesAprovadas = cotacoes.filter((cotacao) =>
-    String(cotacao?.status_aprovacao || '').toLowerCase().trim() === 'aprovado'
-  );
   const possuiCotacaoUsd = cotacoes.some((cotacao) =>
     String(cotacao?.moeda || 'BRL').toUpperCase() === 'USD'
   );
   const taxaUsdBrl = possuiCotacaoUsd ? await obterTaxaUsdBrlCotacaoKanban() : null;
   const resumoTotalHtml = montarResumoTotalCotacoesKanban(
-    cotacoesAprovadas,
+    cotacoes,
     taxaUsdBrl,
     (cotacao) => Number(cotacao?.valor_cotado || cotacao?.valor_unitario || 0) || 0
   );
@@ -39479,7 +39613,1153 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[CARROSSEL] Inicializando carrossel semanal...');
     initCarrosselSemanal();
   }
+
+  if (document.getElementById('agendaCalendarioGrid')) {
+    try {
+      initAgendaReservasUI();
+    } catch (err) {
+      console.error('[AGENDA] Falha ao inicializar calendário de reservas:', err);
+    }
+  }
 });
+
+// ========== CALENDÁRIO MENSAL DE RESERVAS (Página Início) ==========
+let agendaMesReferencia = new Date();
+let agendaDataSelecionada = null;
+let agendaTipoReservaSelecionado = null;
+let agendaUsuariosAtivosCache = [];
+let agendaParticipantesDisponiveis = [];
+let agendaParticipantesSelecionadosLista = [];
+let agendaReservasPorDia = {};
+let agendaLembretesPorDia = {};
+let agendaMostrarSomenteMinhas = false;
+let agendaLembreteDestinatariosDisponiveis = [];
+let agendaLembreteDestinatariosSelecionados = [];
+let agendaLembreteVisualizandoId = null;
+let agendaReservaEditandoId = null;
+let agendaReservaEditandoData = null;
+let agendaPodeEditarAtual = true;
+let agendaUiInicializada = false;
+let agendaProcessandoContador = 0;
+let agendaObserverUsuarioInicializado = false;
+
+function obterNomeUsuarioHeaderAgenda() {
+  return String(document.getElementById('userNameDisplay')?.textContent || '').trim();
+}
+
+function agendaSetProcessando(ativo) {
+  const overlay = document.getElementById('agendaProcessingOverlay');
+  if (!overlay) return;
+
+  if (ativo) {
+    agendaProcessandoContador += 1;
+  } else {
+    agendaProcessandoContador = Math.max(0, agendaProcessandoContador - 1);
+  }
+
+  overlay.style.display = agendaProcessandoContador > 0 ? 'flex' : 'none';
+}
+
+function formatarDataIso(dateObj) {
+  if (!(dateObj instanceof Date)) return '';
+  const ano = dateObj.getFullYear();
+  const mes = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const dia = String(dateObj.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function formatarDataExibicaoPtBr(dataIso) {
+  if (!dataIso) return '-';
+  const data = new Date(`${dataIso}T00:00:00`);
+  if (Number.isNaN(data.getTime())) return dataIso;
+  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function montarTituloAgendaMensal(dateRef) {
+  try {
+    return dateRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+      .replace(/(^\w)/, (match) => match.toUpperCase());
+  } catch (_err) {
+    return '-';
+  }
+}
+
+function obterUsuarioLogadoAgenda() {
+  const nomeTela = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  const nomeSessao = String(window.__sessionUser?.username || '').trim();
+  return nomeTela || nomeSessao;
+}
+
+function usuarioAutenticadoAgenda() {
+  const nomeTela = (document.getElementById('userNameDisplay')?.textContent || '').trim();
+  return Boolean(nomeTela);
+}
+
+function gerarIdReservaAgenda() {
+  return `res_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function carregarReservasMesAgenda() {
+  const ano = agendaMesReferencia.getFullYear();
+  const mes = agendaMesReferencia.getMonth() + 1;
+  const resp = await fetch(`/api/rh/reservas?ano=${ano}&mes=${mes}`, { credentials: 'include' });
+  if (!resp.ok) {
+    throw new Error(`Falha ao carregar reservas (${resp.status})`);
+  }
+  const data = await resp.json();
+  const reservas = Array.isArray(data?.reservas) ? data.reservas : [];
+
+  agendaReservasPorDia = {};
+  reservas.forEach((reserva) => {
+    const dataIso = String(reserva?.data || '').slice(0, 10);
+    if (!dataIso) return;
+    if (!Array.isArray(agendaReservasPorDia[dataIso])) agendaReservasPorDia[dataIso] = [];
+    agendaReservasPorDia[dataIso].push({
+      id: reserva.id,
+      criadoPor: reserva.criadoPor,
+      tipo: reserva.tipo,
+      inicio: reserva.inicio,
+      fim: reserva.fim,
+      tema: reserva.tema,
+      cafe: !!reserva.cafe,
+      participantes: Array.isArray(reserva.participantes) ? reserva.participantes : [],
+      repetir: !!reserva.repetir,
+      repetirTodosMeses: !!reserva.repetirTodosMeses,
+      diasSemana: Array.isArray(reserva.diasSemana) ? reserva.diasSemana : []
+    });
+  });
+}
+
+async function carregarLembretesMesAgenda() {
+  const ano = agendaMesReferencia.getFullYear();
+  const mes = agendaMesReferencia.getMonth() + 1;
+  const usuarioHeader = obterNomeUsuarioHeaderAgenda();
+  if (!usuarioHeader) {
+    agendaLembretesPorDia = {};
+    return;
+  }
+  const usuarioHint = encodeURIComponent(usuarioHeader);
+  const resp = await fetch(`/api/rh/lembretes?ano=${ano}&mes=${mes}&user=${usuarioHint}`, { credentials: 'include' });
+  if (!resp.ok) {
+    throw new Error(`Falha ao carregar lembretes (${resp.status})`);
+  }
+  const data = await resp.json();
+  const lembretes = Array.isArray(data?.lembretes) ? data.lembretes : [];
+
+  agendaLembretesPorDia = {};
+  lembretes.forEach((lembrete) => {
+    const dataIso = String(lembrete?.data || '').slice(0, 10);
+    if (!dataIso) return;
+    if (!Array.isArray(agendaLembretesPorDia[dataIso])) agendaLembretesPorDia[dataIso] = [];
+    agendaLembretesPorDia[dataIso].push({
+      id: lembrete.id,
+      texto: String(lembrete.texto || ''),
+      criadoPor: String(lembrete.criadoPor || ''),
+      destinatarios: Array.isArray(lembrete.destinatarios) ? lembrete.destinatarios : []
+    });
+  });
+}
+
+function iniciarObserverUsuarioAgenda() {
+  if (agendaObserverUsuarioInicializado) return;
+
+  const elUsuario = document.getElementById('userNameDisplay');
+  if (!elUsuario) return;
+  agendaObserverUsuarioInicializado = true;
+
+  let ultimoNome = obterNomeUsuarioHeaderAgenda();
+  const observer = new MutationObserver(async () => {
+    const nomeAtual = obterNomeUsuarioHeaderAgenda();
+    if (!nomeAtual || nomeAtual === ultimoNome || !agendaUiInicializada) return;
+    ultimoNome = nomeAtual;
+    agendaSetProcessando(true);
+    try {
+      await carregarAgendaMesCompleto();
+      renderAgendaCalendarioMensal();
+    } catch (err) {
+      console.error('[AGENDA] Falha ao recarregar após identificar usuário:', err);
+    } finally {
+      agendaSetProcessando(false);
+    }
+  });
+
+  observer.observe(elUsuario, { childList: true, characterData: true, subtree: true });
+}
+
+async function carregarAgendaMesCompleto() {
+  await Promise.all([
+    carregarReservasMesAgenda(),
+    carregarLembretesMesAgenda()
+  ]);
+}
+
+function isConflitoHorarioAgenda(inicioA, fimA, inicioB, fimB) {
+  return inicioA < fimB && fimA > inicioB;
+}
+
+function buscarConflitoReservaAgenda({ dataIso, tipoReservaTexto, horarioInicio, horarioFim, ignorarReservaId = null }) {
+  const reservasDia = Array.isArray(agendaReservasPorDia[dataIso]) ? agendaReservasPorDia[dataIso] : [];
+  return reservasDia.find((reserva) => {
+    if (!reserva || typeof reserva !== 'object') return false;
+    if (ignorarReservaId && String(reserva.id) === String(ignorarReservaId)) return false;
+    if (String(reserva.tipo || '') !== String(tipoReservaTexto || '')) return false;
+    const ini = String(reserva.inicio || '').trim();
+    const fim = String(reserva.fim || '').trim();
+    if (!ini || !fim) return false;
+    return isConflitoHorarioAgenda(horarioInicio, horarioFim, ini, fim);
+  }) || null;
+}
+
+function atualizarPermissaoEdicaoAgenda(podeEditar) {
+  agendaPodeEditarAtual = !!podeEditar;
+
+  const temaInput = document.getElementById('agendaTemaReuniao');
+  const repetirSelect = document.getElementById('agendaRepetirReuniao');
+  const inicioInput = document.getElementById('agendaHorarioInicio');
+  const fimInput = document.getElementById('agendaHorarioFim');
+  const participantesSelect = document.getElementById('agendaParticipantesSelect');
+  const cafeCheckbox = document.getElementById('agendaCafeCheckbox');
+  const btnSalvar = document.getElementById('agendaSalvarReserva');
+  const semanaChecks = document.querySelectorAll('#agendaSemanaRepeticao input[type="checkbox"]');
+
+  if (temaInput) temaInput.disabled = !agendaPodeEditarAtual;
+  if (repetirSelect) repetirSelect.disabled = !agendaPodeEditarAtual;
+  if (inicioInput) inicioInput.disabled = !agendaPodeEditarAtual;
+  if (fimInput) fimInput.disabled = !agendaPodeEditarAtual;
+  if (participantesSelect) participantesSelect.disabled = !agendaPodeEditarAtual;
+  if (cafeCheckbox) cafeCheckbox.disabled = !agendaPodeEditarAtual;
+  semanaChecks.forEach((checkbox) => { checkbox.disabled = !agendaPodeEditarAtual; });
+
+  if (btnSalvar) {
+    if (agendaPodeEditarAtual) {
+      btnSalvar.style.display = '';
+      btnSalvar.disabled = false;
+      btnSalvar.textContent = agendaReservaEditandoId ? 'Salvar alteração' : 'Reservar';
+    } else {
+      btnSalvar.style.display = 'none';
+    }
+  }
+}
+
+function renderAgendaCalendarioMensal() {
+  const grid = document.getElementById('agendaCalendarioGrid');
+  const titulo = document.getElementById('agendaMesTitulo');
+  if (!grid) return;
+
+  const dataRef = new Date(agendaMesReferencia.getFullYear(), agendaMesReferencia.getMonth(), 1);
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const usuarioLogado = obterUsuarioLogadoAgenda().toLowerCase();
+
+  if (titulo) {
+    titulo.textContent = montarTituloAgendaMensal(dataRef);
+  }
+
+  const primeiroDiaSemana = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1).getDay();
+  const totalDiasMes = new Date(dataRef.getFullYear(), dataRef.getMonth() + 1, 0).getDate();
+  const diasMesAnterior = new Date(dataRef.getFullYear(), dataRef.getMonth(), 0).getDate();
+  const diaInicialCalendario = primeiroDiaSemana;
+  const totalSlots = Math.ceil((diaInicialCalendario + totalDiasMes) / 7) * 7;
+
+  const nomesDia = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const htmlCabecalho = nomesDia
+    .map((nomeDia) => `<div class="agenda-cal-head">${nomeDia}</div>`)
+    .join('');
+
+  let htmlDias = '';
+  for (let indice = 0; indice < totalSlots; indice++) {
+    let dataCelula;
+    let diaExibicao;
+    let foraDoMes = false;
+
+    if (indice < diaInicialCalendario) {
+      const diaPrev = diasMesAnterior - (diaInicialCalendario - indice - 1);
+      dataCelula = new Date(dataRef.getFullYear(), dataRef.getMonth() - 1, diaPrev);
+      diaExibicao = diaPrev;
+      foraDoMes = true;
+    } else if (indice >= (diaInicialCalendario + totalDiasMes)) {
+      const diaNext = indice - (diaInicialCalendario + totalDiasMes) + 1;
+      dataCelula = new Date(dataRef.getFullYear(), dataRef.getMonth() + 1, diaNext);
+      diaExibicao = diaNext;
+      foraDoMes = true;
+    } else {
+      const diaAtual = indice - diaInicialCalendario + 1;
+      dataCelula = new Date(dataRef.getFullYear(), dataRef.getMonth(), diaAtual);
+      diaExibicao = diaAtual;
+    }
+
+    const dataIso = formatarDataIso(dataCelula);
+    const isHoje = formatarDataIso(dataCelula) === formatarDataIso(hoje);
+    const classes = ['agenda-cal-day'];
+    if (foraDoMes) classes.push('is-out');
+    if (isHoje) classes.push('is-today');
+
+    const reservasDiaRaw = Array.isArray(agendaReservasPorDia[dataIso]) ? agendaReservasPorDia[dataIso] : [];
+    const reservasDia = agendaMostrarSomenteMinhas
+      ? reservasDiaRaw.filter((reserva) => {
+          const participantesReserva = Array.isArray(reserva?.participantes)
+            ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
+            : [];
+          const criador = String(reserva?.criadoPor || '').trim().toLowerCase();
+          return (Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado)) || (Boolean(usuarioLogado) && criador === usuarioLogado);
+        })
+      : reservasDiaRaw;
+
+    const lembretesDia = Array.isArray(agendaLembretesPorDia[dataIso]) ? agendaLembretesPorDia[dataIso] : [];
+    const reservasHtml = reservasDia.length > 0
+      ? `
+        <div class="agenda-cal-reservas">
+          ${reservasDia.slice(0, 2).map((reserva) => {
+            const participantesReserva = Array.isArray(reserva?.participantes)
+              ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
+              : [];
+            const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
+            const marcadorConvocado = usuarioConvocado
+              ? '<i class="fa-solid fa-calendar-check agenda-convocado-icon" title="Você está convocado"></i>'
+              : '';
+            const marcadorCafe = reserva?.cafe
+              ? '<i class="fa-solid fa-mug-hot agenda-cafe-icon" title="Com café"></i>'
+              : '';
+            const classesReserva = `agenda-cal-reserva-item${usuarioConvocado ? ' is-convocado' : ''}`;
+            return `
+            <div class="${classesReserva}" data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}" data-agenda-reserva-date="${escapeHtml(dataIso)}" title="${escapeHtml(`${reserva.tipo} ${reserva.inicio}-${reserva.fim}`)}">
+              ${marcadorCafe}
+              ${marcadorConvocado}
+              ${escapeHtml(`${reserva.tipo} ${reserva.inicio}-${reserva.fim}`)}
+            </div>
+          `;
+          }).join('')}
+          ${reservasDia.length > 2 ? `<div class="agenda-cal-meta">+${reservasDia.length - 2} reserva(s)</div>` : ''}
+        </div>
+      `
+      : '<div class="agenda-cal-meta">Clique para reservar</div>';
+
+    const lembretesHtml = lembretesDia.length > 0
+      ? `
+        <div class="agenda-cal-lembretes" title="Lembretes do dia">
+          ${lembretesDia.slice(0, 4).map((lembrete) => `
+            <span class="agenda-cal-lembrete-item" data-agenda-lembrete-id="${escapeHtml(String(lembrete.id || ''))}" data-agenda-lembrete-date="${escapeHtml(dataIso)}" title="${escapeHtml(lembrete.texto || 'Lembrete')}">
+              <i class="fa-solid fa-note-sticky"></i>
+            </span>
+          `).join('')}
+        </div>
+      `
+      : '';
+
+    htmlDias += `
+      <button type="button" class="${classes.join(' ')}" data-agenda-date="${dataIso}">
+        <div class="agenda-cal-num">${diaExibicao}</div>
+        ${reservasHtml}
+        ${lembretesHtml}
+      </button>
+    `;
+  }
+
+  grid.innerHTML = `${htmlCabecalho}${htmlDias}`;
+}
+
+async function carregarUsuariosAtivosAgenda() {
+  if (Array.isArray(agendaUsuariosAtivosCache) && agendaUsuariosAtivosCache.length > 0) {
+    return agendaUsuariosAtivosCache;
+  }
+
+  const tentarCarregar = async (url) => {
+    const resposta = await fetch(url, { credentials: 'include' });
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+    const payload = await resposta.json();
+    if (Array.isArray(payload?.users)) {
+      return payload.users.map((username) => String(username || '').trim()).filter(Boolean);
+    }
+    if (Array.isArray(payload?.usuarios)) {
+      return payload.usuarios.map((registro) => String(registro?.username || '').trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  let usuarios = [];
+  try {
+    usuarios = await tentarCarregar('/api/users/ativos');
+  } catch (_erroUsersAtivos) {
+    usuarios = await tentarCarregar('/api/usuarios/ativos');
+  }
+
+  agendaUsuariosAtivosCache = Array.from(new Set(usuarios)).sort((nomeA, nomeB) => nomeA.localeCompare(nomeB, 'pt-BR'));
+  return agendaUsuariosAtivosCache;
+}
+
+function renderParticipantesSelecionadosAgenda() {
+  const listaSelecionados = document.getElementById('agendaParticipantesSelecionados');
+  if (!listaSelecionados) return;
+
+  if (!agendaParticipantesSelecionadosLista.length) {
+    listaSelecionados.innerHTML = '<span style="font-size:12px;color:var(--inactive-color);">Nenhum participante selecionado.</span>';
+    return;
+  }
+
+  listaSelecionados.innerHTML = agendaParticipantesSelecionadosLista
+    .map((username) => `
+      <span class="agenda-participante-chip">
+        ${escapeHtml(username)}
+        ${agendaPodeEditarAtual ? `<button type="button" class="agenda-participante-remover" data-agenda-user-remove="${escapeHtml(username)}" title="Remover">✕</button>` : ''}
+      </span>
+    `)
+    .join('');
+}
+
+function renderParticipantesDisponiveisAgenda() {
+  const participantesSelect = document.getElementById('agendaParticipantesSelect');
+  if (!participantesSelect) return;
+
+  const opcoesDisponiveis = agendaParticipantesDisponiveis
+    .filter((username) => !agendaParticipantesSelecionadosLista.includes(username))
+    .sort((nomeA, nomeB) => nomeA.localeCompare(nomeB, 'pt-BR'));
+
+  participantesSelect.innerHTML = `
+    <option value="">Selecione um participante...</option>
+    ${opcoesDisponiveis.map((username) => `<option value="${escapeHtml(username)}">${escapeHtml(username)}</option>`).join('')}
+  `;
+  participantesSelect.value = '';
+}
+
+function renderDestinatariosLembreteDisponiveisAgenda() {
+  const selectDest = document.getElementById('agendaLembreteParticipantesSelect');
+  if (!selectDest) return;
+
+  const disponiveis = agendaLembreteDestinatariosDisponiveis
+    .filter((username) => !agendaLembreteDestinatariosSelecionados.includes(username))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  selectDest.innerHTML = `
+    <option value="">Selecione um usuário...</option>
+    ${disponiveis.map((username) => `<option value="${escapeHtml(username)}">${escapeHtml(username)}</option>`).join('')}
+  `;
+  selectDest.value = '';
+}
+
+function renderDestinatariosLembreteSelecionadosAgenda() {
+  const container = document.getElementById('agendaLembreteParticipantesSelecionados');
+  if (!container) return;
+
+  if (!agendaLembreteDestinatariosSelecionados.length) {
+    container.innerHTML = '<span style="font-size:12px;color:var(--inactive-color);">Nenhum usuário selecionado.</span>';
+    return;
+  }
+
+  container.innerHTML = agendaLembreteDestinatariosSelecionados
+    .map((username) => `
+      <span class="agenda-participante-chip">
+        ${escapeHtml(username)}
+        <button type="button" class="agenda-participante-remover" data-agenda-lembrete-user-remove="${escapeHtml(username)}" title="Remover">✕</button>
+      </span>
+    `)
+    .join('');
+}
+
+function adicionarDestinatarioLembreteAgenda(username) {
+  const nome = String(username || '').trim();
+  if (!nome) return;
+  if (!agendaLembreteDestinatariosSelecionados.includes(nome)) {
+    agendaLembreteDestinatariosSelecionados.push(nome);
+  }
+  renderDestinatariosLembreteDisponiveisAgenda();
+  renderDestinatariosLembreteSelecionadosAgenda();
+}
+
+function removerDestinatarioLembreteAgenda(username) {
+  const nome = String(username || '').trim();
+  if (!nome) return;
+  agendaLembreteDestinatariosSelecionados = agendaLembreteDestinatariosSelecionados.filter((item) => item !== nome);
+  renderDestinatariosLembreteDisponiveisAgenda();
+  renderDestinatariosLembreteSelecionadosAgenda();
+}
+
+function adicionarParticipanteAgenda(username) {
+  const nome = String(username || '').trim();
+  if (!nome) return;
+  if (!agendaParticipantesSelecionadosLista.includes(nome)) {
+    agendaParticipantesSelecionadosLista.push(nome);
+  }
+  renderParticipantesDisponiveisAgenda();
+  renderParticipantesSelecionadosAgenda();
+}
+
+function removerParticipanteAgenda(username) {
+  const nome = String(username || '').trim();
+  if (!nome) return;
+  agendaParticipantesSelecionadosLista = agendaParticipantesSelecionadosLista.filter((item) => item !== nome);
+  renderParticipantesDisponiveisAgenda();
+  renderParticipantesSelecionadosAgenda();
+}
+
+function resetarFormularioAgendaReserva() {
+  agendaTipoReservaSelecionado = null;
+  agendaReservaEditandoId = null;
+  agendaReservaEditandoData = null;
+  agendaPodeEditarAtual = true;
+
+  const tituloModal = document.getElementById('agendaModalTitulo');
+  const etapaTipo = document.getElementById('agendaEtapaTipo');
+  const etapaFormulario = document.getElementById('agendaEtapaFormulario');
+  const temaInput = document.getElementById('agendaTemaReuniao');
+  const repetirSelect = document.getElementById('agendaRepetirReuniao');
+  const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
+  const inicioInput = document.getElementById('agendaHorarioInicio');
+  const fimInput = document.getElementById('agendaHorarioFim');
+  const cafeCheckbox = document.getElementById('agendaCafeCheckbox');
+  const participantesSelect = document.getElementById('agendaParticipantesSelect');
+  const repetirTodosMeses = document.getElementById('agendaRepetirTodosMeses');
+
+  if (tituloModal) {
+    tituloModal.textContent = `Reserva - ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`;
+  }
+  if (etapaTipo) etapaTipo.style.display = 'block';
+  if (etapaFormulario) etapaFormulario.style.display = 'none';
+  if (temaInput) temaInput.value = '';
+  if (repetirSelect) repetirSelect.value = 'nao';
+  if (semanaRepeticao) semanaRepeticao.style.display = 'none';
+  if (inicioInput) inicioInput.value = '';
+  if (fimInput) fimInput.value = '';
+  if (cafeCheckbox) cafeCheckbox.checked = false;
+  if (repetirTodosMeses) repetirTodosMeses.checked = false;
+  agendaParticipantesSelecionadosLista = [];
+
+  document.querySelectorAll('#agendaSemanaRepeticao input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = false;
+  });
+
+  renderParticipantesDisponiveisAgenda();
+  renderParticipantesSelecionadosAgenda();
+  atualizarPermissaoEdicaoAgenda(true);
+}
+
+async function abrirModalAgendaReserva(dataIso) {
+  const modal = document.getElementById('agendaReservaModal');
+  const participantesSelect = document.getElementById('agendaParticipantesSelect');
+  if (!modal || !participantesSelect) return;
+
+  agendaDataSelecionada = dataIso;
+
+  try {
+    const usuarios = await carregarUsuariosAtivosAgenda();
+    agendaParticipantesDisponiveis = [...usuarios];
+  } catch (erroUsuarios) {
+    console.error('[AGENDA] Erro ao carregar usuários ativos:', erroUsuarios);
+    agendaParticipantesDisponiveis = [];
+  }
+
+  resetarFormularioAgendaReserva();
+  modal.style.display = 'flex';
+}
+
+async function abrirReservaExistenteAgenda(dataIso, reservaId) {
+  const modal = document.getElementById('agendaReservaModal');
+  if (!modal || !dataIso || !reservaId) return;
+
+  const reservasDia = Array.isArray(agendaReservasPorDia[dataIso]) ? agendaReservasPorDia[dataIso] : [];
+  const reserva = reservasDia.find((item) => String(item?.id || '') === String(reservaId));
+  if (!reserva) {
+    await abrirModalAgendaReserva(dataIso);
+    return;
+  }
+
+  agendaDataSelecionada = dataIso;
+  try {
+    const usuarios = await carregarUsuariosAtivosAgenda();
+    agendaParticipantesDisponiveis = [...usuarios];
+  } catch (erroUsuarios) {
+    console.error('[AGENDA] Erro ao carregar usuários ativos:', erroUsuarios);
+    agendaParticipantesDisponiveis = [];
+  }
+
+  resetarFormularioAgendaReserva();
+  modal.style.display = 'flex';
+
+  const tipoCodigo = String(reserva.tipo || '').toLowerCase().includes('audit') ? 'auditorio' : 'sala_reuniao';
+  abrirEtapaFormularioAgenda(tipoCodigo);
+
+  agendaReservaEditandoId = reserva.id;
+  agendaReservaEditandoData = dataIso;
+
+  const temaInput = document.getElementById('agendaTemaReuniao');
+  const repetirSelect = document.getElementById('agendaRepetirReuniao');
+  const inicioInput = document.getElementById('agendaHorarioInicio');
+  const fimInput = document.getElementById('agendaHorarioFim');
+  const cafeCheckbox = document.getElementById('agendaCafeCheckbox');
+  const repetirTodosMeses = document.getElementById('agendaRepetirTodosMeses');
+  const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
+  const tituloModal = document.getElementById('agendaModalTitulo');
+
+  if (temaInput) temaInput.value = String(reserva.tema || '');
+  if (inicioInput) inicioInput.value = String(reserva.inicio || '');
+  if (fimInput) fimInput.value = String(reserva.fim || '');
+  if (cafeCheckbox) cafeCheckbox.checked = !!reserva.cafe;
+  if (repetirTodosMeses) repetirTodosMeses.checked = !!reserva.repetirTodosMeses;
+  if (repetirSelect) repetirSelect.value = reserva.repetir ? 'sim' : 'nao';
+  if (semanaRepeticao) semanaRepeticao.style.display = reserva.repetir ? 'block' : 'none';
+
+  const diasSemanaReserva = Array.isArray(reserva.diasSemana) ? reserva.diasSemana : [];
+  document.querySelectorAll('#agendaSemanaRepeticao input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = diasSemanaReserva.includes(checkbox.value);
+  });
+
+  agendaParticipantesSelecionadosLista = Array.isArray(reserva.participantes)
+    ? reserva.participantes.map((nome) => String(nome || '').trim()).filter(Boolean)
+    : [];
+  renderParticipantesDisponiveisAgenda();
+  renderParticipantesSelecionadosAgenda();
+
+  const usuarioLogado = obterUsuarioLogadoAgenda().toLowerCase();
+  const criador = String(reserva.criadoPor || '').trim().toLowerCase();
+  const podeEditar = Boolean(usuarioLogado) && usuarioLogado === criador;
+
+  if (tituloModal) {
+    const baseTitulo = `${reserva.tipo || 'Reserva'} - ${formatarDataExibicaoPtBr(dataIso)}`;
+    tituloModal.textContent = podeEditar ? baseTitulo : `${baseTitulo} (somente visualização)`;
+  }
+
+  atualizarPermissaoEdicaoAgenda(podeEditar);
+}
+
+function fecharModalAgendaReserva() {
+  const modal = document.getElementById('agendaReservaModal');
+  if (!modal) return;
+  modal.style.display = 'none';
+}
+
+function abrirEtapaFormularioAgenda(tipoReserva) {
+  agendaTipoReservaSelecionado = tipoReserva;
+
+  const etapaTipo = document.getElementById('agendaEtapaTipo');
+  const etapaFormulario = document.getElementById('agendaEtapaFormulario');
+  const tituloModal = document.getElementById('agendaModalTitulo');
+  if (etapaTipo) etapaTipo.style.display = 'none';
+  if (etapaFormulario) etapaFormulario.style.display = 'block';
+
+  if (tituloModal) {
+    const tipoTexto = tipoReserva === 'auditorio' ? 'Reservar auditório' : 'Reservar sala de reunião';
+    tituloModal.textContent = `${tipoTexto} - ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`;
+  }
+}
+
+function voltarParaEtapaTipoAgenda() {
+  const etapaTipo = document.getElementById('agendaEtapaTipo');
+  const etapaFormulario = document.getElementById('agendaEtapaFormulario');
+  const tituloModal = document.getElementById('agendaModalTitulo');
+  if (etapaTipo) etapaTipo.style.display = 'block';
+  if (etapaFormulario) etapaFormulario.style.display = 'none';
+  if (tituloModal) {
+    tituloModal.textContent = `Reserva - ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`;
+  }
+}
+
+async function salvarReservaAgendaLocal() {
+  if (!usuarioAutenticadoAgenda()) {
+    alert('Você precisa estar logado para registrar reserva no calendário.');
+    return;
+  }
+
+  const temaInput = document.getElementById('agendaTemaReuniao');
+  const repetirSelect = document.getElementById('agendaRepetirReuniao');
+  const inicioInput = document.getElementById('agendaHorarioInicio');
+  const fimInput = document.getElementById('agendaHorarioFim');
+  const cafeCheckbox = document.getElementById('agendaCafeCheckbox');
+  const repetirTodosMeses = document.getElementById('agendaRepetirTodosMeses');
+  if (!temaInput || !repetirSelect || !inicioInput || !fimInput || !cafeCheckbox || !repetirTodosMeses) return;
+
+  const temaReuniao = temaInput.value.trim();
+  const repetir = repetirSelect.value === 'sim';
+  const horarioInicio = inicioInput.value;
+  const horarioFim = fimInput.value;
+  const cafeMarcado = !!cafeCheckbox.checked;
+  const repetirTodosMesesMarcado = !!repetirTodosMeses.checked;
+  const participantes = [...agendaParticipantesSelecionadosLista];
+  const diasSemana = repetir
+    ? Array.from(document.querySelectorAll('#agendaSemanaRepeticao input[type="checkbox"]:checked')).map((checkbox) => checkbox.value)
+    : [];
+
+  if (!temaReuniao) {
+    alert('Informe o tema da reunião.');
+    temaInput.focus();
+    return;
+  }
+  if (!horarioInicio || !horarioFim) {
+    alert('Informe horário início e horário fim.');
+    return;
+  }
+  if (horarioFim <= horarioInicio) {
+    alert('Horário fim deve ser maior que horário início.');
+    return;
+  }
+  if (repetir && diasSemana.length === 0) {
+    alert('Selecione ao menos um dia da semana para repetição.');
+    return;
+  }
+
+  const tipoReservaTexto = agendaTipoReservaSelecionado === 'auditorio' ? 'Auditório' : 'Sala de reunião';
+  const resumo = [
+    `Reserva: ${tipoReservaTexto}`,
+    `Data: ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`,
+    `Tema: ${temaReuniao}`,
+    `Café: ${cafeMarcado ? 'Sim' : 'Não'}`,
+    `Repetir: ${repetir ? `Sim (${diasSemana.join(', ')})` : 'Não'}`,
+    `Horário: ${horarioInicio} às ${horarioFim}`,
+    `Participantes: ${participantes.length ? participantes.join(', ') : 'Nenhum selecionado'}`
+  ];
+
+  const mapaDiaSemana = { dom: 0, seg: 1, ter: 2, qua: 3, qui: 4, sex: 5, sab: 6 };
+  const dataBase = new Date(`${agendaDataSelecionada}T00:00:00`);
+  const datasDestino = [];
+
+  if (agendaReservaEditandoId) {
+    datasDestino.push(agendaReservaEditandoData || agendaDataSelecionada);
+  } else if (repetir) {
+    const diasPermitidos = new Set(diasSemana.map((dia) => mapaDiaSemana[dia]).filter((dia) => Number.isInteger(dia)));
+    const ano = dataBase.getFullYear();
+    const mesesAlvo = repetirTodosMesesMarcado
+      ? Array.from({ length: 12 }, (_v, idx) => idx)
+      : [dataBase.getMonth()];
+    mesesAlvo.forEach((mes) => {
+      const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+      for (let dia = 1; dia <= ultimoDia; dia++) {
+        const dataAtual = new Date(ano, mes, dia);
+        if (diasPermitidos.has(dataAtual.getDay())) {
+          datasDestino.push(formatarDataIso(dataAtual));
+        }
+      }
+    });
+  } else {
+    datasDestino.push(agendaDataSelecionada);
+  }
+
+  const datasDestinoUnicas = Array.from(new Set(datasDestino));
+
+  const conflitoEncontrado = datasDestinoUnicas.find((dataIso) => {
+    return buscarConflitoReservaAgenda({
+      dataIso,
+      tipoReservaTexto,
+      horarioInicio,
+      horarioFim,
+      ignorarReservaId: agendaReservaEditandoId || null
+    });
+  });
+
+  if (conflitoEncontrado) {
+    alert(`Conflito de horário para ${tipoReservaTexto} em ${formatarDataExibicaoPtBr(conflitoEncontrado)}.`);
+    return;
+  }
+
+  try {
+    if (agendaReservaEditandoId) {
+      const dataEdicao = agendaReservaEditandoData || agendaDataSelecionada;
+      const respEdicao = await fetch(`/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tipo: tipoReservaTexto,
+          tema: temaReuniao,
+          data: dataEdicao,
+          inicio: horarioInicio,
+          fim: horarioFim,
+          repetir,
+          repetirTodosMeses: repetirTodosMesesMarcado,
+          diasSemana: repetir ? [...diasSemana] : [],
+          cafe: cafeMarcado,
+          participantes
+        })
+      });
+      if (!respEdicao.ok) {
+        const erro = await respEdicao.json().catch(() => ({}));
+        throw new Error(erro.error || `Erro ao editar reserva (${respEdicao.status})`);
+      }
+    } else {
+      const respCriacao = await fetch('/api/rh/reservas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tipo: tipoReservaTexto,
+          tema: temaReuniao,
+          data: agendaDataSelecionada,
+          datas: datasDestinoUnicas,
+          inicio: horarioInicio,
+          fim: horarioFim,
+          repetir,
+          repetirTodosMeses: repetirTodosMesesMarcado,
+          diasSemana: repetir ? [...diasSemana] : [],
+          cafe: cafeMarcado,
+          participantes
+        })
+      });
+      if (!respCriacao.ok) {
+        const erro = await respCriacao.json().catch(() => ({}));
+        throw new Error(erro.error || `Erro ao criar reserva (${respCriacao.status})`);
+      }
+    }
+
+    await carregarAgendaMesCompleto();
+    renderAgendaCalendarioMensal();
+  } catch (erroSalvar) {
+    alert(`Não foi possível salvar a reserva: ${erroSalvar.message}`);
+    return;
+  }
+
+  alert(`Reserva preenchida com sucesso!\n\n${resumo.join('\n')}`);
+  fecharModalAgendaReserva();
+}
+
+async function abrirModalLembreteAgenda(dataIso) {
+  const modalLembrete = document.getElementById('agendaLembreteModal');
+  const tituloLembrete = document.getElementById('agendaLembreteTitulo');
+  const textoLembrete = document.getElementById('agendaLembreteTexto');
+  const btnSalvarLembrete = document.getElementById('agendaSalvarLembrete');
+  const selectDestinatarios = document.getElementById('agendaLembreteParticipantesSelect');
+  if (!modalLembrete || !tituloLembrete || !textoLembrete) return;
+
+  agendaDataSelecionada = dataIso || agendaDataSelecionada;
+  agendaLembreteVisualizandoId = null;
+  textoLembrete.value = '';
+  textoLembrete.disabled = false;
+  tituloLembrete.textContent = `Lembrete - ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`;
+  if (selectDestinatarios) selectDestinatarios.disabled = false;
+  if (btnSalvarLembrete) {
+    btnSalvarLembrete.style.display = '';
+    btnSalvarLembrete.disabled = false;
+  }
+
+  try {
+    const usuarios = await carregarUsuariosAtivosAgenda();
+    agendaLembreteDestinatariosDisponiveis = [...usuarios];
+  } catch (_err) {
+    agendaLembreteDestinatariosDisponiveis = [];
+  }
+  agendaLembreteDestinatariosSelecionados = [];
+  renderDestinatariosLembreteDisponiveisAgenda();
+  renderDestinatariosLembreteSelecionadosAgenda();
+  modalLembrete.style.display = 'flex';
+}
+
+async function abrirLembreteExistenteAgenda(dataIso, lembreteId) {
+  const modalLembrete = document.getElementById('agendaLembreteModal');
+  const tituloLembrete = document.getElementById('agendaLembreteTitulo');
+  const textoLembrete = document.getElementById('agendaLembreteTexto');
+  const btnSalvarLembrete = document.getElementById('agendaSalvarLembrete');
+  const selectDestinatarios = document.getElementById('agendaLembreteParticipantesSelect');
+  if (!modalLembrete || !tituloLembrete || !textoLembrete || !dataIso || !lembreteId) return;
+
+  const lembretesDia = Array.isArray(agendaLembretesPorDia[dataIso]) ? agendaLembretesPorDia[dataIso] : [];
+  const lembrete = lembretesDia.find((item) => String(item?.id || '') === String(lembreteId));
+  if (!lembrete) {
+    await abrirModalLembreteAgenda(dataIso);
+    return;
+  }
+
+  agendaDataSelecionada = dataIso;
+  agendaLembreteVisualizandoId = lembrete.id;
+  try {
+    const usuarios = await carregarUsuariosAtivosAgenda();
+    agendaLembreteDestinatariosDisponiveis = Array.from(new Set([
+      ...usuarios,
+      ...(Array.isArray(lembrete.destinatarios) ? lembrete.destinatarios : [])
+    ])).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  } catch (_err) {
+    agendaLembreteDestinatariosDisponiveis = Array.from(new Set(Array.isArray(lembrete.destinatarios) ? lembrete.destinatarios : []));
+  }
+
+  agendaLembreteDestinatariosSelecionados = Array.isArray(lembrete.destinatarios)
+    ? lembrete.destinatarios.map((nome) => String(nome || '').trim()).filter(Boolean)
+    : [];
+  textoLembrete.value = String(lembrete.texto || '');
+  textoLembrete.disabled = true;
+  tituloLembrete.textContent = `Lembrete - ${formatarDataExibicaoPtBr(agendaDataSelecionada)} (visualização)`;
+
+  renderDestinatariosLembreteDisponiveisAgenda();
+  renderDestinatariosLembreteSelecionadosAgenda();
+
+  if (selectDestinatarios) selectDestinatarios.disabled = true;
+  if (btnSalvarLembrete) {
+    btnSalvarLembrete.style.display = 'none';
+    btnSalvarLembrete.disabled = true;
+  }
+
+  modalLembrete.style.display = 'flex';
+}
+
+function fecharModalLembreteAgenda() {
+  const modalLembrete = document.getElementById('agendaLembreteModal');
+  if (modalLembrete) modalLembrete.style.display = 'none';
+}
+
+async function salvarLembreteAgenda() {
+  if (!usuarioAutenticadoAgenda()) {
+    alert('Você precisa estar logado para registrar lembrete no calendário.');
+    return;
+  }
+
+  const textoLembrete = document.getElementById('agendaLembreteTexto');
+  if (!textoLembrete) return;
+  const texto = String(textoLembrete.value || '').trim();
+  if (!texto) {
+    alert('Escreva o lembrete antes de salvar.');
+    textoLembrete.focus();
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/rh/lembretes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        data: agendaDataSelecionada,
+        texto,
+        destinatarios: [...agendaLembreteDestinatariosSelecionados]
+      })
+    });
+    if (!resp.ok) {
+      const erro = await resp.json().catch(() => ({}));
+      throw new Error(erro.error || `Erro ao salvar lembrete (${resp.status})`);
+    }
+
+    await carregarAgendaMesCompleto();
+    renderAgendaCalendarioMensal();
+    fecharModalLembreteAgenda();
+  } catch (err) {
+    alert(`Não foi possível salvar lembrete: ${err.message}`);
+  }
+}
+
+function initAgendaReservasUI() {
+  if (agendaUiInicializada) {
+    renderAgendaCalendarioMensal();
+    return;
+  }
+
+  agendaMesReferencia = new Date();
+  agendaMesReferencia.setDate(1);
+  iniciarObserverUsuarioAgenda();
+
+  const btnMesAnterior = document.getElementById('agendaMesAnterior');
+  const btnMesProximo = document.getElementById('agendaMesProximo');
+  const btnToggleMinhas = document.getElementById('agendaToggleMinhasReunioes');
+  const grid = document.getElementById('agendaCalendarioGrid');
+  const modal = document.getElementById('agendaReservaModal');
+  const btnAbrirLembrete = document.getElementById('agendaAbrirLembreteBtn');
+  const modalLembrete = document.getElementById('agendaLembreteModal');
+  const btnFecharLembrete = document.getElementById('agendaFecharLembreteModal');
+  const btnSalvarLembrete = document.getElementById('agendaSalvarLembrete');
+  const btnFechar = document.getElementById('agendaFecharModal');
+  const btnVoltarTipo = document.getElementById('agendaVoltarTipo');
+  const btnSalvar = document.getElementById('agendaSalvarReserva');
+  const repetirSelect = document.getElementById('agendaRepetirReuniao');
+  const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
+  const participantesSelect = document.getElementById('agendaParticipantesSelect');
+  const participantesSelecionadosEl = document.getElementById('agendaParticipantesSelecionados');
+
+  if (btnMesAnterior) {
+    btnMesAnterior.addEventListener('click', async () => {
+      agendaSetProcessando(true);
+      agendaMesReferencia.setMonth(agendaMesReferencia.getMonth() - 1);
+      try {
+        await carregarAgendaMesCompleto();
+      } catch (e) {
+        console.error('[AGENDA] erro ao carregar mês:', e);
+      } finally {
+        renderAgendaCalendarioMensal();
+        agendaSetProcessando(false);
+      }
+    });
+  }
+
+  if (btnMesProximo) {
+    btnMesProximo.addEventListener('click', async () => {
+      agendaSetProcessando(true);
+      agendaMesReferencia.setMonth(agendaMesReferencia.getMonth() + 1);
+      try {
+        await carregarAgendaMesCompleto();
+      } catch (e) {
+        console.error('[AGENDA] erro ao carregar mês:', e);
+      } finally {
+        renderAgendaCalendarioMensal();
+        agendaSetProcessando(false);
+      }
+    });
+  }
+
+  if (btnToggleMinhas) {
+    btnToggleMinhas.addEventListener('click', () => {
+      agendaMostrarSomenteMinhas = !agendaMostrarSomenteMinhas;
+      btnToggleMinhas.classList.toggle('is-active', agendaMostrarSomenteMinhas);
+      renderAgendaCalendarioMensal();
+    });
+  }
+
+  if (grid) {
+    grid.addEventListener('click', async (event) => {
+      const lembreteEl = event.target.closest('[data-agenda-lembrete-id]');
+      if (lembreteEl) {
+        event.stopPropagation();
+        const lembreteId = lembreteEl.getAttribute('data-agenda-lembrete-id');
+        const dataLembrete = lembreteEl.getAttribute('data-agenda-lembrete-date');
+        if (lembreteId && dataLembrete) {
+          agendaSetProcessando(true);
+          try {
+            await abrirLembreteExistenteAgenda(dataLembrete, lembreteId);
+          } finally {
+            agendaSetProcessando(false);
+          }
+        }
+        return;
+      }
+
+      const reservaEl = event.target.closest('[data-agenda-reserva-id]');
+      if (reservaEl) {
+        event.stopPropagation();
+        const reservaId = reservaEl.getAttribute('data-agenda-reserva-id');
+        const dataReserva = reservaEl.getAttribute('data-agenda-reserva-date');
+        if (reservaId && dataReserva) {
+          agendaSetProcessando(true);
+          try {
+            await abrirReservaExistenteAgenda(dataReserva, reservaId);
+          } finally {
+            agendaSetProcessando(false);
+          }
+        }
+        return;
+      }
+
+      const botaoDia = event.target.closest('[data-agenda-date]');
+      if (!botaoDia) return;
+      if (!usuarioAutenticadoAgenda()) {
+        alert('Você precisa estar logado para criar reserva no calendário.');
+        return;
+      }
+      const dataIso = botaoDia.getAttribute('data-agenda-date');
+      if (!dataIso) return;
+      agendaSetProcessando(true);
+      try {
+        await abrirModalAgendaReserva(dataIso);
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+
+  document.querySelectorAll('.agenda-opcao-btn[data-tipo-reserva]').forEach((botaoTipo) => {
+    botaoTipo.addEventListener('click', () => {
+      const tipo = botaoTipo.getAttribute('data-tipo-reserva');
+      if (!tipo) return;
+      abrirEtapaFormularioAgenda(tipo);
+    });
+  });
+
+  if (btnFechar) btnFechar.addEventListener('click', fecharModalAgendaReserva);
+  if (btnAbrirLembrete) {
+    btnAbrirLembrete.addEventListener('click', async () => {
+      fecharModalAgendaReserva();
+      agendaSetProcessando(true);
+      try {
+        await abrirModalLembreteAgenda(agendaDataSelecionada);
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+  if (btnVoltarTipo) btnVoltarTipo.addEventListener('click', voltarParaEtapaTipoAgenda);
+  if (btnSalvar) {
+    btnSalvar.addEventListener('click', async () => {
+      agendaSetProcessando(true);
+      try {
+        await salvarReservaAgendaLocal();
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+  if (btnFecharLembrete) btnFecharLembrete.addEventListener('click', fecharModalLembreteAgenda);
+  if (btnSalvarLembrete) {
+    btnSalvarLembrete.addEventListener('click', async () => {
+      agendaSetProcessando(true);
+      try {
+        await salvarLembreteAgenda();
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+
+  if (modal) {
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        fecharModalAgendaReserva();
+      }
+    });
+  }
+
+  if (modalLembrete) {
+    modalLembrete.addEventListener('click', (event) => {
+      if (event.target === modalLembrete) {
+        fecharModalLembreteAgenda();
+      }
+    });
+  }
+
+  if (repetirSelect && semanaRepeticao) {
+    repetirSelect.addEventListener('change', () => {
+      semanaRepeticao.style.display = repetirSelect.value === 'sim' ? 'block' : 'none';
+    });
+  }
+
+  if (participantesSelect) {
+    participantesSelect.addEventListener('change', () => {
+      const username = participantesSelect.value;
+      if (!username) return;
+      adicionarParticipanteAgenda(username);
+    });
+  }
+
+  if (participantesSelecionadosEl) {
+    participantesSelecionadosEl.addEventListener('click', (event) => {
+      const btnRemover = event.target.closest('[data-agenda-user-remove]');
+      if (!btnRemover) return;
+      const username = btnRemover.getAttribute('data-agenda-user-remove');
+      if (!username) return;
+      removerParticipanteAgenda(username);
+    });
+  }
+
+  const lembreteParticipantesSelect = document.getElementById('agendaLembreteParticipantesSelect');
+  const lembreteParticipantesSelecionadosEl = document.getElementById('agendaLembreteParticipantesSelecionados');
+  if (lembreteParticipantesSelect) {
+    lembreteParticipantesSelect.addEventListener('change', () => {
+      const username = lembreteParticipantesSelect.value;
+      if (!username) return;
+      adicionarDestinatarioLembreteAgenda(username);
+    });
+  }
+  if (lembreteParticipantesSelecionadosEl) {
+    lembreteParticipantesSelecionadosEl.addEventListener('click', (event) => {
+      const btnRem = event.target.closest('[data-agenda-lembrete-user-remove]');
+      if (!btnRem) return;
+      const username = btnRem.getAttribute('data-agenda-lembrete-user-remove');
+      if (!username) return;
+      removerDestinatarioLembreteAgenda(username);
+    });
+  }
+
+  carregarAgendaMesCompleto()
+    .catch((err) => {
+      console.error('[AGENDA] Falha ao carregar dados do calendário:', err);
+      agendaReservasPorDia = {};
+      agendaLembretesPorDia = {};
+    })
+    .finally(() => {
+      renderAgendaCalendarioMensal();
+    });
+  agendaUiInicializada = true;
+}
 
 // Excluir item PIR
 async function excluirItemPIR(id) {
