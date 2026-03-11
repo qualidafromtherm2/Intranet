@@ -5931,6 +5931,9 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
     }
 
     // Retorna departamento (centro_custo) como grupo, apenas 4 status fixos, exclui Excluido
+    // DISTINCT ON (h.id) evita fanout: quando há múltiplos itens SC/CSC com o mesmo
+    // grupo_requisicao, o JOIN geraria N linhas para 1 registro de historico_compras,
+    // inflando o SUM(valor_pedido). Pegamos apenas 1 linha por h.id para dept/cc info.
     const { rows } = await pool.query(`
       SELECT
         COALESCE(sub.dept, 'Não informado') ||
@@ -5938,7 +5941,8 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
         COALESCE(sub.h_status, 'sem status') AS status,
         SUM(sub.valor_pedido) AS total
       FROM (
-        SELECT
+        SELECT DISTINCT ON (h.id)
+          h.id,
           CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
                WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
           END AS dept,
@@ -5958,6 +5962,7 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
           AND h.status IN ('aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido')
           ${whereDates}
           ${whereDept}
+        ORDER BY h.id
       ) sub
       GROUP BY grupo, status
       ORDER BY grupo ASC
@@ -6031,7 +6036,8 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
         CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.solicitante
              WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.solicitante
         END AS solicitante,
-        h.valor_pedido
+        h.valor_pedido,
+        pop.n_val_tot AS valor_item
       FROM compras.historico_compras h
       LEFT JOIN compras.solicitacao_compras sc
         ON h.tabela_origem = 'solicitacao_compras'
@@ -6039,6 +6045,17 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
       LEFT JOIN compras.compras_sem_cadastro csc
         ON h.tabela_origem = 'compras_sem_cadastro'
         AND csc.grupo_requisicao = h.grupo_requisicao
+      -- Localiza o pedido Omie pelo grupo_requisicao gravado em c_obs_int
+      LEFT JOIN compras.pedidos_omie po
+        ON NULLIF(BTRIM(po.c_obs_int), '') = h.grupo_requisicao
+      -- Localiza o produto do pedido pelo c_produto = produto_codigo da tabela de origem
+      LEFT JOIN compras.pedidos_omie_produtos pop
+        ON pop.n_cod_ped = po.n_cod_ped
+        AND pop.c_produto = (
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
+          END
+        )
       WHERE h.status = $1
         AND h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
         ${whereDates}
@@ -6056,7 +6073,8 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
         quantidade:       r.quantidade       || '',
         objetivo_compra:  r.objetivo_compra  || '',
         solicitante:      r.solicitante      || '',
-        valor_pedido:     Number(r.valor_pedido)
+        valor_pedido:     Number(r.valor_pedido),
+        valor_item:       r.valor_item != null ? Number(r.valor_item) : null
       }))
     });
   } catch (err) {
