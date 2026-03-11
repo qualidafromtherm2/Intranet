@@ -21888,11 +21888,11 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
       ) origem ON TRUE
       WHERE po.c_etapa = '10'
         AND (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''${whereDataPC}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
-    `);
+    `, paramsPC);
     
     console.log(`[Compras/PedidosCompra] Encontrados ${pedidosComProdutos.length} registros de pedidos com produtos`);
 
@@ -22030,13 +22030,13 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
       ) origem ON TRUE
       WHERE po.c_etapa = '15'
         AND (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''${whereDataCR}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
     `;
 
-    const result = await pool.query(query);
+    const result = await pool.query(query, paramsCR);
 
     // Agrupa por c_numero preservando a ordem de chegada usando Map
     const pedidosPorNumero = new Map();
