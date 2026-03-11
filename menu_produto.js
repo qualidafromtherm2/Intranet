@@ -33107,7 +33107,10 @@ async function exibirDetalheGraficoBarra(statusClicado, grupoClicado) {
       const itensGrupo = itens.filter(i => i.grupo === grupo);
       if (!itensGrupo.length) return;
 
-      const totalGrupo = itensGrupo.reduce((a, i) => a + Number(i.valor_pedido || 0), 0);
+      // Usa o total já corrigido (sem fanout) vindo de _graficoPizzaDados
+      const dadoGrupo  = dados.find(d => d.grupo === grupo && d.status === statusClicado);
+      const totalGrupo = dadoGrupo ? dadoGrupo.total
+        : itensGrupo.reduce((a, i) => a + Number(i.valor_pedido || 0), 0);
       const pct        = totalStatus > 0 ? ((totalGrupo / totalStatus) * 100).toFixed(1) : '0.0';
       const cc         = extrairCC(grupo);
       const subId      = `gpi_sub_${gi}`;
@@ -33130,15 +33133,19 @@ async function exibirDetalheGraficoBarra(statusClicado, grupoClicado) {
                       width:16px;height:16px;border-radius:50%;background:#7c3aed;
                       color:#fff;font-size:9px;font-weight:700;cursor:help;flex-shrink:0;">!</span>`
           : '';
+        const valItemHtml = item.valor_item != null
+          ? `<span style="margin-left:auto;white-space:nowrap;font-weight:600;color:#059669;">R$ ${Math.round(item.valor_item).toLocaleString('pt-BR')}</span>`
+          : '';
         html += `<tr class="${subId}" style="display:none;background:#fff;border-bottom:1px solid #f3f4f6;">
           <td colspan="3" style="padding:5px 12px 5px 36px;">
-            <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;">
+            <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;width:100%;">
               <span style="color:#9ca3af;">#${item.h_id}</span>
               <span style="font-family:monospace;color:#6366f1;">${item.produto_codigo || '—'}</span>
               <span style="color:#374151;">${item.produto_descricao || '—'}</span>
               <span style="color:#6b7280;">Qtd: <b>${item.quantidade || '—'}</b></span>
               ${objHtml}
               <span style="color:#374151;font-style:italic;">${item.solicitante || '—'}</span>
+              ${valItemHtml}
             </span>
           </td>
         </tr>`;
