@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS compras.historico_compras (
   id BIGSERIAL PRIMARY KEY,
   grupo_requisicao VARCHAR(100) NOT NULL,
   status VARCHAR(100),
+  d_dt_previsao DATE,
   tabela_origem TEXT NOT NULL CHECK (tabela_origem IN ('solicitacao_compras', 'compras_sem_cadastro')),
   dados JSONB NOT NULL,
   created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()

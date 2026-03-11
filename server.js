@@ -14503,6 +14503,12 @@ async function ensureComprasSchema() {
           ALTER TABLE compras.historico_compras
           ADD COLUMN IF NOT EXISTS valor_pedido NUMERIC(15,2);
 
+          ALTER TABLE compras.historico_compras
+          ADD COLUMN IF NOT EXISTS d_dt_previsao DATE;
+
+          ALTER TABLE compras.historico_compras
+          ADD COLUMN IF NOT EXISTS d_rec DATE;
+
           CREATE OR REPLACE FUNCTION compras.fn_sync_historico_compras_valor_pedido()
           RETURNS TRIGGER
           LANGUAGE plpgsql
@@ -14510,6 +14516,12 @@ async function ensureComprasSchema() {
           DECLARE
             v_grupo_requisicao TEXT;
             v_valor_pedido NUMERIC(15,2);
+            v_dt_previsao DATE;
+            v_nfe_vinculada TEXT;
+            v_d_rec DATE;
+            v_c_etapa TEXT;
+            v_etapa_nf TEXT;
+            v_status TEXT;
           BEGIN
             v_grupo_requisicao := NULLIF(BTRIM(to_jsonb(NEW)->>'c_obs_int'), '');
             IF v_grupo_requisicao IS NULL THEN
@@ -14522,10 +14534,77 @@ async function ensureComprasSchema() {
               v_valor_pedido := NULL;
             END;
 
+            BEGIN
+              v_dt_previsao := NULLIF(BTRIM(to_jsonb(NEW)->>'d_dt_previsao'), '')::date;
+            EXCEPTION WHEN others THEN
+              v_dt_previsao := NULL;
+            END;
+
+            -- Busca d_rec via "NFe vinculada" → recebimentos_nfe_omie
+            v_nfe_vinculada := NULLIF(BTRIM(to_jsonb(NEW)->>'NFe vinculada'), '');
+            v_d_rec := NULL;
+            IF v_nfe_vinculada IS NOT NULL THEN
+              BEGIN
+                SELECT r.d_rec
+                  INTO v_d_rec
+                FROM logistica.recebimentos_nfe_omie r
+                WHERE BTRIM(r.c_numero_nfe) = v_nfe_vinculada
+                ORDER BY r.d_emissao_nfe DESC NULLS LAST, r.n_id_receb DESC
+                LIMIT 1;
+              EXCEPTION WHEN undefined_table THEN
+                v_d_rec := NULL;
+              END;
+            END IF;
+
+            v_c_etapa := NULLIF(BTRIM(to_jsonb(NEW)->>'c_etapa'), '');
+            v_etapa_nf := NULLIF(BTRIM(to_jsonb(NEW)->>'Etapa_NF'), '');
+            v_status := NULL;
+
+            IF v_etapa_nf IS NOT NULL THEN
+              BEGIN
+                SELECT COALESCE(
+                  NULLIF(BTRIM(e.descricao_customizada), ''),
+                  NULLIF(BTRIM(e.descricao), ''),
+                  v_etapa_nf
+                )
+                  INTO v_status
+                FROM logistica.etapas_recebimento_nfe e
+                WHERE e.codigo = v_etapa_nf
+                LIMIT 1;
+              EXCEPTION WHEN undefined_table THEN
+                v_status := v_etapa_nf;
+              END;
+
+              IF v_status IS NULL THEN
+                v_status := v_etapa_nf;
+              END IF;
+            ELSIF v_c_etapa IS NOT NULL THEN
+              BEGIN
+                SELECT COALESCE(
+                  NULLIF(BTRIM(e.descricao_padrao), ''),
+                  v_c_etapa
+                )
+                  INTO v_status
+                FROM compras.etapas_pedido_compra e
+                WHERE e.codigo = v_c_etapa
+                LIMIT 1;
+              EXCEPTION WHEN undefined_table THEN
+                v_status := v_c_etapa;
+              END;
+
+              IF v_status IS NULL THEN
+                v_status := v_c_etapa;
+              END IF;
+            END IF;
+
             UPDATE compras.historico_compras
-               SET valor_pedido = v_valor_pedido
+               SET valor_pedido = v_valor_pedido,
+                   d_dt_previsao = v_dt_previsao,
+                   d_rec = COALESCE(v_d_rec, d_rec),
+                   status = COALESCE(v_status, status),
+                   created_at = NOW()
              WHERE grupo_requisicao = v_grupo_requisicao
-               AND valor_pedido IS DISTINCT FROM v_valor_pedido;
+            ;
 
             RETURN NEW;
           END;
@@ -14542,24 +14621,67 @@ async function ensureComprasSchema() {
             FROM information_schema.columns
             WHERE table_schema = 'compras'
               AND table_name = 'pedidos_omie'
+              AND column_name = 'c_etapa'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'compras'
+              AND table_name = 'pedidos_omie'
+              AND column_name = 'Etapa_NF'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'compras'
+              AND table_name = 'pedidos_omie'
               AND column_name = 'n_valor'
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'compras'
+              AND table_name = 'pedidos_omie'
+              AND column_name = 'd_dt_previsao'
           ) THEN
             DROP TRIGGER IF EXISTS trg_sync_historico_compras_valor_pedido
             ON compras.pedidos_omie;
 
             CREATE TRIGGER trg_sync_historico_compras_valor_pedido
-            AFTER INSERT OR UPDATE OF c_obs_int, n_valor
+            AFTER INSERT OR UPDATE
             ON compras.pedidos_omie
             FOR EACH ROW
             EXECUTE FUNCTION compras.fn_sync_historico_compras_valor_pedido();
 
             UPDATE compras.historico_compras hc
-               SET valor_pedido = src.n_valor
+               SET valor_pedido = src.n_valor,
+                   d_dt_previsao = src.d_dt_previsao,
+                   d_rec = COALESCE(src.d_rec_nfe, hc.d_rec),
+                   status = COALESCE(src.status_resolvido, hc.status)
               FROM (
                 SELECT DISTINCT ON (NULLIF(BTRIM(po.c_obs_int), ''))
                   NULLIF(BTRIM(po.c_obs_int), '') AS grupo_requisicao,
-                  po.n_valor
+                  po.n_valor,
+                  po.d_dt_previsao,
+                  rnfe.d_rec AS d_rec_nfe,
+                  CASE
+                    WHEN NULLIF(BTRIM(po."Etapa_NF"), '') IS NOT NULL THEN COALESCE(
+                      NULLIF(BTRIM(ern.descricao_customizada), ''),
+                      NULLIF(BTRIM(ern.descricao), ''),
+                      NULLIF(BTRIM(po."Etapa_NF"), '')
+                    )
+                    ELSE COALESCE(
+                      NULLIF(BTRIM(epc.descricao_padrao), ''),
+                      NULLIF(BTRIM(po.c_etapa), '')
+                    )
+                  END AS status_resolvido
                 FROM compras.pedidos_omie po
+                LEFT JOIN compras.etapas_pedido_compra epc
+                  ON epc.codigo = NULLIF(BTRIM(po.c_etapa), '')
+                LEFT JOIN logistica.etapas_recebimento_nfe ern
+                  ON ern.codigo = NULLIF(BTRIM(po."Etapa_NF"), '')
+                LEFT JOIN logistica.recebimentos_nfe_omie rnfe
+                  ON BTRIM(rnfe.c_numero_nfe) = NULLIF(BTRIM(po."NFe vinculada"), '')
                 WHERE NULLIF(BTRIM(po.c_obs_int), '') IS NOT NULL
                 ORDER BY
                   NULLIF(BTRIM(po.c_obs_int), ''),
@@ -14567,11 +14689,166 @@ async function ensureComprasSchema() {
                   po.n_cod_ped DESC
               ) src
              WHERE hc.grupo_requisicao = src.grupo_requisicao
-               AND hc.valor_pedido IS DISTINCT FROM src.n_valor;
+               AND (
+                 hc.valor_pedido IS DISTINCT FROM src.n_valor
+                 OR hc.d_dt_previsao IS DISTINCT FROM src.d_dt_previsao
+                 OR hc.d_rec IS DISTINCT FROM COALESCE(src.d_rec_nfe, hc.d_rec)
+                 OR hc.status IS DISTINCT FROM COALESCE(src.status_resolvido, hc.status)
+               );
           END IF;
         END IF;
       END $$;
     `);
+
+    // ─── Trigger BEFORE UPDATE: ao alterar "NFe vinculada", busca n_valor_nfe em recebimentos_nfe_omie ───
+    // Objetivo: sempre que "NFe vinculada" for preenchida/alterada em pedidos_omie,
+    // localiza a NFe em logistica.recebimentos_nfe_omie pelo c_numero_nfe
+    // e copia n_valor_nfe para n_valor do pedido.
+    await pool.query(`
+      DO $$
+      BEGIN
+        -- Cria ou substitui a função do trigger
+        CREATE OR REPLACE FUNCTION compras.fn_sync_nfe_valor_pedido()
+        RETURNS trigger
+        LANGUAGE plpgsql AS $fn$
+        DECLARE
+          v_nfe_vinculada TEXT;
+          v_valor_nfe     NUMERIC(15,2);
+        BEGIN
+          -- Só age quando "NFe vinculada" mudou (ou é INSERT com valor preenchido)
+          v_nfe_vinculada := NULLIF(BTRIM(NEW."NFe vinculada"), '');
+
+          IF v_nfe_vinculada IS NULL THEN
+            RETURN NEW;
+          END IF;
+
+          -- Se for UPDATE e o valor não mudou, não faz nada
+          IF TG_OP = 'UPDATE'
+             AND NULLIF(BTRIM(OLD."NFe vinculada"), '') IS NOT DISTINCT FROM v_nfe_vinculada THEN
+            RETURN NEW;
+          END IF;
+
+          -- Busca n_valor_nfe em logistica.recebimentos_nfe_omie
+          BEGIN
+            SELECT r.n_valor_nfe
+              INTO v_valor_nfe
+            FROM logistica.recebimentos_nfe_omie r
+            WHERE BTRIM(r.c_numero_nfe) = v_nfe_vinculada
+            ORDER BY r.d_emissao_nfe DESC NULLS LAST, r.n_id_receb DESC
+            LIMIT 1;
+          EXCEPTION WHEN undefined_table THEN
+            v_valor_nfe := NULL;
+          END;
+
+          -- Se encontrou, atualiza n_valor no próprio registro (BEFORE trigger)
+          IF v_valor_nfe IS NOT NULL THEN
+            NEW.n_valor := v_valor_nfe;
+          END IF;
+
+          RETURN NEW;
+        END;
+        $fn$;
+
+        -- Cria o trigger BEFORE INSERT OR UPDATE na tabela pedidos_omie (se ela existir)
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'compras' AND table_name = 'pedidos_omie'
+        )
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'compras' AND table_name = 'pedidos_omie'
+            AND column_name = 'NFe vinculada'
+        ) THEN
+          DROP TRIGGER IF EXISTS trg_sync_nfe_valor_pedido ON compras.pedidos_omie;
+
+          CREATE TRIGGER trg_sync_nfe_valor_pedido
+          BEFORE INSERT OR UPDATE OF "NFe vinculada"
+          ON compras.pedidos_omie
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_sync_nfe_valor_pedido();
+
+          -- Backfill: atualiza n_valor dos registros existentes que já têm "NFe vinculada"
+          UPDATE compras.pedidos_omie po
+             SET n_valor = r.n_valor_nfe,
+                 updated_at = NOW()
+            FROM logistica.recebimentos_nfe_omie r
+           WHERE NULLIF(BTRIM(po."NFe vinculada"), '') IS NOT NULL
+             AND BTRIM(r.c_numero_nfe) = BTRIM(po."NFe vinculada")
+             AND (po.n_valor IS DISTINCT FROM r.n_valor_nfe);
+        END IF;
+      END $$;
+    `);
+    console.log('[Compras] ✓ Trigger trg_sync_nfe_valor_pedido (NFe vinculada → n_valor) criado/atualizado');
+
+    // ─── Trigger: ao alterar pedidos_omie_produtos, soma n_val_tot e atualiza n_valor em pedidos_omie ───
+    // Objetivo: manter n_valor de pedidos_omie sempre = SUM(n_val_tot) dos seus produtos.
+    // Dispara em INSERT, UPDATE ou DELETE na tabela de produtos do pedido.
+    await pool.query(`
+      DO $$
+      BEGIN
+        CREATE OR REPLACE FUNCTION compras.fn_sync_produtos_valor_pedido()
+        RETURNS trigger
+        LANGUAGE plpgsql AS $fn$
+        DECLARE
+          v_cod_ped BIGINT;
+          v_soma    NUMERIC(15,2);
+        BEGIN
+          -- Determina qual pedido foi afetado
+          IF TG_OP = 'DELETE' THEN
+            v_cod_ped := OLD.n_cod_ped;
+          ELSE
+            v_cod_ped := NEW.n_cod_ped;
+          END IF;
+
+          IF v_cod_ped IS NULL THEN
+            IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+          END IF;
+
+          -- Soma todos os n_val_tot dos produtos deste pedido
+          SELECT COALESCE(SUM(pp.n_val_tot), 0)
+            INTO v_soma
+          FROM compras.pedidos_omie_produtos pp
+          WHERE pp.n_cod_ped = v_cod_ped;
+
+          -- Atualiza n_valor em pedidos_omie
+          UPDATE compras.pedidos_omie
+             SET n_valor = v_soma,
+                 updated_at = NOW()
+           WHERE n_cod_ped = v_cod_ped
+             AND (n_valor IS DISTINCT FROM v_soma);
+
+          IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+        END;
+        $fn$;
+
+        -- Cria o trigger na tabela pedidos_omie_produtos (se existir)
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'compras' AND table_name = 'pedidos_omie_produtos'
+        ) THEN
+          DROP TRIGGER IF EXISTS trg_sync_produtos_valor_pedido ON compras.pedidos_omie_produtos;
+
+          CREATE TRIGGER trg_sync_produtos_valor_pedido
+          AFTER INSERT OR UPDATE OR DELETE
+          ON compras.pedidos_omie_produtos
+          FOR EACH ROW
+          EXECUTE FUNCTION compras.fn_sync_produtos_valor_pedido();
+
+          -- Backfill: recalcula n_valor de todos os pedidos com base nos seus produtos
+          UPDATE compras.pedidos_omie po
+             SET n_valor = src.soma_produtos,
+                 updated_at = NOW()
+            FROM (
+              SELECT pp.n_cod_ped, COALESCE(SUM(pp.n_val_tot), 0) AS soma_produtos
+              FROM compras.pedidos_omie_produtos pp
+              GROUP BY pp.n_cod_ped
+            ) src
+           WHERE po.n_cod_ped = src.n_cod_ped
+             AND (po.n_valor IS DISTINCT FROM src.soma_produtos);
+        END IF;
+      END $$;
+    `);
+    console.log('[Compras] ✓ Trigger trg_sync_produtos_valor_pedido (SUM produtos → n_valor) criado/atualizado');
 
     // Backfill inicial: sincroniza descrições já existentes
     try {
@@ -21559,6 +21836,13 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
     // Agrupar por c_numero e incluir fornecedor e produtos
     console.log('[Compras/PedidosCompra] Iniciando busca de pedidos de compra...');
     
+    // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
+    const { dataInicio: diPC, dataFim: dfPC } = req.query;
+    const paramsPC = [];
+    let whereDataPC = '';
+    if (diPC) { paramsPC.push(diPC); whereDataPC += ` AND po.d_inc_data::date >= $${paramsPC.length}::date`; }
+    if (dfPC) { paramsPC.push(dfPC); whereDataPC += ` AND po.d_inc_data::date <= $${paramsPC.length}::date`; }
+    
     // Busca pedidos com c_etapa = '10' com produtos
     const { rows: pedidosComProdutos } = await pool.query(`
       SELECT 
@@ -21570,6 +21854,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         po.n_cod_for,
         po.d_inc_data,
         po.d_dt_previsao,
+        po.n_valor,
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
@@ -21623,6 +21908,7 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
           numero: numero,
           n_cod_ped: row.n_cod_ped,
           c_cod_int_ped: row.c_cod_int_ped, // Adiciona o código interno
+          n_valor: row.n_valor,             // Valor total do pedido (soma dos itens)
           c_etapa: row.c_etapa,
           n_cod_for: row.n_cod_for,
           d_inc_data: row.d_inc_data,
@@ -21691,6 +21977,13 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
   try {
     console.log('[Compras/ComprasRealizadas] Listando compras realizadas (c_etapa = 15)...');
 
+    // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
+    const { dataInicio: diCR, dataFim: dfCR } = req.query;
+    const paramsCR = [];
+    let whereDataCR = '';
+    if (diCR) { paramsCR.push(diCR); whereDataCR += ` AND po.d_inc_data::date >= $${paramsCR.length}::date`; }
+    if (dfCR) { paramsCR.push(dfCR); whereDataCR += ` AND po.d_inc_data::date <= $${paramsCR.length}::date`; }
+
     const query = `
       SELECT 
         po.n_cod_ped,
@@ -21701,6 +21994,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         po.n_cod_for,
         po.d_inc_data,
         po.d_dt_previsao,
+        po.n_valor,
         cc.nome_fantasia AS fornecedor_nome,
         pop.c_produto,
         pop.c_descricao,
@@ -21756,6 +22050,7 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
           numero: numero,
           n_cod_ped: row.n_cod_ped,
           c_cod_int_ped: row.c_cod_int_ped,
+          n_valor: row.n_valor,             // Valor total do pedido (soma dos itens)
           c_obs: row.c_obs || null,
           is_nfe_obs: /^\s*nfe\s*:/i.test(String(row.c_obs || '')),
           c_etapa: row.c_etapa,
@@ -21826,6 +22121,23 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
     console.log('[Compras/PedidosEtapaNF] Listando pedidos por Etapa_NF (40/50/60/80)...');
 
+    // Filtro de data opcional via query params
+    // Pedido de compra e Compra realizada: d_inc_data | Recebido/Concluído: updated_at | Faturada: d_emissao_nfe
+    const { dataInicio: diNF, dataFim: dfNF } = req.query;
+    const paramsNF = [];
+    let whereDataNF = '';
+    let whereDataReceb = '';
+    if (diNF) {
+      paramsNF.push(diNF);
+      whereDataNF  += ` AND po.updated_at::date >= $${paramsNF.length}::date`;
+      whereDataReceb += ` AND r.d_emissao_nfe::date >= $${paramsNF.length}::date`;
+    }
+    if (dfNF) {
+      paramsNF.push(dfNF);
+      whereDataNF  += ` AND po.updated_at::date <= $${paramsNF.length}::date`;
+      whereDataReceb += ` AND r.d_emissao_nfe::date <= $${paramsNF.length}::date`;
+    }
+
     const query = `
       SELECT
         po.n_cod_ped,
@@ -21833,6 +22145,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         po.c_cod_int_ped,
         po.c_etapa,
         po."Etapa_NF" AS etapa_nf,
+        po.n_valor,
         po.n_cod_for,
         po.d_inc_data,
         po.d_dt_previsao,
@@ -21870,13 +22183,13 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         LIMIT 1
       ) origem ON TRUE
       WHERE (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') IN ('40', '50', '60', '80')
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') IN ('40', '50', '60', '80')${whereDataNF}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
     `;
 
-    const { rows } = await pool.query(query);
+    const { rows } = await pool.query(query, paramsNF);
 
     await pool.query(`
       ALTER TABLE logistica.recebimentos_nfe_omie
@@ -21902,7 +22215,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       FROM logistica.recebimentos_nfe_omie r
       WHERE COALESCE(BTRIM(r.c_etapa), '') = '40'
         AND UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
-        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')${whereDataReceb}
       ORDER BY
         CASE
           WHEN COALESCE(NULLIF(LTRIM(REGEXP_REPLACE(COALESCE(r.c_numero_nfe, ''), '\\D', '', 'g'), '0'), ''), NULLIF(LTRIM(SUBSTRING(r.c_chave_nfe FROM 26 FOR 9), '0'), '')) ~ '^\\d+$'
@@ -21912,7 +22225,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         r.updated_at DESC NULLS LAST
     `;
 
-    const { rows: recebimentosEtapa40Rows } = await pool.query(recebimentosEtapa40Query);
+    const { rows: recebimentosEtapa40Rows } = await pool.query(recebimentosEtapa40Query, paramsNF);
 
     const pedidosMap = new Map();
     const pedidos = [];
@@ -21945,6 +22258,7 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
           solicitante: row.solicitante,
           grupo_requisicao: row.grupo_requisicao,
           fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+          n_valor: row.n_valor ?? null,
           created_at: row.created_at,
           updated_at: row.updated_at,
           itens: []
@@ -25482,6 +25796,7 @@ const comprasGoogleSheetsSyncState = {
 };
 
 let historicoComprasHasValorPedidoColumn = null;
+let historicoComprasHasDtPrevisaoColumn = null;
 
 async function verificarColunaValorPedidoHistoricoCompras(force = false) {
   if (!force && historicoComprasHasValorPedidoColumn !== null) {
@@ -25500,6 +25815,25 @@ async function verificarColunaValorPedidoHistoricoCompras(force = false) {
 
   historicoComprasHasValorPedidoColumn = !!rows[0]?.exists_col;
   return historicoComprasHasValorPedidoColumn;
+}
+
+async function verificarColunaDtPrevisaoHistoricoCompras(force = false) {
+  if (!force && historicoComprasHasDtPrevisaoColumn !== null) {
+    return historicoComprasHasDtPrevisaoColumn;
+  }
+
+  const { rows } = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'compras'
+        AND table_name = 'historico_compras'
+        AND column_name = 'd_dt_previsao'
+    ) AS exists_col
+  `);
+
+  historicoComprasHasDtPrevisaoColumn = !!rows[0]?.exists_col;
+  return historicoComprasHasDtPrevisaoColumn;
 }
 
 function formatarDataHoraPtBr(valor) {
@@ -25653,30 +25987,19 @@ async function montarLinhasComprasParaSheets() {
 }
 
 async function montarLinhasHistoricoComprasParaSheets() {
-  const possuiValorPedido = await verificarColunaValorPedidoHistoricoCompras();
-  const { rows } = possuiValorPedido
-    ? await pool.query(`
-      SELECT
-        id,
-        grupo_requisicao,
-        status,
-        tabela_origem,
-        valor_pedido,
-        created_at
-      FROM compras.historico_compras
-      ORDER BY created_at DESC, id DESC
-    `)
-    : await pool.query(`
-      SELECT
-        id,
-        grupo_requisicao,
-        status,
-        tabela_origem,
-        NULL::numeric AS valor_pedido,
-        created_at
-      FROM compras.historico_compras
-      ORDER BY created_at DESC, id DESC
-    `);
+  const { rows } = await pool.query(`
+    SELECT
+      id,
+      grupo_requisicao,
+      status,
+      tabela_origem,
+      valor_pedido,
+      d_dt_previsao,
+      d_rec,
+      created_at
+    FROM compras.historico_compras
+    ORDER BY created_at DESC, id DESC
+  `);
 
   return rows.map((item) => ({
     'ID': item.id || '-',
@@ -25684,6 +26007,8 @@ async function montarLinhasHistoricoComprasParaSheets() {
     'Status': item.status || '-',
     'Tabela Origem': item.tabela_origem || '-',
     'Valor Pedido': item.valor_pedido == null ? '-' : Number(item.valor_pedido),
+    'd_dt_previsao': formatarDataPtBr(item.d_dt_previsao),
+    'd_rec': formatarDataPtBr(item.d_rec),
     'Criado em': formatarDataHoraPtBr(item.created_at)
   }));
 }
@@ -25699,18 +26024,30 @@ async function enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas = [])
     throw new Error('Fetch indisponível no servidor');
   }
 
-  const resposta = await fetchFn(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      linhas,
-      historicoLinhas,
-      abas: {
-        KANBAN: linhas,
-        historico: historicoLinhas
-      }
-    })
+  const payloadBody = JSON.stringify({
+    linhas,
+    historicoLinhas,
+    abas: {
+      KANBAN: linhas,
+      historico: historicoLinhas
+    }
   });
+
+  const executarPost = async (url, followRedirect = false) => {
+    const resposta = await fetchFn(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payloadBody,
+      redirect: followRedirect ? 'follow' : 'manual'
+    });
+    return resposta;
+  };
+
+  const resposta = await executarPost(webhookUrl, false);
+
+  if ([301, 302, 303, 307, 308].includes(Number(resposta.status || 0))) {
+    return;
+  }
 
   const contentType = String(resposta.headers.get('content-type') || '').toLowerCase();
   const texto = await resposta.text();
@@ -25724,13 +26061,15 @@ async function enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas = [])
   }
 
   if (texto) {
+    let payload = null;
     try {
-      const payload = JSON.parse(texto);
-      if (payload && payload.ok === false) {
-        throw new Error(`Apps Script retornou erro: ${JSON.stringify(payload)}`);
-      }
+      payload = JSON.parse(texto);
     } catch (_) {
       // resposta não-JSON é aceita desde que não seja HTML e não seja erro HTTP
+    }
+
+    if (payload && payload.ok === false) {
+      throw new Error(`Apps Script retornou erro: ${JSON.stringify(payload)}`);
     }
   }
 }
@@ -25922,6 +26261,50 @@ app.get('/api/compras/google-sheets/status', async (_req, res) => {
       error: comprasGoogleSheetsSyncState.lastSyncError,
     }
   });
+});
+
+app.post('/api/compras/google-sheets/sync-now', async (req, res) => {
+  try {
+    if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) {
+      return res.status(400).json({ ok: false, error: 'Auto-sync Google Sheets está desabilitado' });
+    }
+
+    if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) {
+      return res.status(400).json({ ok: false, error: 'GOOGLE_SHEETS_WEBHOOK_URL não configurada' });
+    }
+
+    const motivo = String(req.body?.motivo || 'manual').trim() || 'manual';
+    const linhas = await montarLinhasComprasParaSheets();
+    const historicoLinhas = await montarLinhasHistoricoComprasParaSheets();
+
+    await enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas);
+
+    comprasGoogleSheetsSyncState.lastFingerprint = await obterFingerprintComprasParaSheets();
+    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
+    comprasGoogleSheetsSyncState.lastSyncReason = `manual:${motivo}`;
+    comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
+    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length + historicoLinhas.length;
+    comprasGoogleSheetsSyncState.lastSyncError = null;
+
+    return res.json({
+      ok: true,
+      mensagem: 'Sincronização manual concluída',
+      contagem: {
+        kanban: linhas.length,
+        historico: historicoLinhas.length
+      },
+      headers: {
+        kanban: Object.keys(linhas[0] || {}),
+        historico: Object.keys(historicoLinhas[0] || {})
+      }
+    });
+  } catch (err) {
+    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
+    comprasGoogleSheetsSyncState.lastSyncReason = 'manual';
+    comprasGoogleSheetsSyncState.lastSyncStatus = 'error';
+    comprasGoogleSheetsSyncState.lastSyncError = String(err?.message || err || 'Erro desconhecido');
+    return res.status(500).json({ ok: false, error: String(err?.message || err || 'Erro ao sincronizar') });
+  }
 });
 
 const OMIE_WEBHOOK_AUTOSYNC_ENABLED = (() => {

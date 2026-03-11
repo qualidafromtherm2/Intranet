@@ -32562,6 +32562,69 @@ function toggleVisualizacao() {
   }
 }
 
+// ============================================================
+// Filtro de data por período para os kanbans de compras
+// ============================================================
+// Armazena o filtro de data ativo (null = sem filtro)
+window._comprasFiltroDatas = null;
+
+function abrirModalFiltrarData() {
+  const modal = document.getElementById('modalFiltrarDataKanban');
+  if (!modal) return;
+  // Pré-preenche com valores do filtro ativo
+  if (window._comprasFiltroDatas) {
+    const inp1 = document.getElementById('filtrarDataInicio');
+    const inp2 = document.getElementById('filtrarDataFim');
+    if (inp1) inp1.value = window._comprasFiltroDatas.inicio || '';
+    if (inp2) inp2.value = window._comprasFiltroDatas.fim || '';
+  }
+  modal.style.display = 'flex';
+}
+
+function fecharModalFiltrarData() {
+  const modal = document.getElementById('modalFiltrarDataKanban');
+  if (modal) modal.style.display = 'none';
+}
+
+function limparFiltroData() {
+  const inp1 = document.getElementById('filtrarDataInicio');
+  const inp2 = document.getElementById('filtrarDataFim');
+  if (inp1) inp1.value = '';
+  if (inp2) inp2.value = '';
+  window._comprasFiltroDatas = null;
+  // Restaura cor original do botão
+  const btn = document.getElementById('comprasFiltrarDataBtn');
+  if (btn) {
+    btn.style.background = 'linear-gradient(135deg,#ec4899 0%,#db2777 100%)';
+    btn.title = 'Filtrar por Data';
+  }
+  fecharModalFiltrarData();
+  if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+}
+
+function aplicarFiltroData() {
+  const inicio = (document.getElementById('filtrarDataInicio')?.value || '').trim();
+  const fim = (document.getElementById('filtrarDataFim')?.value || '').trim();
+  if (!inicio && !fim) {
+    limparFiltroData();
+    return;
+  }
+  window._comprasFiltroDatas = { inicio, fim };
+  // Destaca o botão para indicar filtro ativo (laranja)
+  const btn = document.getElementById('comprasFiltrarDataBtn');
+  if (btn) {
+    btn.style.background = 'linear-gradient(135deg,#f97316 0%,#ea580c 100%)';
+    btn.title = 'Filtro de data ativo — clique para alterar';
+  }
+  fecharModalFiltrarData();
+  if (typeof loadMinhasSolicitacoes === 'function') loadMinhasSolicitacoes();
+}
+
+window.abrirModalFiltrarData = abrirModalFiltrarData;
+window.fecharModalFiltrarData = fecharModalFiltrarData;
+window.limparFiltroData = limparFiltroData;
+window.aplicarFiltroData = aplicarFiltroData;
+
 // Objetivo: Exibir visualização em Kanban (padrão)
 function mostrarVisualizacaoKanban() {
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
@@ -34919,11 +34982,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
 
     renderizarKanbanPrimeiraFaseRapida(kanbanContainer, listaPrimeiraFase, filtroStatus);
     
+    // Monta query string de filtro de data se houver filtro ativo
+    const _filtroDataParams = (() => {
+      if (!window._comprasFiltroDatas) return '';
+      const p = new URLSearchParams();
+      if (window._comprasFiltroDatas.inicio) p.set('dataInicio', window._comprasFiltroDatas.inicio);
+      if (window._comprasFiltroDatas.fim) p.set('dataFim', window._comprasFiltroDatas.fim);
+      const s = p.toString();
+      return s ? `?${s}` : '';
+    })();
     // Segunda fase: carrega dados mais pesados de pedidos/compras em paralelo.
     const [respPed, respCompra, respEtapaNf] = await Promise.all([
-      fetch(`/api/compras/pedidos-compra`, { credentials: 'include' }),
-      fetch(`/api/compras/compras-realizadas`, { credentials: 'include' }),
-      fetch(`/api/compras/pedidos-etapa-nf`, { credentials: 'include' })
+      fetch(`/api/compras/pedidos-compra${_filtroDataParams}`, { credentials: 'include' }),
+      fetch(`/api/compras/compras-realizadas${_filtroDataParams}`, { credentials: 'include' }),
+      fetch(`/api/compras/pedidos-etapa-nf${_filtroDataParams}`, { credentials: 'include' })
     ]);
 
     // Busca pedidos de compra da tabela pedidos_omie (c_etapa = '10' e Etapa_NF vazia)
@@ -35024,6 +35096,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           status: 'compra realizada',
           statusNormalizado: 'compra realizada',
           isCompraRealizada: true,
+          n_valor: comp.n_valor ?? null,     // Valor total do pedido (n_valor da pedidos_omie)
           itens: comp.itens || [] // Garante que itens estão presentes
         };
       });
@@ -35725,16 +35798,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                     : `
                       <span style="font-weight:600;color:#374151;">
                         ${status === 'aguardando compra'
-                          ? escapeHtml(cardTemBordaVerde
-                            ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
-                            : (primeiroItem.c_cod_int_ped || ''))
+                          ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor))
                           : (status === 'compra realizada'
-                            ? escapeHtml(cardTemBordaVerde
-                              ? compactarIdentificadorKanbanCotado(primeiroItem.c_cod_int_ped || '')
-                              : (primeiroItem.c_cod_int_ped || ''))
+                            ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor))
                             : (status === 'faturada pelo fornecedor'
                               ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor_nfe))
-                              : ((
+                              : ((status === 'recebido' || status === 'concluído')
+                                ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor))
+                                : ((
                                 status === 'aguardando cotação'
                                 || status === 'cotado aguardando escolha'
                                 || status === 'aguardando aprovação da requisição'
@@ -35744,7 +35815,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                                 ? escapeHtml(`ID ${String(primeiroItem.historico_id || primeiroItem.id || '-')}`)
                                 : (statusCompactarIdentificador.includes(status)
                                   ? escapeHtml(compactarIdentificadorKanbanCotado(chaveGrupo))
-                                  : escapeHtml(chaveGrupo)))))
+                                  : escapeHtml(chaveGrupo))))))
                         }
                       </span>
                     `
@@ -35868,18 +35939,70 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           Abrir Tudo
         </button>
       ` : '';
+
+      // Calcula soma dos valores financeiros para colunas monetárias específicas
+      let badgeSomaTotal = '';
+      if (status === 'aguardando compra' || status === 'compra realizada') {
+        // Soma n_valor único por pedido (evita duplicar quando há múltiplas solicitações no mesmo pedido)
+        const vistosPed = new Set();
+        let soma = 0;
+        itens.forEach(item => {
+          const chave = item.n_cod_ped || item.id;
+          if (!vistosPed.has(chave) && Number.isFinite(Number(item.n_valor)) && Number(item.n_valor) > 0) {
+            vistosPed.add(chave);
+            soma += Number(item.n_valor);
+          }
+        });
+        if (soma > 0) {
+          const corBadge = status === 'aguardando compra'
+            ? 'background:#d1fae5;color:#065f46;'
+            : 'background:#dbeafe;color:#1e40af;';
+          badgeSomaTotal = `<span style="${corBadge}padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;">${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`;
+        }
+      } else if (status === 'faturada pelo fornecedor') {
+        // Soma n_valor_nfe único por recebimento (faturada pelo fornecedor)
+        const vistosReceb = new Set();
+        let soma = 0;
+        itens.forEach(item => {
+          const chave = item.n_id_receb || item.cNumero || item.id;
+          if (!vistosReceb.has(chave) && Number.isFinite(Number(item.n_valor_nfe)) && Number(item.n_valor_nfe) > 0) {
+            vistosReceb.add(chave);
+            soma += Number(item.n_valor_nfe);
+          }
+        });
+        if (soma > 0) {
+          badgeSomaTotal = `<span style="background:#fef3c7;color:#92400e;padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;">${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`;
+        }
+      } else if (status === 'recebido' || status === 'concluído') {
+        // Soma n_valor único por pedido (recebido e concluído — vem de compras.pedidos_omie)
+        const vistosPedRec = new Set();
+        let soma = 0;
+        itens.forEach(item => {
+          const chave = item.n_cod_ped || item.chaveGrupo || item.id;
+          if (!vistosPedRec.has(chave) && Number.isFinite(Number(item.n_valor)) && Number(item.n_valor) > 0) {
+            vistosPedRec.add(chave);
+            soma += Number(item.n_valor);
+          }
+        });
+        if (soma > 0) {
+          const corBgConc = status === 'concluído' ? '#f0fdf4' : '#ede9fe';
+          const corTxtConc = status === 'concluído' ? '#14532d' : '#5b21b6';
+          badgeSomaTotal = `<span style="background:${corBgConc};color:${corTxtConc};padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;">${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`;
+        }
+      }
       
       return `
         <div class="kanban-column-minhas" 
           data-status="${status}" 
           style="flex:1;min-width:200px;${estilosExtras}${bordaEspecial}border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:all 0.2s;${estiloDesabilitado}">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;padding-top:0px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${badgeSomaTotal ? '6px' : '16px'};padding-bottom:12px;padding-top:0px;">
             <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
               <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
               ${tituloExibir}
             </h3>
             <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">${itens.length}</span>
           </div>
+          ${badgeSomaTotal ? `<div style="text-align:right;margin-bottom:10px;">${badgeSomaTotal}</div>` : ''}
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;">
             ${badgeIdentificacao}
             ${botaoAbrirTudo}
