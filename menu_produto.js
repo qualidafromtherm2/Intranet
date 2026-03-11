@@ -40317,45 +40317,17 @@ async function salvarReservaAgendaLocal() {
     `Participantes: ${participantes.length ? participantes.join(', ') : 'Nenhum selecionado'}`
   ];
 
-  const mapaDiaSemana = { dom: 0, seg: 1, ter: 2, qua: 3, qui: 4, sex: 5, sab: 6 };
-  const dataBase = new Date(`${agendaDataSelecionada}T00:00:00`);
-  const datasDestino = [];
-
-  if (agendaReservaEditandoId) {
-    datasDestino.push(agendaReservaEditandoData || agendaDataSelecionada);
-  } else if (repetir) {
-    const diasPermitidos = new Set(diasSemana.map((dia) => mapaDiaSemana[dia]).filter((dia) => Number.isInteger(dia)));
-    const ano = dataBase.getFullYear();
-    const mesesAlvo = repetirTodosMesesMarcado
-      ? Array.from({ length: 12 }, (_v, idx) => idx)
-      : [dataBase.getMonth()];
-    mesesAlvo.forEach((mes) => {
-      const ultimoDia = new Date(ano, mes + 1, 0).getDate();
-      for (let dia = 1; dia <= ultimoDia; dia++) {
-        const dataAtual = new Date(ano, mes, dia);
-        if (diasPermitidos.has(dataAtual.getDay())) {
-          datasDestino.push(formatarDataIso(dataAtual));
-        }
-      }
-    });
-  } else {
-    datasDestino.push(agendaDataSelecionada);
-  }
-
-  const datasDestinoUnicas = Array.from(new Set(datasDestino));
-
-  const conflitoEncontrado = datasDestinoUnicas.find((dataIso) => {
-    return buscarConflitoReservaAgenda({
-      dataIso,
-      tipoReservaTexto,
-      horarioInicio,
-      horarioFim,
-      ignorarReservaId: agendaReservaEditandoId || null
-    });
+  const dataConflito = agendaReservaEditandoData || agendaDataSelecionada;
+  const conflitoEncontrado = buscarConflitoReservaAgenda({
+    dataIso: dataConflito,
+    tipoReservaTexto,
+    horarioInicio,
+    horarioFim,
+    ignorarReservaId: agendaReservaEditandoId || null
   });
 
   if (conflitoEncontrado) {
-    alert(`Conflito de horário para ${tipoReservaTexto} em ${formatarDataExibicaoPtBr(conflitoEncontrado)}.`);
+    alert(`Conflito de horário para ${tipoReservaTexto} em ${formatarDataExibicaoPtBr(dataConflito)}.`);
     return;
   }
 
@@ -40392,7 +40364,6 @@ async function salvarReservaAgendaLocal() {
           tipo: tipoReservaTexto,
           tema: temaReuniao,
           data: agendaDataSelecionada,
-          datas: datasDestinoUnicas,
           inicio: horarioInicio,
           fim: horarioFim,
           repetir,

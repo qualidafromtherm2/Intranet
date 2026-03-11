@@ -2409,17 +2409,71 @@ function normalizarDiasSemanaRh(dias) {
   return Array.from(new Set(dias.map((d) => String(d || '').trim().toLowerCase()).filter((d) => permitidos.has(d))));
 }
 
+function obterSiglaDiaSemanaRh(dataIso) {
+  const data = new Date(`${String(dataIso || '').slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(data.getTime())) return null;
+  const mapa = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+  return mapa[data.getDay()] || null;
+}
+
+function gerarDatasRecorrenciaRh({ dataBaseIso, repetir, repetirTodosMeses, diasSemana }) {
+  if (!repetir) return [dataBaseIso];
+
+  const base = new Date(`${String(dataBaseIso || '').slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return [dataBaseIso];
+
+  const diasPermitidos = new Set(normalizarDiasSemanaRh(diasSemana));
+  if (!diasPermitidos.size) return [dataBaseIso];
+
+  const ano = base.getFullYear();
+  const mesesAlvo = repetirTodosMeses
+    ? Array.from({ length: 12 }, (_v, idx) => idx)
+    : [base.getMonth()];
+
+  const mapaSemana = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+  const datas = [];
+  mesesAlvo.forEach((mes) => {
+    const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+    for (let dia = 1; dia <= ultimoDia; dia++) {
+      const atual = new Date(ano, mes, dia);
+      const sigla = mapaSemana[atual.getDay()];
+      if (diasPermitidos.has(sigla)) {
+        datas.push(atual.toISOString().slice(0, 10));
+      }
+    }
+  });
+
+  return Array.from(new Set(datas));
+}
+
 async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaInicio, horaFim, ignorarId = null }) {
+  const diaSemana = obterSiglaDiaSemanaRh(dataReserva);
+  if (!diaSemana) return false;
+
   const { rows } = await client.query(
     `SELECT id
        FROM rh.reservas_ambientes
-      WHERE data_reserva = $1
-        AND tipo_espaco = $2
+      WHERE tipo_espaco = $2
         AND ($3::bigint IS NULL OR id <> $3::bigint)
         AND hora_inicio < $5::time
         AND hora_fim > $4::time
+        AND (
+          (
+            repetir = false
+            AND data_reserva = $1::date
+          )
+          OR (
+            repetir = true
+            AND EXTRACT(YEAR FROM data_reserva) = EXTRACT(YEAR FROM $1::date)
+            AND (
+              repetir_todos_meses = true
+              OR EXTRACT(MONTH FROM data_reserva) = EXTRACT(MONTH FROM $1::date)
+            )
+            AND $6 = ANY(dias_semana)
+          )
+        )
       LIMIT 1`,
-    [dataReserva, tipoEspaco, ignorarId, horaInicio, horaFim]
+    [dataReserva, tipoEspaco, ignorarId, horaInicio, horaFim, diaSemana]
   );
   return rows.length > 0;
 }
@@ -2449,26 +2503,68 @@ app.get('/api/rh/reservas', async (req, res) => {
          FROM rh.reservas_ambientes r
          LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
         WHERE EXTRACT(YEAR FROM r.data_reserva) = $1
-          AND EXTRACT(MONTH FROM r.data_reserva) = $2
+          AND (
+            (
+              r.repetir = false
+              AND EXTRACT(MONTH FROM r.data_reserva) = $2
+            )
+            OR (
+              r.repetir = true
+              AND (
+                r.repetir_todos_meses = true
+                OR EXTRACT(MONTH FROM r.data_reserva) = $2
+              )
+            )
+          )
         GROUP BY r.id
-        ORDER BY r.data_reserva ASC, r.hora_inicio ASC`,
+        ORDER BY r.hora_inicio ASC, r.id ASC`,
       [ano, mes]
     );
 
-    const reservas = rows.map((r) => ({
-      id: r.id,
-      tipo: r.tipo_espaco,
-      tema: r.tema_reuniao,
-      data: r.data_reserva,
-      inicio: r.hora_inicio,
-      fim: r.hora_fim,
-      repetir: !!r.repetir,
-      repetirTodosMeses: !!r.repetir_todos_meses,
-      diasSemana: Array.isArray(r.dias_semana) ? r.dias_semana : [],
-      cafe: !!r.cafe,
-      criadoPor: r.criado_por,
-      participantes: Array.isArray(r.participantes) ? r.participantes : []
-    }));
+    const ultimoDiaMes = new Date(ano, mes, 0);
+    const mapaSemana = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+    const reservas = [];
+
+    rows.forEach((r) => {
+      const baseReserva = {
+        id: r.id,
+        tipo: r.tipo_espaco,
+        tema: r.tema_reuniao,
+        inicio: r.hora_inicio,
+        fim: r.hora_fim,
+        repetir: !!r.repetir,
+        repetirTodosMeses: !!r.repetir_todos_meses,
+        diasSemana: Array.isArray(r.dias_semana) ? r.dias_semana : [],
+        cafe: !!r.cafe,
+        criadoPor: r.criado_por,
+        participantes: Array.isArray(r.participantes) ? r.participantes : []
+      };
+
+      if (!baseReserva.repetir) {
+        reservas.push({ ...baseReserva, data: r.data_reserva });
+        return;
+      }
+
+      const diasSemanaSet = new Set(baseReserva.diasSemana);
+      if (!diasSemanaSet.size) {
+        reservas.push({ ...baseReserva, data: r.data_reserva });
+        return;
+      }
+
+      for (let dia = 1; dia <= ultimoDiaMes.getDate(); dia++) {
+        const dataAtual = new Date(ano, mes - 1, dia);
+        const sigla = mapaSemana[dataAtual.getDay()];
+        if (!diasSemanaSet.has(sigla)) continue;
+        const dataIso = dataAtual.toISOString().slice(0, 10);
+        reservas.push({ ...baseReserva, data: dataIso });
+      }
+    });
+
+    reservas.sort((a, b) => {
+      if (a.data !== b.data) return String(a.data).localeCompare(String(b.data));
+      if (a.inicio !== b.inicio) return String(a.inicio).localeCompare(String(b.inicio));
+      return Number(a.id) - Number(b.id);
+    });
 
     return res.json({ ok: true, reservas });
   } catch (err) {
@@ -2493,9 +2589,6 @@ app.post('/api/rh/reservas', async (req, res) => {
   const repetirTodosMeses = !!body.repetirTodosMeses;
   const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
   const cafe = !!body.cafe;
-  const datasBody = Array.isArray(body.datas)
-    ? body.datas.map((d) => String(d || '').trim()).filter(Boolean)
-    : [];
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -2507,7 +2600,12 @@ app.post('/api/rh/reservas', async (req, res) => {
     return res.status(400).json({ error: 'Horário fim deve ser maior que horário início' });
   }
 
-  const datasReserva = datasBody.length > 0 ? datasBody : [dataReserva];
+  const datasReserva = gerarDatasRecorrenciaRh({
+    dataBaseIso: dataReserva,
+    repetir,
+    repetirTodosMeses,
+    diasSemana
+  });
 
   const client = await pool.connect();
   try {
@@ -2527,30 +2625,26 @@ app.post('/api/rh/reservas', async (req, res) => {
       }
     }
 
-    const idsCriados = [];
-    for (const dataItem of datasReserva) {
-      const insertReserva = await client.query(
-        `INSERT INTO rh.reservas_ambientes
-          (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, criado_por)
-         VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10)
-         RETURNING id`,
-        [tipoEspaco, tema, dataItem, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, userLogado]
-      );
+    const insertReserva = await client.query(
+      `INSERT INTO rh.reservas_ambientes
+        (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, criado_por)
+       VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10)
+       RETURNING id`,
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, userLogado]
+    );
 
-      const reservaId = insertReserva.rows[0].id;
-      idsCriados.push(reservaId);
-      for (const username of participantes) {
-        await client.query(
-          `INSERT INTO rh.reservas_participantes (reserva_id, username)
-           VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [reservaId, username]
-        );
-      }
+    const reservaId = insertReserva.rows[0].id;
+    for (const username of participantes) {
+      await client.query(
+        `INSERT INTO rh.reservas_participantes (reserva_id, username)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [reservaId, username]
+      );
     }
 
     await client.query('COMMIT');
-    return res.json({ ok: true, ids: idsCriados });
+    return res.json({ ok: true, ids: [reservaId] });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas POST erro:', err);
@@ -22711,6 +22805,161 @@ async function obterPdfNfeViaOmie(numeroNfeDigitos) {
   return { ok: true, cPdf, n_id_nfe: nIdNf };
 }
 
+function decodificarXmlHtmlEscapado(valor) {
+  const texto = String(valor || '');
+  if (!texto) return '';
+  return texto
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+async function obterXmlNfeViaOmie({ nIdNF, nNF, chaveNfe, cModelo = '55' } = {}) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    return { ok: false, error: 'Credenciais Omie não configuradas no servidor' };
+  }
+
+  const nIdNumero = Number(nIdNF);
+  const nIdValido = Number.isFinite(nIdNumero) && nIdNumero > 0;
+  const nNfLimpo = String(nNF || '').replace(/\D/g, '');
+  const chaveLimpa = String(chaveNfe || '').replace(/\D/g, '');
+
+  const callOmie = async (url, payload) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok,
+      status: response.status,
+      data,
+      fault: String(data?.faultstring || data?.faultcode || '')
+    };
+  };
+
+  let nIdParaConsulta = nIdValido ? nIdNumero : null;
+
+  if (!nIdParaConsulta && (nNfLimpo || chaveLimpa)) {
+    const paramConsulta = {};
+    if (nNfLimpo) paramConsulta.nNF = nNfLimpo;
+    if (chaveLimpa) paramConsulta.cChaveNFe = chaveLimpa;
+
+    const consultaResp = await callOmie('https://app.omie.com.br/api/v1/produtos/nfconsultar/', {
+      call: 'ConsultarNF',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [paramConsulta]
+    });
+
+    if (!consultaResp.ok || consultaResp.fault) {
+      return {
+        ok: false,
+        error: consultaResp.fault || `Erro HTTP ${consultaResp.status} ao consultar NF`,
+        fonte: 'ConsultarNF'
+      };
+    }
+
+    const nIdDetectado = Number(
+      consultaResp.data?.compl?.nIdNF
+      || consultaResp.data?.compl?.nIdNf
+      || consultaResp.data?.nIdNF
+      || consultaResp.data?.nIdNfe
+    );
+
+    if (!Number.isFinite(nIdDetectado) || nIdDetectado <= 0) {
+      return {
+        ok: false,
+        error: 'ConsultarNF não retornou nIdNF válido',
+        fonte: 'ConsultarNF'
+      };
+    }
+    nIdParaConsulta = nIdDetectado;
+  }
+
+  if (!nIdParaConsulta) {
+    return {
+      ok: false,
+      error: 'Informe nIdNF válido (ou nNF/chaveNfe para localizar)',
+      fonte: 'entrada'
+    };
+  }
+
+  const listarResp = await callOmie('https://app.omie.com.br/api/v1/contador/xml/', {
+    call: 'ListarDocumentos',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      nPagina: 1,
+      nRegPorPagina: 20,
+      cModelo,
+      nIdNF: nIdParaConsulta
+    }]
+  });
+
+  if (listarResp.ok && !listarResp.fault) {
+    const docs = Array.isArray(listarResp.data?.documentosEncontrados)
+      ? listarResp.data.documentosEncontrados
+      : [];
+    const doc = docs.find((item) => Number(item?.nIdNF) === Number(nIdParaConsulta)) || docs[0];
+    const cXml = decodificarXmlHtmlEscapado(doc?.cXml || '');
+    if (cXml) {
+      return {
+        ok: true,
+        fonte: 'ListarDocumentos',
+        nIdNF: Number(doc?.nIdNF || nIdParaConsulta),
+        nChave: String(doc?.nChave || ''),
+        cXml
+      };
+    }
+  }
+
+  const obterResp = await callOmie('https://app.omie.com.br/api/v1/produtos/dfedocs/', {
+    call: 'ObterNfe',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{ nIdNfe: nIdParaConsulta }]
+  });
+
+  if (!obterResp.ok || obterResp.fault) {
+    const motivoListar = listarResp.fault || (listarResp.ok ? '' : `HTTP ${listarResp.status}`);
+    const motivoObter = obterResp.fault || `HTTP ${obterResp.status}`;
+    return {
+      ok: false,
+      error: `Não foi possível obter XML da NFe. ListarDocumentos: ${motivoListar || 'sem XML'} | ObterNfe: ${motivoObter}`,
+      fonte: 'ObterNfe'
+    };
+  }
+
+  const cXml = decodificarXmlHtmlEscapado(
+    obterResp.data?.cXml
+    || obterResp.data?.cXmlNfe
+    || obterResp.data?.xml
+    || obterResp.data?.xmlNfe
+    || obterResp.data?.cConteudo
+    || ''
+  );
+
+  if (!cXml) {
+    return {
+      ok: false,
+      error: 'A Omie retornou resposta sem campo de XML',
+      fonte: 'ObterNfe'
+    };
+  }
+
+  return {
+    ok: true,
+    fonte: 'ObterNfe',
+    nIdNF: nIdParaConsulta,
+    nChave: String(chaveLimpa || ''),
+    cXml
+  };
+}
+
 function normalizarNumeroNfeComparacao(valor) {
   const digitos = String(valor || '').replace(/\D/g, '');
   if (!digitos) return '';
@@ -23459,6 +23708,101 @@ app.get('/api/compras/pedidos-omie/nfe-pdf-link', async (req, res) => {
   } catch (err) {
     console.error('[Compras/NFePdfLink] Erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao gerar link do PDF da NF-e' });
+  }
+});
+
+app.post('/api/omie/nfe/xml', express.json(), async (req, res) => {
+  try {
+    const nIdNF = Number(
+      req.body?.nIdNF
+      || req.body?.nIdNf
+      || req.body?.nIdNfe
+      || req.body?.compl?.nIdNF
+    );
+    const nNF = String(
+      req.body?.nNF
+      || req.body?.numeroNf
+      || req.body?.compl?.nNumero
+      || req.body?.ide?.nNF
+      || ''
+    );
+    const chaveNfe = String(
+      req.body?.chaveNfe
+      || req.body?.cChaveNFe
+      || req.body?.compl?.cChaveNFe
+      || ''
+    );
+    const cModelo = String(req.body?.cModelo || req.body?.ide?.mod || '55');
+
+    const resultado = await obterXmlNfeViaOmie({
+      nIdNF,
+      nNF,
+      chaveNfe,
+      cModelo
+    });
+
+    if (!resultado?.ok) {
+      return res.status(404).json({ ok: false, error: resultado?.error || 'XML não encontrado' });
+    }
+
+    return res.json({
+      ok: true,
+      fonte: resultado.fonte,
+      nIdNF: resultado.nIdNF || nIdNF || null,
+      nChave: resultado.nChave || null,
+      cXml: resultado.cXml
+    });
+  } catch (err) {
+    console.error('[omie/nfe/xml] erro →', err);
+    return res.status(err.status || 500).json({ ok: false, error: err.faultstring || err.message });
+  }
+});
+
+app.get('/api/omie/nfe/xml-download', async (req, res) => {
+  try {
+    const nIdNF = Number(
+      req.query?.nIdNF
+      || req.query?.nIdNf
+      || req.query?.nIdNfe
+      || 0
+    );
+    const nNF = String(
+      req.query?.nNF
+      || req.query?.numero_nfe
+      || req.query?.numeroNf
+      || ''
+    );
+    const chaveNfe = String(
+      req.query?.chave_nfe
+      || req.query?.chaveNfe
+      || req.query?.cChaveNFe
+      || ''
+    );
+    const cModelo = String(req.query?.cModelo || '55');
+
+    const resultado = await obterXmlNfeViaOmie({
+      nIdNF,
+      nNF,
+      chaveNfe,
+      cModelo
+    });
+
+    if (!resultado?.ok || !resultado?.cXml) {
+      return res.status(404).send(resultado?.error || 'XML não encontrado');
+    }
+
+    const chaveArquivo = String(resultado?.nChave || chaveNfe || '').replace(/\D/g, '');
+    const numeroArquivo = String(nNF || '').replace(/\D/g, '');
+    const nomeArquivo = chaveArquivo
+      ? `nfe-${chaveArquivo}.xml`
+      : (numeroArquivo ? `nfe-${numeroArquivo}.xml` : 'nfe.xml');
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
+    return res.status(200).send(resultado.cXml);
+  } catch (err) {
+    console.error('[omie/nfe/xml-download] erro →', err);
+    return res.status(err.status || 500).send(err.faultstring || err.message || 'Erro ao baixar XML');
   }
 });
 
