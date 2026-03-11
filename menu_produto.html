@@ -6188,36 +6188,211 @@ function attachDropZone(ul) {
     }).join('');
   };
 
-  const renderizarResumoRecebimentoOmie = (dados, etapaInfo = null, etapasLegenda = [], pedidoContexto = null) => {
+  const extrairResumoXmlNfe = (xmlRaw) => {
+    const xml = String(xmlRaw || '').trim();
+    if (!xml) return null;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) return null;
+
+    const txt = (tag, base = doc) => {
+      try {
+        return String(base.getElementsByTagNameNS('*', tag)?.[0]?.textContent || '').trim();
+      } catch (_) {
+        return '';
+      }
+    };
+
+    const ide = doc.getElementsByTagNameNS('*', 'ide')?.[0] || doc;
+    const emit = doc.getElementsByTagNameNS('*', 'emit')?.[0] || doc;
+    const prot = doc.getElementsByTagNameNS('*', 'infProt')?.[0] || doc;
+    const cobr = doc.getElementsByTagNameNS('*', 'cobr')?.[0] || doc;
+    const fat = cobr.getElementsByTagNameNS('*', 'fat')?.[0] || cobr;
+    const pagDet = doc.getElementsByTagNameNS('*', 'detPag')?.[0] || doc;
+    const pagCard = pagDet.getElementsByTagNameNS('*', 'card')?.[0] || pagDet;
+    const icmsTot = doc.getElementsByTagNameNS('*', 'ICMSTot')?.[0] || doc;
+    const dets = Array.from(doc.getElementsByTagNameNS('*', 'det'));
+    const dups = Array.from(cobr.getElementsByTagNameNS('*', 'dup'));
+
+    const itens = dets.map((det, idx) => {
+      const prod = det.getElementsByTagNameNS('*', 'prod')?.[0] || det;
+      return {
+        idx: idx + 1,
+        codigo: txt('cProd', prod),
+        descricao: txt('xProd', prod),
+        qtd: txt('qCom', prod),
+        un: txt('uCom', prod),
+        vlrUnit: txt('vUnCom', prod),
+        vlrItem: txt('vProd', prod)
+      };
+    });
+
+    return {
+      ide: {
+        numero: txt('nNF', ide),
+        serie: txt('serie', ide),
+        emissao: txt('dhEmi', ide),
+        modelo: txt('mod', ide),
+        natureza: txt('natOp', ide)
+      },
+      totais: {
+        valorNf: txt('vNF', icmsTot),
+        valorProdutos: txt('vProd', icmsTot),
+        icms: txt('vICMS', icmsTot),
+        pis: txt('vPIS', icmsTot),
+        cofins: txt('vCOFINS', icmsTot)
+      },
+      emitente: {
+        nome: txt('xNome', emit),
+        cnpj: txt('CNPJ', emit),
+        municipio: txt('xMun', emit),
+        uf: txt('UF', emit)
+      },
+      protocolo: {
+        chave: txt('chNFe', prot),
+        protocolo: txt('nProt', prot),
+        status: txt('cStat', prot),
+        motivo: txt('xMotivo', prot),
+        recebidoEm: txt('dhRecbto', prot)
+      },
+      pagamento: {
+        faturaNumero: txt('nFat', fat),
+        valorOriginal: txt('vOrig', fat),
+        valorLiquido: txt('vLiq', fat),
+        indicadorPagamento: txt('indPag', pagDet),
+        tipoPagamento: txt('tPag', pagDet),
+        valorPago: txt('vPag', pagDet),
+        integracaoCartao: txt('tpIntegra', pagCard),
+        cnpjCredenciadora: txt('CNPJ', pagCard),
+        bandeiraCartao: txt('tBand', pagCard),
+        autorizacaoCartao: txt('cAut', pagCard),
+        parcelas: dups.map((dup, idx) => ({
+          idx: idx + 1,
+          numero: txt('nDup', dup),
+          vencimento: txt('dVenc', dup),
+          valor: txt('vDup', dup)
+        }))
+      },
+      itens
+    };
+  };
+
+  const renderizarResumoRecebimentoOmie = (dados, etapaInfo = null, etapasLegenda = [], pedidoContexto = null, resumoXml = null) => {
+    const formatarDataBr = (valor, preferirDataHora = false) => {
+      const bruto = String(valor || '').trim();
+      if (!bruto || bruto === '-') return '-';
+
+      if (/^\d{2}\/\d{2}\/\d{4}(\s\d{2}:\d{2}(:\d{2})?)?$/.test(bruto)) {
+        return bruto;
+      }
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(bruto)) {
+        const [ano, mes, dia] = bruto.split('-');
+        return `${dia}/${mes}/${ano}`;
+      }
+
+      const temHoraNoTexto = /[T\s]\d{2}:\d{2}/.test(bruto);
+      const data = new Date(bruto);
+      if (!Number.isNaN(data.getTime())) {
+        if (preferirDataHora || temHoraNoTexto) {
+          return data.toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+        return data.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+      }
+
+      return bruto;
+    };
+
     const cabec = dados?.cabec || {};
     const totais = dados?.totais || {};
-    const transporte = dados?.transporte || {};
-    const infoCadastro = dados?.infoCadastro || {};
     const itens = Array.isArray(dados?.itensRecebimento) ? dados.itensRecebimento : [];
+    const xmlIde = resumoXml?.ide || {};
+    const xmlTotais = resumoXml?.totais || {};
+    const xmlEmitente = resumoXml?.emitente || {};
+    const xmlProtocolo = resumoXml?.protocolo || {};
+    const xmlPagamento = resumoXml?.pagamento || {};
+    const xmlItens = Array.isArray(resumoXml?.itens) ? resumoXml.itens : [];
     const itensPedido = Array.isArray(pedidoContexto?.itens) ? pedidoContexto.itens : [];
-    const pedidoCriadoEm = pedidoContexto?.created_at
-      ? new Date(pedidoContexto.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-      : '-';
+    const pedidoCriadoEm = formatarDataBr(pedidoContexto?.created_at || '-', true);
     const pedidoObservacao = String(pedidoContexto?.observacao || '-');
     const numeroPedidoContexto = String(pedidoContexto?.cnumero || '').trim();
 
-    const itensHtml = itens.length
-      ? itens.map((item, idx) => {
-          const cab = item?.itensCabec || {};
-          const ajustes = item?.itensAjustes || {};
+    const numeroFlex = (valor) => {
+      if (typeof valor === 'number') return Number.isFinite(valor) ? valor : NaN;
+      const bruto = String(valor ?? '').trim();
+      if (!bruto || bruto === '-') return NaN;
+      const semEspacos = bruto.replace(/\s+/g, '');
+      const semMoeda = semEspacos.replace(/R\$/gi, '');
+      const somenteNumeros = semMoeda.replace(/[^\d,.-]/g, '');
+      if (!somenteNumeros) return NaN;
+
+      const temVirgula = somenteNumeros.includes(',');
+      const temPonto = somenteNumeros.includes('.');
+      let normalizado = somenteNumeros;
+
+      if (temVirgula && temPonto) {
+        normalizado = somenteNumeros.replace(/\./g, '').replace(',', '.');
+      } else if (temVirgula) {
+        normalizado = somenteNumeros.replace(',', '.');
+      }
+
+      return Number(normalizado);
+    };
+
+    const formatarMoedaFlex = (valor) => {
+      const numero = numeroFlex(valor);
+      if (!Number.isFinite(numero)) return '-';
+      return formatarMoeda(numero);
+    };
+
+    const formatarQuantidadeFlex = (valor) => {
+      const numero = numeroFlex(valor);
+      if (!Number.isFinite(numero)) return '-';
+      return formatarQuantidade(numero);
+    };
+
+    const itensHtml = xmlItens.length
+      ? xmlItens.map((item) => {
           return `
             <tr>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${idx + 1}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;font-family:monospace;color:#0f172a;">${escaparHtml(cab.cCodigoProduto || '-')}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(cab.cDescricaoProduto || '-')}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarQuantidade(cab.nQtdeNFe)}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${escaparHtml(cab.cUnidadeNfe || ajustes.cUnidade || '-')}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(cab.nPrecoUnit)}</td>
-              <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(cab.vTotalItem)}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${item.idx}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;font-family:monospace;color:#e2e8f0;">${escaparHtml(item.codigo || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(item.descricao || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarQuantidadeFlex(item.qtd))}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(item.un || '-')}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarMoedaFlex(item.vlrUnit))}</td>
+              <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarMoedaFlex(item.vlrItem))}</td>
             </tr>
           `;
         }).join('')
-      : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Nenhum item retornado.</td></tr>`;
+      : itens.length
+        ? itens.map((item, idx) => {
+            const cab = item?.itensCabec || {};
+            const ajustes = item?.itensAjustes || {};
+            return `
+              <tr>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${idx + 1}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;font-family:monospace;color:#e2e8f0;">${escaparHtml(cab.cCodigoProduto || '-')}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(cab.cDescricaoProduto || '-')}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarQuantidade(cab.nQtdeNFe)}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(cab.cUnidadeNfe || ajustes.cUnidade || '-')}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarMoeda(cab.nPrecoUnit)}</td>
+                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarMoeda(cab.vTotalItem)}</td>
+              </tr>
+            `;
+          }).join('')
+        : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#cbd5e1;">Nenhum item retornado.</td></tr>`;
 
     const itensPedidoHtml = itensPedido.length
       ? itensPedido.map((item, idx) => `
@@ -6232,6 +6407,101 @@ function attachDropZone(ul) {
           </tr>
         `).join('')
       : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Sem itens do pedido para comparação.</td></tr>`;
+
+    const parcelas = Array.isArray(xmlPagamento.parcelas) ? xmlPagamento.parcelas : [];
+    const emissaoExibicao = formatarDataBr(xmlIde.emissao || cabec.dEmissaoNFe || '-', true);
+    const recebidoEmExibicao = formatarDataBr(xmlProtocolo.recebidoEm || '-', true);
+    const descreverIndicadorPagamento = (codigo) => {
+      const mapa = {
+        '0': 'À vista',
+        '1': 'A prazo',
+        '2': 'Outros'
+      };
+      const c = String(codigo || '').trim();
+      if (!c) return '-';
+      return mapa[c] ? `${mapa[c]} (${c})` : `Código ${c}`;
+    };
+
+    const descreverTipoPagamento = (codigo) => {
+      const mapa = {
+        '01': 'Dinheiro',
+        '02': 'Cheque',
+        '03': 'Cartão de crédito',
+        '04': 'Cartão de débito',
+        '05': 'Crédito loja',
+        '10': 'Vale alimentação',
+        '11': 'Vale refeição',
+        '12': 'Vale presente',
+        '13': 'Vale combustível',
+        '15': 'Boleto bancário',
+        '16': 'Depósito bancário',
+        '17': 'PIX',
+        '18': 'Transferência bancária / carteira digital',
+        '19': 'Programa de fidelidade / cashback / crédito virtual',
+        '90': 'Sem pagamento',
+        '99': 'Outros'
+      };
+      const c = String(codigo || '').trim();
+      if (!c) return '-';
+      return mapa[c] ? `${mapa[c]} (${c})` : `Código ${c}`;
+    };
+
+    const descreverIntegracaoCartao = (codigo) => {
+      const mapa = {
+        '1': 'Integrado com automação (TEF)',
+        '2': 'Não integrado (POS)' 
+      };
+      const c = String(codigo || '').trim();
+      if (!c) return '-';
+      return mapa[c] ? `${mapa[c]} (${c})` : `Código ${c}`;
+    };
+
+    const descreverBandeiraCartao = (codigo) => {
+      const mapa = {
+        '01': 'Visa',
+        '02': 'Mastercard',
+        '03': 'American Express',
+        '04': 'Sorocred',
+        '05': 'Diners Club',
+        '06': 'Elo',
+        '07': 'Hipercard',
+        '08': 'Aura',
+        '09': 'Cabal',
+        '10': 'Alelo',
+        '11': 'Banes Card',
+        '12': 'Calcard',
+        '13': 'Credz',
+        '14': 'Discover',
+        '15': 'GoodCard',
+        '16': 'GreenCard',
+        '17': 'Hiper',
+        '18': 'JCB',
+        '19': 'Mais',
+        '20': 'MaxVan',
+        '21': 'Policard',
+        '22': 'Rede Compras',
+        '23': 'Sodexo',
+        '24': 'ValeCard',
+        '25': 'Verocheque',
+        '26': 'VR',
+        '27': 'Ticket',
+        '99': 'Outros'
+      };
+      const c = String(codigo || '').trim();
+      if (!c) return '-';
+      return mapa[c] ? `${mapa[c]} (${c})` : `Código ${c}`;
+    };
+
+    const parcelasHtml = parcelas.length
+      ? parcelas.map((parcela) => `
+          <tr>
+            <td style="padding:7px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${parcela.idx}</td>
+            <td style="padding:7px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(parcela.numero || '-')}</td>
+            <td style="padding:7px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(formatarDataBr(parcela.vencimento || '-'))}</td>
+            <td style="padding:7px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarMoedaFlex(parcela.valor))}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="4" style="padding:10px;text-align:center;color:#cbd5e1;">Sem parcelas no XML.</td></tr>';
 
     const blocoAcaoVinculo = numeroPedidoContexto
       ? `
@@ -6254,38 +6524,80 @@ function attachDropZone(ul) {
 
     return `
       ${blocoAcaoVinculo}
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;font-size:12px;color:#0f172a;">
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Cabeçalho</div>
-          <div><strong>Número:</strong> ${escaparHtml(cabec.cNumeroNFe || '-')}</div>
-          <div><strong>Série:</strong> ${escaparHtml(cabec.cSerieNFe || '-')}</div>
-          <div><strong>Emissão:</strong> ${escaparHtml(cabec.dEmissaoNFe || '-')}</div>
-          <div><strong>Fornecedor:</strong> ${escaparHtml(cabec.cRazaoSocial || cabec.cNome || '-')}</div>
-          <div><strong>CNPJ/CPF:</strong> ${escaparHtml(cabec.cCNPJ_CPF || '-')}</div>
-          <div><strong>Etapa:</strong> ${renderizarBadgeEtapa(cabec.cEtapa, etapaInfo)}</div>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Dados da NF-e</div>
+          <div><strong style="color:#93c5fd;">Número:</strong> ${escaparHtml(xmlIde.numero || cabec.cNumeroNFe || '-')}</div>
+          <div><strong style="color:#93c5fd;">Série:</strong> ${escaparHtml(xmlIde.serie || cabec.cSerieNFe || '-')}</div>
+          <div><strong style="color:#93c5fd;">Emissão:</strong> ${escaparHtml(emissaoExibicao)}</div>
+          <div><strong style="color:#93c5fd;">Modelo:</strong> ${escaparHtml(xmlIde.modelo || '-')}</div>
+          <div><strong style="color:#93c5fd;">Natureza:</strong> ${escaparHtml(xmlIde.natureza || '-')}</div>
+          <div><strong style="color:#93c5fd;">Etapa:</strong> ${renderizarBadgeEtapa(cabec.cEtapa, etapaInfo)}</div>
         </div>
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Totais e Status</div>
-          <div><strong>Valor NF-e:</strong> ${formatarMoeda(cabec.nValorNFe ?? totais.vTotalNFe)}</div>
-          <div><strong>Total Produtos:</strong> ${formatarMoeda(totais.vTotalProdutos)}</div>
-          <div><strong>Operação:</strong> ${escaparHtml(cabec.cNaturezaOperacao || infoCadastro.cOperacao || '-')}</div>
-          <div><strong>Recebido:</strong> ${escaparHtml(infoCadastro.cRecebido || '-')}</div>
-          <div><strong>Faturado:</strong> ${escaparHtml(infoCadastro.cFaturado || '-')}</div>
-          <div><strong>Atualização:</strong> ${escaparHtml(infoCadastro.dAlt || '-')} ${escaparHtml(infoCadastro.hAlt || '')}</div>
-        </div>
-        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">Transporte</div>
-          <div><strong>Transportador:</strong> ${escaparHtml(transporte.cRazaoTransp || transporte.cNomeTransp || '-')}</div>
-          <div><strong>CNPJ/CPF:</strong> ${escaparHtml(transporte.cCnpjCpfTransp || '-')}</div>
-          <div><strong>Frete:</strong> ${escaparHtml(transporte.cTipoFrete || '-')}</div>
-          <div><strong>Volumes:</strong> ${escaparHtml(transporte.nQtdeVolume || transporte.cNumeroVolume || '-')}</div>
-          <div><strong>Peso Bruto:</strong> ${escaparHtml(transporte.nPesoBruto || '-')}</div>
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Totais</div>
+          <div><strong style="color:#93c5fd;">Valor NF:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorNf || cabec.nValorNFe || totais.vTotalNFe))}</div>
+          <div><strong style="color:#93c5fd;">Valor Produtos:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorProdutos || totais.vTotalProdutos))}</div>
+          <div><strong style="color:#93c5fd;">ICMS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.icms))}</div>
+          <div><strong style="color:#93c5fd;">PIS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.pis))}</div>
+          <div><strong style="color:#93c5fd;">COFINS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.cofins))}</div>
         </div>
       </div>
-      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:10px;">
-        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Itens do recebimento (NF-e)</div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Emitente</div>
+          <div><strong style="color:#93c5fd;">Nome:</strong> ${escaparHtml(xmlEmitente.nome || cabec.cRazaoSocial || cabec.cNome || '-')}</div>
+          <div><strong style="color:#93c5fd;">CNPJ:</strong> ${escaparHtml(xmlEmitente.cnpj || cabec.cCNPJ_CPF || '-')}</div>
+          <div><strong style="color:#93c5fd;">Município:</strong> ${escaparHtml(xmlEmitente.municipio || '-')}</div>
+          <div><strong style="color:#93c5fd;">UF:</strong> ${escaparHtml(xmlEmitente.uf || '-')}</div>
+        </div>
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Protocolo/SEFAZ</div>
+          <div><strong style="color:#93c5fd;">Chave:</strong> ${escaparHtml(xmlProtocolo.chave || '-')}</div>
+          <div><strong style="color:#93c5fd;">Protocolo:</strong> ${escaparHtml(xmlProtocolo.protocolo || '-')}</div>
+          <div><strong style="color:#93c5fd;">Status:</strong> ${escaparHtml(xmlProtocolo.status || '-')}</div>
+          <div><strong style="color:#93c5fd;">Motivo:</strong> ${escaparHtml(xmlProtocolo.motivo || '-')}</div>
+          <div><strong style="color:#93c5fd;">Recebido em:</strong> ${escaparHtml(recebidoEmExibicao)}</div>
+        </div>
+      </div>
+
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:10px;">
+        <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:8px;">Cobrança e Pagamento</div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:12px;color:#e2e8f0;margin-bottom:8px;">
+          <div><strong style="color:#93c5fd;">Fatura:</strong> ${escaparHtml(xmlPagamento.faturaNumero || '-')}</div>
+          <div><strong style="color:#93c5fd;">Valor Original:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorOriginal))}</div>
+          <div><strong style="color:#93c5fd;">Valor Líquido:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorLiquido))}</div>
+          <div><strong style="color:#93c5fd;">Condição:</strong> ${escaparHtml(descreverIndicadorPagamento(xmlPagamento.indicadorPagamento))}</div>
+          <div><strong style="color:#93c5fd;">Tipo Pagamento:</strong> ${escaparHtml(descreverTipoPagamento(xmlPagamento.tipoPagamento))}</div>
+          <div><strong style="color:#93c5fd;">Valor Pago:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorPago))}</div>
+          <div><strong style="color:#93c5fd;">Integração Cartão:</strong> ${escaparHtml(descreverIntegracaoCartao(xmlPagamento.integracaoCartao))}</div>
+          <div><strong style="color:#93c5fd;">CNPJ Credenciadora:</strong> ${escaparHtml(xmlPagamento.cnpjCredenciadora || '-')}</div>
+          <div><strong style="color:#93c5fd;">Bandeira:</strong> ${escaparHtml(descreverBandeiraCartao(xmlPagamento.bandeiraCartao))}</div>
+          <div><strong style="color:#93c5fd;">Autorização:</strong> ${escaparHtml(xmlPagamento.autorizacaoCartao || '-')}</div>
+        </div>
+        <div style="overflow:auto;max-height:180px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;color:#e2e8f0;">
+            <colgroup>
+              <col style="width:8%;"><col style="width:25%;"><col style="width:35%;"><col style="width:32%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#111827;">
+                <th style="padding:7px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">#</th>
+                <th style="padding:7px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Parcela</th>
+                <th style="padding:7px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vencimento</th>
+                <th style="padding:7px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Valor</th>
+              </tr>
+            </thead>
+            <tbody>${parcelasHtml}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:10px;">
+        <div style="font-weight:700;color:#f8fafc;margin-bottom:8px;">Itens da NF-e</div>
         <div style="overflow:auto;max-height:300px;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;color:#e2e8f0;">
             <colgroup>
               <col style="width:6%;">
               <col style="width:18%;">
@@ -6296,14 +6608,14 @@ function attachDropZone(ul) {
               <col style="width:13%;">
             </colgroup>
             <thead>
-              <tr style="background:#f8fafc;">
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">#</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Código</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Descrição</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Qtd</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Unid.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Preço Unit.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Total Item</th>
+              <tr style="background:#111827;">
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">#</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Código</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Descrição</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Qtd</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Unid.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Unit.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Item</th>
               </tr>
             </thead>
             <tbody>${itensHtml}</tbody>
@@ -6371,7 +6683,14 @@ function attachDropZone(ul) {
     if (!modal || !modalTitulo || !modalSubtitulo || !modalConteudo || !modalFluxoTopo) return;
 
     modalTitulo.textContent = `NF-e ${numeroNfe || '-'}`;
-    modalSubtitulo.textContent = `Chave: ${chaveNfe || '-'}`;
+    const chaveNfeTexto = String(chaveNfe || '').trim();
+    const chaveNfeDigitos = chaveNfeTexto.replace(/\D/g, '');
+    if (chaveNfeDigitos) {
+      const hrefDownload = `/api/omie/nfe/xml-download?chave_nfe=${encodeURIComponent(chaveNfeDigitos)}&numero_nfe=${encodeURIComponent(String(numeroNfe || '').trim())}`;
+      modalSubtitulo.innerHTML = `Chave: <a href="${hrefDownload}" title="Baixar XML da NF-e" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
+    } else {
+      modalSubtitulo.textContent = 'Chave: -';
+    }
     modalFluxoTopo.innerHTML = '';
     modalConteudo.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;">
@@ -6513,10 +6832,28 @@ function attachDropZone(ul) {
       }
 
       const dadosConsulta = payload?.data || {};
+      let resumoXml = null;
+      try {
+        const respXml = await fetch('/api/omie/nfe/xml', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chaveNfe: chaveNfeDigitos,
+            nNF: String(numeroNfe || dadosConsulta?.cabec?.cNumeroNFe || '').trim(),
+            cModelo: '55'
+          })
+        });
+        const payloadXml = await respXml.json().catch(() => ({}));
+        if (respXml.ok && payloadXml?.ok && payloadXml?.cXml) {
+          resumoXml = extrairResumoXmlNfe(payloadXml.cXml);
+        }
+      } catch (_errXml) {
+      }
+
       const etapaInfo = payload?.etapa_info || null;
       const etapasLegenda = Array.isArray(payload?.etapas_legenda) ? payload.etapas_legenda : [];
       modalFluxoTopo.innerHTML = renderizarSequenciaTopoNfe(etapaInfo, dadosConsulta?.cabec?.cEtapa, etapasLegenda);
-      const resumoHtml = renderizarResumoRecebimentoOmie(dadosConsulta, etapaInfo, etapasLegenda, pedidoContexto);
+      const resumoHtml = renderizarResumoRecebimentoOmie(dadosConsulta, etapaInfo, etapasLegenda, pedidoContexto, resumoXml);
       modalConteudo.innerHTML = resumoHtml;
 
       const btnVincular = document.getElementById('vincularNfePedidoBtn');
