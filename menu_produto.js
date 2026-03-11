@@ -32625,8 +32625,428 @@ window.fecharModalFiltrarData = fecharModalFiltrarData;
 window.limparFiltroData = limparFiltroData;
 window.aplicarFiltroData = aplicarFiltroData;
 
+// ============================================================
+// Gráfico de histórico de compras (Chart.js)
+// ============================================================
+let _graficoHistoricoInstance = null; // instância Chart.js ativa
+let _modoGraficoAtivo = false;        // controla se o painel do gráfico está visível
+
+// Objetivo: Alternar exibição do painel de gráfico
+function toggleGraficoHistorico() {
+  _modoGraficoAtivo = !_modoGraficoAtivo;
+  const btn = document.getElementById('comprasGraficoBtn');
+  const painel = document.getElementById('painelGraficoHistorico');
+  const kanban = document.getElementById('kanbanMinhasSolicitacoes');
+  const lista = document.getElementById('listaMinhasSolicitacoes');
+
+  if (_modoGraficoAtivo) {
+    // Oculta kanban e lista, mostra painel de gráfico
+    if (kanban) kanban.style.display = 'none';
+    if (lista)  lista.style.display  = 'none';
+    if (painel) painel.style.display = 'block';
+    if (btn) {
+      btn.style.background = 'linear-gradient(135deg,#0369a1 0%,#075985 100%)';
+      btn.title = 'Fechar gráfico';
+    }
+    // Define o período padrão: últimos 90 dias
+    const hoje = new Date();
+    const ini  = new Date(hoje); ini.setDate(ini.getDate() - 90);
+    const fmt  = d => d.toISOString().slice(0, 10);
+    const inpIni = document.getElementById('graficoDataInicio');
+    const inpFim = document.getElementById('graficoDataFim');
+    if (inpIni && !inpIni.value) inpIni.value = fmt(ini);
+    if (inpFim && !inpFim.value) inpFim.value = fmt(hoje);
+    carregarGraficoHistorico();
+    carregarOpcoesFiltroDepto().then(() => carregarGraficoPizza());
+  } else {
+    // Fecha painel e restaura a view anterior
+    if (painel) painel.style.display = 'none';
+    if (btn) {
+      btn.style.background = 'linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%)';
+      btn.title = 'Gráfico de Compras';
+    }
+    if (modoVisualizacaoKanban) {
+      if (kanban) kanban.style.display = 'flex';
+    } else {
+      if (lista) lista.style.display = 'block';
+    }
+  }
+}
+
+// Objetivo: Buscar dados da API e renderizar o gráfico
+async function carregarGraficoHistorico() {
+  const loading = document.getElementById('graficoHistoricoLoading');
+  const vazio   = document.getElementById('graficoHistoricoVazio');
+  if (loading) { loading.style.display = 'flex'; loading.style.position = 'absolute'; }
+  if (vazio)     vazio.style.display = 'none';
+
+  try {
+    const inicio = document.getElementById('graficoDataInicio')?.value || '';
+    const fim    = document.getElementById('graficoDataFim')?.value || '';
+    const params = new URLSearchParams();
+    if (inicio) params.set('dataInicio', inicio);
+    if (fim)    params.set('dataFim', fim);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    const resp = await fetch(`/api/compras/grafico-historico${qs}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha na requisição');
+    const { dados } = await resp.json();
+
+    if (loading) loading.style.display = 'none';
+
+    if (!dados || dados.length === 0) {
+      if (vazio) { vazio.style.display = 'flex'; vazio.style.position = 'absolute'; }
+      if (_graficoHistoricoInstance) { _graficoHistoricoInstance.destroy(); _graficoHistoricoInstance = null; }
+      return;
+    }
+
+    // Formata labels como DD/MM/AAAA
+    const labels = dados.map(d => {
+      const [ano, mes, dia] = String(d.data).slice(0,10).split('-');
+      return `${dia}/${mes}/${ano}`;
+    });
+    const valores = dados.map(d => d.total);
+
+    const canvas = document.getElementById('graficoHistoricoCanvas');
+    if (!canvas) return;
+
+    // Destrói instância anterior se existir
+    if (_graficoHistoricoInstance) { _graficoHistoricoInstance.destroy(); _graficoHistoricoInstance = null; }
+
+    _graficoHistoricoInstance = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Valor de Pedidos (R$)',
+          data: valores,
+          fill: true,
+          backgroundColor: 'rgba(14,165,233,0.12)',
+          borderColor: '#0ea5e9',
+          borderWidth: 2.5,
+          pointBackgroundColor: '#0284c7',
+          pointRadius: dados.length > 60 ? 2 : 5,
+          pointHoverRadius: 7,
+          tension: 0.35
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, position: 'top', labels: { font: { size: 13 }, color: '#374151' } },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${Number(ctx.parsed.y).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { font: { size: 11 }, color: '#6b7280', maxTicksLimit: 20, maxRotation: 45 },
+            grid: { color: 'rgba(0,0,0,0.05)' }
+          },
+          y: {
+            ticks: {
+              font: { size: 11 }, color: '#6b7280',
+              callback: v => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+            },
+            grid: { color: 'rgba(0,0,0,0.07)' }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[GraficoHistorico] Erro:', err);
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+// Objetivo: Limpa os filtros e recarrega ambos os gráficos sem período
+function limparFiltroGrafico() {
+  const inpIni = document.getElementById('graficoDataInicio');
+  const inpFim = document.getElementById('graficoDataFim');
+  if (inpIni) inpIni.value = '';
+  if (inpFim) inpFim.value = '';
+  carregarGraficoHistorico();
+  carregarGraficoPizza();
+}
+
+window.toggleGraficoHistorico = toggleGraficoHistorico;
+window.carregarGraficoHistorico = carregarGraficoHistorico;
+window.limparFiltroGrafico = limparFiltroGrafico;
+
+// ============================================================
+// Gráfico de Pizza: Departamento / Centro de Custo
+// ============================================================
+let _graficoPizzaInstance = null;
+let _pizzaGrupoAtivo = 'departamento'; // 'departamento' | 'centro_custo'
+
+// Objetivo: Carregar e renderizar gráfico de pizza com os dados por agrupamento
+// Objetivo: Carrega opções do listbox de departamentos a partir de configuracoes.departamento
+async function carregarOpcoesFiltroDepto() {
+  const lb = document.getElementById('graficoDeptListbox');
+  if (!lb || lb.options.length > 0) return; // já carregado
+  try {
+    const resp = await fetch('/api/compras/departamentos', { credentials: 'include' });
+    if (!resp.ok) return;
+    const { departamentos } = await resp.json();
+    lb.innerHTML = '';
+    (departamentos || []).forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.nome;
+      opt.textContent = d.nome;
+      opt.selected = true; // padrão: todos selecionados
+      lb.appendChild(opt);
+    });
+  } catch(e) { console.error('[FiltroDepto] Erro:', e); }
+}
+
+// Seleciona todos os departamentos no listbox e recarrega o gráfico
+function graficoDeptoSelecionarTodos() {
+  const lb = document.getElementById('graficoDeptListbox');
+  if (!lb) return;
+  Array.from(lb.options).forEach(o => o.selected = true);
+  carregarGraficoPizza();
+}
+
+// Objetivo: Gráfico de barras verticais empilhadas — eixo X = 4 status fixos, camadas = departamento(CC)
+async function carregarGraficoPizza(grupo) {
+  const loading = document.getElementById('graficoPizzaLoading');
+  const vazio   = document.getElementById('graficoPizzaVazio');
+  if (loading) { loading.style.display = 'flex'; loading.style.position = 'absolute'; }
+  if (vazio)     vazio.style.display = 'none';
+
+  try {
+    const inicio = document.getElementById('graficoDataInicio')?.value || '';
+    const fim    = document.getElementById('graficoDataFim')?.value || '';
+    const params = new URLSearchParams();
+    if (inicio) params.set('dataInicio', inicio);
+    if (fim)    params.set('dataFim', fim);
+
+    // Lê os departamentos selecionados no listbox (sem filtro se todos estiverem marcados)
+    const lb = document.getElementById('graficoDeptListbox');
+    if (lb && lb.options.length > 0) {
+      const selecionados = Array.from(lb.selectedOptions).map(o => o.value);
+      const todos        = Array.from(lb.options).map(o => o.value);
+      if (selecionados.length > 0 && selecionados.length < todos.length) {
+        params.set('departamentos', selecionados.join(','));
+      }
+    }
+
+    const resp = await fetch(`/api/compras/grafico-pizza-dept-cc?${params.toString()}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha na requisição');
+    const { dados } = await resp.json();
+
+    if (loading) loading.style.display = 'none';
+
+    if (!dados || dados.length === 0) {
+      if (vazio) { vazio.style.display = 'flex'; vazio.style.position = 'absolute'; }
+      if (_graficoPizzaInstance) { _graficoPizzaInstance.destroy(); _graficoPizzaInstance = null; }
+      return;
+    }
+
+    // Ordem fixa dos status no eixo X (apenas os que tiverem dados)
+    const STATUS_ORDEM = ['aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido'];
+    const statusUnicos = STATUS_ORDEM.filter(st => dados.some(d => d.status === st));
+
+    // Grupos = departamento (centro de custo), na ordem que chegaram do backend
+    const gruposUnicos = [...new Set(dados.map(d => d.grupo))];
+
+    // Calcula total por grupo (soma de todos os status dentro de cada grupo)
+    // Formato: R$ 12.370 (inteiro sem centavos, separador de milhar pt-BR)
+    const fmtCurto = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+
+    const totalPorGrupo = {};
+    gruposUnicos.forEach(g => {
+      totalPorGrupo[g] = dados.filter(d => d.grupo === g).reduce((acc, d) => acc + d.total, 0);
+    });
+
+    // Atualiza o texto de cada opção do listbox com o total do departamento
+    if (lb) {
+      Array.from(lb.options).forEach(opt => {
+        // O valor do opt é o nome exato do departamento (sem CC)
+        // O grupo no dados pode ser "Dept (CC)" ou só "Dept" — procura pelo prefixo
+        const totalDepto = dados
+          .filter(d => d.grupo === opt.value || d.grupo.startsWith(opt.value + ' ('))
+          .reduce((acc, d) => acc + d.total, 0);
+        opt.textContent = totalDepto > 0
+          ? `${opt.value}  ${fmtCurto(totalDepto)}`
+          : opt.value;
+      });
+    }
+
+    // Ordena grupos: maior total primeiro (fica na base da barra), menor total por cima
+    gruposUnicos.sort((a, b) => totalPorGrupo[b] - totalPorGrupo[a]);
+
+    // Paleta de cores por grupo
+    const paletaGrupos = [
+      '#6366f1','#f59e0b','#10b981','#0ea5e9','#8b5cf6',
+      '#14b8a6','#f97316','#ec4899','#84cc16','#06b6d4',
+      '#a855f7','#3b82f6','#ef4444','#d97706','#0284c7',
+    ];
+    const coresPorGrupo = {};
+    let grupoColorIdx = 0;
+    const corDoGrupo = g => {
+      if (!coresPorGrupo[g]) { coresPorGrupo[g] = paletaGrupos[grupoColorIdx++ % paletaGrupos.length]; }
+      return coresPorGrupo[g];
+    };
+    gruposUnicos.forEach(g => corDoGrupo(g));
+
+    // Extrai apenas o centro de custo (parte entre parênteses) para usar como label
+    const extrairCC = g => g.match(/\((.+)\)/)?.[1]?.trim() || g;
+
+    // Monta datasets — já ordenados: índice 0 = maior total (base), último = menor total (topo)
+    const datasets = gruposUnicos.map(g => ({
+      label: extrairCC(g),
+      data: statusUnicos.map(st => {
+        const item = dados.find(d => d.grupo === g && (d.status || 'sem status') === st);
+        return item ? item.total : 0;
+      }),
+      backgroundColor: corDoGrupo(g),
+      borderColor: '#fff',
+      borderWidth: 1,
+      borderRadius: 3,
+    }));
+
+    const totalGeral = dados.reduce((a, d) => a + d.total, 0);
+
+    const canvas = document.getElementById('graficoPizzaCanvas');
+    if (!canvas) return;
+    if (_graficoPizzaInstance) { _graficoPizzaInstance.destroy(); _graficoPizzaInstance = null; }
+
+    _graficoPizzaInstance = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: statusUnicos, datasets },
+      plugins: [{
+        // Plugin inline: desenha o total da barra empilhada em cima de cada coluna
+        id: 'totalNaBarra',
+        afterDatasetsDraw(chart) {
+          const { ctx, data } = chart;
+          const nBars = data.labels.length;
+          ctx.save();
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillStyle = '#374151';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          for (let i = 0; i < nBars; i++) {
+            // Soma todos os datasets para a barra i
+            const soma = data.datasets.reduce((acc, ds) => acc + (Number(ds.data[i]) || 0), 0);
+            if (!soma) continue;
+            // Pega o meta do último dataset para encontrar o topo da barra
+            const lastDs = chart.getDatasetMeta(data.datasets.length - 1);
+            const bar = lastDs.data[i];
+            if (!bar) continue;
+            // Formato: R$ 12.370 (inteiro sem centavos)
+            const txt = 'R$ ' + Math.round(soma).toLocaleString('pt-BR');
+            ctx.fillText(txt, bar.x, bar.y - 4);
+          }
+          ctx.restore();
+        }
+      }],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { top: 28 } },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            reverse: true, // segue ordem visual da barra: menor (topo) → maior (base)
+            labels: { font: { size: 11 }, color: '#374151', padding: 10, boxWidth: 13 }
+          },
+          tooltip: {
+            // Ordena os itens do tooltip do menor para o maior valor
+            itemSort: (a, b) => Number(a.parsed.y) - Number(b.parsed.y),
+            callbacks: {
+              label: ctx => {
+                const val = Number(ctx.parsed.y);
+                if (!val) return null;
+                const pct = totalGeral > 0 ? ((val / totalGeral) * 100).toFixed(1) : 0;
+                const fmt = val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                return ` ${ctx.dataset.label}: ${fmt} (${pct}%)`;
+              },
+              footer: items => {
+                const soma = items.reduce((a, i) => a + Number(i.parsed.y), 0);
+                return `Total: ${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            stacked: true,
+            ticks: { color: '#374151', font: { size: 11 }, maxRotation: 0, autoSkip: false,
+              callback: function(val) {
+                const lbl = this.getLabelForValue(val);
+                // Quebra em linhas de até ~14 chars sem cortar palavras
+                const palavras = lbl.split(' ');
+                const linhas = [];
+                let atual = '';
+                for (const p of palavras) {
+                  if (atual && (atual + ' ' + p).length > 14) {
+                    linhas.push(atual);
+                    atual = p;
+                  } else {
+                    atual = atual ? atual + ' ' + p : p;
+                  }
+                }
+                if (atual) linhas.push(atual);
+                return linhas;
+              }
+            },
+            grid: { display: false }
+          },
+          y: {
+            stacked: true,
+            ticks: {
+              color: '#374151', font: { size: 11 },
+              callback: v => 'R$ ' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(0))
+            },
+            grid: { color: '#e5e7eb' }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[GraficoBarras] Erro:', err);
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+// Objetivo: Alternar entre agrupamento por departamento e centro_custo
+function alternarPizzaGrupo(grupo) {
+  _pizzaGrupoAtivo = grupo;
+  const btnDepto = document.getElementById('pizzaBtnDepto');
+  const btnCC    = document.getElementById('pizzaBtnCC');
+  if (btnDepto && btnCC) {
+    if (grupo === 'departamento') {
+      btnDepto.style.background = '#7c3aed'; btnDepto.style.color = '#fff';
+      btnCC.style.background = '#f9fafb';    btnCC.style.color = '#374151';
+    } else {
+      btnCC.style.background = '#7c3aed';    btnCC.style.color = '#fff';
+      btnDepto.style.background = '#f9fafb'; btnDepto.style.color = '#374151';
+    }
+  }
+  carregarGraficoPizza(grupo);
+}
+
+// Objetivo: Carregar os dois gráficos simultaneamente (botão Aplicar compartilhado)
+function carregarAmboGraficos() {
+  carregarGraficoHistorico();
+  carregarGraficoPizza();
+}
+
+window.carregarGraficoPizza      = carregarGraficoPizza;
+window.carregarOpcoesFiltroDepto = carregarOpcoesFiltroDepto;
+window.graficoDeptoSelecionarTodos = graficoDeptoSelecionarTodos;
+window.alternarPizzaGrupo        = alternarPizzaGrupo;
+window.carregarAmboGraficos      = carregarAmboGraficos;
+
 // Objetivo: Exibir visualização em Kanban (padrão)
 function mostrarVisualizacaoKanban() {
+  // Não sobrescreve o painel de gráfico quando ele está ativo
+  if (_modoGraficoAtivo) return;
   const kanbanContainer = document.getElementById('kanbanMinhasSolicitacoes');
   const listaContainer = document.getElementById('listaMinhasSolicitacoes');
   const botaoAlternar = document.getElementById('comprasAlternarVisualizacaoBtn');

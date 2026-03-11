@@ -483,6 +483,9 @@
                   <button id="comprasFiltrarDataBtn" class="content-button" type="button" onclick="abrirModalFiltrarData()" style="background:linear-gradient(135deg,#ec4899 0%,#db2777 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Filtrar por Data">
                     <i class="fa-solid fa-calendar-days" style="font-size:20px;"></i>
                   </button>
+                  <button id="comprasGraficoBtn" class="content-button" type="button" onclick="toggleGraficoHistorico()" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border-radius:50%;" title="Gráfico de Compras">
+                    <i class="fa-solid fa-chart-line" style="font-size:20px;"></i>
+                  </button>
                   <button id="comprasToggleSolicitanteBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);color:white;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 16px;height:44px;border-radius:22px;font-weight:600;font-size:13px;" title="Alternar entre minhas solicitações e todas as solicitações">
                     <i class="fa-solid fa-user" style="font-size:16px;"></i>
                     <span id="comprasToggleSolicitanteText">Minhas</span>
@@ -525,6 +528,84 @@
               <!-- Kanban de Compras -->
               <div id="kanbanMinhasSolicitacoes" class="kanban-container" style="display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:8px;flex-wrap:nowrap;max-width:100%;margin-top:4px;">
                 <!-- As colunas serão renderizadas via JavaScript -->
+              </div>
+
+              <!-- Painel Gráfico Histórico Compras -->
+              <div id="painelGraficoHistorico" style="display:none;margin-top:8px;">
+
+                <!-- Linha: filtro de período compartilhado -->
+                <div style="background:#fff;border-radius:12px;padding:18px 24px 14px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);display:flex;align-items:center;justify-content:center;">
+                      <i class="fa-solid fa-chart-line" style="color:#fff;font-size:16px;"></i>
+                    </div>
+                    <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Gráficos de Compras</h3>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <label style="font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;">De:</label>
+                      <input type="date" id="graficoDataInicio" style="padding:7px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;outline:none;" onfocus="this.style.borderColor='#0ea5e9'" onblur="this.style.borderColor='#d1d5db'">
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <label style="font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;">Até:</label>
+                      <input type="date" id="graficoDataFim" style="padding:7px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;outline:none;" onfocus="this.style.borderColor='#0ea5e9'" onblur="this.style.borderColor='#d1d5db'">
+                    </div>
+                    <button onclick="carregarAmboGraficos()" style="padding:8px 18px;border:none;border-radius:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:#fff;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;">
+                      <i class="fa-solid fa-magnifying-glass" style="margin-right:5px;"></i>Aplicar
+                    </button>
+                    <button onclick="limparFiltroGrafico()" style="padding:8px 14px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;">Limpar</button>
+                  </div>
+                </div>
+
+                <!-- Coluna: gráfico de barras (cima) + gráfico de linha (baixo) -->
+                <div style="display:flex;flex-direction:column;gap:12px;">
+
+                  <!-- Gráfico de Barras: por Departamento ou Centro de Custo -->
+                  <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:16px;flex-wrap:wrap;">
+                      <h4 style="margin:0;font-size:14px;font-weight:700;color:#7c3aed;white-space:nowrap;"><i class="fa-solid fa-chart-bar" style="margin-right:6px;"></i>Por Departamento (Centro de Custo)</h4>
+                      <!-- Listbox de filtro por departamento -->
+                      <div style="display:flex;flex-direction:column;gap:4px;min-width:200px;max-width:280px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                          <label style="font-size:11px;font-weight:600;color:#6b7280;"><i class="fa-solid fa-filter" style="margin-right:4px;"></i>Filtrar departamento</label>
+                          <button onclick="graficoDeptoSelecionarTodos()" style="font-size:10px;font-weight:600;color:#7c3aed;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Todos</button>
+                        </div>
+                        <select id="graficoDeptListbox" multiple size="4"
+                          onchange="carregarGraficoPizza()"
+                          style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;font-size:12px;color:#374151;padding:4px 6px;background:#f9fafb;outline:none;cursor:pointer;">
+                          <!-- opções carregadas via JS -->
+                        </select>
+                        <span style="font-size:10px;color:#9ca3af;">Ctrl+clique para múltiplos</span>
+                      </div>
+                    </div>
+                    <div id="graficoPizzaWrapper" style="position:relative;height:320px;">
+                      <canvas id="graficoPizzaCanvas"></canvas>
+                      <div id="graficoPizzaLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#7c3aed;font-size:14px;">
+                        <i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;"></i>Carregando...
+                      </div>
+                      <div id="graficoPizzaVazio" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#9ca3af;">
+                        <i class="fa-solid fa-chart-bar" style="font-size:32px;"></i>
+                        <span style="font-size:13px;font-weight:600;">Nenhum dado encontrado</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Gráfico de Linha: Valor por Data -->
+                  <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+                    <h4 style="margin:0 0 14px 0;font-size:14px;font-weight:700;color:#0284c7;"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>Valor por Data</h4>
+                    <div id="graficoHistoricoWrapper" style="position:relative;height:260px;">
+                      <canvas id="graficoHistoricoCanvas"></canvas>
+                      <div id="graficoHistoricoLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#0284c7;font-size:14px;">
+                        <i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;"></i>Carregando...
+                      </div>
+                      <div id="graficoHistoricoVazio" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#9ca3af;">
+                        <i class="fa-solid fa-chart-line" style="font-size:32px;"></i>
+                        <span style="font-size:13px;font-weight:600;">Nenhum dado encontrado</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
               </div>
 
               <!-- Visualização em Lista -->
@@ -4007,6 +4088,7 @@
 </script>
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
   <script type="module" src="menu_produto.js"></script>
   

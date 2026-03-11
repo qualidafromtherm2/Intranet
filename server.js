@@ -5888,6 +5888,117 @@ app.get('/api/compras/departamentos', async (req, res) => {
 // ========== ENDPOINTS DE HISTÓRICO DE SOLICITAÇÕES ==========
 
 // GET /api/compras/historico/resumo - Estatísticas do histórico (DEVE VIR ANTES DO :id)
+// ========================================
+//  Endpoint: Gráfico histórico de compras (created_at x valor_pedido)
+// ========================================
+/**
+ * GET /api/compras/grafico-historico
+ * Retorna valor total de pedidos por dia a partir de compras.historico_compras
+ * Parâmetros opcionais: dataInicio, dataFim (formato YYYY-MM-DD)
+ */
+// ========================================
+//  Endpoint: Gráfico pizza por Departamento / Centro de Custo
+// ========================================
+/**
+ * GET /api/compras/grafico-pizza-dept-cc
+ * Retorna valor_pedido somado por departamento e centro_custo
+ * usando compras.historico_compras como origem e buscando dept/cc
+ * nas tabelas solicitacao_compras e compras_sem_cadastro via grupo_requisicao + tabela_origem.
+ * Parâmetros: dataInicio, dataFim (YYYY-MM-DD), agrupamento ('departamento'|'centro_custo')
+ */
+app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
+  try {
+    const { dataInicio, dataFim } = req.query;
+
+    const params = [];
+    let whereDates = '';
+    if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
+    if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+
+    // Filtro opcional de departamentos (query param: departamentos=A,B,C)
+    let whereDept = '';
+    const deptoParam = req.query.departamentos;
+    if (deptoParam && deptoParam.trim()) {
+      const lista = deptoParam.split(',').map(d => d.trim()).filter(Boolean);
+      if (lista.length > 0) {
+        params.push(lista);
+        whereDept = ` AND (
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
+          END
+        ) = ANY($${params.length}::text[])`;
+      }
+    }
+
+    // Retorna departamento (centro_custo) como grupo, apenas 4 status fixos, exclui Excluido
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(sub.dept, 'Não informado') ||
+        COALESCE(' (' || NULLIF(BTRIM(sub.cc), '') || ')', '') AS grupo,
+        COALESCE(sub.h_status, 'sem status') AS status,
+        SUM(sub.valor_pedido) AS total
+      FROM (
+        SELECT
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
+          END AS dept,
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.centro_custo
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.centro_custo
+          END AS cc,
+          h.status AS h_status,
+          h.valor_pedido
+        FROM compras.historico_compras h
+        LEFT JOIN compras.solicitacao_compras sc
+          ON h.tabela_origem = 'solicitacao_compras'
+          AND sc.grupo_requisicao = h.grupo_requisicao
+        LEFT JOIN compras.compras_sem_cadastro csc
+          ON h.tabela_origem = 'compras_sem_cadastro'
+          AND csc.grupo_requisicao = h.grupo_requisicao
+        WHERE h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
+          AND h.status IN ('aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido')
+          ${whereDates}
+          ${whereDept}
+      ) sub
+      GROUP BY grupo, status
+      ORDER BY grupo ASC
+    `, params);
+
+    res.json({ ok: true, dados: rows.map(r => ({ grupo: r.grupo, status: r.status, total: Number(r.total) })) });
+  } catch (err) {
+    console.error('[Compras/GraficoPizzaDeptCC] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico pizza' });
+  }
+});
+
+app.get('/api/compras/grafico-historico', async (req, res) => {
+  try {
+    const { dataInicio, dataFim } = req.query;
+    const params = [];
+    let whereClauses = `WHERE valor_pedido IS NOT NULL AND valor_pedido > 0`;
+
+    if (dataInicio) { params.push(dataInicio); whereClauses += ` AND created_at::date >= $${params.length}::date`; }
+    if (dataFim)    { params.push(dataFim);    whereClauses += ` AND created_at::date <= $${params.length}::date`; }
+
+    const { rows } = await pool.query(`
+      SELECT
+        DATE(created_at)          AS data,
+        SUM(valor_pedido)         AS total
+      FROM compras.historico_compras
+      ${whereClauses}
+      GROUP BY DATE(created_at)
+      ORDER BY data ASC
+    `, params);
+
+    res.json({ ok: true, dados: rows.map(r => ({
+      data: r.data,           // date string YYYY-MM-DD
+      total: Number(r.total)  // valor somado no dia
+    })) });
+  } catch (err) {
+    console.error('[Compras/GraficoHistorico] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico' });
+  }
+});
+
 app.get('/api/compras/historico/resumo', async (req, res) => {
   try {
     const { dias = 30, table_source } = req.query;
