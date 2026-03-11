@@ -588,9 +588,28 @@
                         <span style="font-size:13px;font-weight:600;">Nenhum dado encontrado</span>
                       </div>
                     </div>
-                  </div>
 
-                  <!-- Gráfico de Linha: Valor por Data -->
+                    <!-- Tabela de detalhes: aparece ao clicar em uma barra -->
+                    <div id="graficoPizzaDetalheWrapper" style="display:none;margin-top:16px;border-top:2px solid #ede9fe;padding-top:14px;">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                        <h5 id="graficoPizzaDetalheTitulo" style="margin:0;font-size:13px;font-weight:700;color:#374151;"></h5>
+                        <button onclick="document.getElementById('graficoPizzaDetalheWrapper').style.display='none'" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 10px;font-size:12px;color:#6b7280;cursor:pointer;">&times; Fechar</button>
+                      </div>
+                      <div style="overflow-x:auto;border-radius:8px;border:1px solid #e5e7eb;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                          <thead>
+                            <tr style="background:#f5f3ff;">
+                              <th style="padding:8px 12px;text-align:left;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Centro de Custo / Itens</th>
+                              <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Valor</th>
+                              <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">%</th>
+                            </tr>
+                          </thead>
+                          <tbody id="graficoPizzaDetalheTbody"></tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                  </div>
                   <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
                     <h4 style="margin:0 0 14px 0;font-size:14px;font-weight:700;color:#0284c7;"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>Valor por Data</h4>
                     <div id="graficoHistoricoWrapper" style="position:relative;height:260px;">
