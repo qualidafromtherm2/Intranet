@@ -5970,6 +5970,101 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
   }
 });
 
+// ========================================
+//  Endpoint: Itens individuais por status (detalhes ao clicar no gráfico)
+// ========================================
+/**
+ * GET /api/compras/grafico-pizza-itens
+ * Retorna os itens individuais de historico_compras para um status dado,
+ * enriquecidos com produto_codigo, produto_descricao, quantidade,
+ * objetivo_compra e solicitante vindos das tabelas de origem.
+ */
+app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
+  try {
+    const { status, dataInicio, dataFim } = req.query;
+    if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
+
+    const params = [status];
+    let whereDates = '';
+    if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
+    if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+
+    let whereDept = '';
+    const deptoParam = req.query.departamentos;
+    if (deptoParam && deptoParam.trim()) {
+      const lista = deptoParam.split(',').map(d => d.trim()).filter(Boolean);
+      if (lista.length > 0) {
+        params.push(lista);
+        whereDept = ` AND (
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
+          END
+        ) = ANY($${params.length}::text[])`;
+      }
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        h.id AS h_id,
+        COALESCE(
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
+          END, 'Não informado'
+        ) ||
+        COALESCE(' (' || NULLIF(BTRIM(
+          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.centro_custo
+               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.centro_custo::text
+          END
+        ), '') || ')', '') AS grupo,
+        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
+             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
+        END AS produto_codigo,
+        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_descricao
+             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_descricao
+        END AS produto_descricao,
+        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.quantidade::text
+             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.quantidade::text
+        END AS quantidade,
+        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.objetivo_compra
+             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.objetivo_compra
+        END AS objetivo_compra,
+        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.solicitante
+             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.solicitante
+        END AS solicitante,
+        h.valor_pedido
+      FROM compras.historico_compras h
+      LEFT JOIN compras.solicitacao_compras sc
+        ON h.tabela_origem = 'solicitacao_compras'
+        AND sc.grupo_requisicao = h.grupo_requisicao
+      LEFT JOIN compras.compras_sem_cadastro csc
+        ON h.tabela_origem = 'compras_sem_cadastro'
+        AND csc.grupo_requisicao = h.grupo_requisicao
+      WHERE h.status = $1
+        AND h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
+        ${whereDates}
+        ${whereDept}
+      ORDER BY grupo ASC, h.id ASC
+    `, params);
+
+    res.json({
+      ok: true,
+      itens: rows.map(r => ({
+        h_id:             r.h_id,
+        grupo:            r.grupo,
+        produto_codigo:   r.produto_codigo   || '',
+        produto_descricao: r.produto_descricao || '',
+        quantidade:       r.quantidade       || '',
+        objetivo_compra:  r.objetivo_compra  || '',
+        solicitante:      r.solicitante      || '',
+        valor_pedido:     Number(r.valor_pedido)
+      }))
+    });
+  } catch (err) {
+    console.error('[Compras/GraficoPizzaItens] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar itens do gráfico' });
+  }
+});
+
 app.get('/api/compras/grafico-historico', async (req, res) => {
   try {
     const { dataInicio, dataFim } = req.query;

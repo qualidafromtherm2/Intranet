@@ -32911,6 +32911,12 @@ async function carregarGraficoPizza(grupo) {
 
     const totalGeral = dados.reduce((a, d) => a + d.total, 0);
 
+    // Guarda dados no window para o click handler acessar
+    window._graficoPizzaDados       = dados;
+    window._graficoPizzaStatusUnicos = statusUnicos;
+    window._graficoPizzaGrupos       = gruposUnicos;
+    window._graficoPizzaExtrairCC    = extrairCC;
+
     const canvas = document.getElementById('graficoPizzaCanvas');
     if (!canvas) return;
     if (_graficoPizzaInstance) { _graficoPizzaInstance.destroy(); _graficoPizzaInstance = null; }
@@ -32949,6 +32955,13 @@ async function carregarGraficoPizza(grupo) {
         maintainAspectRatio: false,
         layout: { padding: { top: 28 } },
         interaction: { mode: 'index', intersect: false },
+        onClick(event, elements) {
+          if (!elements.length) return;
+          const el       = elements[0];
+          const status   = statusUnicos[el.index];
+          const grupo    = gruposUnicos[el.datasetIndex];
+          exibirDetalheGraficoBarra(status, grupo);
+        },
         plugins: {
           legend: {
             position: 'bottom',
@@ -33031,6 +33044,122 @@ function alternarPizzaGrupo(grupo) {
   carregarGraficoPizza(grupo);
 }
 
+// Objetivo: Alternar visibilidade das sublinhas de um grupo da tabela de detalhes
+function toggleGpiSub(subId) {
+  const rows  = document.querySelectorAll(`.${subId}`);
+  const ic    = document.getElementById(`${subId}_ic`);
+  const aberto = rows.length > 0 && rows[0].style.display !== 'none';
+  rows.forEach(r => r.style.display = aberto ? 'none' : 'table-row');
+  if (ic) ic.className = aberto ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-down';
+}
+
+// Objetivo: Exibir tabela de detalhes com sublinhas ao clicar em uma barra do gráfico
+async function exibirDetalheGraficoBarra(statusClicado, grupoClicado) {
+  const wrapper = document.getElementById('graficoPizzaDetalheWrapper');
+  const titulo  = document.getElementById('graficoPizzaDetalheTitulo');
+  const tbody   = document.getElementById('graficoPizzaDetalheTbody');
+  if (!wrapper || !titulo || !tbody) return;
+
+  // Mostra loading imediatamente
+  titulo.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;color:#7c3aed;"></i>Carregando itens...`;
+  tbody.innerHTML  = '';
+  wrapper.style.display = 'block';
+  wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    // Monta parâmetros da requisição (mesmos filtros do gráfico)
+    const params = new URLSearchParams({ status: statusClicado });
+    const inicio = document.getElementById('graficoDataInicio')?.value;
+    const fim    = document.getElementById('graficoDataFim')?.value;
+    if (inicio) params.set('dataInicio', inicio);
+    if (fim)    params.set('dataFim', fim);
+    const lb = document.getElementById('graficoDeptListbox');
+    if (lb && lb.options.length > 0) {
+      const selecionados = Array.from(lb.selectedOptions).map(o => o.value);
+      const todos        = Array.from(lb.options).map(o => o.value);
+      if (selecionados.length > 0 && selecionados.length < todos.length) {
+        params.set('departamentos', selecionados.join(','));
+      }
+    }
+
+    const resp = await fetch(`/api/compras/grafico-pizza-itens?${params.toString()}`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha ao carregar itens');
+    const { itens } = await resp.json();
+
+    const extrairCC   = window._graficoPizzaExtrairCC || (g => g);
+    const dados       = window._graficoPizzaDados    || [];
+    const gruposOrdem = window._graficoPizzaGrupos   || [];
+    const totalStatus = dados.filter(d => d.status === statusClicado).reduce((a, d) => a + d.total, 0);
+
+    // Mantém a ordem do gráfico (maior → menor)
+    const gruposComItens  = [...new Set(itens.map(i => i.grupo))];
+    const gruposOrdenados = gruposOrdem.filter(g => gruposComItens.includes(g))
+      .concat(gruposComItens.filter(g => !gruposOrdem.includes(g)));
+
+    const fmtVal = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+
+    titulo.innerHTML = `<i class="fa-solid fa-table" style="margin-right:6px;color:#7c3aed;"></i>`
+      + `Detalhes — <span style="color:#7c3aed;">${statusClicado}</span>`
+      + ` <span style="font-size:11px;font-weight:400;color:#9ca3af;">(clique no grupo para expandir)</span>`;
+
+    let html = '';
+    gruposOrdenados.forEach((grupo, gi) => {
+      const itensGrupo = itens.filter(i => i.grupo === grupo);
+      if (!itensGrupo.length) return;
+
+      const totalGrupo = itensGrupo.reduce((a, i) => a + Number(i.valor_pedido || 0), 0);
+      const pct        = totalStatus > 0 ? ((totalGrupo / totalStatus) * 100).toFixed(1) : '0.0';
+      const cc         = extrairCC(grupo);
+      const subId      = `gpi_sub_${gi}`;
+
+      // Linha do grupo (clicável) — todos iniciam colapsados com mesmo estilo
+      html += `<tr onclick="toggleGpiSub('${subId}')"
+        style="cursor:pointer;background:#fafafa;border-bottom:1px solid #e5e7eb;">
+        <td style="padding:9px 12px;font-size:13px;font-weight:700;color:#374151;">
+          <i id="${subId}_ic" class="fa-solid fa-chevron-right" style="font-size:10px;margin-right:7px;color:#a78bfa;"></i>${cc}
+        </td>
+        <td style="padding:9px 12px;font-size:13px;font-weight:700;color:#374151;text-align:right;">${fmtVal(totalGrupo)}</td>
+        <td style="padding:9px 12px;font-size:12px;color:#6b7280;text-align:right;">${pct}%</td>
+      </tr>`;
+
+      // Sub-linhas de itens — todas iniciam colapsadas
+      itensGrupo.forEach(item => {
+        const objHtml = item.objetivo_compra
+          ? `<span title="${(item.objetivo_compra || '').replace(/"/g, '&quot;')}"
+               style="display:inline-flex;align-items:center;justify-content:center;
+                      width:16px;height:16px;border-radius:50%;background:#7c3aed;
+                      color:#fff;font-size:9px;font-weight:700;cursor:help;flex-shrink:0;">!</span>`
+          : '';
+        html += `<tr class="${subId}" style="display:none;background:#fff;border-bottom:1px solid #f3f4f6;">
+          <td colspan="3" style="padding:5px 12px 5px 36px;">
+            <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;">
+              <span style="color:#9ca3af;">#${item.h_id}</span>
+              <span style="font-family:monospace;color:#6366f1;">${item.produto_codigo || '—'}</span>
+              <span style="color:#374151;">${item.produto_descricao || '—'}</span>
+              <span style="color:#6b7280;">Qtd: <b>${item.quantidade || '—'}</b></span>
+              ${objHtml}
+              <span style="color:#374151;font-style:italic;">${item.solicitante || '—'}</span>
+            </span>
+          </td>
+        </tr>`;
+      });
+    });
+
+    // Linha de total geral
+    html += `<tr style="background:#f0fdf4;border-top:2px solid #d1fae5;">
+      <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;">Total geral</td>
+      <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmtVal(totalStatus)}</td>
+      <td style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;">100%</td>
+    </tr>`;
+
+    tbody.innerHTML = html;
+
+  } catch (err) {
+    console.error('[GraficoPizzaItens]', err);
+    titulo.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;color:#ef4444;"></i>Erro ao carregar detalhes`;
+  }
+}
+
 // Objetivo: Carregar os dois gráficos simultaneamente (botão Aplicar compartilhado)
 function carregarAmboGraficos() {
   carregarGraficoHistorico();
@@ -33042,6 +33171,8 @@ window.carregarOpcoesFiltroDepto = carregarOpcoesFiltroDepto;
 window.graficoDeptoSelecionarTodos = graficoDeptoSelecionarTodos;
 window.alternarPizzaGrupo        = alternarPizzaGrupo;
 window.carregarAmboGraficos      = carregarAmboGraficos;
+window.exibirDetalheGraficoBarra = exibirDetalheGraficoBarra;
+window.toggleGpiSub              = toggleGpiSub;
 
 // Objetivo: Exibir visualização em Kanban (padrão)
 function mostrarVisualizacaoKanban() {
