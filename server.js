@@ -27000,11 +27000,117 @@ app.post('/api/omie/autosync/run', express.json(), async (req, res) => {
 
 const PORT = process.env.PORT || 5001;
 const HOST = '0.0.0.0';
+// ─── Cron interno: executa o agendamento configurado na página "Agendamento Automático" ───
+// Roda a cada 5 minutos e decide se está na hora com base em proxima_execucao do banco.
+function calcularProximaExecucaoAgendamento(diasSemana, horario) {
+  try {
+    const agora = new Date();
+    const [hora, minuto] = String(horario).split(':').map(Number);
+    let proxima = new Date(agora);
+    proxima.setHours(hora, minuto, 0, 0);
+    if (proxima <= agora) proxima.setDate(proxima.getDate() + 1);
+    for (let i = 0; i < 7; i++) {
+      if (diasSemana.includes(proxima.getDay())) return proxima;
+      proxima.setDate(proxima.getDate() + 1);
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function verificarEExecutarAgendamento() {
+  let client;
+  try {
+    client = await pool.connect();
+
+    // Busca configuração ativa E já verifica se é hora — tudo no fuso do banco
+    // A comparação proxima_execucao <= NOW() acontece dentro do Postgres para
+    // evitar diferenças de fuso entre Node.js local e o servidor do banco.
+    const res = await client.query(`
+      SELECT id, ativo, dias_semana, horario::text AS horario,
+             tabelas, data_inicial, recebimentos_ignorar_etapa_80,
+             proxima_execucao, ultima_execucao,
+             -- Indica se está dentro da janela de execução (até 10 min de atraso)
+             (proxima_execucao <= NOW() AND proxima_execucao >= NOW() - INTERVAL '10 minutes') AS deve_executar
+      FROM public.agendamento_sincronizacao
+      ORDER BY id DESC LIMIT 1
+    `);
+    if (!res.rows.length) return;
+
+    const cfg = res.rows[0];
+    if (!cfg.ativo) return;
+    if (!cfg.deve_executar) {
+      // Silencioso — só loga quando pular por janela expirada (debug ocasional)
+      return;
+    }
+
+    // Trava atômica — evita execução dupla se PM2 tiver múltiplas instâncias
+    // Atualiza proxima_execucao APENAS se ela ainda <= NOW() (não foi alterada por outra instância)
+    const novaProxima = calcularProximaExecucaoAgendamento(cfg.dias_semana, cfg.horario);
+    const lock = await client.query(`
+      UPDATE public.agendamento_sincronizacao
+      SET proxima_execucao = $1, ultima_execucao = NOW()
+      WHERE id = $2 AND proxima_execucao <= NOW()
+      RETURNING id
+    `, [novaProxima, cfg.id]);
+
+    if (lock.rowCount === 0) {
+      console.log('[CronAgendamento] Outra instância já assumiu — ignorando.');
+      return;
+    }
+
+    const tabelas = Array.isArray(cfg.tabelas) && cfg.tabelas.length ? cfg.tabelas : ['fornecedores'];
+    console.log(`[CronAgendamento] ✓ Executando agendamento — tabelas: ${tabelas.join(', ')}`);
+    console.log(`[CronAgendamento]   Ignorar etapa 80: ${!!cfg.recebimentos_ignorar_etapa_80}`);
+    console.log(`[CronAgendamento]   Data inicial: ${cfg.data_inicial || '(todas)'}`);
+    console.log(`[CronAgendamento]   Próxima execução: ${novaProxima?.toISOString() || 'null'}`);
+
+    // Monta opções para as funções de sync já existentes no server.js
+    const filtros = {};
+    if (cfg.data_inicial) {
+      const d = new Date(cfg.data_inicial);
+      filtros.dtAltDe = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    }
+    if (cfg.recebimentos_ignorar_etapa_80) {
+      filtros.ignorarEtapa80 = true;
+    }
+
+    for (const tabela of tabelas) {
+      try {
+        console.log(`[CronAgendamento] → Iniciando sync: ${tabela}`);
+        if (tabela === 'fornecedores')        await syncFornecedoresOmie();
+        else if (tabela === 'pedidos_compra')        await syncPedidosCompraOmie(filtros);
+        else if (tabela === 'requisicoes_compra')    await syncRequisicoesCompraOmie(filtros);
+        else if (tabela === 'recebimentos_nfe')      await syncRecebimentosNFeOmie(filtros);
+        else if (tabela === 'produtos_omie')         await syncProdutosOmieIncremental(999);
+        else console.log(`[CronAgendamento]   Tabela desconhecida: ${tabela}`);
+        console.log(`[CronAgendamento] ✓ ${tabela} concluído`);
+      } catch(e) {
+        console.error(`[CronAgendamento] ✗ Erro em ${tabela}: ${e.message}`);
+      }
+    }
+    console.log('[CronAgendamento] ✓ Agendamento concluído.');
+  } catch(e) {
+    console.error('[CronAgendamento] Erro ao verificar agendamento:', e.message);
+  } finally {
+    if (client) client.release();
+  }
+}
+
+function iniciarCronAgendamento() {
+  console.log('[CronAgendamento] Timer iniciado — verificando a cada 5 minutos.');
+  // Verifica imediatamente ao iniciar (captura janela perdida por restart)
+  verificarEExecutarAgendamento();
+  // Depois a cada 5 minutos
+  setInterval(verificarEExecutarAgendamento, 5 * 60 * 1000);
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando em http://${HOST}:${PORT}`);
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
   iniciarAutoSyncComprasGoogleSheets();
   iniciarAutoSyncWebhooksOmie();
+  iniciarCronAgendamento();
 });
 
 // DEBUG: sanity check do webhook (GET simples)
