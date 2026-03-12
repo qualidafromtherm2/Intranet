@@ -2271,8 +2271,10 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
     };
 
     const maxExistente = await buscarMaximoCodprov();
+    // Se o item já tem um CODPROV atribuído, usa esse número.
+    // Só gera um número novo (maxExistente + 1) se o item ainda não tem código.
+    // O while abaixo (baseExiste) avança se o código já existir na Omie.
     let baseNumero = Number.isFinite(baseNumeroAtual) ? baseNumeroAtual : (maxExistente + 1);
-    if (baseNumero <= maxExistente) baseNumero = maxExistente + 1;
 
     const formatarBase = (num) => String(num).padStart(basePadLength, '0');
     const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
@@ -19658,8 +19660,10 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
     };
 
     const maxExistente = await buscarMaximoCodprov();
+    // Se o item já tem um CODPROV atribuído, usa esse número.
+    // Só gera um número novo (maxExistente + 1) se o item ainda não tem código.
+    // O while abaixo (baseExiste) avança se o código já existir na Omie.
     let baseNumero = Number.isFinite(baseNumeroAtual) ? baseNumeroAtual : (maxExistente + 1);
-    if (baseNumero <= maxExistente) baseNumero = maxExistente + 1;
 
     const formatarBase = (num) => String(num).padStart(basePadLength, '0');
     const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
