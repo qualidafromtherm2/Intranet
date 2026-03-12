@@ -1,0 +1,24 @@
+# ============================================================
+# render.yaml — Configuração do Render para o projeto Intranet
+# ============================================================
+# Documentação: https://render.com/docs/infrastructure-as-code
+
+services:
+
+  # ── Cron Job: Sincronização diária de Recebimentos NF-e ──────────────────
+  - type: cron
+    name: sync-recebimentos-nfe
+    runtime: node
+    region: oregon           # mesma região do banco Postgres no Render
+    schedule: "0 6 * * *"   # Todo dia às 06:00 UTC = 03:00 horário de Brasília (UTC-3)
+    buildCommand: npm install --production
+    startCommand: node cron/sync_recebimentos_nfe.js
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require
+      - key: OMIE_APP_KEY
+        value: "4244634488206"
+      - key: OMIE_APP_SECRET
+        value: "10d9dde2e4e3bac7e62a2cc01bfba01e"
+      - key: NODE_ENV
+        value: production
