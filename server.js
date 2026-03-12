@@ -2364,7 +2364,8 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
           if (cadastro.ok) break;
         }
 
-        if (ehJaCadastrado || ehDescricaoDuplicada || ehCodigoDuplicado) {
+        // Se código já existe na Omie: avança o número base e tenta novamente
+        if (ehJaCadastrado || ehCodigoDuplicado) {
           baseNumero += 1;
           while (await baseExiste(baseNumero)) baseNumero += 1;
           codigoBase = montarCodigoBase(baseNumero);
@@ -2376,6 +2377,17 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
           );
           console.log(`[Solicitações] Código avançado para ${codigoBase} (tent ${tent + 1})`);
           continue;
+        }
+
+        // Descrição duplicada: avisa o usuário para corrigir — não auto-corrige
+        if (ehDescricaoDuplicada) {
+          return res.status(422).json({
+            ok: false,
+            error: `Descrição duplicada: a descrição informada para o item ${i + 1} já está sendo usada por outro produto na Omie. Por favor, altere a descrição do item antes de criar.`,
+            item_index: i,
+            codigo_integracao: codigoIntegracao,
+            resultados
+          });
         }
 
         break;
@@ -19784,14 +19796,11 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
           if (cadastro.ok) break;
         }
 
-        // Se código ou descrição já existe → avança o número base inteiro
-        // CODPROV - 00046 → CODPROV - 00047, e o item vira CODPROV - 00047.1
-        if (ehJaCadastrado || ehDescricaoDuplicada || ehCodigoDuplicado) {
+        // Se código já existe (conflito de código): avança o número base e tenta novamente
+        if (ehJaCadastrado || ehCodigoDuplicado) {
           baseNumero += 1;
-          // Pula números que já existam nas tabelas locais/Omie
           while (await baseExiste(baseNumero)) baseNumero += 1;
           codigoBase = montarCodigoBase(baseNumero);
-          // Persiste o novo código base na tabela de origem
           await pool.query(
             `UPDATE compras.compras_sem_cadastro
              SET produto_codigo = $1, updated_at = NOW()
@@ -19799,7 +19808,18 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
             [codigoBase, id]
           );
           console.log(`[Compras Sem Cadastro] Código avançado para ${codigoBase} (tent ${tent + 1})`);
-          continue; // tenta novamente com o novo código
+          continue;
+        }
+
+        // Descrição duplicada: avisa o usuário para corrigir — não auto-corrige
+        if (ehDescricaoDuplicada) {
+          return res.status(422).json({
+            ok: false,
+            error: `Descrição duplicada: a descrição informada para o item ${i + 1} já está sendo usada por outro produto na Omie. Por favor, altere a descrição do item antes de criar.`,
+            item_index: i,
+            codigo_integracao: codigoIntegracao,
+            resultados
+          });
         }
 
         // Qualquer outro erro — interrompe e retorna erro ao front
