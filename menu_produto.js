@@ -21709,8 +21709,16 @@ function renderizarListaItensAnaliseCadastro() {
             type="text"
             value="${descricao}"
             placeholder="Descrição"
-            oninput="atualizarItemAnaliseCadastro(${idx}, 'descricao', this.value)"
-            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;" />
+            maxlength="120"
+            oninput="atualizarItemAnaliseCadastroComContador(${idx}, this)"
+            style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;"
+            id="inputDescAnaliseCadastro_${idx}" />
+          <div style="text-align:right;font-size:11px;margin-top:3px;" id="contadorDescAnaliseCadastro_${idx}">
+            <span id="contadorNumDesc_${idx}" style="color:${descricao.length > 100 ? (descricao.length >= 120 ? '#dc2626' : '#d97706') : '#6b7280'};">${
+              // escapa a expressão para o template literal do servidor
+              descricao.length
+            }</span><span style="color:#9ca3af;">/120</span>
+          </div>
         </div>
         <div>
           <input
@@ -21737,6 +21745,23 @@ function renderizarListaItensAnaliseCadastro() {
 
   atualizarBotaoSalvarAnaliseCadastro();
 }
+
+// Comentário: atualiza o campo descrição E atualiza o contador de caracteres em tempo real
+window.atualizarItemAnaliseCadastroComContador = function(index, inputEl) {
+  const valor = inputEl.value;
+  const len = valor.length;
+  const spanNum = document.getElementById(`contadorNumDesc_${index}`);
+  if (spanNum) {
+    spanNum.textContent = len;
+    spanNum.style.color = len >= 120 ? '#dc2626' : len > 100 ? '#d97706' : '#6b7280';
+  }
+  const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
+  const alvo = itens[index];
+  if (!alvo) return;
+  alvo['descricao'] = valor.trim();
+  window.analiseCadastroDirty = true;
+  atualizarBotaoSalvarAnaliseCadastro();
+};
 
 // Comentário: atualiza item editado e habilita salvar
 window.atualizarItemAnaliseCadastro = function(index, campo, valor) {
