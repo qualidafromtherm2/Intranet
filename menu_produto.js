@@ -32772,9 +32772,32 @@ function limparFiltroGrafico() {
   carregarGraficoPizza();
 }
 
+// Atalhos rápidos de período para os filtros do gráfico
+function graficoPeriodoRapido(periodo) {
+  const fmt = d => d.toISOString().slice(0, 10);
+  const hoje = new Date();
+  let ini, fim;
+  if (periodo === 'mes-atual') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  } else if (periodo === 'mes-anterior') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+  } else if (periodo === 'trimestre') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  }
+  const inpIni = document.getElementById('graficoDataInicio');
+  const inpFim = document.getElementById('graficoDataFim');
+  if (inpIni) inpIni.value = fmt(ini);
+  if (inpFim) inpFim.value = fmt(fim);
+  carregarAmboGraficos();
+}
+
 window.toggleGraficoHistorico = toggleGraficoHistorico;
 window.carregarGraficoHistorico = carregarGraficoHistorico;
 window.limparFiltroGrafico = limparFiltroGrafico;
+window.graficoPeriodoRapido = graficoPeriodoRapido;
 
 // ============================================================
 // Gráfico de Pizza: Departamento / Centro de Custo

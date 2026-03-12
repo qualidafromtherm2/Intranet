@@ -5960,7 +5960,10 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
           AND csc.grupo_requisicao = h.grupo_requisicao
         WHERE h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
           AND h.status IN ('aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido')
-          ${whereDates}
+          AND (
+            h.status = 'aguardando compra'
+            OR (h.status <> 'aguardando compra' ${whereDates ? whereDates : 'AND 1=1'})
+          )
           ${whereDept}
         ORDER BY h.id
       ) sub
@@ -5991,8 +5994,12 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
 
     const params = [status];
     let whereDates = '';
-    if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
-    if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+    // Aguardando compra é pendência aberta — nunca filtrar por data
+    const ignorarData = (status === 'aguardando compra');
+    if (!ignorarData) {
+      if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
+      if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+    }
 
     let whereDept = '';
     const deptoParam = req.query.departamentos;
@@ -6037,7 +6044,8 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
              WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.solicitante
         END AS solicitante,
         h.valor_pedido,
-        pop.n_val_tot AS valor_item
+        -- Tenta valor do pedido Omie; se nulo (ex: Recebido Totalmente), usa valor do item NF
+        COALESCE(pop.n_val_tot, rni.v_total_item) AS valor_item
       FROM compras.historico_compras h
       LEFT JOIN compras.solicitacao_compras sc
         ON h.tabela_origem = 'solicitacao_compras'
@@ -6048,14 +6056,28 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
       -- Localiza o pedido Omie pelo grupo_requisicao gravado em c_obs_int
       LEFT JOIN compras.pedidos_omie po
         ON NULLIF(BTRIM(po.c_obs_int), '') = h.grupo_requisicao
-      -- Localiza o produto do pedido pelo c_produto = produto_codigo da tabela de origem
+      -- Valor por produto via pedidos_omie_produtos (Compra realizada)
       LEFT JOIN compras.pedidos_omie_produtos pop
         ON pop.n_cod_ped = po.n_cod_ped
-        AND pop.c_produto = (
+        AND REGEXP_REPLACE(pop.c_produto, '\\.\\d{1,2}$', '') = (
           CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
                WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
           END
         )
+      -- Valor por produto via recebimentos NF (Recebido Totalmente / Concluido)
+      -- Usa DISTINCT ON para evitar fanout quando há múltiplos recebimentos do mesmo produto
+      LEFT JOIN LATERAL (
+        SELECT v_total_item
+        FROM logistica.recebimentos_nfe_itens rni2
+        WHERE rni2.n_id_pedido = po.n_cod_ped
+          AND REGEXP_REPLACE(rni2.c_codigo_produto, '\\.\\d{1,2}$', '') = (
+            CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
+                 WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
+            END
+          )
+        ORDER BY rni2.n_id_receb DESC
+        LIMIT 1
+      ) rni ON TRUE
       WHERE h.status = $1
         AND h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
         ${whereDates}

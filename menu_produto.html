@@ -550,6 +550,12 @@
                       <label style="font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;">Até:</label>
                       <input type="date" id="graficoDataFim" style="padding:7px 10px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;outline:none;" onfocus="this.style.borderColor='#0ea5e9'" onblur="this.style.borderColor='#d1d5db'">
                     </div>
+                    <!-- Atalhos rápidos de período -->
+                    <div style="display:flex;align-items:center;gap:4px;">
+                      <button onclick="graficoPeriodoRapido('mes-atual')" style="padding:6px 10px;border:1.5px solid #e0e7ff;border-radius:7px;background:#eef2ff;color:#4f46e5;font-weight:600;font-size:11px;cursor:pointer;white-space:nowrap;" title="Mês atual">Mês atual</button>
+                      <button onclick="graficoPeriodoRapido('mes-anterior')" style="padding:6px 10px;border:1.5px solid #e0e7ff;border-radius:7px;background:#eef2ff;color:#4f46e5;font-weight:600;font-size:11px;cursor:pointer;white-space:nowrap;" title="Mês anterior">Mês ant.</button>
+                      <button onclick="graficoPeriodoRapido('trimestre')" style="padding:6px 10px;border:1.5px solid #e0e7ff;border-radius:7px;background:#eef2ff;color:#4f46e5;font-weight:600;font-size:11px;cursor:pointer;white-space:nowrap;" title="Último trimestre">Trimestre</button>
+                    </div>
                     <button onclick="carregarAmboGraficos()" style="padding:8px 18px;border:none;border-radius:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:#fff;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;">
                       <i class="fa-solid fa-magnifying-glass" style="margin-right:5px;"></i>Aplicar
                     </button>
@@ -3231,6 +3237,15 @@
        Compras
     </a>
 
+    <a href="#" class="main-header-link" data-subtarget="ultimasComprasTab"
+       data-nav-key="produto:dados:ultimascompras"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Últimas compras"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="ultimasComprasTab"]'>
+       Últimas compras
+    </a>
+
   </div>
 </div>
 
@@ -3302,6 +3317,19 @@
       <ul id="comprasList" class="content-list product-details">
         <!-- Preenchido por JS -->
       </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Aba: Últimas compras -->
+<div id="ultimasComprasTab" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Últimas compras</div>
+      <div id="ultimasComprasList">
+        <!-- Conteúdo a ser implementado -->
+        <p style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhuma compra encontrada para este produto.</p>
+      </div>
     </div>
   </div>
 </div>
@@ -7319,6 +7347,10 @@ function attachDropZone(ul) {
         const btnReceber = trPedido.querySelector('.btn-receber-produto');
         btnReceber.addEventListener('click', (e) => {
           e.stopPropagation(); // Evita que o clique expanda/colapse a linha
+          if (configPainel.key === 'recebimento') {
+            abrirModalBuscarNfe(pedidoNum, pedido);
+            return;
+          }
           if (typeof window.abrirModalAssociarPedidoNfe === 'function') {
             window.abrirModalAssociarPedidoNfe();
             return;
@@ -7397,6 +7429,113 @@ function attachDropZone(ul) {
         </tr>
       `;
     }
+  }
+
+  // Função para abrir modal de busca de NF-e (Recebimento de Compras)
+  function abrirModalBuscarNfe(pedidoNum, pedidoData) {
+    const modal = document.getElementById('modalRecebimentoProdutos');
+    const modalPedido = document.getElementById('modalRecebimentoPedido');
+    const modalItens = document.getElementById('modalRecebimentoItens');
+
+    if (!modal || !modalPedido || !modalItens) return;
+
+    modalPedido.textContent = `Pedido: ${pedidoNum}`;
+
+    modalItens.innerHTML = `
+      <div style="max-width:520px;margin:0 auto;">
+        <div style="margin-bottom:20px;padding:14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:13px;color:#1e3a8a;">
+          <i class="fa-solid fa-circle-info" style="margin-right:6px;"></i>
+          Digite o número da NF-e para consultar os dados do recebimento.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label style="font-size:13px;font-weight:600;color:#374151;">Número da NF-e</label>
+          <div style="display:flex;gap:10px;align-items:stretch;">
+            <input
+              id="inputBuscaNumeroNfe"
+              type="text"
+              placeholder="Ex: 38701"
+              autocomplete="off"
+              style="flex:1;padding:12px 14px;border:2px solid #e2e8f0;border-radius:8px;font-size:15px;outline:none;transition:border-color 0.2s;"
+              onfocus="this.style.borderColor='#3b82f6'"
+              onblur="this.style.borderColor='#e2e8f0'"
+            />
+            <button
+              id="btnBuscaNfe"
+              type="button"
+              style="background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;border:none;border-radius:8px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;white-space:nowrap;"
+            >
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Consultar</span>
+            </button>
+          </div>
+          <div id="statusBuscaNfe" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;"></div>
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'block';
+    setTimeout(() => {
+      modal.style.opacity = '1';
+      const modalContent = modal.querySelector('div > div');
+      if (modalContent) modalContent.style.transform = 'translate(-50%, -50%) scale(1)';
+      const input = document.getElementById('inputBuscaNumeroNfe');
+      if (input) input.focus();
+    }, 10);
+
+    const executarBuscaNfe = async () => {
+      const inputEl = document.getElementById('inputBuscaNumeroNfe');
+      const statusEl = document.getElementById('statusBuscaNfe');
+      const btnEl = document.getElementById('btnBuscaNfe');
+      if (!inputEl || !statusEl) return;
+
+      const valorBruto = inputEl.value.trim();
+      if (!valorBruto) {
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#fef3c7';
+        statusEl.style.color = '#92400e';
+        statusEl.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>Informe o número da NF-e.';
+        return;
+      }
+
+      const apenasDigitos = valorBruto.replace(/\D/g, '');
+
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#eff6ff';
+      statusEl.style.color = '#1e3a8a';
+      statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Buscando NF-e...';
+      if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.7'; }
+
+      try {
+        let chaveNfe = '';
+        let numeroNfe = valorBruto;
+
+        if (/^\d{44}$/.test(apenasDigitos)) {
+          chaveNfe = apenasDigitos;
+        } else {
+          const resp = await fetch(`/api/compras/nfe-buscar-chave?numero_nfe=${encodeURIComponent(valorBruto)}`);
+          const data = await resp.json();
+          if (!resp.ok || !data.ok || !data.chave_nfe) {
+            throw new Error(data.error || `NF-e "${valorBruto}" não encontrada no banco de dados.`);
+          }
+          chaveNfe = data.chave_nfe;
+          numeroNfe = data.numero_nfe || valorBruto;
+        }
+
+        window.fecharModalRecebimento && window.fecharModalRecebimento();
+        abrirModalNfeOmieDetalhes(chaveNfe, numeroNfe, pedidoData);
+      } catch (err) {
+        statusEl.style.background = '#fff1f2';
+        statusEl.style.color = '#9f1239';
+        statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${escaparHtml(err.message || 'Erro ao buscar NF-e.')}`;
+      } finally {
+        if (btnEl) { btnEl.disabled = false; btnEl.style.opacity = '1'; }
+      }
+    };
+
+    const inputElRef = document.getElementById('inputBuscaNumeroNfe');
+    const btnElRef = document.getElementById('btnBuscaNfe');
+    if (inputElRef) inputElRef.addEventListener('keydown', (e) => { if (e.key === 'Enter') executarBuscaNfe(); });
+    if (btnElRef) btnElRef.addEventListener('click', executarBuscaNfe);
   }
 
   // Função para abrir modal de recebimento

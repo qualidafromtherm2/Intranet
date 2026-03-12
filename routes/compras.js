@@ -581,6 +581,35 @@ module.exports = (pool) => {
     }
   });
 
+  // Busca a chave NF-e (44 dígitos) pelo número da NF-e no banco local
+  router.get('/nfe-buscar-chave', async (req, res) => {
+    try {
+      const numeroNfe = String(req.query?.numero_nfe || '').trim();
+      if (!numeroNfe) {
+        return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe obrigatório.' });
+      }
+      const resultado = await pool.query(`
+        SELECT
+          REGEXP_REPLACE(COALESCE(c_chave_nfe, ''), '\\D', '', 'g') AS chave_nfe,
+          c_numero_nfe AS numero_nfe
+        FROM logistica.recebimentos_nfe_omie
+        WHERE BTRIM(c_numero_nfe) = $1
+          AND c_chave_nfe IS NOT NULL
+          AND REGEXP_REPLACE(c_chave_nfe, '\\D', '', 'g') ~ '^\\d{44}$'
+        ORDER BY n_id_receb DESC
+        LIMIT 1
+      `, [numeroNfe]);
+
+      if (!resultado.rows.length) {
+        return res.status(404).json({ ok: false, error: `NF-e "${numeroNfe}" não encontrada no banco de dados.` });
+      }
+      res.json({ ok: true, chave_nfe: resultado.rows[0].chave_nfe, numero_nfe: resultado.rows[0].numero_nfe });
+    } catch (e) {
+      console.error('[GET /api/compras/nfe-buscar-chave] erro:', e);
+      res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   // Consulta detalhes de recebimento da NF-e na Omie via c_chave_nfe
   router.get('/nfe-xml-detalhes', async (req, res) => {
     try {
