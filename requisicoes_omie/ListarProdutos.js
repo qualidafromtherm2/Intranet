@@ -208,7 +208,7 @@ function bindGridLazyLoad(grid) {
   });
 }
 
-let __listaViewMode = 'list';
+let __listaViewMode = 'grid';
 const __listaRefs = {
   ul: null,
   grid: null,
@@ -280,6 +280,24 @@ function setCacheDirty(flag) {
 }
 
 function renderFromCache() {
+  // Garante que o modo de visualização correto seja aplicado antes de renderizar
+  updateListaViewUI();
+  // Fallback: aplica diretamente no DOM caso __listaRefs ainda não estejam populados
+  const gridEl = document.getElementById('listaProdutosGrid');
+  const ulEl   = document.getElementById('listaProdutosList');
+  if (gridEl && ulEl) {
+    const isGrid = __listaViewMode === 'grid';
+    gridEl.style.display = isGrid ? 'grid' : 'none';
+    ulEl.style.display   = isGrid ? 'none' : '';
+    // popula refs para uso futuro, caso estejam vazios
+    if (!__listaRefs.grid)   __listaRefs.grid   = gridEl;
+    if (!__listaRefs.ul)     __listaRefs.ul     = ulEl;
+    if (!__listaRefs.toggleBtn) __listaRefs.toggleBtn = document.getElementById('viewToggleBtn');
+    if (!__listaRefs.pagination) __listaRefs.pagination = document.getElementById('pagination');
+    // chama novamente agora que refs estão preenchidas
+    updateListaViewUI();
+  }
+
   setCache(window.__omieFullCache || []);
   const itens = getFiltered();
   renderListaView(itens);
