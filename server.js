@@ -2279,11 +2279,18 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
     const formatarBase = (num) => String(num).padStart(basePadLength, '0');
     const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
 
+    // Verifica nas 3 tabelas para evitar colisão com itens locais ainda não sincronizados
     const baseExiste = async (num) => {
       const prefixo = `${montarCodigoBase(num)}%`;
       const { rows: existe } = await pool.query(
-        `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
-        [prefixo]
+        `SELECT 1 FROM (
+           SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1
+           UNION ALL
+           SELECT produto_codigo FROM compras.solicitacao_compras WHERE produto_codigo LIKE $1 AND id != $2
+           UNION ALL
+           SELECT produto_codigo FROM compras.compras_sem_cadastro WHERE produto_codigo LIKE $1
+         ) t LIMIT 1`,
+        [prefixo, id]
       );
       return existe.length > 0;
     };
@@ -2292,21 +2299,22 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
       baseNumero += 1;
     }
 
-    const baseCodigo = montarCodigoBase(baseNumero);
+    // codigoBase pode ser atualizado durante o loop se a Omie rejeitar o código
+    let codigoBase = montarCodigoBase(baseNumero);
 
-    if (baseCodigo !== codigoBaseRaw) {
+    if (codigoBase !== codigoBaseRaw) {
       await pool.query(
         `UPDATE compras.solicitacao_compras
          SET produto_codigo = $1, updated_at = NOW()
          WHERE id = $2`,
-        [baseCodigo, id]
+        [codigoBase, id]
       );
     }
 
     const resultados = [];
     for (let i = 0; i < itens.length; i++) {
       const itemAtual = itens[i];
-      const codigoIntegracao = `${baseCodigo}.${i + 1}`;
+      let codigoIntegracao = `${codigoBase}.${i + 1}`;
       const descricaoProduto = itemAtual.descricao || `Produto ${codigoIntegracao}`;
 
       if (itemAtual?.codigo_omie) {
@@ -2337,30 +2345,48 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
         continue;
       }
 
-      let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
-      if (!cadastro.ok) {
+      // Loop de tentativas: se a Omie rejeitar por código/descrição duplicada,
+      // avança o número BASE (ex: 00046 → 00047), atualiza o banco e tenta novamente.
+      let cadastro = null;
+      for (let tent = 0; tent < 20; tent++) {
+        codigoIntegracao = `${codigoBase}.${i + 1}`;
+        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
+
+        if (cadastro.ok) break;
+
         const msgErro = String(cadastro.error || '');
-        const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
+        const ehJaCadastrado       = /já cadastrado|Client-102/i.test(msgErro);
         const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+        const ehCodigoDuplicado    = /código.*já.*utilizado|Client-143/i.test(msgErro);
 
         if (ehJaCadastrado) {
           cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `solicitacao:${id}`);
+          if (cadastro.ok) break;
         }
 
-        if (!cadastro.ok && ehDescricaoDuplicada) {
-          const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
-            ? descricaoProduto
-            : `${descricaoProduto} - ${codigoIntegracao}`;
-          cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoComCodigo);
+        if (ehJaCadastrado || ehDescricaoDuplicada || ehCodigoDuplicado) {
+          baseNumero += 1;
+          while (await baseExiste(baseNumero)) baseNumero += 1;
+          codigoBase = montarCodigoBase(baseNumero);
+          await pool.query(
+            `UPDATE compras.solicitacao_compras
+             SET produto_codigo = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [codigoBase, id]
+          );
+          console.log(`[Solicitações] Código avançado para ${codigoBase} (tent ${tent + 1})`);
+          continue;
         }
 
-        if (!cadastro.ok) {
-          return res.status(500).json({
-            ok: false,
-            error: cadastro.error || 'Erro ao cadastrar produto na Omie',
-            resultados
-          });
-        }
+        break;
+      }
+
+      if (!cadastro?.ok) {
+        return res.status(500).json({
+          ok: false,
+          error: cadastro?.error || 'Erro ao cadastrar produto na Omie',
+          resultados
+        });
       }
 
       resultados.push({
@@ -2373,7 +2399,7 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
 
     return res.json({
       ok: true,
-      base_codigo: baseCodigo,
+      base_codigo: codigoBase,
       itens: resultados
     });
   } catch (err) {
@@ -19669,11 +19695,19 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
     const montarCodigoBase = (num) => `CODPROV - ${formatarBase(num)}`;
 
     // Comentário: se o código base atual já existir, avança para o próximo disponível
+    // Verifica nas 3 tabelas: produtos_omie (já enviados), solicitacao_compras e
+    // compras_sem_cadastro (pendentes locais) — evita colisão mesmo antes de sincronizar
     const baseExiste = async (num) => {
       const prefixo = `${montarCodigoBase(num)}%`;
       const { rows: existe } = await pool.query(
-        `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
-        [prefixo]
+        `SELECT 1 FROM (
+           SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1
+           UNION ALL
+           SELECT produto_codigo FROM compras.solicitacao_compras WHERE produto_codigo LIKE $1
+           UNION ALL
+           SELECT produto_codigo FROM compras.compras_sem_cadastro WHERE produto_codigo LIKE $1 AND id != $2
+         ) t LIMIT 1`,
+        [prefixo, id]
       );
       return existe.length > 0;
     };
@@ -19682,21 +19716,22 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
       baseNumero += 1;
     }
 
-    const baseCodigo = montarCodigoBase(baseNumero);
+    // codigoBase pode ser atualizado durante o loop se a Omie rejeitar o código
+    let codigoBase = montarCodigoBase(baseNumero);
 
-    if (baseCodigo !== codigoBaseRaw) {
+    if (codigoBase !== codigoBaseRaw) {
       await pool.query(
         `UPDATE compras.compras_sem_cadastro
          SET produto_codigo = $1, updated_at = NOW()
          WHERE id = $2`,
-        [baseCodigo, id]
+        [codigoBase, id]
       );
     }
 
     const resultados = [];
     for (let i = 0; i < itens.length; i++) {
       const itemAtual = itens[i];
-      const codigoIntegracao = `${baseCodigo}.${i + 1}`;
+      let codigoIntegracao = `${codigoBase}.${i + 1}`;
       const descricaoProduto = itemAtual.descricao || `Produto ${codigoIntegracao}`;
 
       // Comentário: se já houver codigo_omie informado no payload, ignora criação
@@ -19729,30 +19764,54 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
         continue;
       }
 
-      let cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
-      if (!cadastro.ok) {
-        const msgErro = String(cadastro.error || '');
-        const ehJaCadastrado = /já cadastrado|Client-102/i.test(msgErro);
-        const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+      // Loop de tentativas: se a Omie rejeitar por código/descrição duplicada,
+      // avança o número BASE (ex: 00046 → 00047), atualiza o banco e tenta novamente.
+      let cadastro = null;
+      for (let tent = 0; tent < 20; tent++) {
+        codigoIntegracao = `${codigoBase}.${i + 1}`;
+        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
 
+        if (cadastro.ok) break;
+
+        const msgErro = String(cadastro.error || '');
+        const ehJaCadastrado       = /já cadastrado|Client-102/i.test(msgErro);
+        const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
+        const ehCodigoDuplicado    = /código.*já.*utilizado|Client-143/i.test(msgErro);
+
+        // Se o código já existe na Omie, tenta sincronizar primeiro
         if (ehJaCadastrado) {
           cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `sem-cadastro:${id}`);
+          if (cadastro.ok) break;
         }
 
-        if (!cadastro.ok && ehDescricaoDuplicada) {
-          const descricaoComCodigo = descricaoProduto.includes(codigoIntegracao)
-            ? descricaoProduto
-            : `${descricaoProduto} - ${codigoIntegracao}`;
-          cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoComCodigo);
+        // Se código ou descrição já existe → avança o número base inteiro
+        // CODPROV - 00046 → CODPROV - 00047, e o item vira CODPROV - 00047.1
+        if (ehJaCadastrado || ehDescricaoDuplicada || ehCodigoDuplicado) {
+          baseNumero += 1;
+          // Pula números que já existam nas tabelas locais/Omie
+          while (await baseExiste(baseNumero)) baseNumero += 1;
+          codigoBase = montarCodigoBase(baseNumero);
+          // Persiste o novo código base na tabela de origem
+          await pool.query(
+            `UPDATE compras.compras_sem_cadastro
+             SET produto_codigo = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [codigoBase, id]
+          );
+          console.log(`[Compras Sem Cadastro] Código avançado para ${codigoBase} (tent ${tent + 1})`);
+          continue; // tenta novamente com o novo código
         }
 
-        if (!cadastro.ok) {
-          return res.status(500).json({
-            ok: false,
-            error: cadastro.error || 'Erro ao cadastrar produto na Omie',
-            resultados
-          });
-        }
+        // Qualquer outro erro — interrompe e retorna erro ao front
+        break;
+      }
+
+      if (!cadastro?.ok) {
+        return res.status(500).json({
+          ok: false,
+          error: cadastro?.error || 'Erro ao cadastrar produto na Omie',
+          resultados
+        });
       }
 
       resultados.push({
@@ -19765,7 +19824,7 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
 
     return res.json({
       ok: true,
-      base_codigo: baseCodigo,
+      base_codigo: codigoBase,
       itens: resultados
     });
   } catch (err) {
