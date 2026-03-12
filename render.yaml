@@ -5,14 +5,17 @@
 
 services:
 
-  # ── Cron Job: Sincronização diária de Recebimentos NF-e ──────────────────
+  # ── Cron Job: Sincronização Automática via Agendamento ────────────────────
+  # Roda a cada 5 minutos. O script sync_agendamento.js decide sozinho se é
+  # hora de executar lendo "proxima_execucao" em public.agendamento_sincronizacao.
+  # Isso permite qualquer horário configurado na página "Agendamento Automático".
   - type: cron
-    name: sync-recebimentos-nfe
+    name: sync-agendamento-omie
     runtime: node
     region: oregon           # mesma região do banco Postgres no Render
-    schedule: "0 6 * * *"   # Todo dia às 06:00 UTC = 03:00 horário de Brasília (UTC-3)
+    schedule: "*/5 * * * *"  # A cada 5 min — o script decide se executa via proxima_execucao
     buildCommand: npm install --production
-    startCommand: node cron/sync_recebimentos_nfe.js
+    startCommand: node cron/sync_agendamento.js
     envVars:
       - key: DATABASE_URL
         value: postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require
