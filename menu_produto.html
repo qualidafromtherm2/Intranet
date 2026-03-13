@@ -2057,32 +2057,73 @@
             </div>
 
             <!-- Calendário Mensal de Reservas -->
-            <div class="content-section" style="margin-top: 20px;position:relative;">
-              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+            <div class="content-section" style="margin-top: 20px;">
+              <!-- Título: fica acima do layout -->
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <span class="content-section-title" style="display:flex;align-items:center;gap:8px;">
                   <i class="fa-solid fa-calendar-days" style="color:#60a5fa;"></i>
                   Calendário de Reservas
-                  <button id="agendaToggleMinhasReunioes" type="button" class="content-button" title="Mostrar somente minhas reuniões" style="padding:6px 8px;display:inline-flex;align-items:center;gap:6px;">
+                </span>
+              </div>
+
+              <!-- Layout: calendário à esquerda + painel lateral à direita -->
+              <div class="agenda-cal-layout">
+
+                <!-- Grade do calendário -->
+                <div class="agenda-cal-main" style="position:relative;">
+                  <div id="agendaCalendarioGrid" class="agenda-calendario-grid"></div>
+                  <div id="agendaProcessingOverlay" class="agenda-processing-overlay" style="display:none;">
+                    <div class="agenda-processing-spinner" aria-hidden="true"></div>
+                    <div class="agenda-processing-text">Processando...</div>
+                  </div>
+                </div>
+
+                <!-- Painel lateral: controles de mês + legenda -->
+                <div class="agenda-cal-sidebar">
+
+                  <!-- Botão filtro somente minhas reuniões -->
+                  <button id="agendaToggleMinhasReunioes" type="button" class="content-button" title="Mostrar somente minhas reuniões" style="width:100%;padding:8px 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;">
                     <i class="fa-solid fa-user-check"></i>
                     <span style="font-size:12px;">Somente minhas</span>
                   </button>
-                </div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <button id="agendaMesAnterior" class="content-button" type="button" style="padding:6px 10px;">
-                    <i class="fa-solid fa-chevron-left"></i>
-                  </button>
-                  <div id="agendaMesTitulo" style="font-weight:700;color:var(--content-title-color);min-width:170px;text-align:center;">-</div>
-                  <button id="agendaMesProximo" class="content-button" type="button" style="padding:6px 10px;">
-                    <i class="fa-solid fa-chevron-right"></i>
-                  </button>
-                </div>
-              </div>
 
-              <div id="agendaCalendarioGrid" class="agenda-calendario-grid"></div>
+                  <!-- Navegador de mês -->
+                  <div class="agenda-sidebar-nav">
+                    <button id="agendaMesAnterior" class="content-button" type="button" style="padding:6px 10px;">
+                      <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <div id="agendaMesTitulo" style="font-weight:700;color:var(--content-title-color);font-size:13px;text-align:center;line-height:1.3;">-</div>
+                    <button id="agendaMesProximo" class="content-button" type="button" style="padding:6px 10px;">
+                      <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                  </div>
 
-              <div id="agendaProcessingOverlay" class="agenda-processing-overlay" style="display:none;">
-                <div class="agenda-processing-spinner" aria-hidden="true"></div>
-                <div class="agenda-processing-text">Processando...</div>
+                  <!-- Legenda de ícones -->
+                  <div class="agenda-sidebar-legenda">
+                    <div class="agenda-legenda-titulo">Legenda</div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-chalkboard-user" style="color:#a78bfa;"></i>
+                      Auditório
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-handshake" style="color:#6ee7b7;"></i>
+                      Sala de reunião
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-note-sticky" style="color:#fde68a;"></i>
+                      Lembrete
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-mug-hot" style="color:#fbbf24;"></i>
+                      Com café
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-calendar-check" style="color:#34d399;"></i>
+                      Você é participante
+                    </div>
+                  </div>
+
+                </div>
               </div>
             </div>
 
@@ -2098,9 +2139,18 @@
             <div id="agendaEtapaTipo" class="agenda-modal-etapa">
               <div style="font-size:13px;color:var(--inactive-color);margin-bottom:10px;">Escolha o tipo de reserva:</div>
               <div style="display:grid;gap:10px;">
-                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="auditorio">Reservar auditório</button>
-                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="sala_reuniao">Reservar sala de reunião</button>
-                <button type="button" class="agenda-opcao-btn" id="agendaAbrirLembreteBtn">Lembrete</button>
+                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="auditorio">
+                  <i class="fa-solid fa-chalkboard-user agenda-opcao-btn-icon"></i>
+                  Reservar auditório
+                </button>
+                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="sala_reuniao">
+                  <i class="fa-solid fa-handshake agenda-opcao-btn-icon"></i>
+                  Reservar sala de reunião
+                </button>
+                <button type="button" class="agenda-opcao-btn" id="agendaAbrirLembreteBtn">
+                  <i class="fa-solid fa-note-sticky agenda-opcao-btn-icon"></i>
+                  Lembrete
+                </button>
               </div>
             </div>
 
@@ -2165,8 +2215,25 @@
               </div>
 
               <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;">
-                <button id="agendaVoltarTipo" type="button" class="content-button">Voltar</button>
+                <div style="display:flex;gap:8px;">
+                  <button id="agendaVoltarTipo" type="button" class="content-button">Voltar</button>
+                  <button id="agendaExcluirReserva" type="button" class="content-button" style="display:none;background:rgba(220,38,38,.15);border:1px solid rgba(220,38,38,.45);color:#fca5a5;">
+                    <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Excluir
+                  </button>
+                </div>
                 <button id="agendaSalvarReserva" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">Reservar</button>
+              </div>
+
+              <!-- Overlay de confirmação de exclusão -->
+              <div id="agendaExcluirConfirm" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
+                <i class="fa-solid fa-triangle-exclamation" style="font-size:30px;color:#f87171;"></i>
+                <p id="agendaExcluirConfirmTexto" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaExcluirConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
+                  <button id="agendaExcluirConfirmSim" type="button" class="content-button" style="background:#dc2626;color:#fff;border:none;padding:8px 18px;">
+                    <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Sim, excluir
+                  </button>
+                </div>
               </div>
             </div>
           </div>

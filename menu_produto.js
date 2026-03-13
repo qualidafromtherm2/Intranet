@@ -21823,27 +21823,35 @@ window.salvarItensAnaliseCadastro = async function() {
   const tableSource = String(window.analiseCadastroTableSource || 'solicitacao_compras').trim();
 
   const itens = Array.isArray(window.analiseCadastroItens) ? window.analiseCadastroItens : [];
-  const descricaoFinal = itens.map((item) => {
-    const desc = String(item.descricao || 'vazio').trim() || 'vazio';
-    const qtd = String(item.quantidade || 'vazio').trim() || 'vazio';
-    return `${desc}-${qtd}`;
-  }).join(';');
+  if (!itens.length) return;
 
   try {
-    const endpoint = tableSource === 'compras_sem_cadastro'
-      ? `/api/compras/sem-cadastro/${itemId}`
-      : `/api/compras/solicitacoes/${itemId}`;
+    // Salvar cada item individualmente no banco usando seu próprio ID
+    for (const item of itens) {
+      const rowId = item.item_origem_id || itemId;
+      const endpoint = tableSource === 'compras_sem_cadastro'
+        ? `/api/compras/sem-cadastro/${rowId}`
+        : `/api/compras/solicitacoes/${rowId}`;
 
-    const resp = await fetch(endpoint, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ produto_descricao: descricaoFinal })
-    });
+      const payload = {};
+      if (typeof item.descricao !== 'undefined') {
+        payload.produto_descricao = String(item.descricao || '').trim();
+      }
+      if (typeof item.quantidade !== 'undefined' && item.quantidade !== null && item.quantidade !== '') {
+        payload.quantidade = item.quantidade;
+      }
 
-    if (!resp.ok) {
-      const errData = await resp.json();
-      throw new Error(errData.error || 'Erro ao salvar');
+      const resp = await fetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro ao salvar item "${item.descricao}"`);
+      }
     }
 
     window.analiseCadastroDirty = false;
@@ -21907,7 +21915,38 @@ window.criarItensOmieAnaliseCadastro = async function() {
     });
 
     if (!resp.ok) {
-      const errData = await resp.json();
+      const errData = await resp.json().catch(() => ({}));
+
+      // Descrição duplicada: oferece ao user usar o código já cadastrado na Omie
+      if (resp.status === 422 && errData.codigo_existente) {
+        const itemIndexOriginal = indicesOriginaisCodprov[errData.item_index];
+        const itemAlvo = itens[itemIndexOriginal];
+        const confirmar = confirm(
+          `${errData.error}\n\nDeseja usar o código "${errData.codigo_existente}" para o item "${itemAlvo?.descricao || ''}"?`
+        );
+        if (confirmar) {
+          // Atualiza o modal
+          if (itemAlvo) {
+            itemAlvo.produto_codigo = errData.codigo_existente;
+          }
+          window.analiseCadastroItens = itens;
+          // Persiste o novo código no banco
+          const rowId = itemAlvo?.item_origem_id || itemId;
+          const putEndpoint = tableSource === 'compras_sem_cadastro'
+            ? `/api/compras/sem-cadastro/${rowId}`
+            : `/api/compras/solicitacoes/${rowId}`;
+          await fetch(putEndpoint, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ produto_codigo: errData.codigo_existente })
+          });
+          renderizarListaItensAnaliseCadastro();
+          alert(`Código "${errData.codigo_existente}" aplicado ao item. Você pode agora tentar cadastrar novamente.`);
+        }
+        return;
+      }
+
       throw new Error(errData.error || 'Erro ao cadastrar itens na Omie');
     }
 
@@ -21954,10 +21993,37 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     return;
   }
 
+  // Para sem-cadastro: varredura automática — resolve codigo_omie para itens que ainda não têm
   if (tableSource === 'compras_sem_cadastro') {
-    const semCodigoOmie = itens.find(i => !i.codigo_omie);
-    if (semCodigoOmie) {
-      alert('Todos os itens precisam ter código Omie antes de criar a requisição.');
+    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo);
+    if (itensSemOmie.length) {
+      try {
+        const respResolver = await fetch('/api/compras/resolver-codigos-omie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ codigos: itensSemOmie.map((i) => i.produto_codigo) })
+        });
+        if (respResolver.ok) {
+          const { resultado } = await respResolver.json();
+          // Popula codigo_omie nos itens encontrados
+          for (const item of itens) {
+            if (!item.codigo_omie && item.produto_codigo && resultado[item.produto_codigo]) {
+              item.codigo_omie = resultado[item.produto_codigo];
+            }
+          }
+          window.analiseCadastroItens = itens;
+        }
+      } catch (e) {
+        console.warn('[ANALISE CADASTRO] Erro na varredura de códigos Omie:', e);
+      }
+    }
+
+    // Após varredura, verifica se ainda há itens sem codigo_omie
+    const aindaSemOmie = itens.filter((i) => !i.codigo_omie);
+    if (aindaSemOmie.length) {
+      const nomes = aindaSemOmie.map((i) => `"${i.descricao || i.produto_codigo || '?'}"`).join(', ');
+      alert(`Os seguintes itens não foram encontrados na Omie e precisam ser cadastrados antes:\n${nomes}`);
       return;
     }
   }
@@ -40367,6 +40433,7 @@ let agendaLembreteDestinatariosSelecionados = [];
 let agendaLembreteVisualizandoId = null;
 let agendaReservaEditandoId = null;
 let agendaReservaEditandoData = null;
+let agendaReservaEditandoRepetir = false; // true quando a reserva em edição é recorrente
 let agendaPodeEditarAtual = true;
 let agendaUiInicializada = false;
 let agendaProcessandoContador = 0;
@@ -40577,6 +40644,12 @@ function atualizarPermissaoEdicaoAgenda(podeEditar) {
       btnSalvar.style.display = 'none';
     }
   }
+
+  // Botão Excluir: visível somente quando é uma edição e o usuário pode editar
+  const btnExcluir = document.getElementById('agendaExcluirReserva');
+  if (btnExcluir) {
+    btnExcluir.style.display = (agendaPodeEditarAtual && agendaReservaEditandoId) ? '' : 'none';
+  }
 }
 
 function renderAgendaCalendarioMensal() {
@@ -40644,45 +40717,78 @@ function renderAgendaCalendarioMensal() {
       : reservasDiaRaw;
 
     const lembretesDia = Array.isArray(agendaLembretesPorDia[dataIso]) ? agendaLembretesPorDia[dataIso] : [];
-    const reservasHtml = reservasDia.length > 0
+
+    // ── Chips coloridos por tipo: Auditório (roxo) | Sala (verde) | Lembrete (amarelo) ──
+    // Auditório → is-auditorio | Sala de reunião → is-sala | Lembrete → is-lembrete
+    const MAX_CHIPS = 3;
+    const MAX_LEMBRETES = 2;
+
+    // Chips de reservas
+    const chipsReservas = reservasDia.slice(0, MAX_CHIPS).map((reserva) => {
+      const participantesReserva = Array.isArray(reserva?.participantes)
+        ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
+
+      // Classe de cor pelo tipo da sala
+      const ehAuditorio = String(reserva?.tipo || '').toLowerCase().includes('audit');
+      const classTipo = ehAuditorio ? 'is-auditorio' : 'is-sala';
+      const classesReserva = `agenda-cal-reserva-item ${classTipo}`;
+
+      // Ícone representativo
+      const iconeRoom = ehAuditorio
+        ? '<i class="fa-solid fa-chalkboard-user agenda-chip-room-icon" title="Auditório"></i>'
+        : '<i class="fa-solid fa-handshake agenda-chip-room-icon" title="Sala de reunião"></i>';
+
+      // Hora no formato HH/HH
+      const horaInicio = String(reserva?.inicio || '').slice(0, 2);
+      const horaFim    = String(reserva?.fim    || '').slice(0, 2);
+      const horaHtml = horaInicio
+        ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}/${escapeHtml(horaFim || '--')}</span>`
+        : '';
+
+      // Café e convocado apenas quando aplicável
+      const cafeHtml = reserva?.cafe
+        ? '<i class="fa-solid fa-mug-hot agenda-chip-cafe-icon" title="Com café"></i>'
+        : '';
+      const convocadoHtml = usuarioConvocado
+        ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>'
+        : '';
+
+      const tituloChip = escapeHtml(`${reserva.tipo} ${reserva.inicio}–${reserva.fim}`);
+      return `
+        <div class="${classesReserva}"
+             data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}"
+             data-agenda-reserva-date="${escapeHtml(dataIso)}"
+             title="${tituloChip}">
+          ${iconeRoom}${horaHtml}${cafeHtml}${convocadoHtml}
+        </div>
+      `;
+    });
+
+    // Chips de lembretes — linha amarela com letra escura
+    const chipsLembretes = lembretesDia.slice(0, MAX_LEMBRETES).map((lembrete) => `
+      <div class="agenda-cal-reserva-item is-lembrete"
+           data-agenda-lembrete-id="${escapeHtml(String(lembrete.id || ''))}"
+           data-agenda-lembrete-date="${escapeHtml(dataIso)}"
+           title="${escapeHtml(lembrete.texto || 'Lembrete')}">
+        <i class="fa-solid fa-note-sticky agenda-chip-room-icon"></i>
+        <span class="agenda-chip-hora" style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml((lembrete.texto || 'Lembrete').slice(0, 14))}</span>
+      </div>
+    `);
+
+    const totalExtras = Math.max(0, reservasDia.length - MAX_CHIPS) + Math.max(0, lembretesDia.length - MAX_LEMBRETES);
+    const reservasHtml = (chipsReservas.length > 0 || chipsLembretes.length > 0)
       ? `
         <div class="agenda-cal-reservas">
-          ${reservasDia.slice(0, 2).map((reserva) => {
-            const participantesReserva = Array.isArray(reserva?.participantes)
-              ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
-              : [];
-            const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
-            const marcadorConvocado = usuarioConvocado
-              ? '<i class="fa-solid fa-calendar-check agenda-convocado-icon" title="Você está convocado"></i>'
-              : '';
-            const marcadorCafe = reserva?.cafe
-              ? '<i class="fa-solid fa-mug-hot agenda-cafe-icon" title="Com café"></i>'
-              : '';
-            const classesReserva = `agenda-cal-reserva-item${usuarioConvocado ? ' is-convocado' : ''}`;
-            return `
-            <div class="${classesReserva}" data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}" data-agenda-reserva-date="${escapeHtml(dataIso)}" title="${escapeHtml(`${reserva.tipo} ${reserva.inicio}-${reserva.fim}`)}">
-              ${marcadorCafe}
-              ${marcadorConvocado}
-              ${escapeHtml(`${reserva.tipo} ${reserva.inicio}-${reserva.fim}`)}
-            </div>
-          `;
-          }).join('')}
-          ${reservasDia.length > 2 ? `<div class="agenda-cal-meta">+${reservasDia.length - 2} reserva(s)</div>` : ''}
+          ${chipsReservas.join('')}
+          ${chipsLembretes.join('')}
+          ${totalExtras > 0 ? `<div class="agenda-cal-meta">+${totalExtras}</div>` : ''}
         </div>
       `
       : '<div class="agenda-cal-meta">Clique para reservar</div>';
 
-    const lembretesHtml = lembretesDia.length > 0
-      ? `
-        <div class="agenda-cal-lembretes" title="Lembretes do dia">
-          ${lembretesDia.slice(0, 4).map((lembrete) => `
-            <span class="agenda-cal-lembrete-item" data-agenda-lembrete-id="${escapeHtml(String(lembrete.id || ''))}" data-agenda-lembrete-date="${escapeHtml(dataIso)}" title="${escapeHtml(lembrete.texto || 'Lembrete')}">
-              <i class="fa-solid fa-note-sticky"></i>
-            </span>
-          `).join('')}
-        </div>
-      `
-      : '';
+    const lembretesHtml = '';
 
     htmlDias += `
       <button type="button" class="${classes.join(' ')}" data-agenda-date="${dataIso}">
@@ -40835,6 +40941,7 @@ function resetarFormularioAgendaReserva() {
   agendaTipoReservaSelecionado = null;
   agendaReservaEditandoId = null;
   agendaReservaEditandoData = null;
+  agendaReservaEditandoRepetir = false;
   agendaPodeEditarAtual = true;
 
   const tituloModal = document.getElementById('agendaModalTitulo');
@@ -40919,6 +41026,7 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
 
   agendaReservaEditandoId = reserva.id;
   agendaReservaEditandoData = dataIso;
+  agendaReservaEditandoRepetir = !!reserva.repetir;
 
   const temaInput = document.getElementById('agendaTemaReuniao');
   const repetirSelect = document.getElementById('agendaRepetirReuniao');
@@ -41240,6 +41348,30 @@ async function salvarLembreteAgenda() {
   }
 }
 
+// ── Exclui a reserva em edição via DELETE /api/rh/reservas/:id ───────────
+async function excluirReservaAgenda() {
+  if (!agendaReservaEditandoId) return;
+  if (!usuarioAutenticadoAgenda()) {
+    alert('Você precisa estar logado para excluir uma reserva.');
+    return;
+  }
+  try {
+    const resp = await fetch(
+      `/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`,
+      { method: 'DELETE', credentials: 'include' }
+    );
+    if (!resp.ok) {
+      const erro = await resp.json().catch(() => ({}));
+      throw new Error(erro.error || `Erro ${resp.status}`);
+    }
+    fecharModalAgendaReserva();
+    await carregarAgendaMesCompleto();
+    renderAgendaCalendarioMensal();
+  } catch (err) {
+    alert(`Não foi possível excluir a reserva: ${err.message}`);
+  }
+}
+
 function initAgendaReservasUI() {
   if (agendaUiInicializada) {
     renderAgendaCalendarioMensal();
@@ -41261,6 +41393,9 @@ function initAgendaReservasUI() {
   const btnSalvarLembrete = document.getElementById('agendaSalvarLembrete');
   const btnFechar = document.getElementById('agendaFecharModal');
   const btnVoltarTipo = document.getElementById('agendaVoltarTipo');
+  const btnExcluir = document.getElementById('agendaExcluirReserva');
+  const btnExcluirConfirmSim = document.getElementById('agendaExcluirConfirmSim');
+  const btnExcluirConfirmNao = document.getElementById('agendaExcluirConfirmNao');
   const btnSalvar = document.getElementById('agendaSalvarReserva');
   const repetirSelect = document.getElementById('agendaRepetirReuniao');
   const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
@@ -41377,6 +41512,39 @@ function initAgendaReservasUI() {
     });
   }
   if (btnVoltarTipo) btnVoltarTipo.addEventListener('click', voltarParaEtapaTipoAgenda);
+
+  // Botão Excluir: abre o overlay de confirmação dentro do modal
+  if (btnExcluir) {
+    btnExcluir.addEventListener('click', () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      const texto = document.getElementById('agendaExcluirConfirmTexto');
+      if (!overlay || !texto) return;
+      if (agendaReservaEditandoRepetir) {
+        texto.textContent = 'Esta é uma reserva recorrente. Excluir irá remover esta reunião e todas as réplicas futuras da série. Deseja continuar?';
+      } else {
+        texto.textContent = 'Deseja excluir esta reserva? Esta ação não pode ser desfeita.';
+      }
+      overlay.style.display = 'flex';
+    });
+  }
+  if (btnExcluirConfirmNao) {
+    btnExcluirConfirmNao.addEventListener('click', () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      if (overlay) overlay.style.display = 'none';
+    });
+  }
+  if (btnExcluirConfirmSim) {
+    btnExcluirConfirmSim.addEventListener('click', async () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      if (overlay) overlay.style.display = 'none';
+      agendaSetProcessando(true);
+      try {
+        await excluirReservaAgenda();
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
   if (btnSalvar) {
     btnSalvar.addEventListener('click', async () => {
       agendaSetProcessando(true);

@@ -1880,7 +1880,7 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao, produto_descricao } = req.body || {};
+    const { status, prazo_estipulado, quem_recebe, quantidade, grupo_requisicao, retorno_cotacao, produto_descricao, produto_codigo } = req.body || {};
     
     const allowedStatus = [
       'aguardando aprovação',
@@ -1956,6 +1956,11 @@ app.put('/api/compras/solicitacoes/:id', express.json(), async (req, res) => {
     if (typeof produto_descricao !== 'undefined') {
       fields.push(`produto_descricao = $${idx++}`);
       values.push(produto_descricao || null);
+    }
+
+    if (typeof produto_codigo !== 'undefined') {
+      fields.push(`produto_codigo = $${idx++}`);
+      values.push(produto_codigo || null);
     }
     
     if (!fields.length) return res.status(400).json({ error: 'Nada para atualizar' });
@@ -2379,12 +2384,21 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
           continue;
         }
 
-        // Descrição duplicada: avisa o usuário para corrigir — não auto-corrige
+        // Descrição duplicada: busca o código já cadastrado e oferece ao usuário
         if (ehDescricaoDuplicada) {
+          let codigoExistente = null;
+          try {
+            const { rows: rowsDesc } = await pool.query(
+              `SELECT codigo FROM public.produtos_omie WHERE LOWER(TRIM(descricao)) = LOWER(TRIM($1)) LIMIT 1`,
+              [descricaoProduto]
+            );
+            if (rowsDesc.length > 0) codigoExistente = rowsDesc[0].codigo;
+          } catch (e) { /* ignora erro na busca */ }
           return res.status(422).json({
             ok: false,
-            error: `Descrição duplicada: a descrição informada para o item ${i + 1} já está sendo usada por outro produto na Omie. Por favor, altere a descrição do item antes de criar.`,
+            error: `A descrição do item ${i + 1} já está cadastrada na Omie${codigoExistente ? ` com o código "${codigoExistente}"` : ''}. Deseja usar este código?`,
             item_index: i,
+            codigo_existente: codigoExistente,
             codigo_integracao: codigoIntegracao,
             resultados
           });
@@ -2789,6 +2803,45 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas PUT erro:', err);
     return res.status(500).json({ error: 'Falha ao atualizar reserva RH' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/rh/reservas/:id
+// Exclui uma reserva (ou toda a série se for recorrente, pois é um único registro no BD).
+// Somente o criador pode excluir.
+app.delete('/api/rh/reservas/:id', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) {
+    return res.status(401).json({ error: 'Usuário não autenticado' });
+  }
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT criado_por FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      [reservaId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Reserva não encontrada' });
+    }
+    const criador = String(rows[0].criado_por || '').trim().toLowerCase();
+    const userNorm = String(userLogado).trim().toLowerCase();
+    if (!userNorm || criador !== userNorm) {
+      return res.status(403).json({ error: 'Somente o criador pode excluir esta reserva' });
+    }
+
+    // Cascade apaga participantes automaticamente (ON DELETE CASCADE)
+    await client.query(`DELETE FROM rh.reservas_ambientes WHERE id = $1`, [reservaId]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] /api/rh/reservas DELETE erro:', err);
+    return res.status(500).json({ error: 'Falha ao excluir reserva' });
   } finally {
     client.release();
   }
@@ -19569,9 +19622,9 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'ID inválido' });
     }
     
-    const { status, produto_descricao, observacao_reprovacao, usuario_comentario } = req.body || {};
-    if (!status && typeof produto_descricao === 'undefined' && !observacao_reprovacao) {
-      return res.status(400).json({ ok: false, error: 'Informe status, produto_descricao ou observacao_reprovacao' });
+    const { status, produto_descricao, produto_codigo, quantidade, observacao_reprovacao, usuario_comentario } = req.body || {};
+    if (!status && typeof produto_descricao === 'undefined' && typeof produto_codigo === 'undefined' && typeof quantidade === 'undefined' && !observacao_reprovacao) {
+      return res.status(400).json({ ok: false, error: 'Informe status, produto_descricao, quantidade ou observacao_reprovacao' });
     }
     
     const sets = [];
@@ -19584,6 +19637,14 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     if (typeof produto_descricao !== 'undefined') {
       sets.push(`produto_descricao = $${idx++}`);
       values.push(produto_descricao);
+    }
+    if (typeof produto_codigo !== 'undefined') {
+      sets.push(`produto_codigo = $${idx++}`);
+      values.push(produto_codigo);
+    }
+    if (typeof quantidade !== 'undefined') {
+      sets.push(`quantidade = $${idx++}`);
+      values.push(quantidade);
     }
     if (observacao_reprovacao) {
       sets.push(`observacao_reprovacao = $${idx++}`);
@@ -19613,6 +19674,12 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
     if (typeof produto_descricao !== 'undefined') {
       console.log(`[Compras Sem Cadastro] produto_descricao atualizado: ID ${id}`);
     }
+    if (typeof produto_codigo !== 'undefined') {
+      console.log(`[Compras Sem Cadastro] produto_codigo atualizado: ID ${id} -> ${produto_codigo}`);
+    }
+    if (typeof quantidade !== 'undefined') {
+      console.log(`[Compras Sem Cadastro] quantidade atualizada: ID ${id} -> ${quantidade}`);
+    }
     if (observacao_reprovacao) {
       console.log(`[Compras Sem Cadastro] observacao_reprovacao registrada: ID ${id}`);
     }
@@ -19626,6 +19693,39 @@ app.put('/api/compras/sem-cadastro/:id', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[Compras Sem Cadastro] Erro ao atualizar:', err);
     res.status(500).json({ ok: false, error: err.message || 'Erro ao atualizar item' });
+  }
+});
+
+// POST /api/compras/resolver-codigos-omie - Varredura em lote: retorna codigo_produto (Omie) para cada produto_codigo informado
+app.post('/api/compras/resolver-codigos-omie', express.json(), async (req, res) => {
+  try {
+    const { codigos } = req.body || {};
+    if (!Array.isArray(codigos) || !codigos.length) {
+      return res.json({ ok: true, resultado: {} });
+    }
+
+    // Remove duplicatas e filtra valores válidos
+    const codigosUnicos = [...new Set(codigos.map((c) => String(c || '').trim()).filter(Boolean))];
+
+    const { rows } = await pool.query(
+      `SELECT codigo, codigo_produto
+       FROM public.produtos_omie
+       WHERE codigo = ANY($1::text[])
+          OR codigo_produto_integracao = ANY($1::text[])`,
+      [codigosUnicos]
+    );
+
+    // Monta mapa: produto_codigo → codigo_produto (numérico Omie)
+    const resultado = {};
+    for (const row of rows) {
+      if (row.codigo) resultado[row.codigo] = row.codigo_produto;
+    }
+
+    console.log(`[ResolverCodigos] Resolvidos ${Object.keys(resultado).length}/${codigosUnicos.length} códigos`);
+    res.json({ ok: true, resultado });
+  } catch (err) {
+    console.error('[ResolverCodigos] Erro:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -19811,12 +19911,21 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
           continue;
         }
 
-        // Descrição duplicada: avisa o usuário para corrigir — não auto-corrige
+        // Descrição duplicada: busca o código já cadastrado e oferece ao usuário
         if (ehDescricaoDuplicada) {
+          let codigoExistente = null;
+          try {
+            const { rows: rowsDesc } = await pool.query(
+              `SELECT codigo FROM public.produtos_omie WHERE LOWER(TRIM(descricao)) = LOWER(TRIM($1)) LIMIT 1`,
+              [descricaoProduto]
+            );
+            if (rowsDesc.length > 0) codigoExistente = rowsDesc[0].codigo;
+          } catch (e) { /* ignora erro na busca */ }
           return res.status(422).json({
             ok: false,
-            error: `Descrição duplicada: a descrição informada para o item ${i + 1} já está sendo usada por outro produto na Omie. Por favor, altere a descrição do item antes de criar.`,
+            error: `A descrição do item ${i + 1} já está cadastrada na Omie${codigoExistente ? ` com o código "${codigoExistente}"` : ''}. Deseja usar este código?`,
             item_index: i,
+            codigo_existente: codigoExistente,
             codigo_integracao: codigoIntegracao,
             resultados
           });
