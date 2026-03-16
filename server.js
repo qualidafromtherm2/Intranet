@@ -22267,12 +22267,12 @@ app.get('/api/compras/requisicoes', async (req, res) => {
   }
 });
 
-// GET /api/compras/pedidos-compra - Lista pedidos de compra com etapa 10
+// GET /api/compras/pedidos-compra - Lista pedidos de compra (inativo=false, Etapa_NF IS NULL)
 app.get('/api/compras/pedidos-compra', async (req, res) => {
   try {
-    // Objetivo: Retornar pedidos da tabela compras.pedidos_omie com c_etapa = '10'
+    // Objetivo: Retornar pedidos da tabela compras.pedidos_omie com inativo=false e Etapa_NF nulo
     // Agrupar por c_numero e incluir fornecedor e produtos
-    console.log('[Compras/PedidosCompra] Iniciando busca de pedidos de compra...');
+    console.log('[Compras/PedidosCompra] Iniciando busca de pedidos de compra (inativo=false, Etapa_NF IS NULL)...');
     
     // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
     const { dataInicio: diPC, dataFim: dfPC } = req.query;
@@ -22324,9 +22324,8 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
         ORDER BY src.created_at DESC NULLS LAST
         LIMIT 1
       ) origem ON TRUE
-      WHERE po.c_etapa = '10'
-        AND (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''${whereDataPC}
+      WHERE COALESCE(po.inativo, FALSE) = FALSE
+        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')${whereDataPC}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
@@ -22407,13 +22406,11 @@ app.get('/api/compras/pedidos-compra', async (req, res) => {
 // ========================================
 /**
  * GET /api/compras/compras-realizadas
- * Retorna compras realizadas da tabela compras.pedidos_omie com c_etapa = '15'
- * Agrupa por c_numero (4 dígitos: 2232, 2205, etc.)
- * Inclui fornecedor e produtos
+ * Retorna compras da tabela compras.pedidos_omie com inativo=false e Etapa_NF nulo
  */
 app.get('/api/compras/compras-realizadas', async (req, res) => {
   try {
-    console.log('[Compras/ComprasRealizadas] Listando compras realizadas (c_etapa = 15)...');
+    console.log('[Compras/ComprasRealizadas] Listando compras realizadas (inativo=false, Etapa_NF IS NULL)...');
 
     // Filtro de data opcional via query params (dataInicio / dataFim) — filtra por d_inc_data
     const { dataInicio: diCR, dataFim: dfCR } = req.query;
@@ -22466,9 +22463,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         ORDER BY src.created_at DESC NULLS LAST
         LIMIT 1
       ) origem ON TRUE
-      WHERE po.c_etapa = '15'
-        AND (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') = ''${whereDataCR}
+      WHERE COALESCE(po.inativo, FALSE) = FALSE
+        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')${whereDataCR}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
