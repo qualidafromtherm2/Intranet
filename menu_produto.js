@@ -8341,23 +8341,9 @@ const ulList     = document.getElementById('listaProdutosList');
   codeFilter.addEventListener('input', applyResumoFilters);
 
 
-  // pega referências ao botão e ao painel de filtros
+  // pega referências ao botão e ao overlay modal de filtros
 const filterBtn   = document.getElementById('filterBtn');
-const filterPanel = document.getElementById('filterPanel');
-
-filterBtn.addEventListener('click', e => {
-  e.preventDefault();
-  // alterna visibilidade
-  const isOpen = filterPanel.classList.contains('is-open');
-  if (isOpen) {
-    filterPanel.classList.remove('is-open');
-    filterPanel.style.display = 'none';
-    return;
-  }
-
-  filterPanel.classList.add('is-open');
-  filterPanel.style.display = 'flex';
-});
+// O evento de clique do filterBtn é gerenciado pelo filtro_produto.js (initFiltros)
 
 function normalizaNumeroParaBR(val) {
   if (val === null || val === undefined || val === '') return '0,00';
@@ -32828,7 +32814,7 @@ function toggleGraficoHistorico() {
     if (inpIni && !inpIni.value) inpIni.value = fmt(ini);
     if (inpFim && !inpFim.value) inpFim.value = fmt(hoje);
     carregarGraficoHistorico();
-    carregarOpcoesFiltroDepto().then(() => carregarGraficoPizza());
+    carregarGraficoPizza();
   } else {
     // Fecha painel e restaura a view anterior
     if (painel) painel.style.display = 'none';
@@ -32976,35 +32962,7 @@ window.graficoPeriodoRapido = graficoPeriodoRapido;
 let _graficoPizzaInstance = null;
 let _pizzaGrupoAtivo = 'departamento'; // 'departamento' | 'centro_custo'
 
-// Objetivo: Carregar e renderizar gráfico de pizza com os dados por agrupamento
-// Objetivo: Carrega opções do listbox de departamentos a partir de configuracoes.departamento
-async function carregarOpcoesFiltroDepto() {
-  const lb = document.getElementById('graficoDeptListbox');
-  if (!lb || lb.options.length > 0) return; // já carregado
-  try {
-    const resp = await fetch('/api/compras/departamentos', { credentials: 'include' });
-    if (!resp.ok) return;
-    const { departamentos } = await resp.json();
-    lb.innerHTML = '';
-    (departamentos || []).forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d.nome;
-      opt.textContent = d.nome;
-      opt.selected = true; // padrão: todos selecionados
-      lb.appendChild(opt);
-    });
-  } catch(e) { console.error('[FiltroDepto] Erro:', e); }
-}
-
-// Seleciona todos os departamentos no listbox e recarrega o gráfico
-function graficoDeptoSelecionarTodos() {
-  const lb = document.getElementById('graficoDeptListbox');
-  if (!lb) return;
-  Array.from(lb.options).forEach(o => o.selected = true);
-  carregarGraficoPizza();
-}
-
-// Objetivo: Gráfico de barras verticais empilhadas — eixo X = 4 status fixos, camadas = departamento(CC)
+// Objetivo: Gráfico de barras verticais por status de compra
 async function carregarGraficoPizza(grupo) {
   const loading = document.getElementById('graficoPizzaLoading');
   const vazio   = document.getElementById('graficoPizzaVazio');
@@ -33018,16 +32976,6 @@ async function carregarGraficoPizza(grupo) {
     if (inicio) params.set('dataInicio', inicio);
     if (fim)    params.set('dataFim', fim);
 
-    // Lê os departamentos selecionados no listbox (sem filtro se todos estiverem marcados)
-    const lb = document.getElementById('graficoDeptListbox');
-    if (lb && lb.options.length > 0) {
-      const selecionados = Array.from(lb.selectedOptions).map(o => o.value);
-      const todos        = Array.from(lb.options).map(o => o.value);
-      if (selecionados.length > 0 && selecionados.length < todos.length) {
-        params.set('departamentos', selecionados.join(','));
-      }
-    }
-
     const resp = await fetch(`/api/compras/grafico-pizza-dept-cc?${params.toString()}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha na requisição');
     const { dados } = await resp.json();
@@ -33040,76 +32988,36 @@ async function carregarGraficoPizza(grupo) {
       return;
     }
 
-    // Ordem fixa dos status no eixo X (apenas os que tiverem dados)
-    const STATUS_ORDEM = ['aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido'];
+    // Ordem fixa dos status no eixo X
+    const STATUS_ORDEM = ['Compra realizada', 'Recebido'];
     const statusUnicos = STATUS_ORDEM.filter(st => dados.some(d => d.status === st));
 
-    // Grupos = departamento (centro de custo), na ordem que chegaram do backend
-    const gruposUnicos = [...new Set(dados.map(d => d.grupo))];
-
-    // Calcula total por grupo (soma de todos os status dentro de cada grupo)
-    // Formato: R$ 12.370 (inteiro sem centavos, separador de milhar pt-BR)
-    const fmtCurto = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
-
-    const totalPorGrupo = {};
-    gruposUnicos.forEach(g => {
-      totalPorGrupo[g] = dados.filter(d => d.grupo === g).reduce((acc, d) => acc + d.total, 0);
+    // Agrega total por status (sem agrupar por departamento)
+    const totalPorStatus = {};
+    statusUnicos.forEach(st => {
+      totalPorStatus[st] = dados.filter(d => d.status === st).reduce((acc, d) => acc + d.total, 0);
     });
 
-    // Atualiza o texto de cada opção do listbox com o total do departamento
-    if (lb) {
-      Array.from(lb.options).forEach(opt => {
-        // O valor do opt é o nome exato do departamento (sem CC)
-        // O grupo no dados pode ser "Dept (CC)" ou só "Dept" — procura pelo prefixo
-        const totalDepto = dados
-          .filter(d => d.grupo === opt.value || d.grupo.startsWith(opt.value + ' ('))
-          .reduce((acc, d) => acc + d.total, 0);
-        opt.textContent = totalDepto > 0
-          ? `${opt.value}  ${fmtCurto(totalDepto)}`
-          : opt.value;
-      });
-    }
+    const totalGeral = Object.values(totalPorStatus).reduce((a, v) => a + v, 0);
 
-    // Ordena grupos: maior total primeiro (fica na base da barra), menor total por cima
-    gruposUnicos.sort((a, b) => totalPorGrupo[b] - totalPorGrupo[a]);
-
-    // Paleta de cores por grupo
-    const paletaGrupos = [
-      '#6366f1','#f59e0b','#10b981','#0ea5e9','#8b5cf6',
-      '#14b8a6','#f97316','#ec4899','#84cc16','#06b6d4',
-      '#a855f7','#3b82f6','#ef4444','#d97706','#0284c7',
-    ];
-    const coresPorGrupo = {};
-    let grupoColorIdx = 0;
-    const corDoGrupo = g => {
-      if (!coresPorGrupo[g]) { coresPorGrupo[g] = paletaGrupos[grupoColorIdx++ % paletaGrupos.length]; }
-      return coresPorGrupo[g];
+    // Cor fixa por status
+    const STATUS_COR = {
+      'Compra realizada': '#3b82f6',
+      'Recebido':         '#10b981',
     };
-    gruposUnicos.forEach(g => corDoGrupo(g));
 
-    // Extrai apenas o centro de custo (parte entre parênteses) para usar como label
-    const extrairCC = g => g.match(/\((.+)\)/)?.[1]?.trim() || g;
-
-    // Monta datasets — já ordenados: índice 0 = maior total (base), último = menor total (topo)
-    const datasets = gruposUnicos.map(g => ({
-      label: extrairCC(g),
-      data: statusUnicos.map(st => {
-        const item = dados.find(d => d.grupo === g && (d.status || 'sem status') === st);
-        return item ? item.total : 0;
-      }),
-      backgroundColor: corDoGrupo(g),
-      borderColor: '#fff',
-      borderWidth: 1,
-      borderRadius: 3,
-    }));
-
-    const totalGeral = dados.reduce((a, d) => a + d.total, 0);
+    const datasets = [{
+      label: 'Total',
+      data: statusUnicos.map(st => totalPorStatus[st]),
+      backgroundColor: statusUnicos.map(st => STATUS_COR[st] || '#6366f1'),
+      borderRadius: 5,
+      borderWidth: 0,
+    }];
 
     // Guarda dados no window para o click handler acessar
-    window._graficoPizzaDados       = dados;
-    window._graficoPizzaStatusUnicos = statusUnicos;
-    window._graficoPizzaGrupos       = gruposUnicos;
-    window._graficoPizzaExtrairCC    = extrairCC;
+    window._graficoPizzaDados          = dados;
+    window._graficoPizzaStatusUnicos   = statusUnicos;
+    window._graficoPizzaTotalPorStatus = totalPorStatus;
 
     const canvas = document.getElementById('graficoPizzaCanvas');
     if (!canvas) return;
@@ -33151,38 +33059,25 @@ async function carregarGraficoPizza(grupo) {
         interaction: { mode: 'index', intersect: false },
         onClick(event, elements) {
           if (!elements.length) return;
-          const el       = elements[0];
-          const status   = statusUnicos[el.index];
-          const grupo    = gruposUnicos[el.datasetIndex];
-          exibirDetalheGraficoBarra(status, grupo);
+          const status = statusUnicos[elements[0].index];
+          exibirDetalheGraficoBarra(status);
         },
         plugins: {
-          legend: {
-            position: 'bottom',
-            reverse: true, // segue ordem visual da barra: menor (topo) → maior (base)
-            labels: { font: { size: 11 }, color: '#374151', padding: 10, boxWidth: 13 }
-          },
+          legend: { display: false },
           tooltip: {
-            // Ordena os itens do tooltip do menor para o maior valor
-            itemSort: (a, b) => Number(a.parsed.y) - Number(b.parsed.y),
             callbacks: {
               label: ctx => {
                 const val = Number(ctx.parsed.y);
                 if (!val) return null;
                 const pct = totalGeral > 0 ? ((val / totalGeral) * 100).toFixed(1) : 0;
                 const fmt = val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-                return ` ${ctx.dataset.label}: ${fmt} (${pct}%)`;
-              },
-              footer: items => {
-                const soma = items.reduce((a, i) => a + Number(i.parsed.y), 0);
-                return `Total: ${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
+                return ` ${fmt} (${pct}%)`;
               }
             }
           }
         },
         scales: {
           x: {
-            stacked: true,
             ticks: { color: '#374151', font: { size: 11 }, maxRotation: 0, autoSkip: false,
               callback: function(val) {
                 const lbl = this.getLabelForValue(val);
@@ -33205,7 +33100,6 @@ async function carregarGraficoPizza(grupo) {
             grid: { display: false }
           },
           y: {
-            stacked: true,
             ticks: {
               color: '#374151', font: { size: 11 },
               callback: v => 'R$ ' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v.toFixed(0))
@@ -33221,23 +33115,6 @@ async function carregarGraficoPizza(grupo) {
   }
 }
 
-// Objetivo: Alternar entre agrupamento por departamento e centro_custo
-function alternarPizzaGrupo(grupo) {
-  _pizzaGrupoAtivo = grupo;
-  const btnDepto = document.getElementById('pizzaBtnDepto');
-  const btnCC    = document.getElementById('pizzaBtnCC');
-  if (btnDepto && btnCC) {
-    if (grupo === 'departamento') {
-      btnDepto.style.background = '#7c3aed'; btnDepto.style.color = '#fff';
-      btnCC.style.background = '#f9fafb';    btnCC.style.color = '#374151';
-    } else {
-      btnCC.style.background = '#7c3aed';    btnCC.style.color = '#fff';
-      btnDepto.style.background = '#f9fafb'; btnDepto.style.color = '#374151';
-    }
-  }
-  carregarGraficoPizza(grupo);
-}
-
 // Objetivo: Alternar visibilidade das sublinhas de um grupo da tabela de detalhes
 function toggleGpiSub(subId) {
   const rows  = document.querySelectorAll(`.${subId}`);
@@ -33248,110 +33125,61 @@ function toggleGpiSub(subId) {
 }
 
 // Objetivo: Exibir tabela de detalhes com sublinhas ao clicar em uma barra do gráfico
-async function exibirDetalheGraficoBarra(statusClicado, grupoClicado) {
+async function exibirDetalheGraficoBarra(statusClicado) {
   const wrapper = document.getElementById('graficoPizzaDetalheWrapper');
   const titulo  = document.getElementById('graficoPizzaDetalheTitulo');
   const tbody   = document.getElementById('graficoPizzaDetalheTbody');
   if (!wrapper || !titulo || !tbody) return;
 
-  // Mostra loading imediatamente
   titulo.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;color:#7c3aed;"></i>Carregando itens...`;
   tbody.innerHTML  = '';
   wrapper.style.display = 'block';
   wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   try {
-    // Monta parâmetros da requisição (mesmos filtros do gráfico)
     const params = new URLSearchParams({ status: statusClicado });
     const inicio = document.getElementById('graficoDataInicio')?.value;
     const fim    = document.getElementById('graficoDataFim')?.value;
     if (inicio) params.set('dataInicio', inicio);
     if (fim)    params.set('dataFim', fim);
-    const lb = document.getElementById('graficoDeptListbox');
-    if (lb && lb.options.length > 0) {
-      const selecionados = Array.from(lb.selectedOptions).map(o => o.value);
-      const todos        = Array.from(lb.options).map(o => o.value);
-      if (selecionados.length > 0 && selecionados.length < todos.length) {
-        params.set('departamentos', selecionados.join(','));
-      }
-    }
 
     const resp = await fetch(`/api/compras/grafico-pizza-itens?${params.toString()}`, { credentials: 'include' });
     if (!resp.ok) throw new Error('Falha ao carregar itens');
     const { itens } = await resp.json();
 
-    const extrairCC   = window._graficoPizzaExtrairCC || (g => g);
-    const dados       = window._graficoPizzaDados    || [];
-    const gruposOrdem = window._graficoPizzaGrupos   || [];
-    const totalStatus = dados.filter(d => d.status === statusClicado).reduce((a, d) => a + d.total, 0);
-
-    // Mantém a ordem do gráfico (maior → menor)
-    const gruposComItens  = [...new Set(itens.map(i => i.grupo))];
-    const gruposOrdenados = gruposOrdem.filter(g => gruposComItens.includes(g))
-      .concat(gruposComItens.filter(g => !gruposOrdem.includes(g)));
-
+    const totalStatus = (window._graficoPizzaTotalPorStatus || {})[statusClicado] || 0;
     const fmtVal = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
 
     titulo.innerHTML = `<i class="fa-solid fa-table" style="margin-right:6px;color:#7c3aed;"></i>`
-      + `Detalhes — <span style="color:#7c3aed;">${statusClicado}</span>`
-      + ` <span style="font-size:11px;font-weight:400;color:#9ca3af;">(clique no grupo para expandir)</span>`;
+      + `Detalhes — <span style="color:#7c3aed;">${statusClicado}</span>`;
 
     let html = '';
-    gruposOrdenados.forEach((grupo, gi) => {
-      const itensGrupo = itens.filter(i => i.grupo === grupo);
-      if (!itensGrupo.length) return;
-
-      // Usa o total já corrigido (sem fanout) vindo de _graficoPizzaDados
-      const dadoGrupo  = dados.find(d => d.grupo === grupo && d.status === statusClicado);
-      const totalGrupo = dadoGrupo ? dadoGrupo.total
-        : itensGrupo.reduce((a, i) => a + Number(i.valor_pedido || 0), 0);
-      const pct        = totalStatus > 0 ? ((totalGrupo / totalStatus) * 100).toFixed(1) : '0.0';
-      const cc         = extrairCC(grupo);
-      const subId      = `gpi_sub_${gi}`;
-
-      // Linha do grupo (clicável) — todos iniciam colapsados com mesmo estilo
-      html += `<tr onclick="toggleGpiSub('${subId}')"
-        style="cursor:pointer;background:#fafafa;border-bottom:1px solid #e5e7eb;">
-        <td style="padding:9px 12px;font-size:13px;font-weight:700;color:#374151;">
-          <i id="${subId}_ic" class="fa-solid fa-chevron-right" style="font-size:10px;margin-right:7px;color:#a78bfa;"></i>${cc}
+    (itens || []).forEach(item => {
+      const fmtData = item.d_inc_data
+        ? item.d_inc_data.split('-').reverse().join('/')
+        : '—';
+      const valHtml = `<span style="margin-left:auto;white-space:nowrap;font-weight:600;color:#059669;">${fmtVal(item.valor_item)}</span>`;
+      html += `<tr style="background:#fff;border-bottom:1px solid #f3f4f6;">
+        <td colspan="3" style="padding:7px 12px;">
+          <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;width:100%;">
+            <span style="color:#9ca3af;">Ped. #${item.c_numero || item.h_id}</span>
+            <span style="color:#374151;">${item.fornecedor}</span>
+            <span style="color:#6b7280;">Data: <b>${fmtData}</b></span>
+            ${valHtml}
+          </span>
         </td>
-        <td style="padding:9px 12px;font-size:13px;font-weight:700;color:#374151;text-align:right;">${fmtVal(totalGrupo)}</td>
-        <td style="padding:9px 12px;font-size:12px;color:#6b7280;text-align:right;">${pct}%</td>
       </tr>`;
-
-      // Sub-linhas de itens — todas iniciam colapsadas
-      itensGrupo.forEach(item => {
-        const objHtml = item.objetivo_compra
-          ? `<span title="${(item.objetivo_compra || '').replace(/"/g, '&quot;')}"
-               style="display:inline-flex;align-items:center;justify-content:center;
-                      width:16px;height:16px;border-radius:50%;background:#7c3aed;
-                      color:#fff;font-size:9px;font-weight:700;cursor:help;flex-shrink:0;">!</span>`
-          : '';
-        const valItemHtml = item.valor_item != null
-          ? `<span style="margin-left:auto;white-space:nowrap;font-weight:600;color:#059669;">R$ ${Math.round(item.valor_item).toLocaleString('pt-BR')}</span>`
-          : '';
-        html += `<tr class="${subId}" style="display:none;background:#fff;border-bottom:1px solid #f3f4f6;">
-          <td colspan="3" style="padding:5px 12px 5px 36px;">
-            <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;width:100%;">
-              <span style="color:#9ca3af;">#${item.h_id}</span>
-              <span style="font-family:monospace;color:#6366f1;">${item.produto_codigo || '—'}</span>
-              <span style="color:#374151;">${item.produto_descricao || '—'}</span>
-              <span style="color:#6b7280;">Qtd: <b>${item.quantidade || '—'}</b></span>
-              ${objHtml}
-              <span style="color:#374151;font-style:italic;">${item.solicitante || '—'}</span>
-              ${valItemHtml}
-            </span>
-          </td>
-        </tr>`;
-      });
     });
 
-    // Linha de total geral
-    html += `<tr style="background:#f0fdf4;border-top:2px solid #d1fae5;">
-      <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;">Total geral</td>
-      <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmtVal(totalStatus)}</td>
-      <td style="padding:8px 12px;font-size:12px;color:#6b7280;text-align:right;">100%</td>
-    </tr>`;
+    if (!html) {
+      html = `<tr><td colspan="3" style="padding:14px 12px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td></tr>`;
+    } else if (totalStatus > 0) {
+      html += `<tr style="background:#f0fdf4;border-top:2px solid #d1fae5;">
+        <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;">Total</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmtVal(totalStatus)}</td>
+        <td></td>
+      </tr>`;
+    }
 
     tbody.innerHTML = html;
 
@@ -33368,9 +33196,6 @@ function carregarAmboGraficos() {
 }
 
 window.carregarGraficoPizza      = carregarGraficoPizza;
-window.carregarOpcoesFiltroDepto = carregarOpcoesFiltroDepto;
-window.graficoDeptoSelecionarTodos = graficoDeptoSelecionarTodos;
-window.alternarPizzaGrupo        = alternarPizzaGrupo;
 window.carregarAmboGraficos      = carregarAmboGraficos;
 window.exibirDetalheGraficoBarra = exibirDetalheGraficoBarra;
 window.toggleGpiSub              = toggleGpiSub;
@@ -39072,10 +38897,19 @@ fileInput.addEventListener('change', async () => {
     // 🔄 spinner ON assim que o usuário anexa o arquivo
     showEstruturaSpinner();
 
-    const codigo = (window.codigoSelecionado || window.ultimoCodigo || '').trim();
+    // Tenta todas as fontes conhecidas de código do produto atual
+    const codigo = (
+      (typeof getPCPProdutoCodigo === 'function' ? getPCPProdutoCodigo() : '') ||
+      (window.pcpCodigoAtual || '').trim() ||
+      (window.codigoSelecionado || '').trim() ||
+      document.querySelector('#pcp-code')?.textContent?.trim() ||
+      document.getElementById('productTitle')?.textContent?.trim() ||
+      ''
+    ).trim();
+
     if (!codigo) {
-      console.warn('[Importar BOM] Código do produto não identificado na tela.');
       hideEstruturaSpinner();
+      alert('Abra um produto antes de importar a estrutura.\n(Não foi possível identificar o código do produto na tela.)');
       return;
     }
 
@@ -39088,14 +38922,21 @@ fileInput.addEventListener('change', async () => {
     if (isExcel) {
       console.log('[Importar BOM] Arquivo Excel detectado, convertendo...');
       
-      // Carregar biblioteca XLSX dinamicamente
+      // Carregar biblioteca XLSX (local primeiro, CDN como fallback)
       if (typeof XLSX === 'undefined') {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
-        document.head.appendChild(script);
         await new Promise((resolve, reject) => {
-          script.onload = resolve;
-          script.onerror = () => reject(new Error('Falha ao carregar biblioteca XLSX'));
+          const tryLoad = (src) => new Promise((ok, fail) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = ok;
+            s.onerror = fail;
+            document.head.appendChild(s);
+          });
+          const localSrc = (window.API_BASE ? window.API_BASE.replace(/\/+$/, '') : '') + '/vendor/xlsx/xlsx.full.min.js';
+          const cdnSrc   = 'https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js';
+          tryLoad(localSrc)
+            .then(resolve)
+            .catch(() => tryLoad(cdnSrc).then(resolve).catch(reject));
         });
       }
 
@@ -39125,6 +38966,46 @@ fileInput.addEventListener('change', async () => {
 
     const headerRaw = rows[0].map(h => String(h || '').replace(/^"|"$/g,''));
     const header    = headerRaw.map(normHeader);
+
+    // ── Detecção automática do novo formato FICHA_ESTRUTURA ─────────────────
+    // Detectamos pelo DADO da col 0 da primeira linha de dados (não pelo nome do cabeçalho):
+    // Na FICHA_ESTRUTURA a coluna 0 (Nível) começa com "1", "1.1", "1.26" etc.
+    // No formato antigo (BOM) a coluna 0 é a descrição do produto (texto livre).
+    const primeiroValorCol0 = String(rows[1]?.[0] ?? '').trim();
+    const isNovoFormato = isExcel && /^\d+(\.\d+)*$/.test(primeiroValorCol0);
+    console.log('[ImportBOM] col0 da linha 1:', JSON.stringify(primeiroValorCol0), '→ isNovoFormato:', isNovoFormato);
+    if (isNovoFormato) {
+      if (!isExcel) {
+        throw new Error('O novo formato FICHA_ESTRUTURA deve ser enviado como arquivo XLSX (.xlsx).');
+      }
+      console.log('[Importar] Novo formato FICHA_ESTRUTURA detectado. Enviando para /api/pcp/estrutura/replace-ficha…');
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('pai_codigo', codigo);
+      const apiUrl = (window.API_BASE ? window.API_BASE.replace(/\/+$/, '') : '') + '/api/pcp/estrutura/replace-ficha';
+      const resp = await fetch(apiUrl, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+        // SEM Content-Type → browser define o boundary do multipart automaticamente
+      });
+      const rawText = await resp.text();
+      let js; try { js = JSON.parse(rawText); } catch { js = null; }
+      if (!resp.ok || js?.error) {
+        throw new Error(js?.error || `Erro HTTP ${resp.status}`);
+      }
+      console.info(`[ImportarFicha] OK — ${js.inseridos_principal} itens no principal, ${js.sub_montagens} sub-montagem(ns), ${js.inseridos_sub} itens nas sub-montagens.`);
+      if (typeof window.loadEstruturaProduto === 'function') {
+        try { window.loadEstruturaProduto(codigo); } catch (eLoad) { console.warn('[ImportarFicha] loadEstruturaProduto:', eLoad); }
+      }
+      try {
+        const meta = await pcpFetchEstruturaMetaByCod(codigo);
+        pcpUpdateVersaoBadges(meta);
+      } catch (_) { /* silencia */ }
+      hideEstruturaSpinner();
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // mapeia cabeçalhos esperados → índice
     const idx = {};
@@ -39229,6 +39110,7 @@ fileInput.addEventListener('change', async () => {
 
   } catch (err) {
     console.error('[Importar BOM] erro:', err);
+    alert('Erro ao importar estrutura:\n' + (err?.message || String(err)));
   } finally {
     // 🔄 spinner OFF (sempre)
     hideEstruturaSpinner();

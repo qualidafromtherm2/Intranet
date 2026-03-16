@@ -574,21 +574,8 @@
 
                   <!-- Gráfico de Barras: por Departamento ou Centro de Custo -->
                   <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-                    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:16px;flex-wrap:wrap;">
-                      <h4 style="margin:0;font-size:14px;font-weight:700;color:#7c3aed;white-space:nowrap;"><i class="fa-solid fa-chart-bar" style="margin-right:6px;"></i>Por Departamento (Centro de Custo)</h4>
-                      <!-- Listbox de filtro por departamento -->
-                      <div style="display:flex;flex-direction:column;gap:4px;min-width:200px;max-width:280px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;">
-                          <label style="font-size:11px;font-weight:600;color:#6b7280;"><i class="fa-solid fa-filter" style="margin-right:4px;"></i>Filtrar departamento</label>
-                          <button onclick="graficoDeptoSelecionarTodos()" style="font-size:10px;font-weight:600;color:#7c3aed;background:none;border:none;cursor:pointer;padding:0;text-decoration:underline;">Todos</button>
-                        </div>
-                        <select id="graficoDeptListbox" multiple size="4"
-                          onchange="carregarGraficoPizza()"
-                          style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;font-size:12px;color:#374151;padding:4px 6px;background:#f9fafb;outline:none;cursor:pointer;">
-                          <!-- opções carregadas via JS -->
-                        </select>
-                        <span style="font-size:10px;color:#9ca3af;">Ctrl+clique para múltiplos</span>
-                      </div>
+                    <div style="display:flex;align-items:center;margin-bottom:14px;">
+                      <h4 style="margin:0;font-size:14px;font-weight:700;color:#7c3aed;"><i class="fa-solid fa-chart-bar" style="margin-right:6px;"></i>Compras por Status</h4>
                     </div>
                     <div id="graficoPizzaWrapper" style="position:relative;height:320px;">
                       <canvas id="graficoPizzaCanvas"></canvas>
@@ -611,7 +598,7 @@
                         <table style="width:100%;border-collapse:collapse;font-size:13px;">
                           <thead>
                             <tr style="background:#f5f3ff;">
-                              <th style="padding:8px 12px;text-align:left;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Centro de Custo / Itens</th>
+                              <th style="padding:8px 12px;text-align:left;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Itens</th>
                               <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Valor</th>
                               <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">%</th>
                             </tr>
@@ -2357,18 +2344,27 @@
                   <i class="fa-solid fa-arrow-up"></i>
                 </button>
               </div>
-              <div id="filterPanel" class="filter-panel">
-                <div class="filter-row">
-                  <label for="familySelect">Família:</label>
-                  <select id="familySelect"><option value="">– selecione –</option></select>
-                  <label for="tipoItemSelect">Tipo de Item:</label>
-                  <select id="tipoItemSelect"><option value="">– selecione –</option></select>
-                </div>
-                <div class="filter-row">
-                  <label for="caracteristicaSelect">Característica:</label>
-                  <select id="caracteristicaSelect"><option value="">– selecione –</option></select>
-                  <label for="conteudoSelect" id="conteudoLabel" style="display:none">Conteúdo:</label>
-                  <select id="conteudoSelect" style="display:none"><option value="">– selecione –</option></select>
+              <!-- Modal Filtro de Produtos -->
+              <div id="filterPanelOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;">
+                <div id="filterPanel" style="background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                    <span style="font-weight:700;font-size:16px;color:#111;">Filtrar Produtos</span>
+                    <button id="filterPanelCloseBtn" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:2px 6px;" title="Fechar">&#x2715;</button>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:14px;">
+                    <div>
+                      <label for="familySelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Família:</label>
+                      <select id="familySelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todas –</option></select>
+                    </div>
+                    <div>
+                      <label for="tipoItemSelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Tipo de Item:</label>
+                      <select id="tipoItemSelect" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"><option value="">– todos –</option></select>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
+                    <button id="filterPanelLimparBtn" style="padding:9px 18px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:14px;cursor:pointer;">Limpar</button>
+                    <button id="filterPanelAplicarBtn" style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Aplicar</button>
+                  </div>
                 </div>
               </div>
               <div id="listaProdutosGrid" style="display:none;grid-template-columns:repeat(5,1fr);gap:16px;max-height:calc(100vh - 220px);overflow-y:auto;align-content:start;grid-auto-rows:minmax(240px,auto);"></div>
@@ -4210,7 +4206,7 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js"></script>
+  <script type="module" src="menu_produto.js?v=20260316c"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

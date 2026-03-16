@@ -62,7 +62,7 @@ app.get("/api/op", async (req, res) => {
     let estruturaItems = [];
     try {
       const { rows: estrRows } = await pool.query(
-        `select id, versao from public.omie_estrutura where id_produto = $1 order by versao desc`,
+        `select id, versao from engenharia.omie_estrutura where id_produto = $1 order by versao desc`,
         [codigo_omie]
       );
 
@@ -76,7 +76,7 @@ app.get("/api/op", async (req, res) => {
         if (estruturaVersao <= opVersao) {
           const { rows: itemRows } = await pool.query(
             `select cod_prod_malha, descr_prod_malha, quant_prod_malha, unid_prod_malha
-             from public.omie_estrutura_item
+             from engenharia.omie_estrutura_item
              where parent_id = $1
              order by cod_prod_malha asc`,
             [estruturaId]
@@ -85,7 +85,7 @@ app.get("/api/op", async (req, res) => {
         } else {
           const { rows: itemRows } = await pool.query(
             `select cod_prod_malha, descr_prod_malha, quant_prod_malha, unid_prod_malha
-             from public.omie_estrutura_item_versao
+             from engenharia.omie_estrutura_item_versao
              where parent_id = $1 and versao = $2
              order by cod_prod_malha asc`,
             [estruturaId, opVersao]
@@ -95,7 +95,7 @@ app.get("/api/op", async (req, res) => {
           if (!estruturaItems.length) {
             const { rows: fallbackRows } = await pool.query(
               `select cod_prod_malha, descr_prod_malha, quant_prod_malha, unid_prod_malha
-               from public.omie_estrutura_item
+               from engenharia.omie_estrutura_item
                where parent_id = $1
                order by cod_prod_malha asc`,
               [estruturaId]

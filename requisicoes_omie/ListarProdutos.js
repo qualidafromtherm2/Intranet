@@ -441,19 +441,15 @@ export async function initListarProdutosUI(
   }
 
   initFiltros({
-    _codeInput            : codeFilterInput,
-    _familySelect         : document.getElementById('familySelect'),
-    _tipoItemSelect       : document.getElementById('tipoItemSelect'),
-    _caracteristicaSelect : document.getElementById('caracteristicaSelect'),
-    _conteudoLabel        : document.getElementById('conteudoLabel'),
-    _conteudoSelect       : document.getElementById('conteudoSelect'),
-    _filterBtn            : document.getElementById('filterBtn'),
-    _filterPanel          : document.getElementById('filterPanel'),
+    _codeInput      : codeFilterInput,
+    _familySelect   : document.getElementById('familySelect'),
+    _tipoItemSelect : document.getElementById('tipoItemSelect'),
+    _filterBtn      : document.getElementById('filterBtn'),
+    _filterPanel    : document.getElementById('filterPanel'),
     onFiltered: itens => {
       renderListaView(itens);
       const title = pane?.querySelector('.content-section-title');
       if (title) title.textContent = `Lista de produtos (${itens.length})`;
-      populateFilters();
     }
   });
   
