@@ -28858,11 +28858,11 @@ function abrirPainelConfiguracaoCateg() {
     // Esconde todos os painéis
     document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
 
-    // Mostra painel de configurações
+    // Mostra painel de configurações e recarrega dados do banco
     const pane = document.getElementById('comprasConfiguracoesPane');
     if (pane) {
       pane.style.display = 'block';
-      renderizarDepartamentosConfig();
+      recarregarConfig();
     }
   } catch (err) {
     console.error('[CONFIG] Erro ao abrir painel:', err);
@@ -28874,161 +28874,147 @@ function fecharModalConfiguracaoCateg() {
   // Não faz nada - mantido apenas para evitar erros
 }
 
-// Renderiza lista de departamentos e suas categorias
+// Recarrega dados do banco e re-renderiza o painel de configuração
+async function recarregarConfig() {
+  await carregarCategoriasPorDepartamento();
+  renderizarDepartamentosConfig();
+}
+
+// Renderiza lista de departamentos, categorias e sub-subcategorias (fonte: banco de dados)
 function renderizarDepartamentosConfig() {
   const container = document.getElementById('listaDepartamentosConfig');
   if (!container) return;
-  
-  const departamentos = window.categoriasPorDepartamento || {};
-  
-  container.innerHTML = Object.keys(departamentos).map((dept, idx) => {
-    const categorias = departamentos[dept];
-    
+
+  // Usa window.departamentosConfig (array com id, nome, categorias[{id,nome,subitens[{id,nome}]}])
+  const departamentos = Array.isArray(window.departamentosConfig) ? window.departamentosConfig : [];
+
+  if (departamentos.length === 0) {
+    container.innerHTML = '<p style="color:#6b7280;text-align:center;padding:32px;">Nenhum departamento cadastrado.</p>';
+    return;
+  }
+
+  container.innerHTML = departamentos.map((dept) => {
+    const categorias = Array.isArray(dept.categorias) ? dept.categorias : [];
+
+    const categoriasHtml = categorias.map((cat) => {
+      const subitens = Array.isArray(cat.subitens) ? cat.subitens : [];
+
+      const subItensHtml = subitens.map((sub) => `
+        <div style="
+          display:flex;justify-content:space-between;align-items:center;
+          padding:6px 12px;background:#f0fdf4;border:1px solid #bbf7d0;
+          border-radius:6px;font-size:13px;
+        ">
+          <span style="color:#166534;">
+            <i class="fa-solid fa-circle-dot" style="color:#16a34a;margin-right:6px;font-size:10px;"></i>
+            ${window.escapeHtml(sub.nome)}
+          </span>
+          <div style="display:flex;gap:4px;">
+            <button onclick="editarSubitem(${sub.id},'${window.escapeHtml(sub.nome)}')"
+              title="Editar sub-subcategoria"
+              style="background:white;color:#f59e0b;border:1px solid #f59e0b;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer;"
+              onmouseover="this.style.background='#f59e0b';this.style.color='white'"
+              onmouseout="this.style.background='white';this.style.color='#f59e0b'">
+              <i class="fa-solid fa-pen" style="font-size:10px;"></i>
+            </button>
+            <button onclick="excluirSubitem(${sub.id},'${window.escapeHtml(sub.nome)}')"
+              title="Excluir sub-subcategoria"
+              style="background:white;color:#ef4444;border:1px solid #ef4444;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer;"
+              onmouseover="this.style.background='#ef4444';this.style.color='white'"
+              onmouseout="this.style.background='white';this.style.color='#ef4444'">
+              <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+
+      return `
+        <div style="
+          background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;
+          padding:10px 14px;transition:all 0.2s;
+        "
+        onmouseover="this.style.background='#f3f4f6';this.style.borderColor='#d1d5db'"
+        onmouseout="this.style.background='#f9fafb';this.style.borderColor='#e5e7eb'">
+          <!-- Linha da categoria -->
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${subitens.length > 0 ? '8px' : '0'};">
+            <span style="color:#374151;font-size:14px;font-weight:500;">
+              <i class="fa-solid fa-tag" style="color:#6b7280;margin-right:8px;"></i>
+              ${window.escapeHtml(cat.nome)}
+              <span style="background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;">
+                ${subitens.length} sub${subitens.length === 1 ? '' : 's'}
+              </span>
+            </span>
+            <div style="display:flex;gap:6px;">
+              <button onclick="adicionarNovoSubitem(${cat.id},'${window.escapeHtml(cat.nome)}')"
+                title="Adicionar sub-subcategoria"
+                style="background:white;color:#8b5cf6;border:1px solid #8b5cf6;border-radius:4px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;"
+                onmouseover="this.style.background='#8b5cf6';this.style.color='white'"
+                onmouseout="this.style.background='white';this.style.color='#8b5cf6'">
+                <i class="fa-solid fa-plus" style="font-size:11px;"></i>
+              </button>
+              <button onclick="editarCategoria(${cat.id},'${window.escapeHtml(cat.nome)}')"
+                title="Editar categoria"
+                style="background:white;color:#f59e0b;border:1px solid #f59e0b;border-radius:4px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;"
+                onmouseover="this.style.background='#f59e0b';this.style.color='white'"
+                onmouseout="this.style.background='white';this.style.color='#f59e0b'">
+                <i class="fa-solid fa-pen" style="font-size:11px;"></i>
+              </button>
+              <button onclick="excluirCategoria(${cat.id},'${window.escapeHtml(cat.nome)}')"
+                title="Excluir categoria"
+                style="background:white;color:#ef4444;border:1px solid #ef4444;border-radius:4px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;"
+                onmouseover="this.style.background='#ef4444';this.style.color='white'"
+                onmouseout="this.style.background='white';this.style.color='#ef4444'">
+                <i class="fa-solid fa-trash" style="font-size:11px;"></i>
+              </button>
+            </div>
+          </div>
+          <!-- Sub-subcategorias -->
+          ${subitens.length > 0 ? `
+            <div style="display:flex;flex-direction:column;gap:4px;padding-left:16px;border-left:3px solid #bbf7d0;">
+              ${subItensHtml}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
     return `
-      <div style="
-        background:white;
-        border:2px solid #e5e7eb;
-        border-radius:12px;
-        padding:20px;
-        box-shadow:0 2px 8px rgba(0,0,0,0.05);
-      ">
+      <div style="background:white;border:2px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
         <!-- Cabeçalho do Departamento -->
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #f3f4f6;">
           <div style="display:flex;align-items:center;gap:12px;">
             <i class="fa-solid fa-building" style="color:#3b82f6;font-size:20px;"></i>
-            <h4 style="margin:0;color:#1f2937;font-size:16px;font-weight:700;">${window.escapeHtml(dept)}</h4>
+            <h4 style="margin:0;color:#1f2937;font-size:16px;font-weight:700;">${window.escapeHtml(dept.nome)}</h4>
             <span style="background:#dbeafe;color:#1e40af;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">
               ${categorias.length} ${categorias.length === 1 ? 'categoria' : 'categorias'}
             </span>
           </div>
           <div style="display:flex;gap:8px;">
-            <button 
-              onclick="editarNomeDepartamento('${window.escapeHtml(dept)}')"
+            <button onclick="editarNomeDepartamento(${dept.id},'${window.escapeHtml(dept.nome)}')"
               title="Editar nome do departamento"
-              style="
-                background:#f59e0b;
-                color:white;
-                border:none;
-                border-radius:6px;
-                width:36px;
-                height:36px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                cursor:pointer;
-                transition:all 0.2s;
-              "
+              style="background:#f59e0b;color:white;border:none;border-radius:6px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;"
               onmouseover="this.style.transform='scale(1.05)'"
               onmouseout="this.style.transform='scale(1)'">
               <i class="fa-solid fa-pen"></i>
             </button>
-            <button 
-              onclick="excluirDepartamento('${window.escapeHtml(dept)}')"
+            <button onclick="excluirDepartamento(${dept.id},'${window.escapeHtml(dept.nome)}')"
               title="Excluir departamento"
-              style="
-                background:#ef4444;
-                color:white;
-                border:none;
-                border-radius:6px;
-                width:36px;
-                height:36px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                cursor:pointer;
-                transition:all 0.2s;
-              "
+              style="background:#ef4444;color:white;border:none;border-radius:6px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s;"
               onmouseover="this.style.transform='scale(1.05)'"
               onmouseout="this.style.transform='scale(1)'">
               <i class="fa-solid fa-trash"></i>
             </button>
           </div>
         </div>
-        
+
         <!-- Lista de Categorias -->
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
-          ${categorias.map((cat, catIdx) => `
-            <div style="
-              display:flex;
-              justify-content:space-between;
-              align-items:center;
-              padding:10px 14px;
-              background:#f9fafb;
-              border:1px solid #e5e7eb;
-              border-radius:8px;
-              transition:all 0.2s;
-            "
-            onmouseover="this.style.background='#f3f4f6';this.style.borderColor='#d1d5db'"
-            onmouseout="this.style.background='#f9fafb';this.style.borderColor='#e5e7eb'">
-              <span style="color:#374151;font-size:14px;font-weight:500;">
-                <i class="fa-solid fa-tag" style="color:#6b7280;margin-right:8px;"></i>
-                ${window.escapeHtml(cat)}
-              </span>
-              <div style="display:flex;gap:6px;">
-                <button 
-                  onclick="editarCategoria('${window.escapeHtml(dept)}', ${catIdx})"
-                  title="Editar categoria"
-                  style="
-                    background:white;
-                    color:#f59e0b;
-                    border:1px solid #f59e0b;
-                    border-radius:4px;
-                    width:28px;
-                    height:28px;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    cursor:pointer;
-                    transition:all 0.2s;
-                  "
-                  onmouseover="this.style.background='#f59e0b';this.style.color='white'"
-                  onmouseout="this.style.background='white';this.style.color='#f59e0b'">
-                  <i class="fa-solid fa-pen" style="font-size:11px;"></i>
-                </button>
-                <button 
-                  onclick="excluirCategoria('${window.escapeHtml(dept)}', ${catIdx})"
-                  title="Excluir categoria"
-                  style="
-                    background:white;
-                    color:#ef4444;
-                    border:1px solid #ef4444;
-                    border-radius:4px;
-                    width:28px;
-                    height:28px;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    cursor:pointer;
-                    transition:all 0.2s;
-                  "
-                  onmouseover="this.style.background='#ef4444';this.style.color='white'"
-                  onmouseout="this.style.background='white';this.style.color='#ef4444'">
-                  <i class="fa-solid fa-trash" style="font-size:11px;"></i>
-                </button>
-              </div>
-            </div>
-          `).join('')}
+          ${categoriasHtml || '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:8px;">Nenhuma categoria cadastrada.</p>'}
         </div>
-        
+
         <!-- Botão Adicionar Categoria -->
-        <button 
-          onclick="adicionarNovaCategoria('${window.escapeHtml(dept)}')"
-          style="
-            width:100%;
-            padding:10px;
-            background:linear-gradient(135deg,#10b981 0%,#059669 100%);
-            color:white;
-            border:none;
-            border-radius:8px;
-            font-size:13px;
-            font-weight:600;
-            cursor:pointer;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            gap:8px;
-            transition:all 0.2s;
-          "
+        <button onclick="adicionarNovaCategoria(${dept.id},'${window.escapeHtml(dept.nome)}')"
+          style="width:100%;padding:10px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
           onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 12px rgba(16,185,129,0.3)'"
           onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='none'">
           <i class="fa-solid fa-plus-circle"></i>
@@ -29039,104 +29025,175 @@ function renderizarDepartamentosConfig() {
   }).join('');
 }
 
-// Adicionar novo departamento
-function adicionarNovoDepartamento() {
+// Adicionar novo departamento — persiste no banco
+async function adicionarNovoDepartamento() {
   const nome = prompt('Digite o nome do novo departamento:');
   if (!nome || !nome.trim()) return;
-  
-  const nomeTrimmed = nome.trim();
-  
-  if (window.categoriasPorDepartamento[nomeTrimmed]) {
-    alert('Este departamento já existe!');
-    return;
+  try {
+    const resp = await fetch('/api/compras/departamentos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: nome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Departamento adicionado com sucesso!');
+  } catch (err) {
+    alert('Erro ao adicionar departamento: ' + err.message);
   }
-  
-  window.categoriasPorDepartamento[nomeTrimmed] = [];
-  renderizarDepartamentosConfig();
-  alert('Departamento adicionado com sucesso!');
 }
 
-// Editar nome do departamento
-function editarNomeDepartamento(nomeAtual) {
+// Editar nome do departamento — persiste no banco
+async function editarNomeDepartamento(id, nomeAtual) {
   const novoNome = prompt('Digite o novo nome do departamento:', nomeAtual);
   if (!novoNome || !novoNome.trim() || novoNome.trim() === nomeAtual) return;
-  
-  const novoNomeTrimmed = novoNome.trim();
-  
-  if (window.categoriasPorDepartamento[novoNomeTrimmed]) {
-    alert('Já existe um departamento com este nome!');
-    return;
+  try {
+    const resp = await fetch(`/api/compras/departamentos/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: novoNome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Departamento renomeado com sucesso!');
+  } catch (err) {
+    alert('Erro ao renomear departamento: ' + err.message);
   }
-  
-  // Move categorias para novo nome
-  window.categoriasPorDepartamento[novoNomeTrimmed] = window.categoriasPorDepartamento[nomeAtual];
-  delete window.categoriasPorDepartamento[nomeAtual];
-  
-  renderizarDepartamentosConfig();
-  alert('Departamento renomeado com sucesso!');
 }
 
-// Excluir departamento
-function excluirDepartamento(nome) {
-  const categorias = window.categoriasPorDepartamento[nome];
-  const msg = categorias.length > 0 
-    ? `Tem certeza que deseja excluir o departamento "${nome}" e suas ${categorias.length} categorias?`
-    : `Tem certeza que deseja excluir o departamento "${nome}"?`;
-  
-  if (!confirm(msg)) return;
-  
-  delete window.categoriasPorDepartamento[nome];
-  renderizarDepartamentosConfig();
-  alert('Departamento excluído com sucesso!');
+// Excluir departamento — persiste no banco
+async function excluirDepartamento(id, nome) {
+  if (!confirm(`Tem certeza que deseja excluir o departamento "${nome}" e todas as suas categorias?`)) return;
+  try {
+    const resp = await fetch(`/api/compras/departamentos/${id}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Departamento excluído com sucesso!');
+  } catch (err) {
+    alert('Erro ao excluir departamento: ' + err.message);
+  }
 }
 
-// Adicionar nova categoria
-function adicionarNovaCategoria(departamento) {
-  const nome = prompt(`Digite o nome da nova categoria para "${departamento}":`);
+// Adicionar nova categoria — persiste no banco
+async function adicionarNovaCategoria(departamentoId, departamentoNome) {
+  const nome = prompt(`Digite o nome da nova categoria para "${departamentoNome}":`);
   if (!nome || !nome.trim()) return;
-  
-  const nomeTrimmed = nome.trim();
-  
-  if (window.categoriasPorDepartamento[departamento].includes(nomeTrimmed)) {
-    alert('Esta categoria já existe neste departamento!');
-    return;
+  try {
+    const resp = await fetch(`/api/compras/departamentos/${departamentoId}/categorias`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: nome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Categoria adicionada com sucesso!');
+  } catch (err) {
+    alert('Erro ao adicionar categoria: ' + err.message);
   }
-  
-  window.categoriasPorDepartamento[departamento].push(nomeTrimmed);
-  renderizarDepartamentosConfig();
-  alert('Categoria adicionada com sucesso!');
 }
 
-// Editar categoria
-function editarCategoria(departamento, indice) {
-  const categorias = window.categoriasPorDepartamento[departamento];
-  const nomeAtual = categorias[indice];
-  
+// Editar categoria — persiste no banco
+async function editarCategoria(id, nomeAtual) {
   const novoNome = prompt('Digite o novo nome da categoria:', nomeAtual);
   if (!novoNome || !novoNome.trim() || novoNome.trim() === nomeAtual) return;
-  
-  const novoNomeTrimmed = novoNome.trim();
-  
-  if (categorias.includes(novoNomeTrimmed)) {
-    alert('Já existe uma categoria com este nome!');
-    return;
+  try {
+    const resp = await fetch(`/api/compras/categorias-departamento/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: novoNome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Categoria renomeada com sucesso!');
+  } catch (err) {
+    alert('Erro ao renomear categoria: ' + err.message);
   }
-  
-  categorias[indice] = novoNomeTrimmed;
-  renderizarDepartamentosConfig();
-  alert('Categoria renomeada com sucesso!');
 }
 
-// Excluir categoria
-function excluirCategoria(departamento, indice) {
-  const categorias = window.categoriasPorDepartamento[departamento];
-  const nomeCategoria = categorias[indice];
-  
-  if (!confirm(`Tem certeza que deseja excluir a categoria "${nomeCategoria}"?`)) return;
-  
-  categorias.splice(indice, 1);
-  renderizarDepartamentosConfig();
-  alert('Categoria excluída com sucesso!');
+// Excluir categoria — persiste no banco
+async function excluirCategoria(id, nome) {
+  if (!confirm(`Tem certeza que deseja excluir a categoria "${nome}" e todos os seus subitens?`)) return;
+  try {
+    const resp = await fetch(`/api/compras/categorias-departamento/${id}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Categoria excluída com sucesso!');
+  } catch (err) {
+    alert('Erro ao excluir categoria: ' + err.message);
+  }
+}
+
+// Adicionar sub-subcategoria (subitem) — persiste no banco
+async function adicionarNovoSubitem(categoriaId, categoriaNome) {
+  const nome = prompt(`Digite o nome da nova sub-subcategoria para "${categoriaNome}":`);
+  if (!nome || !nome.trim()) return;
+  try {
+    const resp = await fetch(`/api/compras/categorias-departamento/${categoriaId}/subitens`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: nome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Sub-subcategoria adicionada com sucesso!');
+  } catch (err) {
+    alert('Erro ao adicionar sub-subcategoria: ' + err.message);
+  }
+}
+
+// Editar sub-subcategoria (subitem) — persiste no banco
+async function editarSubitem(id, nomeAtual) {
+  const novoNome = prompt('Digite o novo nome da sub-subcategoria:', nomeAtual);
+  if (!novoNome || !novoNome.trim() || novoNome.trim() === nomeAtual) return;
+  try {
+    const resp = await fetch(`/api/compras/subitens-departamento/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ nome: novoNome.trim() })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Sub-subcategoria renomeada com sucesso!');
+  } catch (err) {
+    alert('Erro ao renomear sub-subcategoria: ' + err.message);
+  }
+}
+
+// Excluir sub-subcategoria (subitem) — persiste no banco
+async function excluirSubitem(id, nome) {
+  if (!confirm(`Tem certeza que deseja excluir a sub-subcategoria "${nome}"?`)) return;
+  try {
+    const resp = await fetch(`/api/compras/subitens-departamento/${id}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert('Erro: ' + data.error); return; }
+    await recarregarConfig();
+    alert('Sub-subcategoria excluída com sucesso!');
+  } catch (err) {
+    alert('Erro ao excluir sub-subcategoria: ' + err.message);
+  }
 }
 
 // ===== FIM CONFIGURAÇÃO =====
@@ -29162,12 +29219,16 @@ window.removerCatalogoAnexoIndividual = removerCatalogoAnexoIndividual;
 window.abrirPainelConfiguracaoCateg = abrirPainelConfiguracaoCateg;
 window.fecharModalConfiguracaoCateg = fecharModalConfiguracaoCateg;
 window.renderizarDepartamentosConfig = renderizarDepartamentosConfig;
+window.recarregarConfig = recarregarConfig;
 window.adicionarNovoDepartamento = adicionarNovoDepartamento;
 window.editarNomeDepartamento = editarNomeDepartamento;
 window.excluirDepartamento = excluirDepartamento;
 window.adicionarNovaCategoria = adicionarNovaCategoria;
 window.editarCategoria = editarCategoria;
 window.excluirCategoria = excluirCategoria;
+window.adicionarNovoSubitem = adicionarNovoSubitem;
+window.editarSubitem = editarSubitem;
+window.excluirSubitem = excluirSubitem;
 
 // ========== FIM CATÁLOGO OMIE ==========
 
@@ -30050,7 +30111,6 @@ const todosKanbans = [
   'aguardando cotação',
   'cotado aguardando escolha',
   'analise de cadastro',
-  'aguardando compra',
   'aguardando compra preparação',
   'compra realizada',
   'faturada pelo fornecedor',
@@ -30140,7 +30200,6 @@ async function abrirModalFiltroKanbans() {
   const titulosPersonalizados = {
     'aguardando cotação': 'Cotação com compras',
     'aguardando compra preparação': 'Requisições',
-    'aguardando compra': 'Pedido de compra',
     'analise de cadastro': 'Organizando requisição'
   };
   
@@ -30151,7 +30210,6 @@ async function abrirModalFiltroKanbans() {
     'cotado aguardando escolha': { texto: 'Ação Requisitante', cor: '#dc2626' },
     'solicitado revisão': { texto: 'Ação Requisitante', cor: '#dc2626' },
     'analise de cadastro': { texto: 'Operação Comprador', cor: '#059669' },
-    'aguardando compra': { texto: 'Operação Comprador', cor: '#059669' },
     'aguardando compra preparação': { texto: 'Operação Comprador', cor: '#059669' },
     'compra realizada': { texto: 'Ação Recebimento', cor: '#d97706' },
     'faturada pelo fornecedor': { texto: 'Ação Recebimento', cor: '#d97706' },
@@ -32671,6 +32729,28 @@ function abrirModalFiltrarData() {
   }
   modal.style.display = 'flex';
 }
+
+// Atalhos rápidos de período para o filtro do kanban de compras
+function filtroDataRapido(periodo) {
+  const fmt = d => d.toISOString().slice(0, 10);
+  const hoje = new Date();
+  let ini, fim;
+  if (periodo === 'mes-atual') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  } else if (periodo === 'mes-anterior') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+  } else if (periodo === 'trimestre') {
+    ini = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1);
+    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+  }
+  const inp1 = document.getElementById('filtrarDataInicio');
+  const inp2 = document.getElementById('filtrarDataFim');
+  if (inp1) inp1.value = fmt(ini);
+  if (inp2) inp2.value = fmt(fim);
+}
+window.filtroDataRapido = filtroDataRapido;
 
 function fecharModalFiltrarData() {
   const modal = document.getElementById('modalFiltrarDataKanban');
@@ -35664,70 +35744,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       return s ? `?${s}` : '';
     })();
     // Segunda fase: carrega dados mais pesados de pedidos/compras em paralelo.
-    const [respPed, respCompra, respEtapaNf] = await Promise.all([
-      fetch(`/api/compras/pedidos-compra${_filtroDataParams}`, { credentials: 'include' }),
+    // Nota: 'pedidos-compra' (kanban Pedido de compra) foi removido — agora só compras-realizadas e etapa-nf.
+    const [respCompra, respEtapaNf] = await Promise.all([
       fetch(`/api/compras/compras-realizadas${_filtroDataParams}`, { credentials: 'include' }),
       fetch(`/api/compras/pedidos-etapa-nf${_filtroDataParams}`, { credentials: 'include' })
     ]);
-
-    // Busca pedidos de compra da tabela pedidos_omie (c_etapa = '10' e Etapa_NF vazia)
-    let pedidosCompra = [];
-    if (respPed.ok) {
-      const dataPed = await respPed.json();
-      console.log('[DEBUG] Pedidos de compra recebidos da API:', dataPed.pedidos);
-      pedidosCompra = (dataPed.pedidos || []).map(ped => {
-        console.log('[DEBUG] Pedido individual:', ped.numero, 'com itens:', ped.itens ? ped.itens.length : 0);
-        // Busca item de referência nas tabelas base para herdar solicitante e id_solicitante
-        const itemRef = solicitacoesBaseTodas.find(item => item.numero_pedido === ped.numero);
-        const solicitanteRef = ped.solicitante || (itemRef ? itemRef.solicitante : '') || '';
-        const grupoRequisicaoRef = ped.grupo_requisicao || (itemRef ? itemRef.grupo_requisicao : '') || '';
-        const idSolicitantePorGrupo = obterIdSolicitantePorGrupo(
-          mapaIdSolicitantePorGrupo,
-          solicitanteRef,
-          grupoRequisicaoRef
-        );
-        return {
-          ...ped,
-          id: `ped_${ped.n_cod_ped}`,
-          numero_pedido: ped.numero,
-          numero: ped.numero, // c_numero com 4 dígitos
-          n_cod_ped: ped.n_cod_ped,
-          fornecedor_nome: ped.fornecedor_nome,
-          solicitante: solicitanteRef,
-          id_solicitante: (itemRef && String(itemRef.id_solicitante || '').trim()) || idSolicitantePorGrupo || '-',
-          status: 'aguardando compra',
-          statusNormalizado: 'aguardando compra',
-          isPedidoCompra: true,
-          itens: ped.itens || [] // Garante que itens estão presentes
-        };
-      });
-      
-      // Aplica filtro por solicitante nos pedidos se modo 'minhas'
-      if (filtroSolicitante === 'minhas') {
-        const usuarioNormalizado = normalizarSolicitanteParaId(currentUser);
-        // Para pedidos, prioriza o solicitante do próprio pedido.
-        // Fallback: tenta localizar vínculo por número/código interno nas solicitações base.
-        pedidosCompra = pedidosCompra.filter(ped => {
-          const solicitantePedido = normalizarSolicitanteParaId(ped.solicitante);
-          if (solicitantePedido && solicitantePedido === usuarioNormalizado) return true;
-
-          const numeroPedido = String(ped.numero || '').trim();
-          const codIntPedido = String(ped.c_cod_int_ped || '').trim();
-          return solicitacoesBaseTodas.some(item => {
-            const solicitanteItem = normalizarSolicitanteParaId(item.solicitante);
-            if (!solicitanteItem || solicitanteItem !== usuarioNormalizado) return false;
-
-            const numeroItem = String(item.numero_pedido || '').trim();
-            if (numeroPedido && numeroItem === numeroPedido) return true;
-            if (codIntPedido && numeroItem === codIntPedido) return true;
-            return false;
-          });
-        });
-      }
-      
-      console.log('[DEBUG] Pedidos mapeados:', pedidosCompra);
-      lista = [...lista, ...pedidosCompra];
-    }
     
     // Busca compras realizadas da tabela pedidos_omie (c_etapa = '15' e Etapa_NF vazia)
     console.log('[DEBUG] Buscando compras realizadas...');
@@ -35913,7 +35934,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       'cotado aguardando escolha': filtrarItensPorDataLimite('cotado aguardando escolha', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'cotado')),
       'analise de cadastro': filtrarItensPorDataLimite('analise de cadastro', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'analise de cadastro')),
       'aguardando compra preparação': filtrarItensPorDataLimite('aguardando compra preparação', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra preparação')),
-      'aguardando compra': filtrarItensPorDataLimite('aguardando compra', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'aguardando compra')),
       'compra realizada': filtrarItensPorDataLimite('compra realizada', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'compra realizada')),
       'faturada pelo fornecedor': filtrarItensPorDataLimite('faturada pelo fornecedor', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'faturada pelo fornecedor' && String(i.compras || '').trim().toLowerCase() !== 'nao')),
       'recebido': filtrarItensPorDataLimite('recebido', itensComStatusNormalizado.filter(i => i.statusNormalizado === 'recebido')),
@@ -35931,7 +35951,6 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
         'analise de cadastro': { bg: '#0ea5e9', bgLight: '#e0f2fe', text: '#0c4a6e', icon: 'fa-magnifying-glass' },
         'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
-        'aguardando compra': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-cart-shopping' },
         'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' },
         'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
         'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
@@ -35947,15 +35966,14 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando cotação': 'Cotação',
         'cotado aguardando escolha': 'Cotado',
         'analise de cadastro': 'Analise de cadastro',
-        'aguardando compra preparação': 'Requisições',
-        'aguardando compra': 'Pedido de compra'
+        'aguardando compra preparação': 'Requisições'
       };
       const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
       
       // Define grupos de kanbans com características especiais
       const kanbanAcaoRequisitante = ['cotado aguardando escolha', 'solicitado revisão']; // Ações do requisitante
       const kanbanOperacaoAprovador = ['aguardando aprovação da requisição']; // Aprovador precisa aprovar
-      const kanbanOperacaoComprador = ['aguardando cotação', 'analise de cadastro', 'aguardando compra preparação', 'aguardando compra']; // Operações do comprador
+      const kanbanOperacaoComprador = ['aguardando cotação', 'analise de cadastro', 'aguardando compra preparação']; // Operações do comprador
       const kanbanAcaoRecebimento = ['compra realizada', 'faturada pelo fornecedor']; // Ações do recebimento
       const kanbanSetoresLiberacao = ['recebido']; // Setores precisam liberar
       
@@ -36005,7 +36023,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       
       // Define se a coluna deve ter interação de clique (para abrir modal)
       // "cotado aguardando escolha" será aberto pelo clique no item (sem botão Abrir Tudo)
-      const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra preparação', 'aguardando compra'];
+      const statusComClique = ['aguardando aprovação da requisição', 'aguardando cotação', 'aguardando compra preparação'];
       const temItens = itens.length > 0;
       const ehClicavel = statusComClique.includes(status) && temItens; // Só permite clique se houver itens
       
@@ -36013,8 +36031,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       const funcoesOnclick = {
         'aguardando aprovação da requisição': 'abrirModalAprovacaoRequisicao()',
         'aguardando cotação': 'abrirModalSelecaoItensCotacao()',
-        'aguardando compra preparação': 'abrirModalSelecaoItensCompra()',
-        'aguardando compra': 'abrirModalSelecaoItensCompra()'
+        'aguardando compra preparação': 'abrirModalSelecaoItensCompra()'
       };
       const funcaoOnclick = funcoesOnclick[status] || '';
       
@@ -36023,8 +36040,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         'aguardando aprovação da requisição': 'rgba(37,99,235,0.3)', // Azul
         'aguardando cotação': 'rgba(251,191,36,0.3)', // Amarelo
         'cotado aguardando escolha': 'rgba(139,92,246,0.3)', // Roxo
-        'aguardando compra preparação': 'rgba(16,185,129,0.3)',   // Verde
-        'aguardando compra': 'rgba(16,185,129,0.3)'   // Verde
+        'aguardando compra preparação': 'rgba(16,185,129,0.3)'   // Verde
       };
       const corHover = coresHover[status] || 'rgba(0,0,0,0.1)';
       
@@ -40740,11 +40756,11 @@ function renderAgendaCalendarioMensal() {
         ? '<i class="fa-solid fa-chalkboard-user agenda-chip-room-icon" title="Auditório"></i>'
         : '<i class="fa-solid fa-handshake agenda-chip-room-icon" title="Sala de reunião"></i>';
 
-      // Hora no formato HH/HH
-      const horaInicio = String(reserva?.inicio || '').slice(0, 2);
-      const horaFim    = String(reserva?.fim    || '').slice(0, 2);
+      // Hora no formato HH:MM-HH:MM
+      const horaInicio = String(reserva?.inicio || '').slice(0, 5);
+      const horaFim    = String(reserva?.fim    || '').slice(0, 5);
       const horaHtml = horaInicio
-        ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}/${escapeHtml(horaFim || '--')}</span>`
+        ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}-${escapeHtml(horaFim || '--')}</span>`
         : '';
 
       // Café e convocado apenas quando aplicável

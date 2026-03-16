@@ -395,41 +395,34 @@ module.exports = (pool) => {
     const client = await pool.connect();
     try {
       const { rows } = await client.query(`
-        WITH referencias_grupo AS (
-          SELECT
-            NULLIF(BTRIM(sc.grupo_requisicao), '') AS grupo_requisicao,
-            NULLIF(BTRIM(sc.solicitante), '') AS solicitante,
-            NULLIF(BTRIM(sc.resp_inspecao_recebimento), '') AS resp_inspecao_recebimento,
-            COALESCE(sc.updated_at, sc.created_at) AS ref_data,
-            1 AS origem_ordem
-          FROM compras.solicitacao_compras sc
-          WHERE NULLIF(BTRIM(sc.grupo_requisicao), '') IS NOT NULL
-
-          UNION ALL
-
-          SELECT
-            NULLIF(BTRIM(csc.grupo_requisicao), '') AS grupo_requisicao,
-            NULLIF(BTRIM(csc.solicitante), '') AS solicitante,
-            NULLIF(BTRIM(csc.resp_inspecao_recebimento), '') AS resp_inspecao_recebimento,
-            COALESCE(csc.updated_at, csc.created_at) AS ref_data,
-            2 AS origem_ordem
-          FROM compras.compras_sem_cadastro csc
-          WHERE NULLIF(BTRIM(csc.grupo_requisicao), '') IS NOT NULL
-        ),
-        referencia_escolhida AS (
+        WITH referencia_escolhida AS (
+          -- Busca solicitante e responsável pelo grupo_requisicao vinculado ao pedido
           SELECT DISTINCT ON (rg.grupo_requisicao)
             rg.grupo_requisicao,
             rg.solicitante,
             rg.resp_inspecao_recebimento
-          FROM referencias_grupo rg
-          ORDER BY
-            rg.grupo_requisicao,
+          FROM (
+            SELECT NULLIF(BTRIM(sc.grupo_requisicao), '') AS grupo_requisicao,
+                   NULLIF(BTRIM(sc.solicitante), '') AS solicitante,
+                   NULLIF(BTRIM(sc.resp_inspecao_recebimento), '') AS resp_inspecao_recebimento,
+                   COALESCE(sc.updated_at, sc.created_at) AS ref_data, 1 AS origem_ordem
+            FROM compras.solicitacao_compras sc
+            WHERE NULLIF(BTRIM(sc.grupo_requisicao), '') IS NOT NULL
+            UNION ALL
+            SELECT NULLIF(BTRIM(csc.grupo_requisicao), ''),
+                   NULLIF(BTRIM(csc.solicitante), ''),
+                   NULLIF(BTRIM(csc.resp_inspecao_recebimento), ''),
+                   COALESCE(csc.updated_at, csc.created_at), 2
+            FROM compras.compras_sem_cadastro csc
+            WHERE NULLIF(BTRIM(csc.grupo_requisicao), '') IS NOT NULL
+          ) rg
+          ORDER BY rg.grupo_requisicao,
             CASE WHEN rg.solicitante IS NOT NULL THEN 0 ELSE 1 END,
             CASE WHEN rg.resp_inspecao_recebimento IS NOT NULL THEN 0 ELSE 1 END,
-            rg.ref_data DESC NULLS LAST,
-            rg.origem_ordem ASC
+            rg.ref_data DESC NULLS LAST, rg.origem_ordem ASC
         ),
         recebimentos_base AS (
+          -- NF-es recebidas para cruzar com os pedidos
           SELECT DISTINCT
             NULLIF(BTRIM(r.n_id_fornecedor::text), '') AS id_fornecedor_omie,
             NULLIF(BTRIM(r.c_numero_nfe), '') AS numero_nfe,
@@ -439,142 +432,183 @@ module.exports = (pool) => {
           WHERE r.n_id_fornecedor IS NOT NULL
             AND NULLIF(BTRIM(r.c_numero_nfe), '') IS NOT NULL
         )
-        SELECT 
+        SELECT
           po.n_cod_ped,
-          po.c_numero AS cnumero,
+          po.c_numero                                    AS cnumero,
+          NULLIF(BTRIM(po.c_etapa), '')                  AS etapa_nf_codigo,
           COALESCE(
-            NULLIF(BTRIM(po."Etapa_NF"), ''),
-            NULLIF(BTRIM(po.c_etapa), '')
-          ) AS etapa_nf_codigo,
-          COALESCE(
-            CASE
-              WHEN NULLIF(BTRIM(po."Etapa_NF"), '') IS NOT NULL THEN
-                COALESCE(
-                  NULLIF(BTRIM(ern.descricao_customizada), ''),
-                  NULLIF(BTRIM(ern.descricao), ''),
-                  NULLIF(BTRIM(po."Etapa_NF"), '')
-                )
-              ELSE
-                COALESCE(
-                  NULLIF(BTRIM(epc.descricao_padrao), ''),
-                  NULLIF(BTRIM(epc.descricao_customizada), ''),
-                  NULLIF(BTRIM(po.c_etapa), '')
-                )
-            END,
+            NULLIF(BTRIM(epc.descricao_padrao), ''),
+            NULLIF(BTRIM(epc.descricao_customizada), ''),
+            NULLIF(BTRIM(po.c_etapa), ''),
             'Sem etapa'
-          ) AS etapa_nf,
+          )                                              AS etapa_nf,
           COALESCE(
-            CASE
-              WHEN NULLIF(BTRIM(po."Etapa_NF"), '') IS NOT NULL THEN
-                COALESCE(
-                  NULLIF(BTRIM(ern.descricao_customizada), ''),
-                  NULLIF(BTRIM(ern.descricao), ''),
-                  NULLIF(BTRIM(po."Etapa_NF"), '')
-                )
-              ELSE
-                COALESCE(
-                  NULLIF(BTRIM(epc.descricao_padrao), ''),
-                  NULLIF(BTRIM(epc.descricao_customizada), ''),
-                  NULLIF(BTRIM(po.c_etapa), '')
-                )
-            END,
+            NULLIF(BTRIM(epc.descricao_padrao), ''),
+            NULLIF(BTRIM(epc.descricao_customizada), ''),
+            NULLIF(BTRIM(po.c_etapa), ''),
             'Sem etapa'
-          ) AS etapa_nf_descricao,
-          CASE
-            WHEN NULLIF(BTRIM(po."Etapa_NF"), '') IS NOT NULL THEN NULLIF(BTRIM(ern.cor), '')
-            ELSE COALESCE(
-              NULLIF(BTRIM(to_jsonb(epc)->>'cor'), ''),
-              CASE NULLIF(BTRIM(po.c_etapa), '')
-                WHEN '20' THEN '#FFA500'
-                WHEN '15' THEN '#FF8C00'
-                WHEN '10' THEN '#FFD700'
-                ELSE NULL
-              END
-            )
-          END AS etapa_nf_cor,
-          CASE
-            WHEN NULLIF(BTRIM(po."Etapa_NF"), '') IS NOT NULL THEN NULLIF(BTRIM(ern.icone), '')
-            ELSE COALESCE(
-              NULLIF(BTRIM(to_jsonb(epc)->>'icone'), ''),
-              CASE NULLIF(BTRIM(po.c_etapa), '')
-                WHEN '20' THEN 'clipboard-list'
-                WHEN '15' THEN 'circle-check'
-                WHEN '10' THEN 'cart-shopping'
-                ELSE NULL
-              END
-            )
-          END AS etapa_nf_icone,
+          )                                              AS etapa_nf_descricao,
+          COALESCE(
+            NULLIF(BTRIM(to_jsonb(epc)->>'cor'), ''),
+            CASE NULLIF(BTRIM(po.c_etapa), '')
+              WHEN '20' THEN '#FFA500'
+              WHEN '15' THEN '#FF8C00'
+              WHEN '10' THEN '#FFD700'
+              ELSE '#64748b'
+            END
+          )                                              AS etapa_nf_cor,
+          COALESCE(
+            NULLIF(BTRIM(to_jsonb(epc)->>'icone'), ''),
+            CASE NULLIF(BTRIM(po.c_etapa), '')
+              WHEN '20' THEN 'clipboard-list'
+              WHEN '15' THEN 'circle-check'
+              WHEN '10' THEN 'cart-shopping'
+              ELSE 'box'
+            END
+          )                                              AS etapa_nf_icone,
           pop.id,
           pop.n_cod_item,
-          pop.c_produto AS produto_codigo,
-          pop.c_descricao AS produto_descricao,
-          pop.n_qtde AS quantidade,
-          pop.c_unidade AS unidade,
-          COALESCE(pop.n_val_tot, 0) AS valor_item,
+          pop.c_produto                                  AS produto_codigo,
+          pop.c_descricao                                AS produto_descricao,
+          pop.n_qtde                                     AS quantidade,
+          pop.c_unidade                                  AS unidade,
+          COALESCE(pop.n_val_tot, 0)                     AS valor_item,
           SUM(COALESCE(pop.n_val_tot, 0)) OVER (PARTITION BY po.n_cod_ped) AS valor_total_pedido,
           re.solicitante,
-          po.d_dt_previsao AS previsao_chegada,
+          po.d_dt_previsao                               AS previsao_chegada,
           re.resp_inspecao_recebimento,
-          f.nome_fantasia AS fornecedor_nome_fantasia,
-          f.razao_social AS fornecedor_razao_social,
-          f.cnpj_cpf AS fornecedor_cnpj_cpf,
-          f.cidade AS fornecedor_cidade,
-          f.estado AS fornecedor_estado,
-          f.telefone1_ddd AS fornecedor_telefone1_ddd,
-          f.telefone1_numero AS fornecedor_telefone1_numero,
-          po."NFe vinculada" AS nfe_vinculada,
-          rpf.lista_numeros_nfe AS fornecedor_lista_numeros_nfe,
-          rpf.lista_nfes AS fornecedor_lista_nfes,
-          COALESCE(pop.c_obs, po.c_obs) AS observacao,
-          po.created_at
+          f.nome_fantasia                                AS fornecedor_nome_fantasia,
+          f.razao_social                                 AS fornecedor_razao_social,
+          f.cnpj_cpf                                     AS fornecedor_cnpj_cpf,
+          f.cidade                                       AS fornecedor_cidade,
+          f.estado                                       AS fornecedor_estado,
+          f.telefone1_ddd                                AS fornecedor_telefone1_ddd,
+          f.telefone1_numero                             AS fornecedor_telefone1_numero,
+          po."NFe vinculada"                             AS nfe_vinculada,
+          rpf.lista_numeros_nfe                          AS fornecedor_lista_numeros_nfe,
+          rpf.lista_nfes                                 AS fornecedor_lista_nfes,
+          COALESCE(pop.c_obs, po.c_obs)                  AS observacao,
+          po.d_inc_data
         FROM compras.pedidos_omie po
+        -- ============================================================
+        -- REGRA PRINCIPAL: inativo = false E Etapa_NF = NULL
+        -- ============================================================
         INNER JOIN compras.pedidos_omie_produtos pop
           ON pop.n_cod_ped = po.n_cod_ped
-        LEFT JOIN logistica.etapas_recebimento_nfe ern
-          ON BTRIM(ern.codigo::text) = BTRIM(COALESCE(NULLIF(BTRIM(po."Etapa_NF"), ''), ''))
-         AND BTRIM(ern.codigo::text) IN ('40', '50', '60')
         LEFT JOIN compras.etapas_pedido_compra epc
           ON BTRIM(epc.codigo::text) = BTRIM(COALESCE(NULLIF(BTRIM(po.c_etapa), ''), ''))
         LEFT JOIN omie.fornecedores f
           ON f.codigo_cliente_omie = po.n_cod_for
         LEFT JOIN LATERAL (
+          -- Busca NF-es do fornecedor para exibir link clicável
           SELECT
-            STRING_AGG(rb.numero_nfe, ', ' ORDER BY rb.numero_nfe) AS lista_numeros_nfe,
-            JSONB_AGG(
-              JSONB_BUILD_OBJECT(
-                'numero_nfe', rb.numero_nfe,
-                'chave_nfe', rb.chave_nfe
-              )
-              ORDER BY rb.numero_nfe, rb.chave_nfe
-            ) FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
+            STRING_AGG(DISTINCT rb.numero_nfe, ', ') AS lista_numeros_nfe,
+            JSONB_AGG(JSONB_BUILD_OBJECT('numero_nfe', rb.numero_nfe, 'chave_nfe', rb.chave_nfe))
+              FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
           FROM recebimentos_base rb
           WHERE rb.id_fornecedor_omie = NULLIF(BTRIM(po.n_cod_for::text), '')
-            AND (
-              po.d_inc_data IS NULL
-              OR (rb.d_emissao_nfe IS NOT NULL AND rb.d_emissao_nfe >= po.d_inc_data::date)
-            )
-            AND NOT EXISTS (
-              SELECT 1
-              FROM compras.pedidos_omie po_v
-              WHERE NULLIF(BTRIM(po_v."NFe vinculada"), '') = rb.numero_nfe
-                AND po_v.n_cod_ped IS DISTINCT FROM po.n_cod_ped
-            )
+            AND (po.d_inc_data IS NULL
+                 OR (rb.d_emissao_nfe IS NOT NULL AND rb.d_emissao_nfe >= po.d_inc_data::date))
         ) rpf ON TRUE
         LEFT JOIN referencia_escolhida re
-          ON re.grupo_requisicao = NULLIF(BTRIM(po.c_obs_int), '')
-        WHERE po.c_numero IS NOT NULL
-          AND COALESCE(po.inativo, FALSE) = FALSE
-          AND NULLIF(BTRIM(po.c_obs_int), '') IS NOT NULL
-          AND BTRIM(po.c_obs_int) ~ '^[0-9]{8}-[0-9]{6}-[0-9]{3}$'
-          AND (
-            COALESCE(BTRIM(po."Etapa_NF"), '') = ''
-            OR BTRIM(po."Etapa_NF") IN ('50', '60')
-          )
-        ORDER BY po.c_numero DESC, pop.id ASC
+          ON re.grupo_requisicao = SUBSTRING(BTRIM(COALESCE(po.c_obs_int, '')) FROM '[0-9]{8}-[0-9]{6}-[0-9]{3}')
+        WHERE COALESCE(po.inativo, FALSE) = FALSE
+          AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
+          -- Filtro: apenas pedidos criados a partir de 2026
+          AND po.d_inc_data >= '2026-01-01'
+        ORDER BY CAST(REGEXP_REPLACE(po.c_numero, '[^0-9]', '', 'g') AS BIGINT) DESC, pop.id ASC
       `);
       res.json(rows);
     } catch (e) {
       console.error('[GET /api/compras/solicitacoes-recebimento] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Pedidos já recebidos (Etapa_NF = 50 ou 60, inativo = false)
+  router.get('/pedidos-recebidos', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query(`
+        WITH recebimentos_base AS (
+          SELECT DISTINCT
+            NULLIF(BTRIM(r.n_id_fornecedor::text), '') AS id_fornecedor_omie,
+            NULLIF(BTRIM(r.c_numero_nfe), '')           AS numero_nfe,
+            NULLIF(BTRIM(r.c_chave_nfe), '')            AS chave_nfe,
+            r.d_emissao_nfe::date                       AS d_emissao_nfe
+          FROM logistica.recebimentos_nfe_omie r
+          WHERE r.n_id_fornecedor IS NOT NULL
+            AND NULLIF(BTRIM(r.c_numero_nfe), '') IS NOT NULL
+        )
+        SELECT
+          po.n_cod_ped,
+          po.c_numero                                    AS cnumero,
+          NULLIF(BTRIM(po."Etapa_NF"), '')               AS etapa_nf_codigo,
+          COALESCE(
+            NULLIF(BTRIM(ern.descricao_customizada), ''),
+            NULLIF(BTRIM(ern.descricao), ''),
+            NULLIF(BTRIM(po."Etapa_NF"), ''),
+            'Recebido'
+          )                                              AS etapa_nf,
+          COALESCE(
+            NULLIF(BTRIM(ern.descricao_customizada), ''),
+            NULLIF(BTRIM(ern.descricao), ''),
+            NULLIF(BTRIM(po."Etapa_NF"), ''),
+            'Recebido'
+          )                                              AS etapa_nf_descricao,
+          COALESCE(NULLIF(BTRIM(ern.cor), ''), '#10b981') AS etapa_nf_cor,
+          COALESCE(NULLIF(BTRIM(ern.icone), ''), 'check-circle') AS etapa_nf_icone,
+          pop.id,
+          pop.n_cod_item,
+          pop.c_produto                                  AS produto_codigo,
+          pop.c_descricao                                AS produto_descricao,
+          pop.n_qtde                                     AS quantidade,
+          pop.c_unidade                                  AS unidade,
+          COALESCE(pop.n_val_tot, 0)                     AS valor_item,
+          SUM(COALESCE(pop.n_val_tot, 0)) OVER (PARTITION BY po.n_cod_ped) AS valor_total_pedido,
+          NULL::text                                     AS solicitante,
+          po.d_dt_previsao                               AS previsao_chegada,
+          NULL::text                                     AS resp_inspecao_recebimento,
+          f.nome_fantasia                                AS fornecedor_nome_fantasia,
+          f.razao_social                                 AS fornecedor_razao_social,
+          f.cnpj_cpf                                     AS fornecedor_cnpj_cpf,
+          f.cidade                                       AS fornecedor_cidade,
+          f.estado                                       AS fornecedor_estado,
+          f.telefone1_ddd                                AS fornecedor_telefone1_ddd,
+          f.telefone1_numero                             AS fornecedor_telefone1_numero,
+          po."NFe vinculada"                             AS nfe_vinculada,
+          rpf.lista_numeros_nfe                          AS fornecedor_lista_numeros_nfe,
+          rpf.lista_nfes                                 AS fornecedor_lista_nfes,
+          COALESCE(pop.c_obs, po.c_obs)                  AS observacao,
+          po.d_inc_data
+        FROM compras.pedidos_omie po
+        INNER JOIN compras.pedidos_omie_produtos pop
+          ON pop.n_cod_ped = po.n_cod_ped
+        LEFT JOIN logistica.etapas_recebimento_nfe ern
+          ON BTRIM(ern.codigo::text) = BTRIM(po."Etapa_NF")
+        LEFT JOIN omie.fornecedores f
+          ON f.codigo_cliente_omie = po.n_cod_for
+        LEFT JOIN LATERAL (
+          -- Busca NF-e vinculada para obter a chave e exibir link clicável
+          SELECT
+            STRING_AGG(DISTINCT rb.numero_nfe, ', ') AS lista_numeros_nfe,
+            JSONB_AGG(JSONB_BUILD_OBJECT('numero_nfe', rb.numero_nfe, 'chave_nfe', rb.chave_nfe))
+              FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
+          FROM recebimentos_base rb
+          WHERE NULLIF(BTRIM(po."NFe vinculada"), '') IS NOT NULL
+            AND rb.numero_nfe = NULLIF(BTRIM(po."NFe vinculada"), '')
+        ) rpf ON TRUE
+        WHERE COALESCE(po.inativo, FALSE) = FALSE
+          AND BTRIM(COALESCE(po."Etapa_NF", '')) IN ('50', '60')
+          -- Filtro: apenas pedidos criados a partir de 2026
+          AND po.d_inc_data >= '2026-01-01'
+        ORDER BY CAST(REGEXP_REPLACE(po.c_numero, '[^0-9]', '', 'g') AS BIGINT) DESC, pop.id ASC
+      `);
+      res.json(rows);
+    } catch (e) {
+      console.error('[GET /api/compras/pedidos-recebidos] erro:', e);
       res.status(500).json({ error: e.message || String(e) });
     } finally {
       client.release();

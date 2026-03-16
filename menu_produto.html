@@ -510,6 +510,12 @@
                       <i class="fa-solid fa-xmark"></i>
                     </button>
                   </div>
+                  <!-- Atalhos rápidos de período -->
+                  <div style="display:flex;gap:8px;margin-bottom:16px;">
+                    <button onclick="filtroDataRapido('mes-atual')" style="flex:1;padding:8px 6px;border:1.5px solid #ec4899;border-radius:8px;background:#fff0f6;color:#db2777;font-weight:600;font-size:12px;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='#ec4899';this.style.color='#fff'" onmouseout="this.style.background='#fff0f6';this.style.color='#db2777'">Mês atual</button>
+                    <button onclick="filtroDataRapido('mes-anterior')" style="flex:1;padding:8px 6px;border:1.5px solid #ec4899;border-radius:8px;background:#fff0f6;color:#db2777;font-weight:600;font-size:12px;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='#ec4899';this.style.color='#fff'" onmouseout="this.style.background='#fff0f6';this.style.color='#db2777'">Mês anterior</button>
+                    <button onclick="filtroDataRapido('trimestre')" style="flex:1;padding:8px 6px;border:1.5px solid #ec4899;border-radius:8px;background:#fff0f6;color:#db2777;font-weight:600;font-size:12px;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='#ec4899';this.style.color='#fff'" onmouseout="this.style.background='#fff0f6';this.style.color='#db2777'">Último trimestre</button>
+                  </div>
                   <div style="margin-bottom:14px;">
                     <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Data Início</label>
                     <input type="date" id="filtrarDataInicio" style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;outline:none;transition:border .2s;" onfocus="this.style.borderColor='#ec4899'" onblur="this.style.borderColor='#d1d5db'">
@@ -6552,7 +6558,15 @@ function attachDropZone(ul) {
     const xmlPagamento = resumoXml?.pagamento || {};
     const xmlItens = Array.isArray(resumoXml?.itens) ? resumoXml.itens : [];
     const itensPedido = Array.isArray(pedidoContexto?.itens) ? pedidoContexto.itens : [];
-    const pedidoCriadoEm = formatarDataBr(pedidoContexto?.created_at || '-', true);
+    const pedidoCriadoEm = (() => {
+      const val = pedidoContexto?.d_inc_data;
+      if (!val) return '-';
+      const s = String(val).trim();
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y, m, d] = s.split('-'); return `${d}/${m}/${y}`; }
+      const dt = new Date(s);
+      return isNaN(dt.getTime()) ? s : dt.toLocaleDateString('pt-BR');
+    })();
     const pedidoObservacao = String(pedidoContexto?.observacao || '-');
     const numeroPedidoContexto = String(pedidoContexto?.cnumero || '').trim();
 
@@ -7224,7 +7238,11 @@ function attachDropZone(ul) {
         </tr>
       `;
 
-      const response = await fetch('/api/compras/solicitacoes-recebimento');
+      // Cada painel usa seu próprio endpoint com regra exclusiva
+      const urlEndpoint = configPainel.key === 'produto-recebido'
+        ? '/api/compras/pedidos-recebidos'
+        : '/api/compras/solicitacoes-recebimento';
+      const response = await fetch(urlEndpoint, { credentials: 'include' });
       if (!response.ok) {
         throw new Error(`Erro HTTP: ${response.status}`);
       }
@@ -7274,7 +7292,7 @@ function attachDropZone(ul) {
             fornecedor_lista_nfes: item.fornecedor_lista_nfes,
             fornecedor_lista_numeros_nfe: item.fornecedor_lista_numeros_nfe,
             observacao: item.observacao,
-            created_at: item.created_at,
+            d_inc_data: item.d_inc_data,
             valor_total_pedido: item.valor_total_pedido,
             itens: []
           };
@@ -7301,13 +7319,24 @@ function attachDropZone(ul) {
           ? new Date(pedido.previsao_chegada).toLocaleDateString('pt-BR')
           : '-';
         
-        const criadoEm = pedido.created_at
-          ? new Date(pedido.created_at).toLocaleDateString('pt-BR', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric'
-            })
-          : '-';
+        const criadoEm = (() => {
+          const val = pedido.d_inc_data;
+          if (!val) return '-';
+          const s = String(val).trim();
+          // Formato DD/MM/YYYY (Omie)
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+            const [d, m, y] = s.split('/');
+            return `${d}/${m}/${y}`;
+          }
+          // Formato YYYY-MM-DD (Postgres date)
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+            const [y, m, d] = s.split('-');
+            return `${d}/${m}/${y}`;
+          }
+          // Fallback: tenta via Date
+          const dt = new Date(s);
+          return isNaN(dt.getTime()) ? s : dt.toLocaleDateString('pt-BR');
+        })();
 
         const valorPedido = formatarMoeda(pedido.valor_total_pedido);
         const badgeEtapaNf = renderizarBadgeEtapa(pedido.etapa_nf_codigo, {
