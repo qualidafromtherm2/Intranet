@@ -434,7 +434,7 @@ async function upsertCabecalho(client, ident={}, observacoes={}, custoProducao={
   const vGGF = custoProducao?.vGGF ?? null;
 
   const sel = await client.query(
-    `SELECT id FROM public.omie_estrutura
+    `SELECT id FROM engenharia.omie_estrutura
        WHERE (cod_produto=$1 AND $1 IS NOT NULL)
           OR (id_produto=$2 AND $2 IS NOT NULL)
           OR (int_produto=$3 AND $3 IS NOT NULL)
@@ -445,7 +445,7 @@ async function upsertCabecalho(client, ident={}, observacoes={}, custoProducao={
   if (sel.rowCount) {
     const pid = sel.rows[0].id;
     await client.query(
-      `UPDATE public.omie_estrutura
+      `UPDATE engenharia.omie_estrutura
          SET descr_produto=$1, tipo_produto=$2, unid_produto=$3,
              peso_liq_produto=$4, peso_bruto_produto=$5,
              obs_relevantes=$6, v_mod=$7, v_ggf=$8,
@@ -461,7 +461,7 @@ async function upsertCabecalho(client, ident={}, observacoes={}, custoProducao={
   }
 
   const ins = await client.query(
-    `INSERT INTO public.omie_estrutura
+    `INSERT INTO engenharia.omie_estrutura
      (id_produto,int_produto,cod_produto,descr_produto,tipo_produto,unid_produto,
       peso_liq_produto,peso_bruto_produto,obs_relevantes,v_mod,v_ggf,origem)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'omie') RETURNING id`,
@@ -481,7 +481,7 @@ async function replaceItens(client, parentId, itens = []) {
   // 1) Versão atual com lock
   const { rows: verRows } = await client.query(
     `SELECT COALESCE(versao,1) AS versao
-       FROM public.omie_estrutura
+       FROM engenharia.omie_estrutura
       WHERE id = $1
       FOR UPDATE`,
     [parentId]
@@ -492,9 +492,9 @@ async function replaceItens(client, parentId, itens = []) {
   const MOD_SINC = 'omie-sync';
   await client.query(
     `
-    INSERT INTO public.omie_estrutura_item_versao
+    INSERT INTO engenharia.omie_estrutura_item_versao
     SELECT t.*, $2::int AS versao, $3::text AS modificador, now() as snapshot_at
-      FROM public.omie_estrutura_item t
+      FROM engenharia.omie_estrutura_item t
      WHERE t.parent_id = $1
     `,
     [parentId, versaoAtual, MOD_SINC]
@@ -502,7 +502,7 @@ async function replaceItens(client, parentId, itens = []) {
 
   // 3) Apaga itens antigos e mede se havia algo
   const delRes = await client.query(
-    `DELETE FROM public.omie_estrutura_item WHERE parent_id=$1`,
+    `DELETE FROM engenharia.omie_estrutura_item WHERE parent_id=$1`,
     [parentId]
   );
   const hadPrevious = Number(delRes.rowCount || 0) > 0;
@@ -511,7 +511,7 @@ async function replaceItens(client, parentId, itens = []) {
   if (!Array.isArray(itens) || itens.length === 0) {
     if (hadPrevious) {
       await client.query(
-        `UPDATE public.omie_estrutura
+        `UPDATE engenharia.omie_estrutura
             SET versao = COALESCE(versao, 1) + 1,
                 modificador = $2,
                 updated_at = now()
@@ -520,7 +520,7 @@ async function replaceItens(client, parentId, itens = []) {
       );
     } else {
       await client.query(
-        `UPDATE public.omie_estrutura
+        `UPDATE engenharia.omie_estrutura
             SET versao = COALESCE(versao, 1),
                 modificador = $2,
                 updated_at = now()
@@ -541,7 +541,7 @@ async function replaceItens(client, parentId, itens = []) {
   if (!dedup.length) {
     if (hadPrevious) {
       await client.query(
-        `UPDATE public.omie_estrutura
+        `UPDATE engenharia.omie_estrutura
             SET versao = COALESCE(versao, 1) + 1,
                 modificador = $2,
                 updated_at = now()
@@ -550,7 +550,7 @@ async function replaceItens(client, parentId, itens = []) {
       );
     } else {
       await client.query(
-        `UPDATE public.omie_estrutura
+        `UPDATE engenharia.omie_estrutura
             SET versao = COALESCE(versao, 1),
                 modificador = $2,
                 updated_at = now()
@@ -563,7 +563,7 @@ async function replaceItens(client, parentId, itens = []) {
 
   // 6) INSERT em lote (como já estava)
   const text = `
-    INSERT INTO public.omie_estrutura_item(
+    INSERT INTO engenharia.omie_estrutura_item(
       parent_id,
       id_malha,int_malha,
       id_prod_malha,int_prod_malha,cod_prod_malha,descr_prod_malha,
@@ -608,7 +608,7 @@ async function replaceItens(client, parentId, itens = []) {
   // 7) Incrementa/garante versão **e** marca modificador
   if (hadPrevious) {
     await client.query(
-      `UPDATE public.omie_estrutura
+      `UPDATE engenharia.omie_estrutura
           SET versao = COALESCE(versao, 1) + 1,
               modificador = $2,
               updated_at = now()
@@ -617,7 +617,7 @@ async function replaceItens(client, parentId, itens = []) {
     );
   } else {
     await client.query(
-      `UPDATE public.omie_estrutura
+      `UPDATE engenharia.omie_estrutura
           SET versao = COALESCE(versao, 1),
               modificador = $2,
               updated_at = now()
@@ -5994,80 +5994,36 @@ app.get('/api/compras/departamentos', async (req, res) => {
 // ========================================
 /**
  * GET /api/compras/grafico-pizza-dept-cc
- * Retorna valor_pedido somado por departamento e centro_custo
- * usando compras.historico_compras como origem e buscando dept/cc
- * nas tabelas solicitacao_compras e compras_sem_cadastro via grupo_requisicao + tabela_origem.
- * Parâmetros: dataInicio, dataFim (YYYY-MM-DD), agrupamento ('departamento'|'centro_custo')
+ * Retorna valor somado de pedidos_omie por status:
+ *   - "Compra realizada" : inativo=false e Etapa_NF IS NULL
+ *   - "Recebido"         : inativo=false e Etapa_NF IN ('50','60')
+ * Parâmetros: dataInicio, dataFim (YYYY-MM-DD) — filtro em d_inc_data
  */
 app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
   try {
     const { dataInicio, dataFim } = req.query;
-
     const params = [];
-    let whereDates = '';
-    if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
-    if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+    const whereParts = [
+      `inativo = false`,
+      `("Etapa_NF" IS NULL OR "Etapa_NF" IN ('50', '60'))`,
+    ];
+    if (dataInicio) { params.push(dataInicio); whereParts.push(`d_inc_data >= $${params.length}::date`); }
+    if (dataFim)    { params.push(dataFim);    whereParts.push(`d_inc_data <= $${params.length}::date`); }
 
-    // Filtro opcional de departamentos (query param: departamentos=A,B,C)
-    let whereDept = '';
-    const deptoParam = req.query.departamentos;
-    if (deptoParam && deptoParam.trim()) {
-      const lista = deptoParam.split(',').map(d => d.trim()).filter(Boolean);
-      if (lista.length > 0) {
-        params.push(lista);
-        whereDept = ` AND (
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
-          END
-        ) = ANY($${params.length}::text[])`;
-      }
-    }
-
-    // Retorna departamento (centro_custo) como grupo, apenas 4 status fixos, exclui Excluido
-    // DISTINCT ON (h.id) evita fanout: quando há múltiplos itens SC/CSC com o mesmo
-    // grupo_requisicao, o JOIN geraria N linhas para 1 registro de historico_compras,
-    // inflando o SUM(valor_pedido). Pegamos apenas 1 linha por h.id para dept/cc info.
     const { rows } = await pool.query(`
       SELECT
-        COALESCE(sub.dept, 'Não informado') ||
-        COALESCE(' (' || NULLIF(BTRIM(sub.cc), '') || ')', '') AS grupo,
-        COALESCE(sub.h_status, 'sem status') AS status,
-        SUM(sub.valor_pedido) AS total
-      FROM (
-        SELECT DISTINCT ON (h.id)
-          h.id,
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
-          END AS dept,
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.centro_custo
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.centro_custo
-          END AS cc,
-          h.status AS h_status,
-          h.valor_pedido
-        FROM compras.historico_compras h
-        LEFT JOIN compras.solicitacao_compras sc
-          ON h.tabela_origem = 'solicitacao_compras'
-          AND sc.grupo_requisicao = h.grupo_requisicao
-        LEFT JOIN compras.compras_sem_cadastro csc
-          ON h.tabela_origem = 'compras_sem_cadastro'
-          AND csc.grupo_requisicao = h.grupo_requisicao
-        WHERE h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
-          AND h.status IN ('aguardando compra', 'Compra realizada', 'Recebido Totalmente', 'Concluido')
-          AND (
-            h.status = 'aguardando compra'
-            OR (h.status <> 'aguardando compra' ${whereDates ? whereDates : 'AND 1=1'})
-          )
-          ${whereDept}
-        ORDER BY h.id
-      ) sub
-      GROUP BY grupo, status
-      ORDER BY grupo ASC
+        CASE WHEN "Etapa_NF" IS NULL THEN 'Compra realizada' ELSE 'Recebido' END AS status,
+        COALESCE(SUM(n_valor), 0) AS total
+      FROM compras.pedidos_omie
+      WHERE ${whereParts.join(' AND ')}
+      GROUP BY status
+      ORDER BY MIN(CASE WHEN "Etapa_NF" IS NULL THEN 1 ELSE 2 END)
     `, params);
 
-    res.json({ ok: true, dados: rows.map(r => ({ grupo: r.grupo, status: r.status, total: Number(r.total) })) });
+    res.json({ ok: true, dados: rows.map(r => ({ status: r.status, total: Number(r.total) })) });
   } catch (err) {
     console.error('[Compras/GraficoPizzaDeptCC] Erro:', err);
-    res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico pizza' });
+    res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico' });
   }
 });
 
@@ -6085,111 +6041,48 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
     const { status, dataInicio, dataFim } = req.query;
     if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
 
-    const params = [status];
-    let whereDates = '';
-    // Aguardando compra é pendência aberta — nunca filtrar por data
-    const ignorarData = (status === 'aguardando compra');
-    if (!ignorarData) {
-      if (dataInicio) { params.push(dataInicio); whereDates += ` AND h.created_at::date >= $${params.length}::date`; }
-      if (dataFim)    { params.push(dataFim);    whereDates += ` AND h.created_at::date <= $${params.length}::date`; }
+    // Mapeia o nome do status para a condição SQL em pedidos_omie
+    let statusWhere;
+    if (status === 'Compra realizada') {
+      statusWhere = `p."Etapa_NF" IS NULL`;
+    } else if (status === 'Recebido') {
+      statusWhere = `p."Etapa_NF" IN ('50', '60')`;
+    } else {
+      return res.status(400).json({ ok: false, error: 'Status inválido' });
     }
 
-    let whereDept = '';
-    const deptoParam = req.query.departamentos;
-    if (deptoParam && deptoParam.trim()) {
-      const lista = deptoParam.split(',').map(d => d.trim()).filter(Boolean);
-      if (lista.length > 0) {
-        params.push(lista);
-        whereDept = ` AND (
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
-          END
-        ) = ANY($${params.length}::text[])`;
-      }
-    }
+    const params2 = [];
+    const whereParts = [`p.inativo = false`, statusWhere];
+    if (dataInicio) { params2.push(dataInicio); whereParts.push(`p.d_inc_data >= $${params2.length}::date`); }
+    if (dataFim)    { params2.push(dataFim);    whereParts.push(`p.d_inc_data <= $${params2.length}::date`); }
 
     const { rows } = await pool.query(`
       SELECT
-        h.id AS h_id,
+        p.n_cod_ped                                          AS h_id,
+        p.c_numero,
+        TO_CHAR(p.d_inc_data, 'YYYY-MM-DD')                 AS d_inc_data,
+        COALESCE(p.n_valor, 0)                               AS n_valor,
+        p."Etapa_NF"                                         AS etapa_nf,
         COALESCE(
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.departamento
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.departamento
-          END, 'Não informado'
-        ) ||
-        COALESCE(' (' || NULLIF(BTRIM(
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.centro_custo
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.centro_custo::text
-          END
-        ), '') || ')', '') AS grupo,
-        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
-             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
-        END AS produto_codigo,
-        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_descricao
-             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_descricao
-        END AS produto_descricao,
-        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.quantidade::text
-             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.quantidade::text
-        END AS quantidade,
-        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.objetivo_compra
-             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.objetivo_compra
-        END AS objetivo_compra,
-        CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.solicitante
-             WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.solicitante
-        END AS solicitante,
-        h.valor_pedido,
-        -- Tenta valor do pedido Omie; se nulo (ex: Recebido Totalmente), usa valor do item NF
-        COALESCE(pop.n_val_tot, rni.v_total_item) AS valor_item
-      FROM compras.historico_compras h
-      LEFT JOIN compras.solicitacao_compras sc
-        ON h.tabela_origem = 'solicitacao_compras'
-        AND sc.grupo_requisicao = h.grupo_requisicao
-      LEFT JOIN compras.compras_sem_cadastro csc
-        ON h.tabela_origem = 'compras_sem_cadastro'
-        AND csc.grupo_requisicao = h.grupo_requisicao
-      -- Localiza o pedido Omie pelo grupo_requisicao gravado em c_obs_int
-      LEFT JOIN compras.pedidos_omie po
-        ON NULLIF(BTRIM(po.c_obs_int), '') = h.grupo_requisicao
-      -- Valor por produto via pedidos_omie_produtos (Compra realizada)
-      LEFT JOIN compras.pedidos_omie_produtos pop
-        ON pop.n_cod_ped = po.n_cod_ped
-        AND REGEXP_REPLACE(pop.c_produto, '\\.\\d{1,2}$', '') = (
-          CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
-               WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
-          END
-        )
-      -- Valor por produto via recebimentos NF (Recebido Totalmente / Concluido)
-      -- Usa DISTINCT ON para evitar fanout quando há múltiplos recebimentos do mesmo produto
-      LEFT JOIN LATERAL (
-        SELECT v_total_item
-        FROM logistica.recebimentos_nfe_itens rni2
-        WHERE rni2.n_id_pedido = po.n_cod_ped
-          AND REGEXP_REPLACE(rni2.c_codigo_produto, '\\.\\d{1,2}$', '') = (
-            CASE WHEN h.tabela_origem = 'solicitacao_compras'  THEN sc.produto_codigo
-                 WHEN h.tabela_origem = 'compras_sem_cadastro' THEN csc.produto_codigo
-            END
-          )
-        ORDER BY rni2.n_id_receb DESC
-        LIMIT 1
-      ) rni ON TRUE
-      WHERE h.status = $1
-        AND h.valor_pedido IS NOT NULL AND h.valor_pedido > 0
-        ${whereDates}
-        ${whereDept}
-      ORDER BY grupo ASC, h.id ASC
-    `, params);
+          NULLIF(BTRIM(f.nome_fantasia), ''),
+          NULLIF(BTRIM(f.razao_social), ''),
+          'Fornecedor não identificado'
+        )                                                    AS fornecedor
+      FROM compras.pedidos_omie p
+      LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
+      WHERE ${whereParts.join(' AND ')}
+      ORDER BY p.d_inc_data DESC, p.n_cod_ped DESC
+    `, params2);
 
     res.json({
       ok: true,
       itens: rows.map(r => ({
-        h_id:             r.h_id,
-        grupo:            r.grupo,
-        produto_codigo:   r.produto_codigo   || '',
-        produto_descricao: r.produto_descricao || '',
-        quantidade:       r.quantidade       || '',
-        objetivo_compra:  r.objetivo_compra  || '',
-        solicitante:      r.solicitante      || '',
-        valor_pedido:     Number(r.valor_pedido),
-        valor_item:       r.valor_item != null ? Number(r.valor_item) : null
+        h_id:       r.h_id,
+        c_numero:   r.c_numero   || '',
+        d_inc_data: r.d_inc_data || '',
+        valor_item: Number(r.n_valor),
+        fornecedor: r.fornecedor,
+        etapa_nf:   r.etapa_nf   || '',
       }))
     });
   } catch (err) {
@@ -7783,7 +7676,7 @@ app.get('/api/produto/descricao', async (req, res) => {
     if (Number.isFinite(id) && id > 0) {
       const sqlId = `
         SELECT descr_produto
-          FROM public.omie_estrutura
+          FROM engenharia.omie_estrutura
          WHERE CAST(int_produto AS BIGINT) = $1
             OR CAST(id_produto  AS BIGINT) = $1
          LIMIT 1
@@ -7800,7 +7693,7 @@ app.get('/api/produto/descricao', async (req, res) => {
     if (!descr && codeRaw) {
       // 2.a) match exato
       const r2 = await pool.query(
-        `SELECT descr_produto FROM public.omie_estrutura WHERE cod_produto = $1 LIMIT 1`,
+        `SELECT descr_produto FROM engenharia.omie_estrutura WHERE cod_produto = $1 LIMIT 1`,
         [codeRaw]
       );
       console.log('[API][produto/descricao] ◀ by_code_exact rowCount:', r2.rowCount, r2.rows[0] || null);
@@ -7814,7 +7707,7 @@ app.get('/api/produto/descricao', async (req, res) => {
       // 2.b) TRIM + UPPER
       const r3 = await pool.query(
         `SELECT descr_produto
-           FROM public.omie_estrutura
+           FROM engenharia.omie_estrutura
           WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1))
           LIMIT 1`,
         [codeRaw]
@@ -7830,7 +7723,7 @@ app.get('/api/produto/descricao', async (req, res) => {
       // 2.c) prefixo (quando o back manda código truncado ou com sufixos)
       const r4 = await pool.query(
         `SELECT descr_produto
-           FROM public.omie_estrutura
+           FROM engenharia.omie_estrutura
           WHERE cod_produto ILIKE $1
           ORDER BY LENGTH(cod_produto) ASC
           LIMIT 1`,
@@ -7907,6 +7800,9 @@ function getDirs(tipo = 'Expedicao') {
 
 
 app.use('/etiquetas', express.static(etiquetasRoot));
+
+// Servir lib XLSX local (para importação de estrutura sem depender de CDN externo)
+app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/dist')));
 
 // Servir anexos de compras
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -8770,7 +8666,7 @@ async function obterOperacaoPorCodigo(client, codigo) {
     const { rows } = await client.query(
       `
         SELECT COALESCE(NULLIF(operacao, ''), NULLIF(comp_operacao, ''), NULLIF(destino, ''), NULLIF(origem, '')) AS operacao
-        FROM public.omie_estrutura_item
+        FROM engenharia.omie_estrutura_item
         WHERE cod_prod_malha = $1 OR int_prod_malha = $1 OR int_malha = $1
         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
         LIMIT 1
@@ -8841,7 +8737,7 @@ async function obterVersaoEstrutura(client, codigo) {
     const { rows } = await client.query(
       `
         SELECT versao
-        FROM omie_estrutura
+        FROM engenharia.omie_estrutura
         WHERE cod_produto = $1 OR CAST(cod_produto AS TEXT) = $1
         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
         LIMIT 1
@@ -8857,10 +8753,10 @@ async function obterVersaoEstrutura(client, codigo) {
   }
 }
 
-// Busca o "local de produção" preferencial a partir da tabela public.omie_estrutura,
+// Busca o "local de produção" preferencial a partir da tabela engenharia.omie_estrutura,
 // usando SEMPRE o Código OMIE (id_produto) como chave de localização.
 // - Primeiro resolve id_produto via public.produtos_omie (obterCodigoProdutoId)
-// - Depois lê public.omie_estrutura."local_produção" por id_produto
+// - Depois lê engenharia.omie_estrutura."local_produção" por id_produto
 // - Retorna string ou null se não houver valor
 async function obterLocalProducaoPorCodigo(client, codigo) {
   const cod = String(codigo || '').trim();
@@ -8870,7 +8766,7 @@ async function obterLocalProducaoPorCodigo(client, codigo) {
     if (!id) return null;
     const { rows } = await client.query(
       `SELECT "local_produção" AS local
-         FROM public.omie_estrutura
+         FROM engenharia.omie_estrutura
         WHERE id_produto = $1
         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
         LIMIT 1`,
@@ -9072,7 +8968,7 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
           produtoDet
         });
 
-        // Determina local de impressão do PAI priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+        // Determina local de impressão do PAI priorizando engenharia.omie_estrutura.local_produção (por id_produto/"Código OMIE")
   const localImpressaoPai = await obterLocalProducaoPorCodigo(client, codigo) || 'Montagem';
   if (!localImpressaoPaiLog) localImpressaoPaiLog = localImpressaoPai;
 
@@ -9118,7 +9014,7 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
         if (!descricaoPP) {
           descricaoPP = await obterDescricaoProduto(client, codigoPP) || 'SEM DESCRIÇÃO';
         }
-  // Determina local de impressão do ITEM (PP) priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+  // Determina local de impressão do ITEM (PP) priorizando engenharia.omie_estrutura.local_produção (por id_produto/"Código OMIE")
   const localPreferencial = await obterLocalProducaoPorCodigo(client, codigoPP);
   const localImpressao = localPreferencial || operacao || 'Montagem';
         const versaoPP = await obterVersaoEstrutura(client, codigoPP) || 1;
@@ -9268,7 +9164,7 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
       await client.query('BEGIN');
   await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
 
-  // Determina local de impressão priorizando public.omie_estrutura.local_produção (por id_produto/"Código OMIE")
+  // Determina local de impressão priorizando engenharia.omie_estrutura.local_produção (por id_produto/"Código OMIE")
   const localPreferencial = await obterLocalProducaoPorCodigo(client, codigo);
   const localImpressao = localPreferencial || (await obterOperacaoPorCodigo(client, codigo)) || 'Montagem';
       let descricao = String(descricaoInicial || '').trim();
@@ -12507,8 +12403,8 @@ app.post('/api/omie/malha', express.json(), async (req, res) => {
             i.custo_real                                                         AS custo_real,
             i.int_prod_malha                                                     AS int_prod_malha,
             i.int_malha                                                          AS int_malha
-          FROM public.omie_estrutura_item i
-          JOIN public.omie_estrutura e ON e.id = i.parent_id
+          FROM engenharia.omie_estrutura_item i
+          JOIN engenharia.omie_estrutura e ON e.id = i.parent_id
           WHERE e.cod_produto = $1 OR e.cod_produto::text = $1
           ORDER BY i.descr_prod_malha NULLS LAST, comp_codigo
         `,
@@ -12632,7 +12528,7 @@ app.post('/api/omie/malha/call', express.json(), async (req, res) => {
 //  1) public.produtos_omie
 //       - código → codigo_produto
 //       - codigo_produto_integracao → codigo_produto
-//  2) public.omie_estrutura
+//  2) engenharia.omie_estrutura
 //       - int_produto | cod_produto → id_produto
 //  3) public.omie_malha_cab
 //       - produto_codigo → produto_id
@@ -12675,13 +12571,13 @@ app.get('/api/sql/produto-id/:codigo', async (req, res) => {
     {
       const r = await client.query(`
         SELECT int_produto::text AS codigo, id_produto::bigint AS id,
-               'public.omie_estrutura(int_produto→id_produto)' AS origem
-        FROM public.omie_estrutura
+               'engenharia.omie_estrutura(int_produto→id_produto)' AS origem
+        FROM engenharia.omie_estrutura
         WHERE int_produto = $1
         UNION ALL
         SELECT cod_produto::text AS codigo, id_produto::bigint AS id,
-               'public.omie_estrutura(cod_produto→id_produto)' AS origem
-        FROM public.omie_estrutura
+               'engenharia.omie_estrutura(cod_produto→id_produto)' AS origem
+        FROM engenharia.omie_estrutura
         WHERE cod_produto = $1
         LIMIT 1;
       `, [codigo]);
@@ -13188,7 +13084,7 @@ app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
     const { rows: cabRows } = await client.query(
       `
         SELECT id, COALESCE(versao,1) AS versao, cod_produto
-          FROM public.omie_estrutura
+          FROM engenharia.omie_estrutura
          WHERE TRIM(UPPER(cod_produto)) = TRIM(UPPER($1))
          ORDER BY versao DESC, updated_at DESC NULLS LAST, id DESC
       `,
@@ -13220,7 +13116,7 @@ app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
             unid_prod_malha,
             operacao,
             perc_perda_prod_malha
-          FROM public.omie_estrutura_item
+          FROM engenharia.omie_estrutura_item
           WHERE parent_id = $1
           ORDER BY cod_prod_malha, descr_prod_malha
         `,
@@ -13242,7 +13138,7 @@ app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
             unid_prod_malha,
             operacao,
             perc_perda_prod_malha
-          FROM public.omie_estrutura_item_versao
+          FROM engenharia.omie_estrutura_item_versao
           WHERE parent_id = $1
             AND versao = $2
           ORDER BY cod_prod_malha, descr_prod_malha
@@ -27621,7 +27517,7 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
         LEFT JOIN public.produtos_omie po ON TRIM(UPPER(po.codigo)) = TRIM(UPPER(cab.produto_codigo))
         LEFT JOIN LATERAL (
           SELECT descr_produto, id_produto, unidade
-          FROM omie_estrutura
+          FROM engenharia.omie_estrutura
           WHERE CAST(int_produto AS BIGINT) = cab.produto_id
           ORDER BY id_produto
           LIMIT 1
@@ -27709,7 +27605,7 @@ app.get('/api/estrutura/meta', async (req, res) => {
       const r = await client.query(
         `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
                 "local_produção" AS local_producao
-           FROM public.omie_estrutura
+           FROM engenharia.omie_estrutura
           WHERE id = $1
           LIMIT 1`,
         [parentId]
@@ -27722,7 +27618,7 @@ app.get('/api/estrutura/meta', async (req, res) => {
       const r1 = await client.query(
         `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
                 "local_produção" AS local_producao
-           FROM public.omie_estrutura
+           FROM engenharia.omie_estrutura
           WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1))
           ORDER BY updated_at DESC NULLS LAST, id DESC
           LIMIT 1`,
@@ -27735,7 +27631,7 @@ app.get('/api/estrutura/meta', async (req, res) => {
         const r2 = await client.query(
           `SELECT id, cod_produto, COALESCE(versao,1) AS versao, modificador,
                   "local_produção" AS local_producao
-             FROM public.omie_estrutura
+             FROM engenharia.omie_estrutura
             WHERE TRIM(cod_produto) ILIKE TRIM($1) || '%'
             ORDER BY updated_at DESC NULLS LAST, id DESC
             LIMIT 1`,
@@ -27760,6 +27656,252 @@ app.get('/api/estrutura/meta', async (req, res) => {
   }
 });
 
+
+// === PCP: importar estrutura no formato FICHA_ESTRUTURA.xlsx ===
+// Endpoint: POST /api/pcp/estrutura/replace-ficha
+// Aceita multipart/form-data com campo 'file' (XLSX) e 'pai_codigo' opcional.
+// Se 'pai_codigo' não vier no body, usa o código do produto do nível "1" do próprio XLSX.
+// Lógica de hierarquia:
+//   - Nível "1"     → produto principal  → omie_estrutura (pai)
+//   - Nível "1.x"   → item direto do produto principal (com ou sem filhos)
+//   - Nível "1.x.y" → item filho de 1.x (sub-montagem)
+// Storage:
+//   - omie_estrutura_item do produto principal:
+//       1.x (diretos, sem filhos) → operacao = null
+//       1.x (sub-montagens)      → operacao = null  (aparece como linha E como cabeçalho de grupo no front)
+//       1.x.y                    → operacao = descrição de 1.x  (agrupamento visual)
+//   - Para cada sub-montagem 1.x com filhos:
+//       cria/atualiza omie_estrutura com o código 1.x
+//       insere filhos 1.x.y em omie_estrutura_item da sub-montagem (operacao = null)
+app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, res) => {
+  const XLSX_LIB = require('xlsx');
+
+  // helpers
+  const toNum = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return v;
+    const n = Number(String(v).trim().replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
+  const tr = (v) => String(v ?? '').trim();
+
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Envie o arquivo XLSX no campo "file".' });
+
+    // 1) Parse do XLSX
+    const wb = XLSX_LIB.read(req.file.buffer, { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rawRows = XLSX_LIB.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+
+    if (!rawRows.length) return res.status(400).json({ ok: false, error: 'Arquivo XLSX vazio.' });
+
+    // Colunas por posição fixa (independe do nome do cabeçalho):
+    // 0=Nível | 1=Identificação do Produto | 2=Descrição do Produto | 3=Quantidade | 4=Unidade de Medida | 5=Ficha Técnica | 6=Total Cúbico
+    const iNivel = 0, iCod = 1, iDesc = 2, iQtd = 3, iUnid = 4, iFicha = 5;
+
+    // Valida que tem linhas de dados (pula a linha de cabeçalho)
+    if (rawRows.length < 2) {
+      return res.status(400).json({ ok: false, error: 'Arquivo sem linhas de dados (só cabeçalho).' });
+    }
+
+    // 2) Lê todas as linhas (a partir da linha 1, pulando o cabeçalho)
+    const allRows = rawRows.slice(1).map(row => ({
+      nivel:    tr(row[iNivel]),
+      codigo:   tr(row[iCod]),
+      descricao:tr(row[iDesc] ?? ''),
+      qtd:      toNum(row[iQtd]) ?? 0,
+      unid:     tr(row[iUnid] ?? ''),
+      ficha:    tr(row[iFicha] ?? ''),
+      // — campos ignorados: iDesc poderia ser 2, Total Cúbico coluna 6
+    })).filter(r => r.nivel && r.codigo);
+
+    if (!allRows.length) return res.status(400).json({ ok: false, error: 'Nenhuma linha válida encontrada.' });
+
+    // 3) Identifica produto principal (nível "1") e sub-montagens (nível "1.x" com filhos)
+    const prodPrincipal = allRows.find(r => r.nivel === '1');
+    const paiCodigo = tr(req.body?.pai_codigo || req.query?.pai_codigo || prodPrincipal?.codigo || '');
+    if (!paiCodigo) return res.status(400).json({ ok: false, error: 'Não foi possível identificar o produto principal (nível 1 ou campo pai_codigo).' });
+
+    // Determina quais níveis 1.x têm filhos (1.x.y)
+    const hasChildren = new Set();
+    for (const r of allRows) {
+      const parts = r.nivel.split('.');
+      if (parts.length > 2) {
+        hasChildren.add(parts.slice(0, 2).join('.'));
+      }
+    }
+
+    // Mapa nivel → row (para lookup de sub-montagens)
+    const byNivel = new Map(allRows.map(r => [r.nivel, r]));
+
+    // 4) Separa os itens:
+    //    mainItems: tudo que vai para omie_estrutura_item do produto principal
+    //    subMontagens: mapa código → filhos
+    const mainItems = [];     // {comp_codigo, comp_descricao, comp_qtd, comp_unid, comp_operacao, ficha}
+    const subMontagens = {};  // cod_submontagem → {descricao, children: [...]}
+
+    for (const r of allRows) {
+      const parts = r.nivel.split('.');
+
+      if (parts.length === 1) continue; // é o produto principal "1", não é item
+
+      if (parts.length === 2) {
+        // Item direto do produto principal (pode ou não ser sub-montagem)
+        mainItems.push({
+          comp_codigo:    r.codigo,
+          comp_descricao: r.descricao,
+          comp_qtd:       r.qtd,
+          comp_unid:      r.unid,
+          comp_operacao:  null,  // direto → sem agrupamento
+          ficha:          r.ficha,
+        });
+        // Se tem filhos, prepara entrada de sub-montagem
+        if (hasChildren.has(r.nivel)) {
+          subMontagens[r.codigo] = { descricao: r.descricao, unid: r.unid, children: [] };
+        }
+      } else if (parts.length === 3) {
+        // Filho de sub-montagem (1.x.y)
+        const parentNivel = parts.slice(0, 2).join('.');
+        const parentRow = byNivel.get(parentNivel);
+        const parentDescricao = parentRow?.descricao || parentNivel;
+        const parentCodigo    = parentRow?.codigo || '';
+
+        // VAI para o produto principal agrupado sob o nome da sub-montagem
+        mainItems.push({
+          comp_codigo:    r.codigo,
+          comp_descricao: r.descricao,
+          comp_qtd:       r.qtd,
+          comp_unid:      r.unid,
+          comp_operacao:  parentDescricao,  // agrupamento visual pelo nome da sub-montagem
+          ficha:          r.ficha,
+        });
+
+        // VAI para a sub-montagem própria
+        if (parentCodigo && subMontagens[parentCodigo]) {
+          subMontagens[parentCodigo].children.push({
+            comp_codigo:    r.codigo,
+            comp_descricao: r.descricao,
+            comp_qtd:       r.qtd,
+            comp_unid:      r.unid,
+            comp_operacao:  null,
+          });
+        }
+      }
+      // Níveis mais profundos (1.x.y.z) são ignorados por ora
+    }
+
+    const modificador = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
+
+    // 5) Gravação no banco (transação única)
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Helper: upsert em omie_estrutura, retorna id
+      const upsertEstrutura = async (cod, desc, unid) => {
+        const sel = await client.query(
+          `SELECT id FROM engenharia.omie_estrutura WHERE UPPER(TRIM(cod_produto)) = UPPER(TRIM($1)) LIMIT 1`,
+          [cod]
+        );
+        if (sel.rowCount) {
+          await client.query(
+            `UPDATE engenharia.omie_estrutura SET descr_produto=$2, unid_produto=$3, updated_at=now() WHERE id=$1`,
+            [sel.rows[0].id, desc || null, unid || null]
+          );
+          return sel.rows[0].id;
+        }
+        const ins = await client.query(
+          `INSERT INTO engenharia.omie_estrutura (cod_produto, descr_produto, unid_produto, origem)
+           VALUES ($1, $2, $3, 'ficha') RETURNING id`,
+          [cod, desc || null, unid || null]
+        );
+        return ins.rows[0].id;
+      };
+
+      // Helper: grava itens (substitui tudo do parent_id)
+      const replaceItens = async (parentId, itens) => {
+        // snapshot de versão
+        const vRow = await client.query(
+          `SELECT COALESCE(versao,1) AS versao FROM engenharia.omie_estrutura WHERE id=$1 FOR UPDATE`,
+          [parentId]
+        );
+        const versaoAtual = Number(vRow.rows?.[0]?.versao || 1);
+
+        await client.query(
+          `INSERT INTO engenharia.omie_estrutura_item_versao
+           SELECT t.*, $2::int AS versao, $3::text AS modificador, now() AS snapshot_at
+           FROM engenharia.omie_estrutura_item t WHERE t.parent_id = $1`,
+          [parentId, versaoAtual, modificador]
+        );
+
+        const hadPrev = (await client.query(
+          `DELETE FROM engenharia.omie_estrutura_item WHERE parent_id=$1`,
+          [parentId]
+        )).rowCount > 0;
+
+        if (hadPrev) {
+          await client.query(
+            `UPDATE engenharia.omie_estrutura SET versao=COALESCE(versao,1)+1, modificador=$2, updated_at=now() WHERE id=$1`,
+            [parentId, modificador]
+          );
+        } else {
+          await client.query(
+            `UPDATE engenharia.omie_estrutura SET versao=COALESCE(versao,1), modificador=$2, updated_at=now() WHERE id=$1`,
+            [parentId, modificador]
+          );
+        }
+
+        if (!itens.length) return 0;
+        const cols   = ['parent_id','cod_prod_malha','descr_prod_malha','quant_prod_malha','unid_prod_malha','operacao'];
+        const tuples = [];
+        const vals   = [];
+        for (const it of itens) {
+          const b = vals.length;
+          tuples.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6})`);
+          vals.push(parentId, it.comp_codigo, it.comp_descricao || null, it.comp_qtd, it.comp_unid || null, it.comp_operacao || null);
+        }
+        await client.query(
+          `INSERT INTO engenharia.omie_estrutura_item (${cols.join(',')}) VALUES ${tuples.join(',')}`,
+          vals
+        );
+        return itens.length;
+      };
+
+      // 5a) Produto principal
+      const paiRow = prodPrincipal || { descricao: null, unid: null };
+      const paiId = await upsertEstrutura(paiCodigo, paiRow.descricao, paiRow.unid);
+      const totalMain = await replaceItens(paiId, mainItems);
+
+      // 5b) Sub-montagens
+      let totalSub = 0;
+      for (const [cod, sm] of Object.entries(subMontagens)) {
+        if (!sm.children.length) continue;
+        const smId = await upsertEstrutura(cod, sm.descricao, sm.unid);
+        totalSub += await replaceItens(smId, sm.children);
+      }
+
+      await client.query('COMMIT');
+
+      return res.json({
+        ok: true,
+        pai_codigo: paiCodigo,
+        inseridos_principal: totalMain,
+        sub_montagens: Object.keys(subMontagens).length,
+        inseridos_sub: totalSub,
+      });
+
+    } catch (e) {
+      await client.query('ROLLBACK');
+      console.error('[FICHA][REPLACE][SQL]', e);
+      return res.status(500).json({ ok: false, error: e.message || 'Falha ao gravar estrutura.' });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[FICHA][REPLACE][FATAL]', err);
+    return res.status(500).json({ ok: false, error: 'Erro inesperado no import.' });
+  }
+});
 
 // === PCP: substituir estrutura (IMPORT CSV) usando pai_codigo ===
 app.post('/api/pcp/estrutura/replace', express.json({ limit: '8mb' }), async (req, res) => {

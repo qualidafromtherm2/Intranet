@@ -59,7 +59,7 @@ async function upsertCabecalho(client, ident, observacoes, custoProducao) {
 
   // tenta localizar por prioridade: cod → id → int
   const sel = await client.query(
-    `SELECT id FROM public.omie_estrutura
+    `SELECT id FROM engenharia.omie_estrutura
        WHERE (cod_produto = $1 AND $1 IS NOT NULL)
           OR (id_produto  = $2 AND $2 IS NOT NULL)
           OR (int_produto = $3 AND $3 IS NOT NULL)
@@ -71,7 +71,7 @@ async function upsertCabecalho(client, ident, observacoes, custoProducao) {
   if (sel.rows.length) {
     const parentId = sel.rows[0].id;
     await client.query(
-      `UPDATE public.omie_estrutura
+      `UPDATE engenharia.omie_estrutura
          SET descr_produto = $1,
              tipo_produto  = $2,
              unid_produto  = $3,
@@ -93,7 +93,7 @@ async function upsertCabecalho(client, ident, observacoes, custoProducao) {
   }
 
   const ins = await client.query(
-    `INSERT INTO public.omie_estrutura
+    `INSERT INTO engenharia.omie_estrutura
        (id_produto, int_produto, cod_produto, descr_produto, tipo_produto,
         unid_produto, peso_liq_produto, peso_bruto_produto,
         obs_relevantes, v_mod, v_ggf, origem)
@@ -110,7 +110,7 @@ async function upsertCabecalho(client, ident, observacoes, custoProducao) {
 // 4) Helper: substitui os itens do pai (agora com DEDUP)
 async function replaceItens(client, parentId, itens = []) {
   // 4.1) remove itens antigos do pai
-  await client.query(`DELETE FROM public.omie_estrutura_item WHERE parent_id = $1`, [parentId]);
+  await client.query(`DELETE FROM engenharia.omie_estrutura_item WHERE parent_id = $1`, [parentId]);
 
   if (!Array.isArray(itens) || itens.length === 0) return;
 
@@ -140,7 +140,7 @@ async function replaceItens(client, parentId, itens = []) {
 
   // 4.3) INSERT em lote (igual ao antes, só que usando 'dedup')
   const text = `
-    INSERT INTO public.omie_estrutura_item (
+    INSERT INTO engenharia.omie_estrutura_item (
       parent_id,
       id_malha, int_malha,
       id_prod_malha, int_prod_malha, cod_prod_malha, descr_prod_malha,
@@ -193,7 +193,7 @@ async function replaceItens(client, parentId, itens = []) {
 // 5) Salva JSON bruto para auditoria
 async function saveRaw(client, keyRef, payload) {
   await client.query(
-    `INSERT INTO public.omie_estrutura_raw (key_ref, payload) VALUES ($1,$2)`,
+    `INSERT INTO engenharia.omie_estrutura_raw (key_ref, payload) VALUES ($1,$2)`,
     [keyRef, payload]
   );
 }

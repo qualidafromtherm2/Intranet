@@ -251,15 +251,16 @@ router.get('/lista', async (req, res) => {
 
     const sql = `
       WITH base AS (
-        SELECT *
-        FROM vw_lista_produtos
+        SELECT v.*, p.descricao_familia
+        FROM vw_lista_produtos v
+        LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
         WHERE
           ($1::text IS NULL
-            OR descricao ILIKE '%' || $1 || '%'
-            OR codigo    ILIKE '%' || $1 || '%'
-            OR codigo_produto_integracao ILIKE '%' || $1 || '%')
-          AND ($2::text IS NULL OR tipoitem = $2)
-          AND ($3::text IS NULL OR inativo  = $3)
+            OR v.descricao ILIKE '%' || $1 || '%'
+            OR v.codigo    ILIKE '%' || $1 || '%'
+            OR v.codigo_produto_integracao ILIKE '%' || $1 || '%')
+          AND ($2::text IS NULL OR v.tipoitem = $2)
+          AND ($3::text IS NULL OR v.inativo  = $3)
       )
       SELECT
         (SELECT COUNT(*) FROM base) AS total,
@@ -270,6 +271,7 @@ router.get('/lista', async (req, res) => {
           codigo_produto_integracao,
           codigo,
           descricao,
+          descricao_familia,
           unidade,
           tipoitem,
           ncm,
