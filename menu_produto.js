@@ -21977,41 +21977,43 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     return;
   }
 
-  // Para sem-cadastro: varredura automática — resolve codigo_omie para itens que ainda não têm
-  if (tableSource === 'compras_sem_cadastro') {
-    const itensSemOmie = itens.filter((i) => !i.codigo_omie && i.produto_codigo);
-    if (itensSemOmie.length) {
+  // Passo 1: identifica itens com código provisório (CODPROV)
+  const itensCodprov = itens.filter(i => /^CODPROV\s*-/i.test(String(i.produto_codigo || '').trim()));
+
+  if (itensCodprov.length > 0) {
+    // Passo 2: para CODPROV sem codigo_omie já resolvido, consulta na Omie
+    const codprovSemOmie = itensCodprov.filter(i => !i.codigo_omie);
+    if (codprovSemOmie.length > 0) {
       try {
         const respResolver = await fetch('/api/compras/resolver-codigos-omie', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ codigos: itensSemOmie.map((i) => i.produto_codigo) })
+          body: JSON.stringify({ codigos: codprovSemOmie.map(i => i.produto_codigo) })
         });
         if (respResolver.ok) {
           const { resultado } = await respResolver.json();
-          // Popula codigo_omie nos itens encontrados
-          for (const item of itens) {
-            if (!item.codigo_omie && item.produto_codigo && resultado[item.produto_codigo]) {
+          for (const item of codprovSemOmie) {
+            if (resultado[item.produto_codigo]) {
               item.codigo_omie = resultado[item.produto_codigo];
             }
           }
-          window.analiseCadastroItens = itens;
         }
       } catch (e) {
-        console.warn('[ANALISE CADASTRO] Erro na varredura de códigos Omie:', e);
+        console.warn('[ANALISE CADASTRO] Erro ao verificar CODPROV na Omie:', e);
       }
     }
 
-    // Após varredura, verifica se ainda há itens sem codigo_omie
-    const aindaSemOmie = itens.filter((i) => !i.codigo_omie);
-    if (aindaSemOmie.length) {
-      const nomes = aindaSemOmie.map((i) => `"${i.descricao || i.produto_codigo || '?'}"`).join(', ');
-      alert(`Os seguintes itens não foram encontrados na Omie e precisam ser cadastrados antes:\n${nomes}`);
+    // Passo 3: se algum CODPROV ainda não tem código Omie, bloqueia e orienta o user
+    const aindaSemOmie = itensCodprov.filter(i => !i.codigo_omie);
+    if (aindaSemOmie.length > 0) {
+      const nomes = aindaSemOmie.map(i => `• ${i.descricao || i.produto_codigo || '?'}`).join('\n');
+      alert(`Os seguintes itens possuem código provisório (CODPROV) e ainda não estão cadastrados na Omie:\n\n${nomes}\n\nClique em "Criar itens na Omie" para cadastrá-los antes de gerar a requisição.`);
       return;
     }
   }
 
+  // Passo 4: todos os itens estão prontos — monta a requisição e envia
   const btn = document.getElementById('btnCriarRequisicaoCompraAnaliseCadastro');
   const originalHtml = btn ? btn.innerHTML : '';
 
@@ -22022,29 +22024,28 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Criando...';
     }
 
-    const resp = tableSource === 'compras_sem_cadastro'
-      ? await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ itens })
-        })
-      : await (async () => {
-          const ids = Array.from(new Set(
-            itens
-              .map((item) => Number(item?.item_origem_id || item?.id))
-              .filter((id) => Number.isInteger(id) && id > 0)
-          ));
-
-          const idsPayload = ids.length ? ids : [Number(itemId)].filter((id) => Number.isInteger(id) && id > 0);
-
-          return fetch('/api/compras/aprovar-grupo', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ ids: idsPayload })
-          });
-        })();
+    let resp;
+    if (tableSource === 'compras_sem_cadastro') {
+      resp = await fetch(`/api/compras/sem-cadastro/${itemId}/criar-requisicao-omie`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ itens })
+      });
+    } else {
+      const ids = Array.from(new Set(
+        itens
+          .map(i => Number(i?.item_origem_id || i?.id))
+          .filter(id => Number.isInteger(id) && id > 0)
+      ));
+      const idsPayload = ids.length ? ids : [Number(itemId)].filter(id => Number.isInteger(id) && id > 0);
+      resp = await fetch('/api/compras/aprovar-grupo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids: idsPayload, forcar_requisicao: true })
+      });
+    }
 
     if (!resp.ok) {
       const errData = await resp.json();
@@ -22052,9 +22053,10 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     }
 
     const data = await resp.json();
-    const codigoInterno = data.codIntReqCompra || data.numero_pedido || '-';
-    const codigoOmie = data.codReqCompra || data.ncodped || '-';
-    alert(`Requisição criada com sucesso!\nCódigo interno: ${codigoInterno}\nCódigo Omie: ${codigoOmie}`);
+    mostrarSucessoRequisicao({
+      grupoRequisicao:    data.grupo_requisicao    || '-',
+      numeroRequisicaoOmie: data.numero_requisicao_omie || data.ncodped || '-'
+    });
     fecharModalAnaliseCadastro();
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
@@ -22070,6 +22072,38 @@ window.criarRequisicaoCompraAnaliseCadastro = async function() {
     }
   }
 };
+
+// Comentário: exibe modal de sucesso após criar requisição de compra
+function mostrarSucessoRequisicao({ grupoRequisicao, numeroRequisicaoOmie }) {
+  const antigo = document.getElementById('modalSucessoRequisicao');
+  if (antigo) antigo.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modalSucessoRequisicao';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#ffffff;border-radius:12px;width:90%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden;">
+      <div style="background:linear-gradient(135deg,#10b981,#059669);padding:24px 20px;text-align:center;">
+        <i class="fa-solid fa-circle-check" style="font-size:40px;color:#ffffff;display:block;margin-bottom:10px;"></i>
+        <div style="color:#ffffff;font-weight:700;font-size:17px;">Requisição criada com sucesso.</div>
+      </div>
+      <div style="padding:24px 24px 8px;display:flex;flex-direction:column;gap:14px;">
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;">
+          <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Grupo Requisição</div>
+          <div style="font-size:14px;font-weight:700;color:#1f2937;font-family:monospace;">${escapeHtml(grupoRequisicao)}</div>
+        </div>
+        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;">
+          <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Número da Requisição Omie</div>
+          <div style="font-size:14px;font-weight:700;color:#1f2937;font-family:monospace;">${escapeHtml(numeroRequisicaoOmie)}</div>
+        </div>
+      </div>
+      <div style="padding:16px 24px 24px;text-align:right;">
+        <button onclick="document.getElementById('modalSucessoRequisicao').remove()" style="background:#10b981;color:white;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
 
 // Comentário: modal específico para o kanban "Cotado aguardando escolha" (detalhes do item)
 async function abrirModalCotadoEscolhaItem(itemId) {
@@ -24515,9 +24549,14 @@ async function realizarRequisicaoCotadoEscolha(cotacaoId) {
     }
 
     const data = await resp.json();
-    const novoGrupo = String(data?.novo_grupo_requisicao || '').trim();
-    alert(`Requisição realizada com sucesso. Novo grupo do(s) item(ns): ${novoGrupo || '-'}.`);
-    fecharModalCotadoEscolhaItem();
+
+    // Comentário: remove a cotação aprovada da lista em memória e re-renderiza sem fechar o modal
+    if (Array.isArray(window.cotadoEscolhaCotacoesDb)) {
+      window.cotadoEscolhaCotacoesDb = window.cotadoEscolhaCotacoesDb.filter(c => Number(c.id) !== Number(cotacaoId));
+    }
+    await renderizarCotacoesRegistradasCotadoEscolha();
+
+    // Comentário: atualiza o kanban em segundo plano sem esperar
     if (typeof loadMinhasSolicitacoes === 'function') {
       loadMinhasSolicitacoes();
     }
@@ -41328,7 +41367,7 @@ function renderAgendaCalendarioMensal() {
 
     // ── Chips coloridos por tipo: Auditório (roxo) | Sala (verde) | Lembrete (amarelo) ──
     // Auditório → is-auditorio | Sala de reunião → is-sala | Lembrete → is-lembrete
-    const MAX_CHIPS = 3;
+    const MAX_CHIPS = 4;
     const MAX_LEMBRETES = 2;
 
     // Chips de reservas
@@ -41363,7 +41402,7 @@ function renderAgendaCalendarioMensal() {
         ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>'
         : '';
 
-      const tituloChip = escapeHtml(`${reserva.tipo} ${reserva.inicio}–${reserva.fim}`);
+    const tituloChip = escapeHtml(`${reserva.tipo} ${reserva.inicio}–${reserva.fim}`);
       return `
         <div class="${classesReserva}"
              data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}"
@@ -41374,14 +41413,14 @@ function renderAgendaCalendarioMensal() {
       `;
     });
 
-    // Chips de lembretes — linha amarela com letra escura
+    // Chips de lembretes — quadrado amarelo
     const chipsLembretes = lembretesDia.slice(0, MAX_LEMBRETES).map((lembrete) => `
       <div class="agenda-cal-reserva-item is-lembrete"
            data-agenda-lembrete-id="${escapeHtml(String(lembrete.id || ''))}"
            data-agenda-lembrete-date="${escapeHtml(dataIso)}"
            title="${escapeHtml(lembrete.texto || 'Lembrete')}">
         <i class="fa-solid fa-note-sticky agenda-chip-room-icon"></i>
-        <span class="agenda-chip-hora" style="overflow:hidden;text-overflow:ellipsis;">${escapeHtml((lembrete.texto || 'Lembrete').slice(0, 14))}</span>
+        <span class="agenda-chip-hora">${escapeHtml((lembrete.texto || 'Lembrete').slice(0, 8))}</span>
       </div>
     `);
 
