@@ -18540,6 +18540,26 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       }
     }
 
+    // Validação: garante que codigo_omie corresponde ao produto_codigo informado
+    let codigoOmieValidado = item.codigo_omie || null;
+    if (codigoOmieValidado) {
+      const { rows: validacaoOmie } = await pool.query(
+        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        [produtoCodigo]
+      );
+      const codigoOmieEsperado = validacaoOmie.length > 0 ? validacaoOmie[0].codigo_produto : null;
+      if (codigoOmieEsperado && String(codigoOmieValidado) !== String(codigoOmieEsperado)) {
+        console.warn(`[Carrinho] codigo_omie inconsistente para ${produtoCodigo}: recebido=${codigoOmieValidado}, esperado=${codigoOmieEsperado}. Corrigindo automaticamente.`);
+        codigoOmieValidado = codigoOmieEsperado;
+      }
+    } else if (produtoCodigo) {
+      const { rows: buscaOmie } = await pool.query(
+        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        [produtoCodigo]
+      );
+      if (buscaOmie.length > 0) codigoOmieValidado = buscaOmie[0].codigo_produto;
+    }
+
     const result = await pool.query(`
       INSERT INTO compras.solicitacao_compras (
         produto_codigo,
@@ -18587,7 +18607,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       item.codigo_produto_omie || null,
       categoriaCompraCodigo,
       categoriaCompraNome,
-      item.codigo_omie || null,
+      codigoOmieValidado,
       item.requisicao_direta || false,
       grupoRequisicao,
       anexosArray ? JSON.stringify(anexosArray) : null,
@@ -18642,6 +18662,23 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
       ? gerarNumeroGrupoRequisicao()
       : grupoRequisicaoRaw;
 
+    // Validação: garante que codigo_omie corresponde ao produto_codigo informado
+    const produtoCodigoPUT = String(item.produto_codigo || '').trim();
+    let codigoOmieValidadoPUT = item.codigo_omie || null;
+    if (produtoCodigoPUT) {
+      const { rows: validacaoOmiePUT } = await pool.query(
+        `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+        [produtoCodigoPUT]
+      );
+      const codigoOmieEsperadoPUT = validacaoOmiePUT.length > 0 ? validacaoOmiePUT[0].codigo_produto : null;
+      if (codigoOmieEsperadoPUT) {
+        if (codigoOmieValidadoPUT && String(codigoOmieValidadoPUT) !== String(codigoOmieEsperadoPUT)) {
+          console.warn(`[Carrinho PUT] codigo_omie inconsistente para ${produtoCodigoPUT}: recebido=${codigoOmieValidadoPUT}, esperado=${codigoOmieEsperadoPUT}. Corrigindo automaticamente.`);
+        }
+        codigoOmieValidadoPUT = codigoOmieEsperadoPUT;
+      }
+    }
+
     const result = await pool.query(`
       UPDATE compras.solicitacao_compras
       SET produto_codigo = $1,
@@ -18669,7 +18706,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
           WHERE id = $22
       RETURNING id
     `, [
-      String(item.produto_codigo || '').trim(),
+      produtoCodigoPUT,
       item.produto_descricao || '',
       item.quantidade === '' ? null : item.quantidade,
       item.prazo_solicitado || null,
@@ -18685,7 +18722,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
       item.codigo_produto_omie || null,
       categoriaCompraCodigo,
       categoriaCompraNome,
-      item.codigo_omie || null,
+      codigoOmieValidadoPUT,
       item.requisicao_direta || false,
       grupoRequisicao,
       anexosArray ? JSON.stringify(anexosArray) : null,
@@ -21390,8 +21427,9 @@ async function criarRequisicaoOmieParaItens(itens) {
     throw err;
   }
 
-  // Garante mesma categoria em todos os itens
-  const categoriaBase = (itens[0].categoria_compra_codigo || '').trim();
+  // Determina categoria base: usa a do primeiro item que tiver categoria definida
+  const itemComCategoria = itens.find(i => (i.categoria_compra_codigo || '').trim());
+  const categoriaBase = itemComCategoria ? (itemComCategoria.categoria_compra_codigo || '').trim() : '';
   if (!categoriaBase) {
     const err = new Error('Item sem categoria da compra. Por favor, edite o item e adicione a categoria antes de aprovar.');
     err.status = 400;
@@ -21399,9 +21437,7 @@ async function criarRequisicaoOmieParaItens(itens) {
   }
   const itensCategoriaInvalida = itens.filter(i => (i.categoria_compra_codigo || '').trim() !== categoriaBase);
   if (itensCategoriaInvalida.length > 0) {
-    const err = new Error('Todos os itens do grupo devem ter a mesma categoria de compra.');
-    err.status = 400;
-    throw err;
+    console.warn(`[Aprovar Grupo] Itens com categorias divergentes no grupo. Usando categoria "${categoriaBase}" para todos. IDs divergentes: ${itensCategoriaInvalida.map(i => i.id).join(', ')}`);
   }
 
   // Atualiza observação com resumo das cotações para cada item

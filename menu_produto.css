@@ -6753,6 +6753,81 @@ table.tabela td.num {
   padding: 0 2px;
 }
 
+/* --- Responsividade mobile do calendário --- */
+@media (max-width: 640px) {
+  /* Layout: sidebar vai para baixo do calendário */
+  .agenda-cal-layout {
+    flex-direction: column;
+  }
+
+  /* Sidebar ocupa largura total e organiza itens em linha */
+  .agenda-cal-sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0;
+  }
+
+  /* Botão "Somente minhas" ocupa linha inteira */
+  #agendaToggleMinhasReunioes {
+    width: 100%;
+  }
+
+  /* Navegador de mês e legenda lado a lado */
+  .agenda-sidebar-nav {
+    flex: 1 1 140px;
+  }
+  .agenda-sidebar-legenda {
+    flex: 1 1 140px;
+  }
+
+  /* Grid do calendário: gap menor */
+  .agenda-calendario-grid {
+    gap: 3px;
+  }
+
+  /* Células do calendário menores */
+  .agenda-cal-day {
+    min-height: 72px;
+    padding: 3px;
+  }
+
+  /* Número do dia menor */
+  .agenda-cal-num {
+    font-size: 11px;
+  }
+
+  /* Em telas muito pequenas chips ficam em coluna única */
+  .agenda-cal-reservas {
+    grid-template-columns: 1fr;
+  }
+
+  /* Chips de reserva como linha compacta (não quadrado) no mobile */
+  .agenda-cal-reserva-item {
+    aspect-ratio: auto;
+    flex-direction: row;
+    align-items: center;
+    padding: 2px 4px;
+    gap: 3px;
+    font-size: 8px;
+  }
+
+  /* Modal ocupa quase a tela toda */
+  .agenda-modal-card {
+    width: 97vw;
+    max-height: 92vh;
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  /* Formulário de criação: colunas viram uma */
+  .agenda-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* status icons cores */
 .status-excluido { color: #ef4444; }
 .status-produzindo { color: #f59e0b; }
