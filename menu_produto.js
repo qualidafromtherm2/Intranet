@@ -41348,11 +41348,11 @@ function renderAgendaCalendarioMensal() {
         ? '<i class="fa-solid fa-chalkboard-user agenda-chip-room-icon" title="Auditório"></i>'
         : '<i class="fa-solid fa-handshake agenda-chip-room-icon" title="Sala de reunião"></i>';
 
-      // Hora no formato HH:MM-HH:MM
+      // Hora separada: início e fim em linhas distintas
       const horaInicio = String(reserva?.inicio || '').slice(0, 5);
       const horaFim    = String(reserva?.fim    || '').slice(0, 5);
       const horaHtml = horaInicio
-        ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}-${escapeHtml(horaFim || '--')}</span>`
+        ? `<div class="agenda-chip-horas"><span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span><span class="agenda-chip-hora">${escapeHtml(horaFim || '--')}</span></div>`
         : '';
 
       // Café e convocado apenas quando aplicável
@@ -41362,6 +41362,9 @@ function renderAgendaCalendarioMensal() {
       const convocadoHtml = usuarioConvocado
         ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>'
         : '';
+      const extrasHtml = (cafeHtml || convocadoHtml)
+        ? `<div class="agenda-chip-icons">${cafeHtml}${convocadoHtml}</div>`
+        : '';
 
     const tituloChip = escapeHtml(`${reserva.tipo} ${reserva.inicio}–${reserva.fim}`);
       return `
@@ -41369,7 +41372,9 @@ function renderAgendaCalendarioMensal() {
              data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}"
              data-agenda-reserva-date="${escapeHtml(dataIso)}"
              title="${tituloChip}">
-          ${iconeRoom}${horaHtml}${cafeHtml}${convocadoHtml}
+          ${iconeRoom}
+          ${horaHtml}
+          ${extrasHtml}
         </div>
       `;
     });
@@ -41381,7 +41386,7 @@ function renderAgendaCalendarioMensal() {
            data-agenda-lembrete-date="${escapeHtml(dataIso)}"
            title="${escapeHtml(lembrete.texto || 'Lembrete')}">
         <i class="fa-solid fa-note-sticky agenda-chip-room-icon"></i>
-        <span class="agenda-chip-hora">${escapeHtml((lembrete.texto || 'Lembrete').slice(0, 8))}</span>
+        <span class="agenda-chip-hora lembrete-texto">${escapeHtml((lembrete.texto || 'Lembrete').slice(0, 10))}</span>
       </div>
     `);
 
