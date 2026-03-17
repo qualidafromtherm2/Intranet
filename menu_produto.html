@@ -594,6 +594,34 @@
                         <h5 id="graficoPizzaDetalheTitulo" style="margin:0;font-size:13px;font-weight:700;color:#374151;"></h5>
                         <button onclick="document.getElementById('graficoPizzaDetalheWrapper').style.display='none'" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 10px;font-size:12px;color:#6b7280;cursor:pointer;">&times; Fechar</button>
                       </div>
+                      <!-- Gráfico de pizza por categoria — visível ao clicar em qualquer barra -->
+                      <div id="graficoCategoriaSection" style="display:none;margin-bottom:20px;">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                          <h5 style="margin:0;font-size:13px;font-weight:700;color:#10b981;">
+                            <i class="fa-solid fa-chart-pie" style="margin-right:6px;"></i>Distribuição por Categoria
+                          </h5>
+                          <!-- Breadcrumb de drill-down -->
+                          <span id="graficoCatBreadcrumb" style="display:none;font-size:11px;color:#6b7280;background:#f3f4f6;border-radius:20px;padding:2px 10px;"></span>
+                          <!-- Botão voltar (visível somente no 2º nível) -->
+                          <button id="graficoCatVoltar" onclick="window._graficoCatVoltar()" style="display:none;background:#ede9fe;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer;">
+                            <i class="fa-solid fa-arrow-left" style="margin-right:4px;"></i>Voltar
+                          </button>
+                        </div>
+                        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+                          <div style="position:relative;flex:0 0 300px;max-width:300px;">
+                            <canvas id="graficoCategoriaCanvas" style="max-height:300px;"></canvas>
+                            <div id="graficoCategoriaLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#10b981;font-size:13px;">
+                              <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando...
+                            </div>
+                          </div>
+                          <div style="flex:1;min-width:200px;max-height:300px;overflow-y:auto;">
+                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                              <tbody id="graficoCategoriaLegenda"></tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+
                       <div style="overflow-x:auto;border-radius:8px;border:1px solid #e5e7eb;">
                         <table style="width:100%;border-collapse:collapse;font-size:13px;">
                           <thead>
@@ -4206,7 +4234,7 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260316c"></script>
+  <script type="module" src="menu_produto.js?v=20260316d"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
@@ -6508,7 +6536,7 @@ function attachDropZone(ul) {
     };
   };
 
-  const renderizarResumoRecebimentoOmie = (dados, etapaInfo = null, etapasLegenda = [], pedidoContexto = null, resumoXml = null) => {
+  const renderizarResumoRecebimentoOmie = (dados, etapaInfo = null, etapasLegenda = [], pedidoContexto = null, resumoXml = null, opcoes = {}) => {
     const formatarDataBr = (valor, preferirDataHora = false) => {
       const bruto = String(valor || '').trim();
       if (!bruto || bruto === '-') return '-';
@@ -6861,7 +6889,7 @@ function attachDropZone(ul) {
         </div>
       </div>
 
-      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:12px;">
+      ${opcoes.ocultarComparacao ? '' : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:12px;">
         <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Comparação com itens do pedido</div>
         <div style="overflow:auto;max-height:300px;">
           <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
@@ -6892,7 +6920,7 @@ function attachDropZone(ul) {
           <div style="font-weight:700;">Criado em</div><div>${escaparHtml(pedidoCriadoEm)}</div>
           <div style="font-weight:700;">Observação</div><div style="word-break:break-word;">${escaparHtml(pedidoObservacao)}</div>
         </div>
-      </div>
+      </div>`}
     `;
   };
 
@@ -6911,7 +6939,7 @@ function attachDropZone(ul) {
 
   window.fecharModalNfeOmieDetalhes = fecharModalNfeOmieDetalhes;
 
-  const abrirModalNfeOmieDetalhes = async (chaveNfe, numeroNfe, pedidoContexto = null) => {
+  const abrirModalNfeOmieDetalhes = async (chaveNfe, numeroNfe, pedidoContexto = null, opcoes = {}) => {
     const modal = document.getElementById('modalNfeOmieDetalhes');
     const modalTitulo = document.getElementById('modalNfeOmieTitulo');
     const modalSubtitulo = document.getElementById('modalNfeOmieSubtitulo');
@@ -7091,7 +7119,7 @@ function attachDropZone(ul) {
       const etapaInfo = payload?.etapa_info || null;
       const etapasLegenda = Array.isArray(payload?.etapas_legenda) ? payload.etapas_legenda : [];
       modalFluxoTopo.innerHTML = renderizarSequenciaTopoNfe(etapaInfo, dadosConsulta?.cabec?.cEtapa, etapasLegenda);
-      const resumoHtml = renderizarResumoRecebimentoOmie(dadosConsulta, etapaInfo, etapasLegenda, pedidoContexto, resumoXml);
+      const resumoHtml = renderizarResumoRecebimentoOmie(dadosConsulta, etapaInfo, etapasLegenda, pedidoContexto, resumoXml, opcoes);
       modalConteudo.innerHTML = resumoHtml;
 
       const btnVincular = document.getElementById('vincularNfePedidoBtn');
@@ -7216,6 +7244,8 @@ function attachDropZone(ul) {
       `;
     }
   };
+
+  window.abrirModalNfeOmieDetalhes = abrirModalNfeOmieDetalhes;
 
   // Função para carregar os dados de recebimento
   async function carregarRecebimento(configPainel) {

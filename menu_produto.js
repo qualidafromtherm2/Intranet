@@ -1808,7 +1808,7 @@ async function renderPCPListaEstrutura(payload, codigo) {
   const fmtQtdBR = (n) => {
     const val = Number(parseQty(n));
     const temDecimal = Math.abs(val % 1) > 1e-9;
-    return val.toLocaleString('pt-BR', temDecimal ? { minimumFractionDigits: 3, maximumFractionDigits: 3 } : {});
+    return val.toLocaleString('pt-BR', temDecimal ? { maximumFractionDigits: 5 } : {});
   };
   const fmt = (n) => Number(parseQty(n)).toLocaleString('pt-BR');
 
@@ -2604,9 +2604,7 @@ async function pcpToggleSubEstrutura(rowLi, codProduto) {
   const fmtQtdBR = (n) => {
     const val = Number(parseQty(n));
     const temDecimal = Math.abs(val % 1) > 1e-9;
-    return val.toLocaleString('pt-BR', temDecimal ? { 
-      minimumFractionDigits: 0, maximumFractionDigits: 3 
-    } : { maximumFractionDigits: 0 });
+    return val.toLocaleString('pt-BR', temDecimal ? { maximumFractionDigits: 5 } : { maximumFractionDigits: 0 });
   };
 
   // carrega a estrutura do componente (via SQL)
@@ -4409,7 +4407,7 @@ async function carregarLocaisEstoque() {
   }
 
   try {
-    const resp = await fetch('/api/armazem/locais');
+    const resp = await fetch('/api/armazem/locais?fonte=db');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     if (!json.ok) throw new Error(json.error || 'Falha ao listar locais');
@@ -4448,7 +4446,7 @@ async function carregarLocaisEstoqueListbox() {
 
   // Buscar locais da API
   try {
-    const resp = await fetch('/api/armazem/locais');
+    const resp = await fetch('/api/armazem/locais?fonte=db');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     if (!json.ok) throw new Error(json.error || 'Falha ao listar locais');
@@ -32960,6 +32958,7 @@ window.graficoPeriodoRapido = graficoPeriodoRapido;
 // Gráfico de Pizza: Departamento / Centro de Custo
 // ============================================================
 let _graficoPizzaInstance = null;
+let _graficoCategoriaInstance = null;
 let _pizzaGrupoAtivo = 'departamento'; // 'departamento' | 'centro_custo'
 
 // Objetivo: Gráfico de barras verticais por status de compra
@@ -32989,7 +32988,7 @@ async function carregarGraficoPizza(grupo) {
     }
 
     // Ordem fixa dos status no eixo X
-    const STATUS_ORDEM = ['Compra realizada', 'Recebido'];
+    const STATUS_ORDEM = ['Compra realizada', 'Recebimento'];
     const statusUnicos = STATUS_ORDEM.filter(st => dados.some(d => d.status === st));
 
     // Agrega total por status (sem agrupar por departamento)
@@ -33003,7 +33002,7 @@ async function carregarGraficoPizza(grupo) {
     // Cor fixa por status
     const STATUS_COR = {
       'Compra realizada': '#3b82f6',
-      'Recebido':         '#10b981',
+      'Recebimento':      '#10b981',
     };
 
     const datasets = [{
@@ -33124,47 +33123,58 @@ function toggleGpiSub(subId) {
   if (ic) ic.className = aberto ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-down';
 }
 
-// Objetivo: Exibir tabela de detalhes com sublinhas ao clicar em uma barra do gráfico
-async function exibirDetalheGraficoBarra(statusClicado) {
-  const wrapper = document.getElementById('graficoPizzaDetalheWrapper');
-  const titulo  = document.getElementById('graficoPizzaDetalheTitulo');
-  const tbody   = document.getElementById('graficoPizzaDetalheTbody');
-  if (!wrapper || !titulo || !tbody) return;
+// Objetivo: Renderizar a tabela de itens, com filtro opcional por categoria (pai ou subcategoria exata)
+async function _carregarItensTabela(statusClicado, categoriaCode, categoriaLabel) {
+  const titulo = document.getElementById('graficoPizzaDetalheTitulo');
+  const tbody  = document.getElementById('graficoPizzaDetalheTbody');
+  if (!titulo || !tbody) return;
 
-  titulo.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;color:#7c3aed;"></i>Carregando itens...`;
-  tbody.innerHTML  = '';
-  wrapper.style.display = 'block';
-  wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  tbody.innerHTML = `<tr><td colspan="3" style="padding:14px 12px;text-align:center;color:#7c3aed;font-size:13px;">
+    <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Filtrando itens...</td></tr>`;
+
+  const inicio = document.getElementById('graficoDataInicio')?.value;
+  const fim    = document.getElementById('graficoDataFim')?.value;
+  const params = new URLSearchParams({ status: statusClicado });
+  if (categoriaCode) params.set('categoria', categoriaCode);
+  if (inicio) params.set('dataInicio', inicio);
+  if (fim)    params.set('dataFim', fim);
+
+  const fmtVal = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  const subTag = categoriaLabel
+    ? ` <span style="color:#10b981;font-size:11px;background:#d1fae5;padding:2px 8px;border-radius:10px;font-weight:600;">${categoriaLabel}</span>`
+    : '';
 
   try {
-    const params = new URLSearchParams({ status: statusClicado });
-    const inicio = document.getElementById('graficoDataInicio')?.value;
-    const fim    = document.getElementById('graficoDataFim')?.value;
-    if (inicio) params.set('dataInicio', inicio);
-    if (fim)    params.set('dataFim', fim);
-
     const resp = await fetch(`/api/compras/grafico-pizza-itens?${params.toString()}`, { credentials: 'include' });
-    if (!resp.ok) throw new Error('Falha ao carregar itens');
+    if (!resp.ok) throw new Error('Falha');
     const { itens } = await resp.json();
 
-    const totalStatus = (window._graficoPizzaTotalPorStatus || {})[statusClicado] || 0;
-    const fmtVal = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
-
     titulo.innerHTML = `<i class="fa-solid fa-table" style="margin-right:6px;color:#7c3aed;"></i>`
-      + `Detalhes — <span style="color:#7c3aed;">${statusClicado}</span>`;
+      + `Detalhes — <span style="color:#7c3aed;">${statusClicado}</span>${subTag}`;
 
     let html = '';
+    let totalFiltrado = 0;
     (itens || []).forEach(item => {
-      const fmtData = item.d_inc_data
-        ? item.d_inc_data.split('-').reverse().join('/')
-        : '—';
+      totalFiltrado += item.valor_item || 0;
+      const fmtData = item.d_data ? item.d_data.split('-').reverse().join('/') : '—';
       const valHtml = `<span style="margin-left:auto;white-space:nowrap;font-weight:600;color:#059669;">${fmtVal(item.valor_item)}</span>`;
+      const refLabel = item.referencia || item.h_id;
+      const refHtml = item.chave_nfe
+        ? `<a href="#" style="color:#38bdf8;text-decoration:underline;font-weight:700;"
+             data-chave="${(item.chave_nfe || '').replace(/"/g,'&quot;')}"
+             data-num="${(item.referencia || '').replace(/"/g,'&quot;')}"
+             onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes)window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,null,{ocultarComparacao:true});return false;"
+           >${refLabel}</a>`
+        : `<b>${refLabel}</b>`;
       html += `<tr style="background:#fff;border-bottom:1px solid #f3f4f6;">
         <td colspan="3" style="padding:7px 12px;">
           <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;width:100%;">
-            <span style="color:#9ca3af;">Ped. #${item.c_numero || item.h_id}</span>
+            <span style="color:#9ca3af;">NF/Ped. ${refHtml}</span>
             <span style="color:#374151;">${item.fornecedor}</span>
             <span style="color:#6b7280;">Data: <b>${fmtData}</b></span>
+            ${item.descricao ? `<span style="color:#6366f1;font-family:monospace;">${item.descricao}</span>` : ''}
+            ${item.qtde ? `<span style="color:#6b7280;">Qtd: <b>${item.qtde}</b></span>` : ''}
+            ${item.preco_unit ? `<span style="color:#6b7280;">Unit: <b>${fmtVal(item.preco_unit)}</b></span>` : ''}
             ${valHtml}
           </span>
         </td>
@@ -33173,20 +33183,168 @@ async function exibirDetalheGraficoBarra(statusClicado) {
 
     if (!html) {
       html = `<tr><td colspan="3" style="padding:14px 12px;text-align:center;color:#9ca3af;font-size:13px;">Nenhum item encontrado</td></tr>`;
-    } else if (totalStatus > 0) {
+    } else {
       html += `<tr style="background:#f0fdf4;border-top:2px solid #d1fae5;">
         <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;">Total</td>
-        <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmtVal(totalStatus)}</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#111827;text-align:right;">${fmtVal(totalFiltrado)}</td>
         <td></td>
       </tr>`;
     }
-
     tbody.innerHTML = html;
 
   } catch (err) {
-    console.error('[GraficoPizzaItens]', err);
-    titulo.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;color:#ef4444;"></i>Erro ao carregar detalhes`;
+    console.error('[CarregarItensTabela]', err);
+    titulo.innerHTML = `<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;color:#ef4444;"></i>Erro ao carregar itens`;
   }
+}
+
+// Objetivo: Handler unificado de clique em categoria (drill-down no pie + filtro de itens)
+function _handleCatClick(status, codigo, label, isDrillDown) {
+  if (isDrillDown) _carregarGraficoCategorias(status, codigo, label);
+  _carregarItensTabela(status, codigo, label);
+}
+
+// Estado do drill-down de categorias
+let _graficoCategoriaEstado = { status: null, pai: null, labelPai: null };
+
+// Objetivo: Carregar (e re-carregar para drill-down) o gráfico de pizza por categoria
+async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
+  const catSection = document.getElementById('graficoCategoriaSection');
+  const catLoading = document.getElementById('graficoCategoriaLoading');
+  const catLegenda = document.getElementById('graficoCategoriaLegenda');
+  const breadcrumb = document.getElementById('graficoCatBreadcrumb');
+  const btnVoltar  = document.getElementById('graficoCatVoltar');
+
+  if (catSection) catSection.style.display = 'block';
+  if (catLoading) catLoading.style.display = 'flex';
+
+  // Salvar estado para o botão "Voltar"
+  _graficoCategoriaEstado = { status: statusClicado, pai, labelPai };
+
+  // Breadcrumb e botão voltar
+  if (pai) {
+    if (breadcrumb) { breadcrumb.textContent = labelPai || pai; breadcrumb.style.display = 'inline-block'; }
+    if (btnVoltar)  btnVoltar.style.display = 'inline-block';
+  } else {
+    if (breadcrumb) breadcrumb.style.display = 'none';
+    if (btnVoltar)  btnVoltar.style.display = 'none';
+  }
+
+  const inicio = document.getElementById('graficoDataInicio')?.value;
+  const fim    = document.getElementById('graficoDataFim')?.value;
+  const catParams = new URLSearchParams({ status: statusClicado });
+  if (pai)    catParams.set('pai', pai);
+  if (inicio) catParams.set('dataInicio', inicio);
+  if (fim)    catParams.set('dataFim', fim);
+
+  try {
+    const resp = await fetch(`/api/compras/grafico-categorias?${catParams.toString()}`, { credentials: 'include' });
+    const { categorias } = await resp.json();
+    if (catLoading) catLoading.style.display = 'none';
+
+    const canvas = document.getElementById('graficoCategoriaCanvas');
+    if (!canvas || !categorias || !categorias.length) {
+      if (catLegenda) catLegenda.innerHTML = `<tr><td style="padding:10px;color:#9ca3af;font-size:12px;">Nenhuma categoria encontrada</td></tr>`;
+      return;
+    }
+
+    // Destruir instância anterior
+    if (_graficoCategoriaInstance) { _graficoCategoriaInstance.destroy(); _graficoCategoriaInstance = null; }
+
+    const PALETA = [
+      '#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6',
+      '#06b6d4','#84cc16','#f97316','#ec4899','#14b8a6',
+      '#a78bfa','#fb923c','#34d399','#60a5fa','#fbbf24',
+      '#f87171','#c084fc','#2dd4bf','#a3e635','#fb7185',
+    ];
+    const totalGeral = categorias.reduce((s, c) => s + c.total, 0);
+    const cores      = categorias.map((_, i) => PALETA[i % PALETA.length]);
+    const fmtVal     = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+    const fmtPct     = v => totalGeral > 0 ? ((v / totalGeral) * 100).toFixed(1) + '%' : '0%';
+
+    // Indicar que tem drill-down (nível 1 é clicável)
+    const ehNivel1 = !pai;
+
+    _graficoCategoriaInstance = new Chart(canvas, {
+      type: 'pie',
+      data: {
+        labels: categorias.map(c => c.label),
+        datasets: [{ data: categorias.map(c => c.total), backgroundColor: cores, borderWidth: 1, borderColor: '#fff' }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const suf = ehNivel1 ? ' (clique para detalhar)' : ' (clique para filtrar)';
+                return ` ${fmtVal(ctx.raw)}  (${fmtPct(ctx.raw)})${suf}`;
+              }
+            }
+          }
+        },
+        onClick: (evt, elements) => {
+          if (!elements || !elements.length) return;
+          const idx = elements[0].index;
+          const cat = categorias[idx];
+          if (ehNivel1) _carregarGraficoCategorias(statusClicado, cat.codigo, cat.label);
+          _carregarItensTabela(statusClicado, cat.codigo, cat.label);
+        },
+        onHover: (evt, elements) => { canvas.style.cursor = elements.length ? 'pointer' : 'default'; },
+      }
+    });
+
+    // Legenda lateral com código, descrição, valor, % e ícone de drill-down no nível 1
+    if (catLegenda) {
+      catLegenda.innerHTML = categorias.map((c, i) => `
+        <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer;"
+            onclick="window._handleCatClick('${statusClicado.replace(/'/g,"\\'")}','${c.codigo}','${c.label.replace(/'/g,"\\'")}',${ehNivel1})">
+          <td style="padding:4px 6px;">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${cores[i]};vertical-align:middle;"></span>
+          </td>
+          <td style="padding:4px 6px;font-size:11px;color:#374151;max-width:220px;">
+            <div style="font-weight:600;line-height:1.3;">${c.label}${ehNivel1 ? ' <span style="color:#7c3aed;font-size:10px;">&#9656;</span>' : ''}</div>
+            <div style="color:#9ca3af;font-size:10px;">${c.codigo}</div>
+          </td>
+          <td style="padding:4px 6px;text-align:right;white-space:nowrap;font-size:11px;color:#059669;font-weight:600;">${fmtVal(c.total)}</td>
+          <td style="padding:4px 6px;text-align:right;white-space:nowrap;font-size:11px;color:#6b7280;">${fmtPct(c.total)}</td>
+        </tr>`).join('');
+    }
+  } catch (err) {
+    console.error('[GraficoCategorias]', err);
+    if (catLoading) catLoading.style.display = 'none';
+  }
+}
+
+// Objetivo: Voltar ao nível 1 do gráfico de categorias e resetar filtro da tabela
+function _graficoCatVoltar() {
+  if (_graficoCategoriaEstado.status) {
+    _carregarGraficoCategorias(_graficoCategoriaEstado.status, null, null);
+    _carregarItensTabela(_graficoCategoriaEstado.status, null, null);
+  }
+}
+window._carregarGraficoCategorias = _carregarGraficoCategorias;
+window._carregarItensTabela       = _carregarItensTabela;
+window._handleCatClick            = _handleCatClick;
+window._graficoCatVoltar          = _graficoCatVoltar;
+
+// Objetivo: Exibir tabela de detalhes com sublinhas ao clicar em uma barra do gráfico
+async function exibirDetalheGraficoBarra(statusClicado) {
+  const wrapper    = document.getElementById('graficoPizzaDetalheWrapper');
+  const titulo     = document.getElementById('graficoPizzaDetalheTitulo');
+  const tbody      = document.getElementById('graficoPizzaDetalheTbody');
+  const catSection = document.getElementById('graficoCategoriaSection');
+  if (!wrapper || !titulo || !tbody) return;
+
+  titulo.innerHTML = `<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;color:#7c3aed;"></i>Carregando itens...`;
+  tbody.innerHTML  = '';
+  wrapper.style.display = 'block';
+  wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  // Carregar gráfico de categorias e tabela de itens (sem filtro de categoria ao abrir)
+  _carregarGraficoCategorias(statusClicado, null, null);
+  _carregarItensTabela(statusClicado, null, null);
 }
 
 // Objetivo: Carregar os dois gráficos simultaneamente (botão Aplicar compartilhado)
@@ -37484,6 +37642,328 @@ window.openEngenharia = openEngenharia;
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Gerenciamento de grupos de Operação na Estrutura de Produto
+// Botão + (mover itens selecionados) e ✏️ (renomear toda operação)
+// ─────────────────────────────────────────────────────────────────────────────
+function _wireOpGroupButtons(ul, paiCodigo) {
+  // esc local para uso dentro desta função (não herda escopo de loadEstruturaProduto)
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#x27;'}[c]));
+
+  // Cache de operações (carregado uma vez por sessão de visualização)
+  let _opCache = null;
+  async function _fetchOps() {
+    if (_opCache) return _opCache;
+    try {
+      const r = await fetch('/api/pcp/operacoes');
+      const j = await r.json();
+      // Filtra entradas com caracter de substituição (encoding corrompido no banco)
+      _opCache = Array.isArray(j.operacoes)
+        ? j.operacoes.filter(o => !o.includes('\uFFFD'))
+        : [];
+    } catch { _opCache = []; }
+    return _opCache;
+  }
+
+  // Constrói e posiciona um dropdown de operações perto do botão clicado
+  function _mostrarDropdownOp(anchorEl, opcoes, onSelect) {
+    // remove dropdown anterior se houver
+    document.getElementById('_op-dropdown')?.remove();
+
+    const dd = document.createElement('div');
+    dd.id = '_op-dropdown';
+    dd.style.cssText = `
+      position:fixed; z-index:9999; background:#fff; border:1px solid #d1d5db;
+      border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.18); min-width:220px;
+      max-height:280px; overflow-y:auto; padding:4px 0; font-size:13px;
+      color:#1f2937;
+    `;
+
+    opcoes.forEach(op => {
+      const it = document.createElement('div');
+      it.style.cssText = 'padding:8px 14px; cursor:pointer; white-space:nowrap; color:#1f2937;';
+      it.textContent = op;
+      it.addEventListener('mouseenter', () => { it.style.background = '#f3f4f6'; it.style.color = '#111827'; });
+      it.addEventListener('mouseleave', () => { it.style.background = ''; it.style.color = '#1f2937'; });
+      it.addEventListener('click', () => { dd.remove(); onSelect(op); });
+      dd.appendChild(it);
+    });
+
+    // Posiciona próximo ao âncora
+    document.body.appendChild(dd);
+    const rect = anchorEl.getBoundingClientRect();
+    const ddH = Math.min(280, opcoes.length * 37 + 8);
+    const top = rect.bottom + 4 + ddH > window.innerHeight
+      ? rect.top - ddH - 4
+      : rect.bottom + 4;
+    dd.style.top  = top + 'px';
+    dd.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+
+    // fecha ao clicar fora
+    const close = (e) => { if (!dd.contains(e.target)) { dd.remove(); document.removeEventListener('mousedown', close); } };
+    setTimeout(() => document.addEventListener('mousedown', close), 50);
+  }
+
+  // Retorna todos os <li> de itens que pertencem a um grupo de operação
+  function _getItensDoGrupo(opGrupo) {
+    return Array.from(ul.querySelectorAll(`li[data-op-grupo="${CSS.escape(opGrupo)}"]`));
+  }
+
+  // Entra no modo de seleção de checkboxes para o grupo
+  function _entrarModoSelecao(opGrupo, opSelecionada) {
+    // Mostra checkboxes nos itens do grupo
+    const itens = _getItensDoGrupo(opGrupo);
+    itens.forEach(li => {
+      const chk = li.querySelector('.item-chk');
+      if (chk) { chk.style.display = 'inline-block'; }
+    });
+
+    // Insere barra de ação (Selecionar tudo / Salvar / Cancelar) na cat-header
+    const catHeader = ul.querySelector(`li.category-header[data-op-grupo="${CSS.escape(opGrupo)}"]`);
+    if (!catHeader) return;
+
+    // Remove barra anterior se existir
+    catHeader.querySelector('.cat-op-bar')?.remove();
+
+    const SVG_OK     = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`;
+    const SVG_CANCEL = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    const SVG_SPIN   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:_spin .7s linear infinite;display:block"><circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M12 3a9 9 0 0 1 9 9"/></svg>`;
+
+    const bar = document.createElement('div');
+    bar.className = 'cat-op-bar';
+    bar.style.cssText = 'display:flex; gap:6px; align-items:center; margin-top:4px; width:100%; flex-wrap:wrap;';
+    bar.innerHTML = `
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="_chk-all-${CSS.escape(opGrupo)}" style="margin:0"> Todos
+      </label>
+      <span style="font-size:11px;color:#9ca3af;flex:1">→ <strong style="color:#e5e7eb">${esc(opSelecionada)}</strong></span>
+      <button type="button" class="cat-btn cat-btn-salvar" title="Salvar" aria-label="Salvar" style="background:#15803d;color:#fff;width:26px;height:26px;border-radius:6px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">${SVG_OK}</button>
+      <button type="button" class="cat-btn cat-btn-cancelar" title="Cancelar" aria-label="Cancelar" style="background:#374151;color:#e5e7eb;width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">${SVG_CANCEL}</button>
+    `;
+    catHeader.appendChild(bar);
+
+    // "Todos" checkbox
+    const chkAll = bar.querySelector(`#_chk-all-${CSS.escape(opGrupo)}`);
+    chkAll?.addEventListener('change', () => {
+      itens.forEach(li => {
+        const c = li.querySelector('.item-chk');
+        if (c) c.checked = chkAll.checked;
+      });
+    });
+
+    // Cancelar
+    bar.querySelector('.cat-btn-cancelar')?.addEventListener('click', () => _sairModoSelecao(opGrupo));
+
+    // Salvar
+    bar.querySelector('.cat-btn-salvar')?.addEventListener('click', async () => {
+      const selecionados = itens
+        .filter(li => li.querySelector('.item-chk')?.checked)
+        .map(li => li.dataset.comp)
+        .filter(Boolean);
+
+      if (!selecionados.length) {
+        alert('Selecione ao menos um item.');
+        return;
+      }
+
+      const salvarBtn = bar.querySelector('.cat-btn-salvar');
+      salvarBtn.disabled = true;
+      salvarBtn.innerHTML = SVG_SPIN;
+
+      try {
+        const resp = await fetch('/api/pcp/estrutura/operacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pai_codigo: paiCodigo, codigos: selecionados, nova_operacao: opSelecionada })
+        });
+        const j = await resp.json();
+        if (j.ok) {
+          window.loadEstruturaProduto(paiCodigo);
+        } else {
+          alert('Erro ao salvar: ' + (j.error || 'desconhecido'));
+          salvarBtn.disabled = false;
+          salvarBtn.innerHTML = SVG_OK;
+        }
+      } catch (err) {
+        alert('Falha na requisição: ' + err.message);
+        salvarBtn.disabled = false;
+        salvarBtn.innerHTML = SVG_OK;
+      }
+    });
+  }
+
+  function _sairModoSelecao(opGrupo) {
+    // Esconde checkboxes em TODOS os itens (pode estar em modo "trazer")
+    ul.querySelectorAll('li[data-op-grupo]').forEach(li => {
+      const chk = li.querySelector('.item-chk');
+      if (chk) { chk.style.display = 'none'; chk.checked = false; }
+    });
+    // Remove barras de ação de TODOS os headers (garante limpeza)
+    ul.querySelectorAll('li.category-header .cat-op-bar').forEach(b => b.remove());
+  }
+
+  // Modo "Trazer itens": mostra checkboxes em TODOS os itens de TODOS os grupos
+  function _entrarModoTrazer(opGrupoDestino, opDestinoRaw) {
+    const SVG_OK     = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`;
+    const SVG_CANCEL = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    const SVG_SPIN   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:_spin .7s linear infinite;display:block"><circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M12 3a9 9 0 0 1 9 9"/></svg>`;
+
+    // Limpa qualquer modo anterior
+    _sairModoSelecao(opGrupoDestino);
+
+    // Mostra checkboxes em TODOS os itens de TODOS os grupos (exceto o grupo destino)
+    ul.querySelectorAll('li[data-op-grupo]').forEach(li => {
+      if (li.dataset.opGrupo === opGrupoDestino) return; // não mostra no próprio grupo destino
+      const chk = li.querySelector('.item-chk');
+      if (chk) chk.style.display = 'inline-block';
+    });
+
+    // Barra de ação no header do grupo destino
+    const catHeader = ul.querySelector(`li.category-header[data-op-grupo="${CSS.escape(opGrupoDestino)}"]`);
+    if (!catHeader) return;
+    catHeader.querySelector('.cat-op-bar')?.remove();
+
+    const bar = document.createElement('div');
+    bar.className = 'cat-op-bar';
+    bar.style.cssText = 'display:flex; gap:6px; align-items:center; margin-top:4px; width:100%; flex-wrap:wrap;';
+    bar.innerHTML = `
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" id="_chk-trazer-all" style="margin:0"> Todos
+      </label>
+      <span style="font-size:11px;color:#9ca3af;flex:1">→ <strong style="color:#e5e7eb">${esc(opGrupoDestino)}</strong></span>
+      <button type="button" class="cat-btn cat-btn-salvar" title="Mover para cá" aria-label="Mover para cá" style="background:#15803d;color:#fff;width:26px;height:26px;border-radius:6px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">${SVG_OK}</button>
+      <button type="button" class="cat-btn cat-btn-cancelar" title="Cancelar" aria-label="Cancelar" style="background:#374151;color:#e5e7eb;width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">${SVG_CANCEL}</button>
+    `;
+    catHeader.appendChild(bar);
+
+    // Todos
+    bar.querySelector('#_chk-trazer-all')?.addEventListener('change', (ev) => {
+      ul.querySelectorAll('li[data-op-grupo]').forEach(li => {
+        if (li.dataset.opGrupo === opGrupoDestino) return;
+        const c = li.querySelector('.item-chk');
+        if (c) c.checked = ev.target.checked;
+      });
+    });
+
+    // Cancelar
+    bar.querySelector('.cat-btn-cancelar')?.addEventListener('click', () => _sairModoSelecao(opGrupoDestino));
+
+    // Salvar
+    bar.querySelector('.cat-btn-salvar')?.addEventListener('click', async () => {
+      const selecionados = Array.from(ul.querySelectorAll('li[data-op-grupo] .item-chk:checked'))
+        .map(chk => chk.closest('li[data-op-grupo]')?.dataset.comp)
+        .filter(Boolean);
+
+      if (!selecionados.length) { alert('Selecione ao menos um item.'); return; }
+
+      const salvarBtn = bar.querySelector('.cat-btn-salvar');
+      salvarBtn.disabled = true;
+      salvarBtn.innerHTML = SVG_SPIN;
+
+      try {
+        const resp = await fetch('/api/pcp/estrutura/operacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pai_codigo: paiCodigo, codigos: selecionados, nova_operacao: opDestinoRaw })
+        });
+        const j = await resp.json();
+        if (j.ok) {
+          window.loadEstruturaProduto(paiCodigo);
+        } else {
+          alert('Erro ao mover: ' + (j.error || 'desconhecido'));
+          salvarBtn.disabled = false; salvarBtn.innerHTML = SVG_OK;
+        }
+      } catch (err) {
+        alert('Falha na requisição: ' + err.message);
+        salvarBtn.disabled = false; salvarBtn.innerHTML = SVG_OK;
+      }
+    });
+  }
+
+  // Delegação de cliques nos botões dos category-headers
+  ul.addEventListener('click', async (e) => {
+    const btnMover  = e.target.closest('.cat-btn-mover');
+    const btnRename = e.target.closest('.cat-btn-rename');
+    const btnTrazer = e.target.closest('.cat-btn-trazer');
+    if (!btnMover && !btnRename && !btnTrazer) return;
+
+    const catHeader = e.target.closest('.category-header');
+    if (!catHeader) return;
+
+    const opGrupo = catHeader.dataset.opGrupo || '';  // label exibido
+    const opRaw   = catHeader.dataset.opRaw || null;   // valor no banco (null = SEM OPERAÇÃO)
+
+    if (btnTrazer) {
+      // Modo trazer: mostra checkboxes em todos os outros grupos
+      _entrarModoTrazer(opGrupo, opRaw);
+      return;
+    }
+
+    // Spinner: troca ícone do botão clicado por animação de loading
+    const btnClicado = btnMover || btnRename;
+    const svgOriginal = btnClicado.innerHTML;
+    btnClicado.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:_spin .7s linear infinite;display:block"><circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M12 3a9 9 0 0 1 9 9"/></svg>';
+    btnClicado.disabled = true;
+
+    const ops = await _fetchOps();
+
+    // Restaura o botão
+    btnClicado.innerHTML = svgOriginal;
+    btnClicado.disabled = false;
+
+    // Remove a operação atual da lista de opções (não faz sentido mover para si mesmo)
+    const opcoesFiltradas = ops.filter(o => o !== (opRaw || ''));
+
+    if (btnMover) {
+      // Abre dropdown → ao selecionar entra em modo seleção
+      _mostrarDropdownOp(btnMover, opcoesFiltradas, (opSelecionada) => {
+        _entrarModoSelecao(opGrupo, opSelecionada);
+      });
+
+    } else if (btnRename) {
+      // Abre dropdown → ao selecionar renomeia todos os itens do grupo
+      _mostrarDropdownOp(btnRename, opcoesFiltradas, async (opSelecionada) => {
+        const qtd = _getItensDoGrupo(opGrupo).length;
+        const confirmar = await _fichaModal({
+          titulo: 'Renomear operação',
+          tipo: 'confirmar',
+          html: `<p>Deseja mover <strong>todos os ${qtd} item(ns)</strong> de <em>${esc(opGrupo)}</em> para <strong>${esc(opSelecionada)}</strong>?</p>`,
+          botoes: [
+            { texto: 'Confirmar', valor: 'ok', cor: '#16a34a' },
+            { texto: 'Cancelar', valor: 'cancel', cor: '#6b7280' }
+          ]
+        });
+        if (confirmar !== 'ok') return;
+
+        const opAtualParaAPI = (opGrupo === 'SEM OPERAÇÃO') ? null : opGrupo;
+
+        const btnR = btnRename;
+        const svgR = btnR.innerHTML;
+        btnR.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:_spin .7s linear infinite;display:block"><circle cx="12" cy="12" r="9" stroke-opacity=".25"/><path d="M12 3a9 9 0 0 1 9 9"/></svg>';
+        btnR.disabled = true;
+
+        try {
+          const resp = await fetch('/api/pcp/estrutura/renomear-grupo', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pai_codigo: paiCodigo, operacao_atual: opAtualParaAPI, nova_operacao: opSelecionada })
+          });
+          const j = await resp.json();
+          if (j.ok) {
+            window.loadEstruturaProduto(paiCodigo);
+          } else {
+            btnR.innerHTML = svgR; btnR.disabled = false;
+            await _fichaModal({ titulo: 'Erro', tipo: 'erro', html: `<p>${esc(j.error || 'Erro ao renomear.')}</p>` });
+          }
+        } catch (err) {
+          btnR.innerHTML = svgR; btnR.disabled = false;
+          await _fichaModal({ titulo: 'Erro', tipo: 'erro', html: `<p>${esc(err.message)}</p>` });
+        }
+      });
+    }
+  }, { signal: ul._opGroupAbort?.signal });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Estrutura de produto (render por grupos de Operação)
 // - Busca a estrutura via API (/api/pcp/estrutura)
 // - Agrupa por comp_operacao e renderiza blocos (categoria) com contador
@@ -37629,24 +38109,51 @@ window.loadEstruturaProduto = async function loadEstruturaProduto(codigo) {
       // — render: cabeçalho de grupo + linhas (6 colunas) —
       for (const opNome of opsOrdenadas) {
         const arr = grupos.get(opNome);
+        // opRaw: null para "SEM OPERAÇÃO", senão o nome real
+        const opRaw = (opNome === 'SEM OPERAÇÃO') ? null : opNome;
 
         // cabeçalho do grupo
         const cat = document.createElement('li');
         cat.className = 'category-header';
+        cat.dataset.opGrupo = opNome;        // label exibido (ex: "BASE")
+        cat.dataset.opRaw   = opRaw ?? '';   // valor real no banco (vazio = null)
         cat.innerHTML = `
-          <div class="left">
-            ${esc(opNome)} <span class="badge">(${arr.length})</span>
+          <div class="cat-header-top">
+            <div class="left">
+              ${esc(opNome)} <span class="badge">(${arr.length})</span>
+            </div>
+            <div class="right cat-op-actions">
+              <button type="button" class="cat-btn cat-btn-rename" title="Renomear esta operação" aria-label="Renomear">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button type="button" class="cat-btn cat-btn-mover" title="Mover itens para outra operação" aria-label="Mover itens">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/>
+                </svg>
+              </button>
+              <button type="button" class="cat-btn cat-btn-trazer" title="Trazer itens de outros grupos para cá" aria-label="Trazer itens">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="11 17 6 12 11 7"/><line x1="6" y1="12" x2="18" y2="12"/>
+                </svg>
+              </button>
+            </div>
           </div>
-          <div class="right"></div>
         `;
         frag.appendChild(cat);
 
         // linhas do grupo
         for (const row of arr) {
           const li = document.createElement('li');
-          li.dataset.comp = row.comp_codigo || '';
+          li.dataset.comp    = row.comp_codigo || '';
+          li.dataset.opGrupo = opNome; // facilita seleção por grupo
           li.innerHTML = `
-            <div>${esc(row.comp_codigo || '')}</div>
+            <div class="col-codigo">
+              <input type="checkbox" class="item-chk" style="display:none;margin-right:5px;width:14px;height:14px;cursor:pointer;accent-color:#4ade80;vertical-align:middle;" aria-label="Selecionar item">
+              <span class="col-codigo-text">${esc(row.comp_codigo || '')}</span>
+            </div>
             <div class="desc" title="${esc(row.comp_descricao || '')}">${esc(row.comp_descricao || '')}</div>
             <div>${Number(row.comp_qtd || 0)}</div>
             <div>${esc(row.comp_unid || '')}</div>
@@ -37681,6 +38188,9 @@ window.loadEstruturaProduto = async function loadEstruturaProduto(codigo) {
     }
 
     ul.replaceChildren(frag);
+
+    // ── Lógica dos botões de operação nos category-headers ──
+    _wireOpGroupButtons(ul, cod);
 
     // mantém delegações existentes e marca ícones "Estrutura" quando houver filhos
     ensureEstruturaDelegation();
@@ -38808,6 +39318,91 @@ async function excluirExcedentesEstruturaOmie(paiCodigo, itensCsv) {
 
 
 
+// ─── Modal utilitário para o fluxo de importação de Ficha ────────────────────
+// _fichaModal({ titulo, icone, tipo, html, botoes }) → Promise<string>
+//   tipo: 'sucesso' | 'erro' | 'aviso' | 'info' | 'confirmar'
+//   botoes: [{ label, valor, classe }] — padrão: [{ label:'OK', valor:'ok' }]
+function _fichaModal({ titulo = '', icone = '', tipo = 'info', html = '', botoes } = {}) {
+  return new Promise(resolve => {
+    // Estilos inline — sem dependência de CSS externo
+    const cores = { sucesso: '#22863a', erro: '#c0392b', aviso: '#b7770d', info: '#0969da', confirmar: '#0969da' };
+    const cor = cores[tipo] || cores.info;
+    const btnsPadrao = tipo === 'confirmar'
+      ? [{ label: 'Sim, atualizar', valor: 'sim', classe: 'primary' }, { label: 'Pular', valor: 'nao', classe: 'secondary' }]
+      : [{ label: 'OK', valor: 'ok', classe: 'primary' }];
+    const btnsFinais = botoes || btnsPadrao;
+
+    // Remove modal anterior se existir
+    document.getElementById('_fichaModalOverlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = '_fichaModalOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+
+    const card = document.createElement('div');
+    card.style.cssText = `background:#fff;border-radius:12px;max-width:580px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden`;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `background:${cor};color:#fff;padding:16px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0`;
+    header.innerHTML = `<span style="font-size:1.3rem">${icone || (tipo==='sucesso'?'✅':tipo==='erro'?'❌':tipo==='aviso'?'⚠️':tipo==='confirmar'?'🔧':'ℹ️')}</span><span style="font-weight:600;font-size:1rem;flex:1">${titulo}</span>`;
+
+    // Body
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:20px;overflow-y:auto;flex:1;font-size:.92rem;line-height:1.6;color:#24292f';
+    body.innerHTML = html;
+
+    // Footer
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:12px 20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid #e1e4e8;flex-shrink:0;background:#f6f8fa';
+
+    btnsFinais.forEach(b => {
+      const btn = document.createElement('button');
+      const isPrimary = b.classe === 'primary';
+      btn.textContent = b.label;
+      btn.style.cssText = `padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:.9rem;font-weight:600;transition:opacity .15s;
+        background:${isPrimary ? cor : '#e1e4e8'};color:${isPrimary ? '#fff' : '#24292f'}`;
+      btn.onmouseenter = () => { btn.style.opacity = '.85'; };
+      btn.onmouseleave = () => { btn.style.opacity = '1'; };
+      btn.onclick = () => { overlay.remove(); resolve(b.valor); };
+      footer.appendChild(btn);
+    });
+
+    card.appendChild(header);
+    card.appendChild(body);
+    card.appendChild(footer);
+    overlay.appendChild(card);
+    // Fechar ao clicar fora do card
+    overlay.onclick = e => { if (e.target === overlay) { overlay.remove(); resolve(btnsFinais[btnsFinais.length - 1].valor); } };
+    document.body.appendChild(overlay);
+  });
+}
+
+// Helper: monta HTML de lista de resultados de inclusão na Omie
+function _fichaOmieResultHtml(omieInc, labelPai) {
+  if (!omieInc) return '';
+  let html = '';
+  if (omieInc.ok && omieInc.incluidos != null) {
+    const cor = omieInc.incluidos === omieInc.total ? '#22863a' : '#b7770d';
+    html += `<div style="margin-bottom:8px;color:${cor};font-weight:600">Omie — ${labelPai}: ${omieInc.incluidos} de ${omieInc.total} itens enviados</div>`;
+    if (omieInc.sem_id?.length) {
+      html += `<div style="color:#b7770d;margin-bottom:6px">⚠️ ${omieInc.sem_id.length} componente(s) sem cadastro na Omie: ${omieInc.sem_id.join(', ')}</div>`;
+    }
+    if (omieInc.erros?.length) {
+      html += `<div style="color:#c0392b;margin-bottom:4px;font-weight:600">❌ ${omieInc.erros.length} item(ns) rejeitado(s) pela Omie:</div>`;
+      html += `<table style="width:100%;border-collapse:collapse;font-size:.84rem;margin-top:4px">`;
+      html += `<thead><tr style="background:#fef0f0"><th style="padding:5px 8px;text-align:left;border:1px solid #f5c6cb">Código</th><th style="padding:5px 8px;text-align:left;border:1px solid #f5c6cb">Motivo</th></tr></thead><tbody>`;
+      omieInc.erros.forEach(e => {
+        html += `<tr><td style="padding:4px 8px;border:1px solid #f5c6cb;white-space:nowrap">${e.codProdMalha || e.cod || ''}</td><td style="padding:4px 8px;border:1px solid #f5c6cb;color:#c0392b">${e.erro || e.error || ''}</td></tr>`;
+      });
+      html += `</tbody></table>`;
+    }
+  } else if (omieInc.error) {
+    html += `<div style="color:#c0392b">⚠️ Omie (inclusão): ${omieInc.error}</div>`;
+  }
+  return html;
+}
+
 // ——— Importar Estrutura (apenas CSV no layout B.O.M.) ———
 (function wireImportBOM(){
   const btn = document.getElementById('btnImportarEstrutura');
@@ -38972,7 +39567,9 @@ fileInput.addEventListener('change', async () => {
     // Na FICHA_ESTRUTURA a coluna 0 (Nível) começa com "1", "1.1", "1.26" etc.
     // No formato antigo (BOM) a coluna 0 é a descrição do produto (texto livre).
     const primeiroValorCol0 = String(rows[1]?.[0] ?? '').trim();
-    const isNovoFormato = isExcel && /^\d+(\.\d+)*$/.test(primeiroValorCol0);
+    // Níveis hierárquicos: "1", "1.1", "1.26" — cada segmento tem no máximo 3 dígitos
+    // IDs internos do Omie ("10833528768") têm 8+ dígitos sem ponto → NÃO são níveis
+    const isNovoFormato = isExcel && /^\d{1,3}(\.\d{1,3})*$/.test(primeiroValorCol0);
     console.log('[ImportBOM] col0 da linha 1:', JSON.stringify(primeiroValorCol0), '→ isNovoFormato:', isNovoFormato);
     if (isNovoFormato) {
       if (!isExcel) {
@@ -38995,6 +39592,118 @@ fileInput.addEventListener('change', async () => {
         throw new Error(js?.error || `Erro HTTP ${resp.status}`);
       }
       console.info(`[ImportarFicha] OK — ${js.inseridos_principal} itens no principal, ${js.sub_montagens} sub-montagem(ns), ${js.inseridos_sub} itens nas sub-montagens.`);
+      const omie = js.omie_clear;
+      const omieInc = js.omie_incluir;
+
+      // ── Monta HTML do modal de sucesso ──────────────────────────────────
+      let omieHtml = '';
+      if (omie) {
+        if (omie.ok && omie.deletados != null) {
+          omieHtml += `<div style="color:#586069;margin-bottom:4px">🗑️ Omie exclusão: ${omie.deletados} de ${omie.consultados} itens removidos</div>`;
+        } else if (omie.error) {
+          omieHtml += `<div style="color:#b7770d">⚠️ Omie (exclusão): ${omie.error}</div>`;
+        }
+      }
+      omieHtml += _fichaOmieResultHtml(omieInc, 'produto principal');
+
+      const bodyHtml = `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+          <div style="background:#f0fff4;border:1px solid #c3e6cb;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#22863a">${js.inseridos_principal}</div>
+            <div style="font-size:.8rem;color:#586069;margin-top:2px">Itens no produto principal</div>
+          </div>
+          <div style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#0969da">${js.sub_montagens}</div>
+            <div style="font-size:.8rem;color:#586069;margin-top:2px">Sub-montagens</div>
+          </div>
+          <div style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#0969da">${js.inseridos_sub}</div>
+            <div style="font-size:.8rem;color:#586069;margin-top:2px">Itens nas sub-montagens</div>
+          </div>
+        </div>
+        ${omieHtml ? `<div style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px;padding:12px">${omieHtml}</div>` : ''}`;
+
+      await _fichaModal({ titulo: 'Estrutura importada com sucesso!', tipo: 'sucesso', html: bodyHtml });
+
+      // ── Pergunta se quer atualizar as sub-montagens na Omie ─────────────
+      const subsList = js.sub_montagens_list || [];
+      if (subsList.length > 0) {
+        const totalItens = subsList.reduce((s, sm) => s + sm.count, 0);
+        const linhasHtml = subsList.map(sm =>
+          `<tr>
+            <td style="padding:5px 10px;border:1px solid #e1e4e8;font-size:.87rem">${sm.cod}</td>
+            <td style="padding:5px 10px;border:1px solid #e1e4e8;font-size:.87rem">${sm.descricao || ''}</td>
+            <td style="padding:5px 10px;border:1px solid #e1e4e8;font-size:.87rem;text-align:center">${sm.count}</td>
+          </tr>`
+        ).join('');
+        const confirmHtml = `
+          <p style="margin:0 0 12px">Encontradas <strong>${subsList.length} preparação(ões)</strong> com um total de <strong>${totalItens} itens</strong>. Deseja enviar as estruturas delas para a Omie também?</p>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f0f6ff">
+              <th style="padding:6px 10px;border:1px solid #e1e4e8;text-align:left;font-size:.87rem">Código</th>
+              <th style="padding:6px 10px;border:1px solid #e1e4e8;text-align:left;font-size:.87rem">Descrição</th>
+              <th style="padding:6px 10px;border:1px solid #e1e4e8;text-align:center;font-size:.87rem">Itens</th>
+            </tr></thead>
+            <tbody>${linhasHtml}</tbody>
+          </table>`;
+        const resposta = await _fichaModal({ titulo: 'Atualizar sub-montagens na Omie?', tipo: 'confirmar', html: confirmHtml });
+        if (resposta === 'sim') {
+          showEstruturaSpinner();
+          try {
+            const apiUrlSubs = (window.API_BASE ? window.API_BASE.replace(/\/+$/, '') : '') + '/api/pcp/estrutura/omie-subs';
+            const respSubs = await fetch(apiUrlSubs, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subs: subsList.map(sm => sm.cod) }),
+            });
+            const jsSubs = await respSubs.json().catch(() => null);
+            if (!respSubs.ok || jsSubs?.error) {
+              await _fichaModal({ titulo: 'Erro ao atualizar sub-montagens', tipo: 'erro',
+                html: `<p>${jsSubs?.error || 'Erro HTTP ' + respSubs.status}</p>` });
+            } else {
+              // Monta tabela detalhada de resultados por sub-montagem
+              const linhasRes = (jsSubs.subs || []).map(r => {
+                let statusCell, motivo = '';
+                if (r.aviso) { statusCell = `<span style="color:#b7770d">ℹ️ ${r.aviso}</span>`; }
+                else if (!r.ok && r.error) { statusCell = `<span style="color:#c0392b">❌ Erro</span>`; motivo = r.error; }
+                else {
+                  const ok = r.incluidos === r.total;
+                  statusCell = `<span style="color:${ok?'#22863a':'#b7770d'}">${ok?'✅':'⚠️'} ${r.incluidos}/${r.total} enviados</span>`;
+                  if (r.sem_id?.length) motivo += `⚠️ ${r.sem_id.length} sem ID Omie. `;
+                  if (r.erros?.length) motivo += `❌ ${r.erros.length} rejeitado(s): ` + r.erros.map(e => `${e.codProdMalha||''}: ${e.erro||''}`).join(' | ');
+                }
+                return `<tr>
+                  <td style="padding:5px 8px;border:1px solid #e1e4e8;font-size:.84rem;white-space:nowrap">${r.cod}</td>
+                  <td style="padding:5px 8px;border:1px solid #e1e4e8;font-size:.84rem">${statusCell}</td>
+                  <td style="padding:5px 8px;border:1px solid #e1e4e8;font-size:.83rem;color:#586069">${motivo}</td>
+                </tr>`;
+              }).join('');
+              const subsBodyHtml = `
+                <p style="margin:0 0 12px;color:#22863a;font-weight:600">Total enviado: ${jsSubs.total_incluidos} itens ${jsSubs.total_erros ? `(${jsSubs.total_erros} item(ns) com erro)` : ''}</p>
+                <table style="width:100%;border-collapse:collapse">
+                  <thead><tr style="background:#f0f6ff">
+                    <th style="padding:6px 8px;border:1px solid #e1e4e8;text-align:left;font-size:.84rem">Código</th>
+                    <th style="padding:6px 8px;border:1px solid #e1e4e8;text-align:left;font-size:.84rem">Resultado</th>
+                    <th style="padding:6px 8px;border:1px solid #e1e4e8;text-align:left;font-size:.84rem">Detalhes</th>
+                  </tr></thead>
+                  <tbody>${linhasRes}</tbody>
+                </table>`;
+              await _fichaModal({
+                titulo: 'Sub-montagens atualizadas na Omie',
+                tipo: jsSubs.total_erros ? 'aviso' : 'sucesso',
+                html: subsBodyHtml
+              });
+            }
+          } catch (eSubs) {
+            await _fichaModal({ titulo: 'Falha ao atualizar sub-montagens', tipo: 'erro',
+              html: `<p>${eSubs.message}</p>` });
+          } finally {
+            hideEstruturaSpinner();
+          }
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────
       if (typeof window.loadEstruturaProduto === 'function') {
         try { window.loadEstruturaProduto(codigo); } catch (eLoad) { console.warn('[ImportarFicha] loadEstruturaProduto:', eLoad); }
       }
@@ -39110,7 +39819,8 @@ fileInput.addEventListener('change', async () => {
 
   } catch (err) {
     console.error('[Importar BOM] erro:', err);
-    alert('Erro ao importar estrutura:\n' + (err?.message || String(err)));
+    _fichaModal({ titulo: 'Erro ao importar estrutura', tipo: 'erro',
+      html: `<p style="word-break:break-word">${(err?.message || String(err)).replace(/\n/g,'<br>')}</p>` });
   } finally {
     // 🔄 spinner OFF (sempre)
     hideEstruturaSpinner();
