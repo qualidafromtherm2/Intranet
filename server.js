@@ -16397,37 +16397,32 @@ async function upsertRequisicaoCompra(requisicao, eventoWebhook = '') {
       eventoWebhook
     ]);
 
-    // DESABILITADO: Não vamos mais popular a tabela requisicoes_omie_itens via webhook
-    // Os itens serão gerenciados através do fluxo de aprovação (Meu Carrinho / Aprovação de Requisições)
-    // await client.query('DELETE FROM compras.requisicoes_omie_itens WHERE cod_req_compra = $1', [codReqCompra]);
-    
-    // if (Array.isArray(itens) && itens.length > 0) {
-    //   console.log(`[RequisicoesCompra] 📝 Inserindo ${itens.length} itens na requisição ${codReqCompra}`);
-    //   
-    //   for (const item of itens) {
-    //     await client.query(`
-    //       INSERT INTO compras.requisicoes_omie_itens (
-    //         cod_req_compra, cod_item, cod_int_item,
-    //         cod_prod, cod_int_prod, qtde, preco_unit, obs_item
-    //       )
-    //       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    //     `, [
-    //       codReqCompra,
-    //       item.codItem || item.cod_item || null,
-    //       item.codIntItem || item.cod_int_item || null,
-    //       item.codProd || item.cod_prod || null,
-    //       item.codIntProd || item.cod_int_prod || null,
-    //       item.qtde || item.qtde_item || null,
-    //       item.precoUnit || item.preco_unit || null,
-    //       item.obsItem || item.obs_item || null
-    //     ]);
-    //   }
-    //   console.log(`[RequisicoesCompra] ✓ ${itens.length} itens inseridos com sucesso`);
-    // } else {
-    //   console.log(`[RequisicoesCompra] ⚠ Nenhum item encontrado na requisição ${codReqCompra}`);
-    // }
-    
-    console.log(`[RequisicoesCompra] ℹ️ Webhook processado - Itens não são mais salvos nesta tabela`);
+    // Sincroniza itens da requisição (DELETE + INSERT)
+    await client.query('DELETE FROM compras.requisicoes_omie_itens WHERE cod_req_compra = $1', [codReqCompra]);
+
+    if (Array.isArray(itens) && itens.length > 0) {
+      console.log(`[RequisicoesCompra] 📝 Inserindo ${itens.length} itens na requisição ${codReqCompra}`);
+
+      for (const item of itens) {
+        const codItem    = item.nCodItem    || item.codItem    || item.cod_item    || null;
+        const codIntItem = item.cCodIntItem || item.codIntItem || item.cod_int_item || null;
+        const codProd    = item.nCodProd    || item.codProd    || item.cod_prod    || null;
+        const codIntProd = item.cCodIntProd || item.codIntProd || item.cod_int_prod || null;
+        const qtde       = item.nQtde       || item.qtde       || item.qtde_item   || null;
+        const precoUnit  = item.nValUnit    || item.precoUnit  || item.preco_unit  || null;
+        const obsItem    = item.cObsItem    || item.obsItem    || item.obs_item    || null;
+
+        await client.query(`
+          INSERT INTO compras.requisicoes_omie_itens (
+            cod_req_compra, cod_item, cod_int_item,
+            cod_prod, cod_int_prod, qtde, preco_unit, obs_item
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [codReqCompra, codItem, codIntItem, codProd, codIntProd, qtde, precoUnit, obsItem]);
+      }
+      console.log(`[RequisicoesCompra] ✓ ${itens.length} itens inseridos com sucesso`);
+    } else {
+      console.log(`[RequisicoesCompra] ⚠ Nenhum item encontrado na requisição ${codReqCompra}`);
+    }
 
     await client.query('COMMIT');
     console.log(`[RequisicoesCompra] ✓ Requisição ${codReqCompra} sincronizada com sucesso`);
@@ -20193,7 +20188,14 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     }
 
     const codReqCompraOmie = omieResult.codReqCompra || null;
-    
+    const novoNumeroPedido = omieResult.codIntReqCompra || numeroPedido;
+
+    // Captura valores atuais antes de alterar
+    const { rows: antesUpdateSemCad } = await pool.query(
+      `SELECT id, status, numero_pedido, ncodped, cod_req_compra FROM compras.compras_sem_cadastro WHERE id = $1`,
+      [id]
+    );
+
     await pool.query(
       `UPDATE compras.compras_sem_cadastro
        SET status = 'Requisição',
@@ -20202,13 +20204,40 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
            cod_req_compra = $3,
            updated_at = NOW()
        WHERE id = $4`,
-      [omieResult.codIntReqCompra || numeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, id]
+      [novoNumeroPedido, omieResult.codReqCompra || null, codReqCompraOmie, id]
     );
+
+    // Consulta a Omie para obter o cNumero (numero sequencial visivel na plataforma, ex: "2500")
+    let numeroRequisicaoOmie = null;
+    try {
+      const consultarResp = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarReq',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ codIntReqCompra: novoNumeroPedido }]
+        })
+      });
+      if (consultarResp.ok) {
+        const consultarResult = await consultarResp.json();
+        const cab = consultarResult?.requisicaoCadastro || consultarResult;
+        numeroRequisicaoOmie = cab?.cNumero || String(cab?.codReqCompra || '') || null;
+      }
+    } catch (errConsulta) {
+      console.warn('[Sem Cadastro] Nao foi possivel obter cNumero via ConsultarReq:', errConsulta.message);
+    }
+    if (!numeroRequisicaoOmie) numeroRequisicaoOmie = String(codReqCompraOmie || '');
 
     return res.json({
       ok: true,
       codReqCompra: codReqCompraOmie,
-      codIntReqCompra: omieResult.codIntReqCompra || numeroPedido
+      codIntReqCompra: novoNumeroPedido,
+      numero_pedido: novoNumeroPedido,
+      ncodped: codReqCompraOmie,
+      grupo_requisicao: itemDb.grupo_requisicao || null,
+      numero_requisicao_omie: numeroRequisicaoOmie
     });
   } catch (err) {
     console.error('[Sem Cadastro] Erro ao criar requisição na Omie:', err);
@@ -21485,8 +21514,37 @@ async function criarRequisicaoOmieParaItens(itens) {
     throw new Error(omieResult.faultstring || 'Erro ao criar requisição na Omie');
   }
 
-  const codReqCompra = omieResult.codReqCompra || null;
-  const codIntReqCompra = omieResult.codIntReqCompra || numeroPedido;
+  const codReqCompra    = omieResult.codReqCompra    || null;
+  const codIntReqCompra  = omieResult.codIntReqCompra  || numeroPedido;
+
+  // Consulta a Omie para obter o cNumero (numero sequencial visivel na plataforma, ex: "2500")
+  let numeroRequisicaoOmie = null;
+  try {
+    const consultarResp = await fetch('https://app.omie.com.br/api/v1/produtos/requisicaocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarReq',
+        app_key: process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param: [{ codIntReqCompra: codIntReqCompra }]
+      })
+    });
+    if (consultarResp.ok) {
+      const consultarResult = await consultarResp.json();
+      const cab = consultarResult?.requisicaoCadastro || consultarResult;
+      numeroRequisicaoOmie = cab?.cNumero || String(cab?.codReqCompra || '') || null;
+    }
+  } catch (errConsulta) {
+    console.warn('[Aprovar Grupo] Nao foi possivel obter cNumero via ConsultarReq:', errConsulta.message);
+  }
+  if (!numeroRequisicaoOmie) numeroRequisicaoOmie = String(codReqCompra || '');
+
+  // Captura valores atuais antes de alterar
+  const { rows: antesUpdate } = await pool.query(
+    `SELECT id, status, numero_pedido, ncodped FROM compras.solicitacao_compras WHERE id = ANY($1)`,
+    [itens.map(i => i.id)]
+  );
 
   await pool.query(`
     UPDATE compras.solicitacao_compras
@@ -21498,7 +21556,7 @@ async function criarRequisicaoOmieParaItens(itens) {
     WHERE id = ANY($3)
   `, [codIntReqCompra, codReqCompra, itens.map(i => i.id)]);
 
-  return { codReqCompra, codIntReqCompra, omieResult };
+  return { codReqCompra, codIntReqCompra, omieResult, grupo_requisicao: primeiroItem?.grupo_requisicao || null, numeroRequisicaoOmie };
 }
 
 app.post('/api/compras/aprovar-item/:id', express.json(), async (req, res) => {
@@ -21596,6 +21654,10 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
       ? req.body.ids.map(id => Number(id)).filter(id => Number.isInteger(id))
       : [];
 
+    // Quando chamado a partir do modal "Analise de cadastro", pula a verificação de retorno_cotacao
+    // e cria a requisição diretamente na Omie (o item já passou pela cotação)
+    const forcarRequisicao = req.body?.forcar_requisicao === true;
+
     if (!ids.length) {
       return res.status(400).json({ ok: false, error: 'Lista de IDs inválida' });
     }
@@ -21637,8 +21699,9 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
       return ['s', 'sim', 'yes', 'true', '1'].includes(v);
     };
 
-    const itensAguardarCotacao = rows.filter(item => retornoCotacaoSim(item.retorno_cotacao));
-    const itensRequisicao = rows.filter(item => !retornoCotacaoSim(item.retorno_cotacao));
+    // Com forcar_requisicao, todos os itens vão direto para requisição (ignora retorno_cotacao)
+    const itensAguardarCotacao = forcarRequisicao ? [] : rows.filter(item => retornoCotacaoSim(item.retorno_cotacao));
+    const itensRequisicao = forcarRequisicao ? rows : rows.filter(item => !retornoCotacaoSim(item.retorno_cotacao));
 
     if (itensAguardarCotacao.length > 0) {
       await pool.query(`
@@ -21658,13 +21721,15 @@ app.post('/api/compras/aprovar-grupo', express.json(), async (req, res) => {
       });
     }
 
-    const { codReqCompra, codIntReqCompra, omieResult } = await criarRequisicaoOmieParaItens(itensRequisicao);
+    const { codReqCompra, codIntReqCompra, omieResult, grupo_requisicao, numeroRequisicaoOmie } = await criarRequisicaoOmieParaItens(itensRequisicao);
 
     res.json({
       ok: true,
       message: 'Itens aprovados e requisição criada na Omie',
       numero_pedido: codIntReqCompra,
       ncodped: codReqCompra,
+      grupo_requisicao: grupo_requisicao,
+      numero_requisicao_omie: numeroRequisicaoOmie,
       omie_response: omieResult,
       itens_requisicao: itensRequisicao.map(i => i.id),
       itens_aguardando_cotacao: itensAguardarCotacao.map(i => i.id)

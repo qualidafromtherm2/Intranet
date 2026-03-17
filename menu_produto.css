@@ -6364,12 +6364,12 @@ table.tabela td.num {
 }
 
 .agenda-cal-day {
-  min-height: 92px;
+  min-height: 108px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--content-bg);
   color: var(--theme-color);
-  padding: 8px;
+  padding: 6px;
   cursor: pointer;
   transition: border-color .2s, transform .12s;
 }
@@ -6400,10 +6400,9 @@ table.tabela td.num {
 
 .agenda-cal-reservas {
   margin-top: 4px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 3px;
-  align-items: stretch;
 }
 
 .agenda-cal-lembretes {
@@ -6486,19 +6485,22 @@ table.tabela td.num {
   color: var(--inactive-color);
 }
 
-/* Chip de reserva/lembrete — linha colorida por tipo */
+/* Chip de reserva/lembrete — quadrado por tipo */
 .agenda-cal-reserva-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  font-size: 10px;
+  justify-content: center;
+  gap: 2px;
+  aspect-ratio: 1;
+  font-size: 9px;
   line-height: 1;
-  border-radius: 5px;
-  padding: 3px 5px;
+  border-radius: 6px;
+  padding: 4px 2px;
   cursor: pointer;
-  white-space: nowrap;
   overflow: hidden;
+  text-align: center;
+  min-width: 0;
 }
 
 /* Auditório — roxo */
@@ -6524,16 +6526,19 @@ table.tabela td.num {
 
 /* Ícone do tipo de sala dentro do chip */
 .agenda-chip-room-icon {
-  font-size: 11px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
 /* Hora no formato HH/HH */
 .agenda-chip-hora {
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: -.3px;
-  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* Ícone de café dentro do chip */
