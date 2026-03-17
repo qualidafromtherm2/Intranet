@@ -5994,33 +5994,51 @@ app.get('/api/compras/departamentos', async (req, res) => {
 // ========================================
 /**
  * GET /api/compras/grafico-pizza-dept-cc
- * Retorna valor somado de pedidos_omie por status:
- *   - "Compra realizada" : inativo=false e Etapa_NF IS NULL
- *   - "Recebido"         : inativo=false e Etapa_NF IN ('50','60')
- * Parâmetros: dataInicio, dataFim (YYYY-MM-DD) — filtro em d_inc_data
+ * Retorna valor somado por status:
+ *   - "Compra realizada" : compras.pedidos_omie — inativo=false, Etapa_NF IS NULL, filtro d_inc_data
+ *   - "Recebimento"      : logistica.recebimentos_nfe_omie — c_recebido=S, c_cancelada=N, c_bloqueado=N, c_devolvido=N, c_etapa=80, filtro d_rec
+ * Parâmetros: dataInicio, dataFim (YYYY-MM-DD)
  */
 app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
   try {
     const { dataInicio, dataFim } = req.query;
-    const params = [];
-    const whereParts = [
-      `inativo = false`,
-      `("Etapa_NF" IS NULL OR "Etapa_NF" IN ('50', '60'))`,
-    ];
-    if (dataInicio) { params.push(dataInicio); whereParts.push(`d_inc_data >= $${params.length}::date`); }
-    if (dataFim)    { params.push(dataFim);    whereParts.push(`d_inc_data <= $${params.length}::date`); }
 
-    const { rows } = await pool.query(`
-      SELECT
-        CASE WHEN "Etapa_NF" IS NULL THEN 'Compra realizada' ELSE 'Recebido' END AS status,
-        COALESCE(SUM(n_valor), 0) AS total
+    // --- Barra 1: Compra realizada (pedidos_omie) ---
+    const paramsCompra = [];
+    const whereCompra = [`inativo = false`, `"Etapa_NF" IS NULL`];
+    if (dataInicio) { paramsCompra.push(dataInicio); whereCompra.push(`d_inc_data >= $${paramsCompra.length}::date`); }
+    if (dataFim)    { paramsCompra.push(dataFim);    whereCompra.push(`d_inc_data <= $${paramsCompra.length}::date`); }
+
+    const r1 = await pool.query(`
+      SELECT COALESCE(SUM(n_valor), 0) AS total
       FROM compras.pedidos_omie
-      WHERE ${whereParts.join(' AND ')}
-      GROUP BY status
-      ORDER BY MIN(CASE WHEN "Etapa_NF" IS NULL THEN 1 ELSE 2 END)
-    `, params);
+      WHERE ${whereCompra.join(' AND ')}
+    `, paramsCompra);
 
-    res.json({ ok: true, dados: rows.map(r => ({ status: r.status, total: Number(r.total) })) });
+    // --- Barra 2: Recebimento (recebimentos_nfe_omie) ---
+    const paramsReceb = [];
+    const whereReceb = [
+      `c_recebido = 'S'`,
+      `c_cancelada = 'N'`,
+      `c_bloqueado = 'N'`,
+      `c_devolvido = 'N'`,
+      `c_etapa = '80'`,
+    ];
+    if (dataInicio) { paramsReceb.push(dataInicio); whereReceb.push(`d_rec >= $${paramsReceb.length}::date`); }
+    if (dataFim)    { paramsReceb.push(dataFim);    whereReceb.push(`d_rec <= $${paramsReceb.length}::date`); }
+
+    const r2 = await pool.query(`
+      SELECT COALESCE(SUM(n_valor_nfe), 0) AS total
+      FROM logistica.recebimentos_nfe_omie
+      WHERE ${whereReceb.join(' AND ')}
+    `, paramsReceb);
+
+    const dados = [
+      { status: 'Compra realizada', total: Number(r1.rows[0].total) },
+      { status: 'Recebimento',      total: Number(r2.rows[0].total) },
+    ];
+
+    res.json({ ok: true, dados });
   } catch (err) {
     console.error('[Compras/GraficoPizzaDeptCC] Erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico' });
@@ -6038,56 +6056,240 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
  */
 app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
   try {
-    const { status, dataInicio, dataFim } = req.query;
+    const { status, dataInicio, dataFim, categoria } = req.query;
     if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
 
-    // Mapeia o nome do status para a condição SQL em pedidos_omie
-    let statusWhere;
     if (status === 'Compra realizada') {
-      statusWhere = `p."Etapa_NF" IS NULL`;
-    } else if (status === 'Recebido') {
-      statusWhere = `p."Etapa_NF" IN ('50', '60')`;
+      // --- Itens de Compra realizada: pedidos_omie ---
+      const params = [];
+      const where = [`p.inativo = false`, `p."Etapa_NF" IS NULL`];
+      if (dataInicio) { params.push(dataInicio); where.push(`p.d_inc_data >= $${params.length}::date`); }
+      if (dataFim)    { params.push(dataFim);    where.push(`p.d_inc_data <= $${params.length}::date`); }
+
+      // Filtro por categoria: grupo (categoria_superior=X) ou subcategoria exata (c_cod_categ=X)
+      let joinCat = '';
+      if (categoria) {
+        params.push(categoria);
+        const pIdx = params.length;
+        joinCat = `JOIN configuracoes."ListarCategorias" cat ON cat.codigo = p.c_cod_categ`;
+        where.push(`(cat.categoria_superior = $${pIdx} OR p.c_cod_categ = $${pIdx})`);
+      }
+
+      const { rows } = await pool.query(`
+        SELECT
+          p.n_cod_ped                                          AS h_id,
+          p.c_numero,
+          TO_CHAR(p.d_inc_data, 'YYYY-MM-DD')                 AS d_data,
+          COALESCE(p.n_valor, 0)                               AS n_valor,
+          COALESCE(
+            NULLIF(BTRIM(f.nome_fantasia), ''),
+            NULLIF(BTRIM(f.razao_social), ''),
+            'Fornecedor não identificado'
+          )                                                    AS fornecedor
+        FROM compras.pedidos_omie p
+        LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
+        ${joinCat}
+        WHERE ${where.join(' AND ')}
+        ORDER BY p.d_inc_data DESC, p.n_cod_ped DESC
+      `, params);
+
+      return res.json({
+        ok: true,
+        itens: rows.map(r => ({
+          h_id:       r.h_id,
+          referencia: r.c_numero || '',
+          d_data:     r.d_data   || '',
+          valor_item: Number(r.n_valor),
+          fornecedor: r.fornecedor,
+          descricao:  '',
+        }))
+      });
+    }
+
+    if (status === 'Recebimento') {
+      // --- Itens de Recebimento: recebimentos_nfe_omie + recebimentos_nfe_itens ---
+      const params = [];
+      const where = [
+        `r.c_recebido = 'S'`,
+        `r.c_cancelada = 'N'`,
+        `r.c_bloqueado = 'N'`,
+        `r.c_devolvido = 'N'`,
+        `r.c_etapa = '80'`,
+      ];
+      if (dataInicio) { params.push(dataInicio); where.push(`r.d_rec >= $${params.length}::date`); }
+      if (dataFim)    { params.push(dataFim);    where.push(`r.d_rec <= $${params.length}::date`); }
+
+      // Filtro por categoria: grupo (categoria_superior=X) ou subcategoria exata (c_categoria_item=X)
+      let joinCat = '';
+      if (categoria) {
+        params.push(categoria);
+        const pIdx = params.length;
+        joinCat = `JOIN configuracoes."ListarCategorias" cat ON cat.codigo = i.c_categoria_item`;
+        where.push(`(cat.categoria_superior = $${pIdx} OR i.c_categoria_item = $${pIdx})`);
+      }
+
+      const { rows } = await pool.query(`
+        SELECT
+          r.n_id_receb,
+          r.c_chave_nfe,
+          TO_CHAR(r.d_rec, 'YYYY-MM-DD')     AS d_data,
+          COALESCE(r.c_numero_nfe, '')        AS referencia,
+          COALESCE(r.n_valor_nfe, 0)          AS n_valor_nfe,
+          COALESCE(r.c_nome_fornecedor, 'Fornecedor não identificado') AS fornecedor,
+          i.c_codigo_produto,
+          COALESCE(i.c_descricao_produto, '') AS c_descricao_produto,
+          COALESCE(i.n_preco_unit, 0)         AS n_preco_unit,
+          COALESCE(i.n_qtde_nfe, 0)           AS n_qtde_nfe,
+          COALESCE(i.v_total_item, 0)         AS v_total_item
+        FROM logistica.recebimentos_nfe_omie r
+        ${categoria ? 'INNER' : 'LEFT'} JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
+        ${joinCat}
+        WHERE ${where.join(' AND ')}
+        ORDER BY r.d_rec DESC, r.n_id_receb DESC
+      `, params);
+
+      return res.json({
+        ok: true,
+        itens: rows.map(r => ({
+          h_id:             r.n_id_receb,
+          chave_nfe:        r.c_chave_nfe || '',
+          referencia:       r.referencia,
+          d_data:           r.d_data   || '',
+          valor_item:       Number(r.n_valor_nfe),
+          fornecedor:       r.fornecedor,
+          descricao:        r.c_descricao_produto
+            ? `${r.c_codigo_produto || ''} ${r.c_descricao_produto}`.trim()
+            : '',
+          preco_unit:       Number(r.n_preco_unit),
+          qtde:             Number(r.n_qtde_nfe),
+          v_total_item:     Number(r.v_total_item),
+        }))
+      });
+    }
+
+    return res.status(400).json({ ok: false, error: 'Status inválido' });
+
+  } catch (err) {
+    console.error('[Compras/GraficoPizzaItens] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar itens do gráfico' });
+  }
+});
+
+// ========================================
+/**
+ * GET /api/compras/grafico-categorias
+ * Retorna totais por categoria com suporte a drill-down (nivel pai/filho).
+ * Parâmetros:
+ *   status      - 'Recebimento' ou 'Compra realizada' (obrigatório)
+ *   pai         - código da categoria pai para drill-down (opcional)
+ *   dataInicio  - filtro de data início (opcional)
+ *   dataFim     - filtro de data fim (opcional)
+ * Sem pai: agrupa pelo pai direto da categoria do item (nível 1).
+ * Com pai: agrupa pelos filhos diretos desse pai (nível 2).
+ */
+app.get('/api/compras/grafico-categorias', async (req, res) => {
+  try {
+    const { status, pai, dataInicio, dataFim } = req.query;
+    if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
+
+    const params = [];
+    let q;
+
+    if (status === 'Recebimento') {
+      const where = [
+        `r.c_recebido = 'S'`, `r.c_cancelada = 'N'`, `r.c_bloqueado = 'N'`,
+        `r.c_devolvido = 'N'`, `r.c_etapa = '80'`,
+        `i.c_categoria_item IS NOT NULL`, `i.c_categoria_item <> ''`,
+      ];
+      if (dataInicio) { params.push(dataInicio); where.push(`r.d_rec >= $${params.length}::date`); }
+      if (dataFim)    { params.push(dataFim);    where.push(`r.d_rec <= $${params.length}::date`); }
+
+      if (pai) {
+        // Drill-down: subcategorias do pai selecionado
+        params.push(pai);
+        where.push(`cat.categoria_superior = $${params.length}`);
+        q = `
+          SELECT
+            i.c_categoria_item AS codigo,
+            COALESCE(NULLIF(BTRIM(cat.descricao),''), i.c_categoria_item, 'Sem Categoria') AS label,
+            SUM(COALESCE(i.v_total_item, 0)) AS total
+          FROM logistica.recebimentos_nfe_omie r
+          JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
+          JOIN configuracoes."ListarCategorias" cat ON cat.codigo = i.c_categoria_item
+          WHERE ${where.join(' AND ')}
+          GROUP BY i.c_categoria_item, cat.descricao
+          ORDER BY total DESC
+        `;
+      } else {
+        // Nível 1: agrupar pelo pai da categoria do item
+        where.push(`cat.categoria_superior IS NOT NULL`, `cat.categoria_superior <> ''`);
+        q = `
+          SELECT
+            cat.categoria_superior AS codigo,
+            COALESCE(NULLIF(BTRIM(parent.descricao),''), cat.categoria_superior, 'Sem Categoria') AS label,
+            SUM(COALESCE(i.v_total_item, 0)) AS total
+          FROM logistica.recebimentos_nfe_omie r
+          JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
+          JOIN configuracoes."ListarCategorias" cat ON cat.codigo = i.c_categoria_item
+          LEFT JOIN configuracoes."ListarCategorias" parent ON parent.codigo = cat.categoria_superior
+          WHERE ${where.join(' AND ')}
+          GROUP BY cat.categoria_superior, parent.descricao
+          ORDER BY total DESC
+        `;
+      }
+    } else if (status === 'Compra realizada') {
+      const where = [
+        `p.inativo = false`, `p."Etapa_NF" IS NULL`,
+        `p.c_cod_categ IS NOT NULL`, `p.c_cod_categ <> ''`,
+      ];
+      if (dataInicio) { params.push(dataInicio); where.push(`p.d_inc_data >= $${params.length}::date`); }
+      if (dataFim)    { params.push(dataFim);    where.push(`p.d_inc_data <= $${params.length}::date`); }
+
+      if (pai) {
+        // Drill-down: subcategorias do pai selecionado
+        params.push(pai);
+        where.push(`cat.categoria_superior = $${params.length}`);
+        q = `
+          SELECT
+            p.c_cod_categ AS codigo,
+            COALESCE(NULLIF(BTRIM(cat.descricao),''), p.c_cod_categ, 'Sem Categoria') AS label,
+            SUM(COALESCE(p.n_valor, 0)) AS total
+          FROM compras.pedidos_omie p
+          JOIN configuracoes."ListarCategorias" cat ON cat.codigo = p.c_cod_categ
+          WHERE ${where.join(' AND ')}
+          GROUP BY p.c_cod_categ, cat.descricao
+          ORDER BY total DESC
+        `;
+      } else {
+        // Nível 1: agrupar pelo pai da categoria do pedido
+        where.push(`cat.categoria_superior IS NOT NULL`, `cat.categoria_superior <> ''`);
+        q = `
+          SELECT
+            cat.categoria_superior AS codigo,
+            COALESCE(NULLIF(BTRIM(parent.descricao),''), cat.categoria_superior, 'Sem Categoria') AS label,
+            SUM(COALESCE(p.n_valor, 0)) AS total
+          FROM compras.pedidos_omie p
+          JOIN configuracoes."ListarCategorias" cat ON cat.codigo = p.c_cod_categ
+          LEFT JOIN configuracoes."ListarCategorias" parent ON parent.codigo = cat.categoria_superior
+          WHERE ${where.join(' AND ')}
+          GROUP BY cat.categoria_superior, parent.descricao
+          ORDER BY total DESC
+        `;
+      }
     } else {
       return res.status(400).json({ ok: false, error: 'Status inválido' });
     }
 
-    const params2 = [];
-    const whereParts = [`p.inativo = false`, statusWhere];
-    if (dataInicio) { params2.push(dataInicio); whereParts.push(`p.d_inc_data >= $${params2.length}::date`); }
-    if (dataFim)    { params2.push(dataFim);    whereParts.push(`p.d_inc_data <= $${params2.length}::date`); }
-
-    const { rows } = await pool.query(`
-      SELECT
-        p.n_cod_ped                                          AS h_id,
-        p.c_numero,
-        TO_CHAR(p.d_inc_data, 'YYYY-MM-DD')                 AS d_inc_data,
-        COALESCE(p.n_valor, 0)                               AS n_valor,
-        p."Etapa_NF"                                         AS etapa_nf,
-        COALESCE(
-          NULLIF(BTRIM(f.nome_fantasia), ''),
-          NULLIF(BTRIM(f.razao_social), ''),
-          'Fornecedor não identificado'
-        )                                                    AS fornecedor
-      FROM compras.pedidos_omie p
-      LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
-      WHERE ${whereParts.join(' AND ')}
-      ORDER BY p.d_inc_data DESC, p.n_cod_ped DESC
-    `, params2);
-
-    res.json({
+    const { rows } = await pool.query(q, params);
+    return res.json({
       ok: true,
-      itens: rows.map(r => ({
-        h_id:       r.h_id,
-        c_numero:   r.c_numero   || '',
-        d_inc_data: r.d_inc_data || '',
-        valor_item: Number(r.n_valor),
-        fornecedor: r.fornecedor,
-        etapa_nf:   r.etapa_nf   || '',
-      }))
+      nivelAtual: pai || null,
+      categorias: rows.map(r => ({ codigo: r.codigo, label: r.label, total: Number(r.total) }))
     });
+
   } catch (err) {
-    console.error('[Compras/GraficoPizzaItens] Erro:', err);
-    res.status(500).json({ ok: false, error: 'Erro ao carregar itens do gráfico' });
+    console.error('[Compras/GraficoCategorias] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar categorias' });
   }
 });
 
@@ -27680,7 +27882,28 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
   const toNum = (v) => {
     if (v === null || v === undefined || v === '') return null;
     if (typeof v === 'number') return v;
-    const n = Number(String(v).trim().replace(/\./g, '').replace(',', '.'));
+    const s = String(v).trim();
+    // Suporta formato BR (19,50000 ou 1.234,56) e EN (19.50000 ou 1,234.56)
+    if (s.includes(',') && s.includes('.')) {
+      const lastComma = s.lastIndexOf(',');
+      const lastDot   = s.lastIndexOf('.');
+      if (lastComma > lastDot) {
+        // BR: 1.234,56 → remove pontos → troca vírgula por ponto
+        const n = Number(s.replace(/\./g, '').replace(',', '.'));
+        return Number.isFinite(n) ? n : null;
+      } else {
+        // EN: 1,234.56 → remove vírgulas
+        const n = Number(s.replace(/,/g, ''));
+        return Number.isFinite(n) ? n : null;
+      }
+    }
+    if (s.includes(',')) {
+      // Só vírgula: decimal BR (19,5)
+      const n = Number(s.replace(',', '.'));
+      return Number.isFinite(n) ? n : null;
+    }
+    // Só ponto ou nenhum: decimal EN/sem separador (19.5 ou 19)
+    const n = Number(s);
     return Number.isFinite(n) ? n : null;
   };
   const tr = (v) => String(v ?? '').trim();
@@ -27694,6 +27917,12 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
     const rawRows = XLSX_LIB.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
 
     if (!rawRows.length) return res.status(400).json({ ok: false, error: 'Arquivo XLSX vazio.' });
+
+    // DIAGNÓSTICO COLUNAS RAW — remover após confirmar
+    console.log('[FICHA][DIAG-RAW] total rawRows:', rawRows.length);
+    console.log('[FICHA][DIAG-RAW] rawRows[0]:', JSON.stringify(rawRows[0]));
+    if (rawRows[1]) console.log('[FICHA][DIAG-RAW] rawRows[1]:', JSON.stringify(rawRows[1]));
+    if (rawRows[2]) console.log('[FICHA][DIAG-RAW] rawRows[2]:', JSON.stringify(rawRows[2]));
 
     // Colunas por posição fixa (independe do nome do cabeçalho):
     // 0=Nível | 1=Identificação do Produto | 2=Descrição do Produto | 3=Quantidade | 4=Unidade de Medida | 5=Ficha Técnica | 6=Total Cúbico
@@ -27716,6 +27945,22 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
     })).filter(r => r.nivel && r.codigo);
 
     if (!allRows.length) return res.status(400).json({ ok: false, error: 'Nenhuma linha válida encontrada.' });
+
+    // Detecta formato incorreto: IDs Omie (8+ dígitos, sem pontos) na coluna Nível
+    const nivelSample = allRows.slice(0, 3).map(r => r.nivel);
+    if (nivelSample.every(n => /^\d{7,}$/.test(n))) {
+      return res.status(400).json({
+        ok: false,
+        error: `Formato de arquivo incorreto. A coluna "Nível" contém IDs do Omie (ex: "${nivelSample[0]}") em vez de níveis hierárquicos (ex: 1, 1.1, 1.2). ` +
+               `Envie o arquivo FICHA_ESTRUTURA.xlsx com as colunas: Nível | Identificação do Produto | Descrição | Quantidade | Unidade.`,
+      });
+    }
+
+    // LOG DIAGNÓSTICO — remover após confirmar
+    console.log('[FICHA][DIAG] totalRows:', allRows.length,
+      '| primeiros níveis:', allRows.slice(0, 10).map(r => `"${r.nivel}"`).join(', '),
+      '| primeiros códigos:', allRows.slice(0, 10).map(r => `"${r.codigo}"`).join(', ')
+    );
 
     // 3) Identifica produto principal (nível "1") e sub-montagens (nível "1.x" com filhos)
     const prodPrincipal = allRows.find(r => r.nivel === '1');
@@ -27760,23 +28005,11 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
           subMontagens[r.codigo] = { descricao: r.descricao, unid: r.unid, children: [] };
         }
       } else if (parts.length === 3) {
-        // Filho de sub-montagem (1.x.y)
-        const parentNivel = parts.slice(0, 2).join('.');
-        const parentRow = byNivel.get(parentNivel);
-        const parentDescricao = parentRow?.descricao || parentNivel;
-        const parentCodigo    = parentRow?.codigo || '';
+        // Filho de sub-montagem (1.x.y) — vai APENAS para a sub-montagem, não para o produto principal
+        const parentNivel  = parts.slice(0, 2).join('.');
+        const parentRow    = byNivel.get(parentNivel);
+        const parentCodigo = parentRow?.codigo || '';
 
-        // VAI para o produto principal agrupado sob o nome da sub-montagem
-        mainItems.push({
-          comp_codigo:    r.codigo,
-          comp_descricao: r.descricao,
-          comp_qtd:       r.qtd,
-          comp_unid:      r.unid,
-          comp_operacao:  parentDescricao,  // agrupamento visual pelo nome da sub-montagem
-          ficha:          r.ficha,
-        });
-
-        // VAI para a sub-montagem própria
         if (parentCodigo && subMontagens[parentCodigo]) {
           subMontagens[parentCodigo].children.push({
             comp_codigo:    r.codigo,
@@ -27861,18 +28094,53 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
           vals.push(parentId, it.comp_codigo, it.comp_descricao || null, it.comp_qtd, it.comp_unid || null, it.comp_operacao || null);
         }
         await client.query(
-          `INSERT INTO engenharia.omie_estrutura_item (${cols.join(',')}) VALUES ${tuples.join(',')}`,
+          `INSERT INTO engenharia.omie_estrutura_item (${cols.join(',')}) VALUES ${tuples.join(',')}
+           ON CONFLICT DO NOTHING`,
           vals
         );
         return itens.length;
       };
 
-      // 5a) Produto principal
+      // DIAGNÓSTICO MAINI TEMS — remover após confirmar
+      console.log('[FICHA][DIAG2] mainItems.length:', mainItems.length,
+        '| subMontagens keys:', Object.keys(subMontagens).length,
+        '| exemplo mainItem[0]:', mainItems[0] ? JSON.stringify(mainItems[0]) : 'nenhum'
+      );
+
+      // Segurança: sem itens principais = arquivo no formato errado
+      if (mainItems.length === 0 && allRows.length > 0) {
+        await client.query('ROLLBACK');
+        const niveisMostra = allRows.slice(0, 4).map(r => r.nivel).join(', ');
+        return res.status(400).json({
+          ok: false,
+          error: `Nenhum item encontrado para o produto principal. Os níveis devem ser "1" (raiz), "1.1", "1.2" etc. ` +
+                 `Valores detectados na coluna Nível: ${niveisMostra}. Verifique se está enviando o arquivo FICHA_ESTRUTURA.xlsx correto.`,
+        });
+      }
+
+      // 5a) Verifica duplicatas nos itens diretos do produto principal (1.x)
+      const codigosVistos = new Set();
+      const duplicados = [];
+      for (const it of mainItems) {
+        if (codigosVistos.has(it.comp_codigo)) {
+          if (!duplicados.includes(it.comp_codigo)) duplicados.push(it.comp_codigo);
+        }
+        codigosVistos.add(it.comp_codigo);
+      }
+      if (duplicados.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          ok: false,
+          error: `Itens duplicados na planilha: ${duplicados.join(', ')}. Corrija antes de importar.`,
+        });
+      }
+
+      // 5b) Produto principal
       const paiRow = prodPrincipal || { descricao: null, unid: null };
       const paiId = await upsertEstrutura(paiCodigo, paiRow.descricao, paiRow.unid);
       const totalMain = await replaceItens(paiId, mainItems);
 
-      // 5b) Sub-montagens
+      // 5c) Sub-montagens
       let totalSub = 0;
       for (const [cod, sm] of Object.entries(subMontagens)) {
         if (!sm.children.length) continue;
@@ -27882,12 +28150,38 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
 
       await client.query('COMMIT');
 
+      // 6) Omie: excluir estrutura existente + incluir nova (melhor-esforço)
+      let omieResultado = null;
+      let omieIncluirResultado = null;
+      try {
+        omieResultado = await omieExcluirTodaEstrutura(paiCodigo);
+        console.info('[FICHA][OMIE][CLEAR]', omieResultado);
+      } catch (eOmie) {
+        console.warn('[FICHA][OMIE][CLEAR] falhou (não critico):', eOmie.message);
+        omieResultado = { ok: false, error: eOmie.message };
+      }
+      try {
+        omieIncluirResultado = await omieIncluirEstrutura(paiCodigo, mainItems);
+        console.info('[FICHA][OMIE][INCLUIR]', omieIncluirResultado);
+      } catch (eOmie) {
+        console.warn('[FICHA][OMIE][INCLUIR] falhou (não critico):', eOmie.message);
+        omieIncluirResultado = { ok: false, error: eOmie.message };
+      }
+
+      // Lista de sub-montagens com filhos (para o front-end oferecer atualização na Omie)
+      const subMontajensList = Object.entries(subMontagens)
+        .filter(([, sm]) => sm.children.length > 0)
+        .map(([cod, sm]) => ({ cod, descricao: sm.descricao, count: sm.children.length }));
+
       return res.json({
         ok: true,
         pai_codigo: paiCodigo,
         inseridos_principal: totalMain,
         sub_montagens: Object.keys(subMontagens).length,
         inseridos_sub: totalSub,
+        sub_montagens_list: subMontajensList,
+        omie_clear: omieResultado,
+        omie_incluir: omieIncluirResultado,
       });
 
     } catch (e) {
@@ -27901,6 +28195,227 @@ app.post('/api/pcp/estrutura/replace-ficha', upload.single('file'), async (req, 
     console.error('[FICHA][REPLACE][FATAL]', err);
     return res.status(500).json({ ok: false, error: 'Erro inesperado no import.' });
   }
+});
+
+// ─── Helper: exclui todos os itens da estrutura de um produto na Omie ────────
+// Consulta a estrutura atual e faz ExcluirEstrutura para cada idMalha.
+// Retorna { ok, consultados, deletados, erros[] }
+async function omieExcluirTodaEstrutura(codProduto) {
+  const OMIE_URL  = 'https://app.omie.com.br/api/v1/geral/malha/';
+  const appKey    = process.env.OMIE_APP_KEY    || OMIE_APP_KEY;
+  const appSecret = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
+
+  if (!appKey || !appSecret) {
+    return { ok: false, error: 'Credenciais Omie não configuradas (OMIE_APP_KEY / OMIE_APP_SECRET).' };
+  }
+
+  // 1) Consulta estrutura atual
+  const consulta = await omieCall(OMIE_URL, {
+    call: 'ConsultarEstrutura',
+    app_key: appKey,
+    app_secret: appSecret,
+    param: [{ codProduto }],
+  });
+
+  const itens = Array.isArray(consulta?.itens) ? consulta.itens : [];
+  const idProduto = consulta?.ident?.idProduto;
+
+  if (!idProduto) {
+    return { ok: true, consultados: 0, deletados: 0, erros: [], aviso: 'Produto não encontrado na Omie ou sem estrutura.' };
+  }
+
+  if (!itens.length) {
+    return { ok: true, idProduto, consultados: 0, deletados: 0, erros: [] };
+  }
+
+  // Exclui em lotes paralelos de 3 (limite Omie: 3 req/s)
+  const erros = [];
+  let deletados = 0;
+  const aguardar = ms => new Promise(r => setTimeout(r, ms));
+  const BATCH = 3;
+  for (let i = 0; i < itens.length; i += BATCH) {
+    const lote = itens.slice(i, i + BATCH);
+    const resultados = await Promise.allSettled(
+      lote.map(item => omieCall(OMIE_URL, {
+        call: 'ExcluirEstrutura',
+        app_key: appKey,
+        app_secret: appSecret,
+        param: [{ idProduto, idMalha: item.idMalha }],
+      }))
+    );
+    resultados.forEach((r, j) => {
+      if (r.status === 'fulfilled') {
+        deletados++;
+      } else {
+        erros.push({ idMalha: lote[j].idMalha, codProdMalha: lote[j].codProdMalha, erro: r.reason?.message });
+      }
+    });
+    if (i + BATCH < itens.length) await aguardar(1100); // 1,1s entre lotes
+  }
+
+  return { ok: true, idProduto, consultados: itens.length, deletados, erros };
+}
+
+// ─── Helper: inclui itens na estrutura de um produto na Omie ────────────────
+// Busca idProduto e idProdMalha de cada componente em public.produtos_omie.
+// Chama IncluirEstrutura em lotes de 3 (respeitando limite 3 req/s da Omie).
+async function omieIncluirEstrutura(codProduto, mainItems) {
+  const OMIE_URL  = 'https://app.omie.com.br/api/v1/geral/malha/';
+  const appKey    = process.env.OMIE_APP_KEY    || OMIE_APP_KEY;
+  const appSecret = process.env.OMIE_APP_SECRET || OMIE_APP_SECRET;
+
+  if (!appKey || !appSecret) {
+    return { ok: false, error: 'Credenciais Omie não configuradas.' };
+  }
+
+  // 1) Busca idProduto do produto pai
+  const paiRes = await pool.query(
+    `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+    [codProduto]
+  );
+  if (!paiRes.rowCount) {
+    return { ok: false, error: `Produto ${codProduto} não encontrado em produtos_omie. Sincronize o cadastro de produtos primeiro.` };
+  }
+  const idProduto = Number(paiRes.rows[0].codigo_produto);
+
+  // 2) Busca idProdMalha de todos os componentes em uma só query
+  const codigos = [...new Set(mainItems.map(it => it.comp_codigo))];
+  const compRes = await pool.query(
+    `SELECT codigo, codigo_produto FROM public.produtos_omie WHERE codigo = ANY($1)`,
+    [codigos]
+  );
+  const idPorCodigo = {};
+  compRes.rows.forEach(r => { idPorCodigo[r.codigo] = Number(r.codigo_produto); });
+
+  // 3) Separa itens com/sem ID encontrado
+  const semId = [];
+  const itensValidos = [];
+  for (const it of mainItems) {
+    const idProdMalha = idPorCodigo[it.comp_codigo];
+    if (!idProdMalha) { semId.push(it.comp_codigo); continue; }
+    itensValidos.push({ ...it, idProdMalha });
+  }
+
+  // 4) Inclui em lotes paralelos de 3 (limite Omie: 3 req/s)
+  const erros = [];
+  let incluidos = 0;
+  const aguardar = ms => new Promise(r => setTimeout(r, ms));
+  const BATCH = 3;
+  for (let i = 0; i < itensValidos.length; i += BATCH) {
+    const lote = itensValidos.slice(i, i + BATCH);
+    const resultados = await Promise.allSettled(
+      lote.map(it => omieCall(OMIE_URL, {
+        call: 'IncluirEstrutura',
+        app_key: appKey,
+        app_secret: appSecret,
+        param: [{
+          idProduto,
+          itemMalhaIncluir: {
+            intMalha:          it.comp_codigo,
+            idProdMalha:       it.idProdMalha,
+            quantProdMalha:    it.comp_qtd,
+            percPerdaProdMalha: 0,
+          },
+        }],
+      }))
+    );
+    resultados.forEach((r, j) => {
+      if (r.status === 'fulfilled') incluidos++;
+      else {
+        // omieCall lança Error com JSON stringificado quando há faultstring
+        let msgErro = r.reason?.message || 'Erro desconhecido';
+        try {
+          const parsed = JSON.parse(msgErro);
+          if (parsed.faultstring) msgErro = String(parsed.faultstring).trim();
+        } catch (_) { /* mantém mensagem original */ }
+        erros.push({ codProdMalha: lote[j].comp_codigo, descr: lote[j].comp_descricao || lote[j].comp_codigo, erro: msgErro });
+      }
+    });
+    if (i + BATCH < itensValidos.length) await aguardar(1100); // 1,1s entre lotes
+  }
+
+  return { ok: true, idProduto, total: mainItems.length, incluidos, sem_id: semId, erros };
+}
+
+// Endpoint: POST /api/pcp/estrutura/omie-clear
+// Exclui toda a estrutura de um produto na Omie (para uso manual/teste)
+app.post('/api/pcp/estrutura/omie-clear', express.json(), async (req, res) => {
+  const codProduto = String(req.body?.cod_produto || '').trim();
+  if (!codProduto) return res.status(400).json({ ok: false, error: 'Informe cod_produto.' });
+  try {
+    const resultado = await omieExcluirTodaEstrutura(codProduto);
+    return res.json(resultado);
+  } catch (err) {
+    console.error('[OMIE][CLEAR]', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Endpoint: POST /api/pcp/estrutura/omie-subs
+// Sincroniza as estruturas das sub-montagens na Omie (lê itens do banco e envia).
+// Body: { subs: ["07.MP.N.70005", "01.MP.N.30003", ...] }
+app.post('/api/pcp/estrutura/omie-subs', express.json(), async (req, res) => {
+  const subs = Array.isArray(req.body?.subs) ? req.body.subs.map(s => String(s).trim()).filter(Boolean) : [];
+  if (!subs.length) return res.status(400).json({ ok: false, error: 'Informe ao menos um código em "subs".' });
+
+  const resultados = [];
+
+  for (const cod of subs) {
+    let itensDB = [];
+    try {
+      // Busca os itens da sub-montagem gravados no banco
+      const r = await pool.query(
+        `SELECT i.cod_prod_malha, i.descr_prod_malha, i.quant_prod_malha, i.unid_prod_malha, i.operacao
+           FROM engenharia.omie_estrutura e
+           JOIN engenharia.omie_estrutura_item i ON i.parent_id = e.id
+          WHERE UPPER(TRIM(e.cod_produto)) = UPPER(TRIM($1))
+          ORDER BY i.id`,
+        [cod]
+      );
+      itensDB = r.rows.map(row => ({
+        comp_codigo:    row.cod_prod_malha,
+        comp_descricao: row.descr_prod_malha,
+        comp_qtd:       Number(row.quant_prod_malha) || 0,
+        comp_unid:      row.unid_prod_malha,
+        comp_operacao:  row.operacao || null,
+      }));
+    } catch (eDB) {
+      resultados.push({ cod, ok: false, error: 'Erro ao ler banco: ' + eDB.message });
+      continue;
+    }
+
+    if (!itensDB.length) {
+      resultados.push({ cod, ok: false, aviso: 'Sem itens no banco para este código.' });
+      continue;
+    }
+
+    let clearRes = null, incluirRes = null;
+    try {
+      clearRes = await omieExcluirTodaEstrutura(cod);
+    } catch (eC) {
+      clearRes = { ok: false, error: eC.message };
+    }
+    try {
+      incluirRes = await omieIncluirEstrutura(cod, itensDB);
+    } catch (eI) {
+      incluirRes = { ok: false, error: eI.message };
+    }
+
+    console.info('[FICHA][OMIE][SUBS]', cod, { clear: clearRes, incluir: incluirRes });
+    resultados.push({
+      cod,
+      ok: incluirRes?.ok ?? false,
+      total: itensDB.length,
+      deletados: clearRes?.deletados ?? 0,
+      incluidos: incluirRes?.incluidos ?? 0,
+      sem_id: incluirRes?.sem_id ?? [],
+      erros: [...(clearRes?.erros ?? []), ...(incluirRes?.erros ?? [])],
+    });
+  }
+
+  const totalIncluidos = resultados.reduce((s, r) => s + (r.incluidos || 0), 0);
+  const totalErros     = resultados.reduce((s, r) => s + (r.erros?.length || 0), 0);
+  return res.json({ ok: true, subs: resultados, total_incluidos: totalIncluidos, total_erros: totalErros });
 });
 
 // === PCP: substituir estrutura (IMPORT CSV) usando pai_codigo ===
