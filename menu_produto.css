@@ -6604,6 +6604,10 @@ table.tabela td.num {
   line-height: 1;
 }
 
+.agenda-chip-hora-mobile {
+  display: none;
+}
+
 /* Texto curto do lembrete */
 .agenda-chip-hora.lembrete-texto {
   font-size: 8px;
@@ -6957,6 +6961,19 @@ table.tabela td.num {
 
   .agenda-chip-hora {
     font-size: 9px;
+  }
+
+  .agenda-chip-hora-desktop {
+    display: none;
+  }
+
+  .agenda-chip-hora-mobile {
+    display: inline;
+  }
+
+  .agenda-chip-room-icon,
+  .agenda-chip-cafe-icon {
+    display: none;
   }
 
   .agenda-chip-room-icon {

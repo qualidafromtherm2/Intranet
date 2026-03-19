@@ -33248,15 +33248,24 @@ async function _carregarItensTabela(statusClicado, categoriaCode, categoriaLabel
 
 // Objetivo: Handler unificado de clique em categoria (drill-down no pie + filtro de itens)
 function _handleCatClick(status, codigo, label, isDrillDown) {
-  if (isDrillDown) _carregarGraficoCategorias(status, codigo, label);
+  if (_graficoCategoriaEstado.modo === 'meses') {
+    if (isDrillDown) {
+      _carregarGraficoCategorias(status, codigo, label, _graficoCategoriaEstado.mesCompra, 'meses');
+    }
+    if (_graficoCategoriaEstado.mesCompra) {
+      _renderDetalheMeses(_graficoCategoriaEstado.mesCompra, codigo, label);
+    }
+    return;
+  }
+  if (isDrillDown) _carregarGraficoCategorias(status, codigo, label, null, 'periodo');
   _carregarItensTabela(status, codigo, label);
 }
 
 // Estado do drill-down de categorias
-let _graficoCategoriaEstado = { status: null, pai: null, labelPai: null };
+let _graficoCategoriaEstado = { status: null, pai: null, labelPai: null, mesCompra: null, modo: 'periodo' };
 
 // Objetivo: Carregar (e re-carregar para drill-down) o gráfico de pizza por categoria
-async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
+async function _carregarGraficoCategorias(statusClicado, pai, labelPai, mesCompra, modo = 'periodo') {
   const catSection = document.getElementById('graficoCategoriaSection');
   const catLoading = document.getElementById('graficoCategoriaLoading');
   const catLegenda = document.getElementById('graficoCategoriaLegenda');
@@ -33267,7 +33276,7 @@ async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
   if (catLoading) catLoading.style.display = 'flex';
 
   // Salvar estado para o botão "Voltar"
-  _graficoCategoriaEstado = { status: statusClicado, pai, labelPai };
+  _graficoCategoriaEstado = { status: statusClicado, pai, labelPai, mesCompra, modo };
 
   // Breadcrumb e botão voltar
   if (pai) {
@@ -33284,6 +33293,7 @@ async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
   if (pai)    catParams.set('pai', pai);
   if (inicio) catParams.set('dataInicio', inicio);
   if (fim)    catParams.set('dataFim', fim);
+  if (mesCompra) catParams.set('mesCompra', mesCompra);
 
   try {
     const resp = await fetch(`/api/compras/grafico-categorias?${catParams.toString()}`, { credentials: 'include' });
@@ -33336,8 +33346,12 @@ async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
           if (!elements || !elements.length) return;
           const idx = elements[0].index;
           const cat = categorias[idx];
-          if (ehNivel1) _carregarGraficoCategorias(statusClicado, cat.codigo, cat.label);
-          _carregarItensTabela(statusClicado, cat.codigo, cat.label);
+          if (ehNivel1) _carregarGraficoCategorias(statusClicado, cat.codigo, cat.label, mesCompra, modo);
+          if (modo === 'periodo') {
+            _carregarItensTabela(statusClicado, cat.codigo, cat.label);
+          } else if (modo === 'meses') {
+            _renderDetalheMeses(mesCompra, cat.codigo, cat.label);
+          }
         },
         onHover: (evt, elements) => { canvas.style.cursor = elements.length ? 'pointer' : 'default'; },
       }
@@ -33368,8 +33382,18 @@ async function _carregarGraficoCategorias(statusClicado, pai, labelPai) {
 // Objetivo: Voltar ao nível 1 do gráfico de categorias e resetar filtro da tabela
 function _graficoCatVoltar() {
   if (_graficoCategoriaEstado.status) {
-    _carregarGraficoCategorias(_graficoCategoriaEstado.status, null, null);
-    _carregarItensTabela(_graficoCategoriaEstado.status, null, null);
+    _carregarGraficoCategorias(
+      _graficoCategoriaEstado.status,
+      null,
+      null,
+      _graficoCategoriaEstado.mesCompra,
+      _graficoCategoriaEstado.modo
+    );
+    if (_graficoCategoriaEstado.modo === 'periodo') {
+      _carregarItensTabela(_graficoCategoriaEstado.status, null, null);
+    } else if (_graficoCategoriaEstado.modo === 'meses') {
+      _renderDetalheMeses(_graficoCategoriaEstado.mesCompra);
+    }
   }
 }
 window._carregarGraficoCategorias = _carregarGraficoCategorias;
@@ -33391,7 +33415,7 @@ async function exibirDetalheGraficoBarra(statusClicado) {
   wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   // Carregar gráfico de categorias e tabela de itens (sem filtro de categoria ao abrir)
-  _carregarGraficoCategorias(statusClicado, null, null);
+  _carregarGraficoCategorias(statusClicado, null, null, null, 'periodo');
   _carregarItensTabela(statusClicado, null, null);
 }
 
@@ -33612,11 +33636,14 @@ window.alternarGrafico           = alternarGrafico;
 window.carregarGraficoMeses      = carregarGraficoMeses;
 window.exibirDetalheGraficoBarra = exibirDetalheGraficoBarra;
 window.exibirDetalheMeses        = exibirDetalheMeses;
+window.toggleDetalheMeses        = toggleDetalheMeses;
 window.toggleGpiSub              = toggleGpiSub;
 
 // ========================================
 // Detalhe do gráfico de Meses (painel existente graficoPizzaDetalheWrapper)
 // ========================================
+let _detalheMesesCache = null;
+
 /**
  * Ao clicar em uma barra do gráfico de meses, exibe o painel de detalhe
  * com as NFs recebidas (c_numero + n_valor_nfe + itens) e os pedidos
@@ -33644,74 +33671,154 @@ async function exibirDetalheMeses(mesCompra, dataInicio, dataFim) {
     const recebidos  = data.recebidos  || [];
     const a_receber  = data.a_receber  || [];
 
-    titulo.innerHTML = `<i class="fa-solid fa-calendar-check" style="margin-right:6px;color:#7c3aed;"></i>Pedidos de ${mesCompra}`;
-
-    if (!recebidos.length && !a_receber.length) {
-      tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:#6b7280;text-align:center;">Nenhum pedido encontrado.</td></tr>';
-      return;
+    _detalheMesesCache = { mesCompra, recebidos, a_receber };
+    if (catSection) {
+      _carregarGraficoCategorias('Compra realizada', null, null, mesCompra, 'meses');
     }
-
-    const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-    let html = '';
-
-    // ── Recebidos ────────────────────────────────────────────────────────
-    if (recebidos.length) {
-      const totalRecebidos = recebidos.reduce((s, r) => s + (r.n_valor_nfe || 0), 0);
-      html += `<tr><td colspan="3" style="padding:10px 8px 4px;font-weight:700;color:#059669;font-size:13px;background:#f0fdf4;border-top:2px solid #6ee7b7;">
-        <i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>Recebidos — ${recebidos.length} NF(s) — ${fmt(totalRecebidos)}
-      </td></tr>`;
-      for (const nf of recebidos) {
-        const dtRec = nf.d_rec ? nf.d_rec.split('-').reverse().join('/') : '';
-        html += `<tr style="background:#f9fafb;">
-          <td style="padding:7px 12px;font-weight:600;color:#111827;font-size:13px;">
-            <i class="fa-solid fa-file-invoice" style="color:#059669;margin-right:5px;"></i>Pedido ${nf.c_numero || '—'}
-          </td>
-          <td style="padding:7px 8px;color:#374151;font-size:12px;">Recebido: ${dtRec}</td>
-          <td style="padding:7px 8px;text-align:right;color:#059669;font-weight:600;font-size:13px;">${fmt(nf.n_valor_nfe)}</td>
-        </tr>`;
-        for (const item of (nf.itens || [])) {
-          html += `<tr style="background:#fff;">
-            <td style="padding:3px 8px 3px 28px;color:#6b7280;font-size:12px;" colspan="2">
-              <span style="color:#374151;font-weight:500;">${item.c_codigo_produto || ''}</span>
-              ${item.c_descricao_produto ? ` — ${item.c_descricao_produto}` : ''}
-            </td>
-            <td style="padding:3px 8px;text-align:right;color:#374151;font-size:12px;">${fmt(item.n_preco_unit)} × ${item.n_qtde_nfe || 1}</td>
-          </tr>`;
-        }
-      }
-    }
-
-    // ── A receber ─────────────────────────────────────────────────────────
-    if (a_receber.length) {
-      const totalAReceber = a_receber.reduce((s, r) => s + (r.n_valor || 0), 0);
-      html += `<tr><td colspan="3" style="padding:10px 8px 4px;font-weight:700;color:#3b82f6;font-size:13px;background:#eff6ff;border-top:2px solid #93c5fd;">
-        <i class="fa-solid fa-clock" style="margin-right:5px;"></i>A receber — ${a_receber.length} pedido(s) — ${fmt(totalAReceber)}
-      </td></tr>`;
-      for (const ped of a_receber) {
-        html += `<tr style="background:#f9fafb;">
-          <td style="padding:7px 12px;font-weight:600;color:#111827;font-size:13px;" colspan="2">
-            <i class="fa-solid fa-cart-shopping" style="color:#3b82f6;margin-right:5px;"></i>Pedido ${ped.c_numero || '—'}
-          </td>
-          <td style="padding:7px 8px;text-align:right;color:#3b82f6;font-weight:600;font-size:13px;">${fmt(ped.n_valor)}</td>
-        </tr>`;
-        for (const item of (ped.itens || [])) {
-          html += `<tr style="background:#fff;">
-            <td style="padding:3px 8px 3px 28px;color:#6b7280;font-size:12px;" colspan="2">
-              <span style="color:#374151;font-weight:500;">${item.c_codigo_produto || ''}</span>
-              ${item.c_descricao_produto ? ` — ${item.c_descricao_produto}` : ''}
-            </td>
-            <td style="padding:3px 8px;text-align:right;color:#374151;font-size:12px;">${fmt(item.n_preco_unit)}</td>
-          </tr>`;
-        }
-      }
-    }
-
-    tbody.innerHTML = html;
+    _renderDetalheMeses(mesCompra);
   } catch (err) {
     console.error('[DetalheMeses] Erro:', err);
     titulo.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#ef4444;margin-right:6px;"></i>Erro ao carregar`;
     tbody.innerHTML = '<tr><td colspan="3" style="padding:16px;color:#ef4444;">Erro ao carregar detalhes.</td></tr>';
+  }
+}
+
+function _renderDetalheMeses(mesCompra, catCodigo = null, catLabel = null) {
+  const wrapper = document.getElementById('graficoPizzaDetalheWrapper');
+  const titulo  = document.getElementById('graficoPizzaDetalheTitulo');
+  const tbody   = document.getElementById('graficoPizzaDetalheTbody');
+  const catSection = document.getElementById('graficoCategoriaSection');
+  if (!wrapper || !titulo || !tbody || !_detalheMesesCache) return;
+
+  if (catSection) catSection.style.display = 'block';
+
+  const normCod = v => String(v || '').replace(/^0+/, '') || '0';
+  const filtroCod = catCodigo ? normCod(catCodigo) : null;
+  const recebidosOrig = _detalheMesesCache.recebidos || [];
+  const aReceberOrig  = _detalheMesesCache.a_receber || [];
+  const recebidos = filtroCod
+    ? recebidosOrig.filter(r => normCod(r.c_cod_categ) === filtroCod)
+    : recebidosOrig;
+  const a_receber = filtroCod
+    ? aReceberOrig.filter(p => normCod(p.c_cod_categ) === filtroCod)
+    : aReceberOrig;
+
+  titulo.innerHTML = `<i class="fa-solid fa-calendar-check" style="margin-right:6px;color:#7c3aed;"></i>Pedidos de ${mesCompra}${catLabel ? ` — ${catLabel}` : ''}`;
+
+  if (!recebidos.length && !a_receber.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="padding:20px;color:#6b7280;text-align:center;">Nenhum pedido encontrado.</td></tr>';
+    return;
+  }
+
+  const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  let html = '';
+
+  if (recebidos.length) {
+    const totalRecebidos = recebidos.reduce((s, r) => s + (r.n_valor_nfe || 0), 0);
+    html += `<tr><td colspan="3" style="padding:10px 8px 4px;font-weight:700;color:#059669;font-size:13px;background:#f0fdf4;border-top:2px solid #6ee7b7;">
+      <i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>Recebidos — ${recebidos.length} NF(s) — ${fmt(totalRecebidos)}
+    </td></tr>`;
+    recebidos.forEach((nf, idx) => {
+      const parentKey = `rec-${idx}`;
+      const dtRec = nf.d_rec ? nf.d_rec.split('-').reverse().join('/') : '';
+      html += `<tr style="background:#f9fafb;">
+        <td style="padding:7px 12px;font-weight:600;color:#111827;font-size:13px;">
+          <i class="fa-solid fa-file-invoice" style="color:#059669;margin-right:5px;"></i>Pedido ${nf.c_numero || '—'}
+        </td>
+        <td style="padding:7px 8px;color:#374151;font-size:12px;">Recebido: ${dtRec}</td>
+        <td style="padding:7px 8px;text-align:right;color:#059669;font-weight:600;font-size:13px;">
+          ${fmt(nf.n_valor_nfe)}
+          <button onclick="toggleDetalheMeses('${parentKey}')" style="margin-left:8px;background:#e5e7eb;border:1px solid #d1d5db;border-radius:6px;padding:2px 8px;font-size:11px;color:#374151;cursor:pointer;">Expandir</button>
+        </td>
+      </tr>`;
+      for (const item of (nf.itens || [])) {
+        html += `<tr data-parent="${parentKey}" style="background:#fff;display:none;">
+          <td style="padding:3px 8px 3px 28px;color:#6b7280;font-size:12px;" colspan="2">
+            <span style="color:#374151;font-weight:500;">${item.c_codigo_produto || ''}</span>
+            ${item.c_descricao_produto ? ` — ${item.c_descricao_produto}` : ''}
+          </td>
+          <td style="padding:3px 8px;text-align:right;color:#374151;font-size:12px;">${fmt(item.n_preco_unit)} × ${item.n_qtde_nfe || 1}</td>
+        </tr>`;
+      }
+    });
+  }
+
+  if (a_receber.length) {
+    const totalAReceber = a_receber.reduce((s, r) => s + (r.n_valor || 0), 0);
+    html += `<tr><td colspan="3" style="padding:10px 8px 4px;font-weight:700;color:#3b82f6;font-size:13px;background:#eff6ff;border-top:2px solid #93c5fd;">
+      <i class="fa-solid fa-clock" style="margin-right:5px;"></i>A receber — ${a_receber.length} pedido(s) — ${fmt(totalAReceber)}
+    </td></tr>`;
+    a_receber.forEach((ped, idx) => {
+      const parentKey = `ped-${idx}`;
+      const btnExpandir = `<button onclick="toggleDetalheMeses('${parentKey}', '${ped.c_numero || ''}')" style="margin-left:8px;background:#e5e7eb;border:1px solid #d1d5db;border-radius:6px;padding:2px 8px;font-size:11px;color:#374151;cursor:pointer;">Expandir</button>`;
+      html += `<tr id="row-${parentKey}" style="background:#f9fafb;">
+        <td style="padding:7px 12px;font-weight:600;color:#111827;font-size:13px;" colspan="2">
+          <i class="fa-solid fa-cart-shopping" style="color:#3b82f6;margin-right:5px;"></i>Pedido ${ped.c_numero || '—'}
+        </td>
+        <td style="padding:7px 8px;text-align:right;color:#3b82f6;font-weight:600;font-size:13px;">
+          ${fmt(ped.n_valor)}
+          ${btnExpandir}
+        </td>
+      </tr>`;
+    });
+  }
+
+  tbody.innerHTML = html;
+}
+
+async function toggleDetalheMeses(parentKey, cNumero) {
+  const rows = document.querySelectorAll(`#graficoPizzaDetalheTbody tr[data-parent="${parentKey}"]`);
+  if (rows.length) {
+    const isHidden = rows[0].style.display === 'none';
+    rows.forEach(row => { row.style.display = isHidden ? 'table-row' : 'none'; });
+    const btn = document.querySelector(`button[onclick="toggleDetalheMeses('${parentKey}', '${cNumero || ''}')"]`);
+    if (btn) btn.textContent = isHidden ? 'Ocultar' : 'Expandir';
+    return;
+  }
+
+  if (!cNumero) return;
+  const btn = document.querySelector(`button[onclick="toggleDetalheMeses('${parentKey}', '${cNumero}')"]`);
+  if (btn) btn.textContent = 'Carregando...';
+
+  try {
+    const resp = await fetch(`/api/compras/pedido-omie-itens?cNumero=${encodeURIComponent(cNumero)}`, { credentials: 'include' });
+    const data = await resp.json();
+    const itens = data.itens || [];
+
+    const parentRow = document.getElementById(`row-${parentKey}`);
+    if (!parentRow) return;
+
+    if (!itens.length) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.setAttribute('data-parent', parentKey);
+      emptyRow.style.background = '#fff';
+      emptyRow.innerHTML = '<td colspan="3" style="padding:4px 8px 4px 28px;color:#9ca3af;font-size:12px;">Sem itens retornados pela Omie.</td>';
+      parentRow.insertAdjacentElement('afterend', emptyRow);
+    } else {
+      const fmt = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const rowsHtml = itens.map((item) => {
+        const unidade = item.c_unidade ? ` ${item.c_unidade}` : '';
+        return `
+          <tr data-parent="${parentKey}" style="background:#fff;display:none;">
+            <td style="padding:3px 8px 3px 28px;color:#6b7280;font-size:12px;" colspan="2">
+              <span style="color:#374151;font-weight:500;">${item.c_produto || 'Item sem codigo'}</span>
+              ${item.c_descricao ? ` — ${item.c_descricao}` : ''}
+            </td>
+            <td style="padding:3px 8px;text-align:right;color:#374151;font-size:12px;">
+              ${fmt(item.n_val_unit)} × ${item.n_qtde || 1}${unidade}
+            </td>
+          </tr>
+        `;
+      }).join('');
+      parentRow.insertAdjacentHTML('afterend', rowsHtml);
+    }
+
+    const newRows = document.querySelectorAll(`#graficoPizzaDetalheTbody tr[data-parent="${parentKey}"]`);
+    newRows.forEach(row => { row.style.display = 'table-row'; });
+    if (btn) btn.textContent = 'Ocultar';
+  } catch (err) {
+    console.error('[DetalheMeses/AReceber] Erro:', err);
+    if (btn) btn.textContent = 'Expandir';
   }
 }
 
@@ -41743,11 +41850,16 @@ function renderAgendaCalendarioMensal() {
         : [];
       const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
       const horaInicio = String(reserva?.inicio || '').slice(0, 5);
+      const horaFim = String(reserva?.fim || '').slice(0, 5);
+      const horaFaixa = (horaInicio && horaFim)
+        ? `${horaInicio}-${horaFim}`
+        : (horaInicio || horaFim || '');
       const cafeHtml      = reserva?.cafe      ? '<i class="fa-solid fa-mug-hot agenda-chip-cafe-icon" title="Com café"></i>' : '';
       const convocadoHtml = usuarioConvocado   ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>' : '';
       return `<div class="agenda-cal-reserva-item ${cls}" ${idAttr} title="${tituloChip}">
           <i class="fa-solid ${icon} agenda-chip-room-icon" title="${title}"></i>
-          ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
+          ${horaFaixa ? `<span class="agenda-chip-hora agenda-chip-hora-desktop">${escapeHtml(horaFaixa)}</span>` : ''}
+          ${horaInicio ? `<span class="agenda-chip-hora agenda-chip-hora-mobile">${escapeHtml(horaInicio)}</span>` : ''}
           ${cafeHtml}${convocadoHtml}
         </div>`;
     });
@@ -42085,15 +42197,14 @@ function resetarFormularioAgendaReserva() {
 
   // Limpar campos de link, anexo e ata
   const linkReuniaoEl = document.getElementById('agendaLinkReuniao');
-  const anexoNomeEl   = document.getElementById('agendaAnexoNome');
-  const anexoLinkEl   = document.getElementById('agendaAnexoLink');
-  const anexoRemEl    = document.getElementById('agendaAnexoRemover');
   const ataBtnEl      = document.getElementById('agendaAbrirAtaBtn');
   if (linkReuniaoEl) linkReuniaoEl.value = '';
-  if (anexoNomeEl) anexoNomeEl.textContent = 'Nenhum arquivo';
-  if (anexoLinkEl) { anexoLinkEl.href = '#'; anexoLinkEl.style.display = 'none'; }
-  if (anexoRemEl) anexoRemEl.style.display = 'none';
   if (ataBtnEl) ataBtnEl.style.display = 'none';
+  // Limpar lista de anexos
+  const listaAnexosEl = document.getElementById('agendaAnexosLista');
+  const vazioAnexosEl = document.getElementById('agendaAnexosVazio');
+  if (listaAnexosEl) listaAnexosEl.innerHTML = '';
+  if (vazioAnexosEl) vazioAnexosEl.style.display = '';
   agendaAnexoPendente = null; agendaAnexoUrlAtual = null; agendaAnexoNomeAtual = null;
   agendaReservaIdParaAta = null;
 
@@ -42222,22 +42333,87 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
 
   atualizarPermissaoEdicaoAgenda(podeEditar);
 
-  // Campos novos: link, anexo, ata
+  // Campos novos: link, ata
   const linkReuniaoInput = document.getElementById('agendaLinkReuniao');
   if (linkReuniaoInput) linkReuniaoInput.value = reserva.linkReuniao || '';
-  if (reserva.anexoUrl) {
-    const aLinkEl = document.getElementById('agendaAnexoLink');
-    const aNomeEl = document.getElementById('agendaAnexoNome');
-    const aRemEl  = document.getElementById('agendaAnexoRemover');
-    if (aLinkEl) { aLinkEl.href = reserva.anexoUrl; aLinkEl.style.display = ''; }
-    if (aNomeEl) aNomeEl.textContent = reserva.anexoNome || 'Anexo';
-    if (aRemEl) aRemEl.style.display = '';
-    agendaAnexoUrlAtual  = reserva.anexoUrl;
-    agendaAnexoNomeAtual = reserva.anexoNome || null;
-  }
   const ataBtn = document.getElementById('agendaAbrirAtaBtn');
   if (ataBtn) ataBtn.style.display = '';
   agendaReservaIdParaAta = reserva.id;
+
+  // Carregar lista de anexos da reserva
+  _agendaCarregarAnexosReserva(reserva.id);
+}
+
+// ── Anexos de reserva (lista múltipla) ─────────────────────────────────────────
+function _escapeHtmlInline(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function _agendaCarregarAnexosReserva(reservaId) {
+  const listaEl = document.getElementById('agendaAnexosLista');
+  const vazioEl = document.getElementById('agendaAnexosVazio');
+  if (!listaEl) return;
+  try {
+    const resp = await fetch(`/api/rh/reservas/${encodeURIComponent(reservaId)}/anexos`, { credentials: 'include' });
+    if (!resp.ok) throw new Error('Falha ao buscar anexos');
+    const anexos = await resp.json();
+    if (!anexos.length) {
+      listaEl.innerHTML = '';
+      if (vazioEl) vazioEl.style.display = '';
+      return;
+    }
+    if (vazioEl) vazioEl.style.display = 'none';
+    const usuarioLogado = obterUsuarioLogadoAgenda();
+    listaEl.innerHTML = anexos.map(a => {
+      const podeRemover = String(a.enviado_por || '').toLowerCase() === usuarioLogado.toLowerCase();
+      const btnRemover = podeRemover
+        ? `<button type="button" data-remover-anexo-id="${a.id}" title="Remover" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;padding:0;flex-shrink:0;"><i class="fa-solid fa-xmark"></i></button>`
+        : '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--theme-hover);border:1px solid var(--border-color);border-radius:6px;">
+        <i class="fa-solid fa-file-lines" style="color:#60a5fa;font-size:14px;flex-shrink:0;"></i>
+        <a href="${_escapeHtmlInline(a.url)}" target="_blank" rel="noopener" style="flex:1;font-size:12px;color:#60a5fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeHtmlInline(a.nome)}</a>
+        <span style="font-size:10px;color:var(--inactive-color);white-space:nowrap;">${_escapeHtmlInline(a.enviado_por)} · ${_escapeHtmlInline(a.enviado_em_fmt || '')}</span>
+        ${btnRemover}
+      </div>`;
+    }).join('');
+    // Listener de remoção
+    listaEl.querySelectorAll('[data-remover-anexo-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const anexoId = btn.getAttribute('data-remover-anexo-id');
+        if (!confirm('Remover este anexo?')) return;
+        try {
+          const r = await fetch(`/api/rh/reservas/anexos/${encodeURIComponent(anexoId)}`, { method: 'DELETE', credentials: 'include' });
+          if (r.ok) _agendaCarregarAnexosReserva(reservaId);
+          else { const e = await r.json().catch(() => ({})); alert(e.error || 'Erro ao remover'); }
+        } catch { alert('Erro ao remover anexo'); }
+      });
+    });
+  } catch (err) {
+    console.warn('[AGENDA] Erro ao carregar anexos:', err);
+  }
+}
+
+async function _agendaEnviarAnexoReserva(reservaId, arquivo) {
+  try {
+    const fd = new FormData();
+    fd.append('file', arquivo.file);
+    const nomeSanitizado = arquivo.nome
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    fd.append('path', `agenda-anexos/${Date.now()}_${nomeSanitizado}`);
+    const upResp = await fetch('/api/upload/supabase', { method: 'POST', body: fd, credentials: 'include' });
+    if (!upResp.ok) throw new Error('Upload falhou');
+    const upData = await upResp.json();
+    if (!upData.url) throw new Error('Sem URL retornada');
+    await fetch(`/api/rh/reservas/${encodeURIComponent(reservaId)}/anexos`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: upData.url, nome: arquivo.nome })
+    });
+  } catch (err) {
+    console.warn('[AGENDA] Erro ao enviar anexo:', err);
+    alert('Falha ao enviar o anexo. Tente novamente.');
+  }
 }
 
 function fecharModalAgendaReserva() {
@@ -42405,24 +42581,6 @@ async function salvarReservaAgendaLocal() {
     }
   }
 
-  // Upload de anexo pendente (se houver)
-  let anexoUrlFinal = agendaAnexoUrlAtual || null;
-  let anexoNomeFinal = agendaAnexoNomeAtual || null;
-  if (agendaAnexoPendente) {
-    try {
-      const fd = new FormData();
-      fd.append('file', agendaAnexoPendente.file);
-      fd.append('path', `agenda-anexos/${Date.now()}_${agendaAnexoPendente.nome}`);
-      const upResp = await fetch('/api/upload/supabase', { method: 'POST', body: fd, credentials: 'include' });
-      if (upResp.ok) {
-        const upData = await upResp.json();
-        if (upData.url) { anexoUrlFinal = upData.url; anexoNomeFinal = agendaAnexoPendente.nome; }
-      }
-    } catch (errUpload) {
-      console.warn('[AGENDA] Falha ao fazer upload do anexo:', errUpload);
-    }
-  }
-
   const payload = {
     tipo: tipoReservaTexto,
     tema: temaReuniao,
@@ -42436,11 +42594,12 @@ async function salvarReservaAgendaLocal() {
     descricao: descricao || null,
     visitantes: visitantes || null,
     linkReuniao: document.getElementById('agendaLinkReuniao')?.value?.trim() || null,
-    anexoUrl: anexoUrlFinal,
-    anexoNome: anexoNomeFinal
+    anexoUrl: null,
+    anexoNome: null
   };
 
   try {
+    let reservaIdFinal = agendaReservaEditandoId;
     if (agendaReservaEditandoId) {
       const dataEdicao = agendaReservaEditandoData || agendaDataSelecionada;
       const resp = await fetch(`/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`, {
@@ -42464,6 +42623,14 @@ async function salvarReservaAgendaLocal() {
         const erro = await resp.json().catch(() => ({}));
         throw new Error(erro.error || `Erro ao criar reserva (${resp.status})`);
       }
+      const respData = await resp.json().catch(() => ({}));
+      if (respData.ids && respData.ids.length) reservaIdFinal = respData.ids[0];
+    }
+
+    // Upload de anexo pendente após salvar reserva
+    if (agendaAnexoPendente && reservaIdFinal) {
+      await _agendaEnviarAnexoReserva(reservaIdFinal, agendaAnexoPendente);
+      agendaAnexoPendente = null;
     }
 
     await carregarAgendaMesCompleto();
@@ -43532,36 +43699,32 @@ function initAgendaReservasUI() {
     });
   }
 
-  // Anexo: input de arquivo
+  // Anexo: input de arquivo — ao selecionar, se editando reserva existente, envia direto; se nova, guarda pendente
   const anexoInput = document.getElementById('agendaAnexoInput');
   if (anexoInput) {
-    anexoInput.addEventListener('change', () => {
+    anexoInput.addEventListener('change', async () => {
       const file = anexoInput.files[0];
       if (!file) return;
-      agendaAnexoPendente = { file, nome: file.name };
-      const nomeEl = document.getElementById('agendaAnexoNome');
-      const remEl  = document.getElementById('agendaAnexoRemover');
-      if (nomeEl) nomeEl.textContent = file.name;
-      if (remEl) remEl.style.display = '';
-    });
-  }
-  // Botão selecionar arquivo (dispara o input hidden)
-  const btnAnexoEscolher = document.getElementById('agendaAnexoEscolherBtn');
-  if (btnAnexoEscolher && anexoInput) {
-    btnAnexoEscolher.addEventListener('click', () => anexoInput.click());
-  }
-  // Remover anexo
-  const anexoRemover = document.getElementById('agendaAnexoRemover');
-  if (anexoRemover) {
-    anexoRemover.addEventListener('click', () => {
-      agendaAnexoPendente = null; agendaAnexoUrlAtual = null; agendaAnexoNomeAtual = null;
-      if (anexoInput) anexoInput.value = '';
-      const nomeEl = document.getElementById('agendaAnexoNome');
-      const linkEl = document.getElementById('agendaAnexoLink');
-      const remEl  = document.getElementById('agendaAnexoRemover');
-      if (nomeEl) nomeEl.textContent = 'Nenhum arquivo';
-      if (linkEl) { linkEl.href = '#'; linkEl.style.display = 'none'; }
-      if (remEl) remEl.style.display = 'none';
+      if (agendaReservaEditandoId) {
+        // Reserva já existe — upload imediato e registro na API
+        await _agendaEnviarAnexoReserva(agendaReservaEditandoId, { file, nome: file.name });
+        _agendaCarregarAnexosReserva(agendaReservaEditandoId);
+      } else {
+        // Reserva nova — guarda pendente para enviar após salvar
+        agendaAnexoPendente = { file, nome: file.name };
+        const listaEl = document.getElementById('agendaAnexosLista');
+        const vazioEl = document.getElementById('agendaAnexosVazio');
+        if (listaEl) {
+          listaEl.insertAdjacentHTML('beforeend',
+            `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--theme-hover);border:1px dashed var(--border-color);border-radius:6px;">
+              <i class="fa-solid fa-file-arrow-up" style="color:#fbbf24;font-size:14px;flex-shrink:0;"></i>
+              <span style="flex:1;font-size:12px;color:var(--theme-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escapeHtmlInline(file.name)}</span>
+              <span style="font-size:10px;color:var(--inactive-color);">pendente</span>
+            </div>`);
+        }
+        if (vazioEl) vazioEl.style.display = 'none';
+      }
+      anexoInput.value = '';
     });
   }
 

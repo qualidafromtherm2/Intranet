@@ -472,6 +472,19 @@ async function ensureRhReservasSchema() {
     await pool.query(`ALTER TABLE IF EXISTS rh.notas_reuniao ADD COLUMN IF NOT EXISTS visivel_todos BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`CREATE INDEX IF NOT EXISTS notas_reuniao_reserva_usuario_idx ON rh.notas_reuniao (reserva_id, usuario)`);
 
+    // Tabela de múltiplos anexos por reserva
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.reservas_anexos (
+        id BIGSERIAL PRIMARY KEY,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        nome TEXT NOT NULL,
+        enviado_por TEXT NOT NULL,
+        enviado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS reservas_anexos_reserva_idx ON rh.reservas_anexos (reserva_id)`);
+
     console.log('[RH] Schema de reservas pronto');
   } catch (err) {
     console.error('[RH] Erro ao garantir schema/tabelas de reservas:', err?.message || err);
@@ -3174,6 +3187,65 @@ app.delete('/api/rh/notas/:id', async (req, res) => {
   }
 });
 
+// ── Anexos de reserva (múltiplos por evento) ──────────────────────────────────
+app.get('/api/rh/reservas/:id/anexos', async (req, res) => {
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, url, nome, enviado_por,
+              TO_CHAR(enviado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS enviado_em_fmt
+         FROM rh.reservas_anexos WHERE reserva_id = $1 ORDER BY enviado_em ASC`,
+      [reservaId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[API] GET /api/rh/reservas/:id/anexos erro:', err);
+    return res.status(500).json({ error: 'Falha ao buscar anexos' });
+  }
+});
+
+app.post('/api/rh/reservas/:id/anexos', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  const { url, nome } = req.body || {};
+  if (!url || !nome) return res.status(400).json({ error: 'url e nome são obrigatórios' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO rh.reservas_anexos (reserva_id, url, nome, enviado_por)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, url, nome, enviado_por,
+         TO_CHAR(enviado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS enviado_em_fmt`,
+      [reservaId, url, nome, userLogado]
+    );
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[API] POST /api/rh/reservas/:id/anexos erro:', err);
+    return res.status(500).json({ error: 'Falha ao salvar anexo' });
+  }
+});
+
+app.delete('/api/rh/reservas/anexos/:anexoId', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const anexoId = Number(req.params?.anexoId);
+  if (!Number.isInteger(anexoId) || anexoId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const { rows } = await pool.query(`SELECT enviado_por FROM rh.reservas_anexos WHERE id = $1 LIMIT 1`, [anexoId]);
+    if (!rows.length) return res.status(404).json({ error: 'Anexo não encontrado' });
+    if (String(rows[0].enviado_por || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente quem enviou pode remover este anexo' });
+    }
+    await pool.query(`DELETE FROM rh.reservas_anexos WHERE id = $1`, [anexoId]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/rh/reservas/anexos/:anexoId erro:', err);
+    return res.status(500).json({ error: 'Falha ao remover anexo' });
+  }
+});
+
 app.get('/api/rh/lembretes', async (req, res) => {
   const identificadoresSessao = resolverIdentificadoresAuditoria(req);
   const userHint = String(req.query?.user || '').trim().toLowerCase();
@@ -3613,6 +3685,14 @@ app.post('/api/nav/sync', ensureLoggedIn, async (req, res) => {
       );
       ids.set(r.rows[0].key, r.rows[0].id);
     }
+
+    // 3) desativa nós que não vieram na lista (foram removidos do HTML)
+    const syncedKeys = nodes.map(n => n.key);
+    await pool.query(
+      `UPDATE public.nav_node SET active = FALSE
+        WHERE active = TRUE AND key != ALL($1::text[])`,
+      [syncedKeys]
+    );
 
     await pool.query('COMMIT');
     res.json({ ok: true, updated: ids.size });
@@ -6461,7 +6541,7 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
       SELECT
         TO_CHAR(ped.d_inc_data, 'MM/YYYY') AS ano_compra,
         MIN(ped.d_inc_data)                AS data_ord,
-        COALESCE(SUM(r.n_valor_nfe), 0)    AS total
+        COALESCE(SUM(i.v_total_item), 0)   AS total
       FROM logistica.recebimentos_nfe_omie r
       JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
       JOIN compras.pedidos_omie ped           ON ped.n_cod_ped = i.n_id_pedido
@@ -6473,7 +6553,7 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
 
     // Recebimentos SEM pedido vinculado (n_id_pedido nulo ou 0)
     const r2sem = await pool.query(`
-      SELECT COALESCE(SUM(r.n_valor_nfe), 0) AS total
+      SELECT COALESCE(SUM(i.v_total_item), 0) AS total
       FROM logistica.recebimentos_nfe_omie r
       LEFT JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
       WHERE ${whereRecebBase.join(' AND ')}
@@ -6632,6 +6712,7 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
     const rReceb = await pool.query(`
       SELECT
         p.c_numero,
+        p.c_cod_categ,
         r.n_id_receb,
         COALESCE(r.n_valor_nfe, 0)          AS n_valor_nfe,
         TO_CHAR(r.d_rec, 'YYYY-MM-DD')      AS d_rec,
@@ -6653,6 +6734,7 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
       if (!recebidosMap.has(key)) {
         recebidosMap.set(key, {
           c_numero:    row.c_numero,
+          c_cod_categ: row.c_cod_categ || null,
           n_valor_nfe: Number(row.n_valor_nfe),
           d_rec:       row.d_rec,
           itens:       []
@@ -6669,18 +6751,23 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
     }
     const recebidos = [...recebidosMap.values()];
 
-    // ── A receber: pedidos sem nenhum recebimento S + itens do pedido ─────
+    // ── A receber: pedidos sem nenhum recebimento S + itens da requisição ───
     const rPendente = await pool.query(`
       SELECT
         p.c_numero,
+        p.c_cod_categ,
         p.n_cod_ped,
-        COALESCE(p.n_valor, 0)              AS n_valor,
-        pp.c_produto                         AS c_codigo_produto,
-        COALESCE(pp.c_descricao, '')        AS c_descricao_produto,
-        COALESCE(pp.n_val_unit, 0)          AS n_preco_unit,
-        COALESCE(pp.n_qtde, 0)              AS n_qtde
+        COALESCE(p.n_valor, 0) AS n_valor,
+        COALESCE(
+          roi.cod_int_prod::text,
+          roi.cod_prod::text,
+          roi.cod_int_item::text,
+          roi.cod_item::text
+        ) AS c_codigo_produto,
+        COALESCE(roi.preco_unit, 0) AS n_preco_unit,
+        COALESCE(roi.qtde, 0) AS n_qtde
       FROM compras.pedidos_omie p
-      LEFT JOIN compras.pedidos_omie_produtos pp ON pp.n_cod_ped = p.n_cod_ped
+      LEFT JOIN compras.requisicoes_omie_itens roi ON roi.cod_req_compra::text = p.n_cod_ped::text
       WHERE ${wherePed.join(' AND ')}
         AND p.n_cod_ped NOT IN (
           SELECT DISTINCT i2.n_id_pedido
@@ -6688,7 +6775,7 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
           JOIN logistica.recebimentos_nfe_omie r2 ON r2.n_id_receb = i2.n_id_receb
           WHERE r2.c_recebido = 'S' AND i2.n_id_pedido IS NOT NULL
         )
-      ORDER BY p.c_numero, pp.id
+      ORDER BY p.c_numero, roi.cod_req_compra
     `, params);
 
     // Agrupa por pedido (n_cod_ped)
@@ -6698,16 +6785,16 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
       if (!aReceberMap.has(key)) {
         aReceberMap.set(key, {
           c_numero: row.c_numero,
+          c_cod_categ: row.c_cod_categ || null,
           n_valor:  Number(row.n_valor),
           itens:    []
         });
       }
       if (row.c_codigo_produto) {
         aReceberMap.get(key).itens.push({
-          c_codigo_produto:    row.c_codigo_produto,
-          c_descricao_produto: row.c_descricao_produto,
-          n_preco_unit:        Number(row.n_preco_unit),
-          n_qtde:              Number(row.n_qtde)
+          c_codigo_produto: row.c_codigo_produto,
+          n_preco_unit:     Number(row.n_preco_unit),
+          n_qtde:           Number(row.n_qtde)
         });
       }
     }
@@ -6717,6 +6804,54 @@ app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
   } catch (err) {
     console.error('[Compras/GraficoMesesDetalhe] Erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao carregar detalhe' });
+  }
+});
+
+// ========================================
+//  Endpoint: Itens do pedido Omie (A receber)
+// ========================================
+/**
+ * GET /api/compras/pedido-omie-itens
+ * Parâmetros:
+ *   cNumero - número do pedido Omie (cNumero)
+ * Retorna lista simplificada de itens do pedido.
+ */
+app.get('/api/compras/pedido-omie-itens', async (req, res) => {
+  try {
+    const { cNumero } = req.query;
+    if (!cNumero) return res.status(400).json({ ok: false, error: 'cNumero obrigatório' });
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ ok: false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes' });
+    }
+
+    const resp = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ConsultarPedCompra',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{ cNumero: String(cNumero) }]
+      })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok || data?.faultstring) {
+      return res.status(400).json({ ok: false, error: data?.faultstring || 'Falha ao consultar Omie' });
+    }
+
+    const itens = (data.produtos_consulta || []).map((it) => ({
+      c_produto: it.cProduto || '',
+      c_descricao: it.cDescricao || '',
+      n_qtde: Number(it.nQtde || 0),
+      c_unidade: it.cUnidade || '',
+      n_val_unit: Number(it.nValUnit || 0)
+    }));
+
+    return res.json({ ok: true, itens });
+  } catch (err) {
+    console.error('[Compras/PedidoOmieItens] Erro:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao consultar itens Omie' });
   }
 });
 
@@ -6864,7 +6999,7 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
  */
 app.get('/api/compras/grafico-categorias', async (req, res) => {
   try {
-    const { status, pai, dataInicio, dataFim } = req.query;
+    const { status, pai, dataInicio, dataFim, mesCompra } = req.query;
     if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
 
     const params = [];
@@ -6919,6 +7054,7 @@ app.get('/api/compras/grafico-categorias', async (req, res) => {
       ];
       if (dataInicio) { params.push(dataInicio); where.push(`p.d_inc_data >= $${params.length}::date`); }
       if (dataFim)    { params.push(dataFim);    where.push(`p.d_inc_data <= $${params.length}::date`); }
+      if (mesCompra)  { params.push(mesCompra);  where.push(`TO_CHAR(p.d_inc_data, 'MM/YYYY') = $${params.length}`); }
 
       if (pai) {
         // Drill-down: subcategorias do pai selecionado
