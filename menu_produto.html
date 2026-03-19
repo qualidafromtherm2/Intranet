@@ -598,53 +598,6 @@
                       </div>
                     </div>
 
-                    <!-- Tabela de detalhes: aparece ao clicar em uma barra -->
-                    <div id="graficoPizzaDetalheWrapper" style="display:none;margin-top:16px;border-top:2px solid #ede9fe;padding-top:14px;">
-                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                        <h5 id="graficoPizzaDetalheTitulo" style="margin:0;font-size:13px;font-weight:700;color:#374151;"></h5>
-                        <button onclick="document.getElementById('graficoPizzaDetalheWrapper').style.display='none'" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 10px;font-size:12px;color:#6b7280;cursor:pointer;">&times; Fechar</button>
-                      </div>
-                      <!-- Gráfico de pizza por categoria — visível ao clicar em qualquer barra -->
-                      <div id="graficoCategoriaSection" style="display:none;margin-bottom:20px;">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-                          <h5 style="margin:0;font-size:13px;font-weight:700;color:#10b981;">
-                            <i class="fa-solid fa-chart-pie" style="margin-right:6px;"></i>Distribuição por Categoria
-                          </h5>
-                          <!-- Breadcrumb de drill-down -->
-                          <span id="graficoCatBreadcrumb" style="display:none;font-size:11px;color:#6b7280;background:#f3f4f6;border-radius:20px;padding:2px 10px;"></span>
-                          <!-- Botão voltar (visível somente no 2º nível) -->
-                          <button id="graficoCatVoltar" onclick="window._graficoCatVoltar()" style="display:none;background:#ede9fe;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer;">
-                            <i class="fa-solid fa-arrow-left" style="margin-right:4px;"></i>Voltar
-                          </button>
-                        </div>
-                        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
-                          <div style="position:relative;flex:0 0 300px;max-width:300px;">
-                            <canvas id="graficoCategoriaCanvas" style="max-height:300px;"></canvas>
-                            <div id="graficoCategoriaLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#10b981;font-size:13px;">
-                              <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando...
-                            </div>
-                          </div>
-                          <div style="flex:1;min-width:200px;max-height:300px;overflow-y:auto;">
-                            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                              <tbody id="graficoCategoriaLegenda"></tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style="overflow-x:auto;border-radius:8px;border:1px solid #e5e7eb;">
-                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                          <thead>
-                            <tr style="background:#f5f3ff;">
-                              <th style="padding:8px 12px;text-align:left;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Itens</th>
-                              <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Valor</th>
-                              <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">%</th>
-                            </tr>
-                          </thead>
-                          <tbody id="graficoPizzaDetalheTbody"></tbody>
-                        </table>
-                      </div>
-                    </div>
 
                   </div>
 
@@ -662,6 +615,51 @@
                         <i class="fa-solid fa-chart-bar" style="font-size:32px;"></i>
                         <span style="font-size:13px;font-weight:600;">Nenhum dado encontrado</span>
                       </div>
+                    </div>
+                  </div>
+
+                  <!-- Tabela de detalhes: aparece ao clicar em barra de Período OU de Meses (independente do card) -->
+                  <div id="graficoPizzaDetalheWrapper" style="display:none;background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                      <h5 id="graficoPizzaDetalheTitulo" style="margin:0;font-size:13px;font-weight:700;color:#374151;"></h5>
+                      <button onclick="document.getElementById('graficoPizzaDetalheWrapper').style.display='none'" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 10px;font-size:12px;color:#6b7280;cursor:pointer;">&times; Fechar</button>
+                    </div>
+                    <!-- Gráfico de pizza por categoria — visível ao clicar em qualquer barra -->
+                    <div id="graficoCategoriaSection" style="display:none;margin-bottom:20px;">
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                        <h5 style="margin:0;font-size:13px;font-weight:700;color:#10b981;">
+                          <i class="fa-solid fa-chart-pie" style="margin-right:6px;"></i>Distribuição por Categoria
+                        </h5>
+                        <span id="graficoCatBreadcrumb" style="display:none;font-size:11px;color:#6b7280;background:#f3f4f6;border-radius:20px;padding:2px 10px;"></span>
+                        <button id="graficoCatVoltar" onclick="window._graficoCatVoltar()" style="display:none;background:#ede9fe;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer;">
+                          <i class="fa-solid fa-arrow-left" style="margin-right:4px;"></i>Voltar
+                        </button>
+                      </div>
+                      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+                        <div style="position:relative;flex:0 0 300px;max-width:300px;">
+                          <canvas id="graficoCategoriaCanvas" style="max-height:300px;"></canvas>
+                          <div id="graficoCategoriaLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#10b981;font-size:13px;">
+                            <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>Carregando...
+                          </div>
+                        </div>
+                        <div style="flex:1;min-width:200px;max-height:300px;overflow-y:auto;">
+                          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <tbody id="graficoCategoriaLegenda"></tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                    <div style="overflow-x:auto;border-radius:8px;border:1px solid #e5e7eb;">
+                      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                          <tr style="background:#f5f3ff;">
+                            <th style="padding:8px 12px;text-align:left;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Itens</th>
+                            <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">Valor</th>
+                            <th style="padding:8px 12px;text-align:right;font-weight:600;color:#7c3aed;border-bottom:2px solid #ede9fe;">%</th>
+                          </tr>
+                        </thead>
+                        <tbody id="graficoPizzaDetalheTbody"></tbody>
+                      </table>
                     </div>
                   </div>
 
@@ -2403,24 +2401,25 @@
                   <button id="agendaAbrirAtaBtn" type="button" class="content-button" style="display:none;">
                     <i class="fa-solid fa-file-lines" style="margin-right:5px;"></i>Ata
                   </button>
-                  <!-- Anexo — ao lado do botão Ata -->
-                  <div id="agendaGrupoAnexo" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                    <label style="cursor:pointer;margin:0;">
-                      <span class="content-button" style="padding:5px 11px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">
-                        <i class="fa-solid fa-paperclip"></i> Escolher arquivo
-                      </span>
-                      <input id="agendaAnexoInput" type="file" style="display:none;" />
-                    </label>
-                    <span id="agendaAnexoNome" style="font-size:12px;color:var(--inactive-color);">Nenhum arquivo</span>
-                    <a id="agendaAnexoLink" href="#" target="_blank" rel="noopener" style="display:none;font-size:12px;color:#60a5fa;">
-                      <i class="fa-solid fa-download"></i> Baixar anexo
-                    </a>
-                    <button id="agendaAnexoRemover" type="button" style="display:none;background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;padding:0;">
-                      <i class="fa-solid fa-xmark"></i>
-                    </button>
-                  </div>
                 </div>
                 <button id="agendaSalvarReserva" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">Reservar</button>
+              </div>
+
+              <!-- Seção de anexos — lista abaixo dos botões -->
+              <div id="agendaSecaoAnexos" style="margin-top:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:13px;font-weight:600;color:var(--content-title-color);">
+                    <i class="fa-solid fa-paperclip" style="margin-right:5px;"></i>Anexos
+                  </span>
+                  <label style="cursor:pointer;margin:0;">
+                    <span style="font-size:12px;color:#60a5fa;cursor:pointer;">
+                      <i class="fa-solid fa-plus"></i> Anexar arquivo
+                    </span>
+                    <input id="agendaAnexoInput" type="file" style="display:none;" />
+                  </label>
+                </div>
+                <div id="agendaAnexosLista" style="display:flex;flex-direction:column;gap:6px;"></div>
+                <span id="agendaAnexosVazio" style="font-size:12px;color:var(--inactive-color);font-style:italic;">Nenhum arquivo anexado</span>
               </div>
 
               <!-- Overlay de confirmação de exclusão -->

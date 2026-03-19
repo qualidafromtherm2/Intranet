@@ -487,115 +487,95 @@ const ensurePermStyles = (() => {
     const css = document.createElement('style');
     css.id = 'colabPermStyles';
     css.textContent = `
-      .colab-perm-modal{position:fixed;inset:0;padding:24px;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center}
-      .colab-perm-box{width:min(920px,95vw);max-height:88vh;overflow:auto;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 18px 60px rgba(0,0,0,.55);padding:18px 20px;display:flex;flex-direction:column}
-      .colab-perm-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-      .colab-perm-title{margin:0;font-size:18px;font-weight:600;flex:1;color:#f5f7ff}
-      .colab-perm-body{flex:1;overflow:auto;padding-right:4px}
-      .colab-perm-section{margin:18px 0 6px}
-      .colab-perm-section:first-child{margin-top:0}
-      .colab-perm-section-title{opacity:.8;font-weight:600;margin-bottom:10px;text-transform:uppercase;font-size:13px;letter-spacing:.04em}
-      .colab-perm-item{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;color:#dae0ff;transition:background .15s ease}
-      .colab-perm-item:hover{background:rgba(84,120,255,.12)}
-      .colab-perm-item[data-depth="0"]{font-weight:600}
-      .colab-perm-item input[type="checkbox"]{width:18px;height:18px;margin:0;flex:0 0 auto;appearance:auto;border-radius:4px;accent-color:#506dff}
+      /* ======= OVERLAY DO MODAL ======= */
+      .colab-perm-modal{position:fixed;inset:0;padding:24px;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+
+      /* ======= CAIXA PRINCIPAL ======= */
+      .colab-perm-box{width:min(780px,95vw);max-height:88vh;background:#161b26;border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
+
+      /* ======= CABEÇALHO ======= */
+      .colab-perm-head{display:flex;align-items:center;gap:12px;padding:20px 24px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
+      .colab-perm-title{margin:0;font-size:17px;font-weight:600;flex:1;color:#f5f7ff}
+      .colab-perm-title span{opacity:.6;font-weight:400}
+
+      /* ======= BARRA DE BUSCA ======= */
+      .colab-perm-search-wrap{padding:12px 24px 8px}
+      .colab-perm-search{width:100%;padding:9px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#e8ecff;font-size:14px;outline:none;transition:border-color .2s}
+      .colab-perm-search::placeholder{color:rgba(255,255,255,.3)}
+      .colab-perm-search:focus{border-color:rgba(80,109,255,.5)}
+
+      /* ======= CORPO SCROLLÁVEL ======= */
+      .colab-perm-body{flex:1;overflow-y:auto;padding:8px 24px 16px;scroll-behavior:smooth}
+      .colab-perm-body::-webkit-scrollbar{width:6px}
+      .colab-perm-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+
+      /* ======= GRUPO (seção: Menu lateral / Menu superior / Telas Produto) ======= */
+      .colab-perm-group{margin-bottom:20px}
+      .colab-perm-group:last-child{margin-bottom:0}
+      .colab-perm-group-header{display:flex;align-items:center;gap:8px;padding:8px 0 6px;cursor:default}
+      .colab-perm-group-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.45)}
+      .colab-perm-group-line{flex:1;height:1px;background:rgba(255,255,255,.06)}
+      .colab-perm-group-count{font-size:11px;color:rgba(255,255,255,.3);font-variant-numeric:tabular-nums}
+
+      /* ======= CATEGORIA (pai) ======= */
+      .colab-perm-cat{margin:4px 0 2px;border-radius:10px;background:rgba(255,255,255,.02);overflow:hidden;transition:background .15s}
+      .colab-perm-cat:hover{background:rgba(255,255,255,.035)}
+      .colab-perm-cat-head{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none}
+      .colab-perm-cat-head .perm-arrow{width:16px;height:16px;color:rgba(255,255,255,.35);transition:transform .2s;flex-shrink:0}
+      .colab-perm-cat.open .perm-arrow{transform:rotate(90deg)}
+
+      /* ======= ITEM (checkbox) ======= */
+      .colab-perm-item{display:flex;align-items:center;gap:10px;padding:7px 14px;border-radius:8px;color:#dae0ff;transition:background .12s;cursor:pointer;user-select:none}
+      .colab-perm-item:hover{background:rgba(80,109,255,.08)}
+      .colab-perm-item.is-parent{font-weight:600;color:#f0f2ff}
+      .colab-perm-item.is-child{padding-left:40px;font-size:14px;color:rgba(218,224,255,.85)}
+      .colab-perm-item input[type="checkbox"]{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:#506dff;cursor:pointer}
       .colab-perm-text{flex:1;line-height:1.35}
-      .colab-perm-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
-      .colab-perm-btn{padding:9px 18px;border-radius:999px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.08);color:#e8ecff;font-weight:600;cursor:pointer;transition:filter .15s ease,background .15s ease,border-color .15s ease}
+      .colab-perm-item.hidden-by-search{display:none}
+
+      /* ======= FILHOS OCULTOS (colapsado) ======= */
+      .colab-perm-children{overflow:hidden;max-height:0;transition:max-height .25s ease}
+      .colab-perm-cat.open .colab-perm-children{max-height:600px}
+
+      /* ======= RODAPÉ ======= */
+      .colab-perm-footer{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:14px 24px;border-top:1px solid rgba(255,255,255,.06)}
+      .colab-perm-footer-left{display:flex;gap:8px}
+      .colab-perm-footer-right{display:flex;gap:8px}
+
+      /* ======= BOTÕES ======= */
+      .colab-perm-btn{padding:9px 18px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#e8ecff;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+      .colab-perm-btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.18)}
+      .colab-perm-btn:focus-visible{outline:2px solid rgba(95,142,255,.7);outline-offset:2px}
       .colab-perm-btn.primary{background:#2f66ff;border-color:#2f66ff;color:#fff}
-      .colab-perm-btn:hover{filter:brightness(1.05)}
-      .colab-perm-btn:focus-visible{outline:2px solid rgba(95,142,255,.9);outline-offset:2px}
+      .colab-perm-btn.primary:hover{background:#3d73ff}
+      .colab-perm-btn.danger{background:rgba(255,80,80,.12);border-color:rgba(255,80,80,.2);color:#ff8080}
+      .colab-perm-btn.danger:hover{background:rgba(255,80,80,.18)}
+      .colab-perm-btn .btn-icon{font-size:15px;vertical-align:middle;margin-right:4px}
+      .colab-perm-btn.saving{pointer-events:none;opacity:.6}
+
+      /* ======= VAZIO / ERRO ======= */
+      .colab-perm-empty{padding:32px 16px;text-align:center;color:rgba(255,255,255,.35);font-size:14px}
+
+      /* ======= RESPONSIVO ======= */
       @media(max-width:640px){
-        .colab-perm-modal{padding:12px}
-        .colab-perm-box{padding:16px}
+        .colab-perm-modal{padding:10px}
+        .colab-perm-box{border-radius:12px}
+        .colab-perm-head,.colab-perm-body,.colab-perm-footer,.colab-perm-search-wrap{padding-left:14px;padding-right:14px}
+        .colab-perm-item.is-child{padding-left:28px}
       }
     `;
     document.head.appendChild(css);
   };
 })();
 
-function renderPermissoes(nodes, currentMap) {
-  // nodes: array vindo de /permissions/tree
-  // currentMap: Map(key => allowed) com estado atual permitido/negado
-  const byPos = { side: [], top: [] };
-  nodes.forEach(n => byPos[n.pos].push(n));
-
-  const wrap = document.createElement('div');
-  wrap.className = 'perm-wrap';
-
-  // CSS básico (somente uma vez)
-  if (!document.getElementById('permCss')) {
-    const css = document.createElement('style');
-    css.id='permCss';
-    css.textContent = `
-      .perm-modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center}
-      .perm-box{width:min(920px,95vw);max-height:85vh;overflow:auto;background:#1f232b;border-radius:12px;padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
-      .perm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-      .perm-body h3{margin:12px 0 6px;font-weight:600;opacity:.9}
-      .perm-item{display:flex;gap:8px;align-items:center;padding:2px 0}
-      .perm-item input[type="checkbox"]{transform:scale(1.05)}
-      .perm-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
-      .perm-lbl{opacity:.9}
-      hr{border:0;border-top:1px solid rgba(255,255,255,.08);margin:12px 0}
-    `;
-    document.head.appendChild(css);
-  }
-
-  ['side','top'].forEach(pos => {
-    const grupo = byPos[pos];
-    if (!grupo.length) return;
-
-    const header = document.createElement('h3');
-    header.textContent = (pos === 'side') ? 'Menu lateral' : 'Menu superior';
-    wrap.appendChild(header);
-
-    // organiza por pai -> filhos
-    const byParent = new Map(); // parent_id -> []
-    const roots = [];
-    grupo.forEach(n => {
-      if (n.parent_id) {
-        if (!byParent.has(n.parent_id)) byParent.set(n.parent_id, []);
-        byParent.get(n.parent_id).push(n);
-      } else {
-        roots.push(n);
-      }
-    });
-
-    const sortFn = (a,b) => (a.sort - b.sort) || (a.id - b.id);
-
-    function makeItem(n, depth=0) {
-      const line = document.createElement('div');
-      line.className = 'perm-item';
-      line.style.marginLeft = `${depth*16}px`;
-
-      const chk = document.createElement('input');
-      chk.type = 'checkbox';
-      chk.checked = !!currentMap.get(n.key);
-      chk.dataset.nodeId  = n.id;
-      chk.dataset.nodeKey = n.key;
-
-      const lbl = document.createElement('span');
-      lbl.className = 'perm-lbl';
-      lbl.textContent = n.label;
-
-      line.append(chk, lbl);
-      wrap.appendChild(line);
-
-      (byParent.get(n.id) || []).sort(sortFn).forEach(c => makeItem(c, depth+1));
-    }
-
-    roots.sort(sortFn).forEach(r => makeItem(r, 0));
-
-    wrap.appendChild(document.createElement('hr')); // divisória entre grupos
-  });
-
-  return wrap;
-}
+// ====== SVG Helper ======
+const ARROW_SVG = `<svg class="perm-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 4l4 4-4 4"/></svg>`;
 
 // ====== Permissões: abre rápido e sincroniza em paralelo ======
 async function showPermissoes(userId, username) {
   ensurePermStyles();
-  // 1) Abre o modal imediatamente (skeleton)
+
+  // 1) Cria ou reutiliza o container do modal
   if (!window.__permModalEl) {
     window.__permModalEl = document.createElement('div');
     window.__permModalEl.className = 'colab-perm-modal';
@@ -605,50 +585,61 @@ async function showPermissoes(userId, username) {
   $.innerHTML = `
     <div class="colab-perm-box" role="dialog" aria-modal="true">
       <div class="colab-perm-head">
-        <h3 class="colab-perm-title">Permissões de <span style="opacity:.7;font-weight:500">${username}</span></h3>
-        <button id="permClose" class="colab-perm-btn">Fechar</button>
+        <h3 class="colab-perm-title">Permissões de <span>${username}</span></h3>
+        <button id="permClose" class="colab-perm-btn">✕ Fechar</button>
+      </div>
+      <div class="colab-perm-search-wrap">
+        <input id="permSearch" class="colab-perm-search" type="text" placeholder="Buscar permissão…" autocomplete="off">
       </div>
       <div id="permBody" class="colab-perm-body">
-        <div style="padding:24px 8px;opacity:.7;text-align:center">Carregando permissões…</div>
+        <div class="colab-perm-empty">Carregando permissões…</div>
       </div>
       <div class="colab-perm-footer">
-        <button id="permToggleTodos" class="colab-perm-btn" style="margin-right:auto;">Desmarcar Todos</button>
-        <button id="permSalvar" class="colab-perm-btn primary">Salvar alterações</button>
+        <div class="colab-perm-footer-left">
+          <button id="permMarcarTodos" class="colab-perm-btn"><span class="btn-icon">☑</span> Marcar Todos</button>
+          <button id="permDesmarcarTodos" class="colab-perm-btn danger"><span class="btn-icon">☐</span> Desmarcar Todos</button>
+        </div>
+        <div class="colab-perm-footer-right">
+          <button id="permSalvar" class="colab-perm-btn primary"><span class="btn-icon">💾</span> Salvar alterações</button>
+        </div>
       </div>
     </div>`;
   $.style.display = 'flex';
 
+  // Fechar ao clicar fora ou no botão
   $.onclick = ev => { if (ev.target === $) $.style.display = 'none'; };
-
-  const btnFechar = $.querySelector('#permClose');
-  btnFechar.onclick = () => ($.style.display='none');
+  $.querySelector('#permClose').onclick = () => ($.style.display = 'none');
 
   const body = $.querySelector('#permBody');
 
-  // 2) Dispara a sync em paralelo (NÃO aguarda)
+  // 2) Sync em paralelo (não aguarda)
   try { window.maybeSyncNavNodes?.(); } catch {}
 
-  // 3) Busca a árvore de permissões imediatamente
+  // 3) Busca a árvore de permissões
   let tree;
   try {
-    const r = await fetch(`/api/users/${userId}/permissions/tree`, { credentials:'include' });
-    if (!r.ok) throw new Error('HTTP '+r.status);
+    const r = await fetch(`/api/users/${userId}/permissions/tree`, { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     tree = await r.json();
   } catch (e) {
-    body.innerHTML = `<div style="color:#f66">Falha ao carregar permissões (${e.message||e}).</div>`;
+    body.innerHTML = `<div class="colab-perm-empty" style="color:#f66">Falha ao carregar permissões (${e.message || e}).</div>`;
     return;
   }
 
-  // 4) Render bonitinho: “Menu lateral” / “Menu superior” com divisórias
-  const byPos = { side: [], top: [] };
-  for (const n of (tree.nodes || [])) byPos[n.pos]?.push(n);
+  // 4) Organiza nós por posição
+  const posLabels = { side: 'Menu lateral', top: 'Menu superior' };
+  const byPos = {};
+  for (const n of (tree.nodes || [])) {
+    const pos = n.pos || 'side';
+    if (!byPos[pos]) byPos[pos] = [];
+    byPos[pos].push(n);
+  }
 
-  function buildTree(arr){
+  // Monta árvore: pai → filhos
+  function buildTree(arr) {
     const map = new Map();
     const roots = [];
-    arr.forEach(item => {
-      map.set(item.id, { ...item, children: [] });
-    });
+    arr.forEach(item => map.set(item.id, { ...item, children: [] }));
     map.forEach(node => {
       if (node.parent_id && map.has(node.parent_id)) {
         map.get(node.parent_id).children.push(node);
@@ -656,101 +647,216 @@ async function showPermissoes(userId, username) {
         roots.push(node);
       }
     });
-    const sortFn = (a,b)=> ((a.sort ?? 0) - (b.sort ?? 0)) || (a.label||'').localeCompare(b.label||'', 'pt');
-    const sortTree = nodes => {
-      nodes.sort(sortFn);
-      nodes.forEach(n => sortTree(n.children));
-    };
+    const sortFn = (a, b) => ((a.sort ?? 0) - (b.sort ?? 0)) || (a.label || '').localeCompare(b.label || '', 'pt');
+    const sortTree = nodes => { nodes.sort(sortFn); nodes.forEach(n => sortTree(n.children)); };
     sortTree(roots);
     return roots;
   }
 
-  function renderSection(title, nodes){
-    if (!nodes.length) return;
-    const section = document.createElement('section');
-    section.className = 'colab-perm-section';
-    const header = document.createElement('div');
-    header.className = 'colab-perm-section-title';
-    header.textContent = title;
-    section.appendChild(header);
-
-    const renderNode = (node, depth=0) => {
-      const row = document.createElement('label');
-      row.className = 'colab-perm-item';
-      row.dataset.depth = String(depth);
-      if (depth > 0) row.style.marginLeft = `${depth * 16}px`;
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.className = 'perm-cb';
-      cb.dataset.node = String(node.id);
-      cb.checked = !!node.allowed;
-
-      const span = document.createElement('span');
-      span.className = 'colab-perm-text';
-      span.textContent = node.label;
-
-      row.append(cb, span);
-      section.appendChild(row);
-      node.children.forEach(child => renderNode(child, depth + 1));
-    };
-
-    nodes.forEach(n => renderNode(n, 0));
-    body.appendChild(section);
-  }
-
+  // 5) Renderiza cada grupo de posição
   body.innerHTML = '';
-  renderSection('Menu lateral', buildTree(byPos.side));
-  renderSection('Menu superior', buildTree(byPos.top));
+  const allCheckboxes = [];
 
-  // 5) Botão Marcar/Desmarcar Todos
-  const btnToggleTodos = $.querySelector('#permToggleTodos');
-  let todosEstaoMarcados = true; // Estado inicial: assume que há checkboxes marcados
-  
-  // Atualiza o texto do botão baseado no estado atual dos checkboxes
-  function atualizarTextoBotao() {
-    const cbs = $.querySelectorAll('.perm-cb');
-    const marcados = Array.from(cbs).filter(cb => cb.checked).length;
-    todosEstaoMarcados = marcados > 0;
-    btnToggleTodos.textContent = todosEstaoMarcados ? 'Desmarcar Todos' : 'Marcar Todos';
+  const posOrder = ['side', 'top'];
+  for (const pos of posOrder) {
+    const nodes = byPos[pos];
+    if (!nodes || !nodes.length) continue;
+
+    const groupEl = document.createElement('div');
+    groupEl.className = 'colab-perm-group';
+
+    const totalCount = nodes.length;
+    const header = document.createElement('div');
+    header.className = 'colab-perm-group-header';
+    header.innerHTML = `
+      <span class="colab-perm-group-label">${posLabels[pos] || pos}</span>
+      <div class="colab-perm-group-line"></div>
+      <span class="colab-perm-group-count">${totalCount} itens</span>
+    `;
+    groupEl.appendChild(header);
+
+    const roots = buildTree(nodes);
+
+    for (const root of roots) {
+      const hasChildren = root.children.length > 0;
+
+      if (hasChildren) {
+        const cat = document.createElement('div');
+        cat.className = 'colab-perm-cat open';
+
+        const catHead = document.createElement('div');
+        catHead.className = 'colab-perm-cat-head';
+
+        const parentLabel = document.createElement('label');
+        parentLabel.className = 'colab-perm-item is-parent';
+        parentLabel.style.padding = '0';
+        parentLabel.style.flex = '1';
+
+        const parentCb = document.createElement('input');
+        parentCb.type = 'checkbox';
+        parentCb.className = 'perm-cb';
+        parentCb.dataset.node = String(root.id);
+        parentCb.checked = !!root.allowed;
+        allCheckboxes.push(parentCb);
+
+        const parentSpan = document.createElement('span');
+        parentSpan.className = 'colab-perm-text';
+        parentSpan.textContent = root.label;
+
+        parentLabel.append(parentCb, parentSpan);
+        catHead.innerHTML = ARROW_SVG;
+        catHead.appendChild(parentLabel);
+        cat.appendChild(catHead);
+
+        const childrenEl = document.createElement('div');
+        childrenEl.className = 'colab-perm-children';
+
+        const childCbs = [];
+        for (const child of root.children) {
+          const childLabel = document.createElement('label');
+          childLabel.className = 'colab-perm-item is-child';
+
+          const childCb = document.createElement('input');
+          childCb.type = 'checkbox';
+          childCb.className = 'perm-cb';
+          childCb.dataset.node = String(child.id);
+          childCb.checked = !!child.allowed;
+          allCheckboxes.push(childCb);
+          childCbs.push(childCb);
+
+          const childSpan = document.createElement('span');
+          childSpan.className = 'colab-perm-text';
+          childSpan.textContent = child.label;
+
+          childLabel.append(childCb, childSpan);
+          childrenEl.appendChild(childLabel);
+        }
+
+        cat.appendChild(childrenEl);
+        groupEl.appendChild(cat);
+
+        // Toggle expandir/colapsar ao clicar na seta
+        catHead.querySelector('.perm-arrow').addEventListener('click', (e) => {
+          e.stopPropagation();
+          cat.classList.toggle('open');
+        });
+
+        // Checkbox pai: marcar/desmarcar todos os filhos
+        parentCb.addEventListener('change', () => {
+          childCbs.forEach(cb => { cb.checked = parentCb.checked; });
+          atualizarContadores();
+        });
+
+        // Checkbox filho: atualiza estado do pai (indeterminate)
+        childCbs.forEach(cb => {
+          cb.addEventListener('change', () => {
+            const marcados = childCbs.filter(c => c.checked).length;
+            parentCb.checked = marcados > 0;
+            parentCb.indeterminate = marcados > 0 && marcados < childCbs.length;
+            atualizarContadores();
+          });
+        });
+
+        // Estado indeterminate inicial
+        const marcadosInit = childCbs.filter(c => c.checked).length;
+        if (marcadosInit > 0 && marcadosInit < childCbs.length) {
+          parentCb.indeterminate = true;
+        }
+
+      } else {
+        const itemLabel = document.createElement('label');
+        itemLabel.className = 'colab-perm-item is-parent';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'perm-cb';
+        cb.dataset.node = String(root.id);
+        cb.checked = !!root.allowed;
+        allCheckboxes.push(cb);
+
+        const span = document.createElement('span');
+        span.className = 'colab-perm-text';
+        span.textContent = root.label;
+
+        itemLabel.append(cb, span);
+        groupEl.appendChild(itemLabel);
+        cb.addEventListener('change', () => atualizarContadores());
+      }
+    }
+
+    body.appendChild(groupEl);
   }
-  
-  // Handler do botão toggle
-  btnToggleTodos.onclick = () => {
-    const cbs = $.querySelectorAll('.perm-cb');
-    // Se tem pelo menos um marcado, desmarca tudo; senão marca tudo
-    const deveTodosEstarMarcados = !todosEstaoMarcados;
-    cbs.forEach(cb => { cb.checked = deveTodosEstarMarcados; });
-    atualizarTextoBotao();
-  };
-  
-  // Atualiza o texto do botão ao carregar
-  atualizarTextoBotao();
-  
-  // Monitora mudanças individuais nos checkboxes para atualizar o texto do botão
-  $.querySelectorAll('.perm-cb').forEach(cb => {
-    cb.addEventListener('change', () => atualizarTextoBotao());
+
+  // 6) Contadores
+  function atualizarContadores() {
+    body.querySelectorAll('.colab-perm-group').forEach(group => {
+      const cbs = group.querySelectorAll('.perm-cb');
+      const marcados = Array.from(cbs).filter(c => c.checked).length;
+      const countEl = group.querySelector('.colab-perm-group-count');
+      if (countEl) countEl.textContent = `${marcados}/${cbs.length} ativos`;
+    });
+  }
+  atualizarContadores();
+
+  // 7) Busca em tempo real
+  const searchInput = $.querySelector('#permSearch');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    body.querySelectorAll('.colab-perm-cat').forEach(cat => {
+      const items = cat.querySelectorAll('.colab-perm-item');
+      let hasVisible = false;
+      items.forEach(item => {
+        const text = item.querySelector('.colab-perm-text')?.textContent?.toLowerCase() || '';
+        const match = !q || text.includes(q);
+        item.classList.toggle('hidden-by-search', !match);
+        if (match) hasVisible = true;
+      });
+      cat.style.display = hasVisible ? '' : 'none';
+      if (q && hasVisible) cat.classList.add('open');
+    });
+    body.querySelectorAll('.colab-perm-group > .colab-perm-item').forEach(item => {
+      const text = item.querySelector('.colab-perm-text')?.textContent?.toLowerCase() || '';
+      item.classList.toggle('hidden-by-search', q && !text.includes(q));
+    });
   });
 
-  // 6) Salvar
+  // 8) Marcar Todos / Desmarcar Todos
+  $.querySelector('#permMarcarTodos').onclick = () => {
+    allCheckboxes.forEach(cb => { cb.checked = true; cb.indeterminate = false; });
+    atualizarContadores();
+  };
+  $.querySelector('#permDesmarcarTodos').onclick = () => {
+    allCheckboxes.forEach(cb => { cb.checked = false; cb.indeterminate = false; });
+    atualizarContadores();
+  };
+
+  // 9) Salvar
   $.querySelector('#permSalvar').onclick = async () => {
-    const cbs = $.querySelectorAll('.perm-cb');
-    const overrides = [];
-    cbs.forEach(cb => overrides.push({ node_id: Number(cb.dataset.node), allow: cb.checked }));
-    const r = await fetch(`/api/users/${userId}/permissions/override`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'include',
-      body: JSON.stringify({ overrides })
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(()=>({}));
-      alert('Falha ao salvar: ' + (err.error||r.status));
-      return;
+    const btn = $.querySelector('#permSalvar');
+    btn.classList.add('saving');
+    btn.textContent = 'Salvando…';
+    const overrides = allCheckboxes.map(cb => ({ node_id: Number(cb.dataset.node), allow: cb.checked }));
+    try {
+      const r = await fetch(`/api/users/${userId}/permissions/override`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ overrides })
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        alert('Falha ao salvar: ' + (err.error || r.status));
+        return;
+      }
+      alert('Permissões salvas com sucesso!');
+      window.__navSync.last = 0;
+      window.syncNavNodes?.(true);
+      window.dispatchEvent(new Event('auth:changed'));
+    } catch (e) {
+      alert('Erro ao salvar: ' + (e.message || e));
+    } finally {
+      btn.classList.remove('saving');
+      btn.innerHTML = '<span class="btn-icon">💾</span> Salvar alterações';
     }
-    alert('Permissões salvas.');
-    window.__navSync.last = 0;          // força próxima sync a enviar estado novo
-    window.syncNavNodes?.(true);        // dispara uma sync forçada em background
-    window.dispatchEvent(new Event('auth:changed')); // reavalia visibilidade
   };
 }
