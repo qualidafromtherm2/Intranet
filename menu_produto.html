@@ -547,6 +547,15 @@
                       <i class="fa-solid fa-chart-line" style="color:#fff;font-size:16px;"></i>
                     </div>
                     <h3 style="margin:0;font-size:15px;font-weight:700;color:#111827;">Gráficos de Compras</h3>
+                    <!-- Botão alternador entre os dois gráficos -->
+                    <div style="display:flex;align-items:center;background:#f3f4f6;border-radius:20px;padding:3px;gap:2px;margin-left:6px;">
+                      <button id="btnGraficoPeriodo" onclick="alternarGrafico('periodo')"
+                        style="padding:5px 13px;border:none;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;transition:all 0.2s;"
+                        title="Realizado x Recebido por período">Período</button>
+                      <button id="btnGraficoMeses" onclick="alternarGrafico('meses')"
+                        style="padding:5px 13px;border:none;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;background:transparent;color:#6b7280;transition:all 0.2s;"
+                        title="Realizado x Recebido por meses">Meses</button>
+                    </div>
                   </div>
                   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                     <div style="display:flex;align-items:center;gap:6px;">
@@ -574,7 +583,7 @@
                 <div style="display:flex;flex-direction:column;gap:12px;">
 
                   <!-- Gráfico de Barras: por Departamento ou Centro de Custo -->
-                  <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+                  <div id="graficoPizzaCard" style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
                     <div style="display:flex;align-items:center;margin-bottom:14px;">
                       <h4 style="margin:0;font-size:14px;font-weight:700;color:#7c3aed;"><i class="fa-solid fa-chart-bar" style="margin-right:6px;"></i>Compras por Status</h4>
                     </div>
@@ -638,6 +647,24 @@
                     </div>
 
                   </div>
+
+                  <!-- Gráfico de Meses: Realizado x Recebido por mês (alternativo) -->
+                  <div id="graficoMesesWrapper" style="display:none;background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+                    <div style="display:flex;align-items:center;margin-bottom:14px;">
+                      <h4 style="margin:0;font-size:14px;font-weight:700;color:#7c3aed;"><i class="fa-solid fa-chart-bar" style="margin-right:6px;"></i>Realizado x Recebido — por Mês</h4>
+                    </div>
+                    <div style="position:relative;height:320px;">
+                      <canvas id="graficoMesesCanvas" style="cursor:pointer;"></canvas>
+                      <div id="graficoMesesLoading" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.85);align-items:center;justify-content:center;border-radius:8px;font-weight:600;color:#7c3aed;font-size:14px;">
+                        <i class="fa-solid fa-spinner fa-spin" style="margin-right:7px;"></i>Carregando...
+                      </div>
+                      <div id="graficoMesesVazio" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#9ca3af;">
+                        <i class="fa-solid fa-chart-bar" style="font-size:32px;"></i>
+                        <span style="font-size:13px;font-weight:600;">Nenhum dado encontrado</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style="background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
                     <h4 style="margin:0 0 14px 0;font-size:14px;font-weight:700;color:#0284c7;"><i class="fa-solid fa-chart-line" style="margin-right:6px;"></i>Valor por Data</h4>
                     <div id="graficoHistoricoWrapper" style="position:relative;height:260px;">
@@ -2109,6 +2136,13 @@
                     <span style="font-size:12px;">Somente minhas</span>
                   </button>
 
+                  <!-- Filtro por usuário -->
+                  <div style="margin-top:8px;">
+                    <select id="agendaFiltroUsuario" style="width:100%;padding:7px 8px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);font-size:12px;">
+                      <option value="">Filtrar por usuário...</option>
+                    </select>
+                  </div>
+
                   <!-- Navegador de mês -->
                   <div class="agenda-sidebar-nav">
                     <button id="agendaMesAnterior" class="content-button" type="button" style="padding:6px 10px;">
@@ -2143,6 +2177,18 @@
                       <i class="fa-solid fa-calendar-check" style="color:#34d399;"></i>
                       Você é participante
                     </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-laptop" style="color:#93c5fd;"></i>
+                      Reunião online
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-building" style="color:#fb923c;"></i>
+                      Visita
+                    </div>
+                    <div class="agenda-legenda-item">
+                      <i class="fa-solid fa-champagne-glasses" style="color:#f472b6;"></i>
+                      Evento
+                    </div>
                   </div>
 
                 </div>
@@ -2152,96 +2198,227 @@
           </div>
         </div>
 
-        <!-- Modal de Reserva do Calendário -->
+        <!-- Modal de Reserva do Calendário — modal unificado com seletor de tipo -->
         <div id="agendaReservaModal" class="agenda-modal-overlay" style="display:none;">
           <div class="agenda-modal-card">
             <button id="agendaFecharModal" type="button" class="agenda-modal-close" aria-label="Fechar">×</button>
             <h3 id="agendaModalTitulo" style="margin:0 0 14px 0;color:var(--content-title-color);font-size:18px;">Reserva</h3>
 
-            <div id="agendaEtapaTipo" class="agenda-modal-etapa">
-              <div style="font-size:13px;color:var(--inactive-color);margin-bottom:10px;">Escolha o tipo de reserva:</div>
-              <div style="display:grid;gap:10px;">
-                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="auditorio">
-                  <i class="fa-solid fa-chalkboard-user agenda-opcao-btn-icon"></i>
-                  Reservar auditório
-                </button>
-                <button type="button" class="agenda-opcao-btn" data-tipo-reserva="sala_reuniao">
-                  <i class="fa-solid fa-handshake agenda-opcao-btn-icon"></i>
-                  Reservar sala de reunião
-                </button>
-                <button type="button" class="agenda-opcao-btn" id="agendaAbrirLembreteBtn">
-                  <i class="fa-solid fa-note-sticky agenda-opcao-btn-icon"></i>
-                  Lembrete
-                </button>
-              </div>
-            </div>
+            <!-- select oculto mantido para compatibilidade com JS -->
+            <select id="agendaTipoSelect" style="display:none;">
+              <option value="auditorio">Reservar auditório</option>
+              <option value="sala_reuniao">Reservar sala de reunião</option>
+              <option value="reuniao_online">Reunião online</option>
+              <option value="visita">Visita</option>
+              <option value="evento">Evento</option>
+              <option value="lembrete">Lembrete</option>
+            </select>
 
-            <div id="agendaEtapaFormulario" class="agenda-modal-etapa" style="display:none;">
+            <div id="agendaEtapaFormulario">
               <div class="agenda-form-grid">
-                <label>
-                  <span>Tema da reunião</span>
-                  <input id="agendaTemaReuniao" type="text" placeholder="Digite o tema" />
-                </label>
 
-                <label>
-                  <span>Repetir reunião?</span>
-                  <select id="agendaRepetirReuniao">
-                    <option value="nao">Não</option>
-                    <option value="sim">Sim</option>
-                  </select>
-                </label>
+                <!-- Linha 1: Tipo | Tema — duas colunas -->
+                <div style="grid-column:1/-1;display:grid;grid-template-columns:minmax(160px,220px) 1fr;gap:12px;align-items:end;">
 
-                <div id="agendaSemanaRepeticao" style="display:none;grid-column:1/-1;">
-                  <span style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Dias da semana:</span>
-                  <div class="agenda-weekdays-checks">
-                    <label><input type="checkbox" value="seg" /> Seg</label>
-                    <label><input type="checkbox" value="ter" /> Ter</label>
-                    <label><input type="checkbox" value="qua" /> Qua</label>
-                    <label><input type="checkbox" value="qui" /> Qui</label>
-                    <label><input type="checkbox" value="sex" /> Sex</label>
-                    <label><input type="checkbox" value="sab" /> Sáb</label>
-                    <label><input type="checkbox" value="dom" /> Dom</label>
+                  <!-- Tipo de reserva (col 1) -->
+                  <div>
+                    <span style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Tipo de reserva</span>
+                    <div class="agenda-tipo-picker" id="agendaTipoPicker">
+                      <button type="button" class="agenda-tipo-trigger" id="agendaTipoTrigger">
+                        <i class="fa-solid fa-chalkboard-user" id="agendaTipoTriggerIcon" style="color:#a78bfa;"></i>
+                        <span id="agendaTipoTriggerLabel">Reservar auditório</span>
+                        <i class="fa-solid fa-chevron-down" style="margin-left:auto;font-size:11px;opacity:.55;"></i>
+                      </button>
+                      <div class="agenda-tipo-dropdown" id="agendaTipoDropdown">
+                        <button type="button" class="agenda-tipo-option is-selected" data-tipo-val="auditorio">
+                          <i class="fa-solid fa-chalkboard-user" style="color:#a78bfa;"></i> Reservar auditório
+                        </button>
+                        <button type="button" class="agenda-tipo-option" data-tipo-val="sala_reuniao">
+                          <i class="fa-solid fa-handshake" style="color:#6ee7b7;"></i> Reservar sala de reunião
+                        </button>
+                        <button type="button" class="agenda-tipo-option" data-tipo-val="reuniao_online">
+                          <i class="fa-solid fa-laptop" style="color:#93c5fd;"></i> Reunião online
+                        </button>
+                        <button type="button" class="agenda-tipo-option" data-tipo-val="visita">
+                          <i class="fa-solid fa-building" style="color:#fb923c;"></i> Visita
+                        </button>
+                        <button type="button" class="agenda-tipo-option" data-tipo-val="evento">
+                          <i class="fa-solid fa-champagne-glasses" style="color:#f472b6;"></i> Evento
+                        </button>
+                        <button type="button" class="agenda-tipo-option" data-tipo-val="lembrete">
+                          <i class="fa-solid fa-note-sticky" style="color:#fde68a;"></i> Lembrete
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div style="margin-top:8px;">
+
+                  <!-- Tema (col 2) — oculto para Lembrete -->
+                  <div id="agendaGrupoTema">
+                    <label>
+                      <span>Tema</span>
+                      <input id="agendaTemaReuniao" type="text" placeholder="Digite o tema" />
+                    </label>
+                  </div>
+
+                </div>
+
+                <!-- Linha 2: Horário início | Duração em horas | Repetir? — três colunas -->
+                <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:end;">
+
+                  <!-- Horário início (col 1) — oculto para Lembrete -->
+                  <div id="agendaGrupoHorarios">
+                    <label>
+                      <span>Horário início</span>
+                      <input id="agendaHorarioInicio" type="time" />
+                    </label>
+                  </div>
+
+                  <!-- Duração em horas (col 2) — oculto para Lembrete -->
+                  <div id="agendaGrupoDuracao">
+                    <label>
+                      <span>Duração em horas</span>
+                      <select id="agendaDuracaoHoras">
+                        <option value="">-- horas --</option>
+                        <option value="1">1 hora</option>
+                        <option value="2">2 horas</option>
+                        <option value="3">3 horas</option>
+                        <option value="4">4 horas</option>
+                        <option value="5">5 horas</option>
+                        <option value="6">6 horas</option>
+                        <option value="7">7 horas</option>
+                        <option value="8">8 horas</option>
+                        <option value="9">9 horas</option>
+                        <option value="10">10 horas</option>
+                      </select>
+                    </label>
+                    <!-- Hora fim calculada automaticamente — usada internamente -->
+                    <input id="agendaHorarioFim" type="time" style="display:none;" />
+                  </div>
+
+                  <!-- Repetir? (col 3) -->
+                  <div id="agendaGrupoRepetirCol">
+                    <label>
+                      <span>Repetir?</span>
+                      <select id="agendaRepetirReuniao">
+                        <option value="nao">Não</option>
+                        <option value="sim">Sim</option>
+                      </select>
+                    </label>
+                  </div>
+
+                </div>
+
+                <!-- Dias da semana — exibido quando Repetir = Sim -->
+                <div id="agendaGrupoRepetir" style="grid-column:1/-1;display:none;">
+                  <div id="agendaSemanaRepeticao">
+                    <span style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Dias da semana:</span>
+                    <div class="agenda-weekdays-checks">
+                      <label><input type="checkbox" value="seg" /> Seg</label>
+                      <label><input type="checkbox" value="ter" /> Ter</label>
+                      <label><input type="checkbox" value="qua" /> Qua</label>
+                      <label><input type="checkbox" value="qui" /> Qui</label>
+                      <label><input type="checkbox" value="sex" /> Sex</label>
+                      <label><input type="checkbox" value="sab" /> Sáb</label>
+                      <label><input type="checkbox" value="dom" /> Dom</label>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Repetir todos os meses + Café — mesma linha -->
+                <div style="grid-column:1/-1;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+                  <div id="agendaGrupoRepetirMeses" style="display:none;">
                     <label class="agenda-cafe-check">
                       <span>Repetir todos os meses</span>
                       <input id="agendaRepetirTodosMeses" type="checkbox" />
                     </label>
                   </div>
+                  <!-- Café — apenas Auditório e Sala de reunião -->
+                  <div id="agendaGrupoCafe">
+                    <label class="agenda-cafe-check">
+                      <span>Necessário café para a reunião</span>
+                      <input id="agendaCafeCheckbox" type="checkbox" />
+                    </label>
+                  </div>
                 </div>
 
-                <label>
-                  <span>Horário início</span>
-                  <input id="agendaHorarioInicio" type="time" />
-                </label>
-
-                <label>
-                  <span>Horário fim</span>
-                  <input id="agendaHorarioFim" type="time" />
-                </label>
-
-                <label class="agenda-cafe-check">
-                  <span>Café</span>
-                  <input id="agendaCafeCheckbox" type="checkbox" />
-                </label>
-
-                <label style="grid-column:1/-1;">
-                  <span>Participantes</span>
-                  <select id="agendaParticipantesSelect" size="1"></select>
-                </label>
-
-                <div style="grid-column:1/-1;">
-                  <span style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Selecionados:</span>
-                  <div id="agendaParticipantesSelecionados" class="agenda-participantes-selecionados"></div>
+                <!-- Link da reunião — apenas Reunião online -->
+                <div id="agendaGrupoLink" style="display:none;grid-column:1/-1;">
+                  <label>
+                    <span>Link da reunião</span>
+                    <input id="agendaLinkReuniao" type="url" placeholder="https://meet.google.com/..." style="width:100%;" />
+                  </label>
                 </div>
+
+                <!-- Visitantes — apenas Visita -->
+                <div id="agendaGrupoVisitantes" style="display:none;grid-column:1/-1;">
+                  <label>
+                    <span>Nomes dos visitantes</span>
+                    <textarea id="agendaVisitantesTexto" rows="3" placeholder="Digite os nomes dos visitantes" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;"></textarea>
+                  </label>
+                </div>
+
+                <!-- Descrição — apenas Evento -->
+                <div id="agendaGrupoDescricao" style="display:none;grid-column:1/-1;">
+                  <label>
+                    <span>Descrição do evento</span>
+                    <textarea id="agendaDescricaoEvento" rows="3" placeholder="Descreva o evento" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;"></textarea>
+                  </label>
+                </div>
+
+                <!-- Participantes — oculto para Lembrete -->
+                <div id="agendaGrupoParticipantes" style="grid-column:1/-1;display:grid;gap:8px;">
+                  <label>
+                    <span>Participantes</span>
+                    <select id="agendaParticipantesSelect" size="1"></select>
+                  </label>
+                  <div>
+                    <span style="display:block;margin-bottom:5px;font-size:12px;color:var(--inactive-color);">Selecionados:</span>
+                    <div id="agendaParticipantesSelecionados" class="agenda-participantes-selecionados"></div>
+                  </div>
+                </div>
+
+                <!-- Campos de Lembrete — apenas quando tipo = lembrete -->
+                <div id="agendaGrupoLembrete" style="display:none;grid-column:1/-1;">
+                  <label style="display:block;margin-bottom:10px;">
+                    <span style="display:block;margin-bottom:4px;font-size:12px;color:var(--inactive-color);">Bloco de notas</span>
+                    <textarea id="agendaUnifLembreteTexto" rows="5" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;"></textarea>
+                  </label>
+                  <label style="display:block;margin-bottom:6px;">
+                    <span style="display:block;margin-bottom:4px;font-size:12px;color:var(--inactive-color);">Compartilhar com usuários</span>
+                    <select id="agendaUnifLembreteSelect" size="1" style="width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);font-size:13px;"></select>
+                  </label>
+                  <div>
+                    <span style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">Selecionados:</span>
+                    <div id="agendaUnifLembreteDestinatarios" class="agenda-participantes-selecionados"></div>
+                  </div>
+                </div>
+
               </div>
 
-              <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;">
-                <div style="display:flex;gap:8px;">
-                  <button id="agendaVoltarTipo" type="button" class="content-button">Voltar</button>
+              <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;align-items:center;">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                   <button id="agendaExcluirReserva" type="button" class="content-button" style="display:none;background:rgba(220,38,38,.15);border:1px solid rgba(220,38,38,.45);color:#fca5a5;">
                     <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Excluir
                   </button>
+                  <button id="agendaAbrirAtaBtn" type="button" class="content-button" style="display:none;">
+                    <i class="fa-solid fa-file-lines" style="margin-right:5px;"></i>Ata
+                  </button>
+                  <!-- Anexo — ao lado do botão Ata -->
+                  <div id="agendaGrupoAnexo" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <label style="cursor:pointer;margin:0;">
+                      <span class="content-button" style="padding:5px 11px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">
+                        <i class="fa-solid fa-paperclip"></i> Escolher arquivo
+                      </span>
+                      <input id="agendaAnexoInput" type="file" style="display:none;" />
+                    </label>
+                    <span id="agendaAnexoNome" style="font-size:12px;color:var(--inactive-color);">Nenhum arquivo</span>
+                    <a id="agendaAnexoLink" href="#" target="_blank" rel="noopener" style="display:none;font-size:12px;color:#60a5fa;">
+                      <i class="fa-solid fa-download"></i> Baixar anexo
+                    </a>
+                    <button id="agendaAnexoRemover" type="button" style="display:none;background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;padding:0;">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
                 </div>
                 <button id="agendaSalvarReserva" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">Reservar</button>
               </div>
@@ -2257,7 +2434,123 @@
                   </button>
                 </div>
               </div>
+
+              <!-- Overlay de confirmação ao remover participante de reunião recorrente -->
+              <div id="agendaRemovParticConfirmOverlay" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:21;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
+                <i class="fa-solid fa-user-minus" style="font-size:28px;color:#fb923c;"></i>
+                <p id="agendaRemovParticMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaRemovParticConfirmCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
+                  <button id="agendaRemovParticConfirmEsta" type="button" class="content-button" style="padding:8px 16px;">Só esta reunião</button>
+                  <button id="agendaRemovParticConfirmTodas" type="button" class="content-button" style="background:#b45309;color:#fff;border:none;padding:8px 16px;">Todas as recorrências</button>
+                </div>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Modal de Ata de Reunião -->
+        <div id="agendaAtaModal" class="agenda-modal-overlay" style="display:none;">
+          <div class="agenda-modal-card" style="max-width:1100px;width:96%;">
+            <button id="agendaAtaFecharModal" type="button" class="agenda-modal-close" aria-label="Fechar">×</button>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+              <h3 id="agendaAtaTitulo" style="margin:0;color:var(--content-title-color);font-size:18px;">Ata de Reunião</h3>
+              <button id="agendaAtaToggleNotas" type="button" class="content-button" title="Minhas anotações" style="margin-left:auto;font-size:12px;padding:5px 12px;white-space:nowrap;">
+                <i class="fa-solid fa-note-sticky" style="margin-right:5px;color:#fde68a;"></i>Anotações <i id="agendaAtaToggleNotasIcon" class="fa-solid fa-chevron-left" style="font-size:10px;margin-left:4px;"></i>
+              </button>
+              <button id="agendaAtaGerarPdfBtn" type="button" class="content-button" style="font-size:12px;padding:5px 14px;white-space:nowrap;">
+                <i class="fa-solid fa-file-pdf" style="margin-right:5px;color:#f87171;"></i>Gerar PDF
+              </button>
+            </div>
+            <p id="agendaAtaSubtitulo" style="margin:0 0 14px;font-size:12px;color:var(--inactive-color);"></p>
+
+            <!-- Layout de duas colunas: ata (esq) + notas pessoais (dir) -->
+            <div id="agendaAtaGridCols" style="display:grid;grid-template-columns:1fr;gap:20px;align-items:start;">
+
+              <!-- ── Coluna esquerda: Ata da reunião ────────────────────────── -->
+              <div>
+                <!-- Editor para nova entrada de ata -->
+                <div id="agendaAtaEditorWrap" style="display:none;">
+
+                  <!-- Seleção de tema -->
+                  <div style="margin-bottom:10px;">
+                    <span style="display:block;margin-bottom:4px;font-size:12px;color:var(--inactive-color);">Tema</span>
+                    <input id="agendaAtaTemaInput" type="text" list="agendaAtaTemaDatalist"
+                      placeholder="Digite ou escolha um tema..."
+                      style="width:100%;padding:7px 10px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);font-size:13px;" />
+                    <datalist id="agendaAtaTemaDatalist"></datalist>
+                  </div>
+
+                  <!-- Textarea de nova anotação -->
+                  <div style="margin-bottom:6px;position:relative;">
+                    <span style="display:block;margin-bottom:4px;font-size:12px;color:var(--inactive-color);">Nova anotação <small style="font-weight:400;">— use @ para mencionar alguém e criar um lembrete</small></span>
+                    <textarea id="agendaAtaNovaEntrada" rows="4" placeholder="Registre decisões... Use @usuario para mencionar alguém" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;font-size:13px;"></textarea>
+                    <!-- Dropdown de menção @ -->
+                    <div id="agendaAtaMencaoDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--theme-bg-color);border:1px solid var(--border-color);border-radius:0 0 8px 8px;z-index:120;box-shadow:0 6px 20px rgba(0,0,0,.35);max-height:220px;overflow-y:auto;"></div>
+                  </div>
+
+                  <!-- Seletor de data para lembrete da @menção -->
+                  <div id="agendaAtaMencaoDataWrap" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;background:var(--theme-hover);border-radius:8px;border:1px solid #2563eb55;">
+                    <i class="fa-solid fa-calendar-check" style="color:#60a5fa;"></i>
+                    <span id="agendaAtaMencaoDataLabel" style="font-size:13px;color:var(--theme-color);flex:1;min-width:140px;"></span>
+                    <input type="date" id="agendaAtaMencaoDataInput" style="padding:5px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--theme-bg-color);color:var(--theme-color);font-size:13px;" />
+                    <button id="agendaAtaMencaoDataConfirm" type="button" class="content-button" style="padding:5px 14px;font-size:12px;background:#2563eb;color:#fff;border:none;">OK</button>
+                    <button id="agendaAtaMencaoDataCancelar" type="button" class="content-button" style="padding:5px 12px;font-size:12px;">Cancelar</button>
+                  </div>
+
+                  <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+                    <button id="agendaAtaSalvarEntrada" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">
+                      <i class="fa-solid fa-floppy-disk" style="margin-right:5px;"></i>Salvar anotação
+                    </button>
+                  </div>
+
+                  <hr style="border:none;border-top:1px solid var(--border-color);margin-bottom:14px;" />
+                </div>
+
+                <!-- Histórico de atas -->
+                <div id="agendaAtaHistorico" style="max-height:58vh;overflow-y:auto;">
+                  <div style="text-align:center;color:var(--inactive-color);font-size:13px;padding:20px 0;">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Carregando atas...
+                  </div>
+                </div>
+              </div>
+
+              <!-- ── Coluna direita: Minhas anotações pessoais ──────────────── -->
+              <div id="agendaAtaNotasPainel" style="display:none;border-left:1px solid var(--border-color);padding-left:18px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                  <i class="fa-solid fa-note-sticky" style="color:#fde68a;font-size:14px;"></i>
+                  <span style="font-weight:700;font-size:14px;color:var(--content-title-color);">Minhas anotações</span>
+                </div>
+                <p style="font-size:11px;color:var(--inactive-color);margin:0 0 12px;">Suas anotações privadas. Use o ícone <i class="fa-solid fa-eye" style="color:#34d399;"></i> para compartilhar com os participantes.</p>
+
+                <!-- Lista de notas existentes -->
+                <div id="agendaNotasReuniaoLista" style="max-height:36vh;overflow-y:auto;margin-bottom:14px;">
+                  <p style="font-size:12px;color:var(--inactive-color);text-align:center;padding:12px 0;">Nenhuma anotação ainda.</p>
+                </div>
+
+                <!-- Formulário de nova nota -->
+                <div style="border-top:1px solid var(--border-color);padding-top:12px;">
+                  <textarea id="agendaNotaTexto" rows="3"
+                    placeholder="Ex: Lembrete para falar sobre o tema X..."
+                    style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;font-size:12px;margin-bottom:8px;box-sizing:border-box;"></textarea>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <label style="cursor:pointer;margin:0;">
+                      <span class="content-button" style="padding:4px 10px;font-size:11px;display:inline-flex;align-items:center;gap:5px;">
+                        <i class="fa-solid fa-paperclip"></i> Anexar
+                      </span>
+                      <input id="agendaNotaAnexoInput" type="file" style="display:none;" />
+                    </label>
+                    <span id="agendaNotaAnexoNome" style="font-size:11px;color:var(--inactive-color);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Nenhum arquivo</span>
+                    <button id="agendaNotaSalvarBtn" type="button" class="content-button" style="padding:4px 12px;font-size:12px;background:#2563eb;color:#fff;border:none;white-space:nowrap;">
+                      <i class="fa-solid fa-floppy-disk" style="margin-right:4px;"></i>Salvar
+                    </button>
+                  </div>
+                  <!-- campo oculto para manter compatibilidade com o JS (visivel_todos sempre false no formulário) -->
+                  <input id="agendaNotaVisivelTodos" type="checkbox" style="display:none;" />
+                </div>
+              </div>
+
+            </div><!-- fim grid 2 colunas -->
           </div>
         </div>
 
@@ -2267,6 +2560,12 @@
             <h3 id="agendaLembreteTitulo" style="margin:0 0 14px 0;color:var(--content-title-color);font-size:18px;">Lembrete</h3>
 
             <div class="agenda-form-grid">
+              <!-- Data do lembrete (editável em modo criação/edição) -->
+              <label style="grid-column:1/-1;">
+                <span>Data do lembrete</span>
+                <input type="date" id="agendaLembreteDataInput" style="width:100%;padding:7px 10px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);font-size:13px;" />
+              </label>
+
               <label style="grid-column:1/-1;">
                 <span>Bloco de notas</span>
                 <textarea id="agendaLembreteTexto" rows="7" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;"></textarea>
@@ -2283,7 +2582,16 @@
               </div>
             </div>
 
-            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap;">
+              <!-- Editar + Excluir (só em modo visualização, para o criador) -->
+              <div style="display:flex;gap:8px;">
+                <button id="agendaEditarLembreteBtn" type="button" class="content-button" style="display:none;gap:5px;">
+                  <i class="fa-solid fa-pencil"></i> Editar
+                </button>
+                <button id="agendaExcluirLembreteBtn" type="button" class="content-button" style="display:none;background:#7f1d1d;color:#fca5a5;border:none;gap:5px;">
+                  <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+              </div>
               <button id="agendaSalvarLembrete" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">Salvar lembrete</button>
             </div>
           </div>

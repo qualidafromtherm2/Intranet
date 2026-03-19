@@ -408,6 +408,70 @@ async function ensureRhReservasSchema() {
       ON rh.links_rapidos (url_link)
     `);
 
+    // Remove constraint de tipo para suportar novos tipos (Reunião online, Visita, Evento)
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE rh.reservas_ambientes
+          DROP CONSTRAINT IF EXISTS reservas_ambientes_tipo_espaco_check;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END $$
+    `);
+
+    await pool.query(`
+      ALTER TABLE rh.reservas_ambientes
+        ADD COLUMN IF NOT EXISTS descricao TEXT,
+        ADD COLUMN IF NOT EXISTS visitantes TEXT,
+        ADD COLUMN IF NOT EXISTS link_reuniao TEXT,
+        ADD COLUMN IF NOT EXISTS anexo_url TEXT,
+        ADD COLUMN IF NOT EXISTS anexo_nome TEXT
+    `);
+
+    // Tabela de atas de reunião
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.atas_reuniao (
+        id BIGSERIAL PRIMARY KEY,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        tema TEXT NOT NULL,
+        conteudo TEXT NOT NULL,
+        criado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS atas_reuniao_reserva_idx ON rh.atas_reuniao (reserva_id)
+    `);
+
+    // Garante coluna tema caso tabela tenha sido criada antes sem ela
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS tema TEXT NOT NULL DEFAULT 'Geral'`);
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS conteudo TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS criado_por TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+
+    // Coluna de vínculo lembrete → ata (para rastrear edições)
+    await pool.query(`ALTER TABLE rh.lembretes_calendario ADD COLUMN IF NOT EXISTS ata_id BIGINT REFERENCES rh.atas_reuniao(id) ON DELETE SET NULL`);
+
+    // Colunas de exclusão lógica (soft-delete) em atas
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS excluido BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
+    await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
+
+    // Notas pessoais de reunião — anotações privadas por usuário vinculadas a uma reserva
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.notas_reuniao (
+        id BIGSERIAL PRIMARY KEY,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        usuario TEXT NOT NULL,
+        texto TEXT NOT NULL,
+        anexo_url TEXT,
+        anexo_nome TEXT,
+        visivel_todos BOOLEAN NOT NULL DEFAULT FALSE,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`ALTER TABLE IF EXISTS rh.notas_reuniao ADD COLUMN IF NOT EXISTS visivel_todos BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS notas_reuniao_reserva_usuario_idx ON rh.notas_reuniao (reserva_id, usuario)`);
+
     console.log('[RH] Schema de reservas pronto');
   } catch (err) {
     console.error('[RH] Erro ao garantir schema/tabelas de reservas:', err?.message || err);
@@ -2454,6 +2518,9 @@ function validarTipoEspacoReservaRh(tipo) {
   const t = String(tipo || '').trim().toLowerCase();
   if (t === 'auditório' || t === 'auditorio') return 'Auditório';
   if (t === 'sala de reunião' || t === 'sala de reuniao') return 'Sala de reunião';
+  if (t === 'reunião online' || t === 'reuniao online') return 'Reunião online';
+  if (t === 'visita') return 'Visita';
+  if (t === 'evento') return 'Evento';
   return null;
 }
 
@@ -2551,6 +2618,11 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.repetir_todos_meses,
               r.dias_semana,
               r.cafe,
+              r.descricao,
+              r.visitantes,
+              r.link_reuniao,
+              r.anexo_url,
+              r.anexo_nome,
               r.criado_por,
               COALESCE(array_agg(p.username ORDER BY p.username)
                 FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
@@ -2590,6 +2662,11 @@ app.get('/api/rh/reservas', async (req, res) => {
         repetirTodosMeses: !!r.repetir_todos_meses,
         diasSemana: Array.isArray(r.dias_semana) ? r.dias_semana : [],
         cafe: !!r.cafe,
+        descricao: r.descricao || null,
+        visitantes: r.visitantes || null,
+        linkReuniao: r.link_reuniao || null,
+        anexoUrl: r.anexo_url || null,
+        anexoNome: r.anexo_nome || null,
         criadoPor: r.criado_por,
         participantes: Array.isArray(r.participantes) ? r.participantes : []
       };
@@ -2643,6 +2720,11 @@ app.post('/api/rh/reservas', async (req, res) => {
   const repetirTodosMeses = !!body.repetirTodosMeses;
   const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
   const cafe = !!body.cafe;
+  const descricao = String(body.descricao || '').trim() || null;
+  const visitantes = String(body.visitantes || '').trim() || null;
+  const linkReuniao = String(body.linkReuniao || '').trim() || null;
+  const anexoUrl = String(body.anexoUrl || '').trim() || null;
+  const anexoNome = String(body.anexoNome || '').trim() || null;
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -2661,30 +2743,33 @@ app.post('/api/rh/reservas', async (req, res) => {
     diasSemana
   });
 
+  const tiposComConflito = new Set(['Auditório', 'Sala de reunião']);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    for (const dataItem of datasReserva) {
-      const conflito = await existeConflitoReservaRh(client, {
-        dataReserva: dataItem,
-        tipoEspaco,
-        horaInicio,
-        horaFim,
-        ignorarId: null
-      });
-      if (conflito) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: `Conflito de horário para o mesmo espaço na data ${dataItem}` });
+    if (tiposComConflito.has(tipoEspaco)) {
+      for (const dataItem of datasReserva) {
+        const conflito = await existeConflitoReservaRh(client, {
+          dataReserva: dataItem,
+          tipoEspaco,
+          horaInicio,
+          horaFim,
+          ignorarId: null
+        });
+        if (conflito) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: `Conflito de horário para o mesmo espaço na data ${dataItem}` });
+        }
       }
     }
 
     const insertReserva = await client.query(
       `INSERT INTO rh.reservas_ambientes
-        (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, criado_por)
-       VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10)
+        (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome)
+       VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15)
        RETURNING id`,
-      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, userLogado]
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniao, anexoUrl, anexoNome]
     );
 
     const reservaId = insertReserva.rows[0].id;
@@ -2728,6 +2813,11 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const repetirTodosMeses = !!body.repetirTodosMeses;
   const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
   const cafe = !!body.cafe;
+  const descricao = String(body.descricao || '').trim() || null;
+  const visitantes = String(body.visitantes || '').trim() || null;
+  const linkReuniaoPut = String(body.linkReuniao || '').trim() || null;
+  const anexoUrlPut = String(body.anexoUrl || '').trim() || null;
+  const anexoNomePut = String(body.anexoNome || '').trim() || null;
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -2739,6 +2829,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     return res.status(400).json({ error: 'Horário fim deve ser maior que horário início' });
   }
 
+  const tiposComConflitoPut = new Set(['Auditório', 'Sala de reunião']);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -2759,16 +2850,18 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       return res.status(403).json({ error: 'Somente o criador pode alterar esta reserva' });
     }
 
-    const conflito = await existeConflitoReservaRh(client, {
-      dataReserva,
-      tipoEspaco,
-      horaInicio,
-      horaFim,
-      ignorarId: reservaId
-    });
-    if (conflito) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflito de horário para o mesmo espaço na data informada' });
+    if (tiposComConflitoPut.has(tipoEspaco)) {
+      const conflito = await existeConflitoReservaRh(client, {
+        dataReserva,
+        tipoEspaco,
+        horaInicio,
+        horaFim,
+        ignorarId: reservaId
+      });
+      if (conflito) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Conflito de horário para o mesmo espaço na data informada' });
+      }
     }
 
     await client.query(
@@ -2782,9 +2875,14 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
               repetir_todos_meses = $7,
               dias_semana = $8::text[],
               cafe = $9,
+              descricao = $10,
+              visitantes = $11,
+              link_reuniao = $12,
+              anexo_url = $13,
+              anexo_nome = $14,
               atualizado_em = NOW()
-        WHERE id = $10`,
-      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, reservaId]
+        WHERE id = $15`,
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, reservaId]
     );
 
     await client.query(`DELETE FROM rh.reservas_participantes WHERE reserva_id = $1`, [reservaId]);
@@ -2847,6 +2945,235 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
   }
 });
 
+// ── Atas de Reunião ───────────────────────────────────────────────────────
+// GET  /api/rh/atas?reserva_id=X  → lista todas as atas da reserva (ordem de criação, estável)
+app.get('/api/rh/atas', async (req, res) => {
+  const reservaId = Number(req.query?.reserva_id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) {
+    return res.status(400).json({ error: 'reserva_id inválido' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, reserva_id, tema, conteudo, criado_por,
+              excluido, excluido_por,
+              TO_CHAR(criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS criado_em_fmt,
+              TO_CHAR(excluido_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS excluido_em_fmt
+         FROM rh.atas_reuniao
+        WHERE reserva_id = $1
+        ORDER BY id ASC`,
+      [reservaId]
+    );
+    return res.json({ ok: true, atas: rows });
+  } catch (err) {
+    console.error('[API] /api/rh/atas GET erro:', err);
+    return res.status(500).json({ error: 'Falha ao buscar atas' });
+  }
+});
+
+// POST /api/rh/atas  { reserva_id, tema, conteudo }
+app.post('/api/rh/atas', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const body = req.body || {};
+  const reservaId = Number(body.reserva_id);
+  const tema = String(body.tema || '').trim();
+  const conteudo = String(body.conteudo || '').trim();
+
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'reserva_id inválido' });
+  if (!tema) return res.status(400).json({ error: 'Tema obrigatório' });
+  if (!conteudo) return res.status(400).json({ error: 'Conteúdo obrigatório' });
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO rh.atas_reuniao (reserva_id, tema, conteudo, criado_por)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [reservaId, tema, conteudo, userLogado]
+    );
+    return res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('[API] /api/rh/atas POST erro:', err);
+    return res.status(500).json({ error: 'Falha ao salvar ata' });
+  }
+});
+
+// PUT /api/rh/atas/:id — alterna riscar/restaurar (toggle ~~...~~) — somente autor
+app.put('/api/rh/atas/:id', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const ataId = Number(req.params?.id);
+  if (!Number.isInteger(ataId) || ataId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT criado_por, conteudo FROM rh.atas_reuniao WHERE id = $1 LIMIT 1`,
+      [ataId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Ata não encontrada' });
+    if (String(rows[0].criado_por || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o autor pode riscar esta anotação' });
+    }
+    const atual = String(rows[0].conteudo || '');
+    let novoConteudo;
+    // Se passou body.conteudo → edição direta do texto
+    if (req.body && typeof req.body.conteudo === 'string') {
+      const textoEditado = req.body.conteudo.trim();
+      if (!textoEditado) return res.status(400).json({ error: 'Conteúdo não pode ficar vazio' });
+      novoConteudo = textoEditado;
+    } else {
+      // Toggle: se já está riscado (~~...~~) restaura; senão risca
+      novoConteudo = atual.startsWith('~~') && atual.endsWith('~~')
+        ? atual.slice(2, -2)
+        : `~~${atual}~~`;
+    }
+    await pool.query(`UPDATE rh.atas_reuniao SET conteudo = $1 WHERE id = $2`, [novoConteudo, ataId]);
+    return res.json({ ok: true, conteudo: novoConteudo });
+  } catch (err) {
+    console.error('[API] PUT /api/rh/atas erro:', err);
+    return res.status(500).json({ error: 'Falha ao atualizar ata' });
+  }
+});
+
+// DELETE /api/rh/atas/:id  — exclusão lógica (soft-delete), somente o autor
+app.delete('/api/rh/atas/:id', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const ataId = Number(req.params?.id);
+  if (!Number.isInteger(ataId) || ataId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  try {
+    const { rows } = await pool.query(`SELECT criado_por, excluido FROM rh.atas_reuniao WHERE id = $1 LIMIT 1`, [ataId]);
+    if (!rows.length) return res.status(404).json({ error: 'Ata não encontrada' });
+    if (String(rows[0].criado_por || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o autor pode excluir esta anotação' });
+    }
+    if (rows[0].excluido) return res.status(409).json({ error: 'Anotação já excluída' });
+    await pool.query(
+      `UPDATE rh.atas_reuniao SET excluido = TRUE, excluido_por = $1, excluido_em = NOW() WHERE id = $2`,
+      [userLogado, ataId]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] /api/rh/atas DELETE erro:', err);
+    return res.status(500).json({ error: 'Falha ao excluir ata' });
+  }
+});
+
+// PATCH /api/rh/atas/:id/restaurar — restaura uma anotação excluída, somente o autor
+app.patch('/api/rh/atas/:id/restaurar', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const ataId = Number(req.params?.id);
+  if (!Number.isInteger(ataId) || ataId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  try {
+    const { rows } = await pool.query(`SELECT criado_por, excluido FROM rh.atas_reuniao WHERE id = $1 LIMIT 1`, [ataId]);
+    if (!rows.length) return res.status(404).json({ error: 'Ata não encontrada' });
+    if (String(rows[0].criado_por || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o autor pode restaurar esta anotação' });
+    }
+    if (!rows[0].excluido) return res.status(409).json({ error: 'Anotação não está excluída' });
+    await pool.query(
+      `UPDATE rh.atas_reuniao SET excluido = FALSE, excluido_por = NULL, excluido_em = NULL WHERE id = $1`,
+      [ataId]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] /api/rh/atas PATCH restaurar erro:', err);
+    return res.status(500).json({ error: 'Falha ao restaurar ata' });
+  }
+});
+
+// ── Notas pessoais de reunião ─────────────────────────────────────────────
+// GET /api/rh/notas?reserva_id=X — retorna as notas do usuário + notas de outros com visivel_todos=true
+app.get('/api/rh/notas', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const reservaId = Number(req.query?.reserva_id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'reserva_id inválido' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, usuario, texto, anexo_url, anexo_nome, visivel_todos, criado_em,
+              (lower(usuario) = lower($2)) AS proprio
+         FROM rh.notas_reuniao
+        WHERE reserva_id = $1
+          AND (lower(usuario) = lower($2) OR visivel_todos = TRUE)
+        ORDER BY criado_em ASC`,
+      [reservaId, userLogado]
+    );
+    return res.json({ ok: true, notas: rows });
+  } catch (err) {
+    console.error('[API] GET /api/rh/notas erro:', err);
+    return res.status(500).json({ error: 'Falha ao carregar notas' });
+  }
+});
+
+// POST /api/rh/notas — cria uma nova nota pessoal
+app.post('/api/rh/notas', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const { reserva_id, texto, anexo_url, anexo_nome, visivel_todos } = req.body || {};
+  const reservaId = Number(reserva_id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'reserva_id inválido' });
+  if (!texto || !String(texto).trim()) return res.status(400).json({ error: 'Texto obrigatório' });
+  const visivelTodos = visivel_todos === true || visivel_todos === 'true';
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO rh.notas_reuniao (reserva_id, usuario, texto, anexo_url, anexo_nome, visivel_todos)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [reservaId, userLogado, String(texto).trim(), anexo_url || null, anexo_nome || null, visivelTodos]
+    );
+    return res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('[API] POST /api/rh/notas erro:', err);
+    return res.status(500).json({ error: 'Falha ao salvar nota' });
+  }
+});
+
+// PATCH /api/rh/notas/:id/visivel — alterna visibilidade da nota (somente o dono)
+app.patch('/api/rh/notas/:id/visivel', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const notaId = Number(req.params?.id);
+  if (!Number.isInteger(notaId) || notaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const { rows } = await pool.query(`SELECT usuario, visivel_todos FROM rh.notas_reuniao WHERE id = $1 LIMIT 1`, [notaId]);
+    if (!rows.length) return res.status(404).json({ error: 'Nota não encontrada' });
+    if (String(rows[0].usuario || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o autor pode alterar a visibilidade' });
+    }
+    const novoValor = !rows[0].visivel_todos;
+    await pool.query(`UPDATE rh.notas_reuniao SET visivel_todos = $1 WHERE id = $2`, [novoValor, notaId]);
+    return res.json({ ok: true, visivel_todos: novoValor });
+  } catch (err) {
+    console.error('[API] PATCH /api/rh/notas/visivel erro:', err);
+    return res.status(500).json({ error: 'Falha ao atualizar visibilidade' });
+  }
+});
+
+// DELETE /api/rh/notas/:id — somente o dono pode excluir
+app.delete('/api/rh/notas/:id', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+  const notaId = Number(req.params?.id);
+  if (!Number.isInteger(notaId) || notaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const { rows } = await pool.query(`SELECT usuario FROM rh.notas_reuniao WHERE id = $1 LIMIT 1`, [notaId]);
+    if (!rows.length) return res.status(404).json({ error: 'Nota não encontrada' });
+    if (String(rows[0].usuario || '').toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o autor pode excluir esta nota' });
+    }
+    await pool.query(`DELETE FROM rh.notas_reuniao WHERE id = $1`, [notaId]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/rh/notas erro:', err);
+    return res.status(500).json({ error: 'Falha ao excluir nota' });
+  }
+});
+
 app.get('/api/rh/lembretes', async (req, res) => {
   const identificadoresSessao = resolverIdentificadoresAuditoria(req);
   const userHint = String(req.query?.user || '').trim().toLowerCase();
@@ -2884,13 +3211,10 @@ app.get('/api/rh/lembretes', async (req, res) => {
          LEFT JOIN rh.lembretes_destinatarios d ON d.lembrete_id = l.id
         WHERE EXTRACT(YEAR FROM l.data_lembrete) = $1
           AND EXTRACT(MONTH FROM l.data_lembrete) = $2
-          AND (
-            lower(l.criado_por) = ANY($3::text[])
-            OR EXISTS (
-              SELECT 1 FROM rh.lembretes_destinatarios dx
-               WHERE dx.lembrete_id = l.id
-                 AND lower(dx.username) = ANY($3::text[])
-            )
+          AND EXISTS (
+            SELECT 1 FROM rh.lembretes_destinatarios dx
+             WHERE dx.lembrete_id = l.id
+               AND lower(dx.username) = ANY($3::text[])
           )
         GROUP BY l.id
         ORDER BY l.data_lembrete ASC, l.id ASC`,
@@ -2940,14 +3264,19 @@ app.post('/api/rh/lembretes', async (req, res) => {
 
   const dataLembrete = String(body.data || '').trim();
   const texto = String(body.texto || '').trim();
+  const ataIdBody = body.ata_id ? parseInt(body.ata_id, 10) : null;
   const destinatariosBody = Array.isArray(body.destinatarios)
     ? body.destinatarios.map((u) => String(u || '').trim()).filter(Boolean)
     : [];
-  const destinatarios = Array.from(new Set([
-    userLogado,
-    ...identificadoresCriador,
-    ...destinatariosBody
-  ]));
+  // Quando criado via @menção em atas, não inclui o criador — só os mencionados
+  const apenasMencionados = body.apenas_mencionados === true;
+  const destinatarios = apenasMencionados
+    ? Array.from(new Set(destinatariosBody))
+    : Array.from(new Set([
+        userLogado,
+        ...identificadoresCriador,
+        ...destinatariosBody
+      ]));
 
   if (!dataLembrete || !texto) {
     return res.status(400).json({ error: 'Campos obrigatórios: data e texto' });
@@ -2958,10 +3287,10 @@ app.post('/api/rh/lembretes', async (req, res) => {
     await client.query('BEGIN');
 
     const ins = await client.query(
-      `INSERT INTO rh.lembretes_calendario (data_lembrete, texto, criado_por)
-       VALUES ($1::date, $2, $3)
+      `INSERT INTO rh.lembretes_calendario (data_lembrete, texto, criado_por, ata_id)
+       VALUES ($1::date, $2, $3, $4)
        RETURNING id`,
-      [dataLembrete, texto, userLogado]
+      [dataLembrete, texto, userLogado, ataIdBody || null]
     );
     const lembreteId = ins.rows[0].id;
 
@@ -2982,6 +3311,94 @@ app.post('/api/rh/lembretes', async (req, res) => {
     return res.status(500).json({ error: 'Falha ao criar lembrete RH' });
   } finally {
     client.release();
+  }
+});
+
+// ── PUT /api/rh/lembretes/:id — edita texto, data e destinatários (qualquer destinatário) ──
+app.put('/api/rh/lembretes/:id', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const lembreteId = parseInt(req.params.id, 10);
+  if (isNaN(lembreteId)) return res.status(400).json({ error: 'ID inválido' });
+
+  const body = req.body || {};
+  const dataLembrete = String(body.data || '').trim();
+  const texto = String(body.texto || '').trim();
+  const destinatariosBody = Array.isArray(body.destinatarios)
+    ? body.destinatarios.map((u) => String(u || '').trim()).filter(Boolean)
+    : [];
+  if (!dataLembrete || !texto) return res.status(400).json({ error: 'Campos obrigatórios: data e texto' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const check = await client.query(
+      `SELECT l.criado_por, l.ata_id,
+              EXISTS(SELECT 1 FROM rh.lembretes_destinatarios d WHERE d.lembrete_id = $1 AND lower(d.username) = lower($2)) AS is_dest
+         FROM rh.lembretes_calendario l WHERE l.id = $1`,
+      [lembreteId, userLogado]
+    );
+    if (!check.rows.length) return res.status(404).json({ error: 'Lembrete não encontrado' });
+    const { criado_por, ata_id, is_dest } = check.rows[0];
+    const eCriador = criado_por.toLowerCase() === userLogado.toLowerCase();
+    if (!eCriador && !is_dest) {
+      return res.status(403).json({ error: 'Apenas o criador ou destinatários podem editar o lembrete' });
+    }
+
+    // Se o lembrete tem ata vinculada, atualiza o conteúdo da ata com tachado do original
+    if (ata_id) {
+      const ataRow = await client.query(`SELECT conteudo FROM rh.atas_reuniao WHERE id = $1`, [ata_id]);
+      if (ataRow.rows.length) {
+        const conteudoAtual = ataRow.rows[0].conteudo;
+        // Formata: tachado do original + nova versão com autor
+        const novoConteudo = `~~${conteudoAtual}~~\n[EDITADO por ${userLogado}]: ${texto}`;
+        await client.query(`UPDATE rh.atas_reuniao SET conteudo = $1 WHERE id = $2`, [novoConteudo, ata_id]);
+      }
+    }
+
+    await client.query(
+      `UPDATE rh.lembretes_calendario SET data_lembrete = $1::date, texto = $2 WHERE id = $3`,
+      [dataLembrete, texto, lembreteId]
+    );
+    // Substitui destinatários
+    await client.query(`DELETE FROM rh.lembretes_destinatarios WHERE lembrete_id = $1`, [lembreteId]);
+    for (const username of Array.from(new Set(destinatariosBody))) {
+      await client.query(
+        `INSERT INTO rh.lembretes_destinatarios (lembrete_id, username) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [lembreteId, username]
+      );
+    }
+    await client.query('COMMIT');
+    return res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[API] PUT /api/rh/lembretes erro:', err);
+    return res.status(500).json({ error: 'Falha ao editar lembrete' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── DELETE /api/rh/lembretes/:id — exclui lembrete (só o criador) ──
+app.delete('/api/rh/lembretes/:id', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const lembreteId = parseInt(req.params.id, 10);
+  if (isNaN(lembreteId)) return res.status(400).json({ error: 'ID inválido' });
+
+  try {
+    const check = await pool.query(`SELECT criado_por FROM rh.lembretes_calendario WHERE id = $1`, [lembreteId]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Lembrete não encontrado' });
+    if (check.rows[0].criado_por.toLowerCase() !== userLogado.toLowerCase()) {
+      return res.status(403).json({ error: 'Somente o criador pode excluir o lembrete' });
+    }
+    await pool.query(`DELETE FROM rh.lembretes_calendario WHERE id = $1`, [lembreteId]);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/rh/lembretes erro:', err);
+    return res.status(500).json({ error: 'Falha ao excluir lembrete' });
   }
 });
 
@@ -5995,7 +6412,7 @@ app.get('/api/compras/departamentos', async (req, res) => {
 /**
  * GET /api/compras/grafico-pizza-dept-cc
  * Retorna valor somado por status:
- *   - "Compra realizada" : compras.pedidos_omie — inativo=false, Etapa_NF IS NULL, filtro d_inc_data
+ *   - "Compra realizada" : compras.pedidos_omie — inativo=false, agrupado por Etapa_NF (join logistica.etapas_recebimento_nfe)
  *   - "Recebimento"      : logistica.recebimentos_nfe_omie — c_recebido=S, c_cancelada=N, c_bloqueado=N, c_devolvido=N, c_etapa=80, filtro d_rec
  * Parâmetros: dataInicio, dataFim (YYYY-MM-DD)
  */
@@ -6003,45 +6420,303 @@ app.get('/api/compras/grafico-pizza-dept-cc', async (req, res) => {
   try {
     const { dataInicio, dataFim } = req.query;
 
-    // --- Barra 1: Compra realizada (pedidos_omie) ---
+    // --- Barra 1: Compra realizada por Etapa_NF (pedidos_omie) ---
+    // Agrupa todas as etapas (sem filtrar por NULL), fazendo JOIN com a tabela de etapas para trazer descrição.
+    // Etapa_NF NULL = 'Aguardando recebimento'
     const paramsCompra = [];
-    const whereCompra = [`inativo = false`, `"Etapa_NF" IS NULL`];
-    if (dataInicio) { paramsCompra.push(dataInicio); whereCompra.push(`d_inc_data >= $${paramsCompra.length}::date`); }
-    if (dataFim)    { paramsCompra.push(dataFim);    whereCompra.push(`d_inc_data <= $${paramsCompra.length}::date`); }
+    const whereCompra = [`p.inativo = false`];
+    if (dataInicio) { paramsCompra.push(dataInicio); whereCompra.push(`p.d_inc_data >= $${paramsCompra.length}::date`); }
+    if (dataFim)    { paramsCompra.push(dataFim);    whereCompra.push(`p.d_inc_data <= $${paramsCompra.length}::date`); }
 
     const r1 = await pool.query(`
-      SELECT COALESCE(SUM(n_valor), 0) AS total
-      FROM compras.pedidos_omie
+      SELECT
+        p."Etapa_NF"                                                AS etapa_codigo,
+        COALESCE(e.descricao, 'Aguardando recebimento')             AS etapa_descricao,
+        COALESCE(e.ordem, 0)                                        AS etapa_ordem,
+        COALESCE(SUM(p.n_valor), 0)                                 AS total
+      FROM compras.pedidos_omie p
+      LEFT JOIN logistica.etapas_recebimento_nfe e ON e.codigo = p."Etapa_NF"
       WHERE ${whereCompra.join(' AND ')}
+      GROUP BY p."Etapa_NF", e.descricao, e.ordem
+      ORDER BY e.ordem NULLS FIRST
     `, paramsCompra);
 
-    // --- Barra 2: Recebimento (recebimentos_nfe_omie) ---
+    // --- Barra 2: Recebimento por ano da compra original (pedidos_omie.d_inc_data) ---
+    // Junta recebimentos_nfe_omie → recebimentos_nfe_itens (n_id_receb) → pedidos_omie (n_cod_ped = n_id_pedido)
+    // Agrupa por ano de d_inc_data para mostrar "de quando foi a compra" de cada recebimento.
+    // NFs sem pedido vinculado ficam na camada "Sem pedido vinculado".
     const paramsReceb = [];
-    const whereReceb = [
-      `c_recebido = 'S'`,
-      `c_cancelada = 'N'`,
-      `c_bloqueado = 'N'`,
-      `c_devolvido = 'N'`,
-      `c_etapa = '80'`,
+    const whereRecebBase = [
+      `r.c_recebido = 'S'`,
+      `r.c_cancelada = 'N'`,
+      `r.c_bloqueado = 'N'`,
+      `r.c_devolvido = 'N'`,
+      `r.c_etapa = '80'`,
     ];
-    if (dataInicio) { paramsReceb.push(dataInicio); whereReceb.push(`d_rec >= $${paramsReceb.length}::date`); }
-    if (dataFim)    { paramsReceb.push(dataFim);    whereReceb.push(`d_rec <= $${paramsReceb.length}::date`); }
+    if (dataInicio) { paramsReceb.push(dataInicio); whereRecebBase.push(`r.d_rec >= $${paramsReceb.length}::date`); }
+    if (dataFim)    { paramsReceb.push(dataFim);    whereRecebBase.push(`r.d_rec <= $${paramsReceb.length}::date`); }
 
+    // Recebimentos COM pedido vinculado, agrupados por mês/ano de d_inc_data
     const r2 = await pool.query(`
-      SELECT COALESCE(SUM(n_valor_nfe), 0) AS total
-      FROM logistica.recebimentos_nfe_omie
-      WHERE ${whereReceb.join(' AND ')}
+      SELECT
+        TO_CHAR(ped.d_inc_data, 'MM/YYYY') AS ano_compra,
+        MIN(ped.d_inc_data)                AS data_ord,
+        COALESCE(SUM(r.n_valor_nfe), 0)    AS total
+      FROM logistica.recebimentos_nfe_omie r
+      JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
+      JOIN compras.pedidos_omie ped           ON ped.n_cod_ped = i.n_id_pedido
+      WHERE ${whereRecebBase.join(' AND ')}
+        AND i.n_id_pedido IS NOT NULL AND i.n_id_pedido > 0
+      GROUP BY TO_CHAR(ped.d_inc_data, 'MM/YYYY')
+      ORDER BY MIN(ped.d_inc_data)
     `, paramsReceb);
 
+    // Recebimentos SEM pedido vinculado (n_id_pedido nulo ou 0)
+    const r2sem = await pool.query(`
+      SELECT COALESCE(SUM(r.n_valor_nfe), 0) AS total
+      FROM logistica.recebimentos_nfe_omie r
+      LEFT JOIN logistica.recebimentos_nfe_itens i ON i.n_id_receb = r.n_id_receb
+      WHERE ${whereRecebBase.join(' AND ')}
+        AND (i.n_id_pedido IS NULL OR i.n_id_pedido = 0)
+    `, paramsReceb);
+
+    // Monta dados: uma entrada por etapa de "Compra realizada" + uma por ano de compra do "Recebimento"
+    const etapasCompra = r1.rows.map(row => ({
+      status:          'Compra realizada',
+      etapa_codigo:    row.etapa_codigo,
+      etapa_descricao: row.etapa_descricao,
+      total:           Number(row.total),
+    }));
+
+    const etapasReceb = r2.rows
+      .filter(row => Number(row.total) > 0)
+      .map(row => ({
+        status:          'Recebimento',
+        etapa_codigo:    row.ano_compra,
+        etapa_descricao: `Compra em ${row.ano_compra}`,
+        total:           Number(row.total),
+      }));
+
+    const totalSemPedido = Number(r2sem.rows[0].total);
+    if (totalSemPedido > 0) {
+      etapasReceb.push({
+        status:          'Recebimento',
+        etapa_codigo:    'sem_pedido',
+        etapa_descricao: 'Sem pedido vinculado',
+        total:           totalSemPedido,
+      });
+    }
+
     const dados = [
-      { status: 'Compra realizada', total: Number(r1.rows[0].total) },
-      { status: 'Recebimento',      total: Number(r2.rows[0].total) },
+      ...etapasCompra,
+      ...etapasReceb,
     ];
 
     res.json({ ok: true, dados });
   } catch (err) {
     console.error('[Compras/GraficoPizzaDeptCC] Erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao carregar dados do gráfico' });
+  }
+});
+
+// ========================================
+//  Endpoint: Gráfico Realizado x Recebido por Mês
+// ========================================
+/**
+ * GET /api/compras/grafico-meses
+ * Eixo X = mês de compra (d_inc_data de compras.pedidos_omie).
+ * Barra 1 (azul)  : total realizado naquele mês (n_valor).
+ * Barras 2-N (verdes empilhadas): quanto foi recebido daquelas compras,
+ *   dividido pelo mês de recebimento (d_rec) de logistica.recebimentos_nfe_omie
+ *   onde c_recebido = 'S'. Ligação: pedidos_omie → recebimentos_nfe_itens → recebimentos_nfe_omie.
+ * Parâmetros: dataInicio, dataFim (YYYY-MM-DD) — filtram d_inc_data do pedido.
+ */
+app.get('/api/compras/grafico-meses', async (req, res) => {
+  try {
+    const { dataInicio, dataFim } = req.query;
+    const params = [];
+    const whereCompra = [`p.inativo = false`];
+    if (dataInicio) { params.push(dataInicio); whereCompra.push(`p.d_inc_data >= $${params.length}::date`); }
+    if (dataFim)    { params.push(dataFim);    whereCompra.push(`p.d_inc_data <= $${params.length}::date`); }
+
+    // Total realizado por mês de compra (d_inc_data)
+    const rCompra = await pool.query(`
+      SELECT
+        TO_CHAR(p.d_inc_data, 'MM/YYYY') AS mes,
+        MIN(p.d_inc_data)                AS data_ord,
+        COALESCE(SUM(p.n_valor), 0)      AS total_realizado
+      FROM compras.pedidos_omie p
+      WHERE ${whereCompra.join(' AND ')}
+      GROUP BY TO_CHAR(p.d_inc_data, 'MM/YYYY')
+      ORDER BY MIN(p.d_inc_data)
+    `, params);
+
+    // Total recebido por combinação (mês de compra × mês de recebimento d_rec).
+    // Usa i.v_total_item (valor do ITEM do pedido naquela NF), NÃO n_valor_nfe.
+    // n_valor_nfe é o total da NF inteira — se a NF tiver N pedidos vinculados,
+    // seria contado N vezes. v_total_item já é o valor específico daquele item/pedido.
+    // Ligação: pedidos_omie (n_cod_ped) → recebimentos_nfe_itens (n_id_pedido) → recebimentos_nfe_omie (n_id_receb).
+    const rReceb = await pool.query(`
+      SELECT
+        TO_CHAR(ped.d_inc_data, 'MM/YYYY') AS mes_compra,
+        TO_CHAR(r.d_rec, 'MM/YY')          AS mes_rec,
+        MIN(ped.d_inc_data)                AS data_ord_compra,
+        MIN(r.d_rec)                       AS data_ord_rec,
+        COALESCE(SUM(i.v_total_item), 0)   AS total
+      FROM compras.pedidos_omie ped
+      JOIN logistica.recebimentos_nfe_itens i ON i.n_id_pedido = ped.n_cod_ped
+      JOIN logistica.recebimentos_nfe_omie r  ON r.n_id_receb  = i.n_id_receb
+      WHERE ${whereCompra.join(' AND ').replace(/p\./g, 'ped.')} AND r.c_recebido = 'S'
+      GROUP BY TO_CHAR(ped.d_inc_data, 'MM/YYYY'), TO_CHAR(r.d_rec, 'MM/YY')
+      ORDER BY MIN(ped.d_inc_data), MIN(r.d_rec)
+    `, params);
+
+    // Monta pivô: labels = meses de compra, camadas = meses de d_rec distintos
+    const labels      = rCompra.rows.map(r => r.mes);
+    const realizado   = rCompra.rows.map(r => Number(r.total_realizado));
+    const labelIdx    = {};
+    labels.forEach((l, i) => { labelIdx[l] = i; });
+
+    // Coleta todos os d_rec meses distintos, em ordem cronológica.
+    // Formato MM/AA (2 dígitos): adiciona 2000 para comparação correta.
+    const mesRecSet = [...new Set(rReceb.rows.map(r => r.mes_rec))];
+    mesRecSet.sort((a, b) => {
+      const toDate = s => { const [m, y] = s.split('/'); return new Date(2000 + +y, +m - 1, 1); };
+      return toDate(a) - toDate(b);
+    });
+
+    // Para cada d_rec mes, cria array de valores indexado pelos labels de compra
+    const camadas_recebido = mesRecSet.map(mesRec => {
+      const valores = labels.map(mesCompra => {
+        const row = rReceb.rows.find(r => r.mes_compra === mesCompra && r.mes_rec === mesRec);
+        return row ? Number(row.total) : 0;
+      });
+      return { mes_rec: mesRec, valores };
+    });
+
+    res.json({ ok: true, labels, realizado, camadas_recebido });
+  } catch (err) {
+    console.error('[Compras/GraficoMeses] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar gráfico de meses' });
+  }
+});
+
+// ========================================
+//  Endpoint: Detalhe de pedidos de um mês (clique na barra do gráfico de meses)
+// ========================================
+/**
+ * GET /api/compras/grafico-meses-detalhe
+ * Parâmetros:
+ *   mesCompra  – "MM/YYYY" (mês/ano de d_inc_data do pedido)
+ *   dataInicio – filtro de início do período geral (para consistência com o gráfico)
+ *   dataFim    – filtro de fim do período geral
+ * Retorna lista de pedidos do mês com:
+ *   - n_cod_ped, fornecedor (razao_social), n_valor (valor do pedido)
+ *   - d_inc_data (data da compra)
+ *   - d_rec (data de recebimento — NULL se ainda não recebido)
+ *   - v_recebido (soma de v_total_item recebidos)
+ */
+app.get('/api/compras/grafico-meses-detalhe', async (req, res) => {
+  try {
+    const { mesCompra, dataInicio, dataFim } = req.query;
+    if (!mesCompra) return res.status(400).json({ ok: false, error: 'mesCompra obrigatório' });
+
+    const params = [];
+    const wherePed = [`p.inativo = false`];
+    params.push(mesCompra);
+    wherePed.push(`TO_CHAR(p.d_inc_data, 'MM/YYYY') = $${params.length}`);
+    if (dataInicio) { params.push(dataInicio); wherePed.push(`p.d_inc_data >= $${params.length}::date`); }
+    if (dataFim)    { params.push(dataFim);    wherePed.push(`p.d_inc_data <= $${params.length}::date`); }
+
+    // ── Recebidos: uma linha por item de NF recebida ──────────────────────
+    const rReceb = await pool.query(`
+      SELECT
+        p.c_numero,
+        r.n_id_receb,
+        COALESCE(r.n_valor_nfe, 0)          AS n_valor_nfe,
+        TO_CHAR(r.d_rec, 'YYYY-MM-DD')      AS d_rec,
+        i.c_codigo_produto,
+        COALESCE(i.c_descricao_produto, '') AS c_descricao_produto,
+        COALESCE(i.n_preco_unit, 0)         AS n_preco_unit,
+        COALESCE(i.n_qtde_nfe, 0)           AS n_qtde_nfe
+      FROM compras.pedidos_omie p
+      JOIN logistica.recebimentos_nfe_itens i ON i.n_id_pedido = p.n_cod_ped
+      JOIN logistica.recebimentos_nfe_omie r  ON r.n_id_receb  = i.n_id_receb
+      WHERE ${wherePed.join(' AND ')} AND r.c_recebido = 'S'
+      ORDER BY r.d_rec, p.c_numero, r.n_id_receb
+    `, params);
+
+    // Agrupa por NF (n_id_receb)
+    const recebidosMap = new Map();
+    for (const row of rReceb.rows) {
+      const key = row.n_id_receb;
+      if (!recebidosMap.has(key)) {
+        recebidosMap.set(key, {
+          c_numero:    row.c_numero,
+          n_valor_nfe: Number(row.n_valor_nfe),
+          d_rec:       row.d_rec,
+          itens:       []
+        });
+      }
+      if (row.c_codigo_produto) {
+        recebidosMap.get(key).itens.push({
+          c_codigo_produto:    row.c_codigo_produto,
+          c_descricao_produto: row.c_descricao_produto,
+          n_preco_unit:        Number(row.n_preco_unit),
+          n_qtde_nfe:          Number(row.n_qtde_nfe)
+        });
+      }
+    }
+    const recebidos = [...recebidosMap.values()];
+
+    // ── A receber: pedidos sem nenhum recebimento S + itens do pedido ─────
+    const rPendente = await pool.query(`
+      SELECT
+        p.c_numero,
+        p.n_cod_ped,
+        COALESCE(p.n_valor, 0)              AS n_valor,
+        pp.c_produto                         AS c_codigo_produto,
+        COALESCE(pp.c_descricao, '')        AS c_descricao_produto,
+        COALESCE(pp.n_val_unit, 0)          AS n_preco_unit,
+        COALESCE(pp.n_qtde, 0)              AS n_qtde
+      FROM compras.pedidos_omie p
+      LEFT JOIN compras.pedidos_omie_produtos pp ON pp.n_cod_ped = p.n_cod_ped
+      WHERE ${wherePed.join(' AND ')}
+        AND p.n_cod_ped NOT IN (
+          SELECT DISTINCT i2.n_id_pedido
+          FROM logistica.recebimentos_nfe_itens i2
+          JOIN logistica.recebimentos_nfe_omie r2 ON r2.n_id_receb = i2.n_id_receb
+          WHERE r2.c_recebido = 'S' AND i2.n_id_pedido IS NOT NULL
+        )
+      ORDER BY p.c_numero, pp.id
+    `, params);
+
+    // Agrupa por pedido (n_cod_ped)
+    const aReceberMap = new Map();
+    for (const row of rPendente.rows) {
+      const key = row.n_cod_ped;
+      if (!aReceberMap.has(key)) {
+        aReceberMap.set(key, {
+          c_numero: row.c_numero,
+          n_valor:  Number(row.n_valor),
+          itens:    []
+        });
+      }
+      if (row.c_codigo_produto) {
+        aReceberMap.get(key).itens.push({
+          c_codigo_produto:    row.c_codigo_produto,
+          c_descricao_produto: row.c_descricao_produto,
+          n_preco_unit:        Number(row.n_preco_unit),
+          n_qtde:              Number(row.n_qtde)
+        });
+      }
+    }
+    const a_receber = [...aReceberMap.values()];
+
+    res.json({ ok: true, recebidos, a_receber });
+  } catch (err) {
+    console.error('[Compras/GraficoMesesDetalhe] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao carregar detalhe' });
   }
 });
 
@@ -6060,9 +6735,9 @@ app.get('/api/compras/grafico-pizza-itens', async (req, res) => {
     if (!status) return res.status(400).json({ ok: false, error: 'Parâmetro status obrigatório' });
 
     if (status === 'Compra realizada') {
-      // --- Itens de Compra realizada: pedidos_omie ---
+      // --- Itens de Compra realizada: pedidos_omie (todas as etapas) ---
       const params = [];
-      const where = [`p.inativo = false`, `p."Etapa_NF" IS NULL`];
+      const where = [`p.inativo = false`];
       if (dataInicio) { params.push(dataInicio); where.push(`p.d_inc_data >= $${params.length}::date`); }
       if (dataFim)    { params.push(dataFim);    where.push(`p.d_inc_data <= $${params.length}::date`); }
 
@@ -6239,7 +6914,7 @@ app.get('/api/compras/grafico-categorias', async (req, res) => {
       }
     } else if (status === 'Compra realizada') {
       const where = [
-        `p.inativo = false`, `p."Etapa_NF" IS NULL`,
+        `p.inativo = false`,
         `p.c_cod_categ IS NOT NULL`, `p.c_cod_categ <> ''`,
       ];
       if (dataInicio) { params.push(dataInicio); where.push(`p.d_inc_data >= $${params.length}::date`); }
@@ -8111,20 +8786,30 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
       const { data: buckets } = await supabase.storage.listBuckets();
       const bucketExists = buckets?.some(b => b.name === bucketName);
       
+      const allowedMimes = [
+        'image/*', 'application/pdf',
+        'application/msword',
+        'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'text/plain', 'application/zip', 'application/x-zip-compressed'
+      ];
       if (!bucketExists) {
         console.log(`[Supabase] Criando bucket '${bucketName}'...`);
         const { error: createError } = await supabase.storage.createBucket(bucketName, {
           public: true,
           fileSizeLimit: 10485760, // 10MB
-          allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+          allowedMimeTypes: allowedMimes
         });
-        
         if (createError) {
           console.error('[Supabase] Erro ao criar bucket:', createError);
-          // Continua tentando fazer upload mesmo se falhar ao criar
         } else {
           console.log(`[Supabase] Bucket '${bucketName}' criado com sucesso`);
         }
+      } else {
+        // Atualiza tipos permitidos para incluir formatos Office adicionados posteriormente
+        await supabase.storage.updateBucket(bucketName, { allowedMimeTypes: allowedMimes }).catch(() => {});
       }
     } catch (bucketError) {
       console.warn('[Supabase] Erro ao verificar/criar bucket:', bucketError.message);
@@ -17975,7 +18660,7 @@ app.post('/api/compras/pedido', async (req, res) => {
                 await supabase.storage.createBucket(bucketName, {
                   public: true,
                   fileSizeLimit: 10485760,
-                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
                 });
               }
             } catch (bucketError) {
@@ -18223,7 +18908,7 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
                 await supabase.storage.createBucket(bucketName, {
                   public: true,
                   fileSizeLimit: 10485760,
-                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+                  allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
                 });
               }
             } catch (bucketError) {
@@ -25265,7 +25950,7 @@ app.post('/api/compras/cotacoes', express.json(), async (req, res) => {
             await supabase.storage.createBucket(bucketName, {
               public: true,
               fileSizeLimit: 10485760,
-              allowedMimeTypes: ['image/*', 'application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+              allowedMimeTypes: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'text/plain', 'application/zip', 'application/x-zip-compressed']
             });
           }
         } catch (bucketError) {

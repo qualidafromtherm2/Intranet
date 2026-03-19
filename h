@@ -530,3 +530,41 @@ Restrições de verificação:
  TAB ...................................... Complete filename & cycle.
  SHIFT-TAB ...................... ESC-TAB   Complete filename & reverse cycle.
  ctrl-L ................................... Complete filename, list all.
+       column_name       |          data_type          
+-------------------------+-----------------------------
+ id                      | integer
+ n_id_receb              | bigint
+ n_id_item               | bigint
+ n_sequencia             | integer
+ n_id_produto            | bigint
+ c_codigo_produto        | character varying
+ c_descricao_produto     | character varying
+ c_ncm                   | character varying
+ n_qtde_nfe              | numeric
+ c_unidade_nfe           | character varying
+ n_qtde_recebida         | numeric
+ n_qtde_divergente       | numeric
+ n_preco_unit            | numeric
+ v_total_item            | numeric
+ v_desconto              | numeric
+ v_frete                 | numeric
+ v_seguro                | numeric
+ v_outras                | numeric
+ v_icms                  | numeric
+ v_ipi                   | numeric
+ v_pis                   | numeric
+ v_cofins                | numeric
+ v_icms_st               | numeric
+ n_num_ped_compra        | character varying
+ n_id_pedido             | bigint
+ n_id_it_pedido          | bigint
+ c_cfop_entrada          | character varying
+ c_categoria_item        | character varying
+ codigo_local_estoque    | bigint
+ c_local_estoque         | character varying
+ c_nao_gerar_financeiro  | character
+ c_nao_gerar_mov_estoque | character
+ c_obs_item              | text
+ created_at              | timestamp without time zone
+(34 linhas)
+
