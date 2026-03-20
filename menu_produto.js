@@ -27517,6 +27517,29 @@ function renderizarCatalogoOmie(produtos, options = {}) {
               <i class="fa-solid fa-pencil"></i>
             </button>
 
+            <!-- Botão Últimas Compras -->
+            <button 
+              onclick="event.stopPropagation();abrirModalUltimasCompras('${produto.codigo_produto}', '${escapeHtml(produto.codigo)}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}')"
+              title="Últimas compras"
+              style="
+                width:32px;
+                background:#ede9fe;
+                color:#7c3aed;
+                border:1px solid #c4b5fd;
+                padding:6px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:14px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                flex-shrink:0;
+              "
+              onmouseover="this.style.background='#ddd6fe'"
+              onmouseout="this.style.background='#ede9fe'">
+              <i class="fa-solid fa-receipt"></i>
+            </button>
+
             <!-- Campo Quantidade -->
             <input 
               type="number" 
@@ -41737,6 +41760,7 @@ function renderAgendaCalendarioMensal() {
   const grid = document.getElementById('agendaCalendarioGrid');
   const titulo = document.getElementById('agendaMesTitulo');
   if (!grid) return;
+  const isMobileView = window.matchMedia('(max-width: 768px)').matches;
 
   const dataRef = new Date(agendaMesReferencia.getFullYear(), agendaMesReferencia.getMonth(), 1);
   const hoje = new Date();
@@ -41837,6 +41861,25 @@ function renderAgendaCalendarioMensal() {
       const tituloChip = escapeHtml(`${reserva.tipo} ${reserva.inicio}–${reserva.fim}`);
       const idAttr = `data-agenda-reserva-id="${escapeHtml(String(reserva.id || ''))}" data-agenda-reserva-date="${escapeHtml(dataIso)}"`;
 
+      const participantesReserva = Array.isArray(reserva?.participantes)
+        ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
+      const horaInicio = String(reserva?.inicio || '').slice(0, 5);
+      const convocadoHtml = usuarioConvocado
+        ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>'
+        : '';
+
+      if (isMobileView) {
+        const clsMobile = reservaJaPassou(reserva)
+          ? `agenda-cal-reserva-item ${cls} is-mobile-min is-past-chip`
+          : `agenda-cal-reserva-item ${cls} is-mobile-min`;
+        return `<div class="${clsMobile}" ${idAttr} title="${tituloChip}">
+          ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
+          ${convocadoHtml}
+        </div>`;
+      }
+
       if (reservaJaPassou(reserva)) {
         // Já passou: só o ícone, opaco, sem texto
         return `<div class="agenda-cal-reserva-item ${cls} is-past-chip" ${idAttr} title="${tituloChip}">
@@ -41845,17 +41888,11 @@ function renderAgendaCalendarioMensal() {
       }
 
       // Ainda ativa: chip completo
-      const participantesReserva = Array.isArray(reserva?.participantes)
-        ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
-        : [];
-      const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
-      const horaInicio = String(reserva?.inicio || '').slice(0, 5);
       const horaFim = String(reserva?.fim || '').slice(0, 5);
       const horaFaixa = (horaInicio && horaFim)
         ? `${horaInicio}-${horaFim}`
         : (horaInicio || horaFim || '');
       const cafeHtml      = reserva?.cafe      ? '<i class="fa-solid fa-mug-hot agenda-chip-cafe-icon" title="Com café"></i>' : '';
-      const convocadoHtml = usuarioConvocado   ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>' : '';
       return `<div class="agenda-cal-reserva-item ${cls}" ${idAttr} title="${tituloChip}">
           <i class="fa-solid ${icon} agenda-chip-room-icon" title="${title}"></i>
           ${horaFaixa ? `<span class="agenda-chip-hora agenda-chip-hora-desktop">${escapeHtml(horaFaixa)}</span>` : ''}
