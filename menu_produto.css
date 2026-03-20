@@ -6608,6 +6608,17 @@ table.tabela td.num {
   display: none;
 }
 
+.agenda-cal-reserva-item.is-mobile-min {
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.agenda-cal-reserva-item.is-mobile-min.is-past-chip {
+  width: 100%;
+  opacity: .75;
+  justify-content: space-between;
+}
+
 /* Texto curto do lembrete */
 .agenda-chip-hora.lembrete-texto {
   font-size: 8px;

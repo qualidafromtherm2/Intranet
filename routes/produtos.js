@@ -215,6 +215,43 @@ router.get('/detalhe', async (req, res) => {
 });
 
 // ============================================================================
+// GET /api/produtos/ultimas-compras?codigo_produto=10722904812
+// Retorna as últimas compras (recebimentos NFe) de um produto pelo código OMIE.
+// Junta logistica.recebimentos_nfe_itens + logistica.recebimentos_nfe_omie
+// ============================================================================
+router.get('/ultimas-compras', async (req, res) => {
+  try {
+    const codigoProduto = String(req.query?.codigo_produto || '').trim();
+    if (!codigoProduto) {
+      return res.status(400).json({ error: 'Parâmetro ?codigo_produto é obrigatório.' });
+    }
+
+    const sql = `
+      SELECT
+        r.d_rec,
+        r.c_nome_fornecedor,
+        r.c_numero_nfe,
+        r.c_chave_nfe,
+        i.n_qtde_nfe,
+        i.n_preco_unit,
+        i.v_total_item
+      FROM logistica.recebimentos_nfe_itens i
+      INNER JOIN logistica.recebimentos_nfe_omie r
+        ON r.n_id_receb = i.n_id_receb
+      WHERE i.n_id_produto = $1
+      ORDER BY r.d_rec DESC NULLS LAST
+      LIMIT 50
+    `;
+
+    const { rows } = await dbQuery(sql, [codigoProduto]);
+    return res.json({ itens: rows });
+  } catch (err) {
+    console.error('[produtos/ultimas-compras] erro →', err);
+    return res.status(500).json({ error: 'Falha ao consultar últimas compras.' });
+  }
+});
+
+// ============================================================================
 // POST /api/produtos/locais
 // Atualiza campos que existem só no Postgres (não enviados à Omie).
 // Espera body: { codigo, visivel_principal, tipo_compra }

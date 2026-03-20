@@ -3732,8 +3732,23 @@
     <div class="content-section">
       <div class="content-section-title">Últimas compras</div>
       <div id="ultimasComprasList">
-        <!-- Conteúdo a ser implementado -->
-        <p style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhuma compra encontrada para este produto.</p>
+        <div id="ultimasComprasLoading" style="display:none; color: var(--inactive-color); font-size: 14px; padding: 16px 0;">
+          Carregando últimas compras...
+        </div>
+        <table id="ultimasComprasTable" class="content-list" style="display:none; width:100%; border-collapse:collapse; font-size:14px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-color); text-align:left;">
+              <th style="padding:10px 8px; color: var(--content-title-color);">Data Receb.</th>
+              <th style="padding:10px 8px; color: var(--content-title-color);">Fornecedor</th>
+              <th style="padding:10px 8px; color: var(--content-title-color);">NF-e</th>
+              <th style="padding:10px 8px; color: var(--content-title-color); text-align:right;">Qtde</th>
+              <th style="padding:10px 8px; color: var(--content-title-color); text-align:right;">Preço Unit.</th>
+              <th style="padding:10px 8px; color: var(--content-title-color); text-align:right;">Total Item</th>
+            </tr>
+          </thead>
+          <tbody id="ultimasComprasBody"></tbody>
+        </table>
+        <p id="ultimasComprasVazio" style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhuma compra encontrada para este produto.</p>
       </div>
     </div>
   </div>
@@ -8143,6 +8158,114 @@ function attachDropZone(ul) {
       window.fecharModalNfeOmieDetalhes();
     }
   });
+})();
+</script>
+
+<!-- Modal de Últimas Compras do Produto -->
+<div id="modalUltimasCompras" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.68);z-index:100000;backdrop-filter:blur(3px);opacity:0;transition:opacity 0.18s;">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%) scale(0.9);transition:transform 0.18s;background:#ffffff;border-radius:14px;box-shadow:0 24px 70px rgba(15,23,42,0.35);width:min(860px, 94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;background:linear-gradient(135deg,#4c1d95 0%,#6d28d9 100%);border-bottom:3px solid #8b5cf6;color:#f8fafc;">
+      <div>
+        <h3 id="modalUltimasComprasTitulo" style="margin:0;font-size:18px;font-weight:700;"><i class="fa-solid fa-receipt" style="margin-right:8px;"></i>Últimas Compras</h3>
+        <div id="modalUltimasComprasSubtitulo" style="margin-top:4px;font-size:12px;color:#e0d4fc;"></div>
+      </div>
+      <button type="button" onclick="fecharModalUltimasCompras()" style="background:transparent;border:none;color:#f8fafc;font-size:24px;cursor:pointer;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="modalUltimasComprasConteudo" style="padding:16px;overflow:auto;flex:1;background:#f8fafc;"></div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const modalUC = document.getElementById('modalUltimasCompras');
+  if (!modalUC) return;
+
+  modalUC.addEventListener('click', (event) => {
+    if (event.target === modalUC) fecharModalUltimasCompras();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && modalUC.style.display === 'block') {
+      fecharModalUltimasCompras();
+    }
+  });
+
+  window.fecharModalUltimasCompras = function() {
+    const inner = modalUC.querySelector(':scope > div');
+    modalUC.style.opacity = '0';
+    if (inner) inner.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    setTimeout(() => { modalUC.style.display = 'none'; }, 180);
+  };
+
+  window.abrirModalUltimasCompras = async function(codigoProdutoOmie, codigoProduto, descricao) {
+    const modal = modalUC;
+    const conteudo = document.getElementById('modalUltimasComprasConteudo');
+    const subtitulo = document.getElementById('modalUltimasComprasSubtitulo');
+
+    subtitulo.textContent = `${codigoProduto} — ${descricao}`;
+    conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;"></i><br>Carregando últimas compras...</div>';
+
+    modal.style.display = 'block';
+    requestAnimationFrame(() => {
+      modal.style.opacity = '1';
+      const inner = modal.querySelector(':scope > div');
+      if (inner) inner.style.transform = 'translate(-50%, -50%) scale(1)';
+    });
+
+    try {
+      const resp = await fetch(`/api/produtos/ultimas-compras?codigo_produto=${encodeURIComponent(codigoProdutoOmie)}`);
+      const json = await resp.json();
+
+      if (!json.itens || json.itens.length === 0) {
+        conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Nenhuma compra encontrada para este produto.</div>';
+        return;
+      }
+
+      let rows = '';
+      json.itens.forEach(item => {
+        const dataRec = item.d_rec ? new Date(item.d_rec).toLocaleDateString('pt-BR') : '—';
+        const fornecedor = item.c_nome_fornecedor || '—';
+        const nfeNum = item.c_numero_nfe || '—';
+        const chaveNfe = item.c_chave_nfe || '';
+        const qtde = item.n_qtde_nfe != null ? Number(item.n_qtde_nfe).toLocaleString('pt-BR') : '—';
+        const precoUnit = item.n_preco_unit != null ? Number(item.n_preco_unit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+        const totalItem = item.v_total_item != null ? Number(item.v_total_item).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+
+        const nfeHtml = chaveNfe
+          ? '<a href="#" style="color:#38bdf8;text-decoration:underline;font-weight:700;cursor:pointer;" '
+            + 'data-chave="' + chaveNfe.replace(/"/g,'&quot;') + '" '
+            + 'data-num="' + nfeNum.replace(/"/g,'&quot;') + '" '
+            + 'onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes)window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,null,{ocultarComparacao:true});return false;"'
+            + '>' + nfeNum + '</a>'
+          : nfeNum;
+
+        rows += '<tr style="border-bottom:1px solid #e5e7eb;">'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;">' + dataRec + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;">' + fornecedor + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;">' + nfeHtml + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;text-align:right;">' + qtde + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;text-align:right;">' + precoUnit + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#1e293b;text-align:right;">' + totalItem + '</td>'
+          + '</tr>';
+      });
+
+      conteudo.innerHTML = '<table style="width:100%;border-collapse:collapse;">'
+        + '<thead><tr style="border-bottom:2px solid #e5e7eb;text-align:left;">'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;">Data Receb.</th>'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;">Fornecedor</th>'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;">NF-e</th>'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;text-align:right;">Qtde</th>'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;text-align:right;">Preço Unit.</th>'
+        + '<th style="padding:10px 8px;font-size:12px;color:#6b7280;font-weight:600;text-align:right;">Total Item</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+    } catch (e) {
+      console.error('[ModalUltimasCompras] Erro:', e);
+      conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444;">Erro ao carregar últimas compras.</div>';
+    }
+  };
 })();
 </script>
 

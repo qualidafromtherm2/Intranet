@@ -414,6 +414,77 @@ camposCompras.forEach(f => {
     if (canEdit) attachEditor(li, f);
   });
 
+  // 3.5b) Popula Últimas compras (via recebimentos NFe)
+  try {
+    const codigoOmie = dados.codigo_produto;
+    if (codigoOmie) {
+      const loadingEl = document.getElementById('ultimasComprasLoading');
+      const tableEl   = document.getElementById('ultimasComprasTable');
+      const bodyEl    = document.getElementById('ultimasComprasBody');
+      const vazioEl   = document.getElementById('ultimasComprasVazio');
+
+      if (loadingEl) loadingEl.style.display = 'block';
+      if (vazioEl)   vazioEl.style.display   = 'none';
+      if (tableEl)   tableEl.style.display   = 'none';
+
+      const resp = await fetch(`${API_BASE}/api/produtos/ultimas-compras?codigo_produto=${encodeURIComponent(codigoOmie)}`);
+      const json = await resp.json();
+
+      if (loadingEl) loadingEl.style.display = 'none';
+
+      if (json.itens && json.itens.length > 0) {
+        bodyEl.innerHTML = '';
+        json.itens.forEach(item => {
+          const dataRec = item.d_rec
+            ? new Date(item.d_rec).toLocaleDateString('pt-BR')
+            : '—';
+          const fornecedor = item.c_nome_fornecedor || '—';
+          const nfeNum = item.c_numero_nfe || '—';
+          const chaveNfe = item.c_chave_nfe || '';
+          const qtde = item.n_qtde_nfe != null
+            ? Number(item.n_qtde_nfe).toLocaleString('pt-BR')
+            : '—';
+          const precoUnit = item.n_preco_unit != null
+            ? Number(item.n_preco_unit).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+            : '—';
+          const totalItem = item.v_total_item != null
+            ? Number(item.v_total_item).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+            : '—';
+
+          const tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid var(--border-color)';
+          tr.innerHTML = `
+            <td style="padding:8px;">${dataRec}</td>
+            <td style="padding:8px;">${fornecedor}</td>
+            <td style="padding:8px;">${chaveNfe
+              ? `<a href="#" style="color:#38bdf8;text-decoration:underline;font-weight:700;cursor:pointer;"
+                   data-chave="${chaveNfe.replace(/"/g,'&quot;')}"
+                   data-num="${nfeNum.replace(/"/g,'&quot;')}"
+                   onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes)window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,null,{ocultarComparacao:true});return false;"
+                 >${nfeNum}</a>`
+              : nfeNum}</td>
+            <td style="padding:8px; text-align:right;">${qtde}</td>
+            <td style="padding:8px; text-align:right;">${precoUnit}</td>
+            <td style="padding:8px; text-align:right;">${totalItem}</td>
+          `;
+          bodyEl.appendChild(tr);
+        });
+        tableEl.style.display = 'table';
+      } else {
+        if (vazioEl) vazioEl.style.display = 'block';
+      }
+    }
+  } catch (e) {
+    console.warn('[Últimas compras] Falha ao carregar:', e);
+    const vazioEl = document.getElementById('ultimasComprasVazio');
+    if (vazioEl) {
+      vazioEl.textContent = 'Erro ao carregar últimas compras.';
+      vazioEl.style.display = 'block';
+    }
+    const loadingEl = document.getElementById('ultimasComprasLoading');
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+
   // 3.6) Banner
   const descEl = document.getElementById('productDesc');
   descEl.textContent = dados.descricao || '';
