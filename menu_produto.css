@@ -623,8 +623,8 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   left: 76px;
   top: 16px;
   width: 240px;
-  height: 600px !important;
-  max-height: 600px !important;
+  height: auto;
+  max-height: calc(100vh - 40px);
   background: rgba(30, 30, 30, 0.98);
   border: 2px solid var(--card-border-color);
   border-radius: 12px;
@@ -633,8 +633,8 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   backdrop-filter: blur(10px);
   z-index: 1000;
-  overflow-y: scroll !important;
-  overflow-x: hidden !important;
+  overflow-y: auto;
+  overflow-x: hidden;
   transition: all 0.3s ease;
   display: block !important;
 }
@@ -6613,10 +6613,37 @@ table.tabela td.num {
   gap: 6px;
 }
 
+.agenda-cal-reserva-item.is-mobile-stack {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.agenda-cal-reserva-item.is-mobile-participant {
+  justify-content: center;
+  padding: 2px 4px;
+  min-height: 16px;
+}
+
+.agenda-cal-reserva-item.is-mobile-participant .agenda-chip-convocado-icon {
+  margin: 0;
+}
+
 .agenda-cal-reserva-item.is-mobile-min.is-past-chip {
   width: 100%;
   opacity: .75;
   justify-content: space-between;
+}
+
+.agenda-cal-reserva-item.is-mobile-stack.is-past-chip {
+  width: 100%;
+  justify-content: center;
+}
+
+.agenda-cal-reserva-item.is-mobile-participant.is-past-chip {
+  width: 100%;
+  justify-content: center;
 }
 
 /* Texto curto do lembrete */
@@ -6910,9 +6937,122 @@ table.tabela td.num {
 
 /* --- Responsividade mobile do calendário --- */
 @media (max-width: 640px) {
+  /* Página de compras (mobile): mostrar somente botão dedicado para abrir solicitação */
+  #comprasFormPane .content-section,
+  #comprasFormPane #minhasComprasWrapper {
+    display: none !important;
+  }
+
+  #comprasFormPane #comprasMobileAbrirSolicitacao {
+    display: flex !important;
+  }
+
+  #comprasFormPane #comprasMobileCatalogoBtn {
+    box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
+  }
+
+  /* Modal Solicitação de compra: campos em coluna única no mobile */
+  #modalCatalogoOmie #modalCatalogoOmieContent {
+    width: 98% !important;
+    max-height: 92vh !important;
+  }
+
+  #modalCatalogoOmie .modal-body {
+    padding: 12px !important;
+  }
+
+  #modalCatalogoOmie #catalogoGridConfiguracoes {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 10px !important;
+  }
+
+  #modalCatalogoOmie #catalogoFiltrosContainer {
+    grid-template-columns: 1fr !important;
+  }
+
+  #modalCatalogoOmie #listaProdutosCatalogo {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    max-height: 52vh !important;
+  }
+
+  /* No mobile, manter apenas o menu superior de ícones */
+  #appHeader {
+    display: flex !important;
+    justify-content: flex-end;
+    padding: 0 10px;
+  }
+
+  .menu-logo,
+  #mainMenu,
+  .user-badge {
+    display: none !important;
+  }
+
+  #home-icon {
+    display: inline-flex !important;
+  }
+
+  .header-profile {
+    margin-left: 0;
+    padding-left: 0;
+    flex: 0 1 auto;
+    gap: 14px;
+  }
+
+  /* Reativar ícone hamburger lateral no mobile */
+  .left-side {
+    display: flex !important;
+    position: fixed;
+    left: 8px;
+    top: 66px;
+    width: auto;
+    height: auto !important;
+    padding: 0;
+    border-right: none;
+    background: transparent;
+    z-index: 1200;
+  }
+
+  .sidebar-hamburger {
+    width: 38px;
+    height: 38px;
+    font-size: 17px;
+  }
+
+  .sidebar-content {
+    left: 46px;
+    top: 0;
+    max-height: 72vh;
+  }
+
+  /* Remove espaço lateral excessivo no mobile (principalmente à direita) */
+  #paginaInicio .content-wrapper {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
   /* Layout: sidebar vai para baixo do calendário */
   .agenda-cal-layout {
     flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .agenda-cal-main,
+  .agenda-calendario-grid {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* No mobile, esconder campos laterais para simplificar a visualização */
+  #agendaToggleMinhasReunioes,
+  #agendaFiltroUsuario,
+  .agenda-sidebar-nav,
+  .agenda-sidebar-legenda {
+    display: none !important;
   }
 
   /* Sidebar ocupa largura total e organiza itens em linha */

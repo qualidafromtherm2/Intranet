@@ -23484,7 +23484,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         LIMIT 1
       ) origem ON TRUE
       WHERE COALESCE(po.inativo, FALSE) = FALSE
-        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')${whereDataCR}
+        AND (po."Etapa_NF" IS NULL OR BTRIM(po."Etapa_NF") = '')
+        AND po.d_inc_data >= '2026-01-01'${whereDataCR}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
         po.c_numero DESC
@@ -23562,96 +23563,47 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
 });
 
 // ========================================
-//  Endpoint: Listar Pedidos por Etapa_NF (40/50/60/80)
+//  Endpoint: Listar Recebimentos NF-e por status (Faturada/Recebido/Concluído)
 // ========================================
 /**
  * GET /api/compras/pedidos-etapa-nf
- * Retorna pedidos da tabela compras.pedidos_omie com Etapa_NF preenchida:
- * - 40 -> faturada pelo fornecedor
- * - 50/60 -> recebido
- * - 80 -> concluído
+ * Retorna recebimentos da tabela logistica.recebimentos_nfe_omie:
+ * - Faturada pelo fornecedor: c_recebido <> S, c_cancelada <> S, c_bloqueado <> S
+ * - Recebido: c_recebido = S, c_etapa IN (50,60), c_cancelada <> S, c_bloqueado <> S
+ * - Concluído: c_recebido = S, c_etapa = 80, c_cancelada <> S, c_bloqueado <> S
+ * Filtro de calendário: Faturada usa d_emissao_nfe; Recebido/Concluído usam d_rec
  */
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
-    console.log('[Compras/PedidosEtapaNF] Listando pedidos por Etapa_NF (40/50/60/80)...');
+    console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Recebido/Concluído)...');
 
-    // Filtro de data opcional via query params
-    // Pedido de compra e Compra realizada: d_inc_data | Recebido/Concluído: updated_at | Faturada: d_emissao_nfe
     const { dataInicio: diNF, dataFim: dfNF } = req.query;
-    const paramsNF = [];
-    let whereDataNF = '';
-    let whereDataReceb = '';
+
+    // Monta filtros de data para cada grupo
+    // Faturada: filtra por d_emissao_nfe | Recebido/Concluído: filtra por d_rec
+    const paramsFaturada = [];
+    let whereDataFaturada = '';
     if (diNF) {
-      paramsNF.push(diNF);
-      whereDataNF  += ` AND po.updated_at::date >= $${paramsNF.length}::date`;
-      whereDataReceb += ` AND r.d_emissao_nfe::date >= $${paramsNF.length}::date`;
+      paramsFaturada.push(diNF);
+      whereDataFaturada += ` AND r.d_emissao_nfe::date >= $${paramsFaturada.length}::date`;
     }
     if (dfNF) {
-      paramsNF.push(dfNF);
-      whereDataNF  += ` AND po.updated_at::date <= $${paramsNF.length}::date`;
-      whereDataReceb += ` AND r.d_emissao_nfe::date <= $${paramsNF.length}::date`;
+      paramsFaturada.push(dfNF);
+      whereDataFaturada += ` AND r.d_emissao_nfe::date <= $${paramsFaturada.length}::date`;
     }
 
-    const query = `
-      SELECT
-        po.n_cod_ped,
-        po.c_numero,
-        po.c_cod_int_ped,
-        po.c_etapa,
-        po."Etapa_NF" AS etapa_nf,
-        po.n_valor,
-        po.n_cod_for,
-        po.d_inc_data,
-        po.d_dt_previsao,
-        cc.nome_fantasia AS fornecedor_nome,
-        pop.c_produto,
-        pop.c_descricao,
-        pop.c_unidade,
-        pop.n_qtde,
-        pop.n_val_tot,
-        pop.c_link_nfe_pdf,
-        pop.c_dados_adicionais_nfe,
-        po.created_at,
-        po.updated_at,
-        origem.solicitante,
-        origem.grupo_requisicao
-      FROM compras.pedidos_omie po
-      LEFT JOIN omie.fornecedores cc
-        ON cc.codigo_cliente_omie = po.n_cod_for
-      LEFT JOIN compras.pedidos_omie_produtos pop
-        ON pop.n_cod_ped = po.n_cod_ped
-      LEFT JOIN LATERAL (
-        SELECT src.solicitante, src.grupo_requisicao
-        FROM (
-          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
-          FROM compras.solicitacao_compras sc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
-          UNION ALL
-          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
-          FROM compras.compras_sem_cadastro csc
-          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
-            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
-        ) src
-        ORDER BY src.created_at DESC NULLS LAST
-        LIMIT 1
-      ) origem ON TRUE
-      WHERE (po.inativo IS NULL OR po.inativo = false)
-        AND COALESCE(BTRIM(po."Etapa_NF"), '') IN ('40', '50', '60', '80')${whereDataNF}
-      ORDER BY
-        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
-        po.c_numero DESC
-    `;
+    const paramsRecebConc = [];
+    let whereDataRecebConc = '';
+    if (diNF) {
+      paramsRecebConc.push(diNF);
+      whereDataRecebConc += ` AND r.d_rec::date >= $${paramsRecebConc.length}::date`;
+    }
+    if (dfNF) {
+      paramsRecebConc.push(dfNF);
+      whereDataRecebConc += ` AND r.d_rec::date <= $${paramsRecebConc.length}::date`;
+    }
 
-    const { rows } = await pool.query(query, paramsNF);
-
-    await pool.query(`
-      ALTER TABLE logistica.recebimentos_nfe_omie
-      ADD COLUMN IF NOT EXISTS compras VARCHAR(3) NULL
-    `);
-
-    const recebimentosEtapa40Query = `
-      SELECT
+    const selectBase = `
         r.n_id_receb,
         r.c_chave_nfe,
         COALESCE(
@@ -23664,12 +23616,14 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         r.c_numero_nfe,
         r.n_valor_nfe,
         LOWER(BTRIM(COALESCE(r.compras, ''))) AS compras,
+        r.c_etapa,
+        r.c_recebido,
         r.d_emissao_nfe,
+        r.d_rec,
         r.updated_at
-      FROM logistica.recebimentos_nfe_omie r
-      WHERE COALESCE(BTRIM(r.c_etapa), '') = '40'
-        AND UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
-        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')${whereDataReceb}
+    `;
+
+    const orderBase = `
       ORDER BY
         CASE
           WHEN COALESCE(NULLIF(LTRIM(REGEXP_REPLACE(COALESCE(r.c_numero_nfe, ''), '\\D', '', 'g'), '0'), ''), NULLIF(LTRIM(SUBSTRING(r.c_chave_nfe FROM 26 FOR 9), '0'), '')) ~ '^\\d+$'
@@ -23679,77 +23633,68 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
         r.updated_at DESC NULLS LAST
     `;
 
-    const { rows: recebimentosEtapa40Rows } = await pool.query(recebimentosEtapa40Query, paramsNF);
+    // 1) Faturada pelo fornecedor: não cancelada, não bloqueada, NÃO recebida
+    const queryFaturada = `
+      SELECT ${selectBase}
+      FROM logistica.recebimentos_nfe_omie r
+      WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) NOT IN ('S', 'SIM')
+        AND r.d_emissao_nfe >= '2026-01-01'${whereDataFaturada}
+      ${orderBase}
+    `;
 
-    const pedidosMap = new Map();
-    const pedidos = [];
+    // 2) Recebido: não cancelada, não bloqueada, recebida, etapa 50 ou 60
+    const queryRecebido = `
+      SELECT ${selectBase}
+      FROM logistica.recebimentos_nfe_omie r
+      WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
+        AND COALESCE(BTRIM(r.c_etapa), '') IN ('50', '60')
+        AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
+      ${orderBase}
+    `;
 
-    const mapearStatusPorEtapaNf = (etapaNf) => {
-      const etapa = String(etapaNf || '').trim();
-      if (etapa === '40') return 'faturada pelo fornecedor';
-      if (etapa === '50' || etapa === '60') return 'recebido';
-      if (etapa === '80') return 'concluído';
-      return null;
+    // 3) Concluído: não cancelada, não bloqueada, recebida, etapa 80
+    const queryConcluido = `
+      SELECT ${selectBase}
+      FROM logistica.recebimentos_nfe_omie r
+      WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
+        AND COALESCE(BTRIM(r.c_etapa), '') = '80'
+        AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
+      ${orderBase}
+    `;
+
+    const [resFaturada, resRecebido, resConcluido] = await Promise.all([
+      pool.query(queryFaturada, paramsFaturada),
+      pool.query(queryRecebido, paramsRecebConc),
+      pool.query(queryConcluido, paramsRecebConc)
+    ]);
+
+    const mapearStatus = {
+      faturada: 'faturada pelo fornecedor',
+      recebido: 'recebido',
+      concluido: 'concluído'
     };
 
-    for (const row of rows) {
-      const numero = row.c_numero || 'SEM_NUMERO';
-      const statusNf = mapearStatusPorEtapaNf(row.etapa_nf);
-      if (!statusNf) continue;
-
-      const chavePedido = `${numero}::${statusNf}`;
-      if (!pedidosMap.has(chavePedido)) {
-        const novoPedido = {
-          numero,
-          n_cod_ped: row.n_cod_ped,
-          c_cod_int_ped: row.c_cod_int_ped,
-          c_etapa: row.c_etapa,
-          etapa_nf: row.etapa_nf,
-          status_nf: statusNf,
-          n_cod_for: row.n_cod_for,
-          d_inc_data: row.d_inc_data,
-          d_dt_previsao: row.d_dt_previsao,
-          solicitante: row.solicitante,
-          grupo_requisicao: row.grupo_requisicao,
-          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
-          n_valor: row.n_valor ?? null,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          itens: []
-        };
-        pedidosMap.set(chavePedido, novoPedido);
-        pedidos.push(novoPedido);
-      }
-
-      if (row.c_produto) {
-        pedidosMap.get(chavePedido).itens.push({
-          produto_codigo: row.c_produto,
-          produto_descricao: row.c_descricao || 'Sem descrição',
-          c_unidade: row.c_unidade || '-',
-          n_qtde: row.n_qtde || 0,
-          n_val_tot: row.n_val_tot || 0,
-          c_link_nfe_pdf: row.c_link_nfe_pdf || null,
-          c_dados_adicionais_nfe: row.c_dados_adicionais_nfe || null
-        });
-      }
-    }
-
-    for (const row of recebimentosEtapa40Rows) {
+    const montarRegistro = (row, statusNf) => {
       const numeroNfe = String(row.numero_nfe_exibicao || '').trim() || '0';
-      const chavePedido = `${numeroNfe}::faturada pelo fornecedor::receb_${row.n_id_receb}`;
-
-      const novoRegistro = {
+      return {
         numero: numeroNfe,
         c_numero: numeroNfe,
         n_cod_ped: null,
         n_id_receb: row.n_id_receb,
         c_cod_int_ped: null,
-        c_etapa: '40',
-        etapa_nf: '40',
-        status_nf: 'faturada pelo fornecedor',
+        c_etapa: row.c_etapa || '',
+        etapa_nf: row.c_etapa || '',
+        status_nf: statusNf,
         n_cod_for: null,
         d_inc_data: row.d_emissao_nfe || null,
         d_dt_previsao: null,
+        d_rec: row.d_rec || null,
         solicitante: null,
         grupo_requisicao: null,
         fornecedor_nome: row.c_nome_fornecedor || 'Sem fornecedor',
@@ -23772,9 +23717,17 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
           }
         ]
       };
+    };
 
-      pedidosMap.set(chavePedido, novoRegistro);
-      pedidos.push(novoRegistro);
+    const pedidos = [];
+    for (const row of resFaturada.rows) {
+      pedidos.push(montarRegistro(row, mapearStatus.faturada));
+    }
+    for (const row of resRecebido.rows) {
+      pedidos.push(montarRegistro(row, mapearStatus.recebido));
+    }
+    for (const row of resConcluido.rows) {
+      pedidos.push(montarRegistro(row, mapearStatus.concluido));
     }
 
     const parseNumero = valor => {
@@ -23791,11 +23744,11 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       return String(b.numero).localeCompare(String(a.numero));
     });
 
-    console.log(`[Compras/PedidosEtapaNF] Retornando ${pedidos.length} pedidos agrupados`);
+    console.log(`[Compras/PedidosEtapaNF] Retornando ${pedidos.length} recebimentos agrupados (Faturada: ${resFaturada.rows.length}, Recebido: ${resRecebido.rows.length}, Concluído: ${resConcluido.rows.length})`);
     res.json({ ok: true, pedidos });
   } catch (err) {
-    console.error('[Compras/PedidosEtapaNF] Erro ao listar pedidos por Etapa_NF:', err);
-    res.status(500).json({ ok: false, error: 'Erro ao listar pedidos por Etapa_NF' });
+    console.error('[Compras/PedidosEtapaNF] Erro ao listar recebimentos NF-e:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao listar recebimentos NF-e' });
   }
 });
 

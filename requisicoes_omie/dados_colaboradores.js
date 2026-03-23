@@ -528,14 +528,14 @@ const ensurePermStyles = (() => {
       .colab-perm-item{display:flex;align-items:center;gap:10px;padding:7px 14px;border-radius:8px;color:#dae0ff;transition:background .12s;cursor:pointer;user-select:none}
       .colab-perm-item:hover{background:rgba(80,109,255,.08)}
       .colab-perm-item.is-parent{font-weight:600;color:#f0f2ff}
-      .colab-perm-item.is-child{padding-left:40px;font-size:14px;color:rgba(218,224,255,.85)}
+      .colab-perm-item.is-child{padding-left:24px;font-size:14px;color:rgba(218,224,255,.85)}
       .colab-perm-item input[type="checkbox"]{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:#506dff;cursor:pointer}
       .colab-perm-text{flex:1;line-height:1.35}
       .colab-perm-item.hidden-by-search{display:none}
 
       /* ======= FILHOS OCULTOS (colapsado) ======= */
-      .colab-perm-children{overflow:hidden;max-height:0;transition:max-height .25s ease}
-      .colab-perm-cat.open .colab-perm-children{max-height:600px}
+      .colab-perm-children{overflow:hidden;max-height:0;transition:max-height .25s ease;padding-left:18px}
+      .colab-perm-cat.open > .colab-perm-children{max-height:3000px}
 
       /* ======= RODAPÉ ======= */
       .colab-perm-footer{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:14px 24px;border-top:1px solid rgba(255,255,255,.06)}
@@ -653,9 +653,145 @@ async function showPermissoes(userId, username) {
     return roots;
   }
 
-  // 5) Renderiza cada grupo de posição
+  // 5) Renderiza cada grupo de posição (recursivo para sub-níveis)
   body.innerHTML = '';
   const allCheckboxes = [];
+  const nodeMap = new Map();       // id → { cb, childrenEl }
+  const parentLookup = new Map();  // child_id → parent_id
+
+  function buildParentLookupFromRoots(roots) {
+    for (const r of roots) {
+      for (const c of r.children) {
+        parentLookup.set(c.id, r.id);
+        buildParentLookupFromRoots([c]);
+      }
+    }
+  }
+
+  // Propaga estado para cima (indeterminate nos pais)
+  function bubbleUp(nodeId) {
+    const pid = parentLookup.get(nodeId);
+    if (!pid) return;
+    const entry = nodeMap.get(pid);
+    if (!entry) return;
+    const directCbs = Array.from(
+      entry.childrenEl.querySelectorAll(
+        ':scope > .colab-perm-cat > .colab-perm-cat-head .perm-cb, :scope > .colab-perm-item > .perm-cb'
+      )
+    );
+    const total = directCbs.length;
+    const checked = directCbs.filter(c => c.checked).length;
+    const hasIndet = directCbs.some(c => c.indeterminate);
+    entry.cb.checked = checked > 0;
+    entry.cb.indeterminate = (checked > 0 && checked < total) || hasIndet;
+    bubbleUp(pid);
+  }
+
+  // Renderiza um nó (recursivo)
+  function renderNode(node, container, depth) {
+    const hasChildren = node.children.length > 0;
+
+    if (hasChildren) {
+      const cat = document.createElement('div');
+      cat.className = 'colab-perm-cat' + (depth === 0 ? ' open' : '');
+
+      const catHead = document.createElement('div');
+      catHead.className = 'colab-perm-cat-head';
+
+      const parentLabel = document.createElement('label');
+      parentLabel.className = 'colab-perm-item is-parent';
+      parentLabel.style.padding = '0';
+      parentLabel.style.flex = '1';
+
+      const parentCb = document.createElement('input');
+      parentCb.type = 'checkbox';
+      parentCb.className = 'perm-cb';
+      parentCb.dataset.node = String(node.id);
+      parentCb.checked = !!node.allowed;
+      allCheckboxes.push(parentCb);
+
+      const parentSpan = document.createElement('span');
+      parentSpan.className = 'colab-perm-text';
+      parentSpan.textContent = node.label;
+
+      parentLabel.append(parentCb, parentSpan);
+      catHead.innerHTML = ARROW_SVG;
+      catHead.appendChild(parentLabel);
+      cat.appendChild(catHead);
+
+      const childrenEl = document.createElement('div');
+      childrenEl.className = 'colab-perm-children';
+
+      for (const child of node.children) {
+        renderNode(child, childrenEl, depth + 1);
+      }
+
+      cat.appendChild(childrenEl);
+      container.appendChild(cat);
+
+      nodeMap.set(node.id, { cb: parentCb, childrenEl });
+
+      // Toggle expandir/colapsar
+      catHead.querySelector('.perm-arrow').addEventListener('click', (e) => {
+        e.stopPropagation();
+        cat.classList.toggle('open');
+      });
+
+      // Checkbox pai: marca/desmarca TODOS os descendentes
+      parentCb.addEventListener('change', () => {
+        childrenEl.querySelectorAll('.perm-cb').forEach(cb => {
+          cb.checked = parentCb.checked;
+          cb.indeterminate = false;
+        });
+        bubbleUp(node.id);
+        atualizarContadores();
+      });
+
+    } else {
+      const itemLabel = document.createElement('label');
+      itemLabel.className = depth === 0 ? 'colab-perm-item is-parent' : 'colab-perm-item is-child';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'perm-cb';
+      cb.dataset.node = String(node.id);
+      cb.checked = !!node.allowed;
+      allCheckboxes.push(cb);
+
+      const span = document.createElement('span');
+      span.className = 'colab-perm-text';
+      span.textContent = node.label;
+
+      itemLabel.append(cb, span);
+      container.appendChild(itemLabel);
+
+      cb.addEventListener('change', () => {
+        bubbleUp(node.id);
+        atualizarContadores();
+      });
+    }
+  }
+
+  // Calcula estado indeterminate de baixo para cima após renderizar
+  function initIndeterminate(nodes) {
+    for (const n of nodes) {
+      if (n.children.length > 0) {
+        initIndeterminate(n.children);
+        const entry = nodeMap.get(n.id);
+        if (!entry) continue;
+        const directCbs = Array.from(
+          entry.childrenEl.querySelectorAll(
+            ':scope > .colab-perm-cat > .colab-perm-cat-head .perm-cb, :scope > .colab-perm-item > .perm-cb'
+          )
+        );
+        const total = directCbs.length;
+        const checked = directCbs.filter(c => c.checked).length;
+        const hasIndet = directCbs.some(c => c.indeterminate);
+        entry.cb.checked = checked > 0;
+        entry.cb.indeterminate = (checked > 0 && checked < total) || hasIndet;
+      }
+    }
+  }
 
   const posOrder = ['side', 'top'];
   for (const pos of posOrder) {
@@ -665,125 +801,23 @@ async function showPermissoes(userId, username) {
     const groupEl = document.createElement('div');
     groupEl.className = 'colab-perm-group';
 
-    const totalCount = nodes.length;
     const header = document.createElement('div');
     header.className = 'colab-perm-group-header';
     header.innerHTML = `
       <span class="colab-perm-group-label">${posLabels[pos] || pos}</span>
       <div class="colab-perm-group-line"></div>
-      <span class="colab-perm-group-count">${totalCount} itens</span>
+      <span class="colab-perm-group-count"></span>
     `;
     groupEl.appendChild(header);
 
     const roots = buildTree(nodes);
+    buildParentLookupFromRoots(roots);
 
     for (const root of roots) {
-      const hasChildren = root.children.length > 0;
-
-      if (hasChildren) {
-        const cat = document.createElement('div');
-        cat.className = 'colab-perm-cat open';
-
-        const catHead = document.createElement('div');
-        catHead.className = 'colab-perm-cat-head';
-
-        const parentLabel = document.createElement('label');
-        parentLabel.className = 'colab-perm-item is-parent';
-        parentLabel.style.padding = '0';
-        parentLabel.style.flex = '1';
-
-        const parentCb = document.createElement('input');
-        parentCb.type = 'checkbox';
-        parentCb.className = 'perm-cb';
-        parentCb.dataset.node = String(root.id);
-        parentCb.checked = !!root.allowed;
-        allCheckboxes.push(parentCb);
-
-        const parentSpan = document.createElement('span');
-        parentSpan.className = 'colab-perm-text';
-        parentSpan.textContent = root.label;
-
-        parentLabel.append(parentCb, parentSpan);
-        catHead.innerHTML = ARROW_SVG;
-        catHead.appendChild(parentLabel);
-        cat.appendChild(catHead);
-
-        const childrenEl = document.createElement('div');
-        childrenEl.className = 'colab-perm-children';
-
-        const childCbs = [];
-        for (const child of root.children) {
-          const childLabel = document.createElement('label');
-          childLabel.className = 'colab-perm-item is-child';
-
-          const childCb = document.createElement('input');
-          childCb.type = 'checkbox';
-          childCb.className = 'perm-cb';
-          childCb.dataset.node = String(child.id);
-          childCb.checked = !!child.allowed;
-          allCheckboxes.push(childCb);
-          childCbs.push(childCb);
-
-          const childSpan = document.createElement('span');
-          childSpan.className = 'colab-perm-text';
-          childSpan.textContent = child.label;
-
-          childLabel.append(childCb, childSpan);
-          childrenEl.appendChild(childLabel);
-        }
-
-        cat.appendChild(childrenEl);
-        groupEl.appendChild(cat);
-
-        // Toggle expandir/colapsar ao clicar na seta
-        catHead.querySelector('.perm-arrow').addEventListener('click', (e) => {
-          e.stopPropagation();
-          cat.classList.toggle('open');
-        });
-
-        // Checkbox pai: marcar/desmarcar todos os filhos
-        parentCb.addEventListener('change', () => {
-          childCbs.forEach(cb => { cb.checked = parentCb.checked; });
-          atualizarContadores();
-        });
-
-        // Checkbox filho: atualiza estado do pai (indeterminate)
-        childCbs.forEach(cb => {
-          cb.addEventListener('change', () => {
-            const marcados = childCbs.filter(c => c.checked).length;
-            parentCb.checked = marcados > 0;
-            parentCb.indeterminate = marcados > 0 && marcados < childCbs.length;
-            atualizarContadores();
-          });
-        });
-
-        // Estado indeterminate inicial
-        const marcadosInit = childCbs.filter(c => c.checked).length;
-        if (marcadosInit > 0 && marcadosInit < childCbs.length) {
-          parentCb.indeterminate = true;
-        }
-
-      } else {
-        const itemLabel = document.createElement('label');
-        itemLabel.className = 'colab-perm-item is-parent';
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'perm-cb';
-        cb.dataset.node = String(root.id);
-        cb.checked = !!root.allowed;
-        allCheckboxes.push(cb);
-
-        const span = document.createElement('span');
-        span.className = 'colab-perm-text';
-        span.textContent = root.label;
-
-        itemLabel.append(cb, span);
-        groupEl.appendChild(itemLabel);
-        cb.addEventListener('change', () => atualizarContadores());
-      }
+      renderNode(root, groupEl, 0);
     }
 
+    initIndeterminate(roots);
     body.appendChild(groupEl);
   }
 
