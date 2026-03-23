@@ -6937,6 +6937,11 @@ table.tabela td.num {
 
 /* --- Responsividade mobile do calendário --- */
 @media (max-width: 640px) {
+  /* Header mobile: remover ícone de impressora */
+  #print-icon {
+    display: none !important;
+  }
+
   /* Página de compras (mobile): mostrar somente botão dedicado para abrir solicitação */
   #comprasFormPane .content-section,
   #comprasFormPane #minhasComprasWrapper {
@@ -6949,6 +6954,42 @@ table.tabela td.num {
 
   #comprasFormPane #comprasMobileCatalogoBtn {
     box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
+  }
+
+  /* Lista de produtos (mobile): 1 card por linha e sem botão modo lista */
+  #listaProdutos #viewToggleBtn {
+    display: none !important;
+  }
+
+  #listaProdutos #refreshCacheBtn {
+    display: none !important;
+  }
+
+  #listaProdutos .filter-bar {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #listaProdutos .filter-bar > div:first-child {
+    flex: 1 0 100% !important;
+    max-width: 100%;
+  }
+
+  #listaProdutos .filter-bar input {
+    max-width: none;
+    width: 100%;
+  }
+
+  #listaProdutos #listaProdutosGrid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    max-height: calc(100vh - 180px) !important;
+  }
+
+  #listaProdutos #listaProdutosGrid > * {
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   /* Modal Solicitação de compra: campos em coluna única no mobile */
@@ -6975,6 +7016,75 @@ table.tabela td.num {
     grid-template-columns: 1fr !important;
     gap: 10px !important;
     max-height: 52vh !important;
+  }
+
+  /* Modal Meu Carrinho (mobile): controles abaixo do item em coluna */
+  #modalCarrinhoCompras .modal-container {
+    width: 98% !important;
+  }
+
+  #modalCarrinhoCompras .modal-body {
+    padding: 12px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-top-row {
+    flex-direction: column;
+    gap: 10px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-controles {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end !important;
+    gap: 8px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-qtd {
+    width: 92px !important;
+    flex: 0 0 92px;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-botoes {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-acao-remover,
+  #modalCarrinhoCompras .carrinho-item-acao-confirmar {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 8px !important;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-confirmar-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+
+  #modalCarrinhoCompras .carrinho-item-alerta {
+    flex: 0 0 auto;
+  }
+
+  #modalCarrinhoFooterAcoes {
+    justify-content: stretch !important;
+  }
+
+  #modalCarrinhoFooterBotoes {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #modalCarrinhoFooterBotoes .content-button {
+    width: 100%;
+    justify-content: center;
   }
 
   /* No mobile, manter apenas o menu superior de ícones */

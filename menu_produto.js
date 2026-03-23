@@ -14501,7 +14501,7 @@ async function renderModalCarrinhoCompras() {
            onmouseout="this.style.boxShadow='0 1px 2px rgba(0,0,0,0.05)';">
         
         <!-- Linha superior: informações e controles -->
-        <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div class="carrinho-item-top-row" style="display:flex;gap:12px;align-items:flex-start;">
           
           <!-- Lado Esquerdo: Foto e Info -->
           <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
@@ -14535,10 +14535,10 @@ async function renderModalCarrinhoCompras() {
           </div><!-- fim lado esquerdo -->
           
           <!-- Lado Direito: Quantidade e Botões na MESMA LINHA -->
-          <div style="display:flex;gap:6px;align-items:flex-end;">
+          <div class="carrinho-item-controles" style="display:flex;gap:6px;align-items:flex-end;">
           
           <!-- Campo Quantidade -->
-          <div style="width:90px;">
+          <div class="carrinho-item-qtd" style="width:90px;">
             <label style="color:#6b7280;font-weight:500;display:block;margin-bottom:2px;font-size:11px;">
               <i class="fa-solid fa-boxes-stacked" style="margin-right:3px;font-size:10px;"></i>Qtd
             </label>
@@ -14548,27 +14548,30 @@ async function renderModalCarrinhoCompras() {
           </div>
           
           <!-- Botões de Ação na MESMA LINHA -->
-          <button class="modal-remover-item-btn" data-idx="${idx}" 
+          <div class="carrinho-item-botoes" style="display:flex;gap:6px;align-items:flex-end;">
+          <button class="modal-remover-item-btn carrinho-item-acao-remover" data-idx="${idx}" 
                   style="background:#ef4444;color:white;border:none;width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;"
                   onmouseover="this.style.background='#dc2626';" onmouseout="this.style.background='#ef4444';"
                   title="Remover item">
             <i class="fa-solid fa-trash" style="font-size:12px;"></i>
           </button>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div class="carrinho-item-confirmar-wrap" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             ${item.observacao_reprovacao ? `
               <div
+                class="carrinho-item-alerta"
                 title="${window.escapeHtml(item.observacao_reprovacao)}"
                 style="font-size:14px;color:#f59e0b;cursor:help;line-height:1;"
               >
                 <i class="fa-solid fa-triangle-exclamation"></i>
               </div>
             ` : ''}
-            <button class="carrinho-toggle-detalhes-btn" data-idx="${idx}"
+            <button class="carrinho-toggle-detalhes-btn carrinho-item-acao-confirmar" data-idx="${idx}"
                     style="background:#3b82f6;color:white;border:none;width:32px;height:32px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s;"
                     onmouseover="this.style.background='#2563eb';" onmouseout="this.style.background='#3b82f6';"
                     title="Expandir/Recolher detalhes">
               <i class="fa-solid fa-chevron-down" style="font-size:12px;"></i>
             </button>
+          </div>
           </div>
           
           </div><!-- fim lado direito -->
