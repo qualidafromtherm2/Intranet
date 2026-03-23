@@ -297,6 +297,14 @@ const dados = await resProd.json();
 window.codigoOmieSelecionado = dados?.codigo_produto || null;
 window.descricaoSelecionada = dados?.descricao || '';
 
+// Se a aba PIR estiver ativa, recarrega os itens imediatamente
+try {
+  const pirAtiva = document.querySelector('#produtoTabs .main-header .nav-card[data-target="listaPIR"].active');
+  if (pirAtiva && typeof window.carregarItensPIR === 'function' && window.codigoOmieSelecionado) {
+    window.carregarItensPIR(window.codigoOmieSelecionado);
+  }
+} catch (_) { /* noop */ }
+
 // Atualiza o cabeçalho com as informações do produto
 const headerInfo = document.getElementById('productHeaderInfo');
 const headerCodigo = document.getElementById('headerCodigo');

@@ -4931,6 +4931,8 @@ if (qualidadeFabricaMenuLink) {
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     qualidadeFabricaMenuLink.classList.add('is-active');
     showMainTab('qualidadeFabricaPane');
+    mostrarPainelQualidade('registro');
+    carregarStatusVerificacaoPirQualidade(obterCodigoProdutoQualidadeAtual());
   });
 }
 
@@ -4938,7 +4940,18 @@ if (qualidadeFabricaMenuLink) {
 const qualidadeInspecaoBtn = document.getElementById('qualidadeInspecaoBtn');
 const qualidadeCriarBtn = document.getElementById('qualidadeCriarBtn');
 const qualidadeRelatorioBtn = document.getElementById('qualidadeRelatorioBtn');
+const qualidadeRelatorioTabelaBtn = document.getElementById('qualidadeRelatorioTabelaBtn');
+const qualidadeListaPirCodigosBtn = document.getElementById('qualidadeListaPirCodigosBtn');
+const qualidadeRegistroBtn = document.getElementById('qualidadeRegistroBtn');
+const qualidadeVoltarRegistroBtn = document.getElementById('qualidadeVoltarRegistroBtn');
 const qualidadeInspecaoForm = document.getElementById('qualidadeInspecaoForm');
+const qualidadeRelatorioTabelaWrap = document.getElementById('qualidadeRelatorioTabelaWrap');
+const qualidadeListaPirCodigosWrap = document.getElementById('qualidadeListaPirCodigosWrap');
+const qualidadeRelatorioTabelaHead = document.getElementById('qualidadeRelatorioTabelaHead');
+const qualidadeRelatorioTabelaTbody = document.getElementById('qualidadeRelatorioTabelaTbody');
+const qualidadeListaPirCodigosBody = document.getElementById('qualidadeListaPirCodigosBody');
+const qualidadeListaPirCodigosMeta = document.getElementById('qualidadeListaPirCodigosMeta');
+const qualidadeListaPirAlternarOrigemBtn = document.getElementById('qualidadeListaPirAlternarOrigemBtn');
 const qualidadeInspecaoRegistrarBtn = document.getElementById('qualidadeInspecaoRegistrarBtn');
 const qualidadeInspecaoCancelarBtn = document.getElementById('qualidadeInspecaoCancelarBtn');
 const qualidadeProdutoBusca = document.getElementById('qualidadeProdutoBusca');
@@ -4954,6 +4967,250 @@ const qualidadeNfe = document.getElementById('qualidadeNfe');
 const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
+const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
+let qualidadePirVerificacaoSalvando = false;
+let qualidadeListaPirOrigem = 'pir';
+
+function obterCodigoProdutoQualidadeAtual() {
+  return String(
+    qualidadeCodProduto?.value ||
+    window.codigoSelecionado ||
+    ''
+  ).trim();
+}
+
+async function carregarStatusVerificacaoPirQualidade(codigoProduto) {
+  if (!qualidadePirVerificacaoCheckbox) return;
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) {
+    qualidadePirVerificacaoCheckbox.checked = false;
+    qualidadePirVerificacaoCheckbox.disabled = true;
+    return;
+  }
+
+  qualidadePirVerificacaoCheckbox.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/api/pir/produto/${encodeURIComponent(codigo)}/verificacao`, {
+      credentials: 'include'
+    });
+
+    if (response.status === 404) {
+      qualidadePirVerificacaoCheckbox.checked = false;
+      return;
+    }
+    if (!response.ok) throw new Error('Erro ao carregar verificação PIR');
+
+    const data = await response.json();
+    qualidadePirVerificacaoCheckbox.checked = data?.pir === true;
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar Verificação PIR:', error);
+  } finally {
+    qualidadePirVerificacaoCheckbox.disabled = false;
+  }
+}
+
+async function renderQualidadeListaPirCodigos() {
+  if (!qualidadeListaPirCodigosBody) return;
+
+  qualidadeListaPirCodigosBody.innerHTML = `
+    <tr>
+      <td colspan="3" style="padding:14px;color:var(--inactive-color);text-align:center;">
+        <i class="fa-solid fa-spinner fa-spin"></i> Carregando lista...
+      </td>
+    </tr>
+  `;
+
+  const endpoint = qualidadeListaPirOrigem === 'produtos_omie'
+    ? `${API_BASE}/api/pir/resumo/produtos-omie`
+    : `${API_BASE}/api/pir/resumo/codigos`;
+
+  const response = await fetch(endpoint, { credentials: 'include' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  const itens = Array.isArray(data?.itens) ? data.itens : [];
+
+  if (qualidadeListaPirCodigosMeta) {
+    const origemLabel = qualidadeListaPirOrigem === 'produtos_omie' ? 'Fonte: produtos_omie' : 'Fonte: qualidade.pir';
+    qualidadeListaPirCodigosMeta.textContent = `${origemLabel} | Total: ${itens.length}`;
+  }
+
+  if (qualidadeListaPirAlternarOrigemBtn) {
+    const textoBtn = qualidadeListaPirOrigem === 'produtos_omie'
+      ? 'Usar qualidade.pir'
+      : 'Usar produtos_omie';
+    qualidadeListaPirAlternarOrigemBtn.innerHTML = `<i class="fa-solid fa-shuffle"></i><span>${textoBtn}</span>`;
+  }
+
+  if (!itens.length) {
+    qualidadeListaPirCodigosBody.innerHTML = `
+      <tr>
+        <td colspan="3" style="padding:14px;color:var(--inactive-color);text-align:center;">Nenhum registro encontrado para a origem selecionada.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+
+  qualidadeListaPirCodigosBody.innerHTML = itens.map((item, idx) => {
+    const codigo = String(item?.codigo || '').trim();
+    const descricao = String(item?.descricao || '').trim();
+    const checked = item?.pir === true ? 'checked' : '';
+    return `
+      <tr>
+        <td style="padding:10px;border-bottom:1px solid #334155;white-space:nowrap;">
+          <a href="#" class="qualidade-pir-codigo-link" data-codigo="${escapeHtml(codigo)}" style="color:#93c5fd;text-decoration:underline;cursor:pointer;">${escapeHtml(codigo)}</a>
+        </td>
+        <td style="padding:10px;border-bottom:1px solid #334155;white-space:nowrap;">${escapeHtml(descricao || '-')}</td>
+        <td style="padding:10px;border-bottom:1px solid #334155;text-align:center;">
+          <input type="checkbox" class="qualidade-pir-codigo-check" data-codigo="${escapeHtml(codigo)}" data-idx="${idx}" ${checked} style="width:16px;height:16px;cursor:pointer;" />
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  qualidadeListaPirCodigosBody.querySelectorAll('.qualidade-pir-codigo-check').forEach((checkbox) => {
+    checkbox.addEventListener('change', async (event) => {
+      const input = event.target;
+      const codigo = String(input.getAttribute('data-codigo') || '').trim();
+      const valorNovo = input.checked;
+      const valorAnterior = !valorNovo;
+
+      input.disabled = true;
+      try {
+        await salvarStatusVerificacaoPIR(codigo, valorNovo);
+        const codigoAtualQualidade = obterCodigoProdutoQualidadeAtual();
+        if (codigoAtualQualidade && codigoAtualQualidade === codigo && qualidadePirVerificacaoCheckbox) {
+          qualidadePirVerificacaoCheckbox.checked = valorNovo;
+        }
+      } catch (err) {
+        console.error('[QUALIDADE] Erro ao atualizar Verificação PIR na lista:', err);
+        input.checked = valorAnterior;
+        alert(err?.message || 'Erro ao atualizar Verificação PIR.');
+      } finally {
+        input.disabled = false;
+      }
+    });
+  });
+
+  qualidadeListaPirCodigosBody.querySelectorAll('.qualidade-pir-codigo-link').forEach((link) => {
+    link.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const codigo = String(link.getAttribute('data-codigo') || '').trim();
+      if (!codigo) return;
+      await abrirProdutoPirPorCodigo(codigo);
+    });
+  });
+}
+
+qualidadeListaPirAlternarOrigemBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const btn = qualidadeListaPirAlternarOrigemBtn;
+  try {
+    qualidadeListaPirOrigem = qualidadeListaPirOrigem === 'produtos_omie' ? 'pir' : 'produtos_omie';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Alternando...</span>';
+    }
+    await renderQualidadeListaPirCodigos();
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao alternar origem da lista PIR', err);
+    alert('Erro ao alternar a origem da lista PIR.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+function mostrarPainelQualidade(modo = 'registro') {
+  if (qualidadeInspecaoForm) {
+    qualidadeInspecaoForm.style.display = modo === 'registro' ? 'block' : 'none';
+  }
+  if (qualidadeRelatorioTabelaWrap) {
+    qualidadeRelatorioTabelaWrap.style.display = modo === 'tabela' ? 'block' : 'none';
+  }
+  if (qualidadeListaPirCodigosWrap) {
+    qualidadeListaPirCodigosWrap.style.display = modo === 'lista-codigos' ? 'block' : 'none';
+  }
+  if (qualidadeRegistroBtn) {
+    qualidadeRegistroBtn.style.display = modo === 'registro' ? 'none' : 'inline-flex';
+  }
+}
+
+function formatarCampoTabelaRelatorio(chave, valor) {
+  if (valor == null) return '';
+  if (typeof valor === 'boolean') return valor ? 'Sim' : 'Não';
+  const texto = String(valor);
+  if (/data|created|updated|hora|dt_/i.test(chave)) {
+    const d = new Date(texto);
+    if (!Number.isNaN(d.getTime())) return d.toLocaleString('pt-BR');
+  }
+  return texto;
+}
+
+function renderQualidadeRelatorioTabela(rows = []) {
+  if (!qualidadeRelatorioTabelaHead || !qualidadeRelatorioTabelaTbody) return;
+
+  const itens = Array.isArray(rows) ? rows : [];
+  if (!itens.length) {
+    qualidadeRelatorioTabelaHead.innerHTML = '';
+    qualidadeRelatorioTabelaTbody.innerHTML = `
+      <tr>
+        <td style="padding:16px;text-align:center;color:var(--inactive-color);">Nenhum registro encontrado.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+
+  const preferidas = [
+    'cod_produto', 'descricao_produto', 'nfe', 'frequencia', 'quantidade_ok', 'quantidade_nok', 'created_at'
+  ];
+  const chavesBase = Object.keys(itens[0] || {});
+  const chaves = [
+    ...preferidas.filter((k) => chavesBase.includes(k)),
+    ...chavesBase.filter((k) => !preferidas.includes(k))
+  ];
+
+  qualidadeRelatorioTabelaHead.innerHTML = `
+    <tr>
+      ${chaves.map((ch) => `<th style="position:sticky;top:0;background:#1f2937;color:#f8fafc;padding:10px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap;">${escapeHtml(ch)}</th>`).join('')}
+    </tr>
+  `;
+
+  qualidadeRelatorioTabelaTbody.innerHTML = itens.map((row) => `
+    <tr>
+      ${chaves.map((ch) => `<td style="padding:9px 10px;border-bottom:1px solid #334155;white-space:nowrap;">${escapeHtml(formatarCampoTabelaRelatorio(ch, row?.[ch]))}</td>`).join('')}
+    </tr>
+  `).join('');
+}
+
+async function carregarQualidadeRelatorioTabela() {
+  if (!qualidadeRelatorioTabelaTbody) return;
+  qualidadeRelatorioTabelaTbody.innerHTML = `
+    <tr>
+      <td style="padding:14px;color:var(--inactive-color);text-align:center;">
+        <i class="fa-solid fa-spinner fa-spin"></i> Carregando tabela...
+      </td>
+    </tr>
+  `;
+
+  const resp = await fetch('/api/qualidade/produtos-liberado', { credentials: 'include' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const rows = Array.isArray(data?.itens) ? data.itens : [];
+  renderQualidadeRelatorioTabela(rows);
+}
 
 function renderQualidadePirLista(itens = []) {
   if (!qualidadePirListaConteudo) return;
@@ -5102,7 +5359,6 @@ function openQualidadePirModal({ url, titulo, frequencia, oQue }) {
   caption.style.textAlign = 'center';
   caption.style.fontSize = '14px';
   caption.innerHTML = `
-    <div style="font-weight:600;">${titulo || 'Imagem PIR'}</div>
     <div style="color:#cbd5f5;">Frequência: ${frequencia || '—'} | O que verificar: ${oQue || '—'}</div>
   `;
 
@@ -5114,10 +5370,9 @@ function openQualidadePirModal({ url, titulo, frequencia, oQue }) {
 }
 
 function renderQualidadeCarretelPir(itens = []) {
-  // Qualidade: carretel no mesmo layout do módulo de fotos do produto
+  // Qualidade: galeria responsiva com texto por foto
   if (!qualidadeCarretelImagemPlaceholder) return;
   const lista = Array.isArray(itens) ? itens : [];
-  const vistos = new Set();
   const itensComFoto = lista
     .map((item, index) => ({
       index,
@@ -5125,12 +5380,7 @@ function renderQualidadeCarretelPir(itens = []) {
       frequencia: item?.frequencia ?? '',
       o_que_verificar: item?.o_que_verificar ?? ''
     }))
-    .filter(item => item.foto_url)
-    .filter((item) => {
-      if (vistos.has(item.foto_url)) return false;
-      vistos.add(item.foto_url);
-      return true;
-    });
+    .filter(item => item.foto_url);
 
   if (!itensComFoto.length) {
     qualidadeCarretelImagemPlaceholder.innerHTML = '<i class="fa-solid fa-film"></i><span>Sem imagens no carretel</span>';
@@ -5150,19 +5400,19 @@ function renderQualidadeCarretelPir(itens = []) {
   };
 
   qualidadeCarretelImagemPlaceholder.innerHTML = `
-    <div class="options" data-qualidade-carretel="1">
+    <div class="qualidade-pir-galeria">
       ${itensComFoto.map((item, i) => {
-        const titulo = `Foto PIR ${i + 1}`;
         const freq = formatarFrequencia(item.frequencia) || '—';
         const oQue = String(item.o_que_verificar || '').trim() || 'Sem descrição';
         return `
-          <div class="option${i === 0 ? ' active' : ''}" style="--optionBackground:url(${escapeHtml(item.foto_url)})" data-index="${i}">
-            <div class="shadow"></div>
-            <div class="label">
-              <div class="info">
-                <div class="main">${escapeHtml(titulo)}</div>
-                <div class="sub">Frequência: ${escapeHtml(freq)}<br>O que verificar: ${escapeHtml(oQue)}</div>
-              </div>
+          <div class="qualidade-pir-card" data-index="${i}">
+            <div class="qualidade-pir-img-wrap" data-index="${i}">
+              <img class="qualidade-pir-img" src="${escapeHtml(item.foto_url)}" alt="Foto PIR ${i + 1}" loading="lazy" />
+              <div class="qualidade-pir-frequencia-badge">Freq: ${escapeHtml(freq)}</div>
+            </div>
+            <div class="qualidade-pir-oque-box">
+              <div class="qualidade-pir-oque-title">O que verificar</div>
+              <div class="qualidade-pir-oque-text">${escapeHtml(oQue)}</div>
             </div>
           </div>
         `;
@@ -5170,12 +5420,10 @@ function renderQualidadeCarretelPir(itens = []) {
     </div>
   `;
 
-  const container = qualidadeCarretelImagemPlaceholder.querySelector('.options');
-  if (!container) return;
-  container.querySelectorAll('.option').forEach((opt) => {
+  const galeria = qualidadeCarretelImagemPlaceholder.querySelector('.qualidade-pir-galeria');
+  if (!galeria) return;
+  galeria.querySelectorAll('.qualidade-pir-img-wrap').forEach((opt) => {
     opt.addEventListener('click', () => {
-      container.querySelectorAll('.option').forEach(o => o.classList.remove('active'));
-      opt.classList.add('active');
       const idx = Number(opt.dataset.index || 0);
       const item = itensComFoto[idx];
       if (item?.foto_url) {
@@ -5183,7 +5431,7 @@ function renderQualidadeCarretelPir(itens = []) {
         const oQue = String(item.o_que_verificar || '').trim() || '—';
         openQualidadePirModal({
           url: item.foto_url,
-          titulo: `Foto PIR ${idx + 1}`,
+          titulo: '',
           frequencia: freq,
           oQue
         });
@@ -5314,14 +5562,15 @@ qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
     });
 });
 
-// Qualidade: botão Criar abre PIR do produto seguindo o fluxo padrão do produto
-qualidadeCriarBtn?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const codigo = qualidadeCodProduto?.value?.trim() || '';
+// Qualidade: abre PIR do produto pelo código (mesmo fluxo do botão + Criar)
+async function abrirProdutoPirPorCodigo(codigoBruto) {
+  const codigo = String(codigoBruto || '').trim();
   if (!codigo) {
     alert('Informe o Cod_produto para abrir o PIR.');
     return;
   }
+
+  if (qualidadeCodProduto) qualidadeCodProduto.value = codigo;
 
   const abrirTabPir = () => {
     const pirCard = document.querySelector('#produtoTabs .main-header .nav-card[data-target="listaPIR"]');
@@ -5350,11 +5599,18 @@ qualidadeCriarBtn?.addEventListener('click', async (e) => {
     console.error('[QUALIDADE] erro ao abrir PIR', err);
     alert('Erro ao abrir PIR do produto.');
   }
+}
+
+// Qualidade: botão Criar abre PIR do produto seguindo o fluxo padrão do produto
+qualidadeCriarBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  await abrirProdutoPirPorCodigo(qualidadeCodProduto?.value?.trim() || '');
 });
 
 // Qualidade: botão Relatório exporta XLSX da tabela qualidade.produtos_liberado
 qualidadeRelatorioBtn?.addEventListener('click', async (e) => {
   e.preventDefault();
+  mostrarPainelQualidade('registro');
   const btn = qualidadeRelatorioBtn;
   try {
     if (btn) {
@@ -5388,8 +5644,87 @@ qualidadeRelatorioBtn?.addEventListener('click', async (e) => {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = '<i class="fa-solid fa-file-lines"></i><span>Relatório</span>';
+      btn.innerHTML = '<i class="fa-solid fa-file-lines"></i><span>Relatório excel</span>';
     }
+  }
+});
+
+qualidadeRelatorioTabelaBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const btn = qualidadeRelatorioTabelaBtn;
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Carregando...</span>';
+    }
+    mostrarPainelQualidade('tabela');
+    await carregarQualidadeRelatorioTabela();
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao carregar relatório em tabela', err);
+    alert('Erro ao carregar relatório em tabela.');
+    mostrarPainelQualidade('registro');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-table"></i><span>Relatório tabela</span>';
+    }
+  }
+});
+
+qualidadeListaPirCodigosBtn?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const btn = qualidadeListaPirCodigosBtn;
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Carregando...</span>';
+    }
+    mostrarPainelQualidade('lista-codigos');
+    await renderQualidadeListaPirCodigos();
+  } catch (err) {
+    console.error('[QUALIDADE] erro ao carregar lista de códigos PIR', err);
+    alert('Erro ao carregar lista de códigos PIR.');
+    mostrarPainelQualidade('registro');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-list-check"></i><span>Lista PIR (códigos)</span>';
+    }
+  }
+});
+
+qualidadeVoltarRegistroBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  mostrarPainelQualidade('registro');
+});
+
+qualidadeRegistroBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  mostrarPainelQualidade('registro');
+});
+
+qualidadePirVerificacaoCheckbox?.addEventListener('change', async (event) => {
+  if (qualidadePirVerificacaoSalvando) return;
+
+  const codigo = obterCodigoProdutoQualidadeAtual();
+  const marcado = event.target.checked;
+  if (!codigo) {
+    alert('Selecione um produto para marcar Verificação PIR.');
+    event.target.checked = false;
+    return;
+  }
+
+  qualidadePirVerificacaoSalvando = true;
+  event.target.disabled = true;
+  try {
+    await salvarStatusVerificacaoPIR(codigo, marcado);
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao salvar Verificação PIR:', error);
+    alert(error?.message || 'Erro ao salvar Verificação PIR.');
+    event.target.checked = !marcado;
+  } finally {
+    qualidadePirVerificacaoSalvando = false;
+    event.target.disabled = false;
   }
 });
 
@@ -5427,6 +5762,7 @@ function initQualidadeProdutoAutocomplete() {
         carregarQualidadePirItens(li.dataset.codigoProduto || '');
         carregarQualidadeImagemProduto(li.dataset.codigoProduto || '');
         carregarQualidadeNfeList(li.dataset.codigoProduto || '');
+        carregarStatusVerificacaoPirQualidade(li.dataset.codigo || '');
         limparLista();
       });
       li.addEventListener('mouseenter', () => { li.style.background = '#1f2937'; });
@@ -5450,6 +5786,9 @@ function initQualidadeProdutoAutocomplete() {
   qualidadeProdutoBusca.addEventListener('input', buscar);
   qualidadeProdutoBusca.addEventListener('focus', buscar);
   qualidadeProdutoBusca.addEventListener('click', buscar);
+
+  const codigoInicial = obterCodigoProdutoQualidadeAtual();
+  carregarStatusVerificacaoPirQualidade(codigoInicial);
 
   document.addEventListener('click', (e) => {
     if (!qualidadeProdutoSugestoes.contains(e.target) && e.target !== qualidadeProdutoBusca) {
@@ -40901,10 +41240,110 @@ window.produtoPIRAtual = {
   id_omie: null
 };
 
+const pirVerificacaoCheckbox = document.getElementById('pirVerificacaoCheckbox');
+let pirVerificacaoSalvando = false;
+
+function obterCodigoProdutoAtualPIR() {
+  return String(
+    window.codigoSelecionado ||
+    window.produtoPIRAtual?.codigo ||
+    ''
+  ).trim();
+}
+
+async function carregarStatusVerificacaoPIR(codigoProduto) {
+  if (!pirVerificacaoCheckbox) return;
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) {
+    pirVerificacaoCheckbox.checked = false;
+    pirVerificacaoCheckbox.disabled = true;
+    return;
+  }
+
+  pirVerificacaoCheckbox.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/api/pir/produto/${encodeURIComponent(codigo)}/verificacao`, {
+      credentials: 'include'
+    });
+
+    if (response.status === 404) {
+      pirVerificacaoCheckbox.checked = false;
+      return;
+    }
+    if (!response.ok) throw new Error('Erro ao carregar verificação PIR');
+
+    const data = await response.json();
+    pirVerificacaoCheckbox.checked = data?.pir === true;
+  } catch (error) {
+    console.error('[PIR] Erro ao carregar Verificação PIR:', error);
+  } finally {
+    pirVerificacaoCheckbox.disabled = false;
+  }
+}
+
+async function salvarStatusVerificacaoPIR(codigoProduto, valor) {
+  const codigo = String(codigoProduto || '').trim();
+  if (!codigo) throw new Error('Código do produto não informado');
+
+  const response = await fetch(`${API_BASE}/api/pir/produto/${encodeURIComponent(codigo)}/verificacao`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ pir: valor === true })
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error || 'Erro ao salvar verificação PIR');
+  }
+
+  return response.json();
+}
+
+pirVerificacaoCheckbox?.addEventListener('change', async (event) => {
+  if (pirVerificacaoSalvando) return;
+
+  const codigo = obterCodigoProdutoAtualPIR();
+  const marcado = event.target.checked;
+  if (!codigo) {
+    alert('Selecione um produto antes de marcar Verificação PIR.');
+    event.target.checked = false;
+    return;
+  }
+
+  const valorAnterior = !marcado;
+  pirVerificacaoSalvando = true;
+  event.target.disabled = true;
+  try {
+    await salvarStatusVerificacaoPIR(codigo, marcado);
+  } catch (error) {
+    console.error('[PIR] Erro ao salvar Verificação PIR:', error);
+    alert(error?.message || 'Erro ao salvar Verificação PIR.');
+    event.target.checked = valorAnterior;
+  } finally {
+    pirVerificacaoSalvando = false;
+    event.target.disabled = false;
+  }
+});
+
 // Carregar itens PIR do produto
 async function carregarItensPIR(idOmie) {
   try {
-    const response = await fetch(`${API_BASE}/api/pir/${idOmie}`);
+    const idOmieNormalizado = String(idOmie || '').trim();
+    if (!idOmieNormalizado) {
+      renderizarTabelaPIR([]);
+      return;
+    }
+
+    const codigo = obterCodigoProdutoAtualPIR();
+    if (codigo) {
+      window.produtoPIRAtual.codigo = codigo;
+      carregarStatusVerificacaoPIR(codigo);
+    }
+
+    window.produtoPIRAtual.id_omie = idOmieNormalizado;
+
+    const response = await fetch(`${API_BASE}/api/pir/${encodeURIComponent(idOmieNormalizado)}`);
     if (!response.ok) throw new Error('Erro ao carregar itens PIR');
     const itens = await response.json();
     renderizarTabelaPIR(itens);
@@ -44243,6 +44682,27 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         
         if (targetPane) {
           targetPane.style.display = 'block';
+
+          if (targetId === 'listaPIR') {
+            const codigoAtual = obterCodigoProdutoAtualPIR();
+            carregarStatusVerificacaoPIR(codigoAtual);
+
+            const idOmieAtual = String(
+              window.codigoOmieSelecionado ||
+              window.produtoPIRAtual?.id_omie ||
+              ''
+            ).trim();
+
+            if (codigoAtual) {
+              window.produtoPIRAtual.codigo = codigoAtual;
+            }
+
+            if (idOmieAtual) {
+              carregarItensPIR(idOmieAtual);
+            } else {
+              renderizarTabelaPIR([]);
+            }
+          }
           
           // Atualiza título da seção
           if (sectionTitle && titleMap[targetId]) {
