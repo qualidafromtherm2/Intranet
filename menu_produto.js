@@ -11686,6 +11686,7 @@ if (document.readyState === 'loading') {
 
 /* dentro do MESMO callback que já existe */
 const bell       = document.getElementById('bell-icon');
+const homeBtn    = document.getElementById('home-icon');
 const printBtn   = document.getElementById('print-icon');
 const cloudBtn   = document.getElementById('cloud-icon');
 const avatar     = document.getElementById('profile-icon');
@@ -11813,6 +11814,12 @@ async function salvarLinkRapido() {
     alert(`Não foi possível registrar o link: ${err.message}`);
   }
 }
+
+  /* –– CASA / INÍCIO –– */
+  homeBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById('menu-inicio')?.click();
+  });
 
   /* –– SINO –– */
   bell?.addEventListener('click', e => {
@@ -32123,8 +32130,9 @@ async function toggleCompraRealizadaItens(cardKey, event) {
   const statusContainer = String(container.getAttribute('data-status') || '').trim().toLowerCase();
   const origemRecebimentoNfe = String(container.getAttribute('data-origem-recebimento-nfe') || '') === '1';
   const nIdReceb = Number(container.getAttribute('data-n-id-receb') || 0);
+  const statusesNfeLazyLoad = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
   const precisaCarregarItensNfe = fechado
-    && statusContainer === 'faturada pelo fornecedor'
+    && statusesNfeLazyLoad.includes(statusContainer)
     && origemRecebimentoNfe
     && nIdReceb > 0
     && container.getAttribute('data-loaded') !== '1';
@@ -35576,7 +35584,29 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
     'aguardando compra preparação': 'Requisições'
   };
 
-  kanbanContainer.innerHTML = statusPrimeiraFase
+  // Colunas da segunda fase que terão spinner enquanto carregam
+  const statusSegundaFase = [
+    'compra realizada',
+    'faturada pelo fornecedor',
+    'recebido',
+    'concluído'
+  ];
+
+  const coresSegundaFase = {
+    'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
+    'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
+    'recebido': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-box-open' },
+    'concluído': { bg: '#22c55e', bgLight: '#dcfce7', text: '#166534', icon: 'fa-circle-check' }
+  };
+
+  const titulosSegundaFase = {
+    'compra realizada': 'Compra realizada',
+    'faturada pelo fornecedor': 'Faturada pelo fornecedor',
+    'recebido': 'Recebido',
+    'concluído': 'Concluído'
+  };
+
+  const htmlPrimeiraFase = statusPrimeiraFase
     .filter(status => !statusPermitidosSet || statusPermitidosSet.has(status))
     .map((status) => {
       const itens = statusColunas[status] || [];
@@ -35602,6 +35632,32 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
         </div>
       `;
     }).join('');
+
+  const htmlSegundaFase = statusSegundaFase
+    .filter(status => !statusPermitidosSet || statusPermitidosSet.has(status))
+    .map((status) => {
+      const cor = coresSegundaFase[status];
+      return `
+        <div class="kanban-column-minhas" data-status="${status}" style="flex:1;min-width:200px;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);border:2px solid ${cor.bg};border-top:4px solid ${cor.bg};">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;">
+            <h3 style="margin:0;font-size:15px;font-weight:700;color:${cor.text};">
+              <i class="fa-solid ${cor.icon}" style="margin-right:6px;color:${cor.bg};"></i>
+              ${titulosSegundaFase[status]}
+            </h3>
+            <span class="kanban-count-minhas" style="background:${cor.bgLight};color:${cor.text};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:700;">...</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:0px;border-top:3px solid ${cor.bg};padding-top:12px;"></div>
+          <div class="kanban-cards-minhas" style="display:flex;flex-direction:column;gap:12px;max-height:500px;overflow-y:auto;overflow-x:hidden;padding-right:4px;">
+            <div style="text-align:center;padding:32px 24px;color:${cor.text};font-size:13px;">
+              <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;color:${cor.bg};margin-bottom:10px;display:block;"></i>
+              Carregando...
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  kanbanContainer.innerHTML = htmlPrimeiraFase + htmlSegundaFase;
 
   aplicarFiltroKanbans();
 
@@ -36776,10 +36832,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           };
           
           const comprasCard = String(primeiroItem.compras || '').trim().toLowerCase();
-          const ehCardFaturadaOrigemReceb = String(status || '').trim().toLowerCase() === 'faturada pelo fornecedor'
+          const statusesNfeOrigem = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
+          const ehCardOrigemReceb = statusesNfeOrigem.includes(String(status || '').trim().toLowerCase())
             && !!primeiroItem.origem_recebimento_nfe;
 
-          const corBorda = ehCardFaturadaOrigemReceb
+          const corBorda = ehCardOrigemReceb
             ? (comprasCard === 'sim' ? '#10b981' : '#ef4444')
             : ((primeiroItem.isPedidoCompra || primeiroItem.isCompraRealizada)
               ? determinCorBorda(primeiroItem.c_cod_int_ped)
@@ -36823,8 +36880,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           const grupoRequisicaoCard = String(primeiroItem.grupo_requisicao || chaveGrupo || '').trim();
           const grupoRequisicaoCodificado = encodeURIComponent(grupoRequisicaoCard);
           const tableSourceCard = String(primeiroItem.table_source || 'solicitacao_compras').trim() || 'solicitacao_compras';
+          const statusesRecebimentoNfe = ['faturada pelo fornecedor', 'recebido', 'concluído', 'concluido'];
           const onclickCard = (
-            (status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
+            (statusesRecebimentoNfe.includes(status) && primeiroItem.origem_recebimento_nfe && primeiroItem.n_id_receb)
               ? `abrirModalNfePedidos('${String(primeiroItem.n_id_receb)}', '${String(primeiroItem.numero || '').replace(/'/g, "\\'")}')`
               :
             status === 'analise de cadastro'
@@ -36962,7 +37020,7 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                             : (status === 'faturada pelo fornecedor'
                               ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor_nfe))
                               : ((status === 'recebido' || status === 'concluído')
-                                ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor))
+                                ? escapeHtml(formatarValorMoedaNfePedidos(primeiroItem.n_valor_nfe))
                                 : ((
                                 status === 'aguardando cotação'
                                 || status === 'cotado aguardando escolha'
@@ -37047,9 +37105,9 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
                   data-status="${escapeHtml(statusNormalizado)}"
                   data-origem-recebimento-nfe="${primeiroItem.origem_recebimento_nfe ? '1' : '0'}"
                   data-n-id-receb="${escapeHtml(String(primeiroItem.n_id_receb || ''))}"
-                  data-loaded="${status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe ? '0' : '1'}"
+                  data-loaded="${statusesNfeOrigem.includes(statusNormalizado) && primeiroItem.origem_recebimento_nfe ? '0' : '1'}"
                   style="display:none;">
-                  ${status === 'faturada pelo fornecedor' && primeiroItem.origem_recebimento_nfe ? '' : listaProdutos}
+                  ${statusesNfeOrigem.includes(statusNormalizado) && primeiroItem.origem_recebimento_nfe ? '' : listaProdutos}
                 </div>
               ` : (isSolicitacaoCompra ? `
                 <div
@@ -37132,14 +37190,15 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
           badgeSomaTotal = `<span style="background:#fef3c7;color:#92400e;padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;">${soma.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`;
         }
       } else if (status === 'recebido' || status === 'concluído') {
-        // Soma n_valor único por pedido (recebido e concluído — vem de compras.pedidos_omie)
+        // Soma n_valor_nfe único por recebimento (recebido e concluído — vem de logistica.recebimentos_nfe_omie)
         const vistosPedRec = new Set();
         let soma = 0;
         itens.forEach(item => {
-          const chave = item.n_cod_ped || item.chaveGrupo || item.id;
-          if (!vistosPedRec.has(chave) && Number.isFinite(Number(item.n_valor)) && Number(item.n_valor) > 0) {
+          const chave = item.n_id_receb || item.n_cod_ped || item.chaveGrupo || item.id;
+          const valor = Number(item.n_valor_nfe ?? item.n_valor);
+          if (!vistosPedRec.has(chave) && Number.isFinite(valor) && valor > 0) {
             vistosPedRec.add(chave);
-            soma += Number(item.n_valor);
+            soma += valor;
           }
         });
         if (soma > 0) {
@@ -39186,6 +39245,27 @@ async function applyCurrentUserPermissionsToUI(){
 
   // Início sempre visível
   document.querySelectorAll('#menu-inicio').forEach(el => el.classList.remove('perm-hidden'));
+
+  // Esconde categorias do menu lateral que não têm nenhum filho visível
+  document.querySelectorAll('.side-wrapper').forEach(wrapper => {
+    const filhos = wrapper.querySelectorAll('.side-menu > a');
+    const algumVisivel = Array.from(filhos).some(a => !a.classList.contains('perm-hidden'));
+    wrapper.classList.toggle('perm-hidden', !algumVisivel);
+  });
+
+  // Se a guia ativa do produto ficou escondida, ativa a primeira guia visível
+  const prodTabs = document.querySelector('#produtoTabs .main-header');
+  if (prodTabs) {
+    const activeTab = prodTabs.querySelector('.main-header-link.is-active');
+    if (activeTab && activeTab.classList.contains('perm-hidden')) {
+      activeTab.classList.remove('is-active');
+      const firstVisible = prodTabs.querySelector('.main-header-link:not(.perm-hidden)');
+      if (firstVisible) {
+        firstVisible.classList.add('is-active');
+        firstVisible.click();
+      }
+    }
+  }
 }
 
 // Variável para rastrear se o usuário estava logado na última verificação
@@ -41760,7 +41840,7 @@ function renderAgendaCalendarioMensal() {
   const grid = document.getElementById('agendaCalendarioGrid');
   const titulo = document.getElementById('agendaMesTitulo');
   if (!grid) return;
-  const isMobileView = window.matchMedia('(max-width: 768px)').matches;
+  const isMobileView = window.matchMedia('(max-width: 640px)').matches;
 
   const dataRef = new Date(agendaMesReferencia.getFullYear(), agendaMesReferencia.getMonth(), 1);
   const hoje = new Date();
@@ -41776,6 +41856,11 @@ function renderAgendaCalendarioMensal() {
   const diasMesAnterior = new Date(dataRef.getFullYear(), dataRef.getMonth(), 0).getDate();
   const diaInicialCalendario = primeiroDiaSemana;
   const totalSlots = Math.ceil((diaInicialCalendario + totalDiasMes) / 7) * 7;
+  const hojeDiaSemana = hoje.getDay();
+  const inicioSemanaAtual = new Date(hoje);
+  inicioSemanaAtual.setDate(hoje.getDate() - hojeDiaSemana);
+  const fimSemanaAtual = new Date(inicioSemanaAtual);
+  fimSemanaAtual.setDate(inicioSemanaAtual.getDate() + 6);
 
   const nomesDia = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const htmlCabecalho = nomesDia
@@ -41805,6 +41890,9 @@ function renderAgendaCalendarioMensal() {
     }
 
     const dataIso = formatarDataIso(dataCelula);
+    if (isMobileView && (dataCelula < inicioSemanaAtual || dataCelula > fimSemanaAtual)) {
+      continue;
+    }
     const isHoje = formatarDataIso(dataCelula) === formatarDataIso(hoje);
     const classes = ['agenda-cal-day'];
     if (foraDoMes) classes.push('is-out');
@@ -41864,16 +41952,16 @@ function renderAgendaCalendarioMensal() {
       const participantesReserva = Array.isArray(reserva?.participantes)
         ? reserva.participantes.map((nome) => String(nome || '').trim().toLowerCase()).filter(Boolean)
         : [];
-      const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
       const horaInicio = String(reserva?.inicio || '').slice(0, 5);
+      const usuarioConvocado = Boolean(usuarioLogado) && participantesReserva.includes(usuarioLogado);
       const convocadoHtml = usuarioConvocado
         ? '<i class="fa-solid fa-calendar-check agenda-chip-convocado-icon" title="Você está convocado"></i>'
         : '';
 
       if (isMobileView) {
         const clsMobile = reservaJaPassou(reserva)
-          ? `agenda-cal-reserva-item ${cls} is-mobile-min is-past-chip`
-          : `agenda-cal-reserva-item ${cls} is-mobile-min`;
+          ? `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack is-past-chip`
+          : `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack`;
         return `<div class="${clsMobile}" ${idAttr} title="${tituloChip}">
           ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
           ${convocadoHtml}
@@ -41899,10 +41987,10 @@ function renderAgendaCalendarioMensal() {
           ${horaInicio ? `<span class="agenda-chip-hora agenda-chip-hora-mobile">${escapeHtml(horaInicio)}</span>` : ''}
           ${cafeHtml}${convocadoHtml}
         </div>`;
-    });
+    }).filter(Boolean);
 
     // Chips de lembretes
-    const chipsLembretes = lembretesDia.slice(0, MAX_LEMBRETES).map((lembrete) => `
+    const chipsLembretes = isMobileView ? [] : lembretesDia.slice(0, MAX_LEMBRETES).map((lembrete) => `
       <div class="agenda-cal-reserva-item is-lembrete"
            data-agenda-lembrete-id="${escapeHtml(String(lembrete.id || ''))}"
            data-agenda-lembrete-date="${escapeHtml(dataIso)}"
@@ -41927,7 +42015,7 @@ function renderAgendaCalendarioMensal() {
           ${chipsPassados.length > 0 ? `<div class="agenda-cal-past-row">${chipsPassados.join('')}</div>` : ''}
         </div>
       `
-      : '<div class="agenda-cal-meta">Clique para reservar</div>';
+      : (isMobileView ? '' : '<div class="agenda-cal-meta">Clique para reservar</div>');
 
     const lembretesHtml = '';
 

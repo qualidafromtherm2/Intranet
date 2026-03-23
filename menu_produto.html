@@ -72,6 +72,7 @@
 
   <!-- Ícones da direita -->
   <div class="header-profile">
+    <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
     <div id="notification-wrapper" class="notification" style="display:none;">
       <span class="notification-number">5</span>
       <i id="bell-icon" class="fa-solid fa-bell" title="Mensagens"></i>
@@ -101,7 +102,7 @@
         </button>
 
         <!-- Container do menu lateral (inicialmente expandido) -->
-        <div class="sidebar-content collapsed" id="sidebarContent" style="overflow-y: scroll !important; height: 600px !important;">
+        <div class="sidebar-content collapsed" id="sidebarContent">
 
 <div class="side-wrapper">
   <div class="side-title"
@@ -402,6 +403,12 @@
         <!-- Painel Solicitação de Compras (abre pelo ícone do carrinho) -->
         <div id="comprasFormPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
+            <div id="comprasMobileAbrirSolicitacao" style="display:none;justify-content:center;align-items:center;padding:18px 0;">
+              <button id="comprasMobileCatalogoBtn" class="content-button" type="button" onclick="abrirModalCatalogoOmie()" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:14px 18px;border-radius:999px;font-size:14px;font-weight:700;">
+                <i class="fa-solid fa-file-circle-plus" style="font-size:18px;"></i>
+                <span>Solicitação de compra</span>
+              </button>
+            </div>
             <div class="content-section">
               <div class="title-wrapper" style="display:none;"></div>
 
@@ -3400,7 +3407,8 @@
          data-nav-key="produto:dados"
          data-nav-parent="top:produto"
          data-nav-pos="top"
-         data-nav-label="Dados do produto">
+         data-nav-label="Dados do produto"
+         data-nav-selector='.nav-card[data-target="dadosProduto"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
         <i class="fa-solid fa-info-circle"></i>
       </div>
@@ -3412,7 +3420,8 @@
          data-nav-key="produto:estrutura"
          data-nav-parent="top:produto"
          data-nav-pos="top"
-         data-nav-label="Estrutura do produto">
+         data-nav-label="Estrutura do produto"
+         data-nav-selector='.nav-card[data-target="estruturaProduto"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);">
         <i class="fa-solid fa-diagram-project"></i>
       </div>
@@ -3424,7 +3433,8 @@
          data-nav-key="produto:estrutura:lista-pecas"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="Lista de peças">
+         data-nav-label="Lista de peças"
+         data-nav-selector='.nav-card[data-target="listaPecasTab"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);">
         <i class="fa-solid fa-list"></i>
       </div>
@@ -3436,7 +3446,8 @@
          data-nav-key="produto:estrutura:fotos"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="Fotos">
+         data-nav-label="Fotos"
+         data-nav-selector='.nav-card[data-target="listaFotos"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);">
         <i class="fa-solid fa-camera"></i>
       </div>
@@ -3448,7 +3459,8 @@
          data-nav-key="produto:estrutura:anexos"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="Anexos">
+         data-nav-label="Anexos"
+         data-nav-selector='.nav-card[data-target="listaAnexos"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #818cf8 0%, #4f46e5 100%);">
         <i class="fa-solid fa-paperclip"></i>
       </div>
@@ -3460,7 +3472,8 @@
          data-nav-key="produto:estrutura:ri"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="RI">
+         data-nav-label="RI"
+         data-nav-selector='.nav-card[data-target="listaRI"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
         <i class="fa-solid fa-check"></i>
       </div>
@@ -3472,7 +3485,8 @@
          data-nav-key="produto:estrutura:pir"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="PIR">
+         data-nav-label="PIR"
+         data-nav-selector='.nav-card[data-target="listaPIR"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
         <i class="fa-solid fa-clipboard-list"></i>
       </div>
@@ -3484,7 +3498,8 @@
          data-nav-key="produto:estrutura:check-proj"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="Check-Proj">
+         data-nav-label="Check-Proj"
+         data-nav-selector='.nav-card[data-target="checkProjTab"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);">
         <i class="fa-solid fa-clipboard-check"></i>
       </div>
@@ -3496,7 +3511,8 @@
          data-nav-key="produto:estrutura:check-compras"
          data-nav-parent="produto:estrutura"
          data-nav-pos="top"
-         data-nav-label="Check-Compras">
+         data-nav-label="Check-Compras"
+         data-nav-selector='.nav-card[data-target="checkComprasTab"]'>
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
         <i class="fa-solid fa-list-check"></i>
       </div>
