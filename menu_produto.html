@@ -273,10 +273,10 @@
        data-nav-key="side:qualidade:fabrica"
        data-nav-parent="side:qualidade"
        data-nav-pos="side"
-       data-nav-label="Qualidade fabrica"
+       data-nav-label="PIR"
        data-nav-selector="#menu-qualidade-fabrica">
       <i class="fa-solid fa-clipboard-check" style="margin-right:8px;"></i>
-      Qualidade fabrica
+      PIR
     </a>
   </div>
 </div>
@@ -1828,15 +1828,82 @@
                 </div>
 
                 <!-- Botões principais da Qualidade -->
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
+                <div id="qualidadeAcoesRapidas" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
+                  <label for="qualidadePirVerificacaoCheckbox" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);color:var(--content-color);font-size:13px;font-weight:600;cursor:pointer;">
+                    <input id="qualidadePirVerificacaoCheckbox" type="checkbox" style="width:16px;height:16px;cursor:pointer;">
+                    <span>Verificação PIR</span>
+                  </label>
                   <button id="qualidadeCriarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
                     <i class="fa-solid fa-plus"></i>
                     <span>Criar</span>
                   </button>
                   <button id="qualidadeRelatorioBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;">
                     <i class="fa-solid fa-file-lines"></i>
-                    <span>Relatório</span>
+                    <span>Relatório excel</span>
                   </button>
+                  <button id="qualidadeRelatorioTabelaBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#14b8a6 0%,#0f766e 100%);color:white;">
+                    <i class="fa-solid fa-table"></i>
+                    <span>Relatório tabela</span>
+                  </button>
+                  <button id="qualidadeListaPirCodigosBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:white;">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Lista PIR (códigos)</span>
+                  </button>
+                  <button id="qualidadeRegistroBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:#334155;color:#fff;">
+                    <i class="fa-solid fa-clipboard-check"></i>
+                    <span>Registro de inspeção</span>
+                  </button>
+                </div>
+
+                <div id="qualidadeListaPirCodigosWrap" style="display:none;margin-top:16px;">
+                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <i class="fa-solid fa-list-check" style="color:#0ea5e9;"></i>
+                        <div style="font-weight:600;">Códigos com cadastro em qualidade.pir</div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <button id="qualidadeListaPirAlternarOrigemBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;background:#1d4ed8;color:#fff;">
+                          <i class="fa-solid fa-shuffle"></i>
+                          <span>Usar produtos_omie</span>
+                        </button>
+                        <div id="qualidadeListaPirCodigosMeta" style="font-size:12px;color:var(--inactive-color);">Total: 0</div>
+                      </div>
+                    </div>
+                    <div id="qualidadeListaPirCodigosContainer" style="overflow:auto;max-height:62vh;border:1px solid var(--border-color);border-radius:10px;">
+                      <table id="qualidadeListaPirCodigosTabela" style="width:100%;border-collapse:collapse;min-width:520px;">
+                        <thead>
+                          <tr>
+                            <th style="position:sticky;top:0;background:#1f2937;color:#f8fafc;padding:10px;border-bottom:1px solid #334155;text-align:left;">Código</th>
+                            <th style="position:sticky;top:0;background:#1f2937;color:#f8fafc;padding:10px;border-bottom:1px solid #334155;text-align:left;">Descrição</th>
+                            <th style="position:sticky;top:0;background:#1f2937;color:#f8fafc;padding:10px;border-bottom:1px solid #334155;text-align:center;">Verificação PIR</th>
+                          </tr>
+                        </thead>
+                        <tbody id="qualidadeListaPirCodigosBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="qualidadeRelatorioTabelaWrap" style="display:none;margin-top:16px;">
+                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <i class="fa-solid fa-table" style="color:#14b8a6;"></i>
+                        <div style="font-weight:600;">Tabela do relatório</div>
+                      </div>
+                      <button id="qualidadeVoltarRegistroBtn" class="content-button" type="button" style="background:#334155;color:#fff;display:flex;align-items:center;gap:6px;">
+                        <i class="fa-solid fa-arrow-left"></i>
+                        <span>Registro de inspeção</span>
+                      </button>
+                    </div>
+                    <div id="qualidadeRelatorioTabelaContainer" style="overflow:auto;max-height:62vh;border:1px solid var(--border-color);border-radius:10px;">
+                      <table id="qualidadeRelatorioTabela" style="width:100%;border-collapse:collapse;min-width:900px;">
+                        <thead id="qualidadeRelatorioTabelaHead"></thead>
+                        <tbody id="qualidadeRelatorioTabelaTbody"></tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
 
                 <!-- Formulário de Inspeção (Qualidade) -->
@@ -1856,7 +1923,7 @@
                         </div>
                       </div>
 
-                      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                      <div class="qualidade-inspecao-campos" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
                         <div class="form-field" style="position:relative;">
                           <label for="qualidadeProdutoBusca">Pesquisar produto</label>
                           <input id="qualidadeProdutoBusca" type="text" placeholder="Digite código ou descrição" autocomplete="off" style="width:100%;" />
@@ -1903,7 +1970,7 @@
                       </div>
                     </div>
 
-                    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+                    <div id="qualidadeInspecaoAcoes" style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
                       <button id="qualidadeInspecaoCancelarBtn" class="content-button" type="button" style="background:#6b7280;color:white;">Cancelar</button>
                       <button id="qualidadeInspecaoRegistrarBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">Registrar</button>
                     </div>
@@ -4093,9 +4160,15 @@
                     <h3 class="tab-header-title">Plano de Inspeção e Recebimento (PIR)</h3>
                     <p class="tab-header-subtitle">Checklist para inspeção e recebimento de itens.</p>
                   </div>
-                  <button id="btnAdicionarPIR" class="tab-action-btn btn-primary" type="button">
-                    <i class="fa-solid fa-plus"></i> Adicionar item
-                  </button>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <label for="pirVerificacaoCheckbox" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);color:var(--content-color);font-size:13px;font-weight:600;cursor:pointer;">
+                      <input id="pirVerificacaoCheckbox" type="checkbox" style="width:16px;height:16px;cursor:pointer;">
+                      <span>Verificação PIR</span>
+                    </label>
+                    <button id="btnAdicionarPIR" class="tab-action-btn btn-primary" type="button">
+                      <i class="fa-solid fa-plus"></i> Adicionar item
+                    </button>
+                  </div>
                 </div>
                 
                 <div id="pirConteudo" style="overflow-x: auto;">
