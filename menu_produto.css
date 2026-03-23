@@ -8944,9 +8944,9 @@ table.tabela td.num {
    ============================================================ */
 
 .nav-hamburger {
-  background: var(--primary-color);
+  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   color: white;
   width: 44px;
   height: 44px;
@@ -8959,13 +8959,13 @@ table.tabela td.num {
 }
 
 .nav-hamburger:hover {
-  background: #2563eb;
+  background: linear-gradient(135deg, #0284c7 0%, #1d4ed8 100%);
   transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.35);
 }
 
 .nav-hamburger.active {
-  background: #1d4ed8;
+  background: linear-gradient(135deg, #0369a1 0%, #1e40af 100%);
 }
 
 .product-nav-grid {
