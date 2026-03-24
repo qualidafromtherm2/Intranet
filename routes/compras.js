@@ -4,6 +4,13 @@ const omieCall = require('../utils/omieCall');
 const router = express.Router();
 
 module.exports = (pool) => {
+  const normalizarNumeroNfeComparacao = (valor) => {
+    const digitos = String(valor || '').replace(/\D/g, '');
+    if (!digitos) return '';
+    const semZeros = digitos.replace(/^0+/, '');
+    return semZeros || '0';
+  };
+
   const formatarDataBr = (valor) => {
     if (!valor) return null;
     const data = valor instanceof Date ? valor : new Date(valor);
@@ -140,6 +147,93 @@ module.exports = (pool) => {
           codigo_local_estoque: item.codigo_local_estoque
         }
       }))
+    };
+  };
+
+  const montarPayloadNfeViaDfeDocs = async ({ chaveNfe, numeroNfe = '' } = {}) => {
+    const appKey = process.env.OMIE_APP_KEY;
+    const appSecret = process.env.OMIE_APP_SECRET;
+    if (!appKey || !appSecret) return null;
+
+    const chaveLimpa = String(chaveNfe || '').replace(/\D/g, '');
+    const numeroPorChaveRaw = chaveLimpa.length === 44 ? chaveLimpa.slice(25, 34) : '';
+    const numeroPorChaveNorm = normalizarNumeroNfeComparacao(numeroPorChaveRaw);
+    const numeroReqDigitos = String(numeroNfe || '').replace(/\D/g, '');
+    const numeroReqNorm = normalizarNumeroNfeComparacao(numeroNfe);
+
+    const candidatosNumero = Array.from(new Set([
+      String(numeroNfe || '').trim(),
+      numeroReqDigitos,
+      numeroReqNorm,
+      numeroPorChaveRaw,
+      numeroPorChaveNorm,
+    ].filter(Boolean)));
+
+    let consultaData = null;
+    let nIdNF = 0;
+
+    for (const candidato of candidatosNumero) {
+      let consulta;
+      try {
+        consulta = await omieCall('https://app.omie.com.br/api/v1/produtos/nfconsultar/', {
+          call: 'ConsultarNF',
+          param: [{ nNF: candidato }],
+          app_key: appKey,
+          app_secret: appSecret
+        }, { retryRedundant: false });
+      } catch (errConsulta) {
+        continue;
+      }
+
+      nIdNF = Number(
+        consulta?.compl?.nIdNF
+        || consulta?.compl?.nIdNf
+        || consulta?.nIdNF
+        || consulta?.nIdNfe
+        || 0
+      );
+
+      if (Number.isFinite(nIdNF) && nIdNF > 0) {
+        consultaData = consulta;
+        break;
+      }
+    }
+
+    if (!Number.isFinite(nIdNF) || nIdNF <= 0) {
+      return null;
+    }
+
+    const obterNfe = await omieCall('https://app.omie.com.br/api/v1/produtos/dfedocs/', {
+      call: 'ObterNfe',
+      param: [{ nIdNfe: nIdNF }],
+      app_key: appKey,
+      app_secret: appSecret
+    }, { retryRedundant: false });
+
+    const chaveDoc = String(obterNfe?.nChaveNfe || obterNfe?.cChaveNfe || '').replace(/\D/g, '');
+    if (!/^\d{44}$/.test(chaveDoc)) {
+      return null;
+    }
+
+    return {
+      cabec: {
+        nIdReceb: null,
+        cChaveNFe: chaveDoc,
+        cNumeroNFe: String(obterNfe?.cNumNfe || consultaData?.cabec?.nNF || numeroNfe || '').trim(),
+        cEtapa: null,
+        dEmissaoNFe: String(obterNfe?.dDataEmisNfe || '').trim() || null,
+      },
+      infoCadastro: {
+        cOperacao: 'NF-e faturamento (Omie DFEDocs)'
+      },
+      itensRecebimento: [],
+      dfe_docs: {
+        nIdNF,
+        cPdf: String(obterNfe?.cPdf || '').trim() || null,
+        cLinkPortal: String(obterNfe?.cLinkPortal || '').trim() || null,
+        cCodStatus: String(obterNfe?.cCodStatus || '').trim() || null,
+        cDesStatus: String(obterNfe?.cDesStatus || '').trim() || null
+      }
     };
   };
 
@@ -622,22 +716,93 @@ module.exports = (pool) => {
       if (!numeroNfe) {
         return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe obrigatório.' });
       }
+      const numeroNfeDigitos = String(numeroNfe || '').replace(/\D/g, '');
+      const numeroNfeNorm = normalizarNumeroNfeComparacao(numeroNfe);
       const resultado = await pool.query(`
         SELECT
           REGEXP_REPLACE(COALESCE(c_chave_nfe, ''), '\\D', '', 'g') AS chave_nfe,
           c_numero_nfe AS numero_nfe
         FROM logistica.recebimentos_nfe_omie
-        WHERE BTRIM(c_numero_nfe) = $1
+        WHERE (
+          BTRIM(c_numero_nfe) = $1
+          OR REGEXP_REPLACE(COALESCE(c_numero_nfe, ''), '\\D', '', 'g') = $2
+          OR LTRIM(REGEXP_REPLACE(COALESCE(c_numero_nfe, ''), '\\D', '', 'g'), '0') = $3
+        )
           AND c_chave_nfe IS NOT NULL
           AND REGEXP_REPLACE(c_chave_nfe, '\\D', '', 'g') ~ '^\\d{44}$'
         ORDER BY n_id_receb DESC
         LIMIT 1
-      `, [numeroNfe]);
+      `, [numeroNfe, numeroNfeDigitos, numeroNfeNorm]);
 
-      if (!resultado.rows.length) {
+      if (resultado.rows.length) {
+        return res.json({ ok: true, chave_nfe: resultado.rows[0].chave_nfe, numero_nfe: resultado.rows[0].numero_nfe });
+      }
+
+      const appKey = process.env.OMIE_APP_KEY;
+      const appSecret = process.env.OMIE_APP_SECRET;
+      if (!appKey || !appSecret) {
         return res.status(404).json({ ok: false, error: `NF-e "${numeroNfe}" não encontrada no banco de dados.` });
       }
-      res.json({ ok: true, chave_nfe: resultado.rows[0].chave_nfe, numero_nfe: resultado.rows[0].numero_nfe });
+
+      const candidatosNumero = Array.from(new Set([
+        String(numeroNfe || '').trim(),
+        String(numeroNfeNorm || '').trim(),
+        String(numeroNfeDigitos || '').trim(),
+      ].filter(Boolean)));
+
+      let consultaData = null;
+      for (const candidato of candidatosNumero) {
+        const consulta = await omieCall('https://app.omie.com.br/api/v1/produtos/nfconsultar/', {
+          call: 'ConsultarNF',
+          param: [{ nNF: candidato }],
+          app_key: appKey,
+          app_secret: appSecret
+        }, { retryRedundant: false });
+
+        const faultConsulta = String(consulta?.faultstring || consulta?.faultcode || '').trim();
+        if (!faultConsulta) {
+          consultaData = consulta;
+          break;
+        }
+      }
+
+      const nIdNFConsulta = Number(
+        consultaData?.compl?.nIdNF
+        || consultaData?.compl?.nIdNf
+        || consultaData?.nIdNF
+        || consultaData?.nIdNfe
+        || 0
+      );
+
+      if (!Number.isFinite(nIdNFConsulta) || nIdNFConsulta <= 0) {
+        return res.status(404).json({ ok: false, error: `NF-e "${numeroNfe}" não encontrada no banco nem na Omie.` });
+      }
+
+      const obterNfe = await omieCall('https://app.omie.com.br/api/v1/produtos/dfedocs/', {
+        call: 'ObterNfe',
+        param: [{ nIdNfe: nIdNFConsulta }],
+        app_key: appKey,
+        app_secret: appSecret
+      }, { retryRedundant: false });
+
+      const faultObter = String(obterNfe?.faultstring || obterNfe?.faultcode || '').trim();
+      if (faultObter) {
+        throw new Error(faultObter);
+      }
+
+      const chaveNfe = String(obterNfe?.nChaveNfe || obterNfe?.cChaveNfe || '').replace(/\D/g, '');
+      const numeroEncontrado = String(obterNfe?.cNumNfe || consultaData?.cabec?.nNF || numeroNfe || '').replace(/\D/g, '');
+      if (!/^\d{44}$/.test(chaveNfe)) {
+        return res.status(404).json({ ok: false, error: `NF-e "${numeroNfe}" localizada, mas sem chave válida para abrir detalhes.` });
+      }
+
+      return res.json({
+        ok: true,
+        chave_nfe: chaveNfe,
+        numero_nfe: numeroEncontrado || numeroNfe,
+        n_id_nfe: nIdNFConsulta,
+        source: 'omie-nfconsultar'
+      });
     } catch (e) {
       console.error('[GET /api/compras/nfe-buscar-chave] erro:', e);
       res.status(500).json({ ok: false, error: e.message || String(e) });
@@ -648,6 +813,7 @@ module.exports = (pool) => {
   router.get('/nfe-xml-detalhes', async (req, res) => {
     try {
       const chaveNfe = String(req.query?.chave_nfe || '').replace(/\D/g, '');
+      const numeroNfeInformada = String(req.query?.numero_nfe || '').trim();
       if (!/^\d{44}$/.test(chaveNfe)) {
         return res.status(400).json({
           ok: false,
@@ -726,7 +892,23 @@ module.exports = (pool) => {
               error: mensagem
             });
           }
-          throw erroOmie;
+
+          const isRecebimentoNotFound = /SOAP-ENV:Client-5113|Nao foi possivel encontrar os dados do Recebimento|Não foi possível encontrar os dados do Recebimento/i.test(mensagem);
+          if (isRecebimentoNotFound) {
+            const fallbackNfe = await montarPayloadNfeViaDfeDocs({
+              chaveNfe,
+              numeroNfe: numeroNfeInformada
+            });
+
+            if (fallbackNfe?.cabec?.cChaveNFe) {
+              retorno = fallbackNfe;
+              source = 'omie-dfedocs';
+            } else {
+              throw erroOmie;
+            }
+          } else {
+            throw erroOmie;
+          }
         }
 
         const fault = retorno?.faultstring || retorno?.faultcode || '';

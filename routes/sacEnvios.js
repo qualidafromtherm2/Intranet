@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const mime = require('mime-types');
 const pdfParse = require('pdf-parse');
 const fetch = require('node-fetch');
+const { parse: csvParse } = require('csv-parse/sync');
 
 const supabase = require('../utils/supabase');
 
@@ -27,6 +28,179 @@ const WONCA_TRACK_URL = (process.env.WONCA_TRACK_URL || 'https://api-labs.wonca.
 // TrackingMore: fallback com carrier dos Correios
 const TRACKINGMORE_API_KEY = process.env.TRACKINGMORE_API_KEY || process.env.TRACKINGMORE_TOKEN || '';
 const TRACKINGMORE_URL = (process.env.TRACKINGMORE_URL || 'https://api.trackingmore.com/v2/trackings/realtime').replace(/\/$/, '');
+const AT_SERIE_SHEETS_PUB_KEY = '2PACX-1vTBZcTPkowyN_dViQlzWd4noEgssByJR3f6YPtnR234sYIT5gTFI5PZXw3ZdPUOWAlxp_RDMo_I8JFm';
+const AT_SERIE_SHEETS = ['PRODUÇÃO 1 - ESCOPO', 'PRODUÇÃO 2 - F/ ESCOPO'];
+const AT_SERIE_PUBHTML_URL = `https://docs.google.com/spreadsheets/d/e/${AT_SERIE_SHEETS_PUB_KEY}/pubhtml`;
+const AT_SERIE_CSV_URL = `https://docs.google.com/spreadsheets/d/e/${AT_SERIE_SHEETS_PUB_KEY}/pub`;
+const LEGACY_SERIE_SHEET_ID = '1pYlgEpyF10xprNlI7kcnLQZJPwV15sAMtJaCKCBNySI';
+const LEGACY_SERIE_SHEET_NAME = 'IMPORTRANGE';
+const PEDIDOS_SERIE_SHEET_ID = '14cmU3eOVH8ZscU-nZqxPb1Do5wTnl0SdQCU1caee6qk';
+const PEDIDOS_SERIE_GID = '1642140396';
+const TESTE_GAS_SHEET_ID = '1Kzg7LngaUig6t2CLabS1fhZ-iD5idrmv1ZesIUVOy1M';
+const TESTE_GAS_SHEET_GID = '1333359070';
+let atSerieSheetGidCache = null;
+let atSerieSheetGidCacheAt = 0;
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
+function extractGvizJson(text) {
+  const raw = String(text || '');
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('Resposta gviz invalida.');
+  }
+  return JSON.parse(raw.slice(start, end + 1));
+}
+
+function parseGvizRows(gvizObj) {
+  const table = gvizObj?.table;
+  const cols = Array.isArray(table?.cols) ? table.cols : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const headers = cols.map((c, idx) => String(c?.label || c?.id || `col_${idx}`).trim());
+
+  return rows.map((row) => {
+    const cells = Array.isArray(row?.c) ? row.c : [];
+    const out = {};
+    headers.forEach((h, idx) => {
+      const cell = cells[idx];
+      const val = cell && typeof cell === 'object' ? (cell.f ?? cell.v ?? '') : '';
+      out[h] = String(val ?? '').trim();
+    });
+    return out;
+  });
+}
+
+function getValueByHeaderMatch(rowObj, matcher) {
+  const keys = Object.keys(rowObj || {});
+  const found = keys.find((key) => matcher(normalizeText(key)));
+  return found ? String(rowObj[found] || '').trim() : '';
+}
+
+async function getAtSerieSheetGids() {
+  const now = Date.now();
+  if (atSerieSheetGidCache && (now - atSerieSheetGidCacheAt) < 10 * 60 * 1000) {
+    return atSerieSheetGidCache;
+  }
+
+  const resp = await fetchWithTimeout(AT_SERIE_PUBHTML_URL, { headers: { Accept: 'text/html' } }, 15000);
+  if (!resp.ok) {
+    throw new Error(`Falha ao consultar pubhtml da planilha (${resp.status})`);
+  }
+
+  const html = await resp.text();
+  const map = {};
+
+  // Formato atual do pubhtml: items.push({name: "...", ..., gid: "..."})
+  const scriptRegex = /items\.push\(\{name:\s*"([^"]+)",[\s\S]*?gid:\s*"(-?\d+)"/g;
+  let match;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const rawTitle = String(match[1] || '').trim();
+    const gid = String(match[2] || '').trim();
+    const title = rawTitle
+      .replace(/\\\//g, '/')
+      .replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .trim();
+    if (!gid || !title) continue;
+    map[normalizeText(title)] = gid;
+  }
+
+  // Fallback para versões antigas do pubhtml com links no menu
+  if (!Object.keys(map).length) {
+    const anchorRegex = /<a[^>]*href="\?gid=(\d+)[^"]*"[^>]*>(.*?)<\/a>/gi;
+    while ((match = anchorRegex.exec(html)) !== null) {
+      const gid = String(match[1] || '').trim();
+      const titleHtml = String(match[2] || '').trim();
+      const title = titleHtml.replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+      if (!gid || !title) continue;
+      map[normalizeText(title)] = gid;
+    }
+  }
+
+  atSerieSheetGidCache = map;
+  atSerieSheetGidCacheAt = now;
+  return map;
+}
+
+async function fetchAtSerieSheetRows(sheetName) {
+  const gidMap = await getAtSerieSheetGids();
+  const gid = gidMap[normalizeText(sheetName)];
+  if (!gid) {
+    throw new Error(`Aba não encontrada na publicação: ${sheetName}`);
+  }
+
+  const csvUrl = `${AT_SERIE_CSV_URL}?gid=${encodeURIComponent(gid)}&single=true&output=csv`;
+  const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
+  if (!resp.ok) {
+    throw new Error(`Falha ao consultar CSV da aba ${sheetName} (${resp.status})`);
+  }
+  const csvText = await resp.text();
+  return csvParse(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    bom: true,
+    relax_column_count: true,
+    trim: true,
+  });
+}
+
+async function fetchLegacySerieRows() {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${LEGACY_SERIE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(LEGACY_SERIE_SHEET_NAME)}`;
+  const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
+  if (!resp.ok) {
+    throw new Error(`Falha ao consultar CSV da planilha legacy (${resp.status})`);
+  }
+  const csvText = await resp.text();
+  return csvParse(csvText, {
+    columns: false,
+    skip_empty_lines: true,
+    bom: true,
+    relax_column_count: true,
+    trim: true,
+  });
+}
+
+async function fetchPedidosSerieRows() {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${PEDIDOS_SERIE_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${encodeURIComponent(PEDIDOS_SERIE_GID)}`;
+  const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
+  if (!resp.ok) {
+    throw new Error(`Falha ao consultar planilha PEDIDOS (${resp.status})`);
+  }
+  const csvText = await resp.text();
+  return csvParse(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    bom: true,
+    relax_column_count: true,
+    trim: true,
+  });
+}
+
+async function fetchTesteGasRows() {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${TESTE_GAS_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${encodeURIComponent(TESTE_GAS_SHEET_GID)}`;
+  const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 30000);
+  if (!resp.ok) {
+    throw new Error(`Falha ao consultar planilha TESTE/GAS (${resp.status})`);
+  }
+  const csvText = await resp.text();
+  return csvParse(csvText, {
+    columns: true,
+    skip_empty_lines: true,
+    bom: true,
+    relax_column_count: true,
+    trim: true,
+  });
+}
+
+function isAbortError(err) {
+  return err?.name === 'AbortError' || err?.type === 'aborted';
+}
 
 function sanitizeIdentificacao(codigo) {
   return String(codigo || '').replace(/\s+/g, '').toUpperCase() || null;
@@ -244,11 +418,204 @@ async function ensureSchema() {
 
     ALTER TABLE envios.solicitacoes
       ALTER COLUMN status SET DEFAULT 'Pendente';
+
+    CREATE SCHEMA IF NOT EXISTS sac;
+
+    CREATE TABLE IF NOT EXISTS sac.at (
+      id BIGSERIAL PRIMARY KEY,
+      data TIMESTAMP NOT NULL DEFAULT NOW(),
+      tipo TEXT,
+      nome_revenda_cliente TEXT,
+      numero_telefone TEXT,
+      cpf_cnpj TEXT,
+      cep TEXT,
+      bairro TEXT,
+      cidade TEXT,
+      estado TEXT,
+      numero TEXT,
+      rua TEXT,
+      agendar_atendimento_com TEXT,
+      descreva_reclamacao TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sac.at_busca_selecionada (
+      id BIGSERIAL PRIMARY KEY,
+      id_at BIGINT NOT NULL REFERENCES sac.at(id) ON DELETE CASCADE,
+      pedido TEXT,
+      ordem_producao TEXT,
+      modelo TEXT,
+      cliente TEXT,
+      nota_fiscal TEXT,
+      data_entrega TEXT,
+      teste_tipo_gas TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
 ensureSchema().catch(err => {
   console.error('[SAC] falha ao garantir schema/tabela envios:', err);
+});
+
+router.post('/at', async (req, res) => {
+  const body = req.body || {};
+
+  const payload = {
+    tipo: String(body.tipo || '').trim() || null,
+    nomeRevendaCliente: String(body.nome_revenda_cliente || '').trim() || null,
+    numeroTelefone: String(body.numero_telefone || '').trim() || null,
+    cpfCnpj: String(body.cpf_cnpj || '').trim() || null,
+    cep: String(body.cep || '').trim() || null,
+    bairro: String(body.bairro || '').trim() || null,
+    cidade: String(body.cidade || '').trim() || null,
+    estado: String(body.estado || '').trim() || null,
+    numero: String(body.numero || '').trim() || null,
+    rua: String(body.rua || '').trim() || null,
+    agendarAtendimentoCom: String(body.agendar_atendimento_com || '').trim() || null,
+    descrevaReclamacao: String(body.descreva_reclamacao || '').trim() || null,
+  };
+
+  const selectedItemRaw = body.selected_item && typeof body.selected_item === 'object'
+    ? body.selected_item
+    : null;
+  const selectedItem = selectedItemRaw ? {
+    pedido: String(selectedItemRaw.pedido || '').trim() || null,
+    ordemProducao: String(selectedItemRaw.ordem_producao || '').trim() || null,
+    modelo: String(selectedItemRaw.modelo || '').trim() || null,
+    cliente: String(selectedItemRaw.cliente || '').trim() || null,
+    notaFiscal: String(selectedItemRaw.nota_fiscal || '').trim() || null,
+    dataEntrega: String(selectedItemRaw.data_entrega || '').trim() || null,
+    testeTipoGas: String(selectedItemRaw.teste_tipo_gas || '').trim() || null,
+  } : null;
+
+  const hasSelectedItem = !!selectedItem && [
+    selectedItem.pedido,
+    selectedItem.ordemProducao,
+    selectedItem.modelo,
+    selectedItem.cliente,
+    selectedItem.notaFiscal,
+    selectedItem.dataEntrega,
+    selectedItem.testeTipoGas,
+  ].some(Boolean);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `INSERT INTO sac.at (
+         tipo,
+         nome_revenda_cliente,
+         numero_telefone,
+         cpf_cnpj,
+         cep,
+         bairro,
+         cidade,
+         estado,
+         numero,
+         rua,
+         agendar_atendimento_com,
+         descreva_reclamacao
+       ) VALUES (
+         $1,
+         $2,
+         $3,
+         $4,
+         $5,
+         $6,
+         $7,
+         $8,
+         $9,
+         $10,
+         $11,
+         $12
+       )
+       RETURNING id, data`,
+      [
+        payload.tipo,
+        payload.nomeRevendaCliente,
+        payload.numeroTelefone,
+        payload.cpfCnpj,
+        payload.cep,
+        payload.bairro,
+        payload.cidade,
+        payload.estado,
+        payload.numero,
+        payload.rua,
+        payload.agendarAtendimentoCom,
+        payload.descrevaReclamacao,
+      ]
+    );
+
+      const atRow = result.rows[0];
+      let selectedRow = null;
+
+      if (hasSelectedItem) {
+        const selectedResult = await client.query(
+          `INSERT INTO sac.at_busca_selecionada (
+            id_at,
+            pedido,
+            ordem_producao,
+            modelo,
+            cliente,
+            nota_fiscal,
+            data_entrega,
+            teste_tipo_gas
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          RETURNING id, id_at, pedido, ordem_producao, modelo, cliente, nota_fiscal, data_entrega, teste_tipo_gas, created_at`,
+          [
+            atRow.id,
+            selectedItem.pedido,
+            selectedItem.ordemProducao,
+            selectedItem.modelo,
+            selectedItem.cliente,
+            selectedItem.notaFiscal,
+            selectedItem.dataEntrega,
+            selectedItem.testeTipoGas,
+          ]
+        );
+        selectedRow = selectedResult.rows[0] || null;
+      }
+
+      await client.query('COMMIT');
+
+      return res.status(201).json({ ok: true, row: atRow, selected_row: selectedRow });
+  } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[SAC/AT] erro ao salvar atendimento:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao salvar atendimento AT.' });
+    } finally {
+      client.release();
+  }
+});
+
+router.get('/at/atendimentos', async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         a.id,
+         a.data,
+         a.tipo,
+         a.nome_revenda_cliente,
+         a.descreva_reclamacao,
+         s.pedido,
+         s.ordem_producao,
+         s.modelo,
+         s.cliente,
+         s.nota_fiscal,
+         s.data_entrega,
+         s.teste_tipo_gas
+       FROM sac.at a
+       LEFT JOIN sac.at_busca_selecionada s
+         ON s.id_at = a.id
+       ORDER BY a.id DESC`
+    );
+
+    return res.json({ ok: true, rows: result.rows || [] });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao listar atendimentos:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao listar atendimentos AT.' });
+  }
 });
 
 router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
@@ -747,8 +1114,319 @@ router.delete('/solicitacoes/:id', async (req, res) => {
 
     return res.json({ ok: true, status: r.rows[0].status });
   } catch (err) {
-    console.error('[SAC] erro ao excluir registro:', err);
-    return res.status(500).json({ ok: false, error: 'Erro ao excluir registro.' });
+    console.error('[SAC] erro ao excluir solicitação:', err);
+    return res.status(500).json({ ok: false, error: 'Erro ao excluir solicitação.' });
+  }
+});
+
+router.get('/at/busca-serie', async (req, res) => {
+  const termo = String(req.query?.termo || '').trim();
+  if (termo.length < 2) {
+    return res.status(400).json({ ok: false, error: 'Informe ao menos 2 caracteres para a busca.' });
+  }
+
+  const termoNorm = normalizeText(termo);
+  const maxResultados = 10;
+
+  try {
+    const resultados = [];
+    const seen = new Set();
+    const fontesComTimeout = [];
+
+    const upsertResultado = (row) => {
+      const dedupKey = `${row.numero_serie}|${row.op}|${row.modelo}`;
+      const jaExiste = seen.has(dedupKey);
+
+      if (jaExiste) {
+        const existente = resultados.find((item) => `${item.numero_serie}|${item.op}|${item.modelo}` === dedupKey);
+        if (!existente) return false;
+        if (!existente.cliente && row.cliente) existente.cliente = row.cliente;
+        if (!existente.nota_fiscal && row.nota_fiscal) existente.nota_fiscal = row.nota_fiscal;
+        if (!existente.chave_nfe && row.chave_nfe) existente.chave_nfe = row.chave_nfe;
+        if (!existente.data_entrega && row.data_entrega) existente.data_entrega = row.data_entrega;
+        if (!existente.teste_tipo_gas && row.teste_tipo_gas) existente.teste_tipo_gas = row.teste_tipo_gas;
+        return false;
+      }
+
+      if (resultados.length >= maxResultados) return false;
+      seen.add(dedupKey);
+      resultados.push(row);
+      return true;
+    };
+
+    for (const sheetName of AT_SERIE_SHEETS) {
+      const sheetNameNorm = normalizeText(sheetName);
+      let rows = [];
+      try {
+        rows = await fetchAtSerieSheetRows(sheetName);
+      } catch (sheetErr) {
+        if (isAbortError(sheetErr)) {
+          fontesComTimeout.push(sheetName);
+          console.warn(`[SAC/AT] timeout ao consultar aba ${sheetName}; seguindo com próximas fontes.`);
+          continue;
+        }
+        console.warn(`[SAC/AT] falha na aba ${sheetName}; seguindo com próximas fontes:`, sheetErr?.message || sheetErr);
+        continue;
+      }
+
+      for (const rowObj of rows) {
+        const pedido = getValueByHeaderMatch(rowObj, (key) => key.includes('PEDIDO'));
+        const ordemProducao = getValueByHeaderMatch(rowObj, (key) => key.includes('ORDEM') && key.includes('PRODUCAO'));
+        const modelo = getValueByHeaderMatch(rowObj, (key) => key.includes('MODELO'));
+        const revenda = getValueByHeaderMatch(rowObj, (key) => key.includes('REVENDA') || key.includes('CLIENTE'));
+        const dataVenda = getValueByHeaderMatch(rowObj, (key) => key.includes('DATA') && key.includes('VENDA'));
+        let testeTipoGas = '';
+
+        if (sheetNameNorm.includes('PRODUCAO 2')) {
+          testeTipoGas = getValueByHeaderMatch(
+            rowObj,
+            (key) => key.includes('1REF') && key.includes('FLUIDO') && key.includes('REFRIGERANTE')
+          );
+        } else if (sheetNameNorm.includes('PRODUCAO 1')) {
+          testeTipoGas = getValueByHeaderMatch(
+            rowObj,
+            (key) => key.includes('REF') && key.includes('FLUIDO') && key.includes('REFRIGERANTE')
+          );
+        }
+
+        const pedidoNorm = normalizeText(pedido);
+        const ordemNorm = normalizeText(ordemProducao);
+        if (!pedidoNorm && !ordemNorm) continue;
+
+        let descricao = '';
+        if (pedidoNorm.startsWith(termoNorm)) {
+          descricao = String(pedido || '').toUpperCase();
+        } else if (ordemNorm.startsWith(termoNorm)) {
+          descricao = String(ordemProducao || '').toUpperCase();
+        } else {
+          continue;
+        }
+
+        const row = {
+          descricao,
+          numero_serie: pedido,
+          op: ordemProducao,
+          modelo,
+          revenda,
+          data_venda: dataVenda,
+          cliente: '',
+          nota_fiscal: '',
+          chave_nfe: '',
+          data_entrega: '',
+          teste_tipo_gas: testeTipoGas,
+          pedido,
+          ordem_producao: ordemProducao,
+        };
+
+        upsertResultado(row);
+        if (resultados.length >= maxResultados) break;
+      }
+
+      if (resultados.length >= maxResultados) break;
+    }
+
+    if (resultados.length < maxResultados) {
+      try {
+        const legacyRows = await fetchLegacySerieRows();
+        for (let i = 1; i < legacyRows.length; i++) {
+          const row = Array.isArray(legacyRows[i]) ? legacyRows[i] : [];
+          const serie = String(row[0] || '').trim();
+          const op = String(row[8] || '').trim();
+          const modelo = String(row[12] || '').trim();
+          const revenda = String(row[2] || '').trim();
+          const dataVenda = String(row[22] || '').trim();
+
+          const serieNorm = normalizeText(serie);
+          const opNorm = normalizeText(op);
+          if (!serieNorm && !opNorm) continue;
+
+          let descricao = '';
+          if (serieNorm.startsWith(termoNorm)) {
+            descricao = String(serie || '').toUpperCase();
+          } else if (opNorm.startsWith(termoNorm)) {
+            descricao = String(op || '').toUpperCase();
+          } else {
+            continue;
+          }
+
+          const out = {
+            descricao,
+            numero_serie: serie,
+            op,
+            modelo,
+            revenda,
+            data_venda: dataVenda,
+            cliente: '',
+            nota_fiscal: '',
+            chave_nfe: '',
+            data_entrega: '',
+            teste_tipo_gas: '',
+            pedido: serie,
+            ordem_producao: op,
+          };
+
+          upsertResultado(out);
+          if (resultados.length >= maxResultados) break;
+        }
+      } catch (legacyErr) {
+        if (isAbortError(legacyErr)) {
+          fontesComTimeout.push('IMPORTRANGE (legacy)');
+          console.warn('[SAC/AT] timeout na planilha legacy; retornando resultados parciais.');
+        } else {
+          console.warn('[SAC/AT] planilha legacy indisponível para busca de série:', legacyErr?.message || legacyErr);
+        }
+      }
+    }
+
+      if (resultados.length < maxResultados) {
+        try {
+          const pedidosRows = await fetchPedidosSerieRows();
+          for (const rowObj of pedidosRows) {
+            const pedido = getValueByHeaderMatch(rowObj, (key) => key.includes('PEDIDO'));
+            const ordemProducao = getValueByHeaderMatch(rowObj, (key) => key.includes('ORDEM') && key.includes('PRODUCAO'));
+            const modelo = getValueByHeaderMatch(rowObj, (key) => key.includes('MODELO'));
+            const revenda = getValueByHeaderMatch(rowObj, (key) => key.includes('REVENDA') || key.includes('CLIENTE'));
+            const dataVenda = getValueByHeaderMatch(rowObj, (key) => key.includes('DATA') && key.includes('VENDA'));
+            const cliente = getValueByHeaderMatch(rowObj, (key) => key.includes('CLIENTE'));
+            const notaFiscal = getValueByHeaderMatch(rowObj, (key) => key.includes('NOTA') && key.includes('FISCAL'));
+            const chaveNfe = getValueByHeaderMatch(rowObj, (key) => key.includes('CHAVE') && key.includes('NFE'));
+            const dataEntrega = getValueByHeaderMatch(rowObj, (key) => key.includes('DATA') && key.includes('ENTREGA'));
+
+            const pedidoNorm = normalizeText(pedido);
+            const ordemNorm = normalizeText(ordemProducao);
+            if (!pedidoNorm && !ordemNorm) continue;
+
+            let descricao = '';
+            if (pedidoNorm.startsWith(termoNorm)) {
+              descricao = String(pedido || '').toUpperCase();
+            } else if (ordemNorm.startsWith(termoNorm)) {
+              descricao = String(ordemProducao || '').toUpperCase();
+            } else {
+              continue;
+            }
+
+            const out = {
+              descricao,
+              numero_serie: pedido,
+              op: ordemProducao,
+              modelo,
+              revenda,
+              data_venda: dataVenda,
+              cliente,
+              nota_fiscal: notaFiscal,
+              chave_nfe: chaveNfe,
+              data_entrega: dataEntrega,
+              teste_tipo_gas: '',
+              pedido,
+              ordem_producao: ordemProducao,
+            };
+
+            upsertResultado(out);
+            if (resultados.length >= maxResultados) break;
+          }
+        } catch (pedidosErr) {
+          if (isAbortError(pedidosErr)) {
+            fontesComTimeout.push('PEDIDOS (gid 1642140396)');
+            console.warn('[SAC/AT] timeout na planilha PEDIDOS; retornando resultados parciais.');
+          } else {
+            console.warn('[SAC/AT] planilha PEDIDOS indisponível para busca de série:', pedidosErr?.message || pedidosErr);
+          }
+        }
+      }
+
+      try {
+        const testeGasRows = await fetchTesteGasRows();
+        for (const rowObj of testeGasRows) {
+          const pedido = getValueByHeaderMatch(rowObj, (key) => key.includes('PEDIDO'));
+          const ordemProducao = getValueByHeaderMatch(rowObj, (key) => key.includes('ORDEM') && key.includes('PRODUCAO'));
+          const modelo = getValueByHeaderMatch(rowObj, (key) => key.includes('MODELO'));
+          const cliente = getValueByHeaderMatch(rowObj, (key) => key.includes('CLIENTE') || key.includes('REVENDA'));
+          const testeTipoGas = getValueByHeaderMatch(rowObj, (key) => key.includes('TESTE') && key.includes('TIPO') && key.includes('GAS'));
+
+          const pedidoNorm = normalizeText(pedido);
+          const ordemNorm = normalizeText(ordemProducao);
+          if (!pedidoNorm && !ordemNorm) continue;
+
+          let descricao = '';
+          if (pedidoNorm.startsWith(termoNorm)) {
+            descricao = String(pedido || '').toUpperCase();
+          } else if (ordemNorm.startsWith(termoNorm)) {
+            descricao = String(ordemProducao || '').toUpperCase();
+          } else {
+            continue;
+          }
+
+          const out = {
+            descricao,
+            numero_serie: pedido,
+            op: ordemProducao,
+            modelo,
+            revenda: cliente,
+            data_venda: '',
+            cliente,
+            nota_fiscal: '',
+            chave_nfe: '',
+            data_entrega: '',
+            teste_tipo_gas: testeTipoGas,
+            pedido,
+            ordem_producao: ordemProducao,
+          };
+
+          upsertResultado(out);
+          if (resultados.length >= maxResultados) break;
+        }
+      } catch (testeGasErr) {
+        if (isAbortError(testeGasErr)) {
+          fontesComTimeout.push('TESTE/GAS (gid 1333359070)');
+          console.warn('[SAC/AT] timeout na planilha TESTE/GAS; retornando resultados parciais.');
+        } else {
+          console.warn('[SAC/AT] planilha TESTE/GAS indisponível para busca de série:', testeGasErr?.message || testeGasErr);
+        }
+      }
+
+    const payload = { ok: true, rows: resultados };
+    if (fontesComTimeout.length) {
+      payload.partial = true;
+      payload.warning = `Algumas fontes excederam o tempo: ${fontesComTimeout.join(', ')}`;
+    }
+
+    return res.json(payload);
+  } catch (err) {
+    if (isAbortError(err)) {
+      return res.status(200).json({ ok: true, rows: [], partial: true, warning: 'Busca parcial por timeout externo.' });
+    }
+    console.error('[SAC/AT] erro na busca por numero de serie:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao consultar planilha para busca de serie.' });
+  }
+});
+
+router.get('/at/cep/:cep', async (req, res) => {
+  const cep = String(req.params?.cep || '').replace(/\D/g, '');
+  if (cep.length !== 8) {
+    return res.status(400).json({ ok: false, error: 'CEP inválido. Informe 8 dígitos.' });
+  }
+
+  try {
+    const resp = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {
+      headers: { Accept: 'application/json' }
+    }, 10000);
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data?.erro) {
+      return res.status(404).json({ ok: false, error: 'CEP não encontrado.' });
+    }
+
+    return res.json({
+      ok: true,
+      cep: String(data.cep || '').trim(),
+      rua: String(data.logradouro || '').trim(),
+      bairro: String(data.bairro || '').trim(),
+      cidade: String(data.localidade || '').trim(),
+      estado: String(data.uf || '').trim(),
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao consultar CEP:', err);
+    return res.status(502).json({ ok: false, error: 'Falha ao consultar CEP.' });
   }
 });
 
