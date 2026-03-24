@@ -242,6 +242,31 @@ function resolverIdentificadoresAuditoria(req) {
   return Array.from(new Set(candidatos));
 }
 
+const RH_SETOR_ID_CALENDARIO = 7;
+
+async function usuarioEhSetorRhCalendario(req) {
+  const userSessao = req?.session?.user || {};
+  const userId = Number(userSessao?.id);
+  const username = String(userSessao?.username || resolverUsuarioAuditoria(req) || '').trim();
+
+  if (!Number.isInteger(userId) && !username) return false;
+
+  const { rows } = await pool.query(
+    `SELECT 1
+       FROM public.auth_user_profile up
+       JOIN public.auth_user u ON u.id = up.user_id
+      WHERE up.sector_id = $1
+        AND (
+          ($2::bigint IS NOT NULL AND u.id = $2::bigint)
+          OR ($3::text <> '' AND lower(u.username) = lower($3::text))
+        )
+      LIMIT 1`,
+    [RH_SETOR_ID_CALENDARIO, Number.isInteger(userId) ? userId : null, username]
+  );
+
+  return rows.length > 0;
+}
+
 function isEnvValorValidoOAuth(valor) {
   const v = String(valor || '').trim();
   if (!v) return false;
@@ -766,6 +791,7 @@ async function ensureRhReservasSchema() {
         ADD COLUMN IF NOT EXISTS link_reuniao TEXT,
         ADD COLUMN IF NOT EXISTS anexo_url TEXT,
         ADD COLUMN IF NOT EXISTS anexo_nome TEXT,
+        ADD COLUMN IF NOT EXISTS datas_excecao DATE[] NOT NULL DEFAULT ARRAY[]::date[],
         ADD COLUMN IF NOT EXISTS google_event_id TEXT,
         ADD COLUMN IF NOT EXISTS google_calendar_id TEXT,
         ADD COLUMN IF NOT EXISTS google_event_link TEXT
@@ -826,6 +852,24 @@ async function ensureRhReservasSchema() {
     await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS excluido_por TEXT`);
     await pool.query(`ALTER TABLE rh.atas_reuniao ADD COLUMN IF NOT EXISTS excluido_em TIMESTAMPTZ`);
 
+    // Tarefas extraídas das atas (checkbox + prazo por linha)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.ata_tarefas (
+        id BIGSERIAL PRIMARY KEY,
+        ata_id BIGINT NOT NULL REFERENCES rh.atas_reuniao(id) ON DELETE CASCADE,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        linha_numero INTEGER NOT NULL,
+        texto TEXT NOT NULL,
+        concluida BOOLEAN NOT NULL DEFAULT FALSE,
+        prazo DATE,
+        criado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS ata_tarefas_ata_idx ON rh.ata_tarefas (ata_id, linha_numero)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS ata_tarefas_reserva_idx ON rh.ata_tarefas (reserva_id)`);
+
     // Notas pessoais de reunião — anotações privadas por usuário vinculadas a uma reserva
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rh.notas_reuniao (
@@ -862,6 +906,52 @@ async function ensureRhReservasSchema() {
 }
 
 ensureRhReservasSchema();
+
+function extrairTarefasConteudoAtaRh(conteudo) {
+  const texto = String(conteudo || '');
+  if (!texto.trim()) return [];
+
+  const linhas = texto.split(/\r?\n/);
+  const tarefas = [];
+
+  linhas.forEach((linha, idx) => {
+    const m = linha.match(/^\s*\[( |x|X)\]\s*(.*)$/);
+    if (!m) return;
+
+    const concluida = String(m[1] || '').toLowerCase() === 'x';
+    let textoTarefa = String(m[2] || '').trim();
+    let prazo = null;
+
+    const prazoMatch = textoTarefa.match(/\s*@prazo\((\d{4}-\d{2}-\d{2})\)\s*$/i);
+    if (prazoMatch) {
+      prazo = prazoMatch[1];
+      textoTarefa = textoTarefa.replace(/\s*@prazo\(\d{4}-\d{2}-\d{2}\)\s*$/i, '').trim();
+    }
+
+    tarefas.push({
+      linhaNumero: idx + 1,
+      texto: textoTarefa || 'Tarefa',
+      concluida,
+      prazo
+    });
+  });
+
+  return tarefas;
+}
+
+async function sincronizarAtaTarefasRh(client, { ataId, reservaId, criadoPor, conteudo }) {
+  await client.query(`DELETE FROM rh.ata_tarefas WHERE ata_id = $1`, [ataId]);
+
+  const tarefas = extrairTarefasConteudoAtaRh(conteudo);
+  for (const tarefa of tarefas) {
+    await client.query(
+      `INSERT INTO rh.ata_tarefas
+        (ata_id, reserva_id, linha_numero, texto, concluida, prazo, criado_por)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7)`,
+      [ataId, reservaId, tarefa.linhaNumero, tarefa.texto, tarefa.concluida, tarefa.prazo, criadoPor]
+    );
+  }
+}
 
 
 function parseDateBR(s){ if(!s) return null; const t=String(s).trim();
@@ -2913,6 +3003,29 @@ function normalizarDiasSemanaRh(dias) {
   return Array.from(new Set(dias.map((d) => String(d || '').trim().toLowerCase()).filter((d) => permitidos.has(d))));
 }
 
+function formatarDataIsoLocalRh(dateObj) {
+  if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return null;
+  const ano = dateObj.getFullYear();
+  const mes = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const dia = String(dateObj.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+function normalizarDataIsoRh(valor) {
+  if (!valor) return null;
+  if (valor instanceof Date) return formatarDataIsoLocalRh(valor);
+
+  const bruto = String(valor).trim();
+  const direto = /^\d{4}-\d{2}-\d{2}$/.test(bruto)
+    ? bruto
+    : (/^\d{4}-\d{2}-\d{2}/.test(bruto) ? bruto.slice(0, 10) : null);
+  if (direto) return direto;
+
+  const dt = new Date(bruto);
+  if (Number.isNaN(dt.getTime())) return null;
+  return formatarDataIsoLocalRh(dt);
+}
+
 function obterSiglaDiaSemanaRh(dataIso) {
   const data = new Date(`${String(dataIso || '').slice(0, 10)}T00:00:00`);
   if (Number.isNaN(data.getTime())) return null;
@@ -2923,7 +3036,8 @@ function obterSiglaDiaSemanaRh(dataIso) {
 function gerarDatasRecorrenciaRh({ dataBaseIso, repetir, repetirTodosMeses, diasSemana }) {
   if (!repetir) return [dataBaseIso];
 
-  const base = new Date(`${String(dataBaseIso || '').slice(0, 10)}T00:00:00`);
+  const baseIso = normalizarDataIsoRh(dataBaseIso) || String(dataBaseIso || '').slice(0, 10);
+  const base = new Date(`${baseIso}T00:00:00`);
   if (Number.isNaN(base.getTime())) return [dataBaseIso];
 
   const diasPermitidos = new Set(normalizarDiasSemanaRh(diasSemana));
@@ -2942,12 +3056,62 @@ function gerarDatasRecorrenciaRh({ dataBaseIso, repetir, repetirTodosMeses, dias
       const atual = new Date(ano, mes, dia);
       const sigla = mapaSemana[atual.getDay()];
       if (diasPermitidos.has(sigla)) {
-        datas.push(atual.toISOString().slice(0, 10));
+        const dataIso = formatarDataIsoLocalRh(atual);
+        if (dataIso) datas.push(dataIso);
       }
     }
   });
 
   return Array.from(new Set(datas));
+}
+
+function normalizarDatasExcecaoRh(datas) {
+  if (!Array.isArray(datas)) return [];
+  return Array.from(new Set(
+    datas
+      .map((d) => normalizarDataIsoRh(d))
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+  ));
+}
+
+function unirDatasExcecaoRh(datasAtuais, novasDatas) {
+  return normalizarDatasExcecaoRh([
+    ...normalizarDatasExcecaoRh(datasAtuais),
+    ...normalizarDatasExcecaoRh(novasDatas)
+  ]);
+}
+
+function gerarOcorrenciasReservaRecorrenteNoAnoRh({ ano, dataBaseIso, repetirTodosMeses, diasSemana, datasExcecao = [] }) {
+  const dataBase = normalizarDataIsoRh(dataBaseIso) || String(dataBaseIso || '').slice(0, 10);
+  const base = new Date(`${dataBase}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return [];
+  if (!Number.isInteger(ano) || ano <= 0) return [];
+
+  const diasPermitidos = new Set(normalizarDiasSemanaRh(diasSemana));
+  if (!diasPermitidos.size) return [];
+
+  const mesesAlvo = repetirTodosMeses
+    ? Array.from({ length: 12 }, (_v, idx) => idx)
+    : [base.getMonth()];
+
+  const datasExcecaoSet = new Set(normalizarDatasExcecaoRh(datasExcecao));
+  const mapaSemana = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+  const ocorrencias = [];
+
+  mesesAlvo.forEach((mes) => {
+    const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+    for (let dia = 1; dia <= ultimoDia; dia++) {
+      const atual = new Date(ano, mes, dia);
+      const sigla = mapaSemana[atual.getDay()];
+      if (!diasPermitidos.has(sigla)) continue;
+      const dataIso = formatarDataIsoLocalRh(atual);
+      if (!dataIso) continue;
+      if (datasExcecaoSet.has(dataIso)) continue;
+      ocorrencias.push(dataIso);
+    }
+  });
+
+  return Array.from(new Set(ocorrencias)).sort();
 }
 
 async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaInicio, horaFim, ignorarId = null }) {
@@ -2974,6 +3138,7 @@ async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaIn
               OR EXTRACT(MONTH FROM data_reserva) = EXTRACT(MONTH FROM $1::date)
             )
             AND $6 = ANY(dias_semana)
+            AND NOT ($1::date = ANY(COALESCE(datas_excecao, ARRAY[]::date[])))
           )
         )
       LIMIT 1`,
@@ -3144,6 +3309,8 @@ app.post('/api/google-calendar/disconnect', async (req, res) => {
 
 app.get('/api/rh/reservas', async (req, res) => {
   try {
+    const userLogado = (resolverUsuarioAuditoria(req) || '').trim().toLowerCase();
+    const userEhRh = await usuarioEhSetorRhCalendario(req);
     const ano = Number(req.query?.ano);
     const mes = Number(req.query?.mes);
     if (!Number.isInteger(ano) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
@@ -3160,6 +3327,7 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.repetir,
               r.repetir_todos_meses,
               r.dias_semana,
+              r.datas_excecao,
               r.cafe,
               r.descricao,
               r.visitantes,
@@ -3207,6 +3375,9 @@ app.get('/api/rh/reservas', async (req, res) => {
         repetir: !!r.repetir,
         repetirTodosMeses: !!r.repetir_todos_meses,
         diasSemana: Array.isArray(r.dias_semana) ? r.dias_semana : [],
+        datasExcecao: Array.isArray(r.datas_excecao)
+          ? r.datas_excecao.map((d) => normalizarDataIsoRh(d)).filter(Boolean)
+          : [],
         cafe: !!r.cafe,
         descricao: r.descricao || null,
         visitantes: r.visitantes || null,
@@ -3218,17 +3389,19 @@ app.get('/api/rh/reservas', async (req, res) => {
         googleEventLink: r.google_event_link || null,
         googleAgendado: !!r.google_event_id,
         criadoPor: r.criado_por,
+        podeEditar: userEhRh || (!!userLogado && String(r.criado_por || '').trim().toLowerCase() === userLogado),
         participantes: Array.isArray(r.participantes) ? r.participantes : []
       };
 
       if (!baseReserva.repetir) {
-        reservas.push({ ...baseReserva, data: r.data_reserva });
+        reservas.push({ ...baseReserva, data: normalizarDataIsoRh(r.data_reserva) || r.data_reserva });
         return;
       }
 
       const diasSemanaSet = new Set(baseReserva.diasSemana);
+      const datasExcecaoSet = new Set(normalizarDatasExcecaoRh(baseReserva.datasExcecao));
       if (!diasSemanaSet.size) {
-        reservas.push({ ...baseReserva, data: r.data_reserva });
+        reservas.push({ ...baseReserva, data: normalizarDataIsoRh(r.data_reserva) || r.data_reserva });
         return;
       }
 
@@ -3236,7 +3409,9 @@ app.get('/api/rh/reservas', async (req, res) => {
         const dataAtual = new Date(ano, mes - 1, dia);
         const sigla = mapaSemana[dataAtual.getDay()];
         if (!diasSemanaSet.has(sigla)) continue;
-        const dataIso = dataAtual.toISOString().slice(0, 10);
+        const dataIso = formatarDataIsoLocalRh(dataAtual);
+        if (!dataIso) continue;
+        if (datasExcecaoSet.has(dataIso)) continue;
         reservas.push({ ...baseReserva, data: dataIso });
       }
     });
@@ -3429,6 +3604,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const anexoUrlPut = String(body.anexoUrl || '').trim() || null;
   const anexoNomePut = String(body.anexoNome || '').trim() || null;
   const agendarGoogle = !!body.agendarGoogle;
+  const escopoSolicitado = String(body.aplicarEm || '').trim().toLowerCase();
+  const aplicarEm = escopoSolicitado === 'este_dia' ? 'este_dia' : 'todos_futuros';
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -3446,7 +3623,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: atualRows } = await client.query(
-      `SELECT id, criado_por, google_event_id, google_calendar_id
+      `SELECT id, criado_por, data_reserva, repetir, repetir_todos_meses, dias_semana, datas_excecao,
+              google_event_id, google_calendar_id, google_event_link
          FROM rh.reservas_ambientes
         WHERE id = $1
         LIMIT 1`,
@@ -3459,10 +3637,19 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
 
     const criador = String(atualRows[0].criado_por || '').trim().toLowerCase();
     const userNorm = String(userLogado || '').trim().toLowerCase();
-    if (!userNorm || criador !== userNorm) {
+    const userEhRh = await usuarioEhSetorRhCalendario(req);
+    if (!userNorm || (criador !== userNorm && !userEhRh)) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Somente o criador pode alterar esta reserva' });
+      return res.status(403).json({ error: 'Somente o criador ou o setor RH pode alterar esta reserva' });
     }
+
+    const reservaAtual = atualRows[0];
+    const reservaAtualRecorrente = !!reservaAtual.repetir;
+    const dataBaseAtualIso = normalizarDataIsoRh(reservaAtual.data_reserva) || String(reservaAtual.data_reserva || '').slice(0, 10);
+    const diasSemanaAtuais = normalizarDiasSemanaRh(reservaAtual.dias_semana);
+    const datasExcecaoAtuais = normalizarDatasExcecaoRh(reservaAtual.datas_excecao);
+    const googleEventIdAtual = String(reservaAtual?.google_event_id || '').trim() || null;
+    const googleCalendarIdAtual = String(reservaAtual?.google_calendar_id || '').trim() || 'primary';
 
     if (tiposComConflitoPut.has(tipoEspaco)) {
       const conflito = await existeConflitoReservaRh(client, {
@@ -3478,50 +3665,153 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       }
     }
 
-    await client.query(
-      `UPDATE rh.reservas_ambientes
-          SET tipo_espaco = $1,
-              tema_reuniao = $2,
-              data_reserva = $3::date,
-              hora_inicio = $4::time,
-              hora_fim = $5::time,
-              repetir = $6,
-              repetir_todos_meses = $7,
-              dias_semana = $8::text[],
-              cafe = $9,
-              descricao = $10,
-              visitantes = $11,
-              link_reuniao = $12,
-              anexo_url = $13,
-              anexo_nome = $14,
-              atualizado_em = NOW()
-        WHERE id = $15`,
-      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, reservaId]
-    );
+    let reservaIdFinal = reservaId;
+    let escopoAplicado = 'registro';
+    let googleEventIdBaseSync = googleEventIdAtual;
+    let googleCalendarIdBaseSync = googleCalendarIdAtual;
 
-    await client.query(`DELETE FROM rh.reservas_participantes WHERE reserva_id = $1`, [reservaId]);
-    for (const username of participantes) {
-      await client.query(
-        `INSERT INTO rh.reservas_participantes (reserva_id, username)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [reservaId, username]
+    const inserirParticipantesReservaRh = async (idReserva, listaUsuarios) => {
+      await client.query(`DELETE FROM rh.reservas_participantes WHERE reserva_id = $1`, [idReserva]);
+      for (const username of listaUsuarios) {
+        await client.query(
+          `INSERT INTO rh.reservas_participantes (reserva_id, username)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [idReserva, username]
+        );
+      }
+    };
+
+    if (reservaAtualRecorrente && aplicarEm === 'este_dia') {
+      const ocorrenciasAtuais = gerarOcorrenciasReservaRecorrenteNoAnoRh({
+        ano: new Date(`${dataReserva}T00:00:00`).getFullYear(),
+        dataBaseIso: dataBaseAtualIso,
+        repetirTodosMeses: !!reservaAtual.repetir_todos_meses,
+        diasSemana: diasSemanaAtuais,
+        datasExcecao: datasExcecaoAtuais
+      });
+      const dataCorte = ocorrenciasAtuais.includes(dataReserva) ? dataReserva : dataBaseAtualIso;
+      if (dataCorte !== dataReserva) {
+        console.warn('[API] PUT /api/rh/reservas fallback este_dia: data fora da ocorrencia, usando data base da serie', {
+          reservaId,
+          dataSolicitada: dataReserva,
+          dataBaseAtualIso
+        });
+      }
+
+      const insertNovo = await client.query(
+        `INSERT INTO rh.reservas_ambientes
+          (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, datas_excecao)
+         VALUES ($1, $2, $3::date, $4::time, $5::time, false, false, ARRAY[]::text[],
+                 $6, $7, $8, $9, $10, $11, $12, ARRAY[]::date[])
+         RETURNING id`,
+        [tipoEspaco, tema, dataCorte, horaInicio, horaFim, cafe, descricao, visitantes, userLogado, linkReuniaoPut, anexoUrlPut, anexoNomePut]
       );
+      reservaIdFinal = insertNovo.rows[0].id;
+      await inserirParticipantesReservaRh(reservaIdFinal, participantes);
+
+      const novasExcecoes = unirDatasExcecaoRh(datasExcecaoAtuais, [dataCorte]);
+      await client.query(
+        `UPDATE rh.reservas_ambientes
+            SET datas_excecao = $1::date[],
+                atualizado_em = NOW()
+          WHERE id = $2`,
+        [novasExcecoes, reservaId]
+      );
+
+      escopoAplicado = 'este_dia';
+      googleEventIdBaseSync = null;
+      googleCalendarIdBaseSync = 'primary';
+    } else if (reservaAtualRecorrente && aplicarEm === 'todos_futuros') {
+      const anoSerie = new Date(`${dataReserva}T00:00:00`).getFullYear();
+      const ocorrenciasAtuais = gerarOcorrenciasReservaRecorrenteNoAnoRh({
+        ano: anoSerie,
+        dataBaseIso: dataBaseAtualIso,
+        repetirTodosMeses: !!reservaAtual.repetir_todos_meses,
+        diasSemana: diasSemanaAtuais,
+        datasExcecao: datasExcecaoAtuais
+      });
+      const dataCorte = ocorrenciasAtuais.includes(dataReserva) ? dataReserva : dataBaseAtualIso;
+      if (dataCorte !== dataReserva) {
+        console.warn('[API] PUT /api/rh/reservas fallback todos_futuros: data fora da ocorrencia, usando data base da serie', {
+          reservaId,
+          dataSolicitada: dataReserva,
+          dataBaseAtualIso
+        });
+      }
+
+      const datasFuturas = ocorrenciasAtuais.filter((d) => d >= dataCorte);
+      const excecoesSerieAntiga = unirDatasExcecaoRh(datasExcecaoAtuais, datasFuturas);
+      await client.query(
+        `UPDATE rh.reservas_ambientes
+            SET datas_excecao = $1::date[],
+                google_event_id = NULL,
+                google_calendar_id = NULL,
+                google_event_link = NULL,
+                atualizado_em = NOW()
+          WHERE id = $2`,
+        [excecoesSerieAntiga, reservaId]
+      );
+
+      const ocorrenciasNovaSerie = gerarOcorrenciasReservaRecorrenteNoAnoRh({
+        ano: anoSerie,
+        dataBaseIso: dataCorte,
+        repetirTodosMeses,
+        diasSemana,
+        datasExcecao: []
+      });
+      const excecoesNovaSerie = ocorrenciasNovaSerie.filter((d) => d < dataCorte);
+
+      const insertSerieNova = await client.query(
+        `INSERT INTO rh.reservas_ambientes
+          (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, datas_excecao)
+         VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[],
+                 $9, $10, $11, $12, $13, $14, $15, $16::date[])
+         RETURNING id`,
+        [tipoEspaco, tema, dataCorte, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniaoPut, anexoUrlPut, anexoNomePut, excecoesNovaSerie]
+      );
+      reservaIdFinal = insertSerieNova.rows[0].id;
+      await inserirParticipantesReservaRh(reservaIdFinal, participantes);
+
+      escopoAplicado = 'todos_futuros';
+    } else {
+      await client.query(
+        `UPDATE rh.reservas_ambientes
+            SET tipo_espaco = $1,
+                tema_reuniao = $2,
+                data_reserva = $3::date,
+                hora_inicio = $4::time,
+                hora_fim = $5::time,
+                repetir = $6,
+                repetir_todos_meses = $7,
+                dias_semana = $8::text[],
+                cafe = $9,
+                descricao = $10,
+                visitantes = $11,
+                link_reuniao = $12,
+                anexo_url = $13,
+                anexo_nome = $14,
+                atualizado_em = NOW()
+          WHERE id = $15`,
+        [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, reservaId]
+      );
+      await inserirParticipantesReservaRh(reservaId, participantes);
+      escopoAplicado = reservaAtualRecorrente ? 'todos_futuros' : 'registro';
     }
 
     await client.query('COMMIT');
 
-    const googleEventIdAtual = String(atualRows[0]?.google_event_id || '').trim() || null;
-    const googleCalendarIdAtual = String(atualRows[0]?.google_calendar_id || '').trim() || 'primary';
-    const deveSincronizarGoogle = agendarGoogle || !!googleEventIdAtual;
+    const deveSincronizarGoogle = agendarGoogle || !!googleEventIdBaseSync;
+    let googleAgenda = { requested: deveSincronizarGoogle, ok: null, eventId: googleEventIdBaseSync, eventLink: null, message: null };
 
-    let googleAgenda = { requested: deveSincronizarGoogle, ok: null, eventId: googleEventIdAtual, eventLink: null, message: null };
     if (deveSincronizarGoogle) {
       try {
         const resultadoGoogle = await sincronizarReservaGoogleCalendar({
           username: userLogado,
           reserva: {
-            id: reservaId,
+            id: reservaIdFinal,
             tipo: tipoEspaco,
             tema,
             data: dataReserva,
@@ -3533,8 +3823,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
             linkReuniao: linkReuniaoPut,
             participantes
           },
-          googleEventId: googleEventIdAtual,
-          googleCalendarId: googleCalendarIdAtual
+          googleEventId: googleEventIdBaseSync,
+          googleCalendarId: googleCalendarIdBaseSync
         });
 
         await pool.query(
@@ -3544,7 +3834,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
                   google_event_link = $3,
                   atualizado_em = NOW()
             WHERE id = $4`,
-          [resultadoGoogle.eventId, resultadoGoogle.calendarId, resultadoGoogle.htmlLink, reservaId]
+          [resultadoGoogle.eventId, resultadoGoogle.calendarId, resultadoGoogle.htmlLink, reservaIdFinal]
         );
 
         googleAgenda = {
@@ -3552,20 +3842,20 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
           ok: true,
           eventId: resultadoGoogle.eventId,
           eventLink: resultadoGoogle.htmlLink,
-          message: googleEventIdAtual ? 'Evento atualizado no Google Agenda.' : 'Evento criado no Google Agenda.'
+          message: googleEventIdBaseSync ? 'Evento atualizado no Google Agenda.' : 'Evento criado no Google Agenda.'
         };
       } catch (errGoogle) {
         logFalhaGoogleCalendar({
           operacao: 'upsert_event_after_reserva_put',
           username: userLogado,
-          reservaId,
+          reservaId: reservaIdFinal,
           err: errGoogle,
           reservaLocalSalva: true
         });
         googleAgenda = {
           requested: true,
           ok: false,
-          eventId: googleEventIdAtual,
+          eventId: googleEventIdBaseSync,
           eventLink: null,
           code: classificarFalhaGoogleCalendar(errGoogle),
           message: String(errGoogle?.message || 'Falha ao sincronizar evento no Google Agenda')
@@ -3573,7 +3863,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       }
     }
 
-    return res.json({ ok: true, id: reservaId, googleAgenda });
+    return res.json({ ok: true, id: reservaIdFinal, escopoAplicado, googleAgenda });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas PUT erro:', err);
@@ -3585,7 +3875,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
 
 // DELETE /api/rh/reservas/:id
 // Exclui uma reserva (ou toda a série se for recorrente, pois é um único registro no BD).
-// Somente o criador pode excluir.
+// O criador e o setor RH podem excluir.
 app.delete('/api/rh/reservas/:id', async (req, res) => {
   const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
   if (!userLogado) {
@@ -3610,8 +3900,9 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
     }
     const criador = String(rows[0].criado_por || '').trim().toLowerCase();
     const userNorm = String(userLogado).trim().toLowerCase();
-    if (!userNorm || criador !== userNorm) {
-      return res.status(403).json({ error: 'Somente o criador pode excluir esta reserva' });
+    const userEhRh = await usuarioEhSetorRhCalendario(req);
+    if (!userNorm || (criador !== userNorm && !userEhRh)) {
+      return res.status(403).json({ error: 'Somente o criador ou o setor RH pode excluir esta reserva' });
     }
 
     const googleEventId = String(rows[0].google_event_id || '').trim() || null;
@@ -3663,7 +3954,33 @@ app.get('/api/rh/atas', async (req, res) => {
         ORDER BY id ASC`,
       [reservaId]
     );
-    return res.json({ ok: true, atas: rows });
+
+    const ids = rows.map(r => Number(r.id)).filter(Number.isInteger);
+    const tarefasPorAta = new Map();
+    if (ids.length) {
+      const tarefasRs = await pool.query(
+        `SELECT id, ata_id, linha_numero, texto, concluida,
+                TO_CHAR(prazo, 'YYYY-MM-DD') AS prazo
+           FROM rh.ata_tarefas
+          WHERE ata_id = ANY($1::bigint[])
+          ORDER BY ata_id ASC, linha_numero ASC, id ASC`,
+        [ids]
+      );
+      tarefasRs.rows.forEach((t) => {
+        const key = Number(t.ata_id);
+        if (!tarefasPorAta.has(key)) tarefasPorAta.set(key, []);
+        tarefasPorAta.get(key).push({
+          id: Number(t.id),
+          linha_numero: Number(t.linha_numero),
+          texto: String(t.texto || ''),
+          concluida: !!t.concluida,
+          prazo: t.prazo || null
+        });
+      });
+    }
+
+    const atas = rows.map((r) => ({ ...r, tarefas: tarefasPorAta.get(Number(r.id)) || [] }));
+    return res.json({ ok: true, atas });
   } catch (err) {
     console.error('[API] /api/rh/atas GET erro:', err);
     return res.status(500).json({ error: 'Falha ao buscar atas' });
@@ -3684,16 +4001,29 @@ app.post('/api/rh/atas', async (req, res) => {
   if (!tema) return res.status(400).json({ error: 'Tema obrigatório' });
   if (!conteudo) return res.status(400).json({ error: 'Conteúdo obrigatório' });
 
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+    const { rows } = await client.query(
       `INSERT INTO rh.atas_reuniao (reserva_id, tema, conteudo, criado_por)
        VALUES ($1, $2, $3, $4) RETURNING id`,
       [reservaId, tema, conteudo, userLogado]
     );
+    const ataId = Number(rows[0]?.id);
+    await sincronizarAtaTarefasRh(client, {
+      ataId,
+      reservaId,
+      criadoPor: userLogado,
+      conteudo
+    });
+    await client.query('COMMIT');
     return res.json({ ok: true, id: rows[0].id });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[API] /api/rh/atas POST erro:', err);
     return res.status(500).json({ error: 'Falha ao salvar ata' });
+  } finally {
+    client.release();
   }
 });
 
@@ -3705,9 +4035,10 @@ app.put('/api/rh/atas/:id', async (req, res) => {
   const ataId = Number(req.params?.id);
   if (!Number.isInteger(ataId) || ataId <= 0) return res.status(400).json({ error: 'ID inválido' });
 
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
-      `SELECT criado_por, conteudo FROM rh.atas_reuniao WHERE id = $1 LIMIT 1`,
+    const { rows } = await client.query(
+      `SELECT criado_por, conteudo, reserva_id FROM rh.atas_reuniao WHERE id = $1 LIMIT 1`,
       [ataId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Ata não encontrada' });
@@ -3727,11 +4058,82 @@ app.put('/api/rh/atas/:id', async (req, res) => {
         ? atual.slice(2, -2)
         : `~~${atual}~~`;
     }
-    await pool.query(`UPDATE rh.atas_reuniao SET conteudo = $1 WHERE id = $2`, [novoConteudo, ataId]);
+    await client.query('BEGIN');
+    await client.query(`UPDATE rh.atas_reuniao SET conteudo = $1 WHERE id = $2`, [novoConteudo, ataId]);
+    await sincronizarAtaTarefasRh(client, {
+      ataId,
+      reservaId: Number(rows[0].reserva_id),
+      criadoPor: userLogado,
+      conteudo: novoConteudo
+    });
+    await client.query('COMMIT');
     return res.json({ ok: true, conteudo: novoConteudo });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[API] PUT /api/rh/atas erro:', err);
     return res.status(500).json({ error: 'Falha ao atualizar ata' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/rh/ata-tarefas/:id/toggle — alterna status do checkbox e espelha no texto da ata
+app.patch('/api/rh/ata-tarefas/:id/toggle', async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const tarefaId = Number(req.params?.id);
+  if (!Number.isInteger(tarefaId) || tarefaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const taskRs = await client.query(
+      `SELECT t.id, t.ata_id, t.linha_numero, t.concluida, a.conteudo, a.criado_por
+         FROM rh.ata_tarefas t
+         JOIN rh.atas_reuniao a ON a.id = t.ata_id
+        WHERE t.id = $1
+        LIMIT 1`,
+      [tarefaId]
+    );
+    if (!taskRs.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Tarefa não encontrada' });
+    }
+
+    const task = taskRs.rows[0];
+    if (String(task.criado_por || '').toLowerCase() !== userLogado.toLowerCase()) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Somente o autor pode marcar esta tarefa' });
+    }
+
+    const novoStatus = !task.concluida;
+    await client.query(
+      `UPDATE rh.ata_tarefas
+          SET concluida = $1,
+              atualizado_em = NOW()
+        WHERE id = $2`,
+      [novoStatus, tarefaId]
+    );
+
+    const linhas = String(task.conteudo || '').split(/\r?\n/);
+    const idxLinha = Math.max(0, Number(task.linha_numero) - 1);
+    if (idxLinha < linhas.length) {
+      const linhaAtual = String(linhas[idxLinha] || '');
+      if (/^\s*\[( |x|X)\]\s*/.test(linhaAtual)) {
+        linhas[idxLinha] = linhaAtual.replace(/^\s*\[( |x|X)\]/, novoStatus ? '[x]' : '[ ]');
+        await client.query(`UPDATE rh.atas_reuniao SET conteudo = $1 WHERE id = $2`, [linhas.join('\n'), task.ata_id]);
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.json({ ok: true, concluida: novoStatus });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[API] PATCH /api/rh/ata-tarefas/:id/toggle erro:', err);
+    return res.status(500).json({ error: 'Falha ao alternar tarefa' });
+  } finally {
+    client.release();
   }
 });
 
