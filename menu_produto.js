@@ -42773,6 +42773,7 @@ async function carregarReservasMesAgenda() {
       googleAgendado: !!reserva.googleAgendado,
       googleEventId: reserva.googleEventId || null,
       googleEventLink: reserva.googleEventLink || null,
+      podeEditar: reserva.podeEditar === true,
       participantes: Array.isArray(reserva.participantes) ? reserva.participantes : [],
       repetir: !!reserva.repetir,
       repetirTodosMeses: !!reserva.repetirTodosMeses,
@@ -43520,7 +43521,8 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
 
   const usuarioLogado = obterUsuarioLogadoAgenda().toLowerCase();
   const criador = String(reserva.criadoPor || '').trim().toLowerCase();
-  const podeEditar = Boolean(usuarioLogado) && usuarioLogado === criador;
+  const podeEditar = reserva.podeEditar === true
+    || (Boolean(usuarioLogado) && usuarioLogado === criador);
 
   if (tituloModal) {
     const baseTitulo = `${reserva.tipo || 'Reserva'} - ${formatarDataExibicaoPtBr(dataIso)}`;
@@ -43666,6 +43668,63 @@ function voltarParaEtapaTipoAgenda() {
   // Mantido por compatibilidade — noop, não há mais etapa de seleção separada
 }
 
+function obterReservaEditandoAgenda() {
+  if (!agendaReservaEditandoId || !agendaReservaEditandoData) return null;
+  const reservasDia = Array.isArray(agendaReservasPorDia[agendaReservaEditandoData])
+    ? agendaReservasPorDia[agendaReservaEditandoData]
+    : [];
+  return reservasDia.find((item) => String(item?.id || '') === String(agendaReservaEditandoId)) || null;
+}
+
+function agendaSetEscopoHorarioLoading(ativo) {
+  const acoesEl = document.getElementById('agendaEscopoHorarioAcoes');
+  const loadingEl = document.getElementById('agendaEscopoHorarioLoading');
+  if (acoesEl) acoesEl.style.display = ativo ? 'none' : 'flex';
+  if (loadingEl) loadingEl.style.display = ativo ? 'flex' : 'none';
+}
+
+function agendaFecharEscopoHorarioOverlay() {
+  const overlay = document.getElementById('agendaEscopoHorarioOverlay');
+  agendaSetEscopoHorarioLoading(false);
+  if (overlay) overlay.style.display = 'none';
+}
+
+function perguntarEscopoAlteracaoHorarioAgenda() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('agendaEscopoHorarioOverlay');
+    const btnCancelar = document.getElementById('agendaEscopoHorarioCancelar');
+    const btnEsteDia = document.getElementById('agendaEscopoHorarioEsteDia');
+    const btnFuturos = document.getElementById('agendaEscopoHorarioFuturos');
+    if (!overlay || !btnCancelar || !btnEsteDia || !btnFuturos) {
+      resolve(null);
+      return;
+    }
+
+    agendaSetEscopoHorarioLoading(false);
+
+    const fechar = (valor) => {
+      btnCancelar.onclick = null;
+      btnEsteDia.onclick = null;
+      btnFuturos.onclick = null;
+      if (valor === null) {
+        overlay.style.display = 'none';
+      }
+      resolve(valor);
+    };
+
+    btnCancelar.onclick = () => fechar(null);
+    btnEsteDia.onclick = () => {
+      agendaSetEscopoHorarioLoading(true);
+      fechar('este_dia');
+    };
+    btnFuturos.onclick = () => {
+      agendaSetEscopoHorarioLoading(true);
+      fechar('todos_futuros');
+    };
+    overlay.style.display = 'flex';
+  });
+}
+
 async function salvarReservaAgendaLocal() {
   if (!usuarioAutenticadoAgenda()) {
     alert('Você precisa estar logado para registrar reserva no calendário.');
@@ -43797,8 +43856,26 @@ async function salvarReservaAgendaLocal() {
     anexoUrl: null,
     anexoNome: null
   };
+  let escopoHorarioEmProcessamento = false;
+
+  if (agendaReservaEditandoId && agendaReservaEditandoRepetir) {
+    const reservaAtual = obterReservaEditandoAgenda();
+    const inicioAtual = String(reservaAtual?.inicio || '').slice(0, 5);
+    const fimAtual = String(reservaAtual?.fim || '').slice(0, 5);
+    const horarioMudou = inicioAtual !== horarioInicio || fimAtual !== horarioFim;
+
+    if (horarioMudou) {
+      const escopoHorario = await perguntarEscopoAlteracaoHorarioAgenda();
+      if (!escopoHorario) {
+        return;
+      }
+      payload.aplicarEm = escopoHorario;
+      escopoHorarioEmProcessamento = true;
+    }
+  }
 
   if (payload.agendarGoogle && !agendaGoogleCalendarStatus.connected) {
+    if (escopoHorarioEmProcessamento) agendaFecharEscopoHorarioOverlay();
     alert('Para sincronizar no Google Agenda, conecte sua conta Google no Perfil primeiro.');
     return;
   }
@@ -43819,6 +43896,9 @@ async function salvarReservaAgendaLocal() {
         throw new Error(erro.error || `Erro ao editar reserva (${resp.status})`);
       }
       const respData = await resp.json().catch(() => ({}));
+      if (respData?.id) {
+        reservaIdFinal = respData.id;
+      }
       respostaGoogle = respData?.googleAgenda || null;
     } else {
       const resp = await fetch('/api/rh/reservas', {
@@ -43849,9 +43929,12 @@ async function salvarReservaAgendaLocal() {
       alert(`Reserva salva, mas houve falha ao sincronizar no Google Agenda: ${respostaGoogle.message}`);
     }
   } catch (erroSalvar) {
+    if (escopoHorarioEmProcessamento) agendaFecharEscopoHorarioOverlay();
     alert(`Não foi possível salvar a reserva: ${erroSalvar.message}`);
     return;
   }
+
+  if (escopoHorarioEmProcessamento) agendaFecharEscopoHorarioOverlay();
 
   fecharModalAgendaReserva();
 }
@@ -44130,6 +44213,25 @@ async function abrirModalAtaAgenda() {
     temaInput.dataset.listenerOk = '1';
     temaInput.addEventListener('input', () => _agendaRenderAtaTemaSelecionado());
   }
+
+  const btnChecklist = document.getElementById('agendaAtaInserirChecklistBtn');
+  if (btnChecklist && !btnChecklist.dataset.listenerOk) {
+    btnChecklist.dataset.listenerOk = '1';
+    btnChecklist.addEventListener('click', () => _agendaAtaInserirChecklistLinha());
+  }
+
+  const btnPrazo = document.getElementById('agendaAtaInserirPrazoBtn');
+  if (btnPrazo && !btnPrazo.dataset.listenerOk) {
+    btnPrazo.dataset.listenerOk = '1';
+    btnPrazo.addEventListener('click', () => _agendaAtaEscolherPrazoLinhaAtual());
+  }
+
+  const prazoInput = document.getElementById('agendaAtaPrazoInputHidden');
+  if (prazoInput && !prazoInput.dataset.listenerOk) {
+    prazoInput.dataset.listenerOk = '1';
+    prazoInput.addEventListener('change', () => _agendaAtaAplicarPrazoSelecionado());
+  }
+
   // Listener botão PDF
   const btnPdf = document.getElementById('agendaAtaGerarPdfBtn');
   if (btnPdf && !btnPdf.dataset.listenerOk) {
@@ -44179,6 +44281,154 @@ function _agendaPopularTemaSelect() {
   if (!dl) return;
   const temas = [...new Set(agendaAtasCache.map((a) => String(a.tema || 'Geral').trim()))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   dl.innerHTML = temas.map((t) => `<option value="${escapeHtml(t)}"></option>`).join('');
+}
+
+function _agendaAtaInserirChecklistLinha() {
+  const ta = document.getElementById('agendaAtaNovaEntrada');
+  if (!ta) return;
+  const valor = String(ta.value || '');
+  const pos = Number.isInteger(ta.selectionStart) ? ta.selectionStart : valor.length;
+
+  const linhaInicioAtual = Math.max(0, valor.lastIndexOf('\n', Math.max(0, pos - 1)) + 1);
+  let idx = linhaInicioAtual;
+  let alvo = -1;
+
+  while (idx <= valor.length) {
+    const fim = valor.indexOf('\n', idx);
+    const fimLinha = fim === -1 ? valor.length : fim;
+    const linha = valor.slice(idx, fimLinha);
+    if (!linha.trim()) {
+      alvo = idx;
+      break;
+    }
+    if (fim === -1) break;
+    idx = fim + 1;
+  }
+
+  let novoValor = valor;
+  let novoCursor = 0;
+
+  if (alvo >= 0) {
+    novoValor = `${valor.slice(0, alvo)}[ ] ${valor.slice(alvo)}`;
+    novoCursor = alvo + 4;
+  } else {
+    const precisaQuebra = valor.length > 0 && !valor.endsWith('\n');
+    novoValor = `${valor}${precisaQuebra ? '\n' : ''}[ ] `;
+    novoCursor = novoValor.length;
+  }
+
+  ta.value = novoValor;
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = novoCursor;
+}
+
+function _agendaAtaEscolherPrazoLinhaAtual() {
+  const ta = document.getElementById('agendaAtaNovaEntrada');
+  const input = document.getElementById('agendaAtaPrazoInputHidden');
+  if (!ta || !input) return;
+
+  const valor = String(ta.value || '');
+  const pos = Number.isInteger(ta.selectionStart) ? ta.selectionStart : valor.length;
+  const inicio = Math.max(0, valor.lastIndexOf('\n', Math.max(0, pos - 1)) + 1);
+  const fimRaw = valor.indexOf('\n', pos);
+  const fim = fimRaw === -1 ? valor.length : fimRaw;
+  const linha = valor.slice(inicio, fim);
+
+  if (!linha.trim()) {
+    alert('Posicione o cursor em uma linha com conteúdo para definir prazo.');
+    return;
+  }
+
+  ta.dataset.prazoLinhaInicio = String(inicio);
+  ta.dataset.prazoLinhaFim = String(fim);
+
+  const existente = linha.match(/@prazo\((\d{4}-\d{2}-\d{2})\)/i);
+  input.value = existente ? existente[1] : '';
+  input.showPicker?.();
+  input.click();
+}
+
+function _agendaAtaAplicarPrazoSelecionado() {
+  const ta = document.getElementById('agendaAtaNovaEntrada');
+  const input = document.getElementById('agendaAtaPrazoInputHidden');
+  if (!ta || !input || !input.value) return;
+
+  const valor = String(ta.value || '');
+  const inicio = Number(ta.dataset.prazoLinhaInicio || -1);
+  const fim = Number(ta.dataset.prazoLinhaFim || -1);
+  if (inicio < 0 || fim < 0 || fim < inicio) return;
+
+  const linha = valor.slice(inicio, fim);
+  let limpa = linha.replace(/\s*@prazo\(\d{4}-\d{2}-\d{2}\)\s*$/i, '').trimEnd();
+  limpa = `${limpa} @prazo(${input.value})`;
+
+  ta.value = `${valor.slice(0, inicio)}${limpa}${valor.slice(fim)}`;
+  ta.focus();
+  const cursor = inicio + limpa.length;
+  ta.selectionStart = ta.selectionEnd = cursor;
+}
+
+function _agendaRenderConteudoAtaComTarefas(ata, podeEditarTarefa) {
+  const conteudoStr = String(ata?.conteudo || '');
+  const linhas = conteudoStr.split(/\r?\n/);
+  const tarefas = Array.isArray(ata?.tarefas) ? ata.tarefas : [];
+  const tarefasPorLinha = new Map();
+  tarefas.forEach((t) => {
+    const linha = Number(t.linha_numero);
+    if (Number.isInteger(linha) && linha > 0 && !tarefasPorLinha.has(linha)) {
+      tarefasPorLinha.set(linha, t);
+    }
+  });
+
+  const partes = [];
+  for (let i = 0; i < linhas.length; i++) {
+    const linha = String(linhas[i] || '');
+    const idxLinha = i + 1;
+    const tarefa = tarefasPorLinha.get(idxLinha) || null;
+    const m = linha.match(/^\s*\[( |x|X)\]\s*(.*)$/);
+
+    if (!m) {
+      const linhaRender = _agendaRenderTextoComMencoes(escapeHtml(linha));
+      partes.push(linhaRender || '&nbsp;');
+      continue;
+    }
+
+    const checkedPorTexto = String(m[1] || '').toLowerCase() === 'x';
+    const checked = tarefa ? !!tarefa.concluida : checkedPorTexto;
+    let textoLinha = String(m[2] || '').trim();
+    let prazo = tarefa?.prazo || null;
+
+    // Compatibilidade: se a linha do checklist veio vazia, usa a próxima linha como texto.
+    if (!textoLinha && i + 1 < linhas.length) {
+      const prox = String(linhas[i + 1] || '');
+      if (prox.trim() && !/^\s*\[( |x|X)\]\s*/.test(prox)) {
+        textoLinha = prox.trim();
+        i += 1;
+      }
+    }
+
+    const prazoMatch = textoLinha.match(/\s*@prazo\((\d{4}-\d{2}-\d{2})\)\s*$/i);
+    if (prazoMatch) {
+      prazo = prazo || prazoMatch[1];
+      textoLinha = textoLinha.replace(/\s*@prazo\(\d{4}-\d{2}-\d{2}\)\s*$/i, '').trim();
+    }
+
+    const prazoFmt = prazo ? formatarDataExibicaoPtBr(prazo) : '';
+    const textoRender = _agendaRenderTextoComMencoes(escapeHtml(textoLinha || 'Tarefa'));
+    const checkboxHtml = tarefa
+      ? `<input type="checkbox" data-ata-task-id="${escapeHtml(String(tarefa.id))}" ${checked ? 'checked' : ''} ${podeEditarTarefa ? '' : 'disabled'} onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" style="margin:0;width:14px;height:14px;cursor:${podeEditarTarefa ? 'pointer' : 'not-allowed'};vertical-align:middle;" />`
+      : `<input type="checkbox" ${checked ? 'checked' : ''} disabled onmousedown="event.stopPropagation()" onclick="event.stopPropagation()" style="margin:0;width:14px;height:14px;opacity:.6;vertical-align:middle;" />`;
+
+    partes.push(`<span style="display:flex;align-items:center;gap:7px;">
+      ${checkboxHtml}
+      <span style="flex:1;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span>${textoRender}</span>
+        ${prazoFmt ? `<span style="display:inline-block;font-size:10px;color:#93c5fd;background:#1e3a5f;border-radius:10px;padding:1px 7px;"><i class="fa-regular fa-calendar" style="margin-right:3px;"></i>${escapeHtml(prazoFmt)}</span>` : ''}
+      </span>
+    </span>`);
+  }
+
+  return partes.join('<br>');
 }
 
 /** Renderizar o histórico — sempre exibe TODOS os temas/entradas agrupados */
@@ -44283,6 +44533,34 @@ function _agendaRenderAtaTemaSelecionado() {
       });
     });
   });
+
+  // Listener: toggle de checklist da ata
+  el.querySelectorAll('[data-ata-task-id]').forEach((chk) => {
+    chk.addEventListener('change', async () => {
+      const tarefaId = chk.getAttribute('data-ata-task-id');
+      if (!tarefaId) return;
+      const marcadoAnterior = !chk.checked;
+      chk.disabled = true;
+      try {
+        const r = await fetch(`/api/rh/ata-tarefas/${encodeURIComponent(tarefaId)}/toggle`, {
+          method: 'PATCH',
+          credentials: 'include'
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          chk.checked = marcadoAnterior;
+          alert(e.error || 'Não foi possível atualizar a tarefa.');
+          return;
+        }
+        await abrirModalAtaAgenda();
+      } catch {
+        chk.checked = marcadoAnterior;
+        alert('Não foi possível atualizar a tarefa.');
+      } finally {
+        chk.disabled = false;
+      }
+    });
+  });
 }
 
 /** Gera o HTML de um grupo de entradas por tema com numeração X.Y */
@@ -44335,7 +44613,7 @@ function _agendaHtmlGrupoTema(tema, entradas, temaIndex) {
                 <i class="fa-solid fa-eye"></i></button>
               ${btnRestaurarHtml}
             </div>
-            <div id="ata-ver-${idStr}" style="display:none;margin-top:6px;padding:8px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:6px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#d1d5db;">${_agendaRenderTextoComMencoes(escapeHtml(conteudoStr))}</div>
+            <div id="ata-ver-${idStr}" style="display:none;margin-top:6px;padding:8px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:6px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#d1d5db;">${_agendaRenderConteudoAtaComTarefas(it, false)}</div>
           </div>
         </div>`;
       }
@@ -44353,7 +44631,7 @@ function _agendaHtmlGrupoTema(tema, entradas, temaIndex) {
         <span style="min-width:34px;font-size:11px;font-weight:700;color:#60a5fa;padding-top:2px;flex-shrink:0;">${escapeHtml(num)}</span>
         <div style="flex:1;">
           <div data-ata-display-id="${idStr}" style="font-size:13px;line-height:1.6;display:flex;align-items:flex-start;gap:4px;">
-            <span ${textoSpanAttrs}>${_agendaRenderTextoComMencoes(escapeHtml(conteudoStr))}</span>${btnExcluirHtml}
+            <span ${textoSpanAttrs}>${_agendaRenderConteudoAtaComTarefas(it, podeDel(g.criado_por))}</span>${btnExcluirHtml}
           </div>
         </div>
       </div>`;
@@ -44670,7 +44948,7 @@ async function salvarEntradaAtaAgenda() {
     if (!resp.ok) throw new Error(ataRespData.error || `Erro ${resp.status}`);
     const ataId = ataRespData?.id || null;
     if (conteudoEl) conteudoEl.value = '';
-    // Criar lembretes automáticos para cada @menção encontrada no texto
+    // Criar lembretes apenas quando a linha tiver @usuario + @prazo(YYYY-MM-DD)
     const mencoes = _agendaAtaExtrairMencoes(conteudo);
     for (const mc of mencoes) {
       try {
@@ -44701,9 +44979,8 @@ async function salvarEntradaAtaAgenda() {
 
 // ── @ Menção em atas ──────────────────────────────────────────────────────────
 let _ataMencaoAtPos = -1;
-let _ataMencaoUserSel = null;
 
-/** Realça @user (DD/MM/YYYY) no texto já escapado com HTML, e renderiza ~~tachado~~ */
+/** Realça @user no texto já escapado com HTML, e renderiza ~~tachado~~ */
 function _agendaRenderTextoComMencoes(textoEscapado) {
   // Tachado: ~~texto~~
   let resultado = textoEscapado.replace(
@@ -44715,23 +44992,40 @@ function _agendaRenderTextoComMencoes(textoEscapado) {
     /\[EDITADO por ([^\]]+)\]:/g,
     '<span style="font-size:11px;background:#1e3a5f;color:#93c5fd;border-radius:4px;padding:1px 6px;font-weight:600;"><i class="fa-solid fa-pen-to-square" style="margin-right:3px;"></i>EDITADO por $1</span>'
   );
-  // @menção com data
+  // @menção simples
   resultado = resultado.replace(
-    /@([\w.\-]+) \((\d{2}\/\d{2}\/\d{4})\)/g,
-    '<span style="background:#1d4ed8;color:#fff;border-radius:4px;padding:1px 6px;font-size:12px;font-weight:600;">@$1</span>&nbsp;<span style="color:#93c5fd;font-size:11px;">($2)</span>'
+    /(^|[^\w])@([\w.\-]+)/g,
+    '$1<span style="background:#1d4ed8;color:#fff;border-radius:4px;padding:1px 6px;font-size:12px;font-weight:600;">@$2</span>'
   );
   return resultado;
 }
 
-/** Extrai menções @user (DD/MM/YYYY) do texto e retorna [{username, dataIso}] */
+/**
+ * Extrai lembretes por linha no formato: @usuario ... @prazo(YYYY-MM-DD)
+ * Se não tiver @prazo, não cria lembrete.
+ */
 function _agendaAtaExtrairMencoes(texto) {
-  const mencoes = [];
-  const regex = /@([\w.\-]+) \((\d{2})\/(\d{2})\/(\d{4})\)/g;
-  let m;
-  while ((m = regex.exec(texto)) !== null) {
-    mencoes.push({ username: m[1], dataIso: `${m[4]}-${m[3]}-${m[2]}` });
-  }
-  return mencoes;
+  const lembretes = [];
+  const vistos = new Set();
+  const linhas = String(texto || '').split(/\r?\n/);
+
+  linhas.forEach((linha) => {
+    const prazoMatch = linha.match(/@prazo\((\d{4}-\d{2}-\d{2})\)/i);
+    if (!prazoMatch) return;
+
+    const dataIso = prazoMatch[1];
+    const mencoesLinha = linha.match(/@([\w.\-]+)/g) || [];
+    mencoesLinha.forEach((token) => {
+      const username = token.replace('@', '').trim();
+      if (!username || /^prazo$/i.test(username)) return;
+      const chave = `${username.toLowerCase()}|${dataIso}`;
+      if (vistos.has(chave)) return;
+      vistos.add(chave);
+      lembretes.push({ username, dataIso });
+    });
+  });
+
+  return lembretes;
 }
 
 /** Inicializa listeners de @menção no textarea — executado uma vez por ciclo de vida do modal */
@@ -44767,55 +45061,25 @@ function _initAtaMencaoListeners() {
     if (e.key === 'Escape') dropdown.style.display = 'none';
   });
 
-  // Click no item da lista: guardar usuário e abrir date picker
+  // Click no item da lista: inserir @usuario diretamente (sem data)
   dropdown.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const item = e.target.closest('[data-mencao-user]');
     if (!item) return;
-    _ataMencaoUserSel = item.getAttribute('data-mencao-user');
+    const username = item.getAttribute('data-mencao-user');
+    if (!username || _ataMencaoAtPos < 0) return;
+
+    const insercao = `@${username} `;
+    const val = textarea.value;
+    const posAtual = textarea.selectionStart;
+    textarea.value = val.slice(0, _ataMencaoAtPos) + insercao + val.slice(posAtual);
+    const novaCursor = _ataMencaoAtPos + insercao.length;
+    textarea.setSelectionRange(novaCursor, novaCursor);
+
     dropdown.style.display = 'none';
-    const wrap  = document.getElementById('agendaAtaMencaoDataWrap');
-    const label = document.getElementById('agendaAtaMencaoDataLabel');
-    const input = document.getElementById('agendaAtaMencaoDataInput');
-    if (label) label.textContent = `Lembrete para @${_ataMencaoUserSel}:`;
-    if (input) input.value = new Date().toISOString().slice(0, 10);
-    if (wrap)  wrap.style.display = 'flex';
+    _ataMencaoAtPos = -1;
+    textarea.focus();
   });
-
-  // Confirmar data → inserir @user (DD/MM/YYYY) no textarea
-  const btnOk = document.getElementById('agendaAtaMencaoDataConfirm');
-  if (btnOk && !btnOk.dataset.ok) {
-    btnOk.dataset.ok = '1';
-    btnOk.addEventListener('click', () => {
-      const dataInput = document.getElementById('agendaAtaMencaoDataInput');
-      const wrap = document.getElementById('agendaAtaMencaoDataWrap');
-      const dateIso = dataInput?.value;
-      if (!dateIso || !_ataMencaoUserSel || _ataMencaoAtPos < 0) return;
-      const [y, mo, d] = dateIso.split('-');
-      const insercao = `@${_ataMencaoUserSel} (${d}/${mo}/${y})`;
-      const val = textarea.value;
-      const posAtual = textarea.selectionStart;
-      textarea.value = val.slice(0, _ataMencaoAtPos) + insercao + val.slice(posAtual);
-      const novaCursor = _ataMencaoAtPos + insercao.length;
-      textarea.setSelectionRange(novaCursor, novaCursor);
-      if (wrap) wrap.style.display = 'none';
-      _ataMencaoUserSel = null;
-      _ataMencaoAtPos = -1;
-      textarea.focus();
-    });
-  }
-
-  // Cancelar data
-  const btnCancel = document.getElementById('agendaAtaMencaoDataCancelar');
-  if (btnCancel && !btnCancel.dataset.ok) {
-    btnCancel.dataset.ok = '1';
-    btnCancel.addEventListener('click', () => {
-      document.getElementById('agendaAtaMencaoDataWrap').style.display = 'none';
-      _ataMencaoUserSel = null;
-      _ataMencaoAtPos = -1;
-      textarea.focus();
-    });
-  }
 
   // Fechar dropdown ao clicar fora
   document.addEventListener('click', (e) => {

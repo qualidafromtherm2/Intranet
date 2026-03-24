@@ -2722,6 +2722,21 @@
                   <button id="agendaRemovParticConfirmTodas" type="button" class="content-button" style="background:#b45309;color:#fff;border:none;padding:8px 16px;">Todas as recorrências</button>
                 </div>
               </div>
+
+              <!-- Overlay de escolha de escopo ao alterar horário em reunião recorrente -->
+              <div id="agendaEscopoHorarioOverlay" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:22;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
+                <i class="fa-solid fa-clock-rotate-left" style="font-size:28px;color:#60a5fa;"></i>
+                <p id="agendaEscopoHorarioMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;">Você alterou o horário desta reunião recorrente. Onde deseja aplicar a mudança?</p>
+                <div id="agendaEscopoHorarioAcoes" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaEscopoHorarioCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
+                  <button id="agendaEscopoHorarioEsteDia" type="button" class="content-button" style="padding:8px 16px;">Só este dia</button>
+                  <button id="agendaEscopoHorarioFuturos" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;">Todos os futuros</button>
+                </div>
+                <div id="agendaEscopoHorarioLoading" style="display:none;align-items:center;gap:10px;color:#cbd5e1;font-size:13px;">
+                  <i class="fa-solid fa-spinner fa-spin" style="color:#60a5fa;"></i>
+                  <span>Aplicando alteração, aguarde...</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2760,8 +2775,19 @@
 
                   <!-- Textarea de nova anotação -->
                   <div style="margin-bottom:6px;position:relative;">
-                    <span style="display:block;margin-bottom:4px;font-size:12px;color:var(--inactive-color);">Nova anotação <small style="font-weight:400;">— use @ para mencionar alguém e criar um lembrete</small></span>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+                      <span style="font-size:12px;color:var(--inactive-color);">Nova anotação <small style="font-weight:400;">— use @ para mencionar alguém; para lembrete, adicione data no ícone de calendário</small></span>
+                      <div style="display:flex;align-items:center;gap:6px;">
+                        <button id="agendaAtaInserirChecklistBtn" type="button" class="content-button" title="Inserir checkbox na próxima linha" style="padding:4px 8px;font-size:11px;">
+                          <i class="fa-regular fa-square-check"></i>
+                        </button>
+                        <button id="agendaAtaInserirPrazoBtn" type="button" class="content-button" title="Adicionar prazo na linha atual" style="padding:4px 8px;font-size:11px;">
+                          <i class="fa-regular fa-calendar"></i>
+                        </button>
+                      </div>
+                    </div>
                     <textarea id="agendaAtaNovaEntrada" rows="4" placeholder="Registre decisões... Use @usuario para mencionar alguém" style="width:100%;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-bg-color);color:var(--theme-color);padding:8px 10px;resize:vertical;font-size:13px;"></textarea>
+                    <input id="agendaAtaPrazoInputHidden" type="date" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" tabindex="-1" aria-hidden="true" />
                     <!-- Dropdown de menção @ -->
                     <div id="agendaAtaMencaoDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--theme-bg-color);border:1px solid var(--border-color);border-radius:0 0 8px 8px;z-index:120;box-shadow:0 6px 20px rgba(0,0,0,.35);max-height:220px;overflow-y:auto;"></div>
                   </div>
