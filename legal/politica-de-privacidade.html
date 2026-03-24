@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Politica de Privacidade - Intranet Fromtherm</title>
+  <style>
+    :root {
+      --bg: #0b1324;
+      --card: #111a30;
+      --text: #e6ecff;
+      --muted: #9fb0d8;
+      --line: #263557;
+      --brand: #4a7dff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(circle at top right, #16306c 0%, var(--bg) 50%);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap {
+      max-width: 940px;
+      margin: 32px auto;
+      padding: 0 16px;
+    }
+    .card {
+      background: rgba(17, 26, 48, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
+    }
+    h1, h2 { margin: 0 0 14px; }
+    h1 { font-size: 28px; }
+    h2 {
+      margin-top: 26px;
+      font-size: 20px;
+      color: #cbd8ff;
+    }
+    p, li { color: var(--muted); }
+    ul { padding-left: 20px; }
+    .toplink {
+      display: inline-block;
+      margin-bottom: 14px;
+      color: #b8caff;
+      text-decoration: none;
+    }
+    .toplink:hover { color: #dce6ff; }
+    .badge {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid #34509a;
+      color: #cfe0ff;
+      font-size: 12px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 13px;
+      color: #9ab0e4;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    a { color: var(--brand); }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="card">
+      <a class="toplink" href="/">Voltar para pagina inicial</a>
+      <div class="badge">Documento legal</div>
+      <h1>Politica de Privacidade</h1>
+      <p>
+        Esta politica descreve como a Intranet Fromtherm trata dados pessoais e dados de integracoes,
+        incluindo a conexao com Google Agenda.
+      </p>
+
+      <h2>1. Dados coletados</h2>
+      <ul>
+        <li>Dados de conta interna: nome de usuario, email interno e perfil de acesso.</li>
+        <li>Dados de integracao Google: email da conta Google vinculada e token de autorizacao.</li>
+        <li>Dados de agenda: titulo, horarios, participantes e informacoes relacionadas a reunioes.</li>
+      </ul>
+
+      <h2>2. Finalidade do tratamento</h2>
+      <ul>
+        <li>Permitir sincronizacao de eventos entre a agenda interna e o Google Agenda.</li>
+        <li>Enviar convites para participantes vinculados em eventos de reuniao.</li>
+        <li>Manter historico operacional e rastreabilidade das alteracoes realizadas no sistema.</li>
+      </ul>
+
+      <h2>3. Compartilhamento de dados</h2>
+      <p>
+        Dados de eventos e de conta Google podem ser processados pela API do Google Calendar para viabilizar
+        a sincronizacao solicitada pelo usuario. Nao ha compartilhamento adicional fora das operacoes necessarias
+        ao funcionamento do sistema.
+      </p>
+
+      <h2>4. Armazenamento e seguranca</h2>
+      <p>
+        Tokens de acesso e dados vinculados sao armazenados em banco de dados com controle de acesso no backend.
+        Sao adotadas medidas tecnicas e administrativas para reduzir riscos de acesso nao autorizado.
+      </p>
+
+      <h2>5. Revogacao de acesso</h2>
+      <p>
+        O usuario pode desconectar a conta Google no perfil da Intranet a qualquer momento. A revogacao interrompe
+        novas sincronizacoes para aquela conta ate nova autorizacao.
+      </p>
+
+      <h2>6. Direitos do titular</h2>
+      <p>
+        O titular pode solicitar informacoes sobre dados tratados e solicitar revisao/exclusao conforme legislacao
+        aplicavel, observadas obrigacoes legais e operacionais.
+      </p>
+
+      <h2>7. Contato</h2>
+      <p>
+        Para solicitacoes relacionadas a privacidade, utilize o canal interno oficial da empresa.
+      </p>
+
+      <h2>8. Atualizacoes desta politica</h2>
+      <p>
+        Esta politica pode ser atualizada para refletir mudancas legais, tecnicas ou operacionais.
+      </p>
+
+      <div class="footer">Ultima atualizacao: 24/03/2026</div>
+    </div>
+  </main>
+</body>
+</html>

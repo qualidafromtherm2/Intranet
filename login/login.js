@@ -248,6 +248,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uiNomeCompleto = overlay.querySelector('#uiNomeCompleto');
   const uiDtNasc       = overlay.querySelector('#uiDtNasc');
   const uiEmail        = overlay.querySelector('#uiEmail');
+  const uiContaGoogle  = overlay.querySelector('#uiContaGoogle');
   const uiObs          = overlay.querySelector('#uiObs');
   const uiNCod         = overlay.querySelector('#uiNCod');
   const uiNCodConta    = overlay.querySelector('#uiNCodConta');
@@ -259,6 +260,114 @@ document.addEventListener('DOMContentLoaded', async () => {
   const profilePhotoPlaceholder = overlay.querySelector('#profilePhotoPlaceholder');
   const profilePhotoInput = overlay.querySelector('#profilePhotoInput');
   const profilePhotoStatus = overlay.querySelector('#profilePhotoStatus');
+  const profileGoogleConectarBtn = overlay.querySelector('#profileGoogleCalendarConectarBtn');
+  const profileGoogleDesconectarBtn = overlay.querySelector('#profileGoogleCalendarDesconectarBtn');
+  const profileGoogleStatus = overlay.querySelector('#profileGoogleCalendarStatus');
+
+  let profileGoogleCalendarState = {
+    configured: false,
+    connected: false,
+    email: null,
+    carregado: false
+  };
+
+  function atualizarUiGoogleCalendarPerfil() {
+    if (!uiContaGoogle || !profileGoogleStatus || !profileGoogleConectarBtn || !profileGoogleDesconectarBtn) return;
+
+    if (!profileGoogleCalendarState.carregado) {
+      uiContaGoogle.textContent = 'Não conectada';
+      profileGoogleStatus.textContent = 'Verificando conexão com Google...';
+      profileGoogleConectarBtn.style.display = '';
+      profileGoogleDesconectarBtn.style.display = 'none';
+      return;
+    }
+
+    if (!profileGoogleCalendarState.configured) {
+      uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Não conectada';
+      profileGoogleStatus.textContent = 'Integração Google não configurada no servidor.';
+      profileGoogleConectarBtn.style.display = 'none';
+      profileGoogleDesconectarBtn.style.display = 'none';
+      return;
+    }
+
+    if (profileGoogleCalendarState.connected) {
+      uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Conectada';
+      profileGoogleStatus.textContent = profileGoogleCalendarState.email
+        ? `Conta vinculada: ${profileGoogleCalendarState.email}`
+        : 'Conta Google conectada.';
+      profileGoogleConectarBtn.style.display = 'none';
+      profileGoogleDesconectarBtn.style.display = '';
+      return;
+    }
+
+    uiContaGoogle.textContent = profileGoogleCalendarState.email || 'Não conectada';
+    profileGoogleStatus.textContent = 'Conta Google não conectada.';
+    profileGoogleConectarBtn.style.display = '';
+    profileGoogleDesconectarBtn.style.display = 'none';
+  }
+
+  async function carregarStatusGoogleCalendarPerfil(force = false) {
+    if (profileGoogleCalendarState.carregado && !force) {
+      atualizarUiGoogleCalendarPerfil();
+      return profileGoogleCalendarState;
+    }
+
+    try {
+      const resp = await fetch('/api/google-calendar/status', { credentials: 'include' });
+      if (!resp.ok) {
+        throw new Error(`Falha ao consultar status do Google Calendar (${resp.status})`);
+      }
+      const payload = await resp.json();
+      profileGoogleCalendarState = {
+        configured: payload?.configured !== false,
+        connected: !!payload?.connected,
+        email: payload?.email || payload?.contaGoogle || null,
+        carregado: true
+      };
+    } catch (err) {
+      console.warn('[Perfil] Não foi possível consultar status Google Calendar:', err);
+      profileGoogleCalendarState = {
+        configured: false,
+        connected: false,
+        email: null,
+        carregado: false
+      };
+    }
+
+    atualizarUiGoogleCalendarPerfil();
+    return profileGoogleCalendarState;
+  }
+
+  function conectarGoogleCalendarPerfil() {
+    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = `/api/google-calendar/connect?returnTo=${encodeURIComponent(returnTo)}`;
+  }
+
+  async function desconectarGoogleCalendarPerfil() {
+    if (!confirm('Deseja desconectar a conta Google deste usuário?')) return;
+    try {
+      const resp = await fetch('/api/google-calendar/disconnect', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (!resp.ok) {
+        const payload = await resp.json().catch(() => ({}));
+        throw new Error(payload?.error || `Erro ao desconectar (${resp.status})`);
+      }
+
+      profileGoogleCalendarState = {
+        configured: true,
+        connected: false,
+        email: null,
+        carregado: true
+      };
+      atualizarUiGoogleCalendarPerfil();
+      window.dispatchEvent(new Event('auth:changed'));
+      alert('Conta Google desconectada com sucesso.');
+    } catch (err) {
+      alert(`Não foi possível desconectar a conta Google: ${err.message}`);
+    }
+  }
 
   /* =========================================================
    *  Carrega dados do colaborador (incluindo foto de perfil)
@@ -284,11 +393,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadProfilePhoto(js.user.id);
         // Atualiza também o profile-icon do header usando o foto_perfil_url do objeto
         updateHeaderProfileIconFromUser(js.user);
+        profileGoogleCalendarState.carregado = false;
+        await carregarStatusGoogleCalendarPerfil(true);
       }
 
     } catch (err) {
       console.warn('[loadUserInfo]', err);
     }
+  }
+
+  if (profileGoogleConectarBtn) {
+    profileGoogleConectarBtn.addEventListener('click', conectarGoogleCalendarPerfil);
+  }
+  if (profileGoogleDesconectarBtn) {
+    profileGoogleDesconectarBtn.addEventListener('click', desconectarGoogleCalendarPerfil);
   }
   
   /* =========================================================

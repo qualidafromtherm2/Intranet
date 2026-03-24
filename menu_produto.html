@@ -288,6 +288,18 @@
       <i class="fa-solid fa-paper-plane" style="margin-right:8px;"></i>
       Solicitação de envio
     </a>
+
+    <a href="#"
+       id="menu-sac-at"
+       class="menu-link"
+       data-nav-key="side:sac:at"
+       data-nav-parent="side:sac"
+       data-nav-pos="side"
+       data-nav-label="AT"
+       data-nav-selector="#menu-sac-at">
+      <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
+      AT
+    </a>
   </div>
 </div>
 
@@ -2050,6 +2062,198 @@
           </div>
         </div>
 
+        <div id="sacAtPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-screwdriver-wrench" style="color:#0ea5e9;"></i>
+                  AT
+                </div>
+                <div style="color:var(--inactive-color);font-size:13px;">Campos iniciais importados do exemplo para evolução da tela.</div>
+                <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+                  <button id="atOpenAtendimentosBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#1f2937 0%,#111827 100%);color:white;">
+                    <i class="fa-solid fa-table-list"></i>
+                    <span>Atendimentos</span>
+                  </button>
+                  <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span>Voltar para AT</span>
+                  </button>
+                </div>
+              </div>
+
+              <div id="atFormView">
+
+              <div style="display:grid;grid-template-columns:minmax(240px,1fr) minmax(220px,280px) auto auto;gap:10px;margin-top:12px;align-items:end;">
+                <div class="form-field" style="margin:0;">
+                  <label for="atSerieBusca">Pesquisar número de série</label>
+                  <input id="atSerieBusca" type="text" placeholder="Digite o número de série e pressione Enter" style="width:100%;" />
+                </div>
+                <div class="form-field" style="margin:0;">
+                  <label for="atTipoAtendimento">Tipo de atendimento</label>
+                  <select id="atTipoAtendimento" style="width:100%;">
+                    <option value="">Selecione</option>
+                    <option value="Qualidade">Qualidade</option>
+                    <option value="Comercial">Comercial</option>
+                    <option value="Extanção de garantia">Extanção de garantia</option>
+                  </select>
+                </div>
+                <button id="atSerieBuscaBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#334155 0%,#1e293b 100%);color:white;">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <span>Pesquisar</span>
+                </button>
+                <button id="atSerieReabrirBtn" class="content-button" type="button" title="Reabrir último resultado" style="display:none;align-items:center;gap:6px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;min-width:44px;justify-content:center;">
+                  <i class="fa-solid fa-table"></i>
+                </button>
+              </div>
+              <div id="atSerieBuscaStatus" style="margin-top:8px;color:var(--inactive-color);font-size:13px;"></div>
+
+              <div id="atSerieSelecionadaBox" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid rgba(14,165,233,.35);border-radius:10px;background:rgba(14,165,233,.08);">
+                <div style="font-size:12px;color:#7dd3fc;font-weight:700;letter-spacing:.02em;margin-bottom:6px;">Item selecionado</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;font-size:12px;">
+                  <div><strong>Pedido:</strong> <span id="atSelPedido">-</span></div>
+                  <div><strong>Ordem de produção:</strong> <span id="atSelOrdem">-</span></div>
+                  <div><strong>Modelo:</strong> <span id="atSelModelo">-</span></div>
+                  <div><strong>Cliente:</strong> <span id="atSelCliente">-</span></div>
+                  <div><strong>Nota fiscal:</strong> <span id="atSelNf">-</span></div>
+                  <div><strong>Data entrega:</strong> <span id="atSelDataEntrega">-</span></div>
+                  <div><strong>1º TESTE / TIPO DE GÁS:</strong> <span id="atSelGas">-</span></div>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px;">
+                <div class="form-field">
+                  <label for="atTelefone">Telefone</label>
+                  <input id="atTelefone" type="text" placeholder="(00) 00000-0000" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atNomeRevendaCliente">Nome Revenda/Cliente</label>
+                  <input id="atNomeRevendaCliente" type="text" placeholder="Nome da revenda ou cliente" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atCpfCnpj">CPF/CNPJ</label>
+                  <input id="atCpfCnpj" type="text" placeholder="Informe CPF ou CNPJ" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atCep">CEP</label>
+                  <input id="atCep" type="text" placeholder="00000-000" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atRua">Rua</label>
+                  <input id="atRua" type="text" placeholder="Rua" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atBairro">Bairro</label>
+                  <input id="atBairro" type="text" placeholder="Bairro" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atNumero">Número</label>
+                  <input id="atNumero" type="text" placeholder="Número" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atCidade">Cidade</label>
+                  <input id="atCidade" type="text" placeholder="Cidade" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atEstado">Estado</label>
+                  <input id="atEstado" type="text" placeholder="UF" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
+                  <label for="atAgendarCom">Agendar com</label>
+                  <input id="atAgendarCom" type="text" placeholder="Nome do responsável" style="width:100%;" />
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px;">
+                <div class="form-field">
+                  <label for="atDescricao">Descreva a reclamação</label>
+                  <textarea id="atDescricao" rows="3" placeholder="Descreva a reclamação" style="width:100%;"></textarea>
+                </div>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
+                <div id="atEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
+                <button id="atEnviarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>Enviar solicitação</span>
+                </button>
+              </div>
+              </div>
+
+              <div id="atAtendimentosView" style="display:none;margin-top:12px;">
+                <div id="atAtendimentosStatus" style="margin-bottom:8px;color:var(--inactive-color);font-size:13px;"></div>
+                <div class="tabela-wrapper" style="overflow:auto;">
+                  <table class="tabela padrao" style="min-width:1450px;">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Data</th>
+                        <th>Tipo</th>
+                        <th>Nome revenda/cliente</th>
+                        <th>Descreva reclamação</th>
+                        <th>Pedido</th>
+                        <th>Ordem produção</th>
+                        <th>Modelo</th>
+                        <th>Cliente</th>
+                        <th>Nota fiscal</th>
+                        <th>Data entrega</th>
+                        <th>1º TESTE / TIPO DE GÁS</th>
+                      </tr>
+                    </thead>
+                    <tbody id="atAtendimentosTbody">
+                      <tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="atSerieModal" class="modal-overlay" style="display:none;z-index:10035;">
+          <div class="modal-container" style="max-width:980px;width:94%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-table-list" style="color:#0ea5e9;"></i>
+                Resultado da busca por número de série
+              </h3>
+              <button class="modal-close-btn" id="atSerieModalClose" type="button">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="modal-body" style="padding:16px;">
+              <div class="tabela-wrapper" style="overflow:auto;">
+                <table class="tabela padrao" style="min-width:980px;">
+                  <thead>
+                    <tr>
+                      <th>Pedido</th>
+                      <th>Ordem de produção</th>
+                      <th>Modelo</th>
+                      <th>Cliente</th>
+                      <th>Nota fiscal</th>
+                      <th>Data entrega</th>
+                      <th>1º TESTE / TIPO DE GÁS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="atSerieModalTbody">
+                    <tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal de Edição de Envio (SAC) -->
         <div id="sacEditModal" class="modal-overlay" style="display:none;">
           <div class="modal-container" style="max-width:600px;width:90%;">
@@ -2407,6 +2611,17 @@
                     <span>Link da reunião</span>
                     <input id="agendaLinkReuniao" type="url" placeholder="https://meet.google.com/..." style="width:100%;" />
                   </label>
+                </div>
+
+                <!-- Integração opcional com Google Agenda -->
+                <div id="agendaGrupoGoogleCalendar" style="grid-column:1/-1;border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;background:var(--theme-hover);">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                    <label class="agenda-cafe-check" style="margin:0;">
+                      <span>Criar/atualizar evento no Google Agenda</span>
+                      <input id="agendaGoogleCalendarCheckbox" type="checkbox" />
+                    </label>
+                  </div>
+                  <div id="agendaGoogleCalendarStatus" style="margin-top:8px;font-size:12px;color:var(--inactive-color);">Verificando conexão com Google...</div>
                 </div>
 
                 <!-- Visitantes — apenas Visita -->
@@ -7466,7 +7681,7 @@ function attachDropZone(ul) {
       const maxTentativasConsulta = 4;
 
       for (let tentativa = 1; tentativa <= maxTentativasConsulta; tentativa += 1) {
-        const response = await fetch(`/api/compras/nfe-xml-detalhes?chave_nfe=${encodeURIComponent(chaveNfe)}`);
+        const response = await fetch(`/api/compras/nfe-xml-detalhes?chave_nfe=${encodeURIComponent(chaveNfe)}&numero_nfe=${encodeURIComponent(String(numeroNfe || '').trim())}`);
         payload = await response.json().catch(() => ({}));
 
         const mensagemErro = payload?.error || `Erro HTTP ${response.status}`;
@@ -7498,6 +7713,14 @@ function attachDropZone(ul) {
       }
 
       const dadosConsulta = payload?.data || {};
+      if (chaveNfeDigitos) {
+        const cPdf = String(dadosConsulta?.dfe_docs?.cPdf || '').trim();
+        const hrefSubtitulo = cPdf || `/api/omie/nfe/xml-download?chave_nfe=${encodeURIComponent(chaveNfeDigitos)}&numero_nfe=${encodeURIComponent(String(numeroNfe || '').trim())}`;
+        const titleSubtitulo = cPdf ? 'Abrir PDF da NF-e' : 'Baixar XML da NF-e';
+        const targetSubtitulo = cPdf ? ' target="_blank" rel="noopener noreferrer"' : '';
+        modalSubtitulo.innerHTML = `Chave: <a href="${escaparHtml(hrefSubtitulo)}"${targetSubtitulo} title="${titleSubtitulo}" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
+      }
+
       let resumoXml = null;
       try {
         const respXml = await fetch('/api/omie/nfe/xml', {

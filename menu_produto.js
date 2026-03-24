@@ -5810,6 +5810,16 @@ if (sacMenuLink) {
   });
 }
 
+const sacAtMenuLink = document.getElementById('menu-sac-at');
+if (sacAtMenuLink) {
+  sacAtMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    sacAtMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+  });
+}
+
 // COMPRAS: Configurações de Departamentos e Categorias
 const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
 if (comprasConfigMenuLink) {
@@ -5832,6 +5842,41 @@ const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
+const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
+const atNomeRevendaClienteInput = document.getElementById('atNomeRevendaCliente');
+const atTelefoneInput = document.getElementById('atTelefone');
+const atCpfCnpjInput = document.getElementById('atCpfCnpj');
+const atCepInput = document.getElementById('atCep');
+const atBairroInput = document.getElementById('atBairro');
+const atCidadeInput = document.getElementById('atCidade');
+const atEstadoInput = document.getElementById('atEstado');
+const atNumeroInput = document.getElementById('atNumero');
+const atRuaInput = document.getElementById('atRua');
+const atAgendarComInput = document.getElementById('atAgendarCom');
+const atDescricaoInput = document.getElementById('atDescricao');
+const atEnviarBtn = document.getElementById('atEnviarBtn');
+const atEnvioStatus = document.getElementById('atEnvioStatus');
+const atSerieBuscaInput = document.getElementById('atSerieBusca');
+const atSerieBuscaBtn = document.getElementById('atSerieBuscaBtn');
+const atSerieReabrirBtn = document.getElementById('atSerieReabrirBtn');
+const atSerieBuscaStatus = document.getElementById('atSerieBuscaStatus');
+const atFormView = document.getElementById('atFormView');
+const atAtendimentosView = document.getElementById('atAtendimentosView');
+const atOpenAtendimentosBtn = document.getElementById('atOpenAtendimentosBtn');
+const atBackToFormBtn = document.getElementById('atBackToFormBtn');
+const atAtendimentosStatus = document.getElementById('atAtendimentosStatus');
+const atAtendimentosTbody = document.getElementById('atAtendimentosTbody');
+const atSerieSelecionadaBox = document.getElementById('atSerieSelecionadaBox');
+const atSelPedido = document.getElementById('atSelPedido');
+const atSelOrdem = document.getElementById('atSelOrdem');
+const atSelModelo = document.getElementById('atSelModelo');
+const atSelCliente = document.getElementById('atSelCliente');
+const atSelNf = document.getElementById('atSelNf');
+const atSelDataEntrega = document.getElementById('atSelDataEntrega');
+const atSelGas = document.getElementById('atSelGas');
+const atSerieModal = document.getElementById('atSerieModal');
+const atSerieModalClose = document.getElementById('atSerieModalClose');
+const atSerieModalTbody = document.getElementById('atSerieModalTbody');
 const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
 const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaTabelaBodyPane');
 const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
@@ -5871,6 +5916,325 @@ const normalizeSacStatus = (val) => {
   const found = sacStatusOptions.find(opt => opt.toLowerCase() === status.toLowerCase());
   return found || sacStatusOptions[0];
 };
+
+const setAtEnvioStatus = (text, isError = false) => {
+  if (!atEnvioStatus) return;
+  atEnvioStatus.style.display = text ? 'inline' : 'none';
+  atEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atEnvioStatus.textContent = text || '';
+};
+
+const setAtSerieBuscaStatus = (text, isError = false) => {
+  if (!atSerieBuscaStatus) return;
+  atSerieBuscaStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atSerieBuscaStatus.textContent = text || '';
+};
+
+const setAtAtendimentosStatus = (text, isError = false) => {
+  if (!atAtendimentosStatus) return;
+  atAtendimentosStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atAtendimentosStatus.textContent = text || '';
+};
+
+const escapeAtHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}[ch] || ch));
+
+const atNfeChaveCache = new Map();
+
+async function abrirDetalhesNfeAt(chaveNfeBruta, numeroNfeBruto) {
+  const numeroNfe = String(numeroNfeBruto || '').trim();
+  let chaveNfe = String(chaveNfeBruta || '').replace(/\D/g, '');
+
+  if (!numeroNfe && !chaveNfe) {
+    setAtSerieBuscaStatus('NF-e inválida para consulta.', true);
+    return;
+  }
+
+  if (!window.abrirModalNfeOmieDetalhes) {
+    setAtSerieBuscaStatus('Modal de NF-e indisponível no momento.', true);
+    return;
+  }
+
+  try {
+    let numeroNfeFinal = numeroNfe;
+
+    if (!chaveNfe) {
+      const cacheKey = numeroNfe;
+      if (cacheKey && atNfeChaveCache.has(cacheKey)) {
+        chaveNfe = atNfeChaveCache.get(cacheKey);
+      } else {
+        const resp = await fetch(`/api/compras/nfe-buscar-chave?numero_nfe=${encodeURIComponent(numeroNfe)}`, {
+          credentials: 'include'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data?.ok || !data?.chave_nfe) {
+          throw new Error(data?.error || `NF-e ${numeroNfe} não encontrada para abrir detalhes.`);
+        }
+        chaveNfe = String(data.chave_nfe || '').replace(/\D/g, '');
+        numeroNfeFinal = String(data.numero_nfe || numeroNfe).trim();
+        if (cacheKey && chaveNfe) atNfeChaveCache.set(cacheKey, chaveNfe);
+      }
+    }
+
+    if (!chaveNfe) {
+      throw new Error('Não foi possível identificar a chave da NF-e.');
+    }
+
+    window.abrirModalNfeOmieDetalhes(chaveNfe, numeroNfeFinal || numeroNfe, null, { ocultarComparacao: true });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao abrir detalhes da NF-e', err);
+    setAtSerieBuscaStatus(err?.message || 'Erro ao abrir detalhes da NF-e.', true);
+  }
+}
+
+function openAtSerieModal() {
+  if (atSerieModal) atSerieModal.style.display = 'flex';
+}
+
+function closeAtSerieModal() {
+  if (atSerieModal) atSerieModal.style.display = 'none';
+}
+
+function preencherAtSerieSelecionada(row) {
+  if (!atSerieSelecionadaBox || !row) return;
+  atSerieSelectedRow = {
+    pedido: String(row.pedido || '').trim() || null,
+    ordem_producao: String(row.ordem_producao || '').trim() || null,
+    modelo: String(row.modelo || '').trim() || null,
+    cliente: String(row.cliente || '').trim() || null,
+    nota_fiscal: String(row.nota_fiscal || '').trim() || null,
+    data_entrega: String(row.data_entrega || '').trim() || null,
+    teste_tipo_gas: String(row.teste_tipo_gas || '').trim() || null,
+  };
+  if (atSelPedido) atSelPedido.textContent = String(row.pedido || '-').trim() || '-';
+  if (atSelOrdem) atSelOrdem.textContent = String(row.ordem_producao || '-').trim() || '-';
+  if (atSelModelo) atSelModelo.textContent = String(row.modelo || '-').trim() || '-';
+  if (atSelCliente) atSelCliente.textContent = String(row.cliente || '-').trim() || '-';
+  if (atSelNf) atSelNf.textContent = String(row.nota_fiscal || '-').trim() || '-';
+  if (atSelDataEntrega) atSelDataEntrega.textContent = String(row.data_entrega || '-').trim() || '-';
+  if (atSelGas) atSelGas.textContent = String(row.teste_tipo_gas || '-').trim() || '-';
+  atSerieSelecionadaBox.style.display = 'block';
+}
+
+function limparAtSerieSelecionada() {
+  atSerieSelectedRow = null;
+  if (!atSerieSelecionadaBox) return;
+  atSerieSelecionadaBox.style.display = 'none';
+}
+
+function renderAtAtendimentosRows(rows) {
+  if (!atAtendimentosTbody) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    atAtendimentosTbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum atendimento encontrado.</td></tr>';
+    return;
+  }
+
+  const formatDateBr = (value) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleString('pt-BR');
+  };
+
+  atAtendimentosTbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${escapeAtHtml(row.id ?? '-')}</td>
+      <td>${escapeAtHtml(formatDateBr(row.data))}</td>
+      <td>${escapeAtHtml(row.tipo || '-')}</td>
+      <td>${escapeAtHtml(row.nome_revenda_cliente || '-')}</td>
+      <td>${escapeAtHtml(row.descreva_reclamacao || '-')}</td>
+      <td>${escapeAtHtml(row.pedido || '-')}</td>
+      <td>${escapeAtHtml(row.ordem_producao || '-')}</td>
+      <td>${escapeAtHtml(row.modelo || '-')}</td>
+      <td>${escapeAtHtml(row.cliente || '-')}</td>
+      <td>${escapeAtHtml(row.nota_fiscal || '-')}</td>
+      <td>${escapeAtHtml(row.data_entrega || '-')}</td>
+      <td>${escapeAtHtml(row.teste_tipo_gas || '-')}</td>
+    </tr>
+  `).join('');
+}
+
+async function carregarAtAtendimentos() {
+  setAtAtendimentosStatus('Carregando atendimentos...', false);
+  try {
+    const resp = await fetch('/api/sac/at/atendimentos', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || 'Falha ao carregar atendimentos.');
+    }
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    renderAtAtendimentosRows(rows);
+    setAtAtendimentosStatus(`${rows.length} atendimento(s) encontrado(s).`, false);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao listar atendimentos', err);
+    renderAtAtendimentosRows([]);
+    setAtAtendimentosStatus(err?.message || 'Erro ao carregar atendimentos.', true);
+  }
+}
+
+function abrirTelaAtAtendimentos() {
+  if (atFormView) atFormView.style.display = 'none';
+  if (atAtendimentosView) atAtendimentosView.style.display = 'block';
+  if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'none';
+  if (atBackToFormBtn) atBackToFormBtn.style.display = 'inline-flex';
+}
+
+function abrirTelaAtFormulario() {
+  if (atFormView) atFormView.style.display = 'block';
+  if (atAtendimentosView) atAtendimentosView.style.display = 'none';
+  if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'inline-flex';
+  if (atBackToFormBtn) atBackToFormBtn.style.display = 'none';
+}
+
+function mergeAtSerieRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+
+  const isFilled = (v) => {
+    const txt = String(v || '').trim();
+    return txt && txt !== '-';
+  };
+
+  const normalizeKeyPart = (v) => String(v || '').trim().toUpperCase();
+  const mergedMap = new Map();
+
+  rows.forEach((row, idx) => {
+    const op = String(row?.ordem_producao || '').trim();
+    const modelo = String(row?.modelo || '').trim();
+    const canMerge = !!op && !!modelo;
+    const key = canMerge
+      ? `${normalizeKeyPart(op)}|${normalizeKeyPart(modelo)}`
+      : `__idx__${idx}`;
+
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, {
+        ...row,
+        pedido_list: isFilled(row?.pedido) ? [String(row.pedido).trim()] : []
+      });
+      return;
+    }
+
+    const current = mergedMap.get(key);
+    const pedidoAtual = String(row?.pedido || '').trim();
+    if (isFilled(pedidoAtual) && !current.pedido_list.includes(pedidoAtual)) {
+      current.pedido_list.push(pedidoAtual);
+    }
+
+    if (!isFilled(current.cliente) && isFilled(row?.cliente)) current.cliente = String(row.cliente).trim();
+    if (!isFilled(current.nota_fiscal) && isFilled(row?.nota_fiscal)) current.nota_fiscal = String(row.nota_fiscal).trim();
+    if (!isFilled(current.chave_nfe) && isFilled(row?.chave_nfe)) current.chave_nfe = String(row.chave_nfe).trim();
+    if (!isFilled(current.data_entrega) && isFilled(row?.data_entrega)) current.data_entrega = String(row.data_entrega).trim();
+    if (!isFilled(current.teste_tipo_gas) && isFilled(row?.teste_tipo_gas)) current.teste_tipo_gas = String(row.teste_tipo_gas).trim();
+  });
+
+  return Array.from(mergedMap.values()).map((row) => ({
+    ...row,
+    pedido: Array.isArray(row.pedido_list) && row.pedido_list.length ? row.pedido_list.join(' / ') : row.pedido,
+  }));
+}
+
+function renderAtSerieRows(rows) {
+  if (!atSerieModalTbody) return;
+  const mergedRows = mergeAtSerieRows(rows);
+  atSerieRenderedRows = mergedRows;
+  if (!Array.isArray(mergedRows) || !mergedRows.length) {
+    limparAtSerieSelecionada();
+    atSerieModalTbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>';
+    return;
+  }
+
+  atSerieModalTbody.innerHTML = mergedRows.map((row, idx) => `
+    <tr data-at-row-index="${idx}" style="cursor:pointer;">
+      <td>${escapeAtHtml(row.pedido || '-')}</td>
+      <td>${escapeAtHtml(row.ordem_producao || '-')}</td>
+      <td>${escapeAtHtml(row.modelo || '-')}</td>
+      <td>${escapeAtHtml(row.cliente || '-')}</td>
+      <td>${String(row.nota_fiscal || '').trim()
+        ? `<a href="#" class="at-nfe-link" data-num="${escapeAtHtml(row.nota_fiscal || '')}" data-chave="${escapeAtHtml(row.chave_nfe || '')}" style="color:#0ea5e9;text-decoration:underline;font-weight:600;" title="Abrir detalhes da NF-e">${escapeAtHtml(row.nota_fiscal || '')}</a>`
+        : '-'}</td>
+      <td>${escapeAtHtml(row.data_entrega || '-')}</td>
+      <td>${escapeAtHtml(row.teste_tipo_gas || '-')}</td>
+    </tr>
+  `).join('');
+}
+
+let atSerieLastRows = [];
+let atSerieRenderedRows = [];
+let atSerieSelectedRow = null;
+
+async function buscarSerieAt() {
+  const termo = atSerieBuscaInput?.value?.trim() || '';
+  if (!termo || termo.length < 2) {
+    setAtSerieBuscaStatus('Digite ao menos 2 caracteres para pesquisar.', true);
+    return;
+  }
+
+  if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = true;
+  setAtSerieBuscaStatus('Pesquisando número de série...', false);
+
+  try {
+    const resp = await fetch(`/api/sac/at/busca-serie?termo=${encodeURIComponent(termo)}`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || 'Falha ao buscar número de série.');
+    }
+
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    atSerieLastRows = rows;
+    renderAtSerieRows(rows);
+    if (rows.length) {
+      setAtSerieBuscaStatus(`${rows.length} registro(s) encontrado(s).`, false);
+      if (atSerieReabrirBtn) atSerieReabrirBtn.style.display = 'inline-flex';
+      openAtSerieModal();
+    } else {
+      setAtSerieBuscaStatus('Nenhum registro encontrado para este número de série.', false);
+      if (atSerieReabrirBtn) atSerieReabrirBtn.style.display = 'none';
+      closeAtSerieModal();
+    }
+  } catch (err) {
+    console.error('[SAC/AT] erro na busca de serie', err);
+    setAtSerieBuscaStatus(err?.message || 'Erro ao buscar número de série.', true);
+  } finally {
+    if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = false;
+  }
+}
+
+async function preencherEnderecoPorCepAt() {
+  const cepRaw = atCepInput?.value || '';
+  const cep = cepRaw.replace(/\D/g, '');
+  if (cep.length !== 8) {
+    setAtEnvioStatus('CEP inválido. Digite 8 números e pressione Enter.', true);
+    return;
+  }
+
+  setAtEnvioStatus('Consultando CEP...', false);
+
+  try {
+    const resp = await fetch(`/api/sac/at/cep/${encodeURIComponent(cep)}`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      if (atRuaInput) atRuaInput.value = '';
+      if (atBairroInput) atBairroInput.value = '';
+      if (atCidadeInput) atCidadeInput.value = '';
+      if (atEstadoInput) atEstadoInput.value = '';
+      setAtEnvioStatus('CEP não encontrado. Preencha o endereço manualmente.', true);
+      return;
+    }
+
+    if (atRuaInput) atRuaInput.value = String(data.rua || '').trim();
+    if (atBairroInput) atBairroInput.value = String(data.bairro || '').trim();
+    if (atCidadeInput) atCidadeInput.value = String(data.cidade || '').trim();
+    if (atEstadoInput) atEstadoInput.value = String(data.estado || '').trim();
+    setAtEnvioStatus('Endereço preenchido pelo CEP.', false);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao consultar CEP', err);
+    setAtEnvioStatus('Erro ao consultar CEP. Tente novamente.', true);
+  }
+}
 
 const formatFile = (f) => `${f.name} (${Math.round(f.size / 1024)} KB)`;
 
@@ -5972,6 +6336,139 @@ if (sacSendBtn) {
     } finally {
       sacSendBtn.disabled = false;
     }
+  });
+}
+
+if (atEnviarBtn) {
+  atEnviarBtn.addEventListener('click', async () => {
+    atEnviarBtn.disabled = true;
+    setAtEnvioStatus('Salvando atendimento...', false);
+
+    try {
+      const payload = {
+        tipo: atTipoAtendimentoInput?.value?.trim() || null,
+        nome_revenda_cliente: atNomeRevendaClienteInput?.value?.trim() || null,
+        numero_telefone: atTelefoneInput?.value?.trim() || null,
+        cpf_cnpj: atCpfCnpjInput?.value?.trim() || null,
+        cep: atCepInput?.value?.trim() || null,
+        bairro: atBairroInput?.value?.trim() || null,
+        cidade: atCidadeInput?.value?.trim() || null,
+        estado: atEstadoInput?.value?.trim() || null,
+        numero: atNumeroInput?.value?.trim() || null,
+        rua: atRuaInput?.value?.trim() || null,
+        agendar_atendimento_com: atAgendarComInput?.value?.trim() || null,
+        descreva_reclamacao: atDescricaoInput?.value?.trim() || null,
+        selected_item: atSerieSelectedRow || null,
+      };
+
+      const resp = await fetch('/api/sac/at', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || 'Falha ao salvar atendimento AT.');
+      }
+
+      setAtEnvioStatus(`Atendimento salvo com sucesso (ID ${data?.row?.id || 'n/a'}).`, false);
+
+      if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
+      if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
+      if (atTelefoneInput) atTelefoneInput.value = '';
+      if (atCpfCnpjInput) atCpfCnpjInput.value = '';
+      if (atCepInput) atCepInput.value = '';
+      if (atBairroInput) atBairroInput.value = '';
+      if (atCidadeInput) atCidadeInput.value = '';
+      if (atEstadoInput) atEstadoInput.value = '';
+      if (atNumeroInput) atNumeroInput.value = '';
+      if (atRuaInput) atRuaInput.value = '';
+      if (atAgendarComInput) atAgendarComInput.value = '';
+      if (atDescricaoInput) atDescricaoInput.value = '';
+      limparAtSerieSelecionada();
+    } catch (err) {
+      console.error('[SAC/AT] erro ao salvar atendimento', err);
+      setAtEnvioStatus(err?.message || 'Erro ao salvar atendimento.', true);
+    } finally {
+      atEnviarBtn.disabled = false;
+    }
+  });
+}
+
+if (atCepInput) {
+  atCepInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    preencherEnderecoPorCepAt();
+  });
+}
+
+if (atSerieBuscaBtn) {
+  atSerieBuscaBtn.addEventListener('click', buscarSerieAt);
+}
+
+if (atSerieReabrirBtn) {
+  atSerieReabrirBtn.addEventListener('click', () => {
+    if (!Array.isArray(atSerieLastRows) || !atSerieLastRows.length) {
+      setAtSerieBuscaStatus('Não há resultado anterior para reabrir.', true);
+      return;
+    }
+    renderAtSerieRows(atSerieLastRows);
+    openAtSerieModal();
+  });
+}
+
+if (atSerieBuscaInput) {
+  atSerieBuscaInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    buscarSerieAt();
+  });
+}
+
+if (atSerieModalClose) {
+  atSerieModalClose.addEventListener('click', closeAtSerieModal);
+}
+
+if (atSerieModal) {
+  atSerieModal.addEventListener('click', (e) => {
+    if (e.target === atSerieModal) closeAtSerieModal();
+  });
+}
+
+if (atSerieModalTbody) {
+  atSerieModalTbody.addEventListener('click', (e) => {
+    const nfeLink = e.target.closest('.at-nfe-link');
+    if (nfeLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      abrirDetalhesNfeAt(nfeLink.dataset?.chave || '', nfeLink.dataset?.num || '');
+      return;
+    }
+
+    const rowEl = e.target.closest('tr[data-at-row-index]');
+    if (!rowEl) return;
+    const idx = Number(rowEl.getAttribute('data-at-row-index'));
+    if (!Number.isFinite(idx) || idx < 0) return;
+    const rowData = atSerieRenderedRows[idx];
+    if (!rowData) return;
+    preencherAtSerieSelecionada(rowData);
+    setAtSerieBuscaStatus('Item selecionado e preenchido abaixo da pesquisa.', false);
+    closeAtSerieModal();
+  });
+}
+
+if (atOpenAtendimentosBtn) {
+  atOpenAtendimentosBtn.addEventListener('click', async () => {
+    abrirTelaAtAtendimentos();
+    await carregarAtAtendimentos();
+  });
+}
+
+if (atBackToFormBtn) {
+  atBackToFormBtn.addEventListener('click', () => {
+    abrirTelaAtFormulario();
   });
 }
 
@@ -42064,6 +42561,12 @@ let agendaObserverUsuarioInicializado = false;
 // Destinatários do lembrete no modal unificado
 let agendaUnifLembreteDestinDisponiveis = [];
 let agendaUnifLembreteDestinSelecionados = [];
+let agendaGoogleCalendarStatus = {
+  configured: false,
+  connected: false,
+  email: null,
+  carregado: false
+};
 
 function obterNomeUsuarioHeaderAgenda() {
   return String(document.getElementById('userNameDisplay')?.textContent || '').trim();
@@ -42121,6 +42624,120 @@ function obterUsuarioLogadoAgenda() {
   return nomeTela || nomeSessao;
 }
 
+function atualizarUiGoogleCalendarAgenda() {
+  const statusEl = document.getElementById('agendaGoogleCalendarStatus');
+  const checkbox = document.getElementById('agendaGoogleCalendarCheckbox');
+
+  if (!statusEl || !checkbox) return;
+
+  if (!agendaGoogleCalendarStatus.carregado) {
+    statusEl.textContent = 'Verificando conexão com Google...';
+    checkbox.disabled = true;
+    return;
+  }
+
+  if (!agendaGoogleCalendarStatus.configured) {
+    statusEl.textContent = 'Integração Google não configurada no servidor.';
+    checkbox.checked = false;
+    checkbox.disabled = true;
+    return;
+  }
+
+  checkbox.disabled = false;
+  if (agendaGoogleCalendarStatus.connected) {
+    statusEl.textContent = agendaGoogleCalendarStatus.email
+      ? `Conectado como ${agendaGoogleCalendarStatus.email}`
+      : 'Conta Google conectada.';
+    return;
+  }
+
+  statusEl.textContent = 'Conta Google não conectada. Faça a conexão no Perfil.';
+}
+
+async function carregarStatusGoogleCalendarAgenda(force = false) {
+  if (agendaGoogleCalendarStatus.carregado && !force) {
+    atualizarUiGoogleCalendarAgenda();
+    return agendaGoogleCalendarStatus;
+  }
+
+  try {
+    const resp = await fetch('/api/google-calendar/status', { credentials: 'include' });
+    if (!resp.ok) {
+      throw new Error(`Falha ao consultar Google Calendar (${resp.status})`);
+    }
+    const payload = await resp.json();
+    agendaGoogleCalendarStatus = {
+      configured: payload?.configured !== false,
+      connected: !!payload?.connected,
+      email: payload?.email || null,
+      carregado: true
+    };
+  } catch (err) {
+    console.warn('[AGENDA] Não foi possível consultar status do Google Calendar:', err);
+    agendaGoogleCalendarStatus = {
+      configured: false,
+      connected: false,
+      email: null,
+      carregado: false
+    };
+  }
+
+  atualizarUiGoogleCalendarAgenda();
+  return agendaGoogleCalendarStatus;
+}
+
+function iniciarConexaoGoogleCalendarAgenda() {
+  const returnTo = window.location.pathname + window.location.search + window.location.hash;
+  window.location.href = `/api/google-calendar/connect?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+async function desconectarGoogleCalendarAgenda() {
+  if (!confirm('Deseja desconectar a conta Google deste usuário?')) return;
+
+  try {
+    const resp = await fetch('/api/google-calendar/disconnect', {
+      method: 'POST',
+      credentials: 'include'
+    });
+    if (!resp.ok) {
+      const payload = await resp.json().catch(() => ({}));
+      throw new Error(payload?.error || `Erro ao desconectar (${resp.status})`);
+    }
+
+    agendaGoogleCalendarStatus = {
+      configured: true,
+      connected: false,
+      email: null,
+      carregado: true
+    };
+
+    const googleCheckbox = document.getElementById('agendaGoogleCalendarCheckbox');
+    if (googleCheckbox) googleCheckbox.checked = false;
+    atualizarUiGoogleCalendarAgenda();
+    alert('Conta Google desconectada com sucesso.');
+  } catch (err) {
+    alert(`Não foi possível desconectar a conta Google: ${err.message}`);
+  }
+}
+
+function tratarRetornoConexaoGoogleCalendarAgenda() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('google_calendar_connected')) return;
+    const conectado = url.searchParams.get('google_calendar_connected') === '1';
+    alert(conectado
+      ? 'Google Agenda conectado com sucesso.'
+      : 'Não foi possível concluir a conexão com o Google Agenda.');
+
+    url.searchParams.delete('google_calendar_connected');
+    const novo = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, document.title, novo);
+    carregarStatusGoogleCalendarAgenda(true).catch(() => {});
+  } catch (_err) {
+    // ignora
+  }
+}
+
 function usuarioAutenticadoAgenda() {
   const nomeTela = obterNomeUsuarioHeaderAgenda();
   return nomeUsuarioValidoAgenda(nomeTela);
@@ -42153,6 +42770,9 @@ async function carregarReservasMesAgenda() {
       fim: reserva.fim,
       tema: reserva.tema,
       cafe: !!reserva.cafe,
+      googleAgendado: !!reserva.googleAgendado,
+      googleEventId: reserva.googleEventId || null,
+      googleEventLink: reserva.googleEventLink || null,
       participantes: Array.isArray(reserva.participantes) ? reserva.participantes : [],
       repetir: !!reserva.repetir,
       repetirTodosMeses: !!reserva.repetirTodosMeses,
@@ -42674,6 +43294,7 @@ function agendaAtualizarCamposPorTipo(tipo) {
   const grupoPartic      = document.getElementById('agendaGrupoParticipantes');
   const grupoLembrete    = document.getElementById('agendaGrupoLembrete');
   const grupoLink        = document.getElementById('agendaGrupoLink');
+  const grupoGoogle      = document.getElementById('agendaGrupoGoogleCalendar');
   const btnSalvar        = document.getElementById('agendaSalvarReserva');
 
   const ehLembrete       = tipo === 'lembrete';
@@ -42695,6 +43316,7 @@ function agendaAtualizarCamposPorTipo(tipo) {
   show(grupoPartic,     !ehLembrete);
   show(grupoLembrete,   ehLembrete);
   show(grupoLink,       ehOnline);
+  show(grupoGoogle,     !ehLembrete);
 
   if (btnSalvar) btnSalvar.textContent = ehLembrete ? 'Salvar lembrete' : 'Reservar';
 }
@@ -42719,6 +43341,7 @@ function resetarFormularioAgendaReserva() {
   const visitantesTexto   = document.getElementById('agendaVisitantesTexto');
   const descricaoEvento   = document.getElementById('agendaDescricaoEvento');
   const unifLembrete      = document.getElementById('agendaUnifLembreteTexto');
+  const googleCheckbox    = document.getElementById('agendaGoogleCalendarCheckbox');
 
   if (tituloModal) tituloModal.textContent = `Reserva - ${formatarDataExibicaoPtBr(agendaDataSelecionada)}`;
   if (etapaFormulario) etapaFormulario.style.display = 'block';
@@ -42759,6 +43382,7 @@ function resetarFormularioAgendaReserva() {
   if (visitantesTexto) visitantesTexto.value = '';
   if (descricaoEvento) descricaoEvento.value = '';
   if (unifLembrete) unifLembrete.value = '';
+  if (googleCheckbox) googleCheckbox.checked = false;
   agendaParticipantesSelecionadosLista = [];
   agendaUnifLembreteDestinSelecionados = [];
 
@@ -42778,6 +43402,7 @@ function resetarFormularioAgendaReserva() {
   document.querySelectorAll('#agendaSemanaRepeticao input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
 
   agendaAtualizarCamposPorTipo('auditorio');
+  atualizarUiGoogleCalendarAgenda();
   renderParticipantesDisponiveisAgenda();
   renderParticipantesSelecionadosAgenda();
   renderUnifLembreteDisponiveisAgenda();
@@ -42802,6 +43427,8 @@ async function abrirModalAgendaReserva(dataIso) {
     agendaParticipantesDisponiveis = [];
     agendaUnifLembreteDestinDisponiveis = [];
   }
+
+  await carregarStatusGoogleCalendarAgenda(true);
 
   resetarFormularioAgendaReserva();
   modal.style.display = 'flex';
@@ -42828,6 +43455,8 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
     agendaParticipantesDisponiveis = [];
     agendaUnifLembreteDestinDisponiveis = [];
   }
+
+  await carregarStatusGoogleCalendarAgenda(true);
 
   resetarFormularioAgendaReserva();
   modal.style.display = 'flex';
@@ -42903,6 +43532,8 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
   // Campos novos: link, ata
   const linkReuniaoInput = document.getElementById('agendaLinkReuniao');
   if (linkReuniaoInput) linkReuniaoInput.value = reserva.linkReuniao || '';
+  const googleCheckbox = document.getElementById('agendaGoogleCalendarCheckbox');
+  if (googleCheckbox) googleCheckbox.checked = !!reserva.googleAgendado;
   const ataBtn = document.getElementById('agendaAbrirAtaBtn');
   if (ataBtn) ataBtn.style.display = '';
   agendaReservaIdParaAta = reserva.id;
@@ -43094,6 +43725,7 @@ async function salvarReservaAgendaLocal() {
   const repetirTodosMeses = document.getElementById('agendaRepetirTodosMeses');
   const visitantesEl      = document.getElementById('agendaVisitantesTexto');
   const descricaoEl       = document.getElementById('agendaDescricaoEvento');
+  const googleCheckboxEl  = document.getElementById('agendaGoogleCalendarCheckbox');
   if (!temaInput || !inicioInput || !fimInput) return;
 
   const temaReuniao            = temaInput.value.trim();
@@ -43160,13 +43792,20 @@ async function salvarReservaAgendaLocal() {
     participantes,
     descricao: descricao || null,
     visitantes: visitantes || null,
+    agendarGoogle: !!(googleCheckboxEl && googleCheckboxEl.checked),
     linkReuniao: document.getElementById('agendaLinkReuniao')?.value?.trim() || null,
     anexoUrl: null,
     anexoNome: null
   };
 
+  if (payload.agendarGoogle && !agendaGoogleCalendarStatus.connected) {
+    alert('Para sincronizar no Google Agenda, conecte sua conta Google no Perfil primeiro.');
+    return;
+  }
+
   try {
     let reservaIdFinal = agendaReservaEditandoId;
+    let respostaGoogle = null;
     if (agendaReservaEditandoId) {
       const dataEdicao = agendaReservaEditandoData || agendaDataSelecionada;
       const resp = await fetch(`/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`, {
@@ -43179,6 +43818,8 @@ async function salvarReservaAgendaLocal() {
         const erro = await resp.json().catch(() => ({}));
         throw new Error(erro.error || `Erro ao editar reserva (${resp.status})`);
       }
+      const respData = await resp.json().catch(() => ({}));
+      respostaGoogle = respData?.googleAgenda || null;
     } else {
       const resp = await fetch('/api/rh/reservas', {
         method: 'POST',
@@ -43192,6 +43833,7 @@ async function salvarReservaAgendaLocal() {
       }
       const respData = await resp.json().catch(() => ({}));
       if (respData.ids && respData.ids.length) reservaIdFinal = respData.ids[0];
+      respostaGoogle = respData?.googleAgenda || null;
     }
 
     // Upload de anexo pendente após salvar reserva
@@ -43202,6 +43844,10 @@ async function salvarReservaAgendaLocal() {
 
     await carregarAgendaMesCompleto();
     renderAgendaCalendarioMensal();
+
+    if (respostaGoogle?.requested && respostaGoogle?.ok === false && respostaGoogle?.message) {
+      alert(`Reserva salva, mas houve falha ao sincronizar no Google Agenda: ${respostaGoogle.message}`);
+    }
   } catch (erroSalvar) {
     alert(`Não foi possível salvar a reserva: ${erroSalvar.message}`);
     return;
@@ -44188,6 +44834,7 @@ function initAgendaReservasUI() {
   agendaMesReferencia = new Date();
   agendaMesReferencia.setDate(1);
   iniciarObserverUsuarioAgenda();
+  tratarRetornoConexaoGoogleCalendarAgenda();
 
   const btnMesAnterior = document.getElementById('agendaMesAnterior');
   const btnMesProximo = document.getElementById('agendaMesProximo');
@@ -44208,6 +44855,8 @@ function initAgendaReservasUI() {
   const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
   const participantesSelect = document.getElementById('agendaParticipantesSelect');
   const participantesSelecionadosEl = document.getElementById('agendaParticipantesSelecionados');
+
+  carregarStatusGoogleCalendarAgenda().catch(() => {});
 
   if (btnMesAnterior) {
     btnMesAnterior.addEventListener('click', async () => {

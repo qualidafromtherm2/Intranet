@@ -13,7 +13,7 @@ const pool = new Pool({
 async function carregarExtrasDoUsuario(userId) {
   try {
     const { rows } = await pool.query(
-      `SELECT s.name AS setor_nome, u.foto_perfil_url
+      `SELECT s.name AS setor_nome, u.foto_perfil_url, u.conta_google
          FROM public.auth_user u
          LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
          LEFT JOIN public.auth_sector s ON s.id = up.sector_id
@@ -23,11 +23,12 @@ async function carregarExtrasDoUsuario(userId) {
     );
     return { 
       setor: rows[0]?.setor_nome || null,
-      foto_perfil_url: rows[0]?.foto_perfil_url || null
+      foto_perfil_url: rows[0]?.foto_perfil_url || null,
+      conta_google: rows[0]?.conta_google || null
     };
   } catch (e) {
     console.warn('[auth] não foi possível carregar dados extras do usuário', e.message);
-    return { setor: null, foto_perfil_url: null };
+    return { setor: null, foto_perfil_url: null, conta_google: null };
   }
 }
 

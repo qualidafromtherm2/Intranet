@@ -207,6 +207,12 @@ label:has(#rememberMe) {
         <p><strong>Cargo:</strong> <span id="uiCargo"></span></p>
         <p><strong>Celular:</strong> <span id="uiCel"></span></p>
         <p><strong>Email:</strong> <span id="uiEmail"></span></p>
+        <p><strong>Conta Google:</strong> <span id="uiContaGoogle">Não conectada</span></p>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 10px;">
+          <button id="profileGoogleCalendarConectarBtn" type="button" class="ghost" style="padding:6px 10px;font-size:12px;">Conectar Google</button>
+          <button id="profileGoogleCalendarDesconectarBtn" type="button" class="ghost" style="display:none;padding:6px 10px;font-size:12px;">Desconectar Google</button>
+        </div>
+        <p id="profileGoogleCalendarStatus" style="font-size:12px;opacity:.85;margin-top:-2px;">Verificando conexão com Google...</p>
         <p><strong>Endereço:</strong> <span id="uiEndereco"></span></p>
         <p><strong>Obs.:</strong> <span id="uiObs"></span></p>
         <p><strong>Cód. Omie:</strong> <span id="uiNCod"></span></p>

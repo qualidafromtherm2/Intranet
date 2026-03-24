@@ -48,6 +48,13 @@ const sseClients = new Set();
 
 // 🔐 Sessão (cookies) — DEVE vir antes das rotas /api/*
 const isProd = process.env.NODE_ENV === 'production';
+const GOOGLE_CALENDAR_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/calendar.events'
+];
+const GOOGLE_CALENDAR_TOKEN_SAFETY_MS = 60 * 1000;
 const callOmieDedup = require('./utils/callOmieDedup');
 // Helper para registrar histórico de modificações de produto
 const { registrarModificacao } = require('./utils/auditoria');
@@ -233,6 +240,341 @@ function resolverIdentificadoresAuditoria(req) {
     .filter(Boolean)
     .map((item) => item.toLowerCase());
   return Array.from(new Set(candidatos));
+}
+
+function isEnvValorValidoOAuth(valor) {
+  const v = String(valor || '').trim();
+  if (!v) return false;
+  const normalizado = v.toUpperCase();
+  if (normalizado.includes('COLE_AQUI')) return false;
+  if (normalizado.includes('SEU_') || normalizado.includes('YOUR_')) return false;
+  return true;
+}
+
+function googleCalendarConfigOk() {
+  return isEnvValorValidoOAuth(process.env.GOOGLE_OAUTH_CLIENT_ID)
+    && isEnvValorValidoOAuth(process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+}
+
+function normalizarGoogleReturnTo(req, valor) {
+  const fallback = '/#';
+  const bruto = String(valor || '').trim();
+  if (!bruto) return fallback;
+
+  if (bruto.startsWith('/')) return bruto;
+
+  try {
+    const origemAtual = `${req.protocol}://${req.get('host')}`;
+    const url = new URL(bruto);
+    if (url.origin !== origemAtual) return fallback;
+    return `${url.pathname}${url.search}${url.hash}` || fallback;
+  } catch (_err) {
+    return fallback;
+  }
+}
+
+function montarGoogleRedirectUri(req) {
+  const manual = String(process.env.GOOGLE_OAUTH_REDIRECT_URI || '').trim();
+  if (manual) return manual;
+  return `${req.protocol}://${req.get('host')}/api/google-calendar/callback`;
+}
+
+async function obterGoogleTokenUsuario(username) {
+  const { rows } = await pool.query(
+    `SELECT username, access_token, refresh_token, token_type, scope, expires_at, email
+       FROM rh.google_calendar_tokens
+      WHERE username = $1
+      LIMIT 1`,
+    [username]
+  );
+  return rows[0] || null;
+}
+
+async function obterContaGoogleAuthUser(username) {
+  const user = String(username || '').trim();
+  if (!user) return null;
+
+  const { rows } = await pool.query(
+    `SELECT conta_google
+       FROM public.auth_user
+      WHERE lower(username) = lower($1)
+      LIMIT 1`,
+    [user]
+  );
+
+  return String(rows[0]?.conta_google || '').trim() || null;
+}
+
+async function atualizarContaGoogleAuthUser(req, contaGoogle) {
+  const user = req?.session?.user || {};
+  const valor = String(contaGoogle || '').trim() || null;
+
+  if (user?.id) {
+    await pool.query(
+      `UPDATE public.auth_user
+          SET conta_google = $1,
+              updated_at = NOW()
+        WHERE id = $2`,
+      [valor, user.id]
+    );
+  } else {
+    const username = resolverUsuarioAuditoria(req);
+    if (!username) return;
+    await pool.query(
+      `UPDATE public.auth_user
+          SET conta_google = $1,
+              updated_at = NOW()
+        WHERE lower(username) = lower($2)`,
+      [valor, username]
+    );
+  }
+
+  if (req?.session?.user) {
+    req.session.user.conta_google = valor;
+  }
+}
+
+async function salvarGoogleTokenUsuario({ username, accessToken, refreshToken = null, tokenType = 'Bearer', scope = null, expiresAt = null, email = null }) {
+  await pool.query(
+    `INSERT INTO rh.google_calendar_tokens
+      (username, access_token, refresh_token, token_type, scope, expires_at, email)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (username)
+     DO UPDATE
+       SET access_token = EXCLUDED.access_token,
+           refresh_token = COALESCE(EXCLUDED.refresh_token, rh.google_calendar_tokens.refresh_token),
+           token_type = EXCLUDED.token_type,
+           scope = EXCLUDED.scope,
+           expires_at = EXCLUDED.expires_at,
+           email = COALESCE(EXCLUDED.email, rh.google_calendar_tokens.email),
+           updated_em = NOW()`,
+    [username, accessToken, refreshToken, tokenType, scope, expiresAt, email]
+  );
+}
+
+async function renovarGoogleAccessToken({ username, refreshToken }) {
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  });
+
+  const resp = await safeFetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString()
+  });
+
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || !payload.access_token) {
+    throw new Error(payload.error_description || payload.error || `Falha ao renovar token Google (${resp.status})`);
+  }
+
+  const expiresSec = Number(payload.expires_in || 3600);
+  const expiresAt = new Date(Date.now() + (expiresSec * 1000));
+
+  await salvarGoogleTokenUsuario({
+    username,
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token || null,
+    tokenType: payload.token_type || 'Bearer',
+    scope: payload.scope || null,
+    expiresAt,
+    email: null
+  });
+
+  return payload.access_token;
+}
+
+async function obterGoogleAccessTokenValido(username) {
+  const row = await obterGoogleTokenUsuario(username);
+  if (!row) {
+    throw new Error('Conta Google não conectada para este usuário.');
+  }
+
+  const expiraEm = row.expires_at ? new Date(row.expires_at).getTime() : 0;
+  if (row.access_token && expiraEm > (Date.now() + GOOGLE_CALENDAR_TOKEN_SAFETY_MS)) {
+    return row.access_token;
+  }
+
+  if (!row.refresh_token) {
+    throw new Error('Token Google expirado e sem refresh_token. Reconecte sua conta Google.');
+  }
+
+  return renovarGoogleAccessToken({ username, refreshToken: row.refresh_token });
+}
+
+async function googleCalendarApiRequest({ accessToken, method = 'GET', path, body = null, query = null }) {
+  const queryStr = query ? `?${new URLSearchParams(query).toString()}` : '';
+  const url = `https://www.googleapis.com/calendar/v3${path}${queryStr}`;
+  const resp = await safeFetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(payload?.error?.message || `Google Calendar retornou HTTP ${resp.status}`);
+  }
+  return payload;
+}
+
+function classificarFalhaGoogleCalendar(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  if (!msg) return 'unknown';
+  if (msg.includes('insufficient authentication scopes')) return 'insufficient_scopes';
+  if (msg.includes('token') && msg.includes('expir')) return 'token_expired';
+  if (msg.includes('refresh_token')) return 'refresh_token_missing';
+  if (msg.includes('não conectada') || msg.includes('nao conectada')) return 'not_connected';
+  if (msg.includes('unauthorized') || msg.includes('forbidden') || msg.includes('http 401') || msg.includes('http 403')) return 'auth_error';
+  if (msg.includes('quota') || msg.includes('rate limit')) return 'quota_rate_limit';
+  return 'unknown';
+}
+
+function logFalhaGoogleCalendar({ operacao, username, reservaId = null, err, reservaLocalSalva = false }) {
+  const codigo = classificarFalhaGoogleCalendar(err);
+  const msg = String(err?.message || err || 'erro_desconhecido');
+  const partes = [
+    `[GOOGLE_CALENDAR_SYNC]`,
+    `operacao=${operacao}`,
+    `codigo=${codigo}`,
+    `user=${String(username || '').trim() || 'desconhecido'}`,
+    `reserva_id=${reservaId ? String(reservaId) : '-'}`,
+    `reserva_local_salva=${reservaLocalSalva ? 'true' : 'false'}`,
+    `erro="${msg.replace(/\s+/g, ' ').trim()}"`
+  ];
+  console.warn(partes.join(' '));
+}
+
+function normalizarEmailGoogle(valor) {
+  const email = String(valor || '').trim().toLowerCase();
+  if (!email) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return email;
+}
+
+async function obterEmailsConviteGoogle(participantes) {
+  if (!Array.isArray(participantes) || !participantes.length) return [];
+
+  const usuarios = Array.from(
+    new Set(
+      participantes
+        .map((u) => String(u || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (!usuarios.length) return [];
+
+  const { rows } = await pool.query(
+    `SELECT username, email, conta_google
+       FROM public.auth_user
+      WHERE username = ANY($1::text[])`,
+    [usuarios]
+  );
+
+  const porUsuario = new Map(
+    rows.map((r) => [String(r.username || '').trim().toLowerCase(), r])
+  );
+
+  const emails = [];
+  const seen = new Set();
+  for (const username of usuarios) {
+    const info = porUsuario.get(String(username).trim().toLowerCase());
+    if (!info) continue;
+    const emailEscolhido = normalizarEmailGoogle(info.conta_google)
+      || normalizarEmailGoogle(info.email);
+    if (!emailEscolhido || seen.has(emailEscolhido)) continue;
+    seen.add(emailEscolhido);
+    emails.push(emailEscolhido);
+  }
+
+  return emails;
+}
+
+function montarEventoGoogleCalendarReserva({ reserva, emailsConvites = [] }) {
+  const participantesTxt = Array.isArray(reserva.participantes) && reserva.participantes.length
+    ? `Participantes: ${reserva.participantes.join(', ')}`
+    : 'Participantes: não informados';
+
+  const descricaoPartes = [
+    `Tipo: ${reserva.tipo}`,
+    participantesTxt,
+    reserva.descricao ? `Descrição: ${reserva.descricao}` : null,
+    reserva.visitantes ? `Visitantes: ${reserva.visitantes}` : null,
+    reserva.linkReuniao ? `Link: ${reserva.linkReuniao}` : null,
+    reserva.cafe ? 'Observação: solicitar café.' : null,
+    `Origem: Intranet (reserva #${reserva.id})`
+  ].filter(Boolean);
+
+  const evento = {
+    summary: String(reserva.tema || 'Reunião').trim(),
+    description: descricaoPartes.join('\n'),
+    location: reserva.tipo === 'Reunião online' ? (reserva.linkReuniao || 'Online') : reserva.tipo,
+    start: {
+      dateTime: `${String(reserva.data).slice(0, 10)}T${String(reserva.inicio).slice(0, 5)}:00`,
+      timeZone: 'America/Sao_Paulo'
+    },
+    end: {
+      dateTime: `${String(reserva.data).slice(0, 10)}T${String(reserva.fim).slice(0, 5)}:00`,
+      timeZone: 'America/Sao_Paulo'
+    }
+  };
+
+  if (Array.isArray(emailsConvites) && emailsConvites.length) {
+    evento.attendees = emailsConvites.map((email) => ({ email }));
+  }
+
+  return evento;
+}
+
+async function sincronizarReservaGoogleCalendar({ username, reserva, googleEventId = null, googleCalendarId = 'primary' }) {
+  const accessToken = await obterGoogleAccessTokenValido(username);
+  const emailsConvites = await obterEmailsConviteGoogle(reserva?.participantes);
+  const evento = montarEventoGoogleCalendarReserva({ reserva, emailsConvites });
+
+  if (googleEventId) {
+    const updated = await googleCalendarApiRequest({
+      accessToken,
+      method: 'PATCH',
+      path: `/calendars/${encodeURIComponent(googleCalendarId)}/events/${encodeURIComponent(googleEventId)}`,
+      body: evento
+    });
+    return {
+      eventId: updated.id,
+      calendarId: updated.organizer?.email || googleCalendarId,
+      htmlLink: updated.htmlLink || null,
+      action: 'updated'
+    };
+  }
+
+  const created = await googleCalendarApiRequest({
+    accessToken,
+    method: 'POST',
+    path: `/calendars/${encodeURIComponent(googleCalendarId)}/events`,
+    body: evento
+  });
+
+  return {
+    eventId: created.id,
+    calendarId: created.organizer?.email || googleCalendarId,
+    htmlLink: created.htmlLink || null,
+    action: 'created'
+  };
+}
+
+async function excluirReservaGoogleCalendar({ username, googleEventId, googleCalendarId = 'primary' }) {
+  if (!googleEventId) return;
+  const accessToken = await obterGoogleAccessTokenValido(username);
+  await googleCalendarApiRequest({
+    accessToken,
+    method: 'DELETE',
+    path: `/calendars/${encodeURIComponent(googleCalendarId)}/events/${encodeURIComponent(googleEventId)}`
+  });
 }
 
 // Encaminha pool.query para o client de contexto quando a rota está em /api/compras.
@@ -423,7 +765,35 @@ async function ensureRhReservasSchema() {
         ADD COLUMN IF NOT EXISTS visitantes TEXT,
         ADD COLUMN IF NOT EXISTS link_reuniao TEXT,
         ADD COLUMN IF NOT EXISTS anexo_url TEXT,
-        ADD COLUMN IF NOT EXISTS anexo_nome TEXT
+        ADD COLUMN IF NOT EXISTS anexo_nome TEXT,
+        ADD COLUMN IF NOT EXISTS google_event_id TEXT,
+        ADD COLUMN IF NOT EXISTS google_calendar_id TEXT,
+        ADD COLUMN IF NOT EXISTS google_event_link TEXT
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.google_calendar_tokens (
+        username TEXT PRIMARY KEY,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        token_type TEXT,
+        scope TEXT,
+        expires_at TIMESTAMPTZ,
+        email TEXT,
+        created_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      ALTER TABLE public.auth_user
+      ADD COLUMN IF NOT EXISTS conta_google TEXT
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS auth_user_conta_google_idx
+      ON public.auth_user (conta_google)
+      WHERE conta_google IS NOT NULL
     `);
 
     // Tabela de atas de reunião
@@ -2612,6 +2982,166 @@ async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaIn
   return rows.length > 0;
 }
 
+app.get('/api/google-calendar/status', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+  }
+
+  try {
+    const contaGoogle = await obterContaGoogleAuthUser(userLogado);
+
+    if (!googleCalendarConfigOk()) {
+      return res.json({ ok: true, connected: false, configured: false, email: contaGoogle, contaGoogle });
+    }
+
+    const row = await obterGoogleTokenUsuario(userLogado);
+    return res.json({
+      ok: true,
+      connected: !!row,
+      configured: true,
+      email: contaGoogle || row?.email || null,
+      contaGoogle,
+      tokenEmail: row?.email || null
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao verificar status Google Calendar' });
+  }
+});
+
+app.get('/api/google-calendar/connect', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).send('Usuário não autenticado');
+  }
+
+  if (!googleCalendarConfigOk()) {
+    return res.status(400).send('Google Calendar não configurado no servidor');
+  }
+
+  const returnTo = normalizarGoogleReturnTo(req, req.query?.returnTo);
+  const nonce = crypto.randomBytes(16).toString('hex');
+  req.session.googleCalendarOauthNonce = nonce;
+
+  const state = Buffer.from(JSON.stringify({ nonce, returnTo }), 'utf8').toString('base64url');
+  const redirectUri = montarGoogleRedirectUri(req);
+
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    access_type: 'offline',
+    prompt: 'consent select_account',
+    include_granted_scopes: 'false',
+    scope: GOOGLE_CALENDAR_SCOPES.join(' '),
+    state
+  });
+
+  return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+app.get('/api/google-calendar/callback', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).send('Usuário não autenticado');
+  }
+
+  const fallback = '/#';
+  const rawState = String(req.query?.state || '');
+  let returnTo = fallback;
+  try {
+    const parsed = JSON.parse(Buffer.from(rawState, 'base64url').toString('utf8'));
+    if (!parsed?.nonce || parsed.nonce !== req.session.googleCalendarOauthNonce) {
+      return res.status(400).send('State OAuth inválido. Tente conectar novamente.');
+    }
+    returnTo = normalizarGoogleReturnTo(req, parsed.returnTo || fallback);
+  } catch (_err) {
+    return res.status(400).send('State OAuth inválido. Tente conectar novamente.');
+  } finally {
+    req.session.googleCalendarOauthNonce = null;
+  }
+
+  if (req.query?.error) {
+    const sep = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${sep}google_calendar_connected=0`);
+  }
+
+  const code = String(req.query?.code || '').trim();
+  if (!code) {
+    return res.status(400).send('Código OAuth ausente.');
+  }
+
+  try {
+    const redirectUri = montarGoogleRedirectUri(req);
+    const tokenResp = await safeFetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+        client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      }).toString()
+    });
+
+    const tokenData = await tokenResp.json().catch(() => ({}));
+    if (!tokenResp.ok || !tokenData.access_token) {
+      throw new Error(tokenData.error_description || tokenData.error || `Falha OAuth Google (${tokenResp.status})`);
+    }
+
+    let email = null;
+    try {
+      const meResp = await safeFetch('https://openidconnect.googleapis.com/v1/userinfo', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` }
+      });
+      const meData = await meResp.json().catch(() => ({}));
+      if (meResp.ok) {
+        email = String(meData?.email || '').trim() || null;
+      }
+    } catch (_err) {
+      email = null;
+    }
+
+    const expiresSec = Number(tokenData.expires_in || 3600);
+    const expiresAt = new Date(Date.now() + (expiresSec * 1000));
+
+    await salvarGoogleTokenUsuario({
+      username: userLogado,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || null,
+      tokenType: tokenData.token_type || 'Bearer',
+      scope: tokenData.scope || null,
+      expiresAt,
+      email
+    });
+
+    await atualizarContaGoogleAuthUser(req, email);
+
+    const sep = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${sep}google_calendar_connected=1`);
+  } catch (err) {
+    console.error('[GoogleCalendar] Callback OAuth erro:', err);
+    const sep = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${sep}google_calendar_connected=0`);
+  }
+});
+
+app.post('/api/google-calendar/disconnect', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
+  if (!userLogado) {
+    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+  }
+
+  try {
+    await pool.query(`DELETE FROM rh.google_calendar_tokens WHERE username = $1`, [userLogado]);
+    await atualizarContaGoogleAuthUser(req, null);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao desconectar Google Calendar' });
+  }
+});
+
 app.get('/api/rh/reservas', async (req, res) => {
   try {
     const ano = Number(req.query?.ano);
@@ -2636,6 +3166,9 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.link_reuniao,
               r.anexo_url,
               r.anexo_nome,
+              r.google_event_id,
+              r.google_calendar_id,
+              r.google_event_link,
               r.criado_por,
               COALESCE(array_agg(p.username ORDER BY p.username)
                 FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
@@ -2680,6 +3213,10 @@ app.get('/api/rh/reservas', async (req, res) => {
         linkReuniao: r.link_reuniao || null,
         anexoUrl: r.anexo_url || null,
         anexoNome: r.anexo_nome || null,
+        googleEventId: r.google_event_id || null,
+        googleCalendarId: r.google_calendar_id || null,
+        googleEventLink: r.google_event_link || null,
+        googleAgendado: !!r.google_event_id,
         criadoPor: r.criado_por,
         participantes: Array.isArray(r.participantes) ? r.participantes : []
       };
@@ -2738,6 +3275,7 @@ app.post('/api/rh/reservas', async (req, res) => {
   const linkReuniao = String(body.linkReuniao || '').trim() || null;
   const anexoUrl = String(body.anexoUrl || '').trim() || null;
   const anexoNome = String(body.anexoNome || '').trim() || null;
+  const agendarGoogle = !!body.agendarGoogle;
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -2796,7 +3334,66 @@ app.post('/api/rh/reservas', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    return res.json({ ok: true, ids: [reservaId] });
+
+    let googleAgenda = { requested: agendarGoogle, ok: null, eventId: null, eventLink: null, message: null };
+    if (agendarGoogle) {
+      try {
+        const resultadoGoogle = await sincronizarReservaGoogleCalendar({
+          username: userLogado,
+          reserva: {
+            id: reservaId,
+            tipo: tipoEspaco,
+            tema,
+            data: dataReserva,
+            inicio: horaInicio,
+            fim: horaFim,
+            cafe,
+            descricao,
+            visitantes,
+            linkReuniao,
+            participantes
+          },
+          googleEventId: null,
+          googleCalendarId: 'primary'
+        });
+
+        await pool.query(
+          `UPDATE rh.reservas_ambientes
+              SET google_event_id = $1,
+                  google_calendar_id = $2,
+                  google_event_link = $3,
+                  atualizado_em = NOW()
+            WHERE id = $4`,
+          [resultadoGoogle.eventId, resultadoGoogle.calendarId, resultadoGoogle.htmlLink, reservaId]
+        );
+
+        googleAgenda = {
+          requested: true,
+          ok: true,
+          eventId: resultadoGoogle.eventId,
+          eventLink: resultadoGoogle.htmlLink,
+          message: 'Evento criado no Google Agenda.'
+        };
+      } catch (errGoogle) {
+        logFalhaGoogleCalendar({
+          operacao: 'create_event_after_reserva_post',
+          username: userLogado,
+          reservaId,
+          err: errGoogle,
+          reservaLocalSalva: true
+        });
+        googleAgenda = {
+          requested: true,
+          ok: false,
+          eventId: null,
+          eventLink: null,
+          code: classificarFalhaGoogleCalendar(errGoogle),
+          message: String(errGoogle?.message || 'Falha ao criar evento no Google Agenda')
+        };
+      }
+    }
+
+    return res.json({ ok: true, ids: [reservaId], googleAgenda });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas POST erro:', err);
@@ -2831,6 +3428,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const linkReuniaoPut = String(body.linkReuniao || '').trim() || null;
   const anexoUrlPut = String(body.anexoUrl || '').trim() || null;
   const anexoNomePut = String(body.anexoNome || '').trim() || null;
+  const agendarGoogle = !!body.agendarGoogle;
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -2848,7 +3446,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows: atualRows } = await client.query(
-      `SELECT id, criado_por FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      `SELECT id, criado_por, google_event_id, google_calendar_id
+         FROM rh.reservas_ambientes
+        WHERE id = $1
+        LIMIT 1`,
       [reservaId]
     );
     if (!atualRows.length) {
@@ -2909,7 +3510,70 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    return res.json({ ok: true, id: reservaId });
+
+    const googleEventIdAtual = String(atualRows[0]?.google_event_id || '').trim() || null;
+    const googleCalendarIdAtual = String(atualRows[0]?.google_calendar_id || '').trim() || 'primary';
+    const deveSincronizarGoogle = agendarGoogle || !!googleEventIdAtual;
+
+    let googleAgenda = { requested: deveSincronizarGoogle, ok: null, eventId: googleEventIdAtual, eventLink: null, message: null };
+    if (deveSincronizarGoogle) {
+      try {
+        const resultadoGoogle = await sincronizarReservaGoogleCalendar({
+          username: userLogado,
+          reserva: {
+            id: reservaId,
+            tipo: tipoEspaco,
+            tema,
+            data: dataReserva,
+            inicio: horaInicio,
+            fim: horaFim,
+            cafe,
+            descricao,
+            visitantes,
+            linkReuniao: linkReuniaoPut,
+            participantes
+          },
+          googleEventId: googleEventIdAtual,
+          googleCalendarId: googleCalendarIdAtual
+        });
+
+        await pool.query(
+          `UPDATE rh.reservas_ambientes
+              SET google_event_id = $1,
+                  google_calendar_id = $2,
+                  google_event_link = $3,
+                  atualizado_em = NOW()
+            WHERE id = $4`,
+          [resultadoGoogle.eventId, resultadoGoogle.calendarId, resultadoGoogle.htmlLink, reservaId]
+        );
+
+        googleAgenda = {
+          requested: true,
+          ok: true,
+          eventId: resultadoGoogle.eventId,
+          eventLink: resultadoGoogle.htmlLink,
+          message: googleEventIdAtual ? 'Evento atualizado no Google Agenda.' : 'Evento criado no Google Agenda.'
+        };
+      } catch (errGoogle) {
+        logFalhaGoogleCalendar({
+          operacao: 'upsert_event_after_reserva_put',
+          username: userLogado,
+          reservaId,
+          err: errGoogle,
+          reservaLocalSalva: true
+        });
+        googleAgenda = {
+          requested: true,
+          ok: false,
+          eventId: googleEventIdAtual,
+          eventLink: null,
+          code: classificarFalhaGoogleCalendar(errGoogle),
+          message: String(errGoogle?.message || 'Falha ao sincronizar evento no Google Agenda')
+        };
+      }
+    }
+
+    return res.json({ ok: true, id: reservaId, googleAgenda });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas PUT erro:', err);
@@ -2935,7 +3599,10 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT criado_por FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      `SELECT criado_por, google_event_id, google_calendar_id
+         FROM rh.reservas_ambientes
+        WHERE id = $1
+        LIMIT 1`,
       [reservaId]
     );
     if (!rows.length) {
@@ -2945,6 +3612,26 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
     const userNorm = String(userLogado).trim().toLowerCase();
     if (!userNorm || criador !== userNorm) {
       return res.status(403).json({ error: 'Somente o criador pode excluir esta reserva' });
+    }
+
+    const googleEventId = String(rows[0].google_event_id || '').trim() || null;
+    const googleCalendarId = String(rows[0].google_calendar_id || '').trim() || 'primary';
+    if (googleEventId) {
+      try {
+        await excluirReservaGoogleCalendar({
+          username: userLogado,
+          googleEventId,
+          googleCalendarId
+        });
+      } catch (errGoogleDelete) {
+        logFalhaGoogleCalendar({
+          operacao: 'delete_event_before_reserva_delete',
+          username: userLogado,
+          reservaId,
+          err: errGoogleDelete,
+          reservaLocalSalva: false
+        });
+      }
     }
 
     // Cascade apaga participantes automaticamente (ON DELETE CASCADE)
@@ -13888,6 +14575,21 @@ app.use(express.static(path.join(__dirname), {
     }
   }
 }));
+
+// Paginas publicas para cadastro no Google Auth Platform (OAuth consent screen)
+app.get('/politica-de-privacidade', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(__dirname, 'legal', 'politica-de-privacidade.html'));
+});
+
+app.get('/termos-de-uso', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(__dirname, 'legal', 'termos-de-uso.html'));
+});
 
 
 // ────────────────────────────────────────────
