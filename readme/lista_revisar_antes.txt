@@ -1,0 +1,21 @@
+backup/x220- travou nessa parte do projeto, não abre mais login/cricao                                      | saldo  | data_posicao 
+backup/x220- travou nessa parte do projeto, não abre mais login/crição: -s | Qtd: -s | Status: -s',
+backup/x220- travou nessa parte do projeto, não abre mais login/ername TEXT NOT NULL,
+backup/x220- travou nessa parte do projeto, não abre mais login/olicitacao_id, operacao, campo_alterado, valor_anterior, valor_novo,
+backup/x220- travou nessa parte do projeto, não abre mais login/pseroavel_username TEXT NOT NULL,
+backup/x220- travou nessa parte do projeto, não abre mais login/t { Pool } = require('pg');
+backup/x220- travou nessa parte do projeto, não abre mais login/tringify(r.rows, null, 2)); pool.end(); })
+chaves_nao_vazias,
+com_chave,
+cricao                                      | saldo  | data_posicao 
+crição: -s | Qtd: -s | Status: -s',
+ername TEXT NOT NULL,
+et -a
+et -e
+ole.log('n📋 Últimos 3 registros:n');
+olicitacao_id, operacao, campo_alterado, valor_anterior, valor_novo,
+pseroavel_username TEXT NOT NULL,
+total,
+t { Pool } = require('pg');
+tringify(r.rows, null, 2)); pool.end(); })
+tros' as verificacao,
