@@ -43357,7 +43357,7 @@ function resetarFormularioAgendaReserva() {
   if (inicioInput) inicioInput.value = '';
   if (fimInput) fimInput.value = '';
   const duracaoSelectReset = document.getElementById('agendaDuracaoHoras');
-  if (duracaoSelectReset) duracaoSelectReset.value = '';
+  if (duracaoSelectReset) duracaoSelectReset.value = '1';
   // Registrar listeners de cálculo automático da hora fim (uma vez)
   if (duracaoSelectReset && !duracaoSelectReset.dataset.listenerOk) {
     duracaoSelectReset.dataset.listenerOk = '1';
@@ -43693,19 +43693,21 @@ function perguntarEscopoAlteracaoHorarioAgenda() {
   return new Promise((resolve) => {
     const overlay = document.getElementById('agendaEscopoHorarioOverlay');
     const btnCancelar = document.getElementById('agendaEscopoHorarioCancelar');
-    const btnEsteDia = document.getElementById('agendaEscopoHorarioEsteDia');
-    const btnFuturos = document.getElementById('agendaEscopoHorarioFuturos');
-    if (!overlay || !btnCancelar || !btnEsteDia || !btnFuturos) {
+    const btnSalvar = document.getElementById('agendaEscopoHorarioSalvar');
+    const chkFuturos = document.getElementById('agendaEscopoHorarioChkFuturos');
+    const chkManterAta = document.getElementById('agendaEscopoHorarioChkManterAta');
+    if (!overlay || !btnCancelar || !btnSalvar || !chkFuturos || !chkManterAta) {
       resolve(null);
       return;
     }
 
     agendaSetEscopoHorarioLoading(false);
+    chkFuturos.checked = false;
+    chkManterAta.checked = true;
 
     const fechar = (valor) => {
       btnCancelar.onclick = null;
-      btnEsteDia.onclick = null;
-      btnFuturos.onclick = null;
+      btnSalvar.onclick = null;
       if (valor === null) {
         overlay.style.display = 'none';
       }
@@ -43713,13 +43715,12 @@ function perguntarEscopoAlteracaoHorarioAgenda() {
     };
 
     btnCancelar.onclick = () => fechar(null);
-    btnEsteDia.onclick = () => {
+    btnSalvar.onclick = () => {
       agendaSetEscopoHorarioLoading(true);
-      fechar('este_dia');
-    };
-    btnFuturos.onclick = () => {
-      agendaSetEscopoHorarioLoading(true);
-      fechar('todos_futuros');
+      fechar({
+        aplicarEm: chkFuturos.checked ? 'todos_futuros' : 'este_dia',
+        manterAta: !!chkManterAta.checked
+      });
     };
     overlay.style.display = 'flex';
   });
@@ -43863,13 +43864,26 @@ async function salvarReservaAgendaLocal() {
     const inicioAtual = String(reservaAtual?.inicio || '').slice(0, 5);
     const fimAtual = String(reservaAtual?.fim || '').slice(0, 5);
     const horarioMudou = inicioAtual !== horarioInicio || fimAtual !== horarioFim;
+    const repetirTodosMesesAtual = !!reservaAtual?.repetirTodosMeses;
+    const repetirTodosMesesMudou = repetirTodosMesesAtual !== repetirTodosMesesMarcado;
 
-    if (horarioMudou) {
-      const escopoHorario = await perguntarEscopoAlteracaoHorarioAgenda();
-      if (!escopoHorario) {
+    const diasSemanaAtuais = Array.isArray(reservaAtual?.diasSemana)
+      ? [...reservaAtual.diasSemana].map((d) => String(d || '').trim().toLowerCase()).sort()
+      : [];
+    const diasSemanaNovos = repetir
+      ? [...diasSemana].map((d) => String(d || '').trim().toLowerCase()).sort()
+      : [];
+    const diasSemanaMudou = diasSemanaAtuais.join('|') !== diasSemanaNovos.join('|');
+
+    const devePerguntarEscopo = horarioMudou || repetirTodosMesesMudou || diasSemanaMudou;
+
+    if (devePerguntarEscopo) {
+      const escolhaEscopo = await perguntarEscopoAlteracaoHorarioAgenda();
+      if (!escolhaEscopo) {
         return;
       }
-      payload.aplicarEm = escopoHorario;
+      payload.aplicarEm = escolhaEscopo.aplicarEm;
+      payload.manterAta = !!escolhaEscopo.manterAta;
       escopoHorarioEmProcessamento = true;
     }
   }
@@ -43898,6 +43912,8 @@ async function salvarReservaAgendaLocal() {
       const respData = await resp.json().catch(() => ({}));
       if (respData?.id) {
         reservaIdFinal = respData.id;
+        agendaReservaEditandoId = respData.id;
+        agendaReservaIdParaAta = respData.id;
       }
       respostaGoogle = respData?.googleAgenda || null;
     } else {
@@ -44139,16 +44155,25 @@ async function salvarLembreteAgenda() {
 }
 
 // ── Exclui a reserva em edição via DELETE /api/rh/reservas/:id ───────────
-async function excluirReservaAgenda() {
+async function excluirReservaAgenda(opcoes = {}) {
   if (!agendaReservaEditandoId) return;
   if (!usuarioAutenticadoAgenda()) {
     alert('Você precisa estar logado para excluir uma reserva.');
     return;
   }
   try {
+    const payloadDelete = {
+      aplicarEm: String(opcoes.aplicarEm || 'registro'),
+      data: agendaReservaEditandoData || agendaDataSelecionada || null
+    };
     const resp = await fetch(
       `/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`,
-      { method: 'DELETE', credentials: 'include' }
+      {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadDelete)
+      }
     );
     if (!resp.ok) {
       const erro = await resp.json().catch(() => ({}));
@@ -45114,6 +45139,9 @@ function initAgendaReservasUI() {
   const btnExcluir = document.getElementById('agendaExcluirReserva');
   const btnExcluirConfirmSim = document.getElementById('agendaExcluirConfirmSim');
   const btnExcluirConfirmNao = document.getElementById('agendaExcluirConfirmNao');
+  const btnExcluirConfirmEsta = document.getElementById('agendaExcluirConfirmEsta');
+  const btnExcluirConfirmFuturos = document.getElementById('agendaExcluirConfirmFuturos');
+  const btnExcluirConfirmCancelarRec = document.getElementById('agendaExcluirConfirmCancelarRec');
   const btnSalvar = document.getElementById('agendaSalvarReserva');
   const repetirSelect = document.getElementById('agendaRepetirReuniao');
   const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
@@ -45365,11 +45393,17 @@ function initAgendaReservasUI() {
     btnExcluir.addEventListener('click', () => {
       const overlay = document.getElementById('agendaExcluirConfirm');
       const texto = document.getElementById('agendaExcluirConfirmTexto');
+      const acoesPadrao = document.getElementById('agendaExcluirConfirmAcoesPadrao');
+      const acoesRecorrente = document.getElementById('agendaExcluirConfirmAcoesRecorrente');
       if (!overlay || !texto) return;
       if (agendaReservaEditandoRepetir) {
-        texto.textContent = 'Esta é uma reserva recorrente. Excluir irá remover esta reunião e todas as réplicas futuras da série. Deseja continuar?';
+        texto.textContent = 'Esta é uma reserva recorrente. Escolha se deseja excluir somente este evento ou todos os próximos.';
+        if (acoesPadrao) acoesPadrao.style.display = 'none';
+        if (acoesRecorrente) acoesRecorrente.style.display = 'flex';
       } else {
         texto.textContent = 'Deseja excluir esta reserva? Esta ação não pode ser desfeita.';
+        if (acoesPadrao) acoesPadrao.style.display = 'flex';
+        if (acoesRecorrente) acoesRecorrente.style.display = 'none';
       }
       overlay.style.display = 'flex';
     });
@@ -45386,7 +45420,37 @@ function initAgendaReservasUI() {
       if (overlay) overlay.style.display = 'none';
       agendaSetProcessando(true);
       try {
-        await excluirReservaAgenda();
+        await excluirReservaAgenda({ aplicarEm: 'registro' });
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+  if (btnExcluirConfirmCancelarRec) {
+    btnExcluirConfirmCancelarRec.addEventListener('click', () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      if (overlay) overlay.style.display = 'none';
+    });
+  }
+  if (btnExcluirConfirmEsta) {
+    btnExcluirConfirmEsta.addEventListener('click', async () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      if (overlay) overlay.style.display = 'none';
+      agendaSetProcessando(true);
+      try {
+        await excluirReservaAgenda({ aplicarEm: 'este_dia' });
+      } finally {
+        agendaSetProcessando(false);
+      }
+    });
+  }
+  if (btnExcluirConfirmFuturos) {
+    btnExcluirConfirmFuturos.addEventListener('click', async () => {
+      const overlay = document.getElementById('agendaExcluirConfirm');
+      if (overlay) overlay.style.display = 'none';
+      agendaSetProcessando(true);
+      try {
+        await excluirReservaAgenda({ aplicarEm: 'todos_futuros' });
       } finally {
         agendaSetProcessando(false);
       }

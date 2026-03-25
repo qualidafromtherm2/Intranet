@@ -2544,7 +2544,7 @@
                       <span>Duração em horas</span>
                       <select id="agendaDuracaoHoras">
                         <option value="">-- horas --</option>
-                        <option value="1">1 hora</option>
+                        <option value="1" selected>1 hora</option>
                         <option value="2">2 horas</option>
                         <option value="3">3 horas</option>
                         <option value="4">4 horas</option>
@@ -2593,7 +2593,7 @@
                 <div style="grid-column:1/-1;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
                   <div id="agendaGrupoRepetirMeses" style="display:none;">
                     <label class="agenda-cafe-check">
-                      <span>Repetir todos os meses</span>
+                      <span>Repetir todos os dias futuros dos meses seguintes</span>
                       <input id="agendaRepetirTodosMeses" type="checkbox" />
                     </label>
                   </div>
@@ -2685,16 +2685,18 @@
 
               <!-- Seção de anexos — lista abaixo dos botões -->
               <div id="agendaSecaoAnexos" style="margin-top:16px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                  <span style="font-size:13px;font-weight:600;color:var(--content-title-color);">
-                    <i class="fa-solid fa-paperclip" style="margin-right:5px;"></i>Anexos
-                  </span>
+                <div style="display:flex;justify-content:flex-start;margin-bottom:8px;">
                   <label style="cursor:pointer;margin:0;">
-                    <span style="font-size:12px;color:#60a5fa;cursor:pointer;">
+                    <span class="content-button" style="padding:5px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">
                       <i class="fa-solid fa-plus"></i> Anexar arquivo
                     </span>
                     <input id="agendaAnexoInput" type="file" style="display:none;" />
                   </label>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:flex-start;margin-bottom:8px;">
+                  <span style="font-size:13px;font-weight:600;color:var(--content-title-color);">
+                    <i class="fa-solid fa-paperclip" style="margin-right:5px;"></i>Anexos
+                  </span>
                 </div>
                 <div id="agendaAnexosLista" style="display:flex;flex-direction:column;gap:6px;"></div>
                 <span id="agendaAnexosVazio" style="font-size:12px;color:var(--inactive-color);font-style:italic;">Nenhum arquivo anexado</span>
@@ -2704,11 +2706,18 @@
               <div id="agendaExcluirConfirm" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
                 <i class="fa-solid fa-triangle-exclamation" style="font-size:30px;color:#f87171;"></i>
                 <p id="agendaExcluirConfirmTexto" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                <div id="agendaExcluirConfirmAcoesPadrao" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
                   <button id="agendaExcluirConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
                   <button id="agendaExcluirConfirmSim" type="button" class="content-button" style="background:#dc2626;color:#fff;border:none;padding:8px 18px;">
                     <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Sim, excluir
                   </button>
+                </div>
+                <div id="agendaExcluirConfirmAcoesRecorrente" style="display:none;flex-direction:column;gap:10px;align-items:center;">
+                  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                    <button id="agendaExcluirConfirmEsta" type="button" class="content-button" style="padding:8px 16px;">Excluir só este evento</button>
+                    <button id="agendaExcluirConfirmFuturos" type="button" class="content-button" style="background:#b45309;color:#fff;border:none;padding:8px 16px;">Excluir todos os futuros</button>
+                  </div>
+                  <button id="agendaExcluirConfirmCancelarRec" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
                 </div>
               </div>
 
@@ -2726,11 +2735,20 @@
               <!-- Overlay de escolha de escopo ao alterar horário em reunião recorrente -->
               <div id="agendaEscopoHorarioOverlay" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:22;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
                 <i class="fa-solid fa-clock-rotate-left" style="font-size:28px;color:#60a5fa;"></i>
-                <p id="agendaEscopoHorarioMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;">Você alterou o horário desta reunião recorrente. Onde deseja aplicar a mudança?</p>
-                <div id="agendaEscopoHorarioAcoes" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-                  <button id="agendaEscopoHorarioCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
-                  <button id="agendaEscopoHorarioEsteDia" type="button" class="content-button" style="padding:8px 16px;">Só este dia</button>
-                  <button id="agendaEscopoHorarioFuturos" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;">Todos os futuros</button>
+                <p id="agendaEscopoHorarioMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;">Você alterou uma reunião recorrente. Escolha como aplicar:</p>
+                <div id="agendaEscopoHorarioAcoes" style="display:flex;flex-direction:column;gap:10px;min-width:320px;max-width:440px;align-items:stretch;">
+                  <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-hover);text-align:left;cursor:pointer;">
+                    <input id="agendaEscopoHorarioChkFuturos" type="checkbox" style="width:15px;height:15px;" />
+                    <span style="color:#e5e7eb;font-size:13px;">Aplicar para todos os dias futuros dos meses seguintes</span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-hover);text-align:left;cursor:pointer;">
+                    <input id="agendaEscopoHorarioChkManterAta" type="checkbox" checked style="width:15px;height:15px;" />
+                    <span style="color:#e5e7eb;font-size:13px;">Manter histórico de ata de reunião</span>
+                  </label>
+                  <div style="display:flex;gap:10px;justify-content:center;">
+                    <button id="agendaEscopoHorarioCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
+                    <button id="agendaEscopoHorarioSalvar" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;">Salvar</button>
+                  </div>
                 </div>
                 <div id="agendaEscopoHorarioLoading" style="display:none;align-items:center;gap:10px;color:#cbd5e1;font-size:13px;">
                   <i class="fa-solid fa-spinner fa-spin" style="color:#60a5fa;"></i>

@@ -6472,7 +6472,9 @@ table.tabela td.num {
 }
 
 .agenda-cal-day.is-today {
-  box-shadow: 0 0 0 1px rgba(58,109,240,.45) inset;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96,165,250,.9) inset, 0 0 0 1px rgba(147,197,253,.55);
+  background: linear-gradient(180deg, rgba(96,165,250,.09), rgba(96,165,250,.02));
 }
 
 .agenda-cal-day.is-out {
