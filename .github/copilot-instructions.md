@@ -29,3 +29,31 @@
 - Se a atualização envolver HTML, explique **apenas um trecho pequeno** da alteração em cada resposta, citando **em que parte da página** ele aparece.
 - Quando houver alterações, traga a explicação em **lista separada por HTML, CSS e JavaScript** (quando aplicável).
 - Só execute os comandos do PM2 quando a atualização realmente exigir (ex.: mudanças de backend). Se a mudança for apenas em HTML/CSS/JS de front, **não** execute PM2.
+
+## Protocolo de colaboração multi-IA (obrigatório)
+- Este repositório é editado por múltiplos colaboradores usando IA (Codex/Chat). Toda alteração deve priorizar **baixo conflito de merge**.
+- Nunca fazer push direto em `main` quando houver fluxo de time; usar branch por tarefa e Pull Request.
+- Antes de iniciar qualquer alteração: atualizar contexto com `git status`, `git pull` e confirmar branch correta.
+- Evitar mudanças amplas fora do escopo solicitado; não fazer "faxina geral" sem pedido explícito.
+- Não remover, renomear ou mover arquivos de outras áreas sem autorização explícita do usuário.
+
+## Áreas de atuação por colaborador
+- Colaborador Layout/UI: prioriza `public/`, `img/`, `menu_produto.css`, `menu_produto.html`, `menu_produto.js`.
+- Colaborador Relatórios: prioriza rotas/consultas de relatório em `routes/` e blocos relacionados no `server.js`.
+- Colaborador Compras/Kanban: prioriza `routes/compras*`, `kanban/`, `sql/` e blocos de compras no `server.js`.
+- Se a solicitação cruzar áreas, a IA deve avisar risco de conflito e manter alteração mínima possível.
+
+## Regras para alterar `server.js`
+- `server.js` é arquivo de alto conflito: editar somente o bloco necessário.
+- Evitar reordenação ampla, reformatação global e mudanças cosméticas no arquivo inteiro.
+- Em caso de trechos potencialmente concorrentes, citar exatamente a seção alterada para facilitar merge.
+
+## Segurança e versionamento
+- Nunca commitar segredos: `.env`, tokens, senhas, URLs com credenciais, `config.server.js` com dados reais.
+- Respeitar `.gitignore` e não versionar artefatos locais (`node_modules`, backups locais, logs, dumps).
+- Ao detectar arquivo com nome acidental (comando colado, saída de terminal, etc.), confirmar com o usuário antes de remover em lote.
+
+## Qualidade de entrega em time
+- Entregar mudanças em commits pequenos e temáticos (ex.: `chore`, `docs`, `feat`, `fix`).
+- Separar commit de infraestrutura/limpeza de commit funcional.
+- Sempre informar comando de validação executado e impacto esperado.
