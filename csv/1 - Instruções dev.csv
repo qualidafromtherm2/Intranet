@@ -1,0 +1,36 @@
+
+
+"Meu site local"
+http://localhost:5001/menu_produto.html#inicio
+
+
+"Reinicia, verifica se está rodando e checar logs (bom para revisar logs aplicados ao projeto):"
+
+pm2 flush
+pm2 restart intranet_api
+pm2 logs intranet_api
+
+"Sites uteis:"
+https://www.w3schools.com/ // site de referência para HTML, CSS e JavaScript
+https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
+https://www.brasilcode.com.br/page/2/ site de modelos e cursos html,css e java script
+
+
+"Abaixo nomeclaturas de programação"
+span - campo amarelo para digitação, ou seja, inserção de dados.
+Modal - parecido com o card, porem flutuante.
+Card - Quadrado ou retangulo para gerar informações dentro dele.
+checkbox - campo de seleção de opções.
+radio - campo de seleção de opções.
+input - campo de digitação.
+button - botão de ação.
+select - campo de seleção de opções.
+textarea - campo de digitação de texto.
+label - campo de texto.
+form - campo de formulário.
+table - campo de tabela.
+div - campo de divisão.
+ul - campo de lista não ordenada.
+ol - campo de lista ordenada.
+li - campo de item de lista.
+h1 - campo de titulo.
