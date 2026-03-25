@@ -24,6 +24,10 @@ Thumbs.db
 # cache de Pacotes
 .npm
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 config.server.js
 etiquetas/*.zpl
 etiquetas/*.zpl
@@ -32,4 +36,15 @@ etiquetas/*.zpl
 
 # nunca versionar o antigo cache
 data/kanban_preparacao.json
+
+# arquivos temporarios e de editor
+.idea/
+.vs/
+*.swp
+*.swo
+*.tmp
+
+# pastas locais de backup/historico
+backup/
+Historico de conversar IA/
 
