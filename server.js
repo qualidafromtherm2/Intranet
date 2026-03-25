@@ -791,11 +791,13 @@ async function ensureRhReservasSchema() {
         ADD COLUMN IF NOT EXISTS link_reuniao TEXT,
         ADD COLUMN IF NOT EXISTS anexo_url TEXT,
         ADD COLUMN IF NOT EXISTS anexo_nome TEXT,
+        ADD COLUMN IF NOT EXISTS ata_referencia_reserva_id BIGINT REFERENCES rh.reservas_ambientes(id) ON DELETE SET NULL,
         ADD COLUMN IF NOT EXISTS datas_excecao DATE[] NOT NULL DEFAULT ARRAY[]::date[],
         ADD COLUMN IF NOT EXISTS google_event_id TEXT,
         ADD COLUMN IF NOT EXISTS google_calendar_id TEXT,
         ADD COLUMN IF NOT EXISTS google_event_link TEXT
     `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS reservas_ambientes_ata_ref_idx ON rh.reservas_ambientes (ata_referencia_reserva_id)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rh.google_calendar_tokens (
@@ -952,7 +954,6 @@ async function sincronizarAtaTarefasRh(client, { ataId, reservaId, criadoPor, co
     );
   }
 }
-
 
 function parseDateBR(s){ if(!s) return null; const t=String(s).trim();
   if(/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
@@ -3161,11 +3162,15 @@ app.get('/api/google-calendar/status', async (req, res) => {
     }
 
     const row = await obterGoogleTokenUsuario(userLogado);
+    const contaGoogleNorm = normalizarEmailGoogle(contaGoogle);
+    const tokenEmailNorm = normalizarEmailGoogle(row?.email || null);
+    const vinculoValido = !!row && !!contaGoogleNorm && (!tokenEmailNorm || tokenEmailNorm === contaGoogleNorm);
+
     return res.json({
       ok: true,
-      connected: !!row,
+      connected: vinculoValido,
       configured: true,
-      email: contaGoogle || row?.email || null,
+      email: vinculoValido ? contaGoogleNorm : null,
       contaGoogle,
       tokenEmail: row?.email || null
     });
@@ -3605,7 +3610,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const anexoNomePut = String(body.anexoNome || '').trim() || null;
   const agendarGoogle = !!body.agendarGoogle;
   const escopoSolicitado = String(body.aplicarEm || '').trim().toLowerCase();
-  const aplicarEm = escopoSolicitado === 'este_dia' ? 'este_dia' : 'todos_futuros';
+  const aplicarEm = escopoSolicitado === 'este_dia'
+    ? 'este_dia'
+    : (escopoSolicitado === 'todos_futuros' ? 'todos_futuros' : 'registro');
+  const manterAta = body.manterAta === undefined ? true : !!body.manterAta;
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -3624,6 +3632,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
 
     const { rows: atualRows } = await client.query(
       `SELECT id, criado_por, data_reserva, repetir, repetir_todos_meses, dias_semana, datas_excecao,
+              ata_referencia_reserva_id,
               google_event_id, google_calendar_id, google_event_link
          FROM rh.reservas_ambientes
         WHERE id = $1
@@ -3648,6 +3657,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     const dataBaseAtualIso = normalizarDataIsoRh(reservaAtual.data_reserva) || String(reservaAtual.data_reserva || '').slice(0, 10);
     const diasSemanaAtuais = normalizarDiasSemanaRh(reservaAtual.dias_semana);
     const datasExcecaoAtuais = normalizarDatasExcecaoRh(reservaAtual.datas_excecao);
+    const reservaAtaOrigemId = Number(reservaAtual.ata_referencia_reserva_id) || reservaId;
     const googleEventIdAtual = String(reservaAtual?.google_event_id || '').trim() || null;
     const googleCalendarIdAtual = String(reservaAtual?.google_calendar_id || '').trim() || 'primary';
 
@@ -3702,11 +3712,25 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       const insertNovo = await client.query(
         `INSERT INTO rh.reservas_ambientes
           (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
-           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, datas_excecao)
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao)
          VALUES ($1, $2, $3::date, $4::time, $5::time, false, false, ARRAY[]::text[],
-                 $6, $7, $8, $9, $10, $11, $12, ARRAY[]::date[])
+                 $6, $7, $8, $9, $10, $11, $12, $13, ARRAY[]::date[])
          RETURNING id`,
-        [tipoEspaco, tema, dataCorte, horaInicio, horaFim, cafe, descricao, visitantes, userLogado, linkReuniaoPut, anexoUrlPut, anexoNomePut]
+        [
+          tipoEspaco,
+          tema,
+          dataCorte,
+          horaInicio,
+          horaFim,
+          cafe,
+          descricao,
+          visitantes,
+          userLogado,
+          linkReuniaoPut,
+          anexoUrlPut,
+          anexoNomePut,
+          manterAta ? reservaAtaOrigemId : null
+        ]
       );
       reservaIdFinal = insertNovo.rows[0].id;
       await inserirParticipantesReservaRh(reservaIdFinal, participantes);
@@ -3766,11 +3790,29 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       const insertSerieNova = await client.query(
         `INSERT INTO rh.reservas_ambientes
           (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
-           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, datas_excecao)
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao)
          VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[],
-                 $9, $10, $11, $12, $13, $14, $15, $16::date[])
+                 $9, $10, $11, $12, $13, $14, $15, $16, $17::date[])
          RETURNING id`,
-        [tipoEspaco, tema, dataCorte, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniaoPut, anexoUrlPut, anexoNomePut, excecoesNovaSerie]
+        [
+          tipoEspaco,
+          tema,
+          dataCorte,
+          horaInicio,
+          horaFim,
+          repetir,
+          repetirTodosMeses,
+          diasSemana,
+          cafe,
+          descricao,
+          visitantes,
+          userLogado,
+          linkReuniaoPut,
+          anexoUrlPut,
+          anexoNomePut,
+          manterAta ? reservaAtaOrigemId : null,
+          excecoesNovaSerie
+        ]
       );
       reservaIdFinal = insertSerieNova.rows[0].id;
       await inserirParticipantesReservaRh(reservaIdFinal, participantes);
@@ -3798,7 +3840,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
         [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, reservaId]
       );
       await inserirParticipantesReservaRh(reservaId, participantes);
-      escopoAplicado = reservaAtualRecorrente ? 'todos_futuros' : 'registro';
+      escopoAplicado = 'registro';
     }
 
     await client.query('COMMIT');
@@ -3886,10 +3928,18 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido' });
   }
 
+  const body = req.body || {};
+  const escopoSolicitado = String(body.aplicarEm || '').trim().toLowerCase();
+  const aplicarEm = escopoSolicitado === 'este_dia'
+    ? 'este_dia'
+    : (escopoSolicitado === 'todos_futuros' ? 'todos_futuros' : 'registro');
+  const dataOcorrenciaReq = normalizarDataIsoRh(body.data || null);
+
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT criado_por, google_event_id, google_calendar_id
+      `SELECT criado_por, data_reserva, repetir, repetir_todos_meses, dias_semana, datas_excecao,
+              google_event_id, google_calendar_id
          FROM rh.reservas_ambientes
         WHERE id = $1
         LIMIT 1`,
@@ -3905,8 +3955,52 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
       return res.status(403).json({ error: 'Somente o criador ou o setor RH pode excluir esta reserva' });
     }
 
-    const googleEventId = String(rows[0].google_event_id || '').trim() || null;
-    const googleCalendarId = String(rows[0].google_calendar_id || '').trim() || 'primary';
+    const reservaAtual = rows[0];
+    const reservaRecorrente = !!reservaAtual.repetir;
+
+    if (reservaRecorrente && aplicarEm !== 'registro') {
+      const dataBaseIso = normalizarDataIsoRh(reservaAtual.data_reserva) || String(reservaAtual.data_reserva || '').slice(0, 10);
+      const datasExcecaoAtuais = normalizarDatasExcecaoRh(reservaAtual.datas_excecao);
+      const dataAlvo = dataOcorrenciaReq || dataBaseIso;
+      const anoSerie = new Date(`${dataAlvo}T00:00:00`).getFullYear();
+      const ocorrenciasAtuais = gerarOcorrenciasReservaRecorrenteNoAnoRh({
+        ano: anoSerie,
+        dataBaseIso,
+        repetirTodosMeses: !!reservaAtual.repetir_todos_meses,
+        diasSemana: normalizarDiasSemanaRh(reservaAtual.dias_semana),
+        datasExcecao: datasExcecaoAtuais
+      });
+
+      const dataCorte = ocorrenciasAtuais.includes(dataAlvo) ? dataAlvo : dataBaseIso;
+
+      if (aplicarEm === 'este_dia') {
+        const novasExcecoes = unirDatasExcecaoRh(datasExcecaoAtuais, [dataCorte]);
+        await client.query(
+          `UPDATE rh.reservas_ambientes
+              SET datas_excecao = $1::date[],
+                  atualizado_em = NOW()
+            WHERE id = $2`,
+          [novasExcecoes, reservaId]
+        );
+        return res.json({ ok: true, escopoAplicado: 'este_dia' });
+      }
+
+      const datasFuturas = ocorrenciasAtuais.filter((d) => d >= dataCorte);
+      if (datasFuturas.length) {
+        const novasExcecoes = unirDatasExcecaoRh(datasExcecaoAtuais, datasFuturas);
+        await client.query(
+          `UPDATE rh.reservas_ambientes
+              SET datas_excecao = $1::date[],
+                  atualizado_em = NOW()
+            WHERE id = $2`,
+          [novasExcecoes, reservaId]
+        );
+        return res.json({ ok: true, escopoAplicado: 'todos_futuros' });
+      }
+    }
+
+    const googleEventId = String(reservaAtual.google_event_id || '').trim() || null;
+    const googleCalendarId = String(reservaAtual.google_calendar_id || '').trim() || 'primary';
     if (googleEventId) {
       try {
         await excluirReservaGoogleCalendar({
@@ -3927,7 +4021,7 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
 
     // Cascade apaga participantes automaticamente (ON DELETE CASCADE)
     await client.query(`DELETE FROM rh.reservas_ambientes WHERE id = $1`, [reservaId]);
-    return res.json({ ok: true });
+    return res.json({ ok: true, escopoAplicado: 'registro' });
   } catch (err) {
     console.error('[API] /api/rh/reservas DELETE erro:', err);
     return res.status(500).json({ error: 'Falha ao excluir reserva' });
@@ -3944,6 +4038,18 @@ app.get('/api/rh/atas', async (req, res) => {
     return res.status(400).json({ error: 'reserva_id inválido' });
   }
   try {
+    const refRs = await pool.query(
+      `SELECT COALESCE(ata_referencia_reserva_id, id) AS ata_reserva_id
+         FROM rh.reservas_ambientes
+        WHERE id = $1
+        LIMIT 1`,
+      [reservaId]
+    );
+    if (!refRs.rows.length) {
+      return res.status(404).json({ error: 'Reserva não encontrada' });
+    }
+    const ataReservaId = Number(refRs.rows[0].ata_reserva_id) || reservaId;
+
     const { rows } = await pool.query(
       `SELECT id, reserva_id, tema, conteudo, criado_por,
               excluido, excluido_por,
@@ -3952,7 +4058,7 @@ app.get('/api/rh/atas', async (req, res) => {
          FROM rh.atas_reuniao
         WHERE reserva_id = $1
         ORDER BY id ASC`,
-      [reservaId]
+      [ataReservaId]
     );
 
     const ids = rows.map(r => Number(r.id)).filter(Number.isInteger);
@@ -4003,16 +4109,28 @@ app.post('/api/rh/atas', async (req, res) => {
 
   const client = await pool.connect();
   try {
+    const refRs = await client.query(
+      `SELECT COALESCE(ata_referencia_reserva_id, id) AS ata_reserva_id
+         FROM rh.reservas_ambientes
+        WHERE id = $1
+        LIMIT 1`,
+      [reservaId]
+    );
+    if (!refRs.rows.length) {
+      return res.status(404).json({ error: 'Reserva não encontrada' });
+    }
+    const ataReservaId = Number(refRs.rows[0].ata_reserva_id) || reservaId;
+
     await client.query('BEGIN');
     const { rows } = await client.query(
       `INSERT INTO rh.atas_reuniao (reserva_id, tema, conteudo, criado_por)
        VALUES ($1, $2, $3, $4) RETURNING id`,
-      [reservaId, tema, conteudo, userLogado]
+      [ataReservaId, tema, conteudo, userLogado]
     );
     const ataId = Number(rows[0]?.id);
     await sincronizarAtaTarefasRh(client, {
       ataId,
-      reservaId,
+      reservaId: ataReservaId,
       criadoPor: userLogado,
       conteudo
     });
