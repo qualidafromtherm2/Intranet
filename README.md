@@ -30,6 +30,26 @@ cp .env.example .env
 npm run dev
 ```
 
+### 2.1) Variaveis minimas para subir no localhost
+
+Para a aplicacao iniciar no ambiente local sem cair no boot, preencha no minimo:
+
+- `PORT` (ex.: `5001`)
+- `SESSION_SECRET`
+- `DATABASE_URL` (ou equivalente via `PGHOST`/`PGUSER`/etc)
+
+Observacoes importantes:
+
+- `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE` sao opcionais para subir o servidor.
+- Sem Supabase, apenas rotas de upload (fotos/anexos/sac) retornarao erro em runtime.
+- `OMIE_APP_KEY` e `OMIE_APP_SECRET` podem ficar vazios se voce nao for testar rotas/sincronizacao da Omie.
+- `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET` so sao necessarios para login Google/Calendar.
+
+Referencia:
+
+- Use [ .env.example ](.env.example) como fonte unica de todas as chaves suportadas.
+- Nunca commitar `.env` com valores reais.
+
 ## 3) Divisao de responsabilidade sugerida
 
 Para reduzir conflito, cada colaborador atua em um conjunto principal de arquivos:
