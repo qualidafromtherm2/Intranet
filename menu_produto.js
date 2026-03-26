@@ -30836,7 +30836,7 @@ async function excluirItemCompra(itemId) {
   }
 }
 
-async function loadComprasRecebimento() {
+async function loadComprasRecebimentoLegacy() {
   const tbody = document.getElementById('recebimentoTbody');
   if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>';
@@ -30889,6 +30889,346 @@ async function loadComprasRecebimento() {
   } catch (err) {
     console.error('[recebimento] carregar', err);
     tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Erro ao carregar dados.</td></tr>';
+  }
+}
+
+const RECEBIMENTO_FILTER_FIELDS = [
+  { key: 'produto', inputId: 'recebimentoFilterProduto' },
+  { key: 'pedido', inputId: 'recebimentoFilterPedido' },
+  { key: 'etapa', inputId: 'recebimentoFilterEtapa' },
+  { key: 'solicitante', inputId: 'recebimentoFilterSolicitante' },
+  { key: 'previsao', inputId: 'recebimentoFilterPrevisao' },
+  { key: 'responsavel', inputId: 'recebimentoFilterResponsavel' },
+  { key: 'fornecedor', inputId: 'recebimentoFilterFornecedor' },
+  { key: 'observacao', inputId: 'recebimentoFilterObservacao' },
+  { key: 'criadoEm', inputId: 'recebimentoFilterCriadoEm' },
+  { key: 'valor', inputId: 'recebimentoFilterValor' },
+  { key: 'acoes', inputId: 'recebimentoFilterAcoes' }
+];
+
+setTimeout(() => {
+  try {
+    vincularFiltrosRecebimento();
+  } catch (err) {
+    console.warn('[recebimento] nao foi possivel vincular filtros no bootstrap:', err);
+  }
+}, 0);
+
+function obterEstadoRecebimentoCompras() {
+  if (!window.__recebimentoComprasState) {
+    window.__recebimentoComprasState = {
+      rows: [],
+      filtrosVinculados: false
+    };
+  }
+  return window.__recebimentoComprasState;
+}
+
+function normalizarTextoRecebimento(valor) {
+  return String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function formatarDataRecebimento(valor, incluirHora = false) {
+  if (!valor) return '-';
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) return String(valor);
+  if (incluirHora) {
+    return data.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  }
+  return data.toLocaleDateString('pt-BR');
+}
+
+function formatarValorRecebimento(valor) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return '-';
+  return numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function obterFornecedorRecebimento(item) {
+  return item?.fornecedor_nome_fantasia || item?.fornecedor_razao_social || '-';
+}
+
+function obterFornecedorComplementoRecebimento(item) {
+  const partes = [
+    item?.fornecedor_razao_social,
+    item?.fornecedor_cnpj_cpf,
+    item?.fornecedor_cidade
+      ? `${item.fornecedor_cidade}${item?.fornecedor_estado ? ` / ${item.fornecedor_estado}` : ''}`
+      : item?.fornecedor_estado
+  ].filter(Boolean);
+  return partes.join(' | ');
+}
+
+function obterNfsRecebimento(item) {
+  if (Array.isArray(item?.fornecedor_lista_nfes)) return item.fornecedor_lista_nfes;
+  return [];
+}
+
+function obterTextoAcoesRecebimento(item) {
+  const listaNfs = obterNfsRecebimento(item);
+  if (listaNfs.length) {
+    return listaNfs
+      .map(nf => [nf?.numero_nfe, nf?.chave_nfe].filter(Boolean).join(' '))
+      .join(' ');
+  }
+  return item?.fornecedor_lista_numeros_nfe || '';
+}
+
+function montarIndiceRecebimento(item) {
+  const campos = {
+    produto: `${item?.produto_codigo || ''} ${item?.produto_descricao || ''} ${item?.quantidade || ''} ${item?.unidade || ''}`,
+    pedido: `${item?.cnumero || ''} ${item?.n_cod_ped || ''}`,
+    etapa: `${item?.etapa_nf || ''} ${item?.etapa_nf_descricao || ''}`,
+    solicitante: item?.solicitante || '',
+    previsao: formatarDataRecebimento(item?.previsao_chegada),
+    responsavel: item?.resp_inspecao_recebimento || '',
+    fornecedor: `${obterFornecedorRecebimento(item)} ${obterFornecedorComplementoRecebimento(item)}`,
+    observacao: item?.observacao || '',
+    criadoEm: formatarDataRecebimento(item?.d_inc_data),
+    valor: `${item?.valor_total_pedido || ''} ${formatarValorRecebimento(item?.valor_total_pedido)}`,
+    acoes: obterTextoAcoesRecebimento(item)
+  };
+
+  item.__recebimentoCampos = Object.fromEntries(
+    Object.entries(campos).map(([chave, valor]) => [chave, normalizarTextoRecebimento(valor)])
+  );
+  item.__recebimentoSearch = normalizarTextoRecebimento(Object.values(campos).join(' '));
+  return item;
+}
+
+function coletarFiltrosRecebimento() {
+  const filtros = {
+    global: normalizarTextoRecebimento(document.getElementById('recebimentoGlobalSearch')?.value || '')
+  };
+
+  RECEBIMENTO_FILTER_FIELDS.forEach(({ key, inputId }) => {
+    filtros[key] = normalizarTextoRecebimento(document.getElementById(inputId)?.value || '');
+  });
+
+  return filtros;
+}
+
+function atualizarResumoFiltrosRecebimento(filtros, filtrados, total) {
+  const resumo = document.getElementById('recebimentoFilterSummary');
+  if (!resumo) return;
+
+  const ativos = [
+    filtros.global,
+    ...RECEBIMENTO_FILTER_FIELDS.map(({ key }) => filtros[key])
+  ].filter(Boolean).length;
+
+  if (!ativos) {
+    resumo.textContent = `Sem filtros ativos | ${filtrados} item(ns)`;
+    resumo.style.background = '#eff6ff';
+    resumo.style.color = '#1d4ed8';
+    return;
+  }
+
+  resumo.textContent = `${ativos} filtro(s) ativo(s) | ${filtrados} de ${total} item(ns)`;
+  resumo.style.background = '#fff7ed';
+  resumo.style.color = '#c2410c';
+}
+
+function renderAcoesRecebimento(item) {
+  const listaNfs = obterNfsRecebimento(item);
+  if (!listaNfs.length) {
+    const textoFallback = item?.fornecedor_lista_numeros_nfe
+      ? `NF ${escapeHtml(String(item.fornecedor_lista_numeros_nfe))}`
+      : 'Sem NF vinculada';
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:11px;font-weight:600;">${textoFallback}</span>`;
+  }
+
+  return listaNfs.map((nf) => {
+    const numero = escapeHtml(String(nf?.numero_nfe || '-'));
+    const chave = escapeHtml(String(nf?.chave_nfe || ''));
+    return `
+      <button
+        type="button"
+        data-chave="${chave}"
+        data-num="${numero}"
+        onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes&&this.dataset.chave)window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,null,{ocultarComparacao:true});"
+        style="display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #bae6fd;border-radius:999px;background:#f0f9ff;color:#0369a1;font-size:11px;font-weight:700;cursor:pointer;"
+      >
+        <i class="fa-solid fa-file-invoice"></i>
+        <span>NF ${numero}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderRecebimentoTabela(listaFiltrada, totalOriginal) {
+  const tbody = document.getElementById('recebimentoTbody');
+  const countBadge = document.getElementById('recebimentoCount');
+  if (!tbody) return;
+
+  if (countBadge) {
+    countBadge.textContent = totalOriginal === listaFiltrada.length
+      ? `${totalOriginal} itens`
+      : `${listaFiltrada.length} de ${totalOriginal} itens`;
+  }
+
+  if (!listaFiltrada.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="11" style="text-align:center;padding:32px 16px;color:#64748b;">
+          <i class="fa-solid fa-filter-circle-xmark" style="font-size:22px;margin-bottom:10px;display:block;color:#94a3b8;"></i>
+          Nenhum item encontrado com os filtros atuais.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = listaFiltrada.map((item) => {
+    const produtoCodigo = escapeHtml(item?.produto_codigo || '-');
+    const produtoDescricao = escapeHtml(item?.produto_descricao || '-');
+    const quantidade = item?.quantidade ? formatarQuantidadeExibicao(item.quantidade) : '-';
+    const unidade = escapeHtml(item?.unidade || '');
+    const pedidoNumero = escapeHtml(String(item?.cnumero || item?.n_cod_ped || '-'));
+    const pedidoInterno = item?.n_cod_ped ? `<div style="font-size:11px;color:#64748b;margin-top:4px;">ID Omie: ${escapeHtml(String(item.n_cod_ped))}</div>` : '';
+    const etapaCor = item?.etapa_nf_cor || '#f59e0b';
+    const etapaTexto = escapeHtml(item?.etapa_nf_descricao || item?.etapa_nf || '-');
+    const solicitante = escapeHtml(item?.solicitante || '-');
+    const previsao = escapeHtml(formatarDataRecebimento(item?.previsao_chegada));
+    const responsavel = escapeHtml(item?.resp_inspecao_recebimento || '-');
+    const fornecedorNome = escapeHtml(obterFornecedorRecebimento(item));
+    const fornecedorComplemento = obterFornecedorComplementoRecebimento(item);
+    const observacao = escapeHtml(item?.observacao || '-');
+    const criadoEm = escapeHtml(formatarDataRecebimento(item?.d_inc_data));
+    const valor = escapeHtml(formatarValorRecebimento(item?.valor_total_pedido));
+
+    return `
+      <tr style="border-bottom:1px solid #e2e8f0;">
+        <td style="padding:14px 16px;vertical-align:top;min-width:220px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-weight:700;color:#0f172a;">${produtoCodigo}</div>
+          <div style="font-size:12px;color:#475569;margin-top:4px;line-height:1.45;">${produtoDescricao}</div>
+          <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 8px;border-radius:999px;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">
+            <i class="fa-solid fa-boxes-stacked" style="color:#64748b;"></i>
+            <span>${escapeHtml(String(quantidade))}${unidade ? ` ${unidade}` : ''}</span>
+          </div>
+        </td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">
+          <div style="font-weight:700;color:#1d4ed8;">${pedidoNumero}</div>
+          ${pedidoInterno}
+        </td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">
+          <span style="display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:${escapeHtml(etapaCor)}18;color:${escapeHtml(etapaCor)};font-size:11px;font-weight:700;border:1px solid ${escapeHtml(etapaCor)}40;">
+            ${etapaTexto}
+          </span>
+        </td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${solicitante}</td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${previsao}</td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${responsavel}</td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;min-width:230px;">
+          <div style="font-weight:700;color:#0f172a;">${fornecedorNome}</div>
+          ${fornecedorComplemento ? `<div style="font-size:11px;color:#64748b;line-height:1.45;margin-top:4px;">${escapeHtml(fornecedorComplemento)}</div>` : ''}
+        </td>
+        <td style="padding:14px 16px;vertical-align:top;max-width:220px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:12px;color:#334155;line-height:1.45;white-space:normal;word-break:break-word;">${observacao}</div>
+        </td>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${criadoEm}</td>
+        <td style="padding:14px 16px;vertical-align:top;text-align:right;border-bottom:1px solid #e2e8f0;font-weight:700;color:#047857;white-space:nowrap;">${valor}</td>
+        <td style="padding:14px 16px;vertical-align:top;text-align:center;border-bottom:1px solid #e2e8f0;">
+          <div style="display:flex;justify-content:center;flex-wrap:wrap;gap:6px;">
+            ${renderAcoesRecebimento(item)}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function aplicarFiltrosRecebimento() {
+  const state = obterEstadoRecebimentoCompras();
+  const filtros = coletarFiltrosRecebimento();
+  const listaFiltrada = state.rows.filter((item) => {
+    if (filtros.global && !item.__recebimentoSearch.includes(filtros.global)) return false;
+    return RECEBIMENTO_FILTER_FIELDS.every(({ key }) => {
+      const valorFiltro = filtros[key];
+      if (!valorFiltro) return true;
+      return (item.__recebimentoCampos?.[key] || '').includes(valorFiltro);
+    });
+  });
+
+  renderRecebimentoTabela(listaFiltrada, state.rows.length);
+  atualizarResumoFiltrosRecebimento(filtros, listaFiltrada.length, state.rows.length);
+}
+
+function vincularFiltrosRecebimento() {
+  const state = obterEstadoRecebimentoCompras();
+  if (state.filtrosVinculados) return;
+
+  const elementos = [
+    document.getElementById('recebimentoGlobalSearch'),
+    ...RECEBIMENTO_FILTER_FIELDS.map(({ inputId }) => document.getElementById(inputId))
+  ].filter(Boolean);
+
+  elementos.forEach((el) => {
+    el.addEventListener('input', aplicarFiltrosRecebimento);
+  });
+
+  document.getElementById('recebimentoClearFiltersBtn')?.addEventListener('click', () => {
+    elementos.forEach((el) => {
+      el.value = '';
+    });
+    aplicarFiltrosRecebimento();
+    document.getElementById('recebimentoGlobalSearch')?.focus();
+  });
+
+  document.getElementById('menu-recebimento')?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    await loadComprasRecebimento();
+  });
+
+  document.getElementById('recebimentoRefreshBtn')?.addEventListener('click', async () => {
+    await loadComprasRecebimento(true);
+  });
+
+  state.filtrosVinculados = true;
+}
+
+async function loadComprasRecebimento(forceReload = false) {
+  const state = obterEstadoRecebimentoCompras();
+  const tbody = document.getElementById('recebimentoTbody');
+  const btnRecarregar = document.getElementById('recebimentoRefreshBtn');
+  if (!tbody) return;
+
+  vincularFiltrosRecebimento();
+
+  if (!forceReload && state.rows.length) {
+    aplicarFiltrosRecebimento();
+    return;
+  }
+
+  if (btnRecarregar) btnRecarregar.disabled = true;
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--inactive-color);">Carregando recebimentos...</td></tr>';
+
+  try {
+    const resp = await fetch('/api/compras/solicitacoes-recebimento', { credentials: 'include' });
+    if (!resp.ok) throw new Error('Nao foi possivel carregar os recebimentos.');
+
+    const data = await resp.json();
+    const listaBruta = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.solicitacoes)
+        ? data.solicitacoes
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+    state.rows = listaBruta.map((item) => montarIndiceRecebimento({ ...item }));
+    aplicarFiltrosRecebimento();
+  } catch (err) {
+    console.error('[recebimento] carregar', err);
+    state.rows = [];
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#b91c1c;">Erro ao carregar os dados de recebimento.</td></tr>';
+    atualizarResumoFiltrosRecebimento({ global: '', produto: '', pedido: '', etapa: '', solicitante: '', previsao: '', responsavel: '', fornecedor: '', observacao: '', criadoEm: '', valor: '', acoes: '' }, 0, 0);
+  } finally {
+    if (btnRecarregar) btnRecarregar.disabled = false;
   }
 }
 
@@ -43366,7 +43706,7 @@ function resetarFormularioAgendaReserva() {
   if (inicioInput) inicioInput.value = '';
   if (fimInput) fimInput.value = '';
   const duracaoSelectReset = document.getElementById('agendaDuracaoHoras');
-  if (duracaoSelectReset) duracaoSelectReset.value = '1';
+  if (duracaoSelectReset) duracaoSelectReset.value = '';
   // Registrar listeners de cálculo automático da hora fim (uma vez)
   if (duracaoSelectReset && !duracaoSelectReset.dataset.listenerOk) {
     duracaoSelectReset.dataset.listenerOk = '1';
@@ -43702,21 +44042,19 @@ function perguntarEscopoAlteracaoHorarioAgenda() {
   return new Promise((resolve) => {
     const overlay = document.getElementById('agendaEscopoHorarioOverlay');
     const btnCancelar = document.getElementById('agendaEscopoHorarioCancelar');
-    const btnSalvar = document.getElementById('agendaEscopoHorarioSalvar');
-    const chkFuturos = document.getElementById('agendaEscopoHorarioChkFuturos');
-    const chkManterAta = document.getElementById('agendaEscopoHorarioChkManterAta');
-    if (!overlay || !btnCancelar || !btnSalvar || !chkFuturos || !chkManterAta) {
+    const btnEsteDia = document.getElementById('agendaEscopoHorarioEsteDia');
+    const btnFuturos = document.getElementById('agendaEscopoHorarioFuturos');
+    if (!overlay || !btnCancelar || !btnEsteDia || !btnFuturos) {
       resolve(null);
       return;
     }
 
     agendaSetEscopoHorarioLoading(false);
-    chkFuturos.checked = false;
-    chkManterAta.checked = true;
 
     const fechar = (valor) => {
       btnCancelar.onclick = null;
-      btnSalvar.onclick = null;
+      btnEsteDia.onclick = null;
+      btnFuturos.onclick = null;
       if (valor === null) {
         overlay.style.display = 'none';
       }
@@ -43724,12 +44062,13 @@ function perguntarEscopoAlteracaoHorarioAgenda() {
     };
 
     btnCancelar.onclick = () => fechar(null);
-    btnSalvar.onclick = () => {
+    btnEsteDia.onclick = () => {
       agendaSetEscopoHorarioLoading(true);
-      fechar({
-        aplicarEm: chkFuturos.checked ? 'todos_futuros' : 'este_dia',
-        manterAta: !!chkManterAta.checked
-      });
+      fechar('este_dia');
+    };
+    btnFuturos.onclick = () => {
+      agendaSetEscopoHorarioLoading(true);
+      fechar('todos_futuros');
     };
     overlay.style.display = 'flex';
   });
@@ -43873,26 +44212,13 @@ async function salvarReservaAgendaLocal() {
     const inicioAtual = String(reservaAtual?.inicio || '').slice(0, 5);
     const fimAtual = String(reservaAtual?.fim || '').slice(0, 5);
     const horarioMudou = inicioAtual !== horarioInicio || fimAtual !== horarioFim;
-    const repetirTodosMesesAtual = !!reservaAtual?.repetirTodosMeses;
-    const repetirTodosMesesMudou = repetirTodosMesesAtual !== repetirTodosMesesMarcado;
 
-    const diasSemanaAtuais = Array.isArray(reservaAtual?.diasSemana)
-      ? [...reservaAtual.diasSemana].map((d) => String(d || '').trim().toLowerCase()).sort()
-      : [];
-    const diasSemanaNovos = repetir
-      ? [...diasSemana].map((d) => String(d || '').trim().toLowerCase()).sort()
-      : [];
-    const diasSemanaMudou = diasSemanaAtuais.join('|') !== diasSemanaNovos.join('|');
-
-    const devePerguntarEscopo = horarioMudou || repetirTodosMesesMudou || diasSemanaMudou;
-
-    if (devePerguntarEscopo) {
-      const escolhaEscopo = await perguntarEscopoAlteracaoHorarioAgenda();
-      if (!escolhaEscopo) {
+    if (horarioMudou) {
+      const escopoHorario = await perguntarEscopoAlteracaoHorarioAgenda();
+      if (!escopoHorario) {
         return;
       }
-      payload.aplicarEm = escolhaEscopo.aplicarEm;
-      payload.manterAta = !!escolhaEscopo.manterAta;
+      payload.aplicarEm = escopoHorario;
       escopoHorarioEmProcessamento = true;
     }
   }
@@ -43921,8 +44247,6 @@ async function salvarReservaAgendaLocal() {
       const respData = await resp.json().catch(() => ({}));
       if (respData?.id) {
         reservaIdFinal = respData.id;
-        agendaReservaEditandoId = respData.id;
-        agendaReservaIdParaAta = respData.id;
       }
       respostaGoogle = respData?.googleAgenda || null;
     } else {
@@ -44164,25 +44488,16 @@ async function salvarLembreteAgenda() {
 }
 
 // ── Exclui a reserva em edição via DELETE /api/rh/reservas/:id ───────────
-async function excluirReservaAgenda(opcoes = {}) {
+async function excluirReservaAgenda() {
   if (!agendaReservaEditandoId) return;
   if (!usuarioAutenticadoAgenda()) {
     alert('Você precisa estar logado para excluir uma reserva.');
     return;
   }
   try {
-    const payloadDelete = {
-      aplicarEm: String(opcoes.aplicarEm || 'registro'),
-      data: agendaReservaEditandoData || agendaDataSelecionada || null
-    };
     const resp = await fetch(
       `/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}`,
-      {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadDelete)
-      }
+      { method: 'DELETE', credentials: 'include' }
     );
     if (!resp.ok) {
       const erro = await resp.json().catch(() => ({}));
@@ -45148,9 +45463,6 @@ function initAgendaReservasUI() {
   const btnExcluir = document.getElementById('agendaExcluirReserva');
   const btnExcluirConfirmSim = document.getElementById('agendaExcluirConfirmSim');
   const btnExcluirConfirmNao = document.getElementById('agendaExcluirConfirmNao');
-  const btnExcluirConfirmEsta = document.getElementById('agendaExcluirConfirmEsta');
-  const btnExcluirConfirmFuturos = document.getElementById('agendaExcluirConfirmFuturos');
-  const btnExcluirConfirmCancelarRec = document.getElementById('agendaExcluirConfirmCancelarRec');
   const btnSalvar = document.getElementById('agendaSalvarReserva');
   const repetirSelect = document.getElementById('agendaRepetirReuniao');
   const semanaRepeticao = document.getElementById('agendaSemanaRepeticao');
@@ -45402,17 +45714,11 @@ function initAgendaReservasUI() {
     btnExcluir.addEventListener('click', () => {
       const overlay = document.getElementById('agendaExcluirConfirm');
       const texto = document.getElementById('agendaExcluirConfirmTexto');
-      const acoesPadrao = document.getElementById('agendaExcluirConfirmAcoesPadrao');
-      const acoesRecorrente = document.getElementById('agendaExcluirConfirmAcoesRecorrente');
       if (!overlay || !texto) return;
       if (agendaReservaEditandoRepetir) {
-        texto.textContent = 'Esta é uma reserva recorrente. Escolha se deseja excluir somente este evento ou todos os próximos.';
-        if (acoesPadrao) acoesPadrao.style.display = 'none';
-        if (acoesRecorrente) acoesRecorrente.style.display = 'flex';
+        texto.textContent = 'Esta é uma reserva recorrente. Excluir irá remover esta reunião e todas as réplicas futuras da série. Deseja continuar?';
       } else {
         texto.textContent = 'Deseja excluir esta reserva? Esta ação não pode ser desfeita.';
-        if (acoesPadrao) acoesPadrao.style.display = 'flex';
-        if (acoesRecorrente) acoesRecorrente.style.display = 'none';
       }
       overlay.style.display = 'flex';
     });
@@ -45429,37 +45735,7 @@ function initAgendaReservasUI() {
       if (overlay) overlay.style.display = 'none';
       agendaSetProcessando(true);
       try {
-        await excluirReservaAgenda({ aplicarEm: 'registro' });
-      } finally {
-        agendaSetProcessando(false);
-      }
-    });
-  }
-  if (btnExcluirConfirmCancelarRec) {
-    btnExcluirConfirmCancelarRec.addEventListener('click', () => {
-      const overlay = document.getElementById('agendaExcluirConfirm');
-      if (overlay) overlay.style.display = 'none';
-    });
-  }
-  if (btnExcluirConfirmEsta) {
-    btnExcluirConfirmEsta.addEventListener('click', async () => {
-      const overlay = document.getElementById('agendaExcluirConfirm');
-      if (overlay) overlay.style.display = 'none';
-      agendaSetProcessando(true);
-      try {
-        await excluirReservaAgenda({ aplicarEm: 'este_dia' });
-      } finally {
-        agendaSetProcessando(false);
-      }
-    });
-  }
-  if (btnExcluirConfirmFuturos) {
-    btnExcluirConfirmFuturos.addEventListener('click', async () => {
-      const overlay = document.getElementById('agendaExcluirConfirm');
-      if (overlay) overlay.style.display = 'none';
-      agendaSetProcessando(true);
-      try {
-        await excluirReservaAgenda({ aplicarEm: 'todos_futuros' });
+        await excluirReservaAgenda();
       } finally {
         agendaSetProcessando(false);
       }
