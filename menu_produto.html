@@ -1731,13 +1731,26 @@
                   <span>Recarregar</span>
                 </button>
               </div>
-              
+
+              <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px;">
+                <div style="flex:1 1 320px;min-width:260px;position:relative;">
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#64748b;font-size:14px;"></i>
+                  <input id="recebimentoGlobalSearch" type="search" placeholder="Pesquisar em todas as colunas..." style="width:100%;padding:12px 14px 12px 40px;border:1px solid #cbd5e1;border-radius:10px;background:#ffffff;color:#0f172a;font-size:14px;outline:none;">
+                </div>
+                <div id="recebimentoFilterSummary" style="flex:0 1 auto;padding:10px 14px;border-radius:10px;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:600;">
+                  Sem filtros ativos
+                </div>
+                <button id="recebimentoClearFiltersBtn" type="button" class="content-button" style="background:#e2e8f0;color:#0f172a;padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;">
+                  Limpar filtros
+                </button>
+              </div>
+
               <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
                 <div style="overflow:auto;max-height:calc(100vh - 260px);">
                   <table style="width:100%;border-collapse:separate;border-spacing:0;font-size:14px;">
                     <thead>
                       <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;width:40px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);"></th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;min-width:220px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Produto</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Nº Pedido</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Etapa_NF</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Solicitante</th>
@@ -1748,6 +1761,41 @@
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Criado em</th>
                         <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Vlr.</th>
                         <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Ações</th>
+                      </tr>
+                      <tr style="background:#e2e8f0;">
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterProduto" type="text" placeholder="Filtrar produto" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterPedido" type="text" placeholder="Filtrar pedido" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterEtapa" type="text" placeholder="Filtrar etapa" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterSolicitante" type="text" placeholder="Filtrar solicitante" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterPrevisao" type="text" placeholder="Filtrar previsao" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterResponsavel" type="text" placeholder="Filtrar responsavel" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterFornecedor" type="text" placeholder="Filtrar fornecedor" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterObservacao" type="text" placeholder="Filtrar observacao" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterCriadoEm" type="text" placeholder="Filtrar criado em" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterValor" type="text" placeholder="Filtrar valor" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                          <input id="recebimentoFilterAcoes" type="text" placeholder="Filtrar NF" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                        </th>
                       </tr>
                     </thead>
                     <tbody id="recebimentoTbody">
@@ -2544,7 +2592,7 @@
                       <span>Duração em horas</span>
                       <select id="agendaDuracaoHoras">
                         <option value="">-- horas --</option>
-                        <option value="1" selected>1 hora</option>
+                        <option value="1">1 hora</option>
                         <option value="2">2 horas</option>
                         <option value="3">3 horas</option>
                         <option value="4">4 horas</option>
@@ -2593,7 +2641,7 @@
                 <div style="grid-column:1/-1;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
                   <div id="agendaGrupoRepetirMeses" style="display:none;">
                     <label class="agenda-cafe-check">
-                      <span>Repetir todos os dias futuros dos meses seguintes</span>
+                      <span>Repetir todos os meses</span>
                       <input id="agendaRepetirTodosMeses" type="checkbox" />
                     </label>
                   </div>
@@ -2685,18 +2733,16 @@
 
               <!-- Seção de anexos — lista abaixo dos botões -->
               <div id="agendaSecaoAnexos" style="margin-top:16px;">
-                <div style="display:flex;justify-content:flex-start;margin-bottom:8px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:13px;font-weight:600;color:var(--content-title-color);">
+                    <i class="fa-solid fa-paperclip" style="margin-right:5px;"></i>Anexos
+                  </span>
                   <label style="cursor:pointer;margin:0;">
-                    <span class="content-button" style="padding:5px 12px;font-size:12px;display:inline-flex;align-items:center;gap:6px;">
+                    <span style="font-size:12px;color:#60a5fa;cursor:pointer;">
                       <i class="fa-solid fa-plus"></i> Anexar arquivo
                     </span>
                     <input id="agendaAnexoInput" type="file" style="display:none;" />
                   </label>
-                </div>
-                <div style="display:flex;align-items:center;justify-content:flex-start;margin-bottom:8px;">
-                  <span style="font-size:13px;font-weight:600;color:var(--content-title-color);">
-                    <i class="fa-solid fa-paperclip" style="margin-right:5px;"></i>Anexos
-                  </span>
                 </div>
                 <div id="agendaAnexosLista" style="display:flex;flex-direction:column;gap:6px;"></div>
                 <span id="agendaAnexosVazio" style="font-size:12px;color:var(--inactive-color);font-style:italic;">Nenhum arquivo anexado</span>
@@ -2706,18 +2752,11 @@
               <div id="agendaExcluirConfirm" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
                 <i class="fa-solid fa-triangle-exclamation" style="font-size:30px;color:#f87171;"></i>
                 <p id="agendaExcluirConfirmTexto" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
-                <div id="agendaExcluirConfirmAcoesPadrao" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
                   <button id="agendaExcluirConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
                   <button id="agendaExcluirConfirmSim" type="button" class="content-button" style="background:#dc2626;color:#fff;border:none;padding:8px 18px;">
                     <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Sim, excluir
                   </button>
-                </div>
-                <div id="agendaExcluirConfirmAcoesRecorrente" style="display:none;flex-direction:column;gap:10px;align-items:center;">
-                  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-                    <button id="agendaExcluirConfirmEsta" type="button" class="content-button" style="padding:8px 16px;">Excluir só este evento</button>
-                    <button id="agendaExcluirConfirmFuturos" type="button" class="content-button" style="background:#b45309;color:#fff;border:none;padding:8px 16px;">Excluir todos os futuros</button>
-                  </div>
-                  <button id="agendaExcluirConfirmCancelarRec" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
                 </div>
               </div>
 
@@ -2735,20 +2774,11 @@
               <!-- Overlay de escolha de escopo ao alterar horário em reunião recorrente -->
               <div id="agendaEscopoHorarioOverlay" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:22;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
                 <i class="fa-solid fa-clock-rotate-left" style="font-size:28px;color:#60a5fa;"></i>
-                <p id="agendaEscopoHorarioMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;">Você alterou uma reunião recorrente. Escolha como aplicar:</p>
-                <div id="agendaEscopoHorarioAcoes" style="display:flex;flex-direction:column;gap:10px;min-width:320px;max-width:440px;align-items:stretch;">
-                  <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-hover);text-align:left;cursor:pointer;">
-                    <input id="agendaEscopoHorarioChkFuturos" type="checkbox" style="width:15px;height:15px;" />
-                    <span style="color:#e5e7eb;font-size:13px;">Aplicar para todos os dias futuros dos meses seguintes</span>
-                  </label>
-                  <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--theme-hover);text-align:left;cursor:pointer;">
-                    <input id="agendaEscopoHorarioChkManterAta" type="checkbox" checked style="width:15px;height:15px;" />
-                    <span style="color:#e5e7eb;font-size:13px;">Manter histórico de ata de reunião</span>
-                  </label>
-                  <div style="display:flex;gap:10px;justify-content:center;">
-                    <button id="agendaEscopoHorarioCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
-                    <button id="agendaEscopoHorarioSalvar" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;">Salvar</button>
-                  </div>
+                <p id="agendaEscopoHorarioMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;">Você alterou o horário desta reunião recorrente. Onde deseja aplicar a mudança?</p>
+                <div id="agendaEscopoHorarioAcoes" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaEscopoHorarioCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
+                  <button id="agendaEscopoHorarioEsteDia" type="button" class="content-button" style="padding:8px 16px;">Só este dia</button>
+                  <button id="agendaEscopoHorarioFuturos" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;">Todos os futuros</button>
                 </div>
                 <div id="agendaEscopoHorarioLoading" style="display:none;align-items:center;gap:10px;color:#cbd5e1;font-size:13px;">
                   <i class="fa-solid fa-spinner fa-spin" style="color:#60a5fa;"></i>
@@ -8458,13 +8488,13 @@ function attachDropZone(ul) {
     });
   }
 
-  registrarListenerRefresh(configPainelRecebimento);
+  // Recebimento de compras agora usa a implementacao principal em menu_produto.js
   registrarListenerRefresh(configPainelProdutoRecebido);
 
-  registrarListenerNfe(configPainelRecebimento);
+  // Mantem o fluxo legado apenas para "produto recebido"
   registrarListenerNfe(configPainelProdutoRecebido);
 
-  registrarListenerMenu(configPainelRecebimento);
+  // O menu de recebimento principal e controlado pelo script central
   registrarListenerMenu(configPainelProdutoRecebido);
 })();
 </script>
