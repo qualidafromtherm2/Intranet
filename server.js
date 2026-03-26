@@ -27447,8 +27447,17 @@ app.get('/api/compras/cotacoes/:solicitacao_id', async (req, res) => {
                WHERE ci.cotacao_id = c.id
              ), '[]'::jsonb) AS itens_cotacao
       FROM compras.cotacoes c
-      WHERE c.solicitacao_id = $1
-        AND c.table_source = $2
+      WHERE c.table_source = $2
+        AND (
+          c.solicitacao_id = $1
+          OR EXISTS (
+            SELECT 1
+            FROM compras.cotacoes_itens ci_ref
+            WHERE ci_ref.cotacao_id = c.id
+              AND ci_ref.item_origem_id = $1
+              AND ci_ref.table_source = $2
+          )
+        )
       ORDER BY c.criado_em DESC
     `, [solicitacao_id, table_source]);
     
@@ -28374,6 +28383,9 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
 
       ALTER TABLE compras.compras_sem_cadastro
       ADD COLUMN IF NOT EXISTS cod_req_compra TEXT;
+
+      ALTER TABLE compras.compras_sem_cadastro
+      ADD COLUMN IF NOT EXISTS cod_int_req_compra TEXT;
     `);
 
     await pool.query(`

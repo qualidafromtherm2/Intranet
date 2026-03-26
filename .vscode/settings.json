@@ -31,5 +31,7 @@
       ],
       "filterFileRegex": ".*Arvore_do_projeto\\.csv$"
     }
-  }
+  },
+  "git.autoRepositoryDetection": "subFolders",
+  "git.openRepositoryInParentFolders": "never"
 }
