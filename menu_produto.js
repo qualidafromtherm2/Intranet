@@ -23220,17 +23220,26 @@ async function abrirModalCotadoEscolhaItem(itemId) {
 
     if (idsSolicitacaoGrupo.length > 0) {
       try {
+        const fontesBusca = tableSource === 'compras_sem_cadastro'
+          ? ['compras_sem_cadastro', 'solicitacao_compras']
+          : ['solicitacao_compras', 'compras_sem_cadastro'];
+
         const respostasCotacoes = await Promise.all(
           idsSolicitacaoGrupo.map(async (solicitacaoIdGrupo) => {
-            const respCot = await fetch(
-              `/api/compras/cotacoes/${solicitacaoIdGrupo}?table_source=${encodeURIComponent(tableSource)}`,
-              { credentials: 'include' }
-            );
-            if (!respCot.ok) return [];
-            const data = await respCot.json();
-            return Array.isArray(data?.cotacoes)
-              ? data.cotacoes
-              : (Array.isArray(data) ? data : []);
+            const acumulado = [];
+            for (const fonte of fontesBusca) {
+              const respCot = await fetch(
+                `/api/compras/cotacoes/${solicitacaoIdGrupo}?table_source=${encodeURIComponent(fonte)}`,
+                { credentials: 'include' }
+              );
+              if (!respCot.ok) continue;
+              const data = await respCot.json();
+              const cotacoesFonte = Array.isArray(data?.cotacoes)
+                ? data.cotacoes
+                : (Array.isArray(data) ? data : []);
+              if (cotacoesFonte.length > 0) acumulado.push(...cotacoesFonte);
+            }
+            return acumulado;
           })
         );
 
