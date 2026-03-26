@@ -28374,6 +28374,9 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
 
       ALTER TABLE compras.compras_sem_cadastro
       ADD COLUMN IF NOT EXISTS cod_req_compra TEXT;
+
+      ALTER TABLE compras.compras_sem_cadastro
+      ADD COLUMN IF NOT EXISTS cod_int_req_compra TEXT;
     `);
 
     await pool.query(`
