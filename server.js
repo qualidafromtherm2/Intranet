@@ -27884,40 +27884,6 @@ app.post('/api/compras/cotacoes/:id/realizar-requisicao', express.json(), async 
       ? 'compras.compras_sem_cadastro'
       : 'compras.solicitacao_compras';
 
-    const solicitacaoId = Number(cotacao.solicitacao_id);
-    if (!Number.isInteger(solicitacaoId)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'Cotação sem solicitacao_id válido' });
-    }
-
-    const { rows: grupoPaiRows } = await client.query(
-      `
-        SELECT grupo_requisicao
-        FROM ${tableName}
-        WHERE id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [solicitacaoId]
-    );
-
-    if (!grupoPaiRows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ ok: false, error: 'Item de referência da cotação não encontrado na tabela de origem' });
-    }
-
-    const grupoPaiOriginal = String(grupoPaiRows[0]?.grupo_requisicao || '').trim();
-    if (!grupoPaiOriginal) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'Grupo de requisição não encontrado no item de referência' });
-    }
-
-    const grupoPaiBase = grupoPaiOriginal.split('.').shift();
-    if (!grupoPaiBase) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'Grupo de requisição base inválido' });
-    }
-
     const { rows: cotacaoItensRows } = await client.query(
       `
         SELECT item_origem_id
@@ -27938,6 +27904,51 @@ app.post('/api/compras/cotacoes/:id/realizar-requisicao', express.json(), async 
     if (!itensOrigemIds.length) {
       await client.query('ROLLBACK');
       return res.status(400).json({ ok: false, error: 'Cotação sem itens vinculados para desmembrar' });
+    }
+
+    const solicitacaoId = Number(cotacao.solicitacao_id);
+    const referenciaInicialId = Number.isInteger(solicitacaoId)
+      ? solicitacaoId
+      : itensOrigemIds[0];
+
+    const { rows: grupoPaiRows } = await client.query(
+      `
+        SELECT grupo_requisicao
+        FROM ${tableName}
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [referenciaInicialId]
+    );
+
+    let grupoPaiOriginal = String(grupoPaiRows[0]?.grupo_requisicao || '').trim();
+
+    if (!grupoPaiOriginal) {
+      const { rows: fallbackGrupoRows } = await client.query(
+        `
+          SELECT grupo_requisicao
+          FROM ${tableName}
+          WHERE id = ANY($1::int[])
+            AND NULLIF(TRIM(COALESCE(grupo_requisicao, '')), '') IS NOT NULL
+          ORDER BY id ASC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [itensOrigemIds]
+      );
+      grupoPaiOriginal = String(fallbackGrupoRows[0]?.grupo_requisicao || '').trim();
+    }
+
+    if (!grupoPaiOriginal) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Item de referência da cotação não encontrado na tabela de origem' });
+    }
+
+    const grupoPaiBase = grupoPaiOriginal.split('.').shift();
+    if (!grupoPaiBase) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Grupo de requisição base inválido' });
     }
 
     const { rows: gruposExistentesRows } = await client.query(
