@@ -1165,6 +1165,8 @@ let ultimoCodigo = null;      // <-- NOVO
 
 import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
+import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
+import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
 let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
@@ -13030,6 +13032,8 @@ document.getElementById('produtoTabs').style.display = 'none';
 
   // … quaisquer outras inicializações finais …
   initDadosColaboradoresUI();
+  initRhConfiguracaoCargosUI();
+  initRhColaboradoresUI();
   initAnexosUI();
 });  // <--- aqui fecha o DOMContentLoaded
 
