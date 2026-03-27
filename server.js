@@ -115,6 +115,7 @@ app.use(session({
 
 app.use('/api/nav', require('./routes/nav'));
 app.use('/api/colaboradores', require('./routes/colaboradores'));
+app.use('/api/rh', require('./routes/rhCargos'));
 app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
@@ -688,6 +689,73 @@ pool.query('SELECT 1').then(() => {
 async function ensureRhReservasSchema() {
   try {
     await pool.query(`CREATE SCHEMA IF NOT EXISTS rh`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.descricao_cargos (
+        id BIGSERIAL PRIMARY KEY,
+        cargo TEXT NOT NULL,
+        cbo TEXT,
+        descricao_ltcat TEXT,
+        descricao_chao_fabrica TEXT,
+        epi TEXT,
+        treinamentos TEXT,
+        periculosidade TEXT,
+        insalubridade TEXT,
+        equipamentos_ferramentas TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS descricao_cargos_cargo_idx
+      ON rh.descricao_cargos (cargo)
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.colaboradores (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL UNIQUE REFERENCES public.auth_user(id) ON DELETE CASCADE,
+        username TEXT NOT NULL,
+        email TEXT,
+        funcao_id BIGINT REFERENCES public.auth_funcao(id),
+        setor_id BIGINT REFERENCES public.auth_sector(id),
+        cargo_id BIGINT REFERENCES rh.descricao_cargos(id),
+        cargo TEXT,
+        cbo TEXT,
+        descricao_ltcat TEXT,
+        descricao_chao_fabrica TEXT,
+        epi TEXT,
+        treinamentos TEXT,
+        periculosidade TEXT,
+        insalubridade TEXT,
+        equipamentos_ferramentas TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS rh_colaboradores_username_idx
+      ON rh.colaboradores (username)
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.colaboradores_anexos (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
+        nome_arquivo TEXT NOT NULL,
+        url_arquivo TEXT NOT NULL,
+        path_arquivo TEXT NOT NULL,
+        enviado_por TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS rh_colaboradores_anexos_user_idx
+      ON rh.colaboradores_anexos (user_id, created_at DESC)
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rh.reservas_ambientes (
