@@ -210,7 +210,8 @@ router.post('/tema', express.json(), async (req, res) => {
 router.get('/tema', async (req, res) => {
   try {
     if (!req.session.user?.id) {
-      return res.status(401).json({ error: 'Não autenticado' });
+      // Sem sessão: retorna padrão sem erro (evita 401 desnecessário no console)
+      return res.json({ theme: 'dark', authenticated: false });
     }
 
     const userId = req.session.user.id;
@@ -220,7 +221,7 @@ router.get('/tema', async (req, res) => {
     );
 
     const theme = rows[0]?.theme_preference || 'dark';
-    res.json({ theme });
+    res.json({ theme, authenticated: true });
   } catch (err) {
     console.error('[auth/tema]', err);
     res.status(500).json({ error: 'Falha ao recuperar tema' });

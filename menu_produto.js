@@ -5857,7 +5857,278 @@ const atRuaInput = document.getElementById('atRua');
 const atAgendarComInput = document.getElementById('atAgendarCom');
 const atDescricaoInput = document.getElementById('atDescricao');
 const atEnviarBtn = document.getElementById('atEnviarBtn');
+const atModeloInput = document.getElementById('atModelo');
+const atTagProblemaInput = document.getElementById('atTagProblema');
+const atPlataformaInput = document.getElementById('atPlataformaAtendimento');
 const atEnvioStatus = document.getElementById('atEnvioStatus');
+const atAnexoBtn = document.getElementById('atAnexoBtn');
+const atAnexoInput = document.getElementById('atAnexoInput');
+const atAnexoPreview = document.getElementById('atAnexoPreview');
+
+// -------- Gestão de anexos pendentes (antes de salvar a OS) --------
+let _atAnexosPendentes = []; // Array de File objects
+
+function _atRenderAnexoChips() {
+  if (!atAnexoPreview) return;
+  atAnexoPreview.innerHTML = '';
+  _atAnexosPendentes.forEach((file, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'at-anexo-chip';
+    chip.innerHTML = `<i class="fa-solid fa-file" style="color:#f59e0b;flex-shrink:0;"></i><span title="${file.name}">${file.name}</span><button type="button" title="Remover" data-idx="${idx}">&times;</button>`;
+    chip.querySelector('button').addEventListener('click', () => {
+      _atAnexosPendentes.splice(idx, 1);
+      _atRenderAnexoChips();
+    });
+    atAnexoPreview.appendChild(chip);
+  });
+}
+
+if (atAnexoBtn && atAnexoInput) {
+  atAnexoBtn.addEventListener('click', () => atAnexoInput.click());
+  atAnexoInput.addEventListener('change', () => {
+    Array.from(atAnexoInput.files || []).forEach(f => _atAnexosPendentes.push(f));
+    atAnexoInput.value = ''; // reset para permitir selecionar o mesmo arquivo novamente
+    _atRenderAnexoChips();
+  });
+}
+
+async function _atFazerUploadAnexos(idAt) {
+  if (!_atAnexosPendentes.length) return;
+  const form = new FormData();
+  _atAnexosPendentes.forEach(f => form.append('arquivo', f));
+  try {
+    const r = await fetch(`/api/sac/at/anexos/${idAt}`, { method: 'POST', body: form });
+    if (!r.ok) console.warn('[SAC/AT] falha parcial no upload de anexos:', await r.text());
+  } catch (e) {
+    console.error('[SAC/AT] erro no upload de anexos:', e);
+  }
+  _atAnexosPendentes = [];
+  _atRenderAnexoChips();
+}
+
+// -------- Modal de ver/excluir anexos --------
+const atAnexosModal = document.getElementById('atAnexosModal');
+const atAnexosModalClose = document.getElementById('atAnexosModalClose');
+const atAnexosList = document.getElementById('atAnexosList');
+const atAnexosModalTitle = document.getElementById('atAnexosModalTitle');
+
+function _atMimeIcon(ct) {
+  if (!ct) return 'fa-file';
+  if (ct.startsWith('image/')) return 'fa-file-image';
+  if (ct === 'application/pdf') return 'fa-file-pdf';
+  if (ct.includes('word')) return 'fa-file-word';
+  if (ct.includes('sheet') || ct.includes('excel')) return 'fa-file-excel';
+  if (ct.startsWith('video/')) return 'fa-file-video';
+  return 'fa-file';
+}
+
+function _atFormatBytes(bytes) {
+  const n = Number(bytes);
+  if (!n) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n/1024).toFixed(1)} KB`;
+  return `${(n/1024/1024).toFixed(1)} MB`;
+}
+
+function _atIsImage(ct) { return ct && ct.startsWith('image/'); }
+
+function _atRenderAnexoLista(container, anexos, idAt, onDelete) {
+  // grade de imagens
+  const imgs = anexos.filter(a => _atIsImage(a.content_type));
+  const outros = anexos.filter(a => !_atIsImage(a.content_type));
+
+  if (imgs.length) {
+    const grid = document.createElement('div');
+    grid.className = 'at-anx-img-grid';
+    imgs.forEach(anx => {
+      const card = document.createElement('div');
+      card.className = 'at-anx-img-card';
+      const img = document.createElement('img');
+      img.className = 'at-anx-img-thumb';
+      img.src = anx.url_publica;
+      img.alt = anx.nome_arquivo;
+      img.loading = 'lazy';
+      const overlay = document.createElement('div');
+      overlay.className = 'at-anx-img-overlay';
+      overlay.innerHTML = `<i class="fa-solid fa-magnifying-glass-plus"></i><span class="at-anx-img-name">${anx.nome_arquivo}</span>`;
+      const del = document.createElement('button');
+      del.className = 'at-anx-img-del';
+      del.type = 'button';
+      del.title = 'Excluir';
+      del.innerHTML = '<i class="fa-solid fa-trash"></i>';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Excluir este anexo?')) return;
+        try {
+          const rd = await fetch(`/api/sac/at/anexos/${idAt}/${anx.id}`, { method: 'DELETE' });
+          if (rd.ok) { card.remove(); if (onDelete) onDelete(); }
+          else alert('Erro ao excluir anexo.');
+        } catch(err) { alert('Erro ao excluir anexo.'); }
+      });
+      card.appendChild(img);
+      card.appendChild(overlay);
+      card.appendChild(del);
+      card.addEventListener('click', () => _atAbrirLightbox(anx.url_publica, anx.nome_arquivo));
+      grid.appendChild(card);
+    });
+    container.appendChild(grid);
+  }
+
+  // outros arquivos
+  outros.forEach(anx => {
+    const item = document.createElement('div');
+    item.className = 'at-anx-item';
+    const dt = anx.criado_em ? new Date(anx.criado_em).toLocaleString('pt-BR') : '';
+    // PDFs e office abrem inline; resto baixa
+    const podeAbrir = /pdf|text\/|officedocument|opendocument|msword|sheet|presentation/i.test(anx.content_type || '');
+    item.innerHTML = `
+      <i class="fa-solid ${_atMimeIcon(anx.content_type)} at-anx-icon"></i>
+      <div class="at-anx-info">
+        <div class="at-anx-name" title="${anx.nome_arquivo}">${anx.nome_arquivo}</div>
+        <div class="at-anx-meta">${_atFormatBytes(anx.tamanho_bytes)}${anx.enviado_por ? ' · ' + anx.enviado_por : ''}${dt ? ' · ' + dt : ''}</div>
+      </div>
+      <div class="at-anx-actions">
+        ${podeAbrir ? `<a class="at-anx-open" href="${anx.url_publica}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir</a>` : ''}
+        <a class="at-anx-dl" href="${anx.url_publica}" target="_blank" rel="noopener" download>
+          <i class="fa-solid fa-download"></i> Baixar
+        </a>
+        <button class="at-anx-del" type="button" data-id="${anx.id}" data-idat="${idAt}">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>`;
+    item.querySelector('.at-anx-del').addEventListener('click', async function() {
+      if (!confirm('Excluir este anexo?')) return;
+      try {
+        const rd = await fetch(`/api/sac/at/anexos/${idAt}/${anx.id}`, { method: 'DELETE' });
+        if (rd.ok) { item.remove(); if (onDelete) onDelete(); }
+        else alert('Erro ao excluir anexo.');
+      } catch(e) { alert('Erro ao excluir anexo.'); }
+    });
+    container.appendChild(item);
+  });
+}
+
+function _atAbrirLightbox(url, nome) {
+  const lb = document.getElementById('atLightbox');
+  if (!lb) return;
+  document.getElementById('atLbImg').src = url;
+  document.getElementById('atLbName').textContent = nome;
+  document.getElementById('atLbDl').href = url;
+  lb.style.display = 'flex';
+}
+
+async function _atVerAnexos(idAt, titulo) {
+  if (!atAnexosModal || !atAnexosList) return;
+  atAnexosModalTitle.textContent = `Anexos — #${idAt}${titulo ? ' · ' + titulo : ''}`;
+  atAnexosList.innerHTML = '<span style="color:var(--inactive-color);font-size:13px;">Carregando...</span>';
+  atAnexosModal.style.display = 'flex';
+  try {
+    const r = await fetch(`/api/sac/at/anexos/${idAt}`);
+    const data = await r.json();
+    const anexos = data.anexos || [];
+    atAnexosList.innerHTML = '';
+    if (!anexos.length) {
+      atAnexosList.innerHTML = '<span style="color:var(--inactive-color);font-size:13px;">Nenhum anexo neste atendimento.</span>';
+      return;
+    }
+    _atRenderAnexoLista(atAnexosList, anexos, idAt, null);
+  } catch(e) {
+    atAnexosList.innerHTML = '<span style="color:#f87171;font-size:13px;">Erro ao carregar anexos.</span>';
+  }
+}
+
+if (atAnexosModalClose) atAnexosModalClose.addEventListener('click', () => { if (atAnexosModal) atAnexosModal.style.display = 'none'; });
+if (atAnexosModal) atAnexosModal.addEventListener('click', e => { if (e.target === atAnexosModal) atAnexosModal.style.display = 'none'; });
+
+// Lightbox
+const _atLightbox = document.getElementById('atLightbox');
+const _atLbClose  = document.getElementById('atLbClose');
+if (_atLbClose)  _atLbClose.addEventListener('click', () => { if (_atLightbox) _atLightbox.style.display = 'none'; });
+if (_atLightbox) _atLightbox.addEventListener('click', e => { if (e.target === _atLightbox) _atLightbox.style.display = 'none'; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && _atLightbox && _atLightbox.style.display === 'flex') _atLightbox.style.display = 'none'; });
+
+// ---------- Combobox com valores do banco ----------
+function inicializarComboboxAt(inputEl, dropdownEl, campo) {
+  if (!inputEl || !dropdownEl) return;
+  let opcoesBanco = [];
+  let carregado = false;
+
+  async function carregarOpcoes() {
+    if (carregado) return;
+    try {
+      const r = await fetch(`/api/sac/at/opcoes-campo?campo=${campo}`);
+      const data = await r.json();
+      if (data.ok) opcoesBanco = data.opcoes || [];
+      carregado = true;
+    } catch (_) {}
+  }
+
+  function renderDropdown(filtro) {
+    const termo = filtro.toLowerCase().trim();
+    const filtradas = termo
+      ? opcoesBanco.filter(o => o.toLowerCase().includes(termo))
+      : opcoesBanco;
+
+    const itens = filtradas.map(o => {
+      const div = document.createElement('div');
+      div.className = 'at-combobox-item';
+      div.textContent = o;
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        inputEl.value = o;
+        fecharDropdown();
+      });
+      return div;
+    });
+
+    // Opção "Adicionar" se valor digitado não está na lista
+    const exato = opcoesBanco.some(o => o.toLowerCase() === termo);
+    if (termo && !exato) {
+      const divNovo = document.createElement('div');
+      divNovo.className = 'at-combobox-item novo';
+      divNovo.textContent = `Adicionar: "${filtro.trim()}"`;
+      divNovo.addEventListener('mousedown', e => {
+        e.preventDefault();
+        inputEl.value = filtro.trim();
+        fecharDropdown();
+      });
+      itens.unshift(divNovo);
+    }
+
+    dropdownEl.innerHTML = '';
+    itens.forEach(i => dropdownEl.appendChild(i));
+    dropdownEl.classList.toggle('aberto', itens.length > 0);
+  }
+
+  function fecharDropdown() {
+    dropdownEl.classList.remove('aberto');
+    dropdownEl.innerHTML = '';
+  }
+
+  inputEl.addEventListener('focus', async () => {
+    await carregarOpcoes();
+    renderDropdown(inputEl.value);
+  });
+
+  inputEl.addEventListener('input', () => renderDropdown(inputEl.value));
+
+  document.addEventListener('click', e => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) fecharDropdown();
+  });
+}
+
+// Inicializa combobox para ambos os campos
+inicializarComboboxAt(
+  atTagProblemaInput,
+  document.getElementById('atTagProblemaDropdown'),
+  'tag_problema'
+);
+inicializarComboboxAt(
+  atPlataformaInput,
+  document.getElementById('atPlataformaAtendimentoDropdown'),
+  'plataforma_atendimento'
+);
+// ---------------------------------------------------
 const atSerieBuscaInput = document.getElementById('atSerieBusca');
 const atSerieBuscaBtn = document.getElementById('atSerieBuscaBtn');
 const atSerieReabrirBtn = document.getElementById('atSerieReabrirBtn');
@@ -5925,6 +6196,26 @@ const setAtEnvioStatus = (text, isError = false) => {
   atEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
   atEnvioStatus.textContent = text || '';
 };
+
+function aplicarVisibilidadeAtCampos() {
+  const isRapido = atTipoAtendimentoInput?.value === 'Atendimento rápido';
+  document.querySelectorAll('.at-campo-fullonly').forEach(el => {
+    el.style.display = isRapido ? 'none' : '';
+  });
+  document.querySelectorAll('.at-campo-rapidoonly').forEach(el => {
+    el.style.display = isRapido ? '' : 'none';
+  });
+  if (atSerieSelecionadaBox && isRapido) {
+    limparAtSerieSelecionada();
+  }
+  if (atSerieBuscaStatus && isRapido) {
+    atSerieBuscaStatus.textContent = '';
+  }
+}
+
+if (atTipoAtendimentoInput) {
+  atTipoAtendimentoInput.addEventListener('change', aplicarVisibilidadeAtCampos);
+}
 
 const setAtSerieBuscaStatus = (text, isError = false) => {
   if (!atSerieBuscaStatus) return;
@@ -6025,40 +6316,535 @@ function preencherAtSerieSelecionada(row) {
 
 function limparAtSerieSelecionada() {
   atSerieSelectedRow = null;
+  atIdExistente = null;
   if (!atSerieSelecionadaBox) return;
   atSerieSelecionadaBox.style.display = 'none';
+  const hist = document.getElementById('atDescricaoHistorico');
+  if (hist) hist.innerHTML = '';
 }
 
-function renderAtAtendimentosRows(rows) {
-  if (!atAtendimentosTbody) return;
-  if (!Array.isArray(rows) || !rows.length) {
-    atAtendimentosTbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum atendimento encontrado.</td></tr>';
+async function carregarHistoricoReclamacao(ordemProducao, modelo) {
+  const container = document.getElementById('atDescricaoHistorico');
+  if (!container) return;
+  container.innerHTML = '<div style="color:var(--inactive-color);font-size:12px;margin-top:6px;">Carregando histórico...</div>';
+  try {
+    const params = new URLSearchParams();
+    if (ordemProducao) params.set('ordem_producao', ordemProducao);
+    if (modelo) params.set('modelo', modelo);
+    const resp = await fetch(`/api/sac/at/historico-reclamacao?${params.toString()}`, { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao buscar histórico');
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (!rows.length) {
+      container.innerHTML = '';
+      return;
+    }
+    const formatDate = (v) => {
+      if (!v) return '-';
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString('pt-BR');
+    };
+    container.innerHTML = `
+      <div style="margin-top:8px;border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px;background:rgba(239,68,68,.05);">
+        <div style="font-size:11px;font-weight:700;color:#f87171;margin-bottom:8px;letter-spacing:.04em;text-transform:uppercase;">Histórico de Reclamações</div>
+        ${rows.map(r => `
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:12px;">
+            <span style="color:var(--inactive-color);font-size:11px;">${formatDate(r.data)} &mdash; ${escapeAtHtml(r.tipo || '-')}</span><br>
+            <span style="color:var(--content-title-color);">${escapeAtHtml(r.descreva_reclamacao || '')}</span>
+          </div>`).join('')}
+      </div>`;
+  } catch (err) {
+    console.error('[SAC/AT] erro ao carregar histórico de reclamação', err);
+    container.innerHTML = '<div style="color:#f87171;font-size:12px;margin-top:6px;">Erro ao carregar histórico.</div>';
+  }
+}
+
+// ─── estado interno da lista de atendimentos ────────────────────────────────
+let _atAllRows       = [];   // todos os registros carregados
+let _atViewMode      = 'tabela'; // 'tabela' | 'card'
+let _atSortCol       = 'id';
+let _atSortDir       = 'desc'; // 'asc' | 'desc'
+let _atFiltroTimer   = null;
+
+const _atFormatDateBr = (value) => {
+  if (!value) return '-';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('pt-BR');
+};
+
+/** Compara dois valores para ordenação */
+function _atCompare(a, b, col, dir) {
+  let va = a[col] ?? '';
+  let vb = b[col] ?? '';
+  if (col === 'id') { va = Number(va) || 0; vb = Number(vb) || 0; }
+  else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+  if (va < vb) return dir === 'asc' ? -1 : 1;
+  if (va > vb) return dir === 'asc' ? 1 : -1;
+  return 0;
+}
+
+/** Filtra + ordena e re-renderiza conforme o modo atual */
+function _atRenderCurrent() {
+  const filtroEl = document.getElementById('atAtendimentosFiltro');
+  const q = String(filtroEl?.value || '').toLowerCase().trim();
+
+  let rows = _atAllRows;
+  if (q) {
+    rows = rows.filter(r =>
+      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
+    );
+  }
+
+  rows = [...rows].sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
+
+  setAtAtendimentosStatus(`${rows.length} atendimento(s).`, false);
+
+  if (_atViewMode === 'card') {
+    _renderAtCards(rows);
+  } else {
+    _renderAtTabela(rows);
+  }
+}
+
+/** Atualiza ícones de sort no thead */
+function _atUpdateSortIcons() {
+  const ths = document.querySelectorAll('#atTabelaWrapper thead th[data-col]');
+  ths.forEach(th => {
+    const ico = th.querySelector('i');
+    if (!ico) return;
+    if (th.dataset.col === _atSortCol) {
+      ico.className = _atSortDir === 'asc'
+        ? 'fa-solid fa-sort-up'
+        : 'fa-solid fa-sort-down';
+      ico.style.opacity = '1';
+      ico.style.color = '#0ea5e9';
+    } else {
+      ico.className = 'fa-solid fa-sort';
+      ico.style.opacity = '.4';
+      ico.style.color = '';
+    }
+  });
+}
+
+/** Renderiza modo tabela — agrupa por ordem_producao igual ao modo card */
+function _renderAtTabela(rows) {
+  const tbody = document.getElementById('atAtendimentosTbody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum atendimento encontrado.</td></tr>';
     return;
   }
 
-  const formatDateBr = (value) => {
-    if (!value) return '-';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleString('pt-BR');
-  };
+  // Agrupa por ordem_producao (mesmo item físico)
+  const groups = [];
+  const byOP = {};
+  rows.forEach(row => {
+    const op = row.ordem_producao;
+    if (op) {
+      if (!byOP[op]) { byOP[op] = []; groups.push({ key: op, rows: byOP[op] }); }
+      byOP[op].push(row);
+    } else {
+      groups.push({ key: null, rows: [row] });
+    }
+  });
 
-  atAtendimentosTbody.innerHTML = rows.map((row) => `
-    <tr>
-      <td>${escapeAtHtml(row.id ?? '-')}</td>
-      <td>${escapeAtHtml(formatDateBr(row.data))}</td>
-      <td>${escapeAtHtml(row.tipo || '-')}</td>
-      <td>${escapeAtHtml(row.nome_revenda_cliente || '-')}</td>
-      <td>${escapeAtHtml(row.descreva_reclamacao || '-')}</td>
-      <td>${escapeAtHtml(row.pedido || '-')}</td>
-      <td>${escapeAtHtml(row.ordem_producao || '-')}</td>
-      <td>${escapeAtHtml(row.modelo || '-')}</td>
-      <td>${escapeAtHtml(row.cliente || '-')}</td>
-      <td>${escapeAtHtml(row.nota_fiscal || '-')}</td>
-      <td>${escapeAtHtml(row.data_entrega || '-')}</td>
-      <td>${escapeAtHtml(row.teste_tipo_gas || '-')}</td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = groups.map(group => {
+    const primary = group.rows[0];
+    const allIds  = group.rows.map(r => r.id);
+    const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
+
+    const idBadges = `<div style="display:flex;flex-wrap:wrap;flex-direction:row;gap:3px;align-items:center;">${
+      allIds.map(aid =>
+        `<span style="background:#0ea5e9;color:#fff;font-size:10px;padding:2px 6px;border-radius:10px;white-space:nowrap;">#${escapeAtHtml(String(aid))}</span>`
+      ).join('')
+    }</div>`;
+
+    const reclamacoes = group.rows
+      .filter(r => r.descreva_reclamacao)
+      .map(r => group.rows.length > 1
+        ? `<div><span style="font-size:10px;color:#0ea5e9;font-weight:700;">#${escapeAtHtml(String(r.id))}</span> ${escapeAtHtml(r.descreva_reclamacao)}</div>`
+        : escapeAtHtml(r.descreva_reclamacao)
+      ).join('');
+
+    const anexoBtn = hasAnexos
+      ? `<button class="at-tbl-anexo-btn" data-id="${escapeAtHtml(String(primary.id))}" data-nome="${escapeAtHtml(primary.nome_revenda_cliente || '')}"
+           type="button" title="Ver/enviar anexos"
+           style="padding:4px 8px;border-radius:6px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.1);color:#f59e0b;cursor:pointer;font-size:12px;">
+           <i class="fa-solid fa-paperclip"></i>
+         </button>`
+      : '';
+
+    return `
+    <tr data-id="${escapeAtHtml(String(primary.id))}" style="cursor:pointer;" title="Clique para editar">
+      <td>${idBadges}</td>
+      <td>${escapeAtHtml(_atFormatDateBr(primary.data))}</td>
+      <td>${escapeAtHtml(primary.tipo || '-')}</td>
+      <td>${escapeAtHtml(primary.nome_revenda_cliente || '-')}</td>
+      <td>${reclamacoes || '-'}</td>
+      <td>${escapeAtHtml(primary.pedido || '-')}</td>
+      <td>${escapeAtHtml(primary.ordem_producao || '-')}</td>
+      <td>${escapeAtHtml(primary.modelo || '-')}</td>
+      <td>${escapeAtHtml(primary.cliente || '-')}</td>
+      <td>${escapeAtHtml(primary.nota_fiscal || '-')}</td>
+      <td>${escapeAtHtml(primary.data_entrega || '-')}</td>
+      <td>${escapeAtHtml(primary.teste_tipo_gas || '-')}</td>
+      <td style="text-align:center;">${anexoBtn}</td>
+    </tr>`;
+  }).join('');
+
+  // clique na linha abre modal de edição
+  tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+    tr.addEventListener('click', e => {
+      if (e.target.closest('.at-tbl-anexo-btn')) return;
+      _abrirAtEditModal(tr.dataset.id);
+    });
+  });
+  // botão de anexo
+  tbody.querySelectorAll('.at-tbl-anexo-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _atVerAnexos(btn.dataset.id, btn.dataset.nome);
+    });
+  });
+}
+
+/** Campo somente-leitura no card */
+function _atCiFieldRO(label, val) {
+  const safe = escapeAtHtml(val || '');
+  return `
+    <div class="at-ci-field">
+      <div class="at-ci-field-lbl">${label}</div>
+      <div class="at-ci-field-val">${safe || '<em style="opacity:.4">—</em>'}</div>
+    </div>`;
+}
+
+/** Renderiza modo card (somente leitura — clique abre modal) */
+function _renderAtCards(rows) {
+  const container = document.getElementById('atCardsContainer');
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = '<div style="text-align:center;padding:32px;color:var(--inactive-color);">Nenhum atendimento encontrado.</div>';
+    return;
+  }
+
+  // Agrupa por ordem_producao (mesmo item físico)
+  const groups = [];
+  const byOP   = {};
+  rows.forEach(row => {
+    const op = row.ordem_producao;
+    if (op) {
+      if (!byOP[op]) { byOP[op] = []; groups.push({ key: op, rows: byOP[op] }); }
+      byOP[op].push(row);
+    } else {
+      groups.push({ key: null, rows: [row] });
+    }
+  });
+
+  const empty = `<em style="opacity:.4">—</em>`;
+
+  container.innerHTML = groups.map(group => {
+    const primary = group.rows[0];
+    const id      = primary.id;
+    const allIds  = group.rows.map(r => r.id);
+
+    const idBadges = allIds.map(aid =>
+      `<span class="at-ci-badge">#${escapeAtHtml(String(aid))}</span>`
+    ).join('');
+
+    const editInfo = primary.editado_por
+      ? `<span class="at-ci-editado" title="Editado em ${escapeAtHtml(_atFormatDateBr(primary.editado_em))}">✎ ${escapeAtHtml(primary.editado_por)}</span>`
+      : '';
+
+    const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
+    const anexoBtnCard = hasAnexos
+      ? `<button class="at-card-anexo-btn" data-id="${escapeAtHtml(String(id))}" data-nome="${escapeAtHtml(primary.nome_revenda_cliente || '')}"
+           type="button" title="Ver/enviar anexos" style="background:none;border:none;cursor:pointer;color:#f59e0b;padding:2px 4px;font-size:13px;flex-shrink:0;">
+           <i class="fa-solid fa-paperclip"></i>
+         </button>`
+      : '';
+
+    const reclamacoes = group.rows
+      .filter(r => r.descreva_reclamacao)
+      .map(r => `<div class="at-ci-reclam-item"><span class="at-ci-reclam-id">#${escapeAtHtml(String(r.id))}</span>${escapeAtHtml(r.descreva_reclamacao)}</div>`)
+      .join('');
+    const descPrimary = escapeAtHtml(primary.descreva_reclamacao || '');
+
+    const fRow = group.rows.find(r =>
+      r.fech_tag || r.fech_descricao || r.fech_obs || r.fech_valor_mo || r.fech_data_conclusao || r.fech_valor_pecas);
+
+    const fechInfo = fRow ? `
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(74,222,128,.2);">
+        <div style="font-size:9px;text-transform:uppercase;color:#4ade80;font-weight:700;letter-spacing:.06em;margin-bottom:3px;">
+          <i class="fa-solid fa-circle-check"></i> Fechamento
+        </div>
+        ${fRow.fech_data_conclusao ? `<div style="font-size:11px;color:var(--inactive-color);">Conclusão: ${escapeAtHtml(String(fRow.fech_data_conclusao).slice(0,10))}</div>` : ''}
+        ${fRow.fech_valor_mo ? `<div style="font-size:11px;color:var(--inactive-color);">M.O.: R$ ${escapeAtHtml(String(fRow.fech_valor_mo))}</div>` : ''}
+      </div>` : '';
+
+    return `
+    <div class="at-card-item" data-id="${id}" style="cursor:pointer;" title="Clique para editar">
+      <div class="at-ci-header">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;flex:1;min-width:0;">
+          ${idBadges}
+          <span class="at-ci-date">${escapeAtHtml(_atFormatDateBr(primary.data))}</span>
+          <span class="at-ci-tipo">${escapeAtHtml(primary.tipo || '-')}</span>
+          ${editInfo}
+        </div>
+        ${anexoBtnCard}
+      </div>
+      <div class="at-ci-fields">
+        ${_atCiFieldRO('Cliente', primary.nome_revenda_cliente)}
+        ${_atCiFieldRO('Telefone', primary.telefone)}
+        ${_atCiFieldRO('Modelo', primary.modelo)}
+        ${_atCiFieldRO('Estado', primary.estado)}
+        ${_atCiFieldRO('Tag', primary.tag_problema)}
+        ${_atCiFieldRO('Plataforma', primary.plataforma_atendimento)}
+      </div>
+      <div class="at-ci-desc-area">
+        <div class="at-ci-desc-lbl">Reclamação</div>
+        ${group.rows.length > 1 && reclamacoes
+          ? `<div class="at-ci-reclam-list">${reclamacoes}</div>`
+          : `<div class="at-ci-desc-val">${descPrimary || empty}</div>`}
+      </div>
+      ${fechInfo}
+    </div>`;
+  }).join('');
+
+  // clique no card abre modal de edição (exceto no botão de anexo)
+  container.querySelectorAll('.at-card-item').forEach(card => {
+    card.addEventListener('click', e => {
+      if (e.target.closest('.at-card-anexo-btn')) return;
+      _abrirAtEditModal(card.dataset.id);
+    });
+  });
+  // botão de anexo no card
+  container.querySelectorAll('.at-card-anexo-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _atVerAnexos(btn.dataset.id, btn.dataset.nome);
+    });
+  });
+}
+
+function _atCardToggleEdit()  { /* substituído por modal */ }
+function _atCardMarkDirty()   { /* substituído por modal */ }
+function _atCardSave()        { /* substituído por modal */ }
+
+// ── Modal de edição de OS ────────────────────────────────────────────────────
+let _atEditModalCurrentId = null;
+let _atEmAnexosPendentes = [];
+
+function _atEmRenderChips() {
+  const ct = document.getElementById('atEmAnexosChips');
+  if (!ct) return;
+  ct.innerHTML = _atEmAnexosPendentes.map((f, i) =>
+    `<span class="at-anexo-chip">${escapeAtHtml(f.name)} <span data-emidx="${i}" style="cursor:pointer;margin-left:4px;color:#f87171;">×</span></span>`
+  ).join('');
+  ct.querySelectorAll('[data-emidx]').forEach(x => {
+    x.addEventListener('click', () => {
+      _atEmAnexosPendentes.splice(Number(x.dataset.emidx), 1);
+      _atEmRenderChips();
+    });
+  });
+}
+
+async function _atEmCarregarAnexosExistentes(idAt) {
+  const ct = document.getElementById('atEmAnexosExistentes');
+  if (!ct) return;
+  ct.innerHTML = '<span style="font-size:12px;color:var(--inactive-color);">Carregando...</span>';
+  try {
+    const r = await fetch(`/api/sac/at/anexos/${idAt}`, { credentials: 'include' });
+    const data = await r.json().catch(() => ({ anexos: [] }));
+    const lista = data.anexos || [];
+    ct.innerHTML = '';
+    if (!lista.length) return;
+    _atRenderAnexoLista(ct, lista, idAt, () => {
+      // Atualiza contagem no cache após exclusão
+      const row = _atAllRows.find(row => String(row.id) === String(idAt));
+      if (row && row.qtd_anexos > 0) row.qtd_anexos = String(Number(row.qtd_anexos) - 1);
+      _atRenderCurrent();
+    });
+  } catch { ct.innerHTML = ''; }
+}
+
+function _abrirAtEditModal(id) {
+  const row = _atAllRows.find(r => String(r.id) === String(id));
+  if (!row) return;
+  _atEditModalCurrentId = id;
+  const modal = document.getElementById('atEditModal');
+  if (!modal) return;
+
+  document.getElementById('atEditModalTitle').textContent = `Editar OS #${id}`;
+
+  const setV = (elId, val) => { const el = document.getElementById(elId); if (el) el.value = val ?? ''; };
+  setV('atEmTelefone',  row.telefone);
+  setV('atEmNome',      row.nome_revenda_cliente);
+  setV('atEmCpf',       row.cpf_cnpj);
+  setV('atEmModelo',    row.modelo);
+  setV('atEmEstado',    row.estado);
+  setV('atEmCidade',    row.cidade);
+  setV('atEmTag',       row.tag_problema);
+  setV('atEmPlataforma',row.plataforma_atendimento);
+
+  const tipoSel = document.getElementById('atEmTipo');
+  if (tipoSel) tipoSel.value = row.tipo || '';
+
+  // Histórico de reclamações do grupo
+  const grpRows = _atAllRows.filter(r => r.ordem_producao && r.ordem_producao === row.ordem_producao && r.descreva_reclamacao);
+  const histDiv = document.getElementById('atEmReclamHistorico');
+  if (grpRows.length && histDiv) {
+    histDiv.style.display = 'block';
+    histDiv.innerHTML = grpRows.map(r =>
+      `<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #374151;">
+        <span style="font-size:10px;color:#0ea5e9;font-weight:700;">#${escapeAtHtml(String(r.id))}</span>
+        <span style="margin-left:5px;font-size:12px;">${escapeAtHtml(r.descreva_reclamacao)}</span>
+      </div>`
+    ).join('');
+  } else if (histDiv) {
+    histDiv.style.display = 'none';
+    histDiv.innerHTML = '';
+  }
+  setV('atEmReclamacao', row.descreva_reclamacao);
+
+  // Fechamento
+  setV('atEmFechTag',        row.fech_tag);
+  setV('atEmFechPlataforma', row.fech_plataforma);
+  setV('atEmFechData',       row.fech_data_conclusao ? String(row.fech_data_conclusao).slice(0,10) : '');
+  setV('atEmFechMO',         row.fech_valor_mo);
+  setV('atEmFechPecasValor', row.fech_valor_pecas);
+  setV('atEmFechPecas',      row.fech_pecas);
+  setV('atEmFechServico',    row.fech_descricao);
+  setV('atEmFechObs',        row.fech_obs);
+  setV('atEmFechMidias',     row.fech_midias);
+
+  // Reset mensagens
+  const emSaved = document.getElementById('atEmSavedMsg');
+  const emErr   = document.getElementById('atEmErrMsg');
+  if (emSaved) emSaved.style.display = 'none';
+  if (emErr)   emErr.style.display   = 'none';
+  const saveBtn = document.getElementById('atEmSaveBtn');
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar'; }
+
+  // Reset anexos pendentes e carrega existentes
+  _atEmAnexosPendentes = [];
+  _atEmRenderChips();
+  _atEmCarregarAnexosExistentes(id);
+
+  modal.style.display = 'flex';
+}
+
+async function _salvarAtEditModal() {
+  const id = _atEditModalCurrentId;
+  if (!id) return;
+  const idStr = String(id);
+
+  const gV = elId => { const el = document.getElementById(elId); return el ? el.value : ''; };
+  const payload = {
+    tipo:                   gV('atEmTipo'),
+    nome_revenda_cliente:   gV('atEmNome'),
+    telefone:               gV('atEmTelefone'),
+    cpf_cnpj:               gV('atEmCpf'),
+    modelo:                 gV('atEmModelo'),
+    estado:                 gV('atEmEstado'),
+    cidade:                 gV('atEmCidade'),
+    tag_problema:           gV('atEmTag'),
+    plataforma_atendimento: gV('atEmPlataforma'),
+    descreva_reclamacao:    gV('atEmReclamacao'),
+  };
+  const fechPayload = {
+    tag_problema:                gV('atEmFechTag'),
+    plataforma_atendimento:      gV('atEmFechPlataforma'),
+    data_conclusao_servico:      gV('atEmFechData')        || null,
+    valor_total_mao_obra:        gV('atEmFechMO')          || null,
+    valor_gasto_pecas:           gV('atEmFechPecasValor')  || null,
+    pecas_reposicao:             gV('atEmFechPecas'),
+    descricao_servico_realizado: gV('atEmFechServico'),
+    observacoes:                 gV('atEmFechObs'),
+    midias_servico:              gV('atEmFechMidias'),
+  };
+  const hasFechData = Object.values(fechPayload).some(v => v && String(v).trim());
+
+  const saveBtn = document.getElementById('atEmSaveBtn');
+  const emSaved = document.getElementById('atEmSavedMsg');
+  const emErr   = document.getElementById('atEmErrMsg');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...'; }
+  if (emSaved) emSaved.style.display = 'none';
+  if (emErr)   emErr.style.display   = 'none';
+
+  try {
+    const resp = await fetch(`/api/sac/at/atendimentos/${id}`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao salvar.');
+
+    if (hasFechData) {
+      const fr = await fetch(`/api/sac/at/fechamento/${id}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fechPayload)
+      });
+      const fd = await fr.json().catch(() => ({}));
+      if (!fr.ok || fd.ok === false) throw new Error(fd.error || 'Falha ao salvar fechamento.');
+    }
+
+    // Atualiza cache local
+    const idx = _atAllRows.findIndex(r => String(r.id) === idStr);
+    if (idx !== -1) {
+      _atAllRows[idx] = {
+        ..._atAllRows[idx], ...payload,
+        editado_por: data.editado_por,
+        editado_em:  data.editado_em,
+        ...(hasFechData ? {
+          fech_tag:            fechPayload.tag_problema,
+          fech_plataforma:     fechPayload.plataforma_atendimento,
+          fech_data_conclusao: fechPayload.data_conclusao_servico,
+          fech_valor_mo:       fechPayload.valor_total_mao_obra,
+          fech_valor_pecas:    fechPayload.valor_gasto_pecas,
+          fech_pecas:          fechPayload.pecas_reposicao,
+          fech_descricao:      fechPayload.descricao_servico_realizado,
+          fech_obs:            fechPayload.observacoes,
+          fech_midias:         fechPayload.midias_servico,
+        } : {})
+      };
+    }
+
+    _atRenderCurrent();
+
+    // Upload de arquivos pendentes do modal
+    if (_atEmAnexosPendentes.length) {
+      const fd = new FormData();
+      _atEmAnexosPendentes.forEach(f => fd.append('arquivo', f));
+      await fetch(`/api/sac/at/anexos/${id}`, { method: 'POST', credentials: 'include', body: fd }).catch(() => null);
+      _atEmAnexosPendentes = [];
+      _atEmRenderChips();
+      // Atualiza contagem no cache para botão 📎 aparecer
+      const rIdx = _atAllRows.findIndex(r => String(r.id) === idStr);
+      if (rIdx !== -1) _atAllRows[rIdx].qtd_anexos = String(Number(_atAllRows[rIdx].qtd_anexos || 0) + 1);
+      _atRenderCurrent();
+    }
+
+    if (emSaved) { emSaved.style.display = 'inline'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar'; }
+    setTimeout(() => {
+      const modal = document.getElementById('atEditModal');
+      if (modal) modal.style.display = 'none';
+    }, 1200);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao salvar modal', err);
+    if (emErr) { emErr.textContent = err?.message || 'Erro ao salvar.'; emErr.style.display = 'inline'; }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar'; }
+  }
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Compat: chamada original — armazena e renderiza */
+function renderAtAtendimentosRows(rows) {
+  _atAllRows = Array.isArray(rows) ? rows : [];
+  _atRenderCurrent();
+  _atUpdateSortIcons();
 }
 
 async function carregarAtAtendimentos() {
@@ -6149,9 +6935,15 @@ function renderAtSerieRows(rows) {
     return;
   }
 
-  atSerieModalTbody.innerHTML = mergedRows.map((row, idx) => `
-    <tr data-at-row-index="${idx}" style="cursor:pointer;">
-      <td>${escapeAtHtml(row.pedido || '-')}</td>
+  atSerieModalTbody.innerHTML = mergedRows.map((row, idx) => {
+    const jaExiste = !!row.ja_existe;
+    const rowStyle = jaExiste
+      ? 'cursor:pointer;color:#f87171;background:rgba(239,68,68,.10);'
+      : 'cursor:pointer;';
+    const titleAttr = jaExiste ? ' title="Este número de série já possui atendimento registrado. Clique para reabrir."' : '';
+    return `
+    <tr data-at-row-index="${idx}" style="${rowStyle}"${titleAttr}>
+      <td>${jaExiste ? '<i class="fa-solid fa-circle-exclamation" style="color:#f87171;margin-right:4px;"></i>' : ''}${escapeAtHtml(row.pedido || '-')}</td>
       <td>${escapeAtHtml(row.ordem_producao || '-')}</td>
       <td>${escapeAtHtml(row.modelo || '-')}</td>
       <td>${escapeAtHtml(row.cliente || '-')}</td>
@@ -6161,12 +6953,15 @@ function renderAtSerieRows(rows) {
       <td>${escapeAtHtml(row.data_entrega || '-')}</td>
       <td>${escapeAtHtml(row.teste_tipo_gas || '-')}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 let atSerieLastRows = [];
 let atSerieRenderedRows = [];
 let atSerieSelectedRow = null;
+let atIdExistente = null; // ID do AT já existente ao clicar em linha vermelha
+const atBuscaSpinner = document.getElementById('atBuscaSpinner');
 
 async function buscarSerieAt() {
   const termo = atSerieBuscaInput?.value?.trim() || '';
@@ -6176,6 +6971,7 @@ async function buscarSerieAt() {
   }
 
   if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = true;
+  if (atBuscaSpinner) atBuscaSpinner.style.display = 'block';
   setAtSerieBuscaStatus('Pesquisando número de série...', false);
 
   try {
@@ -6188,9 +6984,10 @@ async function buscarSerieAt() {
     const rows = Array.isArray(data.rows) ? data.rows : [];
     atSerieLastRows = rows;
     renderAtSerieRows(rows);
+    const isRapido = atTipoAtendimentoInput?.value === 'Atendimento rápido';
     if (rows.length) {
       setAtSerieBuscaStatus(`${rows.length} registro(s) encontrado(s).`, false);
-      if (atSerieReabrirBtn) atSerieReabrirBtn.style.display = 'inline-flex';
+      if (atSerieReabrirBtn && !isRapido) atSerieReabrirBtn.style.display = 'inline-flex';
       openAtSerieModal();
     } else {
       setAtSerieBuscaStatus('Nenhum registro encontrado para este número de série.', false);
@@ -6202,6 +6999,7 @@ async function buscarSerieAt() {
     setAtSerieBuscaStatus(err?.message || 'Erro ao buscar número de série.', true);
   } finally {
     if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = false;
+    if (atBuscaSpinner) atBuscaSpinner.style.display = 'none';
   }
 }
 
@@ -6343,6 +7141,13 @@ if (sacSendBtn) {
 
 if (atEnviarBtn) {
   atEnviarBtn.addEventListener('click', async () => {
+    // Tipo de atendimento é obrigatório
+    if (!atTipoAtendimentoInput?.value?.trim()) {
+      setAtEnvioStatus('Selecione o Tipo de atendimento antes de enviar.', true);
+      atTipoAtendimentoInput?.focus();
+      return;
+    }
+
     atEnviarBtn.disabled = true;
     setAtEnvioStatus('Salvando atendimento...', false);
 
@@ -6360,7 +7165,11 @@ if (atEnviarBtn) {
         rua: atRuaInput?.value?.trim() || null,
         agendar_atendimento_com: atAgendarComInput?.value?.trim() || null,
         descreva_reclamacao: atDescricaoInput?.value?.trim() || null,
+        modelo: atModeloInput?.value?.trim() || null,
+        tag_problema: atTagProblemaInput?.value?.trim() || null,
+        plataforma_atendimento: atPlataformaInput?.value?.trim() || null,
         selected_item: atSerieSelectedRow || null,
+        id_at_existente: atIdExistente || null,
       };
 
       const resp = await fetch('/api/sac/at', {
@@ -6374,7 +7183,14 @@ if (atEnviarBtn) {
         throw new Error(data.error || 'Falha ao salvar atendimento AT.');
       }
 
-      setAtEnvioStatus(`Atendimento salvo com sucesso (ID ${data?.row?.id || 'n/a'}).`, false);
+      // Upload de anexos pendentes após obter o id_at
+      const idAtSalvo = data?.row?.id;
+      if (idAtSalvo && _atAnexosPendentes.length) {
+        setAtEnvioStatus('Enviando anexos...', false);
+        await _atFazerUploadAnexos(idAtSalvo);
+      }
+
+      setAtEnvioStatus(`Atendimento salvo com sucesso (ID ${idAtSalvo || 'n/a'}).`, false);
 
       if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
       if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
@@ -6388,6 +7204,15 @@ if (atEnviarBtn) {
       if (atRuaInput) atRuaInput.value = '';
       if (atAgendarComInput) atAgendarComInput.value = '';
       if (atDescricaoInput) atDescricaoInput.value = '';
+      if (atModeloInput) atModeloInput.value = '';
+      if (atTagProblemaInput) atTagProblemaInput.value = '';
+      if (atPlataformaInput) atPlataformaInput.value = '';
+      const hist = document.getElementById('atDescricaoHistorico');
+      if (hist) hist.innerHTML = '';
+      atIdExistente = null;
+      _atAnexosPendentes = [];
+      _atRenderAnexoChips();
+      aplicarVisibilidadeAtCampos();
       limparAtSerieSelecionada();
     } catch (err) {
       console.error('[SAC/AT] erro ao salvar atendimento', err);
@@ -6456,7 +7281,33 @@ if (atSerieModalTbody) {
     const rowData = atSerieRenderedRows[idx];
     if (!rowData) return;
     preencherAtSerieSelecionada(rowData);
-    setAtSerieBuscaStatus('Item selecionado e preenchido abaixo da pesquisa.', false);
+
+    // Se a linha já tem atendimento registrado, preenche todos os campos do formulário
+    if (rowData.ja_existe && rowData.at_data) {
+      const d = rowData.at_data;
+      atIdExistente = d.id || null;
+      if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = d.tipo || '';
+      if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = d.nome_revenda_cliente || '';
+      if (atTelefoneInput) atTelefoneInput.value = d.numero_telefone || '';
+      if (atCpfCnpjInput) atCpfCnpjInput.value = d.cpf_cnpj || '';
+      if (atCepInput) atCepInput.value = d.cep || '';
+      if (atBairroInput) atBairroInput.value = d.bairro || '';
+      if (atCidadeInput) atCidadeInput.value = d.cidade || '';
+      if (atEstadoInput) atEstadoInput.value = d.estado || '';
+      if (atNumeroInput) atNumeroInput.value = d.numero || '';
+      if (atRuaInput) atRuaInput.value = d.rua || '';
+      if (atAgendarComInput) atAgendarComInput.value = d.agendar_atendimento_com || '';
+      if (atModeloInput) atModeloInput.value = d.at_modelo || '';
+      if (atTagProblemaInput) atTagProblemaInput.value = d.tag_problema || '';
+      if (atPlataformaInput) atPlataformaInput.value = d.plataforma_atendimento || '';
+      if (atDescricaoInput) atDescricaoInput.value = ''; // deixa vazio para nova inserção
+      aplicarVisibilidadeAtCampos();
+      carregarHistoricoReclamacao(rowData.ordem_producao || '', rowData.modelo || '');
+      setAtSerieBuscaStatus('OS existente carregada. Preencha a nova reclamação e envie.', false);
+    } else {
+      setAtSerieBuscaStatus('Item selecionado e preenchido abaixo da pesquisa.', false);
+    }
+
     closeAtSerieModal();
   });
 }
@@ -6468,9 +7319,84 @@ if (atOpenAtendimentosBtn) {
   });
 }
 
+// Toggle lista ↔ card
+const _atViewTabelaBtn = document.getElementById('atViewTabela');
+const _atViewCardBtn   = document.getElementById('atViewCard');
+if (_atViewTabelaBtn) {
+  _atViewTabelaBtn.addEventListener('click', () => {
+    _atViewMode = 'tabela';
+    document.getElementById('atTabelaWrapper').style.display = '';
+    document.getElementById('atCardsContainer').style.display = 'none';
+    _atViewTabelaBtn.style.background = '#0ea5e9';
+    _atViewTabelaBtn.style.color = '#fff';
+    _atViewCardBtn.style.background = 'var(--input-bg,#1e2535)';
+    _atViewCardBtn.style.color = 'var(--inactive-color)';
+    _atRenderCurrent();
+    _atUpdateSortIcons();
+  });
+}
+if (_atViewCardBtn) {
+  _atViewCardBtn.addEventListener('click', () => {
+    _atViewMode = 'card';
+    document.getElementById('atTabelaWrapper').style.display = 'none';
+    document.getElementById('atCardsContainer').style.display = '';
+    _atViewCardBtn.style.background = '#0ea5e9';
+    _atViewCardBtn.style.color = '#fff';
+    _atViewTabelaBtn.style.background = 'var(--input-bg,#1e2535)';
+    _atViewTabelaBtn.style.color = 'var(--inactive-color)';
+    _atRenderCurrent();
+  });
+}
+
+// Filtro de pesquisa
+const _atFiltroEl = document.getElementById('atAtendimentosFiltro');
+if (_atFiltroEl) {
+  _atFiltroEl.addEventListener('input', () => {
+    clearTimeout(_atFiltroTimer);
+    _atFiltroTimer = setTimeout(() => _atRenderCurrent(), 200);
+  });
+}
+
+// Ordenação por coluna (modo tabela)
+document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (_atSortCol === col) {
+      _atSortDir = _atSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      _atSortCol = col;
+      _atSortDir = 'asc';
+    }
+    _atRenderCurrent();
+    _atUpdateSortIcons();
+  });
+});
+
 if (atBackToFormBtn) {
   atBackToFormBtn.addEventListener('click', () => {
     abrirTelaAtFormulario();
+  });
+}
+
+// Listeners modal edição AT
+const _atEditModal      = document.getElementById('atEditModal');
+const _atEditModalClose = document.getElementById('atEditModalClose');
+const _atEmCancelBtn    = document.getElementById('atEmCancelBtn');
+const _atEmSaveBtn      = document.getElementById('atEmSaveBtn');
+if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; });
+if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; });
+if (_atEmSaveBtn)      _atEmSaveBtn.addEventListener('click',      () => _salvarAtEditModal());
+if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) _atEditModal.style.display = 'none'; });
+
+// Botão Anexar arquivo no modal editar
+const _atEmAnexarBtn   = document.getElementById('atEmAnexarBtn');
+const _atEmAnexarInput = document.getElementById('atEmAnexarInput');
+if (_atEmAnexarBtn && _atEmAnexarInput) {
+  _atEmAnexarBtn.addEventListener('click', () => _atEmAnexarInput.click());
+  _atEmAnexarInput.addEventListener('change', () => {
+    Array.from(_atEmAnexarInput.files).forEach(f => _atEmAnexosPendentes.push(f));
+    _atEmAnexarInput.value = '';
+    _atEmRenderChips();
   });
 }
 
@@ -22751,36 +23677,6 @@ window.criarItensOmieAnaliseCadastro = async function() {
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
 
-      // Descrição duplicada: oferece ao user usar o código já cadastrado na Omie
-      if (resp.status === 422 && errData.codigo_existente) {
-        const itemIndexOriginal = indicesOriginaisCodprov[errData.item_index];
-        const itemAlvo = itens[itemIndexOriginal];
-        const confirmar = confirm(
-          `${errData.error}\n\nDeseja usar o código "${errData.codigo_existente}" para o item "${itemAlvo?.descricao || ''}"?`
-        );
-        if (confirmar) {
-          // Atualiza o modal
-          if (itemAlvo) {
-            itemAlvo.produto_codigo = errData.codigo_existente;
-          }
-          window.analiseCadastroItens = itens;
-          // Persiste o novo código no banco
-          const rowId = itemAlvo?.item_origem_id || itemId;
-          const putEndpoint = tableSource === 'compras_sem_cadastro'
-            ? `/api/compras/sem-cadastro/${rowId}`
-            : `/api/compras/solicitacoes/${rowId}`;
-          await fetch(putEndpoint, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ produto_codigo: errData.codigo_existente })
-          });
-          renderizarListaItensAnaliseCadastro();
-          alert(`Código "${errData.codigo_existente}" aplicado ao item. Você pode agora tentar cadastrar novamente.`);
-        }
-        return;
-      }
-
       throw new Error(errData.error || 'Erro ao cadastrar itens na Omie');
     }
 
@@ -23762,6 +24658,39 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
     return;
   }
 
+  // Monta HTML dos anexos existentes para o modo edição
+  const _anexosEdicaoLista = (() => {
+    const raw = item ? item.anexos : null;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch (e) { return []; } }
+    return [];
+  })();
+  const _anexosEdicaoHtml = _anexosEdicaoLista.length ? `
+    <div style="display:grid;gap:6px;">
+      <span style="font-weight:600;font-size:12px;color:#1f2937;">Anexos existentes</span>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+        ${_anexosEdicaoLista.map((anexo, idx) => {
+          const url = typeof anexo === 'string' ? anexo : (anexo?.url || anexo?.path || '');
+          const tipo = anexo?.tipo || 'application/octet-stream';
+          const base64 = anexo?.base64 || '';
+          const href = url || (base64 ? `data:${tipo};base64,${base64}` : 'javascript:void(0)');
+          let nome = typeof anexo === 'string' ? '' : (anexo?.nome || '');
+          if (!nome && url) { try { const s = url.split('?')[0]; nome = decodeURIComponent(s.substring(s.lastIndexOf('/') + 1)) || ''; } catch(e){ nome = url; } }
+          if (!nome) nome = `Anexo ${idx + 1}`;
+          return `<div style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:5px 10px;border-radius:6px;border:1px solid #d1d5db;">
+            <a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:#1f2937;font-size:11px;">
+              <i class="fa-solid fa-paperclip" style="color:#3b82f6;"></i>
+              <span>${escapeHtml(nome)}</span>
+            </a>
+            <button type="button" onclick="excluirAnexoCotacaoKanban(${idx})" title="Excluir anexo" style="background:none;border:none;cursor:pointer;padding:0 0 0 6px;color:#ef4444;display:inline-flex;align-items:center;font-size:12px;">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
   container.innerHTML = `
     <div style="background:#ede9fe;border:2px solid #8b5cf6;border-radius:8px;padding:16px;margin-bottom:16px;">
       <h4 style="margin:0 0 12px 0;font-size:14px;font-weight:700;color:#5b21b6;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -23786,6 +24715,18 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
           <span style="font-weight:600;">Link</span>
           <input id="cotacaoKanbanDetalhesLink" type="text" value="${escapeHtml(linkAtual)}" placeholder="https://..." style="padding:8px;border:1px solid #d1d5db;border-radius:6px;">
         </label>
+        ${_anexosEdicaoHtml}
+        <div style="display:grid;gap:6px;">
+          <span style="font-weight:600;font-size:12px;color:#1f2937;">Anexar arquivo (opcional)</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <input type="file" id="cotacaoKanbanDetalhesAnexoInput" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" style="display:none;" onchange="onCotacaoKanbanDetalhesAnexoChange()">
+            <button type="button" onclick="document.getElementById('cotacaoKanbanDetalhesAnexoInput').click()" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-paperclip"></i>
+              Selecionar arquivo
+            </button>
+            <span id="cotacaoKanbanDetalhesAnexoNome" style="font-size:11px;color:#6b7280;">Nenhum arquivo selecionado</span>
+          </div>
+        </div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
         <button type="button" onclick="cancelarEdicaoDetalhesCotacaoKanban()" style="background:#6b7280;color:#fff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
@@ -23800,6 +24741,83 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
       ${itensGrupoHtml}
     </div>
   `;
+}
+
+window.onCotacaoKanbanDetalhesAnexoChange = function() {
+  const input = document.getElementById('cotacaoKanbanDetalhesAnexoInput');
+  const nomeSpan = document.getElementById('cotacaoKanbanDetalhesAnexoNome');
+  if (input && nomeSpan) {
+    nomeSpan.textContent = input.files && input.files[0] ? input.files[0].name : 'Nenhum arquivo selecionado';
+  }
+};
+
+function construirAnexosItemHtmlCotacaoKanban(item) {  const raw = item ? item.anexos : null;
+  let lista = [];
+  if (raw) {
+    if (Array.isArray(raw)) {
+      lista = raw;
+    } else if (typeof raw === 'string') {
+      try { lista = JSON.parse(raw); } catch (e) { lista = []; }
+    }
+  }
+  if (!lista.length) {
+    return '<div style="margin-top:8px;"><div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong> -</div></div>';
+  }
+  const itensHtml = lista.map((anexo, idx) => {
+    const anexoRaw = typeof anexo === 'string' ? anexo : '';
+    const url = anexoRaw || anexo?.url || anexo?.path || '';
+    const tipo = anexo?.tipo || 'application/octet-stream';
+    const base64 = anexo?.base64 || '';
+    const href = url || (base64 ? `data:${tipo};base64,${base64}` : 'javascript:void(0)');
+    let nome = anexo?.nome || '';
+    if (!nome && url) {
+      try {
+        const semQuery = url.split('?')[0];
+        nome = decodeURIComponent(semQuery.substring(semQuery.lastIndexOf('/') + 1)) || '';
+      } catch (e) { nome = url; }
+    }
+    if (!nome) nome = `Anexo ${idx + 1}`;
+    return `<div style="display:inline-flex;align-items:center;gap:4px;background:#f3f4f6;padding:6px 10px;border-radius:6px;border:1px solid #d1d5db;"><a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:#1f2937;font-size:11px;"><i class="fa-solid fa-paperclip" style="color:#3b82f6;"></i><span>${escapeHtml(nome)}</span></a><button onclick="excluirAnexoCotacaoKanban(${idx})" title="Excluir anexo" style="background:none;border:none;cursor:pointer;padding:0 0 0 6px;color:#ef4444;display:inline-flex;align-items:center;font-size:11px;"><i class="fa-solid fa-trash-can"></i></button></div>`;
+  }).join('');
+  return `<div style="margin-top:8px;"><div style="font-size:11px;color:#6b7280;"><strong>Anexos do Item:</strong></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${itensHtml}</div></div>`;
+}
+
+async function excluirAnexoCotacaoKanban(index) {
+  const itemId = Number(window.cotacaoKanbanItemId);
+  if (!Number.isInteger(itemId)) return;
+  if (!confirm('Deseja remover este anexo?')) return;
+
+  const tableSource = window.cotacaoKanbanTableSource === 'compras_sem_cadastro'
+    ? 'compras_sem_cadastro'
+    : 'solicitacao_compras';
+
+  try {
+    const resp = await fetch(`/api/compras/itens/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ table_source: tableSource, remover_anexo_index: index })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Erro ao remover anexo');
+
+    window.cotacaoKanbanItem = {
+      ...(window.cotacaoKanbanItem || {}),
+      ...(data.item || {})
+    };
+
+    const novoAnexosHtml = construirAnexosItemHtmlCotacaoKanban(window.cotacaoKanbanItem);
+    window.cotacaoKanbanDetalhesContexto = {
+      ...(window.cotacaoKanbanDetalhesContexto || {}),
+      anexosItemHtml: novoAnexosHtml
+    };
+
+    renderizarDetalhesItemCotacaoKanban();
+    renderizarItensGrupoCotacaoKanban();
+  } catch (err) {
+    console.error('[COTACAO KANBAN] Erro ao remover anexo:', err);
+    alert('Erro ao remover anexo: ' + err.message);
+  }
 }
 
 function iniciarEdicaoDetalhesCotacaoKanban() {
@@ -23835,6 +24853,33 @@ async function salvarDetalhesCotacaoKanban() {
     payload.anexo_url = link || null;
   }
 
+  // Upload de arquivo (se selecionado)
+  const inputAnexo = document.getElementById('cotacaoKanbanDetalhesAnexoInput');
+  const arquivoSelecionado = inputAnexo && inputAnexo.files && inputAnexo.files[0] ? inputAnexo.files[0] : null;
+  if (arquivoSelecionado) {
+    try {
+      const formData = new FormData();
+      const timestamp = Date.now();
+      const filePath = `compras/item-detalhes/${itemId}/${timestamp}_${arquivoSelecionado.name}`;
+      formData.append('file', arquivoSelecionado);
+      formData.append('path', filePath);
+      const uploadResp = await fetch('/api/upload/supabase', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+      if (uploadResp.ok) {
+        const uploadData = await uploadResp.json();
+        const fileUrl = uploadData.url || uploadData.path || '';
+        if (fileUrl) {
+          payload.novo_anexo = { nome: arquivoSelecionado.name, url: fileUrl, tipo: arquivoSelecionado.type };
+        }
+      }
+    } catch (uploadErr) {
+      console.error('[Cotacao Kanban] Erro no upload do anexo:', uploadErr);
+    }
+  }
+
   const btnSalvar = document.getElementById('btnSalvarDetalhesCotacaoKanban');
   const originalHtml = btnSalvar ? btnSalvar.innerHTML : '';
   if (btnSalvar) {
@@ -23867,9 +24912,11 @@ async function salvarDetalhesCotacaoKanban() {
         return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;">${escapeHtml(link)}</a>`;
       })()
       : '-';
+    const novoAnexosHtml = construirAnexosItemHtmlCotacaoKanban(window.cotacaoKanbanItem);
     window.cotacaoKanbanDetalhesContexto = {
       ...(window.cotacaoKanbanDetalhesContexto || {}),
-      linksCotacaoHtml: linkExibicao
+      linksCotacaoHtml: linkExibicao,
+      anexosItemHtml: novoAnexosHtml
     };
 
     window.cotacaoKanbanEditandoDetalhes = false;
@@ -25675,6 +26722,8 @@ window.fecharModalCotacaoKanban = fecharModalCotacaoKanban;
 window.iniciarEdicaoDetalhesCotacaoKanban = iniciarEdicaoDetalhesCotacaoKanban;
 window.cancelarEdicaoDetalhesCotacaoKanban = cancelarEdicaoDetalhesCotacaoKanban;
 window.salvarDetalhesCotacaoKanban = salvarDetalhesCotacaoKanban;
+window.excluirAnexoCotacaoKanban = excluirAnexoCotacaoKanban;
+window.onCotacaoKanbanDetalhesAnexoChange = onCotacaoKanbanDetalhesAnexoChange;
 window.registrarCotacaoKanban = registrarCotacaoKanban;
 window.adicionarAnexoCotacaoKanban = adicionarAnexoCotacaoKanban;
 window.removerAnexoCotacaoKanban = removerAnexoCotacaoKanban;

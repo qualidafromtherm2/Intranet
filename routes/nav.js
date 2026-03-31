@@ -55,6 +55,7 @@ router.post('/sync', requireLogin, async (req, res) => {
   }
 
   // upsert um por um (lista tipicamente pequena)
+  const syncedNodeKeys = [];
   for (const n of nodes) {
     const { key, label, position, selector } = n;
     if (!key || !label || !position) continue;
@@ -85,6 +86,39 @@ router.post('/sync', requireLogin, async (req, res) => {
              selector = COALESCE(EXCLUDED.selector, public.nav_node.selector),
              active   = TRUE`,
       [key, label, position, parentMap.get(n.parentKey) || null, sort, selector || null]
+    );
+
+    syncedNodeKeys.push(key);
+  }
+
+  // Para cada nó sincronizado, garante permissões por role.
+  // Assim, novos botões/telas não ficam liberados para todos por padrão:
+  // - admin: true
+  // - demais roles: false
+  if (syncedNodeKeys.length) {
+    await pool.query(
+      `WITH target_nodes AS (
+         SELECT id FROM public.nav_node WHERE key = ANY($1::text[])
+       ),
+       known_roles AS (
+         SELECT DISTINCT role
+           FROM (
+             SELECT unnest(COALESCE(u.roles, ARRAY[]::text[])) AS role
+               FROM public.auth_user u
+             UNION ALL
+             SELECT 'admin'::text AS role
+           ) r
+          WHERE r.role IS NOT NULL AND btrim(r.role) <> ''
+       )
+       INSERT INTO public.auth_role_permission (role, node_id, allow)
+       SELECT
+         kr.role,
+         tn.id,
+         CASE WHEN kr.role = 'admin' THEN TRUE ELSE FALSE END AS allow
+       FROM known_roles kr
+       CROSS JOIN target_nodes tn
+       ON CONFLICT (role, node_id) DO NOTHING`,
+      [syncedNodeKeys]
     );
   }
 
