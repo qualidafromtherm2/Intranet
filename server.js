@@ -2938,30 +2938,35 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
         continue;
       }
 
-      const { rows: prodRows } = await pool.query(
-        `SELECT codigo_produto
-         FROM public.produtos_omie
-         WHERE codigo = $1 OR codigo_produto_integracao = $1
-         LIMIT 1`,
-        [codigoIntegracao]
-      );
-
-      if (prodRows.length > 0) {
-        resultados.push({
-          index: i,
-          codigo_integracao: codigoIntegracao,
-          codigo_produto: prodRows[0].codigo_produto || null,
-          ja_existe: true
-        });
-        continue;
-      }
-
-      // Loop de tentativas: se a Omie rejeitar por código/descrição duplicada,
+      // Loop de tentativas: se houver colisão de código (local/Omie),
       // avança o número BASE (ex: 00046 → 00047), atualiza o banco e tenta novamente.
       let cadastro = null;
       for (let tent = 0; tent < 20; tent++) {
         codigoIntegracao = `${codigoBase}.${i + 1}`;
-        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
+        const { rows: prodRows } = await pool.query(
+          `SELECT codigo_produto
+           FROM public.produtos_omie
+           WHERE codigo = $1 OR codigo_produto_integracao = $1
+           LIMIT 1`,
+          [codigoIntegracao]
+        );
+
+        // Nunca reaproveita código já existente: avança para o próximo código.
+        if (prodRows.length > 0) {
+          baseNumero += 1;
+          while (await baseExiste(baseNumero)) baseNumero += 1;
+          codigoBase = montarCodigoBase(baseNumero);
+          await pool.query(
+            `UPDATE compras.solicitacao_compras
+             SET produto_codigo = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [codigoBase, id]
+          );
+          console.log(`[Solicitações] Código já existente (${codigoIntegracao}), avançando base para ${codigoBase}`);
+          continue;
+        }
+
+        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto, `solicitacao:${id}`);
 
         if (cadastro.ok) break;
 
@@ -2969,11 +2974,6 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
         const ehJaCadastrado       = /já cadastrado|Client-102/i.test(msgErro);
         const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
         const ehCodigoDuplicado    = /código.*já.*utilizado|Client-143/i.test(msgErro);
-
-        if (ehJaCadastrado) {
-          cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `solicitacao:${id}`);
-          if (cadastro.ok) break;
-        }
 
         // Se código já existe na Omie: avança o número base e tenta novamente
         if (ehJaCadastrado || ehCodigoDuplicado) {
@@ -2990,21 +2990,12 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
           continue;
         }
 
-        // Descrição duplicada: busca o código já cadastrado e oferece ao usuário
+        // Descrição duplicada: não reaproveita produto existente neste fluxo.
         if (ehDescricaoDuplicada) {
-          let codigoExistente = null;
-          try {
-            const { rows: rowsDesc } = await pool.query(
-              `SELECT codigo FROM public.produtos_omie WHERE LOWER(TRIM(descricao)) = LOWER(TRIM($1)) LIMIT 1`,
-              [descricaoProduto]
-            );
-            if (rowsDesc.length > 0) codigoExistente = rowsDesc[0].codigo;
-          } catch (e) { /* ignora erro na busca */ }
           return res.status(422).json({
             ok: false,
-            error: `A descrição do item ${i + 1} já está cadastrada na Omie${codigoExistente ? ` com o código "${codigoExistente}"` : ''}. Deseja usar este código?`,
+            error: `A descrição do item ${i + 1} já está cadastrada na Omie. Ajuste a descrição para cadastrar um novo produto sem reaproveitar código existente.`,
             item_index: i,
-            codigo_existente: codigoExistente,
             codigo_integracao: codigoIntegracao,
             resultados
           });
@@ -3219,7 +3210,8 @@ async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaIn
 app.get('/api/google-calendar/status', async (req, res) => {
   const userLogado = resolverUsuarioAuditoria(req);
   if (!userLogado) {
-    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    // Sem sessão: retorna estado padrão sem erro (evita 401 desnecessário no console)
+    return res.json({ ok: true, connected: false, configured: false, authenticated: false });
   }
 
   try {
@@ -18188,10 +18180,12 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
       messageId
     ]);
     
-    // 2. Remove produtos antigos e insere novos
-    await client.query('DELETE FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1', [nCodPed]);
-    
+    // 2. Atualiza itens do pedido somente quando o payload traz produtos.
+    // Em alguns eventos (ex.: EtapaAlterada), a Omie pode retornar cabeçalho sem itens;
+    // nesse caso, preservamos os itens locais para evitar zerar a compra na UI.
     if (Array.isArray(produtos) && produtos.length > 0) {
+      await client.query('DELETE FROM compras.pedidos_omie_produtos WHERE n_cod_ped = $1', [nCodPed]);
+
       for (const prod of produtos) {
         await client.query(`
           INSERT INTO compras.pedidos_omie_produtos (
@@ -18244,6 +18238,8 @@ async function upsertPedidoCompra(pedido, eventoWebhook = '', messageId = null) 
           prod.cCodCateg || prod.c_cod_categ || null
         ]);
       }
+    } else {
+      console.log(`[PedidosCompra] ⚠️ Pedido ${nCodPed} recebido sem itens no payload (${eventoWebhook || 'sem-evento'}). Itens locais preservados.`);
     }
     
     // 3. Upsert do frete (1:1 com pedido)
@@ -22098,31 +22094,35 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
         continue;
       }
 
-      // Comentário: verifica se o item já existe na tabela produtos_omie
-      const { rows: prodRows } = await pool.query(
-        `SELECT codigo_produto
-         FROM public.produtos_omie
-         WHERE codigo = $1 OR codigo_produto_integracao = $1
-         LIMIT 1`,
-        [codigoIntegracao]
-      );
-
-      if (prodRows.length > 0) {
-        resultados.push({
-          index: i,
-          codigo_integracao: codigoIntegracao,
-          codigo_produto: prodRows[0].codigo_produto || null,
-          ja_existe: true
-        });
-        continue;
-      }
-
-      // Loop de tentativas: se a Omie rejeitar por código/descrição duplicada,
+      // Loop de tentativas: se houver colisão de código (local/Omie),
       // avança o número BASE (ex: 00046 → 00047), atualiza o banco e tenta novamente.
       let cadastro = null;
       for (let tent = 0; tent < 20; tent++) {
         codigoIntegracao = `${codigoBase}.${i + 1}`;
-        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto);
+        const { rows: prodRows } = await pool.query(
+          `SELECT codigo_produto
+           FROM public.produtos_omie
+           WHERE codigo = $1 OR codigo_produto_integracao = $1
+           LIMIT 1`,
+          [codigoIntegracao]
+        );
+
+        // Nunca reaproveita código já existente: avança para o próximo código.
+        if (prodRows.length > 0) {
+          baseNumero += 1;
+          while (await baseExiste(baseNumero)) baseNumero += 1;
+          codigoBase = montarCodigoBase(baseNumero);
+          await pool.query(
+            `UPDATE compras.compras_sem_cadastro
+             SET produto_codigo = $1, updated_at = NOW()
+             WHERE id = $2`,
+            [codigoBase, id]
+          );
+          console.log(`[Compras Sem Cadastro] Código já existente (${codigoIntegracao}), avançando base para ${codigoBase}`);
+          continue;
+        }
+
+        cadastro = await cadastrarProdutoNaOmie(codigoIntegracao, descricaoProduto, `sem-cadastro:${id}`);
 
         if (cadastro.ok) break;
 
@@ -22130,12 +22130,6 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
         const ehJaCadastrado       = /já cadastrado|Client-102/i.test(msgErro);
         const ehDescricaoDuplicada = /descri.*já está sendo utilizada|Client-143/i.test(msgErro);
         const ehCodigoDuplicado    = /código.*já.*utilizado|Client-143/i.test(msgErro);
-
-        // Se o código já existe na Omie, tenta sincronizar primeiro
-        if (ehJaCadastrado) {
-          cadastro = await sincronizarProdutoExistenteOmie(codigoIntegracao, descricaoProduto, `sem-cadastro:${id}`);
-          if (cadastro.ok) break;
-        }
 
         // Se código já existe (conflito de código): avança o número base e tenta novamente
         if (ehJaCadastrado || ehCodigoDuplicado) {
@@ -22152,21 +22146,12 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
           continue;
         }
 
-        // Descrição duplicada: busca o código já cadastrado e oferece ao usuário
+        // Descrição duplicada: não reaproveita produto existente neste fluxo.
         if (ehDescricaoDuplicada) {
-          let codigoExistente = null;
-          try {
-            const { rows: rowsDesc } = await pool.query(
-              `SELECT codigo FROM public.produtos_omie WHERE LOWER(TRIM(descricao)) = LOWER(TRIM($1)) LIMIT 1`,
-              [descricaoProduto]
-            );
-            if (rowsDesc.length > 0) codigoExistente = rowsDesc[0].codigo;
-          } catch (e) { /* ignora erro na busca */ }
           return res.status(422).json({
             ok: false,
-            error: `A descrição do item ${i + 1} já está cadastrada na Omie${codigoExistente ? ` com o código "${codigoExistente}"` : ''}. Deseja usar este código?`,
+            error: `A descrição do item ${i + 1} já está cadastrada na Omie. Ajuste a descrição para cadastrar um novo produto sem reaproveitar código existente.`,
             item_index: i,
-            codigo_existente: codigoExistente,
             codigo_integracao: codigoIntegracao,
             resultados
           });
@@ -28062,7 +28047,9 @@ app.put('/api/compras/itens/:id', express.json(), async (req, res) => {
       objetivo_compra,
       prazo_solicitado,
       link,
-      anexo_url
+      anexo_url,
+      novo_anexo,
+      remover_anexo_index
     } = req.body || {};
 
     let tableSource = table_source;
@@ -28145,6 +28132,24 @@ app.put('/api/compras/itens/:id', express.json(), async (req, res) => {
     if (tableSource === 'solicitacao_compras' && typeof anexo_url !== 'undefined') {
       sets.push(`anexo_url = $${idx++}`);
       values.push(String(anexo_url || '').trim() || null);
+    }
+
+    if (novo_anexo && typeof novo_anexo === 'object' && (novo_anexo.url || novo_anexo.path)) {
+      sets.push(`anexos = COALESCE(anexos, '[]'::jsonb) || jsonb_build_array($${idx++}::jsonb)`);
+      values.push(JSON.stringify(novo_anexo));
+    }
+
+    if (typeof remover_anexo_index === 'number' && Number.isInteger(remover_anexo_index) && remover_anexo_index >= 0) {
+      // Remove o elemento pelo índice: filtra o array jsonb excluindo a posição informada
+      sets.push(`anexos = (
+        SELECT COALESCE(jsonb_agg(elem ORDER BY pos), '[]'::jsonb)
+        FROM (
+          SELECT elem, pos
+          FROM jsonb_array_elements(COALESCE(anexos, '[]'::jsonb)) WITH ORDINALITY AS t(elem, pos)
+          WHERE (pos - 1) <> $${idx++}
+        ) sub
+      )`);
+      values.push(remover_anexo_index);
     }
 
     if (sets.length === 0) {

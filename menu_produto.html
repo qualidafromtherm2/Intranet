@@ -2158,21 +2158,23 @@
 
               <div id="atFormView">
 
-              <div style="display:grid;grid-template-columns:minmax(240px,1fr) minmax(220px,280px) auto auto;gap:10px;margin-top:12px;align-items:end;">
-                <div class="form-field" style="margin:0;">
-                  <label for="atSerieBusca">Pesquisar número de série</label>
-                  <input id="atSerieBusca" type="text" placeholder="Digite o número de série e pressione Enter" style="width:100%;" />
-                </div>
-                <div class="form-field" style="margin:0;">
+              <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
+                <div class="form-field" style="margin:0;flex:0 1 280px;">
                   <label for="atTipoAtendimento">Tipo de atendimento</label>
                   <select id="atTipoAtendimento" style="width:100%;">
                     <option value="">Selecione</option>
                     <option value="Qualidade">Qualidade</option>
                     <option value="Comercial">Comercial</option>
                     <option value="Extanção de garantia">Extanção de garantia</option>
+                    <option value="Atendimento rápido">Atendimento rápido</option>
                   </select>
                 </div>
-                <button id="atSerieBuscaBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#334155 0%,#1e293b 100%);color:white;">
+                <div class="form-field at-campo-fullonly" style="margin:0;flex:1 1 240px;position:relative;">
+                  <label for="atSerieBusca">Pesquisar número de série</label>
+                  <input id="atSerieBusca" type="text" placeholder="Digite o número de série e pressione Enter" style="width:100%;padding-right:32px;" />
+                  <span id="atBuscaSpinner" style="display:none;position:absolute;right:8px;bottom:9px;width:16px;height:16px;border:2px solid rgba(14,165,233,.3);border-top-color:#0ea5e9;border-radius:50%;animation:atSpinAnim .7s linear infinite;"></span>
+                </div>
+                <button id="atSerieBuscaBtn" class="content-button at-campo-fullonly" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#334155 0%,#1e293b 100%);color:white;">
                   <i class="fa-solid fa-magnifying-glass"></i>
                   <span>Pesquisar</span>
                 </button>
@@ -2206,32 +2208,32 @@
                   <input id="atNomeRevendaCliente" type="text" placeholder="Nome da revenda ou cliente" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atCpfCnpj">CPF/CNPJ</label>
                   <input id="atCpfCnpj" type="text" placeholder="Informe CPF ou CNPJ" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atCep">CEP</label>
                   <input id="atCep" type="text" placeholder="00000-000" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atRua">Rua</label>
                   <input id="atRua" type="text" placeholder="Rua" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atBairro">Bairro</label>
                   <input id="atBairro" type="text" placeholder="Bairro" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atNumero">Número</label>
                   <input id="atNumero" type="text" placeholder="Número" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atCidade">Cidade</label>
                   <input id="atCidade" type="text" placeholder="Cidade" style="width:100%;" />
                 </div>
@@ -2241,9 +2243,31 @@
                   <input id="atEstado" type="text" placeholder="UF" style="width:100%;" />
                 </div>
 
-                <div class="form-field">
+                <div class="form-field at-campo-fullonly">
                   <label for="atAgendarCom">Agendar com</label>
                   <input id="atAgendarCom" type="text" placeholder="Nome do responsável" style="width:100%;" />
+                </div>
+
+                <!-- Campos exclusivos do Atendimento rápido -->
+                <div class="form-field at-campo-rapidoonly" style="display:none;">
+                  <label for="atModelo">Modelo</label>
+                  <input id="atModelo" type="text" placeholder="Ex: FTI185LPTBR" style="width:100%;" />
+                </div>
+
+                <div class="form-field at-campo-rapidoonly" style="display:none;">
+                  <label for="atTagProblema">Tag do problema</label>
+                  <div class="at-combobox-wrapper">
+                    <input id="atTagProblema" type="text" placeholder="Ex: Não liga, Vazamento, Ruído" autocomplete="off" style="width:100%;" />
+                    <div id="atTagProblemaDropdown" class="at-combobox-dropdown"></div>
+                  </div>
+                </div>
+
+                <div class="form-field at-campo-rapidoonly" style="display:none;">
+                  <label for="atPlataformaAtendimento">Plataforma do atendimento</label>
+                  <div class="at-combobox-wrapper">
+                    <input id="atPlataformaAtendimento" type="text" placeholder="Ex: WhatsApp, Telefone, E-mail" autocomplete="off" style="width:100%;" />
+                    <div id="atPlataformaAtendimentoDropdown" class="at-combobox-dropdown"></div>
+                  </div>
                 </div>
               </div>
 
@@ -2251,11 +2275,21 @@
                 <div class="form-field">
                   <label for="atDescricao">Descreva a reclamação</label>
                   <textarea id="atDescricao" rows="3" placeholder="Descreva a reclamação" style="width:100%;"></textarea>
+                  <div id="atDescricaoHistorico"></div>
                 </div>
               </div>
 
               <div style="display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
                 <div id="atEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
+                <!-- Botão e preview de anexos do formulário -->
+                <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+                  <input id="atAnexoInput" type="file" multiple style="display:none;">
+                  <button id="atAnexoBtn" type="button" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid #374151;background:transparent;color:var(--content-title-color);cursor:pointer;font-size:13px;white-space:nowrap;">
+                    <i class="fa-solid fa-paperclip" style="color:#f59e0b;"></i>
+                    <span>Inserir Anexo</span>
+                  </button>
+                  <div id="atAnexoPreview" style="display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0;"></div>
+                </div>
                 <button id="atEnviarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
                   <i class="fa-solid fa-paper-plane"></i>
                   <span>Enviar solicitação</span>
@@ -2264,31 +2298,219 @@
               </div>
 
               <div id="atAtendimentosView" style="display:none;margin-top:12px;">
-                <div id="atAtendimentosStatus" style="margin-bottom:8px;color:var(--inactive-color);font-size:13px;"></div>
-                <div class="tabela-wrapper" style="overflow:auto;">
-                  <table class="tabela padrao" style="min-width:1450px;">
+
+                <!-- Toolbar: pesquisa + toggle lista/card -->
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                  <div style="position:relative;flex:1;min-width:200px;">
+                    <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--inactive-color);pointer-events:none;"></i>
+                    <input id="atAtendimentosFiltro" type="text" placeholder="Pesquisar atendimentos..."
+                      style="width:100%;padding:7px 10px 7px 32px;background:var(--input-bg,#1e2535);border:1px solid var(--border-color,#374151);border-radius:8px;color:var(--content-title-color);font-size:13px;box-sizing:border-box;">
+                  </div>
+                  <div id="atAtendimentosStatus" style="color:var(--inactive-color);font-size:13px;white-space:nowrap;"></div>
+                  <div style="display:flex;gap:4px;">
+                    <button id="atViewTabela" title="Modo tabela" type="button"
+                      style="padding:6px 10px;border-radius:8px 0 0 8px;border:1px solid var(--border-color,#374151);background:#0ea5e9;color:#fff;cursor:pointer;">
+                      <i class="fa-solid fa-table-list"></i>
+                    </button>
+                    <button id="atViewCard" title="Modo card" type="button"
+                      style="padding:6px 10px;border-radius:0 8px 8px 0;border:1px solid var(--border-color,#374151);background:var(--input-bg,#1e2535);color:var(--inactive-color);cursor:pointer;">
+                      <i class="fa-solid fa-id-card"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Modo tabela -->
+                <div id="atTabelaWrapper" class="tabela-wrapper" style="overflow:auto;">
+                  <table class="tabela padrao" style="min-width:1550px;">
                     <thead>
                       <tr>
-                        <th>ID</th>
-                        <th>Data</th>
-                        <th>Tipo</th>
-                        <th>Nome revenda/cliente</th>
-                        <th>Descreva reclamação</th>
-                        <th>Pedido</th>
-                        <th>Ordem produção</th>
-                        <th>Modelo</th>
-                        <th>Cliente</th>
-                        <th>Nota fiscal</th>
-                        <th>Data entrega</th>
-                        <th>1º TESTE / TIPO DE GÁS</th>
+                        <th data-col="id" style="cursor:pointer;user-select:none;">ID <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="data" style="cursor:pointer;user-select:none;">Data <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="tipo" style="cursor:pointer;user-select:none;">Tipo <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="nome_revenda_cliente" style="cursor:pointer;user-select:none;">Nome revenda/cliente <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="descreva_reclamacao" style="cursor:pointer;user-select:none;">Descreva reclamação <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="pedido" style="cursor:pointer;user-select:none;">Pedido <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="ordem_producao" style="cursor:pointer;user-select:none;">Ordem produção <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="modelo" style="cursor:pointer;user-select:none;">Modelo <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="cliente" style="cursor:pointer;user-select:none;">Cliente <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="nota_fiscal" style="cursor:pointer;user-select:none;">Nota fiscal <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="data_entrega" style="cursor:pointer;user-select:none;">Data entrega <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="teste_tipo_gas" style="cursor:pointer;user-select:none;">1º TESTE / TIPO DE GÁS <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th style="text-align:center;">Anexos</th>
                       </tr>
                     </thead>
                     <tbody id="atAtendimentosTbody">
-                      <tr><td colspan="12" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
+                      <tr><td colspan="13" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
                     </tbody>
                   </table>
                 </div>
+
+                <!-- Modo card -->
+                <div id="atCardsContainer" style="display:none;"></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal de edição de OS -->
+        <div id="atEditModal" class="modal-overlay" style="display:none;z-index:10042;">
+          <div class="modal-container" style="max-width:800px;width:96%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-pen-to-square" style="color:#0ea5e9;"></i>
+                <span id="atEditModalTitle">Editar Atendimento</span>
+              </h3>
+              <button id="atEditModalClose" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;">
+              <!-- Seção AT -->
+              <div>
+                <div class="at-em-section-title" style="color:#0ea5e9;">
+                  <i class="fa-solid fa-ticket"></i> Atendimento
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Tipo de atendimento</label>
+                    <select id="atEmTipo" class="at-em-input">
+                      <option value="Qualidade">Qualidade</option>
+                      <option value="Garantia">Garantia</option>
+                      <option value="Atendimento rápido">Atendimento rápido</option>
+                      <option value="Troca">Troca</option>
+                    </select>
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Nome Revenda/Cliente</label>
+                    <input type="text" id="atEmNome" class="at-em-input" placeholder="Nome">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Telefone</label>
+                    <input type="text" id="atEmTelefone" class="at-em-input" placeholder="(00) 00000-0000">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">CPF/CNPJ</label>
+                    <input type="text" id="atEmCpf" class="at-em-input" placeholder="CPF ou CNPJ">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Modelo</label>
+                    <input type="text" id="atEmModelo" class="at-em-input" placeholder="Modelo do produto">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Estado</label>
+                    <input type="text" id="atEmEstado" class="at-em-input" placeholder="UF">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Cidade</label>
+                    <input type="text" id="atEmCidade" class="at-em-input" placeholder="Cidade">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Tag do problema</label>
+                    <input type="text" id="atEmTag" class="at-em-input" placeholder="Tag">
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Plataforma do atendimento</label>
+                    <input type="text" id="atEmPlataforma" class="at-em-input" placeholder="Plataforma">
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Histórico de reclamações</label>
+                    <div id="atEmReclamHistorico" style="display:none;max-height:140px;overflow-y:auto;border:1px solid #374151;border-radius:8px;padding:8px;font-size:12px;color:var(--inactive-color);margin-bottom:6px;"></div>
+                    <label class="at-em-lbl" style="margin-top:2px;">Descreva a reclamação (nova entrada)</label>
+                    <textarea id="atEmReclamacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Texto da reclamação..."></textarea>
+                  </div>
+                </div>
+              </div>
+              <!-- Seção Fechamento -->
+              <div>
+                <div class="at-em-section-title" style="color:#4ade80;">
+                  <i class="fa-solid fa-circle-check"></i> Fechamento
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Tag</label>
+                    <input type="text" id="atEmFechTag" class="at-em-input" placeholder="Tag">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Plataforma</label>
+                    <input type="text" id="atEmFechPlataforma" class="at-em-input" placeholder="Plataforma">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Data de conclusão</label>
+                    <input type="date" id="atEmFechData" class="at-em-input">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">M.O. (R$)</label>
+                    <input type="number" step="0.01" id="atEmFechMO" class="at-em-input" placeholder="0,00">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Peças (R$)</label>
+                    <input type="number" step="0.01" id="atEmFechPecasValor" class="at-em-input" placeholder="0,00">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Peças de reposição</label>
+                    <input type="text" id="atEmFechPecas" class="at-em-input" placeholder="Peças utilizadas">
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Serviço realizado</label>
+                    <textarea id="atEmFechServico" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Descrição do serviço..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Observações</label>
+                    <textarea id="atEmFechObs" class="at-em-input" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Observações..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Mídias (URLs)</label>
+                    <input type="text" id="atEmFechMidias" class="at-em-input" placeholder="URLs separadas por vírgula">
+                  </div>
+                </div>
+              </div>
+            </div>
+              <!-- Seção Anexos -->
+              <div id="atEmAnexosSection">
+                <div class="at-em-section-title" style="color:#f59e0b;">
+                  <i class="fa-solid fa-paperclip"></i> Anexos
+                </div>
+                <!-- Anexos já existentes -->
+                <div id="atEmAnexosExistentes" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                <!-- Chips de arquivos pendentes -->
+                <div id="atEmAnexosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+                <!-- Botão -->
+                <button id="atEmAnexarBtn" type="button" style="padding:6px 14px;border-radius:8px;border:1px dashed #f59e0b;background:rgba(245,158,11,.08);color:#f59e0b;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-paperclip"></i> Anexar arquivo
+                </button>
+                <input type="file" id="atEmAnexarInput" multiple style="display:none;">
+              </div>
+
+            <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid #374151;">
+              <span id="atEmSavedMsg" style="font-size:12px;color:#4ade80;display:none;">Salvo!</span>
+              <span id="atEmErrMsg" style="font-size:12px;color:#f87171;display:none;max-width:300px;text-align:right;"></span>
+              <button id="atEmCancelBtn" type="button" style="padding:7px 16px;border-radius:8px;border:1px solid #374151;background:transparent;color:var(--content-title-color);cursor:pointer;">Cancelar</button>
+              <button id="atEmSaveBtn" type="button" style="padding:7px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f766e,#115e59);color:#fff;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-floppy-disk"></i> Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal de visualização de anexos de AT -->
+        <!-- Lightbox AT -->
+        <div id="atLightbox">
+          <div class="at-lb-bar">
+            <span class="at-lb-name" id="atLbName"></span>
+            <a class="at-lb-dl" id="atLbDl" href="#" target="_blank" rel="noopener"><i class="fa-solid fa-download"></i> Baixar</a>
+            <button class="at-lb-close" id="atLbClose" type="button"><i class="fa-solid fa-xmark"></i> Fechar</button>
+          </div>
+          <img id="atLbImg" src="" alt="">
+        </div>
+        <div id="atAnexosModal" class="modal-overlay" style="display:none;z-index:10045;">
+          <div class="modal-container" style="max-width:700px;width:94%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-paperclip" style="color:#f59e0b;"></i>
+                <span id="atAnexosModalTitle">Anexos do Atendimento</span>
+              </h3>
+              <button class="modal-close-btn" id="atAnexosModalClose" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" style="padding:16px;">
+              <div id="atAnexosList" style="display:flex;flex-direction:column;gap:10px;min-height:60px;"></div>
             </div>
           </div>
         </div>
@@ -3316,6 +3538,346 @@
             </div>
 
             <style>
+              .at-combobox-wrapper { position: relative; }
+              .at-combobox-dropdown {
+                display: none;
+                position: absolute;
+                top: calc(100% + 2px);
+                left: 0;
+                right: 0;
+                z-index: 9999;
+                background: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                max-height: 200px;
+                overflow-y: auto;
+                box-shadow: 0 8px 24px rgba(0,0,0,.45);
+              }
+              .at-combobox-dropdown.aberto { display: block; }
+              .at-combobox-item {
+                padding: 8px 12px;
+                cursor: pointer;
+                font-size: 13px;
+                color: #cbd5e1;
+                border-bottom: 1px solid #1e293b;
+                transition: background .15s;
+              }
+              .at-combobox-item:last-child { border-bottom: none; }
+              .at-combobox-item:hover, .at-combobox-item.ativo { background: #334155; color: #fff; }
+              .at-combobox-item.novo { color: #38bdf8; font-style: italic; }
+
+              /* ── AT Cards Grid ───────────────────────── */
+              #atCardsContainer {
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                gap: 12px;
+                padding: 4px 0;
+              }
+              .at-card-item {
+                background: var(--card-bg, #1e2535);
+                border: 1px solid var(--border-color, #374151);
+                border-radius: 12px;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                transition: box-shadow .2s;
+              }
+              .at-card-item:hover { box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+              .at-ci-header {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 9px 11px 7px;
+                border-bottom: 1px solid var(--border-color, #374151);
+                flex-wrap: wrap;
+              }
+              .at-ci-badge {
+                background: #0ea5e9;
+                color: #fff;
+                border-radius: 20px;
+                padding: 1px 8px;
+                font-size: 11px;
+                font-weight: 700;
+              }
+              .at-ci-date { font-size: 10px; color: var(--inactive-color); }
+              .at-ci-tipo {
+                font-size: 10px;
+                background: rgba(255,255,255,.07);
+                border-radius: 6px;
+                padding: 1px 7px;
+              }
+              .at-ci-edit-btn {
+                margin-left: auto;
+                background: none;
+                border: none;
+                color: var(--inactive-color);
+                cursor: pointer;
+                padding: 3px 6px;
+                border-radius: 6px;
+                font-size: 13px;
+                transition: color .15s, background .15s;
+              }
+              .at-ci-edit-btn:hover { color: #0ea5e9; background: rgba(14,165,233,.1); }
+              .at-ci-fields {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+              }
+              .at-ci-field {
+                padding: 6px 11px;
+                border-bottom: 1px solid var(--border-color, #374151);
+              }
+              .at-ci-field:nth-child(odd) { border-right: 1px solid var(--border-color, #374151); }
+              .at-ci-field-lbl {
+                font-size: 9px;
+                color: var(--inactive-color);
+                text-transform: uppercase;
+                letter-spacing: .05em;
+                margin-bottom: 2px;
+              }
+              .at-ci-field-val {
+                font-size: 12px;
+                color: var(--content-title-color);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                min-height: 16px;
+              }
+              .at-ci-input {
+                width: 100%;
+                box-sizing: border-box;
+                padding: 2px 5px;
+                background: var(--input-bg, #1a2235);
+                border: 1px solid #0ea5e9;
+                border-radius: 5px;
+                color: var(--content-title-color);
+                font-size: 12px;
+                display: none;
+              }
+              .at-ci-desc-area {
+                padding: 7px 11px;
+                flex: 1;
+              }
+              .at-ci-desc-lbl {
+                font-size: 9px;
+                color: var(--inactive-color);
+                text-transform: uppercase;
+                letter-spacing: .05em;
+                margin-bottom: 3px;
+              }
+              .at-ci-desc-val {
+                font-size: 11px;
+                color: var(--content-title-color);
+                line-height: 1.45;
+                max-height: 52px;
+                overflow: hidden;
+              }
+              .at-ci-desc-input {
+                width: 100%;
+                box-sizing: border-box;
+                resize: vertical;
+                padding: 4px 6px;
+                background: var(--input-bg, #1a2235);
+                border: 1px solid #0ea5e9;
+                border-radius: 5px;
+                color: var(--content-title-color);
+                font-size: 11px;
+                display: none;
+              }
+              .at-ci-footer {
+                display: none;
+                align-items: center;
+                gap: 6px;
+                padding: 7px 11px;
+                border-top: 1px solid var(--border-color, #374151);
+                margin-top: auto;
+              }
+              /* editado_por */
+              .at-ci-editado {
+                font-size: 10px;
+                color: #60a5fa;
+                opacity: .8;
+                white-space: nowrap;
+                cursor: default;
+              }
+              /* lista de reclamações mescladas */
+              .at-ci-reclam-list { display: flex; flex-direction: column; gap: 4px; }
+              .at-ci-reclam-item { font-size: 12px; color: var(--content-title-color); line-height: 1.4; }
+              .at-ci-reclam-id {
+                display: inline-block;
+                background: rgba(99,102,241,.2);
+                color: #a5b4fc;
+                border-radius: 4px;
+                padding: 1px 5px;
+                font-size: 10px;
+                margin-right: 4px;
+                font-weight: 600;
+              }
+              /* seção fechamento */
+              .at-ci-fech-wrapper {
+                border-top: 1px solid rgba(16,185,129,.2);
+                margin: 4px 0 0;
+              }
+              .at-ci-fech-toggle {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 11px;
+                font-size: 10px;
+                font-weight: 700;
+                color: #4ade80;
+                text-transform: uppercase;
+                letter-spacing: .07em;
+                cursor: pointer;
+                user-select: none;
+              }
+              .at-ci-fech-toggle:hover { background: rgba(74,222,128,.06); border-radius: 6px; }
+              .at-ci-fech-toggle-hidden { display: none !important; }
+              .at-ci-fech-chevron {
+                margin-left: auto;
+                font-size: 9px;
+                transition: transform .2s;
+                opacity: .7;
+              }
+              .at-ci-fech-content { padding: 4px 11px 8px; }
+              .at-ci-fech-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 6px 10px;
+              }
+              .at-ci-fech-item { font-size: 11px; color: var(--content-title-color); }
+              .at-ci-fech-full { grid-column: 1 / -1; }
+              .at-ci-fech-val {
+                font-size: 11px;
+                color: var(--content-title-color);
+                line-height: 1.45;
+                word-break: break-word;
+              }
+              .at-ci-fech-input {
+                width: 100%;
+                box-sizing: border-box;
+                resize: vertical;
+                padding: 4px 6px;
+                background: var(--input-bg, #1a2235);
+                border: 1px solid #10b981;
+                border-radius: 5px;
+                color: var(--content-title-color);
+                font-size: 11px;
+                display: none;
+              }
+              @media (max-width: 1400px) { #atCardsContainer { grid-template-columns: repeat(4,1fr); } }
+              @media (max-width: 1100px) { #atCardsContainer { grid-template-columns: repeat(3,1fr); } }
+              @media (max-width: 750px)  { #atCardsContainer { grid-template-columns: repeat(2,1fr); } }
+
+              /* AT: preview de anexos no formulário */
+              .at-anexo-chip {
+                display:inline-flex;align-items:center;gap:5px;
+                background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);
+                border-radius:6px;padding:3px 8px;font-size:12px;
+                color:var(--content-title-color);max-width:180px;
+              }
+              .at-anexo-chip span { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+              .at-anexo-chip button { background:none;border:none;cursor:pointer;color:#f87171;padding:0;line-height:1;font-size:14px; }
+              /* AT: lista de anexos no modal */
+              .at-anx-item {
+                display:flex;align-items:center;gap:10px;
+                padding:8px 10px;border-radius:8px;
+                background:var(--card-bg,rgba(255,255,255,.04));
+                border:1px solid var(--border-color,#374151);
+              }
+              .at-anx-icon { font-size:22px;color:#f59e0b;flex-shrink:0; }
+              .at-anx-info { flex:1;min-width:0; }
+              .at-anx-name { font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+              .at-anx-meta { font-size:11px;color:var(--inactive-color);margin-top:2px; }
+              .at-anx-actions { display:flex;gap:6px;flex-shrink:0; }
+              .at-anx-actions a, .at-anx-actions button {
+                padding:5px 10px;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;
+                display:flex;align-items:center;gap:4px;
+              }
+              .at-anx-dl { background:rgba(14,165,233,.15);border:1px solid rgba(14,165,233,.3);color:#38bdf8; }
+              .at-anx-open { background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);color:#34d399; }
+              .at-anx-del { background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#f87171; }
+              /* AT: grid de imagens */
+              .at-anx-img-grid { display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px; }
+              .at-anx-img-card {
+                position:relative;width:120px;border-radius:10px;overflow:hidden;
+                border:1px solid var(--border-color,#374151);
+                background:var(--card-bg,rgba(255,255,255,.04));
+                cursor:zoom-in;flex-shrink:0;
+              }
+              .at-anx-img-card:hover .at-anx-img-overlay { opacity:1; }
+              .at-anx-img-thumb { width:120px;height:90px;object-fit:cover;display:block; }
+              .at-anx-img-overlay {
+                position:absolute;inset:0;background:rgba(0,0,0,.55);
+                display:flex;flex-direction:column;align-items:center;justify-content:center;
+                opacity:0;transition:opacity .15s;gap:4px;
+              }
+              .at-anx-img-overlay i { color:#fff;font-size:22px; }
+              .at-anx-img-name { font-size:10px;color:#fff;text-align:center;padding:0 6px;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%; }
+              .at-anx-img-del {
+                position:absolute;top:4px;right:4px;background:rgba(239,68,68,.8);
+                border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;
+                display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;
+              }
+              /* AT: Lightbox */
+              #atLightbox {
+                display:none;position:fixed;inset:0;z-index:10200;
+                background:rgba(0,0,0,.92);align-items:center;justify-content:center;
+                flex-direction:column;gap:12px;
+              }
+              #atLightbox img { max-width:92vw;max-height:85vh;border-radius:10px;object-fit:contain; }
+              #atLightbox .at-lb-bar {
+                display:flex;gap:10px;align-items:center;
+              }
+              #atLightbox .at-lb-name { color:#e5e7eb;font-size:13px;max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+              #atLightbox .at-lb-close {
+                background:rgba(255,255,255,.12);border:none;border-radius:8px;
+                color:#fff;padding:6px 14px;cursor:pointer;font-size:13px;
+                display:flex;align-items:center;gap:6px;
+              }
+              #atLightbox .at-lb-dl {
+                background:rgba(14,165,233,.2);border:1px solid rgba(14,165,233,.3);
+                border-radius:8px;color:#38bdf8;padding:6px 14px;cursor:pointer;
+                font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px;
+              }
+
+              @keyframes atSpinAnim {
+                to { transform: rotate(360deg); }
+              }
+              /* ── Modal edição AT ──────────────────────── */
+              .at-em-section-title {
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .07em;
+                font-weight: 700;
+                margin-bottom: 10px;
+                padding-bottom: 6px;
+                border-bottom: 1px solid #374151;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+              }
+              .at-em-lbl {
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: .05em;
+                color: var(--inactive-color);
+                margin-bottom: 3px;
+                display: block;
+              }
+              .at-em-input {
+                width: 100%;
+                padding: 6px 10px;
+                background: var(--input-bg, #1e2535);
+                border: 1px solid var(--border-color, #374151);
+                border-radius: 7px;
+                color: var(--content-title-color);
+                font-size: 13px;
+                box-sizing: border-box;
+                font-family: inherit;
+              }
+              .at-em-input:focus { border-color: #0ea5e9; outline: none; }
+              .at-em-wrap { display: flex; flex-direction: column; }
               @keyframes fadeIn {
                 from { opacity: 0; }
                 to { opacity: 1; }
@@ -4948,7 +5510,7 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260316d"></script>
+  <script type="module" src="menu_produto.js?v=20260331b"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

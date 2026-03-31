@@ -10,6 +10,11 @@ pm2 flush
 pm2 restart intranet_api
 pm2 logs intranet_api
 
+
+texto para que o GPT aprove uma subida para o GITHUB
+“Revisa o PR #X completo, valida escopo e segurança, 
+,e só faz merge após me passar o resumo que eu dou o ok para vc finalizar o processo.
+
 "Sites uteis:"
 https://www.w3schools.com/ // site de referência para HTML, CSS e JavaScript
 https://codepen.io/kristen17/pen/NPKrxBd // exemplo para card de funncionarios.
