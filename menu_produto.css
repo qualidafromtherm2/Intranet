@@ -6669,6 +6669,14 @@ table.tabela td.num {
   flex-shrink: 0;
 }
 
+/* Chip passado NÃO realizado — ícone vermelho de alerta */
+.agenda-cal-reserva-item.is-past-chip.is-nao-realizada {
+  opacity: .85;
+  background: rgba(239, 68, 68, .15);
+  border: 1px solid rgba(239, 68, 68, .55);
+  color: #fca5a5;
+}
+
 /* Linha de ícones de eventos passados — enfileirada no final da célula */
 .agenda-cal-past-row {
   display: flex;

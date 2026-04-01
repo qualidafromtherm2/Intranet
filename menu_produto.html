@@ -2336,7 +2336,7 @@
                         <th data-col="nota_fiscal" style="cursor:pointer;user-select:none;">Nota fiscal <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="data_entrega" style="cursor:pointer;user-select:none;">Data entrega <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="teste_tipo_gas" style="cursor:pointer;user-select:none;">1º TESTE / TIPO DE GÁS <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
-                        <th style="text-align:center;">Anexos</th>
+                        <th style="text-align:center;">Docs</th>
                       </tr>
                     </thead>
                     <tbody id="atAtendimentosTbody">
@@ -2511,6 +2511,39 @@
             </div>
             <div class="modal-body" style="padding:16px;">
               <div id="atAnexosList" style="display:flex;flex-direction:column;gap:10px;min-height:60px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Solicitação de AT (OS Form) -->
+        <div id="atOsModal" class="modal-overlay" style="display:none;z-index:10050;">
+          <div class="modal-container" style="max-width:900px;width:96%;max-height:94vh;overflow-y:auto;padding:0;">
+            <!-- Cabeçalho fixo do modal -->
+            <div class="modal-header" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:13px;color:var(--inactive-color);">Solicitação de AT</span>
+              <button id="atOsModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <!-- Corpo -->
+            <div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px;">
+
+              <!-- CABEÇALHO DO FORMULÁRIO -->
+              <div class="at-os-header">
+                <!-- Coluna esquerda: logo -->
+                <div class="at-os-hcol at-os-hcol-logo">
+                  <img src="img/Logo_OS.png" alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
+                </div>
+                <!-- Coluna central: título -->
+                <div class="at-os-hcol at-os-hcol-center">
+                  <div class="at-os-title">FT-M04-SAC – Solicitação de Assistência Técnica</div>
+                  <div class="at-os-rev">REV.: 01 &nbsp;|&nbsp; 01/04/2026</div>
+                </div>
+                <!-- Coluna direita: número OS -->
+                <div class="at-os-hcol at-os-hcol-os">
+                  <div class="at-os-os-label">ORDEM DE SERVIÇO</div>
+                  <div class="at-os-os-num" id="atOsNumero">—</div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -2973,6 +3006,9 @@
                   <button id="agendaAbrirAtaBtn" type="button" class="content-button" style="display:none;">
                     <i class="fa-solid fa-file-lines" style="margin-right:5px;"></i>Ata
                   </button>
+                  <button id="agendaRealizadaBtn" type="button" class="content-button" style="display:none;background:rgba(220,38,38,.15);border:1px solid rgba(220,38,38,.45);color:#fca5a5;">
+                    <i class="fa-solid fa-circle-check" style="margin-right:5px;"></i>Realizada
+                  </button>
                 </div>
                 <button id="agendaSalvarReserva" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">Reservar</button>
               </div>
@@ -3014,6 +3050,17 @@
                   <button id="agendaRemovParticConfirmCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
                   <button id="agendaRemovParticConfirmEsta" type="button" class="content-button" style="padding:8px 16px;">Só esta reunião</button>
                   <button id="agendaRemovParticConfirmTodas" type="button" class="content-button" style="background:#b45309;color:#fff;border:none;padding:8px 16px;">Todas as recorrências</button>
+                </div>
+              </div>
+
+              <!-- Overlay de confirmação ao ADICIONAR participante em reunião recorrente -->
+              <div id="agendaAddParticConfirmOverlay" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:21;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
+                <i class="fa-solid fa-user-plus" style="font-size:28px;color:#34d399;"></i>
+                <p id="agendaAddParticMensagem" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaAddParticConfirmCancelar" type="button" class="content-button" style="padding:8px 16px;">Cancelar</button>
+                  <button id="agendaAddParticConfirmEsta" type="button" class="content-button" style="padding:8px 16px;">Só esta reunião</button>
+                  <button id="agendaAddParticConfirmFuturas" type="button" class="content-button" style="background:#16a34a;color:#fff;border:none;padding:8px 16px;">Esta e as futuras</button>
                 </div>
               </div>
 
@@ -3820,6 +3867,61 @@
                 display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;
               }
               /* AT: Lightbox */
+              /* === OS Form modal === */
+              .at-os-header {
+                display:grid;
+                grid-template-columns:1fr 2fr 1fr;
+                gap:12px;
+                align-items:center;
+                border:2px solid rgba(255,255,255,.15);
+                border-radius:8px;
+                padding:12px 16px;
+                background:rgba(255,255,255,.03);
+              }
+              .at-os-hcol { display:flex;flex-direction:column;align-items:center;justify-content:center; }
+              .at-os-hcol-logo { align-items:flex-start; }
+              .at-os-hcol-center { text-align:center;gap:4px; }
+              .at-os-hcol-os {
+                align-items:flex-end;
+                border-left:1px solid rgba(255,255,255,.15);
+                padding-left:12px;
+              }
+              .at-os-title {
+                font-size:14px;
+                font-weight:700;
+                color:var(--primary-color, #0ea5e9);
+                letter-spacing:.2px;
+                text-align:center;
+              }
+              .at-os-rev {
+                font-size:11px;
+                color:var(--inactive-color);
+                margin-top:2px;
+              }
+              .at-os-os-label {
+                font-size:10px;
+                font-weight:600;
+                letter-spacing:1px;
+                color:var(--inactive-color);
+                text-transform:uppercase;
+              }
+              .at-os-os-num {
+                font-size:24px;
+                font-weight:800;
+                color:var(--primary-color, #0ea5e9);
+                letter-spacing:1px;
+                margin-top:2px;
+              }
+              .at-os-pdf-btn {
+                padding:4px 8px;
+                border-radius:6px;
+                border:1px solid rgba(239,68,68,.35);
+                background:rgba(239,68,68,.1);
+                color:#ef4444;
+                cursor:pointer;
+                font-size:12px;
+              }
+              .at-os-pdf-btn:hover { background:rgba(239,68,68,.22); }
               #atLightbox {
                 display:none;position:fixed;inset:0;z-index:10200;
                 background:rgba(0,0,0,.92);align-items:center;justify-content:center;
@@ -5510,7 +5612,7 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260331b"></script>
+  <script type="module" src="menu_produto.js?v=20260331c"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

@@ -6474,6 +6474,13 @@ function _renderAtTabela(rows) {
          </button>`
       : '';
 
+    const pdfBtn = `<button class="at-tbl-os-btn at-os-pdf-btn" data-id="${escapeAtHtml(String(primary.id))}"
+         type="button" title="Solicitação de AT (PDF)">
+         <i class="fa-solid fa-file-pdf"></i>
+       </button>`;
+
+    const docsCell = `<div style="display:flex;gap:4px;justify-content:center;align-items:center;">${anexoBtn}${pdfBtn}</div>`;
+
     return `
     <tr data-id="${escapeAtHtml(String(primary.id))}" style="cursor:pointer;" title="Clique para editar">
       <td>${idBadges}</td>
@@ -6488,14 +6495,14 @@ function _renderAtTabela(rows) {
       <td>${escapeAtHtml(primary.nota_fiscal || '-')}</td>
       <td>${escapeAtHtml(primary.data_entrega || '-')}</td>
       <td>${escapeAtHtml(primary.teste_tipo_gas || '-')}</td>
-      <td style="text-align:center;">${anexoBtn}</td>
+      <td style="text-align:center;">${docsCell}</td>
     </tr>`;
   }).join('');
 
   // clique na linha abre modal de edição
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
     tr.addEventListener('click', e => {
-      if (e.target.closest('.at-tbl-anexo-btn')) return;
+      if (e.target.closest('.at-tbl-anexo-btn') || e.target.closest('.at-tbl-os-btn')) return;
       _abrirAtEditModal(tr.dataset.id);
     });
   });
@@ -6504,6 +6511,13 @@ function _renderAtTabela(rows) {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       _atVerAnexos(btn.dataset.id, btn.dataset.nome);
+    });
+  });
+  // botão PDF
+  tbody.querySelectorAll('.at-tbl-os-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _abrirAtOsModal(btn.dataset.id);
     });
   });
 }
@@ -6563,6 +6577,11 @@ function _renderAtCards(rows) {
          </button>`
       : '';
 
+    const pdfBtnCard = `<button class="at-card-os-btn at-os-pdf-btn" data-id="${escapeAtHtml(String(id))}"
+         type="button" title="Solicitação de AT (PDF)" style="background:none;border:none;cursor:pointer;color:#ef4444;padding:2px 4px;font-size:13px;flex-shrink:0;">
+         <i class="fa-solid fa-file-pdf"></i>
+       </button>`;
+
     const reclamacoes = group.rows
       .filter(r => r.descreva_reclamacao)
       .map(r => `<div class="at-ci-reclam-item"><span class="at-ci-reclam-id">#${escapeAtHtml(String(r.id))}</span>${escapeAtHtml(r.descreva_reclamacao)}</div>`)
@@ -6590,7 +6609,10 @@ function _renderAtCards(rows) {
           <span class="at-ci-tipo">${escapeAtHtml(primary.tipo || '-')}</span>
           ${editInfo}
         </div>
-        ${anexoBtnCard}
+        <div style="display:flex;gap:2px;align-items:center;flex-shrink:0;">
+          ${anexoBtnCard}
+          ${pdfBtnCard}
+        </div>
       </div>
       <div class="at-ci-fields">
         ${_atCiFieldRO('Cliente', primary.nome_revenda_cliente)}
@@ -6610,10 +6632,10 @@ function _renderAtCards(rows) {
     </div>`;
   }).join('');
 
-  // clique no card abre modal de edição (exceto no botão de anexo)
+  // clique no card abre modal de edição (exceto no botão de anexo ou PDF)
   container.querySelectorAll('.at-card-item').forEach(card => {
     card.addEventListener('click', e => {
-      if (e.target.closest('.at-card-anexo-btn')) return;
+      if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn')) return;
       _abrirAtEditModal(card.dataset.id);
     });
   });
@@ -6624,11 +6646,45 @@ function _renderAtCards(rows) {
       _atVerAnexos(btn.dataset.id, btn.dataset.nome);
     });
   });
+  // botão PDF no card
+  container.querySelectorAll('.at-card-os-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _abrirAtOsModal(btn.dataset.id);
+    });
+  });
 }
 
 function _atCardToggleEdit()  { /* substituído por modal */ }
 function _atCardMarkDirty()   { /* substituído por modal */ }
 function _atCardSave()        { /* substituído por modal */ }
+
+// ── Modal Solicitação de AT (Formulário OS) ─────────────────────────────────
+function _abrirAtOsModal(id) {
+  const row = _atAllRows.find(r => String(r.id) === String(id));
+  if (!row) return;
+
+  const modal = document.getElementById('atOsModal');
+  if (!modal) return;
+
+  // Número da OS: AA-ID  (últimos 2 dígitos do ano + "-" + id)
+  const ano = String(new Date().getFullYear()).slice(-2);
+  const numOS = `${ano}-${row.id}`;
+  const numEl = document.getElementById('atOsNumero');
+  if (numEl) numEl.textContent = numOS;
+
+  modal.style.display = 'flex';
+}
+
+// Listeners do modal OS
+(function() {
+  const closeBtn = document.getElementById('atOsModalClose');
+  const modal    = document.getElementById('atOsModal');
+  if (!modal) return;
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.style.display !== 'none') modal.style.display = 'none'; });
+})();
 
 // ── Modal de edição de OS ────────────────────────────────────────────────────
 let _atEditModalCurrentId = null;
@@ -43941,6 +43997,7 @@ let agendaTipoReservaSelecionado = null;
 let agendaUsuariosAtivosCache = [];
 let agendaParticipantesDisponiveis = [];
 let agendaParticipantesSelecionadosLista = [];
+let agendaParticipantesOriginaisReserva = []; // cópia dos participantes ao abrir a reserva
 let agendaReservasPorDia = {};
 let agendaLembretesPorDia = {};
 let agendaMostrarSomenteMinhas = false;
@@ -44179,7 +44236,8 @@ async function carregarReservasMesAgenda() {
       participantes: Array.isArray(reserva.participantes) ? reserva.participantes : [],
       repetir: !!reserva.repetir,
       repetirTodosMeses: !!reserva.repetirTodosMeses,
-      diasSemana: Array.isArray(reserva.diasSemana) ? reserva.diasSemana : []
+      diasSemana: Array.isArray(reserva.diasSemana) ? reserva.diasSemana : [],
+      realizada: !!reserva.realizada
     });
   });
 }
@@ -44425,7 +44483,7 @@ function renderAgendaCalendarioMensal() {
 
       if (isMobileView) {
         const clsMobile = reservaJaPassou(reserva)
-          ? `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack is-past-chip`
+          ? `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack is-past-chip${!reserva.realizada ? ' is-nao-realizada' : ''}`
           : `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack`;
         return `<div class="${clsMobile}" ${idAttr} title="${tituloChip}">
           ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
@@ -44434,8 +44492,14 @@ function renderAgendaCalendarioMensal() {
       }
 
       if (reservaJaPassou(reserva)) {
-        // Já passou: só o ícone, opaco, sem texto
-        return `<div class="agenda-cal-reserva-item ${cls} is-past-chip" ${idAttr} title="${tituloChip}">
+        if (reserva.realizada) {
+          // Realizada: só ícone, cor normal, sem opacidade
+          return `<div class="agenda-cal-reserva-item ${cls} is-past-chip" style="opacity:1;" ${idAttr} title="${tituloChip}">
+            <i class="fa-solid ${icon} agenda-chip-room-icon" title="${title}"></i>
+          </div>`;
+        }
+        // Não realizada: ícone vermelho
+        return `<div class="agenda-cal-reserva-item ${cls} is-past-chip is-nao-realizada" ${idAttr} title="${tituloChip}">
           <i class="fa-solid ${icon} agenda-chip-room-icon"></i>
         </div>`;
       }
@@ -44467,9 +44531,9 @@ function renderAgendaCalendarioMensal() {
 
     const totalExtras = Math.max(0, reservasDia.length - MAX_CHIPS) + Math.max(0, lembretesDia.length - MAX_LEMBRETES);
 
-    // Separa chips passados (só ícone) dos ativos (barra com hora)
-    const chipsPassados = chipsReservas.filter((_, i) => reservaJaPassou(reservasDia[i]));
-    const chipsAtivos   = chipsReservas.filter((_, i) => !reservaJaPassou(reservasDia[i]));
+    // Separa chips: ativos (futuro + realizados que passaram = chip completo) e ícones-passados (não realizados)
+    const chipsPassados = chipsReservas.filter((_, i) => reservaJaPassou(reservasDia[i]) && !reservasDia[i].realizada);
+    const chipsAtivos   = chipsReservas.filter((_, i) => !reservaJaPassou(reservasDia[i]) || reservasDia[i].realizada);
 
     const reservasHtml = (chipsReservas.length > 0 || chipsLembretes.length > 0)
       ? `
@@ -44616,11 +44680,56 @@ function removerDestinatarioLembreteAgenda(username) {
 function adicionarParticipanteAgenda(username) {
   const nome = String(username || '').trim();
   if (!nome) return;
-  if (!agendaParticipantesSelecionadosLista.includes(nome)) {
-    agendaParticipantesSelecionadosLista.push(nome);
+
+  const executarAdicao = () => {
+    if (!agendaParticipantesSelecionadosLista.includes(nome)) {
+      agendaParticipantesSelecionadosLista.push(nome);
+    }
+    renderParticipantesDisponiveisAgenda();
+    renderParticipantesSelecionadosAgenda();
+  };
+
+  // Se for reunião recorrente existente, pergunta se inclui nas futuras
+  if (agendaReservaEditandoId && agendaReservaEditandoRepetir) {
+    const overlay = document.getElementById('agendaAddParticConfirmOverlay');
+    if (overlay) {
+      const msgEl = document.getElementById('agendaAddParticMensagem');
+      if (msgEl) msgEl.textContent = `Incluir "${nome}" em: só esta reunião ou nesta e em todas as futuras da série?`;
+
+      const btnEsta   = document.getElementById('agendaAddParticConfirmEsta');
+      const btnFutura = document.getElementById('agendaAddParticConfirmFuturas');
+      const btnCancel = document.getElementById('agendaAddParticConfirmCancelar');
+
+      const limpar = () => { overlay.style.display = 'none'; };
+
+      const onEsta = () => { limpar(); executarAdicao(); };
+      const onFutura = async () => {
+        limpar();
+        executarAdicao();
+        // Persiste nas futuras via API
+        try {
+          await fetch(`/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}/participante`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ username: nome })
+          });
+        } catch (e) {
+          console.warn('[AGENDA] falha ao propagar participante para futuras:', e);
+        }
+      };
+      const onCancel = () => { limpar(); };
+
+      if (btnEsta)   btnEsta.onclick   = onEsta;
+      if (btnFutura) btnFutura.onclick = onFutura;
+      if (btnCancel) btnCancel.onclick = onCancel;
+
+      overlay.style.display = 'flex';
+      return;
+    }
   }
-  renderParticipantesDisponiveisAgenda();
-  renderParticipantesSelecionadosAgenda();
+
+  executarAdicao();
 }
 
 function removerParticipanteAgenda(username) {
@@ -44787,13 +44896,20 @@ function resetarFormularioAgendaReserva() {
   if (unifLembrete) unifLembrete.value = '';
   if (googleCheckbox) googleCheckbox.checked = false;
   agendaParticipantesSelecionadosLista = [];
-  agendaUnifLembreteDestinSelecionados = [];
+  agendaParticipantesOriginaisReserva = [];
 
   // Limpar campos de link, anexo e ata
   const linkReuniaoEl = document.getElementById('agendaLinkReuniao');
   const ataBtnEl      = document.getElementById('agendaAbrirAtaBtn');
   if (linkReuniaoEl) linkReuniaoEl.value = '';
   if (ataBtnEl) ataBtnEl.style.display = 'none';
+  const realizadaBtnEl = document.getElementById('agendaRealizadaBtn');
+  if (realizadaBtnEl) {
+    realizadaBtnEl.style.display = 'none';
+    realizadaBtnEl.style.background = 'rgba(220,38,38,.15)';
+    realizadaBtnEl.style.color = '#fca5a5';
+    realizadaBtnEl.style.border = '1px solid rgba(220,38,38,.45)';
+  }
   // Limpar lista de anexos
   const listaAnexosEl = document.getElementById('agendaAnexosLista');
   const vazioAnexosEl = document.getElementById('agendaAnexosVazio');
@@ -44918,6 +45034,7 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
   agendaParticipantesSelecionadosLista = Array.isArray(reserva.participantes)
     ? reserva.participantes.map((nome) => String(nome || '').trim()).filter(Boolean)
     : [];
+  agendaParticipantesOriginaisReserva = [...agendaParticipantesSelecionadosLista];
   renderParticipantesDisponiveisAgenda();
   renderParticipantesSelecionadosAgenda();
 
@@ -44941,6 +45058,21 @@ async function abrirReservaExistenteAgenda(dataIso, reservaId) {
   const ataBtn = document.getElementById('agendaAbrirAtaBtn');
   if (ataBtn) ataBtn.style.display = '';
   agendaReservaIdParaAta = reserva.id;
+
+  // Botão Realizada
+  const realizadaBtn = document.getElementById('agendaRealizadaBtn');
+  if (realizadaBtn) {
+    realizadaBtn.style.display = '';
+    if (reserva.realizada) {
+      realizadaBtn.style.background = '#16a34a';
+      realizadaBtn.style.color = '#fff';
+      realizadaBtn.style.border = 'none';
+    } else {
+      realizadaBtn.style.background = 'rgba(220,38,38,.15)';
+      realizadaBtn.style.color = '#fca5a5';
+      realizadaBtn.style.border = '1px solid rgba(220,38,38,.45)';
+    }
+  }
 
   // Carregar lista de anexos da reserva
   _agendaCarregarAnexosReserva(reserva.id);
@@ -45567,6 +45699,7 @@ async function excluirReservaAgenda() {
 // ── Funções de Ata de Reunião ─────────────────────────────────────────────
 
 let agendaAtasCache = []; // cache das atas carregadas
+let agendaPresencaCache = []; // cache dos registros de lista de presença
 let agendaAtasCriarNovoTema = false; // true quando usuário clicou em "Novo tema"
 
 async function abrirModalAtaAgenda() {
@@ -45596,6 +45729,14 @@ async function abrirModalAtaAgenda() {
     agendaAtasCache = resp.ok ? (await resp.json()).atas || [] : [];
   } catch (e) {
     agendaAtasCache = [];
+  }
+
+  // Carregar lista de presença
+  try {
+    const presResp = await fetch(`/api/rh/reservas/${encodeURIComponent(agendaReservaIdParaAta)}/presenca`, { credentials: 'include' });
+    agendaPresencaCache = presResp.ok ? (await presResp.json()).registros || [] : [];
+  } catch (e) {
+    agendaPresencaCache = [];
   }
 
   // Popular o select de temas com os temas já existentes
@@ -45838,9 +45979,43 @@ function _agendaRenderAtaTemaSelecionado() {
   const el = document.getElementById('agendaAtaHistorico');
   if (!el) return;
 
-  if (!agendaAtasCache.length) {
+  if (!agendaAtasCache.length && !agendaPresencaCache.length) {
     el.innerHTML = '<p style="color:var(--inactive-color);font-size:13px;padding:8px 0;">Nenhuma anotação registrada ainda. Selecione ou crie um tema para começar.</p>';
     return;
+  }
+
+  // ── Seção 0: Lista de Presença ────────────────────────────────────────────
+  let secao0Html = '';
+  if (agendaPresencaCache.length > 0) {
+    const itensPresenca = agendaPresencaCache.map((reg, i) => {
+      const num = `0.${i + 1}`;
+      const dataHora = reg.hora_inicio
+        ? `${reg.data_fmt} ${reg.hora_inicio.slice(0, 5)}`
+        : reg.data_fmt;
+      const presentes = Array.isArray(reg.participantes) ? reg.participantes : [];
+      const ausentes  = Array.isArray(reg.ausentes) ? reg.ausentes : [];
+      const listaNomes = presentes.length || ausentes.length
+        ? [
+            ...presentes.map((n) => escapeHtml(String(n))),
+            ...ausentes.map((n) => `<s style="opacity:.55;">${escapeHtml(String(n))}</s>`)
+          ].join(', ')
+        : '<em style="color:var(--inactive-color);">Nenhum participante registrado</em>';
+      return `<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;">
+        <span style="min-width:34px;font-size:11px;font-weight:700;color:#60a5fa;padding-top:2px;flex-shrink:0;">${escapeHtml(num)}</span>
+        <div style="flex:1;font-size:13px;line-height:1.6;">
+          <span style="font-weight:600;color:var(--theme-color);">${escapeHtml(dataHora)}</span>
+          <br><span style="color:var(--inactive-color);font-size:12px;">Registrado por: ${escapeHtml(reg.registrado_por)}</span>
+          <br>${listaNomes}
+        </div>
+      </div>`;
+    }).join('');
+    secao0Html = `<div style="margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-weight:700;font-size:14px;color:var(--content-title-color);">0 &mdash; Lista de presença</span>
+        <span style="flex:1;border-top:1px solid var(--border-color);"></span>
+      </div>
+      <div style="background:var(--theme-hover);border-radius:8px;padding:10px 12px;">${itensPresenca}</div>
+    </div>`;
   }
 
   // Agrupa por tema mantendo a ordem de primeira aparição
@@ -45852,7 +46027,7 @@ function _agendaRenderAtaTemaSelecionado() {
   }
 
   window._agendaAtasRawMap = {};
-  el.innerHTML = Object.entries(porTema).map(([tema, entradas], idx) =>
+  el.innerHTML = secao0Html + Object.entries(porTema).map(([tema, entradas], idx) =>
     _agendaHtmlGrupoTema(tema, entradas, idx + 1)
   ).join('');
 
@@ -46616,6 +46791,52 @@ function initAgendaReservasUI() {
     btnAbrirAta.addEventListener('click', async () => {
       agendaSetProcessando(true);
       try { await abrirModalAtaAgenda(); } finally { agendaSetProcessando(false); }
+    });
+  }
+
+  // Botão Realizada
+  const btnRealizada = document.getElementById('agendaRealizadaBtn');
+  if (btnRealizada) {
+    btnRealizada.addEventListener('click', async () => {
+      if (!agendaReservaEditandoId) return;
+      agendaSetProcessando(true);
+      try {
+        const participantes = [...agendaParticipantesSelecionadosLista];
+        // Ausentes = convidados originais que foram removidos antes de marcar como realizada
+        const ausentes = agendaParticipantesOriginaisReserva.filter((u) => !participantes.includes(u));
+        const r = await fetch(`/api/rh/reservas/${encodeURIComponent(String(agendaReservaEditandoId))}/realizada`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ participantes, ausentes, data_reuniao: agendaReservaEditandoData || '' })
+        });
+        if (r.ok) {
+          const data = await r.json();
+          // Atualizar cache local
+          const rdDia = agendaReservasPorDia[agendaReservaEditandoData] || [];
+          const ri = rdDia.findIndex((rv) => String(rv.id) === String(agendaReservaEditandoId));
+          if (ri >= 0) rdDia[ri].realizada = data.realizada;
+          // Atualizar cor do botão
+          if (data.realizada) {
+            btnRealizada.style.background = '#16a34a';
+            btnRealizada.style.color = '#fff';
+            btnRealizada.style.border = 'none';
+          } else {
+            btnRealizada.style.background = 'rgba(220,38,38,.15)';
+            btnRealizada.style.color = '#fca5a5';
+            btnRealizada.style.border = '1px solid rgba(220,38,38,.45)';
+          }
+          renderAgendaCalendarioMensal();
+        } else {
+          const err = await r.json().catch(() => ({}));
+          alert(err.error || 'Erro ao marcar reunião como realizada.');
+        }
+      } catch (e) {
+        console.error('[AGENDA] erro ao marcar realizada:', e);
+        alert('Erro ao comunicar com o servidor.');
+      } finally {
+        agendaSetProcessando(false);
+      }
     });
   }
   const btnFecharAta = document.getElementById('agendaAtaFecharModal');
