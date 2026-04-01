@@ -969,6 +969,26 @@ async function ensureRhReservasSchema() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS reservas_anexos_reserva_idx ON rh.reservas_anexos (reserva_id)`);
 
+    // Coluna de controle: reunião realizada
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS realizada BOOLEAN NOT NULL DEFAULT FALSE`);
+
+    // Tabela de presença: registra participantes confirmados ao marcar reunião como realizada
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rh.reuniao_presenca (
+        id BIGSERIAL PRIMARY KEY,
+        reserva_id BIGINT NOT NULL REFERENCES rh.reservas_ambientes(id) ON DELETE CASCADE,
+        data_reuniao DATE NOT NULL,
+        hora_inicio TEXT,
+        participantes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        ausentes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+        registrado_por TEXT NOT NULL,
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS reuniao_presenca_reserva_idx ON rh.reuniao_presenca (reserva_id)`);
+    // Coluna ausentes para registros já existentes
+    await pool.query(`ALTER TABLE rh.reuniao_presenca ADD COLUMN IF NOT EXISTS ausentes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`);
+
     console.log('[RH] Schema de reservas pronto');
   } catch (err) {
     console.error('[RH] Erro ao garantir schema/tabelas de reservas:', err?.message || err);
@@ -3403,6 +3423,7 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.google_calendar_id,
               r.google_event_link,
               r.criado_por,
+              r.realizada,
               COALESCE(array_agg(p.username ORDER BY p.username)
                 FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
          FROM rh.reservas_ambientes r
@@ -3454,6 +3475,7 @@ app.get('/api/rh/reservas', async (req, res) => {
         googleEventLink: r.google_event_link || null,
         googleAgendado: !!r.google_event_id,
         criadoPor: r.criado_por,
+        realizada: !!r.realizada,
         podeEditar: userEhRh || (!!userLogado && String(r.criado_por || '').trim().toLowerCase() === userLogado),
         participantes: Array.isArray(r.participantes) ? r.participantes : []
       };
@@ -4170,7 +4192,8 @@ app.post('/api/rh/atas', async (req, res) => {
   const client = await pool.connect();
   try {
     const refRs = await client.query(
-      `SELECT COALESCE(ata_referencia_reserva_id, id) AS ata_reserva_id
+      `SELECT COALESCE(ata_referencia_reserva_id, id) AS ata_reserva_id,
+              data_reserva, hora_inicio
          FROM rh.reservas_ambientes
         WHERE id = $1
         LIMIT 1`,
@@ -4180,6 +4203,8 @@ app.post('/api/rh/atas', async (req, res) => {
       return res.status(404).json({ error: 'Reserva não encontrada' });
     }
     const ataReservaId = Number(refRs.rows[0].ata_reserva_id) || reservaId;
+    const dataReserva = refRs.rows[0].data_reserva;
+    const horaInicio = refRs.rows[0].hora_inicio;
 
     await client.query('BEGIN');
     const { rows } = await client.query(
@@ -4195,6 +4220,67 @@ app.post('/api/rh/atas', async (req, res) => {
       conteudo
     });
     await client.query('COMMIT');
+
+    // Disparo automático de mensagem para usuários mencionados via @
+    try {
+      const mencoesMatch = conteudo.match(/(^|[^\w])@([\w.\-]+)/g) || [];
+      const usernamesMencionados = [...new Set(
+        mencoesMatch
+          .map(m => m.replace(/^[^\w]*@/, '').trim().toLowerCase())
+          .filter(u => u && !/^prazo$/i.test(u))
+      )];
+
+      if (usernamesMencionados.length > 0) {
+        // Busca ID do remetente (quem mencionou)
+        const senderRs = await pool.query(
+          `SELECT id FROM public.auth_user WHERE LOWER(username) = LOWER($1) AND is_active = true LIMIT 1`,
+          [userLogado]
+        );
+        const senderId = senderRs.rows[0]?.id;
+        if (!senderId) throw new Error(`Remetente ${userLogado} não encontrado`);
+
+        // Formata data e hora da reunião
+        let dataHoraFormatada = '';
+        if (dataReserva) {
+          const d = new Date(dataReserva);
+          const dia = String(d.getUTCDate()).padStart(2, '0');
+          const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const ano = d.getUTCFullYear();
+          dataHoraFormatada = `${dia}/${mes}/${ano}`;
+        }
+        if (horaInicio) {
+          dataHoraFormatada += ` ${String(horaInicio).slice(0, 5)}`;
+        }
+
+        for (const username of usernamesMencionados) {
+          try {
+            const destRs = await pool.query(
+              `SELECT id FROM public.auth_user WHERE LOWER(username) = LOWER($1) AND is_active = true LIMIT 1`,
+              [username]
+            );
+            const destId = destRs.rows[0]?.id;
+            if (!destId) continue;
+
+            const textoMensagem =
+              `🤖 Mensagem automática\n` +
+              `Você foi mencionado em uma ata\n` +
+              `Data e hora da reunião: ${dataHoraFormatada}\n` +
+              `---\n` +
+              `${conteudo}`;
+
+            await pool.query(
+              'SELECT send_chat_message($1, $2, $3)',
+              [senderId, destId, textoMensagem]
+            );
+          } catch (msgErr) {
+            console.warn(`[atas] falha ao notificar @${username}:`, msgErr?.message || msgErr);
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.warn('[atas] falha no bloco de notificações de @menção:', notifErr?.message || notifErr);
+    }
+
     return res.json({ ok: true, id: rows[0].id });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
@@ -4455,6 +4541,125 @@ app.delete('/api/rh/notas/:id', async (req, res) => {
 });
 
 // ── Anexos de reserva (múltiplos por evento) ──────────────────────────────────
+
+// POST /api/rh/reservas/:id/realizada — alterna flag realizada e registra presença
+app.post('/api/rh/reservas/:id/realizada', express.json(), async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  const body = req.body || {};
+  const participantes = Array.isArray(body.participantes) ? body.participantes.map(String).filter(Boolean) : [];
+  const ausentes      = Array.isArray(body.ausentes)      ? body.ausentes.map(String).filter(Boolean)      : [];
+  const dataReuniaoRaw = String(body.data_reuniao || '').trim();
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT realizada, to_char(hora_inicio, 'HH24:MI') AS hora_inicio, data_reserva
+         FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      [reservaId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Reserva não encontrada' });
+
+    const novoValor = !rows[0].realizada;
+    await client.query(`UPDATE rh.reservas_ambientes SET realizada = $1 WHERE id = $2`, [novoValor, reservaId]);
+
+    if (novoValor) {
+      // Marcar como realizada: registrar presença
+      const dataReuniao = dataReuniaoRaw || (rows[0].data_reserva ? String(rows[0].data_reserva).slice(0, 10) : null);
+      const horaInicio = rows[0].hora_inicio || null;
+      await client.query(
+        `INSERT INTO rh.reuniao_presenca (reserva_id, data_reuniao, hora_inicio, participantes, ausentes, registrado_por)
+         VALUES ($1, $2::date, $3, $4, $5, $6)`,
+        [reservaId, dataReuniao, horaInicio, participantes, ausentes, userLogado]
+      );
+    } else {
+      // Desmarcar como realizada: apaga o registro mais recente
+      await client.query(
+        `DELETE FROM rh.reuniao_presenca
+          WHERE id = (
+            SELECT id FROM rh.reuniao_presenca
+             WHERE reserva_id = $1
+             ORDER BY criado_em DESC
+             LIMIT 1
+          )`,
+        [reservaId]
+      );
+    }
+
+    return res.json({ ok: true, realizada: novoValor });
+  } catch (err) {
+    console.error('[API] POST /api/rh/reservas/:id/realizada erro:', err);
+    return res.status(500).json({ error: 'Falha ao atualizar status de realização' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/rh/reservas/:id/presenca — lista todos os registros de presença da reserva
+app.get('/api/rh/reservas/:id/presenca', async (req, res) => {
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id,
+              to_char(data_reuniao, 'DD/MM/YYYY') AS data_fmt,
+              hora_inicio,
+              participantes,
+              ausentes,
+              registrado_por,
+              to_char(criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS criado_em_fmt
+         FROM rh.reuniao_presenca
+        WHERE reserva_id = $1
+        ORDER BY criado_em ASC`,
+      [reservaId]
+    );
+    return res.json({ ok: true, registros: rows });
+  } catch (err) {
+    console.error('[API] GET /api/rh/reservas/:id/presenca erro:', err);
+    return res.status(500).json({ error: 'Falha ao buscar lista de presença' });
+  }
+});
+
+// POST /api/rh/reservas/:id/participante — adiciona participante à série recorrente (reserva pai + todas futuras)
+app.post('/api/rh/reservas/:id/participante', express.json(), async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
+
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+  const username = String((req.body || {}).username || '').trim();
+  if (!username) return res.status(400).json({ error: 'username obrigatório' });
+
+  try {
+    // A reserva pode ser a pai (repetir=true) ou uma filha (ata_referencia_reserva_id aponta para pai)
+    const { rows } = await pool.query(
+      `SELECT COALESCE(ata_referencia_reserva_id, id) AS pai_id
+         FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
+      [reservaId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Reserva não encontrada' });
+    const paiId = Number(rows[0].pai_id);
+
+    // Insere na reserva pai e em todas as filhas da mesma série
+    await pool.query(
+      `INSERT INTO rh.reservas_participantes (reserva_id, username)
+         SELECT id, $1 FROM rh.reservas_ambientes
+          WHERE id = $2
+             OR (ata_referencia_reserva_id = $2 AND data_reserva >= CURRENT_DATE)
+       ON CONFLICT DO NOTHING`,
+      [username, paiId]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[API] POST /api/rh/reservas/:id/participante erro:', err);
+    return res.status(500).json({ error: 'Falha ao adicionar participante' });
+  }
+});
 app.get('/api/rh/reservas/:id/anexos', async (req, res) => {
   const reservaId = Number(req.params?.id);
   if (!Number.isInteger(reservaId) || reservaId <= 0) return res.status(400).json({ error: 'ID inválido' });
