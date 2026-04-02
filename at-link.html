@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal AT — Fromtherm</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: url('https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/fundo.png') center center / cover fixed, linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 32px 16px;
+    }
+
+    /* ── Cartões de autenticação ── */
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.3);
+      padding: 38px 34px;
+      max-width: 440px;
+      width: 100%;
+    }
+    .card-logo { font-size: 11px; font-weight: 700; color: #94a3b8; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
+    .card-titulo { font-size: 22px; font-weight: 800; color: #1e293b; margin-bottom: 20px; }
+    .card label { display: block; font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 5px; margin-top: 16px; letter-spacing: .3px; text-transform: uppercase; }
+    .card input[type=password] { width: 100%; padding: 11px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 15px; color: #1e293b; outline: none; transition: border-color .2s; background: #fff; }
+    .card input[type=password]:focus { border-color: #3b82f6; }
+    .hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+    .btn { width: 100%; margin-top: 22px; padding: 13px; background: #3b82f6; color: #fff; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; transition: background .2s; }
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .erro { background: #fee2e2; color: #b91c1c; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 14px; display: none; }
+
+    /* ── Dashboard ── */
+    #dashSection { max-width: 720px; width: 100%; }
+    .dash-header { background: linear-gradient(90deg, #1e3a5f, #3b82f6); color: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; }
+    .dash-header .saudacao { font-size: 12px; opacity: .8; margin-bottom: 2px; }
+    .dash-header .dash-nome { font-size: 20px; font-weight: 800; line-height: 1.25; word-break: break-word; }
+    .badge { display: inline-block; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-top: 8px; text-transform: uppercase; letter-spacing: .4px; }
+    .tbl-titulo { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 10px; margin-top: 4px; }
+    .tbl-wrap { overflow-x: auto; border-radius: 10px; border: 1.5px solid rgba(255,255,255,.12); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead tr { background: #2c3e6b; }
+    thead th { padding: 9px 10px; text-align: left; font-weight: 700; font-size: 11px; letter-spacing: .3px; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    tbody tr { transition: background .12s; border-bottom: 1px solid #d1d5db; background: #fff; color: #111827; }
+    tbody tr:hover { background: #f0f4ff; }
+    tbody td { padding: 8px 10px; color: #1e293b; vertical-align: top; font-weight: 500; }
+    .tbl-os { font-weight: 700; color: #1d4ed8; white-space: nowrap; }
+    .tbl-prob { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tbl-empty { text-align: center; color: #94a3b8; padding: 28px; font-size: 13px; }
+    .logout-btn { background: rgba(255,255,255,.15); border: 1.5px solid rgba(255,255,255,.5); color: #fff; border-radius: 10px; padding: 9px 18px; font-size: 13px; cursor: pointer; margin-top: 18px; width: 100%; transition: background .15s, border-color .15s; }
+    .logout-btn:hover { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.8); }
+
+    /* ── Spinner ── */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 5px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ══════════════════════════════════════════════════════
+       MODAL OS — CSS idêntico ao menu_produto.html
+       ══════════════════════════════════════════════════════ */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.72);
+      z-index: 9999;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 12px;
+      overflow-y: auto;
+    }
+    .modal-overlay.open { display: flex; }
+
+    .modal-container {
+      background: #1f2937;
+      border-radius: 14px;
+      width: 96%;
+      max-width: 900px;
+      max-height: 94vh;
+      overflow-y: auto;
+      margin: auto;
+      box-shadow: 0 16px 64px rgba(0,0,0,.5);
+    }
+
+    .modal-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1f2937;
+      position: sticky;
+      top: 0;
+      z-index: 6;
+    }
+    .modal-header-title { font-size: 13px; color: #9ca3af; }
+    .modal-close-btn {
+      background: rgba(255,255,255,.1);
+      border: none;
+      border-radius: 8px;
+      color: #e5e7eb;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .modal-close-btn:hover { background: rgba(255,255,255,.2); }
+
+    /* ── Documento branco (cópia exata de menu_produto.html) ── */
+    .at-os-doc {
+      background: #fff; color: #111; font-family: Arial, sans-serif;
+      font-size: 13px; border: 1px solid #ccc; margin: 0 16px 16px;
+      border-radius: 4px; overflow: hidden;
+    }
+    .at-os-doc .at-os-header {
+      display: grid; grid-template-columns: 160px 1fr 180px;
+      gap: 0; border-bottom: 2px solid #2c3e6b;
+      padding: 10px 12px; background: #fff;
+    }
+    .at-os-hcol { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .at-os-hcol-logo { align-items: flex-start; }
+    .at-os-hcol-center { text-align: center; gap: 4px; }
+    .at-os-hcol-os { align-items: flex-end; border-left: 1px solid #d1d5db; padding-left: 12px; }
+    .at-os-doc .at-os-title { color: #111; font-size: 13px; font-weight: 700; text-align: center; }
+    .at-os-doc .at-os-rev   { color: #444; font-size: 11px; margin-top: 4px; }
+    .at-os-doc .at-os-os-label {
+      font-size: 11px; font-weight: 700; color: #fff; background: #2c3e6b;
+      text-align: center; padding: 3px 6px; border-radius: 2px 2px 0 0;
+    }
+    .at-os-doc .at-os-os-num {
+      background: #2c3e6b; color: #fff; font-size: 22px; font-weight: 900;
+      text-align: center; padding: 6px 4px; letter-spacing: 1px; border-radius: 0 0 2px 2px;
+    }
+    .at-os-section-bar {
+      background: #2c3e6b; color: #fff; font-weight: 700; font-size: 12px;
+      letter-spacing: .5px; text-align: center; padding: 6px 12px;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+    }
+    .at-os-agenda-hint { color: #ef4444; font-size: 11px; font-weight: 600; font-style: italic; }
+    .at-os-fields-row { display: flex; gap: 0; padding: 6px 10px; flex-wrap: wrap; }
+    .at-os-fields-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 0; padding: 6px 10px; }
+    .at-os-equip-row { justify-content: space-between; }
+    .at-os-field {
+      display: flex; align-items: baseline; gap: 5px;
+      padding: 3px 8px 3px 0; flex: 1; min-width: 200px;
+    }
+    .at-os-span2 { grid-column: 1/3; }
+    .at-os-fl { font-weight: 700; white-space: nowrap; font-size: 12px; color: #111; }
+    .at-os-fv { font-size: 12px; color: #222; border-bottom: 1px solid #ccc; flex: 1; min-width: 60px; padding-bottom: 1px; }
+
+    @media (max-width: 540px) {
+      .card { padding: 26px 18px; }
+      .at-os-doc .at-os-header { grid-template-columns: 90px 1fr 120px; }
+      .at-os-hcol-os { padding-left: 6px; }
+      .at-os-doc { margin: 0 8px 12px; }
+    }
+
+    /* ── Status badges ── */
+    .status-badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+    .status-aberta     { background:#dcfce7; color:#15803d; border:1px solid #16a34a; }
+    .status-aguardando { background:#fef9c3; color:#92400e; border:1px solid #d97706; }
+    .status-finalizado { background:#e5e7eb; color:#374151; border:1px solid #9ca3af; }
+
+    /* ── Botões de ação na tabela ── */
+    .tbl-icon-btn { background:none; border:none; cursor:pointer; font-size:15px; padding:2px 5px; border-radius:6px; transition:background .12s; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
+    .tbl-icon-btn:hover { background:rgba(255,255,255,.15); }
+    .tbl-fechar-btn { font-size:12px; font-weight:700; border:1.5px solid #4ade80; border-radius:6px; padding:2px 8px; color:#4ade80; }
+    .tbl-fechar-btn.is-fechada { color:#6b7280; border-color:#4b5563; }
+
+    /* ── Modal de fechamento ── */
+    .fech-label { display:block; font-size:11px; font-weight:700; color:#94a3b8; margin-bottom:4px; letter-spacing:.3px; text-transform:uppercase; }
+    .fech-field-group { margin-bottom:14px; }
+    .fech-input { width:100%; padding:9px 12px; background:#374151; border:1.5px solid #4b5563; border-radius:8px; color:#f1f5f9; font-size:13px; outline:none; transition:border-color .2s; font-family:inherit; box-sizing:border-box; }
+    .fech-input:focus { border-color:#60a5fa; }
+    .fech-ta { resize:vertical; min-height:64px; }
+    .fech-toggle-btn { font-size:12px; font-weight:600; padding:5px 13px; border-radius:8px; border:1.5px solid #4ade80; background:transparent; color:#4ade80; cursor:pointer; transition:background .15s; white-space:nowrap; }
+    .fech-toggle-btn:hover { background:rgba(74,222,128,.1); }
+    .fech-toggle-btn.is-fechada { border-color:#9ca3af; color:#9ca3af; }
+    .fech-nfe-section { background:rgba(30,58,95,.3); border:1.5px solid rgba(30,64,175,.4); border-radius:10px; padding:14px; margin-top:18px; }
+    .fech-upload-btn { padding:7px 14px; background:#1e40af; color:#fff; border:none; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; transition:background .15s; }
+    .fech-upload-btn:hover { background:#1d4ed8; }
+    .fech-upload-btn:disabled { opacity:.5; cursor:not-allowed; }
+    .fech-save-btn { padding:10px 22px; background:#16a34a; color:#fff; border:none; border-radius:10px; font-size:14px; font-weight:700; cursor:pointer; transition:background .15s; }
+    .fech-save-btn:hover { background:#15803d; }
+    .fech-save-btn:disabled { opacity:.5; cursor:not-allowed; }
+    /* ── Evidências ── */
+    .evid-item { position:relative; width:70px; height:70px; border-radius:8px; overflow:hidden; border:1.5px solid #374151; flex-shrink:0; }
+    .evid-item img { width:100%; height:100%; object-fit:cover; display:block; }
+    .evid-item video { width:100%; height:100%; object-fit:cover; display:block; }
+    .evid-item .evid-ext { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#93c5fd; background:#1e3a5f; word-break:break-all; text-align:center; padding:4px; }
+    .evid-spinner { display:inline-block; width:14px; height:14px; border:2px solid rgba(147,197,253,.3); border-top-color:#93c5fd; border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; margin-right:5px; }
+    /* ── Modal evidências (viewer) ── */
+    .evid-grid { display:flex; flex-wrap:wrap; gap:12px; padding:16px 18px; }
+    .evid-thumb { position:relative; width:110px; height:110px; border-radius:10px; overflow:hidden; border:1.5px solid #374151; cursor:pointer; transition:border-color .15s; }
+    .evid-thumb:hover { border-color:#60a5fa; }
+    .evid-thumb img,.evid-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    .evid-thumb .evid-play { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:28px; }
+    .evid-viewer { position:relative; background:#000; border-radius:0 0 14px 14px; display:flex; align-items:center; justify-content:center; min-height:200px; }
+    .evid-viewer img { max-width:100%; max-height:70vh; object-fit:contain; display:block; }
+    .evid-viewer video { max-width:100%; max-height:70vh; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Seções de autenticação ────────────────────────── -->
+  <div id="loadingSection" class="card">
+    <div class="card-logo">Atendimento Técnico</div>
+    <div class="card-titulo">Verificando link…</div>
+  </div>
+
+  <div id="invalidSection" class="card" style="display:none;">
+    <div class="card-logo">Atendimento Técnico</div>
+    <div class="card-titulo">Link inválido</div>
+    <p style="color:#64748b;font-size:14px;">Este link não é válido ou expirou. Solicite um novo link ao suporte.</p>
+  </div>
+
+  <div id="cadastroSection" class="card" style="display:none;">
+    <div class="card-logo">Atendimento Técnico</div>
+    <div class="card-titulo">Crie sua senha</div>
+    <p style="color:#64748b;font-size:13px;">Olá, <strong id="cadastroNome"></strong>! Configure uma senha para acessar seu portal.</p>
+    <label for="novaSenha">Nova senha</label>
+    <input type="password" id="novaSenha" placeholder="Mínimo 6 dígitos" autocomplete="new-password">
+    <label for="confirmaSenha">Confirmar senha</label>
+    <input type="password" id="confirmaSenha" placeholder="Repita a senha" autocomplete="new-password">
+    <p class="hint">Mínimo 6 caracteres.</p>
+    <div class="erro" id="cadastroErro"></div>
+    <button class="btn" id="cadastroBtn" onclick="cadastrarSenha()">Criar senha e entrar</button>
+  </div>
+
+  <div id="loginSection" class="card" style="display:none;">
+    <div class="card-logo">Atendimento Técnico</div>
+    <div class="card-titulo">Entrar no portal</div>
+    <p style="color:#64748b;font-size:13px;">Olá, <strong id="loginNome"></strong>! Digite sua senha para acessar.</p>
+    <label for="senhaLogin">Senha</label>
+    <input type="password" id="senhaLogin" placeholder="Sua senha" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')fazerLogin()">
+    <div class="erro" id="loginErro"></div>
+    <button class="btn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
+  </div>
+
+  <!-- ── Dashboard ─────────────────────────────────────── -->
+  <div id="dashSection" style="display:none;">
+    <div class="dash-header">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/logo.png"
+             alt="Logo" style="height:54px;object-fit:contain;flex-shrink:0;">
+        <div style="flex:1;min-width:0;">
+          <div class="saudacao">Bem-vindo(a)</div>
+          <div class="dash-nome" id="dashNome">—</div>
+          <div class="badge" id="dashTipo">—</div>
+        </div>
+        <button class="logout-btn" onclick="sair()" title="Sair" style="margin-top:0;width:auto;padding:8px 10px;flex-shrink:0;line-height:1;"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+      </div>
+    </div>
+    <div class="tbl-titulo">Meus Atendimentos</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>OS</th>
+          <th>Data</th>
+          <th>Cliente</th>
+          <th>Modelo</th>
+          <th>Problema</th>
+          <th>Mídias</th>
+          <th style="white-space:normal;min-width:58px;">Finalizar<br>atendimento</th>
+          <th>NF<small style="font-size:9px;letter-spacing:0;text-transform:none;">e</small></th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="atendTbody">
+          <tr><td colspan="9" class="tbl-empty">Carregando…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       MODAL OS — estrutura idêntica ao menu_produto.html
+       ══════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="osModal" onclick="if(event.target===this)fecharOsModal()">
+    <div class="modal-container">
+
+      <div class="modal-header">
+        <span class="modal-header-title" id="osModalTitle">Solicitação de AT</span>
+        <button class="modal-close-btn" onclick="fecharOsModal()">✕ Fechar</button>
+      </div>
+
+      <div class="at-os-doc">
+
+        <!-- CABEÇALHO -->
+        <div class="at-os-header">
+          <div class="at-os-hcol at-os-hcol-logo">
+            <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png"
+                 alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
+          </div>
+          <div class="at-os-hcol at-os-hcol-center">
+            <div class="at-os-title">FT-M04-SAC – Solicitação de Assistência Técnica</div>
+            <div class="at-os-rev" id="osRevData">REV.: 01 &nbsp;|&nbsp; —</div>
+          </div>
+          <div class="at-os-hcol at-os-hcol-os">
+            <div class="at-os-os-label">ORDEM DE SERVIÇO</div>
+            <div class="at-os-os-num" id="osNumero">—</div>
+          </div>
+        </div>
+
+        <!-- DADOS DA REVENDA -->
+        <div class="at-os-section-bar">DADOS DA REVENDA</div>
+        <div class="at-os-fields-row">
+          <div class="at-os-field"><span class="at-os-fl">REVENDA:</span><span class="at-os-fv" id="osRevenda"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CELULAR:</span><span class="at-os-fv" id="osRevendaCel"></span></div>
+        </div>
+
+        <!-- DADOS DO CLIENTE -->
+        <div class="at-os-section-bar">
+          DADOS DO CLIENTE
+          <span class="at-os-agenda-hint">(Agendar a visita técnica com o contato abaixo)</span>
+        </div>
+        <div class="at-os-fields-grid">
+          <div class="at-os-field at-os-span2"><span class="at-os-fl">CLIENTE:</span><span class="at-os-fv" id="osCliente"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CONTATO:</span><span class="at-os-fv" id="osContato"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CIDADE/UF:</span><span class="at-os-fv" id="osCidadeUf"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CELULAR:</span><span class="at-os-fv" id="osCelular"></span></div>
+          <div class="at-os-field at-os-span2"><span class="at-os-fl">ENDEREÇO:</span><span class="at-os-fv" id="osEndereco"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CPF/CNPJ:</span><span class="at-os-fv" id="osCpfCnpj"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CEP:</span><span class="at-os-fv" id="osCep"></span></div>
+        </div>
+
+        <!-- DADOS DO EQUIPAMENTO -->
+        <div class="at-os-section-bar">DADOS DO EQUIPAMENTO DO CLIENTE</div>
+        <div class="at-os-fields-row at-os-equip-row">
+          <div class="at-os-field"><span class="at-os-fl">N° SÉRIE:</span><span class="at-os-fv" id="osNumSerie"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">NF:</span><span class="at-os-fv" id="osNf"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">MODELO:</span><span class="at-os-fv" id="osModelo"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">DATA DE VENDA:</span><span class="at-os-fv" id="osDataVenda"></span></div>
+        </div>
+
+        <!-- ESPECIFICAÇÕES TÉCNICAS -->
+        <div class="at-os-section-bar">ESPECIFICAÇÕES TÉCNICAS</div>
+        <div class="at-os-fields-row" style="flex-wrap:wrap;">
+          <div class="at-os-field"><span class="at-os-fl">QUADRO EXT.:</span><span class="at-os-fv" id="osQuadroExt"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">CONTROLADOR:</span><span class="at-os-fv" id="osControlador"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">ALIMENTAÇÃO:</span><span class="at-os-fv" id="osAlimentacao"></span></div>
+          <div class="at-os-field"><span class="at-os-fl">FLUIDO REFRIG.:</span><span class="at-os-fv" id="osFluidoRefrig"></span></div>
+        </div>
+
+        <!-- ATENDIMENTO INICIAL -->
+        <div class="at-os-section-bar">ATENDIMENTO INICIAL</div>
+        <div style="padding:6px 10px;">
+          <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">ATENDIMENTO INICIAL REALIZADO COM O CLIENTE:</div>
+          <span class="at-os-fv" id="osAtendimentoInicial" style="display:block;min-height:36px;white-space:pre-wrap;"></span>
+        </div>
+
+        <!-- DESCRIÇÃO DO PROBLEMA -->
+        <div class="at-os-section-bar">DESCRIÇÃO DO PROBLEMA</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+          <div style="padding:6px 10px;border-right:1px solid #e5e7eb;">
+            <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">MOTIVO DA SOLICITAÇÃO</div>
+            <span class="at-os-fv" id="osMotivo" style="display:block;min-height:36px;white-space:pre-wrap;"></span>
+          </div>
+          <div style="padding:6px 10px;">
+            <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">DESCRIÇÃO DO PROBLEMA</div>
+            <span class="at-os-fv" id="osDescricao" style="display:block;min-height:36px;white-space:pre-wrap;"></span>
+          </div>
+        </div>
+
+        <!-- HISTÓRICO DE ATENDIMENTO -->
+        <div class="at-os-section-bar">HISTÓRICO DE ATENDIMENTO</div>
+        <div style="min-height:48px;padding:6px 10px;">
+          <div id="osHistorico"></div>
+        </div>
+
+        <!-- OBSERVAÇÕES -->
+        <div class="at-os-section-bar">OBSERVAÇÕES</div>
+        <div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
+          <p style="margin:0;font-weight:700;font-style:italic;font-size:11px;color:#111;text-align:center;line-height:1.55;">
+            AS PEÇAS E A MÃO DE OBRA QUE NÃO CARACTERIZAM DEFEITO DE FABRICAÇÃO, CONFORME MANUAL DO EQUIPAMENTO,<br>
+            SERÃO COBRADAS DO CLIENTE/SOLICITANTE.
+          </p>
+        </div>
+
+        <!-- Assinaturas -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+          <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+            <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO TÉCNICO:</span>
+          </div>
+          <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+            <span style="font-weight:700;font-size:11px;color:#111;">DATA DE ABERTURA:</span>
+            <span class="at-os-fv" id="osDataAbertura" style="font-size:11px;"></span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+          <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+            <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO CLIENTE:</span>
+          </div>
+          <div style="padding:8px 10px;">
+            <span style="font-weight:700;font-size:11px;color:#111;">DATA DE CONCLUSÃO:</span>
+          </div>
+        </div>
+
+        <!-- Rodapé -->
+        <div style="text-align:center;padding:10px 10px 8px;border-top:1px solid #d1d5db;margin-top:4px;">
+          <div style="font-weight:700;font-size:11px;color:#111;">FROMTHERM SISTEMAS TÉRMICOS LTDA</div>
+          <div style="font-size:10px;color:#444;margin-top:2px;">R. Edgard Hoffmann, 699 - Beira Rio, Biguaçu - SC, 88164-275</div>
+          <div style="font-size:10px;color:#444;margin-top:1px;">CNPJ: 12.659.566/0001-09 &nbsp; CONTATO: (48) 3246-5627 / (48) 98814-5666 &nbsp; E-MAIL: sac@fromtherm.com.br</div>
+        </div>
+
+      </div><!-- /.at-os-doc -->
+    </div><!-- /.modal-container -->
+  </div><!-- /#osModal -->
+
+  <script>
+    const BASE     = location.origin;
+    const TOKEN    = new URLSearchParams(location.search).get('token') || '';
+    const SESS_KEY = 'at_portal_sess_' + TOKEN.slice(0, 8);
+
+    function mostrar(id) {
+      ['loadingSection','invalidSection','cadastroSection','loginSection','dashSection']
+        .forEach(s => {
+          const el = document.getElementById(s);
+          if (el) el.style.display = s === id ? '' : 'none';
+        });
+    }
+    function setErro(id, msg) {
+      const el = document.getElementById(id);
+      if (el) { el.textContent = msg; el.style.display = msg ? 'block' : 'none'; }
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g,
+        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function set(id, val) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val || '';
+    }
+    function _statusMeta(st) {
+      if (st === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
+      if (st === 'aguardando_nfe') return { cls: 'aguardando', label: 'Aguardando NFe' };
+      return { cls: 'aberta', label: 'Aberta' };
+    }
+
+    // ── Init ──
+    async function init() {
+      if (!TOKEN || TOKEN.length < 32) { mostrar('invalidSection'); return; }
+      const sessRaw = sessionStorage.getItem(SESS_KEY);
+      if (sessRaw) {
+        try {
+          const d = JSON.parse(atob(sessRaw.replace(/-/g,'+').replace(/_/g,'/')));
+          mostrarDash(d);
+          carregarAtendimentos();
+          return;
+        } catch {}
+      }
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/status?token=${encodeURIComponent(TOKEN)}`);
+        if (r.status === 404) { mostrar('invalidSection'); return; }
+        const d = await r.json();
+        if (d.temSenha) {
+          document.getElementById('loginNome').textContent = d.nome;
+          mostrar('loginSection');
+          setTimeout(() => document.getElementById('senhaLogin').focus(), 80);
+        } else {
+          document.getElementById('cadastroNome').textContent = d.nome;
+          mostrar('cadastroSection');
+          setTimeout(() => document.getElementById('novaSenha').focus(), 80);
+        }
+      } catch { mostrar('invalidSection'); }
+    }
+
+    // ── Cadastro ──
+    async function cadastrarSenha() {
+      const senha = document.getElementById('novaSenha').value;
+      const conf  = document.getElementById('confirmaSenha').value;
+      setErro('cadastroErro', '');
+      if (senha.length < 6) { setErro('cadastroErro', 'Mínimo 6 caracteres.'); return; }
+      if (senha !== conf)   { setErro('cadastroErro', 'As senhas não coincidem.'); return; }
+      const btn = document.getElementById('cadastroBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Cadastrando…';
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/set-senha`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: TOKEN, senha })
+        });
+        const d = await r.json();
+        if (!r.ok) { setErro('cadastroErro', d.error || 'Erro.'); btn.disabled = false; btn.textContent = 'Criar senha e entrar'; return; }
+        await _loginComSenha(senha);
+      } catch { setErro('cadastroErro', 'Erro de conexão.'); btn.disabled = false; btn.textContent = 'Criar senha e entrar'; }
+    }
+
+    // ── Login ──
+    async function fazerLogin() {
+      const senha = document.getElementById('senhaLogin').value;
+      setErro('loginErro', '');
+      if (!senha) { setErro('loginErro', 'Digite sua senha.'); return; }
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Entrando…';
+      await _loginComSenha(senha);
+      btn.disabled = false; btn.textContent = 'Entrar';
+    }
+
+    async function _loginComSenha(senha) {
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/login`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: TOKEN, senha })
+        });
+        const d = await r.json();
+        if (!r.ok) {
+          const errId = document.getElementById('cadastroSection').style.display !== 'none' ? 'cadastroErro' : 'loginErro';
+          setErro(errId, d.error || 'Erro.');
+          return;
+        }
+        sessionStorage.setItem(SESS_KEY, d.session);
+        mostrarDash(d);
+        carregarAtendimentos();
+      } catch { setErro('loginErro', 'Erro de conexão.'); }
+    }
+
+    // ── Dashboard ──
+    function mostrarDash(d) {
+      document.getElementById('dashNome').textContent = d.nome || '—';
+      document.getElementById('dashTipo').textContent = d.tipo || '';
+      mostrar('dashSection');
+    }
+    function sair() {
+      sessionStorage.removeItem(SESS_KEY);
+      document.getElementById('senhaLogin').value = '';
+      mostrar('loginSection');
+    }
+
+    // ── Tabela de atendimentos ──
+    async function carregarAtendimentos() {
+      const tbody = document.getElementById('atendTbody');
+      tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">Carregando…</td></tr>';
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/atendimentos?token=${encodeURIComponent(TOKEN)}`);
+        const lista = r.ok ? await r.json() : [];
+        if (!lista.length) {
+          tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">Nenhum atendimento vinculado.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = lista.map(a => {
+          const st = a.status_os || 'aberta';
+          const m  = _statusMeta(st);
+          const nfeCell = a.nfe_url
+            ? '<a href="' + esc(a.nfe_url) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>'
+            : '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>';
+          const fechCls = st === 'aberta' ? '' : ' is-fechada';
+          return `
+          <tr data-id-at="${a.id_at}">
+            <td class="tbl-os" onclick="abrirOsModal(${a.id_at})" style="cursor:pointer;" title="Ver OS">${esc(a.os_num)}</td>
+            <td style="white-space:nowrap;">${esc(a.data)}</td>
+            <td>${esc(a.cliente)}</td>
+            <td style="white-space:nowrap;">${esc(a.modelo)}</td>
+            <td class="tbl-prob">${esc(a.problema)}</td>
+            <td><button class="tbl-icon-btn" onclick="event.stopPropagation();abrirEvidModal(${a.id_at})" title="Ver evidências">📷</button></td>
+            <td><button class="tbl-icon-btn tbl-fechar-btn${fechCls}" onclick="event.stopPropagation();abrirFechModal(${a.id_at})" title="Finalizar atendimento" style="white-space:nowrap;font-size:11px;">Finalizar</button></td>
+            <td class="tbl-nfe-cell">${nfeCell}</td>
+            <td><span class="status-badge status-${m.cls}">${m.label}</span></td>
+          </tr>`;
+        }).join('');
+      } catch {
+        tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">Erro ao carregar.</td></tr>';
+      }
+    }
+
+    // ── Modal OS ──
+    async function abrirOsModal(idAt) {
+      ['osNumero','osRevenda','osRevendaCel','osCliente','osContato','osCidadeUf',
+       'osCelular','osEndereco','osCpfCnpj','osCep','osNumSerie','osNf','osModelo',
+       'osDataVenda','osQuadroExt','osControlador','osAlimentacao','osFluidoRefrig',
+       'osAtendimentoInicial','osMotivo','osDescricao','osDataAbertura']
+        .forEach(id => set(id, '…'));
+      document.getElementById('osHistorico').innerHTML = '';
+      document.getElementById('osRevData').innerHTML = 'REV.: 01 &nbsp;|&nbsp; …';
+
+      const _osTitleEl = document.getElementById('osModalTitle');
+      if (_osTitleEl) _osTitleEl.innerHTML = '<span class="spinner" style="width:11px;height:11px;border-width:2px;margin-right:5px;"></span>Carregando…';
+      document.getElementById('osModal').classList.add('open');
+      document.body.style.overflow = 'hidden';
+
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/os-portal/${idAt}?token=${encodeURIComponent(TOKEN)}`
+        );
+        if (!r.ok) { alert('Não foi possível carregar os dados da OS.'); fecharOsModal(); return; }
+        const d = await r.json();
+        if (_osTitleEl) _osTitleEl.textContent = 'Solicitação de AT';
+
+        document.getElementById('osRevData').innerHTML =
+          `REV.: 01 &nbsp;|&nbsp; ${esc(d.data_abertura || '—')}`;
+
+        set('osNumero',             d.os_num);
+        set('osRevenda',            d.revenda);
+        set('osRevendaCel',         d.revenda_cel);
+        set('osCliente',            d.cliente);
+        set('osContato',            d.contato);
+        set('osCidadeUf',           d.cidade_uf);
+        set('osCelular',            d.celular);
+        set('osEndereco',           d.endereco);
+        set('osCpfCnpj',            d.cpf_cnpj);
+        set('osCep',                d.cep);
+        set('osNumSerie',           d.num_serie);
+        set('osNf',                 d.nota_fiscal);
+        set('osModelo',             d.modelo);
+        set('osDataVenda',          d.data_venda);
+        set('osQuadroExt',          d.quadro_ext || (d.fluido_refrig ? 'Não' : ''));
+        set('osControlador',        d.controlador || '');
+        set('osAlimentacao',        d.alimentacao || '');
+        set('osFluidoRefrig',       d.fluido_refrig);
+        set('osAtendimentoInicial', d.atendimento_inicial);
+        set('osMotivo',             d.motivo_solicitacao);
+        set('osDescricao',          d.descricao_problema);
+        set('osDataAbertura',       d.data_abertura);
+
+        const histEl = document.getElementById('osHistorico');
+        if (d.historico && d.historico.length) {
+          histEl.innerHTML = d.historico.map(h => {
+            const m = h.match(/^(\S+)\s+(.+)$/s);
+            return `<div style="font-size:12px;color:#222;padding:1px 0;">` +
+              (m ? `<strong style="color:#1e40af;">${esc(m[1])}</strong> ${esc(m[2])}` : esc(h)) +
+              `</div>`;
+          }).join('');
+        } else {
+          histEl.innerHTML = '<span style="color:#94a3b8;font-size:12px;">Sem histórico.</span>';
+        }
+      } catch { alert('Erro de conexão.'); fecharOsModal(); }
+    }
+
+    function fecharOsModal() {
+      document.getElementById('osModal').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { fecharOsModal(); fecharFechModal(); fecharEvidModal(); }
+    });
+
+    // ── Estado do modal fechamento ──────────────────────────────────────────
+    let _fechIdAt      = null;
+    let _fechStatusOs  = 'aberta';
+    let _inlineNfeIdAt = null;
+
+    async function abrirFechModal(idAt) {
+      _fechIdAt    = idAt;
+      _fechStatusOs = 'aberta';
+      ['fechDescricao','fechPecas','fechValorMo','fechValorPecas','fechDataConclusao','fechObs']
+        .forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+      document.getElementById('fechEvidList').innerHTML    = '';
+      document.getElementById('fechEvidStatus').textContent = '';
+      document.getElementById('fechEvidFile').value = '';
+      setErro('fechErro', '');
+      // Pré-preenche data de conclusão com hoje
+      const hoje = new Date().toISOString().slice(0, 10);
+      document.getElementById('fechDataConclusao').value = hoje;
+
+      document.getElementById('fechModalOv').classList.add('open');
+      document.body.style.overflow = 'hidden';
+
+      try {
+        const r = await fetch(`${BASE}/api/sac/at/tecnico/fechamento/${idAt}?token=${encodeURIComponent(TOKEN)}`);
+        if (r.ok) {
+          const d = await r.json();
+          _fechStatusOs = d.status_os || 'aberta';
+          const el = id => document.getElementById(id);
+          if (d.descricao_servico_realizado) el('fechDescricao').value  = d.descricao_servico_realizado;
+          if (d.pecas_reposicao)             el('fechPecas').value      = d.pecas_reposicao;
+          if (d.valor_total_mao_obra  != null) el('fechValorMo').value  = d.valor_total_mao_obra;
+          if (d.valor_gasto_pecas     != null) el('fechValorPecas').value = d.valor_gasto_pecas;
+          if (d.data_conclusao_servico) el('fechDataConclusao').value   = (d.data_conclusao_servico || '').slice(0, 10);
+          if (d.observacao_tecnico)    el('fechObs').value              = d.observacao_tecnico;
+          // carrega evidencias existentes
+          try {
+            const re = await fetch(`${BASE}/api/sac/at/tecnico/fechamento/${idAt}/evidencias?token=${encodeURIComponent(TOKEN)}`);
+            if (re.ok) { const de = await re.json(); if (de.evidencias && de.evidencias.length) _renderEvidencias(de.evidencias, false); }
+          } catch {}
+        }
+      } catch {}
+      _atualizarUiFechStatus();
+    }
+
+    function _atualizarUiFechStatus() {
+      const badge = document.getElementById('fechStatusBadge');
+      if (!badge) return;
+      const m = _statusMeta(_fechStatusOs);
+      badge.textContent = m.label;
+      badge.className   = 'status-badge status-' + m.cls;
+    }
+
+    async function salvarFechamento() {
+      if (!_fechIdAt) return;
+      const btn = document.getElementById('fechSaveBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Salvando…';
+      setErro('fechErro', '');
+      const el = id => document.getElementById(id);
+      // Só altera status se ainda não está finalizado
+      const novoStatus = _fechStatusOs === 'finalizado' ? 'finalizado' : 'aguardando_nfe';
+      const payload = {
+        status_os:                   novoStatus,
+        descricao_servico_realizado: el('fechDescricao').value.trim(),
+        pecas_reposicao:             el('fechPecas').value.trim(),
+        valor_total_mao_obra:        el('fechValorMo').value.trim()       || null,
+        valor_gasto_pecas:           el('fechValorPecas').value.trim()    || null,
+        data_conclusao_servico:      el('fechDataConclusao').value.trim() || null,
+        observacao_tecnico:          el('fechObs').value.trim()
+      };
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/fechamento/${_fechIdAt}?token=${encodeURIComponent(TOKEN)}`,
+          { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+        );
+        const d = await r.json();
+        if (!r.ok) { setErro('fechErro', d.error || 'Erro ao salvar.'); btn.disabled = false; btn.textContent = '💾 Salvar'; return; }
+        _fechStatusOs = novoStatus;
+        _atualizarBadgeLinha(_fechIdAt, novoStatus);
+        fecharFechModal();
+      } catch { setErro('fechErro', 'Erro de conexão.'); }
+      btn.disabled = false; btn.textContent = '💾 Salvar';
+    }
+
+    // Upload evidências (fotos/vídeos) pelo modal
+    async function uploadEvidencias() {
+      const fileInput = document.getElementById('fechEvidFile');
+      const files = fileInput.files;
+      if (!files || !files.length || !_fechIdAt) return;
+      const statusEl = document.getElementById('fechEvidStatus');
+      const btn      = document.getElementById('fechEvidBtn');
+      btn.disabled = true;
+      statusEl.innerHTML = '<span class="evid-spinner"></span>Enviando ' + files.length + ' arquivo(s)…';
+      const form = new FormData();
+      for (const f of files) form.append('evidencias', f);
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/fechamento/${_fechIdAt}/evidencias?token=${encodeURIComponent(TOKEN)}`,
+          { method: 'POST', body: form }
+        );
+        const d = await r.json();
+        if (!r.ok) { statusEl.textContent = d.error || 'Erro no upload.'; btn.disabled = false; return; }
+        statusEl.textContent = '✓ ' + d.evidencias.length + ' arquivo(s) enviado(s)!';
+        _renderEvidencias(d.evidencias, true);
+        fileInput.value = '';
+      } catch { statusEl.textContent = 'Erro de conexão.'; }
+      btn.disabled = false;
+    }
+
+    function _renderEvidencias(lista, append) {
+      const container = document.getElementById('fechEvidList');
+      if (!container) return;
+      if (!append) container.innerHTML = '';
+      lista.forEach(ev => {
+        const isImg   = ev.content_type && ev.content_type.startsWith('image/');
+        const isVideo = ev.content_type && ev.content_type.startsWith('video/');
+        const item = document.createElement('div');
+        item.className = 'evid-item';
+        item.title = ev.nome_arquivo || '';
+        if (isImg) {
+          item.innerHTML = '<a href="' + esc(ev.url_publica) + '" target="_blank" rel="noopener noreferrer">' +
+            '<img src="' + esc(ev.url_publica) + '" alt="' + esc(ev.nome_arquivo) + '"></a>';
+        } else if (isVideo) {
+          item.innerHTML = '<a href="' + esc(ev.url_publica) + '" target="_blank" rel="noopener noreferrer">' +
+            '<video src="' + esc(ev.url_publica) + '" muted playsinline></video>' +
+            '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:22px;opacity:.9;">▶</div></a>';
+        } else {
+          const ext = (ev.nome_arquivo || '').split('.').pop().toUpperCase().slice(0,5);
+          item.innerHTML = '<a href="' + esc(ev.url_publica) + '" target="_blank" rel="noopener noreferrer">' +
+            '<div class="evid-ext">' + esc(ext) + '</div></a>';
+        }
+        container.appendChild(item);
+      });
+    }
+
+    // Upload NFe direto da tabela (sem abrir modal)
+    function abrirNfeUpload(idAt) {
+      _inlineNfeIdAt = idAt;
+      const inp = document.getElementById('inlineNfeInput');
+      inp.value = '';
+      inp.click();
+    }
+
+    async function uploadNfeInline() {
+      const fileInput = document.getElementById('inlineNfeInput');
+      const file = fileInput.files[0];
+      if (!file || !_inlineNfeIdAt) return;
+      const idAt  = _inlineNfeIdAt;
+      const row   = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
+      const nfeTd = row ? row.querySelector('.tbl-nfe-cell') : null;
+      if (nfeTd) nfeTd.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span>';
+      const form = new FormData();
+      form.append('nfe', file);
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/fechamento/${idAt}/nfe?token=${encodeURIComponent(TOKEN)}`,
+          { method: 'POST', body: form }
+        );
+        const d = await r.json();
+        if (!r.ok) {
+          if (nfeTd) nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
+          alert(d.error || 'Erro no upload.');
+          return;
+        }
+        _atualizarNfeLinha(idAt, d.nfe_url);
+        _atualizarBadgeLinha(idAt, 'finalizado');
+      } catch {
+        if (nfeTd) nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
+        alert('Erro de conexão.');
+      }
+      fileInput.value = '';
+    }
+
+    function _atualizarBadgeLinha(idAt, novoStatus) {
+      const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
+      if (!row) return;
+      const m = _statusMeta(novoStatus);
+      const badge = row.querySelector('.status-badge');
+      if (badge) { badge.textContent = m.label; badge.className = 'status-badge status-' + m.cls; }
+      const fbtn = row.querySelector('.tbl-fechar-btn');
+      if (fbtn) fbtn.className = 'tbl-icon-btn tbl-fechar-btn' + (novoStatus === 'aberta' ? '' : ' is-fechada');
+    }
+
+    function _atualizarNfeLinha(idAt, nfeUrl) {
+      const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
+      if (!row) return;
+      const nfeTd = row.querySelector('.tbl-nfe-cell');
+      if (nfeTd) {
+        nfeTd.innerHTML = '<a href="' + esc(nfeUrl) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>';
+      }
+    }
+
+    // ── Modal de visualização de evidências da tabela ──────────────────────
+    let _evidIdAt = null;
+
+    async function abrirEvidModal(idAt) {
+      _evidIdAt = idAt;
+      const row   = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
+      const osNum = row ? (row.querySelector('.tbl-os')?.textContent || idAt) : idAt;
+      document.getElementById('evidOsNum').textContent  = osNum;
+      document.getElementById('evidViewer').style.display = 'none';
+      document.getElementById('evidViewer').innerHTML   = '';
+      document.getElementById('evidGridThumb').innerHTML =
+        '<span class="evid-spinner"></span><span style="color:#94a3b8;font-size:13px;">Carregando…</span>';
+      document.getElementById('evidModalOv').classList.add('open');
+      document.body.style.overflow = 'hidden';
+
+      try {
+        const r = await fetch(
+          `${BASE}/api/sac/at/tecnico/fechamento/${idAt}/evidencias?token=${encodeURIComponent(TOKEN)}`
+        );
+        const d = r.ok ? await r.json() : { evidencias: [] };
+        const lista = (d.evidencias || []).filter(ev =>
+          ev.content_type && (ev.content_type.startsWith('image/') || ev.content_type.startsWith('video/'))
+        );
+        const grid = document.getElementById('evidGridThumb');
+        if (!lista.length) {
+          grid.innerHTML = '<span style="color:#94a3b8;font-size:13px;padding:4px;">Nenhuma evidência de foto ou vídeo ainda.</span>';
+          return;
+        }
+        grid.innerHTML = '';
+        lista.forEach((ev, idx) => {
+          const isImg = ev.content_type.startsWith('image/');
+          const thumb = document.createElement('div');
+          thumb.className = 'evid-thumb';
+          thumb.title = ev.nome_arquivo || '';
+          thumb.onclick = () => _abrirEvidViewer(ev, isImg);
+          if (isImg) {
+            thumb.innerHTML = '<img src="' + esc(ev.url_publica) + '" alt="' + esc(ev.nome_arquivo) + '" loading="lazy">';
+          } else {
+            thumb.innerHTML =
+              '<video src="' + esc(ev.url_publica) + '" muted playsinline preload="metadata"></video>' +
+              '<div class="evid-play">▶</div>';
+          }
+          grid.appendChild(thumb);
+          if (idx === 0) _abrirEvidViewer(ev, isImg);
+        });
+      } catch {
+        document.getElementById('evidGridThumb').innerHTML =
+          '<span style="color:#f87171;font-size:13px;padding:4px;">Erro ao carregar evidências.</span>';
+      }
+    }
+
+    function _abrirEvidViewer(ev, isImg) {
+      const viewer = document.getElementById('evidViewer');
+      viewer.style.display = 'flex';
+      if (isImg) {
+        viewer.innerHTML = '<img src="' + esc(ev.url_publica) + '" alt="' + esc(ev.nome_arquivo) + '">';
+      } else {
+        viewer.innerHTML = '<video src="' + esc(ev.url_publica) + '" controls autoplay style="max-width:100%;max-height:70vh;"></video>';
+      }
+    }
+
+    function fecharEvidModal() {
+      const ov = document.getElementById('evidModalOv');
+      if (ov) ov.classList.remove('open');
+      const viewer = document.getElementById('evidViewer');
+      if (viewer) { viewer.innerHTML = ''; viewer.style.display = 'none'; }
+      document.body.style.overflow = '';
+    }
+
+    function fecharFechModal() {
+      const ov = document.getElementById('fechModalOv');
+      if (ov) ov.classList.remove('open');
+      document.body.style.overflow = '';
+      const fi = document.getElementById('fechEvidFile');
+      if (fi) fi.value = '';
+    }
+
+    init();
+  </script>
+  <!-- ══════════════════════════════════════════════════
+       MODAL FECHAMENTO — preenchimento e upload NFe
+       ══════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="fechModalOv" onclick="if(event.target===this)fecharFechModal()">
+    <div class="modal-container" style="max-width:560px;">
+
+      <div class="modal-header">
+        <span class="modal-header-title">Finalizar atendimento</span>
+        <button class="modal-close-btn" onclick="fecharFechModal()">✕ Fechar</button>
+      </div>
+
+      <div style="padding:16px 18px 22px;">
+
+        <!-- Status atual -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap;">
+          <span style="font-size:12px;color:#9ca3af;">Status:</span>
+          <span class="status-badge status-aberta" id="fechStatusBadge">Aberta</span>
+        </div>
+
+        <!-- Campos do fechamento -->
+        <div class="fech-field-group">
+          <label class="fech-label">Descrição do serviço realizado</label>
+          <textarea class="fech-input fech-ta" id="fechDescricao" rows="3" placeholder="Descreva o serviço executado…"></textarea>
+        </div>
+        <div class="fech-field-group">
+          <label class="fech-label">Peças utilizadas</label>
+          <input class="fech-input" id="fechPecas" type="text" placeholder="Ex: Resistência, termostato…">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="fech-field-group">
+            <label class="fech-label">Valor mão de obra (R$)</label>
+            <input class="fech-input" id="fechValorMo" type="number" min="0" step="0.01" placeholder="0.00">
+          </div>
+          <div class="fech-field-group">
+            <label class="fech-label">Valor peças (R$)</label>
+            <input class="fech-input" id="fechValorPecas" type="number" min="0" step="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="fech-field-group">
+          <label class="fech-label">Data de conclusão</label>
+          <input class="fech-input" id="fechDataConclusao" type="date">
+        </div>
+        <div class="fech-field-group">
+          <label class="fech-label">Observações do técnico</label>
+          <textarea class="fech-input fech-ta" id="fechObs" rows="2" placeholder="Observações adicionais…"></textarea>
+        </div>
+
+        <!-- Evidências -->
+        <div class="fech-nfe-section" id="fechEvidSection">
+          <div style="font-size:12px;font-weight:700;color:#93c5fd;margin-bottom:10px;">📷 Evidências (fotos / vídeos)</div>
+          <div id="fechEvidList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="file" id="fechEvidFile" accept="image/*,video/*" multiple style="display:none;" onchange="uploadEvidencias()">
+            <button class="fech-upload-btn" id="fechEvidBtn" onclick="document.getElementById('fechEvidFile').click()">
+              📷 Adicionar fotos / vídeos
+            </button>
+            <span id="fechEvidStatus" style="font-size:12px;color:#94a3b8;"></span>
+          </div>
+        </div>
+
+        <!-- Ações -->
+        <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
+          <button class="fech-save-btn" id="fechSaveBtn" onclick="salvarFechamento()">💾 Salvar</button>
+          <button class="modal-close-btn" onclick="fecharFechModal()">Cancelar</button>
+        </div>
+        <div class="erro" id="fechErro" style="margin-top:12px;"></div>
+
+      </div>
+    </div>
+  </div>
+
+<input type="file" id="inlineNfeInput" accept=".pdf,.xml,application/pdf,text/xml,application/xml" style="display:none;" onchange="uploadNfeInline()">
+
+  <!-- ══════════════════════════════════════════════════
+       MODAL EVIDÊNCIAS — visualização de fotos/vídeos
+       ══════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="evidModalOv" onclick="if(event.target===this)fecharEvidModal()">
+    <div class="modal-container" style="max-width:680px;">
+      <div class="modal-header">
+        <span class="modal-header-title">📷 Evidências — OS <span id="evidOsNum">—</span></span>
+        <button class="modal-close-btn" onclick="fecharEvidModal()">✕ Fechar</button>
+      </div>
+      <!-- Thumbnails -->
+      <div class="evid-grid" id="evidGridThumb" style="min-height:80px;align-items:flex-start;">
+        <span style="color:#94a3b8;font-size:13px;padding:4px;">Carregando…</span>
+      </div>
+      <!-- Viewer grande -->
+      <div class="evid-viewer" id="evidViewer" style="display:none;"></div>
+    </div>
+  </div>
+
+</body>
+</html>

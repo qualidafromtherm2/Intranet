@@ -2149,6 +2149,9 @@
                     <i class="fa-solid fa-table-list"></i>
                     <span>Atendimentos</span>
                   </button>
+                  <button id="atConfigAlimentacaoBtn" class="content-button" type="button" title="Configurar Alimentação" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#374151 0%,#1f2937 100%);color:#9ca3af;padding:8px 12px;">
+                    <i class="fa-solid fa-gear"></i>
+                  </button>
                   <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar para AT</span>
@@ -2271,7 +2274,18 @@
                 </div>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px;">
+              <div style="grid-column:1/-1;margin-top:12px;">
+                <div class="form-field">
+                  <label for="atAtendimentoInicial">Atendimento inicial realizado com o cliente:</label>
+                  <textarea id="atAtendimentoInicial" rows="2" placeholder="Descreva o atendimento inicial com o cliente" style="width:100%;"></textarea>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+                <div class="form-field">
+                  <label for="atMotivoSolicitacao">Motivo da Solicitação</label>
+                  <textarea id="atMotivoSolicitacao" rows="3" placeholder="Descreva o motivo da solicitação" style="width:100%;"></textarea>
+                </div>
                 <div class="form-field">
                   <label for="atDescricao">Descreva a reclamação</label>
                   <textarea id="atDescricao" rows="3" placeholder="Descreva a reclamação" style="width:100%;"></textarea>
@@ -2336,11 +2350,12 @@
                         <th data-col="nota_fiscal" style="cursor:pointer;user-select:none;">Nota fiscal <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="data_entrega" style="cursor:pointer;user-select:none;">Data entrega <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="teste_tipo_gas" style="cursor:pointer;user-select:none;">1º TESTE / TIPO DE GÁS <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="atendimento_inicial" style="cursor:pointer;user-select:none;">Atend. inicial <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th style="text-align:center;">Docs</th>
                       </tr>
                     </thead>
                     <tbody id="atAtendimentosTbody">
-                      <tr><td colspan="13" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
+                      <tr><td colspan="14" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -2411,8 +2426,12 @@
                     <input type="text" id="atEmPlataforma" class="at-em-input" placeholder="Plataforma">
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
+                    <label class="at-em-lbl">Atendimento inicial realizado com o cliente:</label>
+                    <textarea id="atEmAtendimentoInicial" class="at-em-input" rows="2" style="width:100%;box-sizing:border-box;" placeholder="Descreva o atendimento inicial com o cliente..."></textarea>
+                  </div>
+                  <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Histórico de reclamações</label>
-                    <div id="atEmReclamHistorico" style="display:none;max-height:140px;overflow-y:auto;border:1px solid #374151;border-radius:8px;padding:8px;font-size:12px;color:var(--inactive-color);margin-bottom:6px;"></div>
+                    <div id="atEmReclamHistorico" style="display:none;max-height:220px;overflow-y:auto;border:1px solid #374151;border-radius:8px;padding:8px;font-size:12px;margin-bottom:6px;"></div>
                     <label class="at-em-lbl" style="margin-top:2px;">Descreva a reclamação (nova entrada)</label>
                     <textarea id="atEmReclamacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Texto da reclamação..."></textarea>
                   </div>
@@ -2519,31 +2538,269 @@
         <div id="atOsModal" class="modal-overlay" style="display:none;z-index:10050;">
           <div class="modal-container" style="max-width:900px;width:96%;max-height:94vh;overflow-y:auto;padding:0;">
             <!-- Cabeçalho fixo do modal -->
-            <div class="modal-header" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;justify-content:space-between;align-items:center;">
+            <div class="modal-header" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:6;background:#1f2937;">
               <span style="font-size:13px;color:var(--inactive-color);">Solicitação de AT</span>
-              <button id="atOsModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button id="atOsImprimirBtn" type="button"
+                  style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;cursor:pointer;font-size:13px;font-weight:600;"
+                  title="Gerar PDF / Imprimir">
+                  <i class="fa-solid fa-file-pdf"></i> Salvar PDF
+                </button>
+                <button id="atOsEnviarLinkBtn" type="button"
+                  style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;cursor:pointer;font-size:13px;font-weight:600;"
+                  title="Enviar link para técnico">
+                  <i class="fa-solid fa-paper-plane"></i> Enviar Link
+                </button>
+                <button id="atOsMapaBtn" type="button"
+                  style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#10b981,#047857);color:#fff;cursor:pointer;font-size:13px;font-weight:600;"
+                  title="Ver mapa de técnicos">
+                  <i class="fa-solid fa-map-location-dot"></i> Ver Mapa
+                </button>
+                <button id="atOsModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+              </div>
             </div>
-            <!-- Corpo -->
-            <div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px;">
+            <!-- Corpo — documento branco imprimível -->
+            <div class="at-os-doc">
 
               <!-- CABEÇALHO DO FORMULÁRIO -->
               <div class="at-os-header">
-                <!-- Coluna esquerda: logo -->
                 <div class="at-os-hcol at-os-hcol-logo">
-                  <img src="img/Logo_OS.png" alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
+                  <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png" alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
                 </div>
-                <!-- Coluna central: título -->
                 <div class="at-os-hcol at-os-hcol-center">
                   <div class="at-os-title">FT-M04-SAC – Solicitação de Assistência Técnica</div>
                   <div class="at-os-rev">REV.: 01 &nbsp;|&nbsp; 01/04/2026</div>
                 </div>
-                <!-- Coluna direita: número OS -->
                 <div class="at-os-hcol at-os-hcol-os">
                   <div class="at-os-os-label">ORDEM DE SERVIÇO</div>
                   <div class="at-os-os-num" id="atOsNumero">—</div>
                 </div>
               </div>
 
+              <!-- DADOS DA REVENDA -->
+              <div class="at-os-section-bar">DADOS DA REVENDA</div>
+              <div class="at-os-fields-row">
+                <div class="at-os-field"><span class="at-os-fl">REVENDA:</span><span class="at-os-fv" id="atOsRevenda"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CELULAR:</span><span class="at-os-fv" id="atOsRevendaCel"></span></div>
+              </div>
+
+              <!-- DADOS DO CLIENTE -->
+              <div class="at-os-section-bar">
+                DADOS DO CLIENTE
+                <span class="at-os-agenda-hint">(Agendar a visita técnica com o contato abaixo)</span>
+              </div>
+              <div class="at-os-fields-grid">
+                <div class="at-os-field at-os-span2"><span class="at-os-fl">CLIENTE:</span><span class="at-os-fv" id="atOsCliente"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CONTATO:</span><span class="at-os-fv" id="atOsContato"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CIDADE/UF:</span><span class="at-os-fv" id="atOsCidadeUf"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CELULAR:</span><span class="at-os-fv" id="atOsCelular"></span></div>
+                <div class="at-os-field at-os-span2"><span class="at-os-fl">ENDEREÇO:</span><span class="at-os-fv" id="atOsEndereco"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CPF/CNPJ:</span><span class="at-os-fv" id="atOsCpfCnpj"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CEP:</span><span class="at-os-fv" id="atOsCep"></span></div>
+              </div>
+
+              <!-- DADOS DO EQUIPAMENTO -->
+              <div class="at-os-section-bar">DADOS DO EQUIPAMENTO DO CLIENTE</div>
+              <div class="at-os-fields-row at-os-equip-row">
+                <div class="at-os-field"><span class="at-os-fl">N° SÉRIE:</span><span class="at-os-fv" id="atOsNumSerie"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">NF:</span><span class="at-os-fv" id="atOsNf"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">MODELO:</span><span class="at-os-fv" id="atOsModelo"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">DATA DE VENDA:</span><span class="at-os-fv" id="atOsDataVenda"></span></div>
+              </div>
+
+              <!-- ESPECIFICAÇÕES TÉCNICAS -->
+              <div class="at-os-section-bar">ESPECIFICAÇÕES TÉCNICAS</div>
+              <div class="at-os-fields-row" style="flex-wrap:wrap;">
+                <div class="at-os-field"><span class="at-os-fl">QUADRO EXT.:</span><span class="at-os-fv" id="atOsQuadroExt"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">CONTROLADOR:</span><span class="at-os-fv" id="atOsControlador"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">ALIMENTAÇÃO:</span><span class="at-os-fv" id="atOsAlimentacao"></span></div>
+                <div class="at-os-field"><span class="at-os-fl">FLUIDO REFRIG.:</span><span class="at-os-fv" id="atOsFluidoRefrig"></span></div>
+              </div>
+
+              <!-- ATENDIMENTO INICIAL -->
+              <div class="at-os-section-bar">ATENDIMENTO INICIAL</div>
+              <div style="padding:6px 10px;">
+                <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">ATENDIMENTO INICIAL REALIZADO COM O CLIENTE:</div>
+                <span class="at-os-fv" id="atOsAtendimentoInicial" style="display:block;min-height:36px;"></span>
+              </div>
+
+              <!-- DESCRIÇÃO DO PROBLEMA -->
+              <div class="at-os-section-bar">DESCRIÇÃO DO PROBLEMA</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+                <div style="padding:6px 10px;border-right:1px solid #e5e7eb;">
+                  <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">MOTIVO DA SOLICITAÇÃO</div>
+                  <span class="at-os-fv" id="atOsMotivoSolicitacao" style="display:block;min-height:36px;"></span>
+                </div>
+                <div style="padding:6px 10px;">
+                  <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">DESCRIÇÃO DO PROBLEMA</div>
+                  <span class="at-os-fv" id="atOsDescricaoProblema" style="display:block;min-height:36px;"></span>
+                </div>
+              </div>
+
+              <!-- HISTÓRICO DE ATENDIMENTO -->
+              <div class="at-os-section-bar">HISTÓRICO DE ATENDIMENTO</div>
+              <div style="min-height:48px;padding:6px 10px;">
+                <span class="at-os-fv" id="atOsHistorico" style="display:block;min-height:40px;"></span>
+              </div>
+
+              <!-- OBSERVAÇÕES -->
+              <div class="at-os-section-bar">OBSERVAÇÕES</div>
+              <div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
+                <p style="margin:0;font-weight:700;font-style:italic;font-size:11px;color:#111;text-align:center;line-height:1.5;">
+                  AS PEÇAS E A MÃO DE OBRA QUE NÃO CARACTERIZAM DEFEITO DE FABRICAÇÃO, CONFORME MANUAL DO EQUIPAMENTO,<br>
+                  SERÃO COBRADAS DO CLIENTE/SOLICITANTE.
+                </p>
+              </div>
+              <!-- Assinaturas e datas -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+                  <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO TÉCNICO:</span>
+                </div>
+                <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+                  <span style="font-weight:700;font-size:11px;color:#111;">DATA DE ABERTURA:</span>
+                  <span class="at-os-fv" id="atOsDataAbertura" style="font-size:11px;"></span>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+                  <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO CLIENTE:</span>
+                </div>
+                <div style="padding:8px 10px;">
+                  <span style="font-weight:700;font-size:11px;color:#111;">DATA DE CONCLUSÃO:</span>
+                </div>
+              </div>
+
+              <!-- Rodapé -->
+              <div style="text-align:center;padding:10px 10px 8px;border-top:1px solid #d1d5db;margin-top:4px;">
+                <div style="font-weight:700;font-size:11px;color:#111;">FROMTHERM SISTEMAS TÉRMICOS LTDA</div>
+                <div style="font-size:10px;color:#444;margin-top:2px;">R. Edgard Hoffmann, 699 - Beira Rio, Biguaçu - SC, 88164-275</div>
+                <div style="font-size:10px;color:#444;margin-top:1px;">CNPJ: 12.659.566/0001-09 &nbsp; CONTATO: (48) 3246-5627 / (48) 98814-5666 &nbsp; E-MAIL: sac@fromtherm.com.br</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Enviar Link — seleção de técnico -->
+        <div id="atEnviarLinkModal" class="modal-overlay" style="display:none;z-index:10055;">
+          <div class="modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-paper-plane" style="color:#38bdf8;"></i>
+                Enviar Link para Técnico
+              </h3>
+              <button id="atEnviarLinkModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <div style="position:relative;flex:1;min-width:180px;">
+                  <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:12px;"></i>
+                  <input id="atTecBuscaInput" type="text" placeholder="Buscar por nome..."
+                    style="width:100%;padding:7px 10px 7px 30px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#e5e7eb;font-size:13px;box-sizing:border-box;outline:none;">
+                </div>
+                <!-- Botão único de filtro por UF -->
+                <button id="atTecFiltroBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid rgba(14,165,233,.4);background:rgba(14,165,233,.12);color:#38bdf8;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap;">
+                  <i class="fas fa-filter"></i>
+                  <span id="atTecFiltroLabel">Todos</span>
+                </button>
+              </div>
+              <!-- Dropdown de checkboxes por UF -->
+              <div id="atTecFiltroDropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
+                <div style="padding:6px 12px 4px;font-size:11px;color:#6b7280;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">Estados</div>
+                <div id="atTecUfCheckList" style="display:flex;flex-direction:column;"></div>
+              </div>
+            </div>
+            <div id="atTecListWrap" style="flex:1;overflow-y:auto;padding:10px 14px;min-height:120px;max-height:55vh;">
+              <div id="atTecLista" style="display:flex;flex-direction:column;gap:6px;"></div>
+              <div id="atTecEmpty" style="display:none;text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum técnico encontrado.</div>
+              <div id="atTecLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Mapa — localização cliente + técnicos -->
+        <div id="atMapaModal" class="modal-overlay" style="display:none;z-index:10053;">
+          <div class="modal-container" style="max-width:960px;width:96%;height:88vh;display:flex;flex-direction:column;padding:0;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <h3 style="margin:0;font-size:14px;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-map-location-dot" style="color:#34d399;"></i>
+                  Mapa de Técnicos
+                </h3>
+                <!-- Legenda -->
+                <div style="display:flex;gap:12px;align-items:center;font-size:11px;color:#9ca3af;">
+                  <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;border:2px solid #fff;vertical-align:middle;margin-right:4px;"></span>Cliente</span>
+                  <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid #fff;vertical-align:middle;margin-right:4px;"></span>AT Autorizada</span>
+                  <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#eab308;border:2px solid #fff;vertical-align:middle;margin-right:4px;"></span>AT Habilitada</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <!-- Toggle mostrar todos / só UF -->
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#9ca3af;cursor:pointer;user-select:none;">
+                  <input type="checkbox" id="atMapaMostrarTodos"
+                    style="accent-color:#34d399;width:14px;height:14px;cursor:pointer;">
+                  Mostrar todos os estados
+                </label>
+                <button id="atMapaModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+              </div>
+            </div>
+            <!-- Barra de progresso do geocoding -->
+            <div id="atMapaProgress" style="display:none;padding:6px 16px;background:rgba(52,211,153,.08);border-bottom:1px solid rgba(52,211,153,.15);flex-shrink:0;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <i class="fas fa-circle-notch fa-spin" style="color:#34d399;font-size:12px;"></i>
+                <span id="atMapaProgressTxt" style="font-size:12px;color:#6ee7b7;">Geocodificando...</span>
+                <div style="flex:1;background:rgba(255,255,255,.08);border-radius:4px;height:4px;overflow:hidden;">
+                  <div id="atMapaProgressBar" style="height:100%;background:#34d399;width:0%;transition:width .3s;"></div>
+                </div>
+              </div>
+            </div>
+            <!-- Container do mapa Leaflet -->
+            <div id="atMapaLeaflet" style="flex:1;min-height:0;"></div>
+          </div>
+        </div>
+
+        <!-- Modal configuração Alimentação -->
+        <div id="atAlimentacaoModal" class="modal-overlay" style="display:none;z-index:10060;">
+          <div class="modal-container" style="max-width:560px;width:96%;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-gear" style="color:#9ca3af;"></i>
+                Configuração — Alimentação por Letra do Modelo
+              </h3>
+              <button class="modal-close-btn" id="atAlimModalClose" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" style="padding:16px;">
+              <!-- Formulário de nova entrada -->
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:12px;align-items:end;">
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">LETRA DO CÓDIGO</label>
+                  <input id="atAlimLetra" class="input-padrao" type="text" maxlength="3" placeholder="ex: L" style="text-transform:uppercase;">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">DEGELO</label>
+                  <input id="atAlimDegelo" class="input-padrao" type="text" placeholder="ex: Reverso">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">ALIMENTAÇÃO</label>
+                  <input id="atAlimAlimentacao" class="input-padrao" type="text" placeholder="ex: 220V MONO">
+                </div>
+                <button id="atAlimAddBtn" class="content-button" type="button" style="background:#0ea5e9;color:#fff;height:38px;">
+                  <i class="fa-solid fa-plus"></i>
+                </button>
+              </div>
+              <!-- Tabela de entradas -->
+              <div class="tabela-wrapper" style="max-height:320px;overflow-y:auto;">
+                <table class="tabela padrao">
+                  <thead>
+                    <tr>
+                      <th>Letra</th><th>Degelo</th><th>Alimentação</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="atAlimTbody">
+                    <tr><td colspan="4" style="text-align:center;color:var(--inactive-color);">Carregando…</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -3922,6 +4179,97 @@
                 font-size:12px;
               }
               .at-os-pdf-btn:hover { background:rgba(239,68,68,.22); }
+
+              /* ── Documento OS ── */
+              .at-os-doc {
+                background:#fff;
+                color:#111;
+                font-family: Arial, sans-serif;
+                font-size:13px;
+                border:1px solid #ccc;
+                margin:0 16px 16px;
+                border-radius:4px;
+                overflow:hidden;
+              }
+
+              @media print {
+                body > *:not(#atOsModal) { display:none !important; }
+                body.at-os-printing > *:not(#atOsModal) { display:none !important; }
+                #atOsModal { display:block !important; position:static !important; background:none !important; z-index:auto !important; padding:0 !important; margin:0 !important; width:100% !important; }
+                #atOsModal .modal-container { box-shadow:none !important; border:none !important; max-height:none !important; overflow:visible !important; border-radius:0 !important; width:100% !important; margin:0 !important; padding:0 !important; }
+                #atOsModal .modal-header { display:none !important; }
+                .at-os-doc { margin:0 !important; border:none !important; border-radius:0 !important; }
+                .at-os-fv { border-bottom:1px solid #bbb !important; }
+              }
+              .at-os-section-bar {
+                background:#2c3e6b;
+                color:#fff;
+                font-weight:700;
+                font-size:12px;
+                letter-spacing:.5px;
+                text-align:center;
+                padding:6px 12px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                gap:12px;
+              }
+              .at-os-agenda-hint {
+                color:#ef4444;
+                font-size:11px;
+                font-weight:600;
+                font-style:italic;
+              }
+              .at-os-fields-row {
+                display:flex;
+                gap:0;
+                padding:6px 10px;
+                flex-wrap:wrap;
+              }
+              .at-os-fields-grid {
+                display:grid;
+                grid-template-columns:1fr 1fr;
+                gap:2px 0;
+                padding:6px 10px;
+              }
+              .at-os-equip-row { justify-content:space-between; }
+              .at-os-field {
+                display:flex;
+                align-items:baseline;
+                gap:5px;
+                padding:3px 8px 3px 0;
+                flex:1;
+                min-width:200px;
+              }
+              .at-os-span2 { grid-column:1/3; }
+              .at-os-fl {
+                font-weight:700;
+                white-space:nowrap;
+                font-size:12px;
+                color:#111;
+              }
+              .at-os-fv {
+                font-size:12px;
+                color:#222;
+                border-bottom:1px solid #ccc;
+                flex:1;
+                min-width:60px;
+                padding-bottom:1px;
+              }
+              /* cabeçalho do documento */
+              .at-os-doc .at-os-header {
+                display:grid;
+                grid-template-columns:160px 1fr 180px;
+                gap:0;
+                border-bottom:2px solid #2c3e6b;
+                padding:10px 12px;
+                background:#fff;
+              }
+              .at-os-doc .at-os-title { color:#111;font-size:13px;font-weight:700; }
+              .at-os-doc .at-os-rev   { color:#444;font-size:11px;margin-top:4px; }
+              .at-os-doc .at-os-os-label { font-size:11px;font-weight:700;color:#fff;background:#2c3e6b;text-align:center;padding:3px 6px;border-radius:2px 2px 0 0; }
+              .at-os-doc .at-os-os-num   { background:#2c3e6b;color:#fff;font-size:22px;font-weight:900;text-align:center;padding:6px 4px;letter-spacing:1px;border-radius:0 0 2px 2px; }
+
               #atLightbox {
                 display:none;position:fixed;inset:0;z-index:10200;
                 background:rgba(0,0,0,.92);align-items:center;justify-content:center;
@@ -5612,7 +5960,7 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260331c"></script>
+  <script type="module" src="menu_produto.js?v=20260401g"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>

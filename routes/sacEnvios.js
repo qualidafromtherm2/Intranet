@@ -6,6 +6,8 @@ const mime = require('mime-types');
 const pdfParse = require('pdf-parse');
 const fetch = require('node-fetch');
 const { parse: csvParse } = require('csv-parse/sync');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const supabase = require('../utils/supabase');
 
@@ -38,6 +40,8 @@ const PEDIDOS_SERIE_SHEET_ID = '14cmU3eOVH8ZscU-nZqxPb1Do5wTnl0SdQCU1caee6qk';
 const PEDIDOS_SERIE_GID = '1642140396';
 const TESTE_GAS_SHEET_ID = '1Kzg7LngaUig6t2CLabS1fhZ-iD5idrmv1ZesIUVOy1M';
 const TESTE_GAS_SHEET_GID = '1333359070';
+const SPEC_SHEET_ID  = '1Kzg7LngaUig6t2CLabS1fhZ-iD5idrmv1ZesIUVOy1M';
+const SPEC_SHEET_GID = '2061903610';
 let atSerieSheetGidCache = null;
 let atSerieSheetGidCacheAt = 0;
 
@@ -276,6 +280,44 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   }
 }
 
+// Geocoding via BrasilAPI CEP (sem rate limit, usa coordenadas do CEP)
+async function geocodeByCep(cep) {
+  const clean = String(cep || '').replace(/\D/g, '');
+  if (clean.length !== 8) return null;
+  try {
+    const r = await fetchWithTimeout(`https://brasilapi.com.br/api/cep/v2/${clean}`, {}, 6000);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const c = d && d.location && d.location.coordinates;
+    if (c && c.latitude && c.longitude) {
+      return { lat: parseFloat(c.latitude), lng: parseFloat(c.longitude) };
+    }
+  } catch {}
+  return null;
+}
+
+// Geocoding via Open-Meteo (OSM, gratuito, sem rate limit, acessível do servidor)
+async function geocodeByNominatimBackend(municipio, uf) {
+  if (!municipio) return null;
+  try {
+    // Remove acentos para melhor busca
+    const nome = municipio.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(nome)}&count=5&language=pt&format=json&countryCode=BR`;
+    const r = await fetchWithTimeout(url, {}, 8000);
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d.results || !d.results.length) return null;
+    // Prefere resultado que bate com o estado (UF)
+    const ufUpper = String(uf || '').toUpperCase();
+    const match = ufUpper
+      ? d.results.find(x => x.admin1 && x.admin1.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().includes(ufUpper === 'SC' ? 'SANTA CATARINA' : ufUpper === 'SP' ? 'SAO PAULO' : ufUpper))
+        || d.results[0]
+      : d.results[0];
+    return { lat: parseFloat(match.latitude), lng: parseFloat(match.longitude) };
+  } catch {}
+  return null;
+}
+
 function normalizeStatus(statusRaw) {
   const val = String(statusRaw || '').trim();
   if (!val) return STATUS_LIST[0];
@@ -456,6 +498,16 @@ async function ensureSchema() {
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS plataforma_atendimento TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS editado_por TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS editado_em TIMESTAMP;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS motivo_solicitacao TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS atendimento_inicial TEXT;
+
+    CREATE TABLE IF NOT EXISTS sac.alimentacao (
+      id            BIGSERIAL PRIMARY KEY,
+      letra_codigo  TEXT NOT NULL UNIQUE,
+      degelo        TEXT,
+      alimentacao   TEXT NOT NULL,
+      criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
+    );
 
     CREATE TABLE IF NOT EXISTS sac.fechamento (
       id BIGSERIAL PRIMARY KEY,
@@ -496,6 +548,24 @@ async function ensureSchema() {
         ALTER TABLE public.controle_tecnicos SET SCHEMA sac;
       END IF;
     END $controle$;
+
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS lat NUMERIC(10,7);
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS lng NUMERIC(10,7);
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS senha TEXT;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS token TEXT;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS qtd_atend_ult_1_ano INTEGER DEFAULT 0;
+    ALTER TABLE sac.controle_tecnicos ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+    CREATE UNIQUE INDEX IF NOT EXISTS controle_tecnicos_token_idx ON sac.controle_tecnicos(token) WHERE token IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS controle_tecnicos_id_idx    ON sac.controle_tecnicos(id);
+    -- coluna que vincula técnico ao atendimento em fechamento
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS id_tecnico BIGINT;
+    CREATE UNIQUE INDEX IF NOT EXISTS fechamento_at_tec_uidx ON sac.fechamento(id_at, id_tecnico) WHERE id_tecnico IS NOT NULL;
+    -- colunas para fechamento pelo portal AT
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS status_os TEXT DEFAULT 'aberta';
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS nfe_url TEXT;
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS nfe_path_key TEXT;
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS observacao_tecnico TEXT;
+    ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS data_envio_nfe TIMESTAMPTZ;
   `);
 }
 
@@ -519,6 +589,8 @@ router.post('/at', async (req, res) => {
     rua: String(body.rua || '').trim() || null,
     agendarAtendimentoCom: String(body.agendar_atendimento_com || '').trim() || null,
     descrevaReclamacao: String(body.descreva_reclamacao || '').trim() || null,
+    motivoSolicitacao: String(body.motivo_solicitacao || '').trim() || null,
+    atendimentoInicial: String(body.atendimento_inicial || '').trim() || null,
     modelo: String(body.modelo || '').trim() || null,
     tagProblema: String(body.tag_problema || '').trim() || null,
     plataformaAtendimento: String(body.plataforma_atendimento || '').trim() || null,
@@ -575,10 +647,12 @@ router.post('/at', async (req, res) => {
            rua,
            agendar_atendimento_com,
            descreva_reclamacao,
+           motivo_solicitacao,
+           atendimento_inicial,
            modelo,
            tag_problema,
            plataforma_atendimento
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -593,6 +667,8 @@ router.post('/at', async (req, res) => {
           payload.rua,
           payload.agendarAtendimentoCom,
           payload.descrevaReclamacao,
+          payload.motivoSolicitacao,
+          payload.atendimentoInicial,
           payload.modelo,
           payload.tagProblema,
           payload.plataformaAtendimento,
@@ -622,10 +698,12 @@ router.post('/at', async (req, res) => {
            rua,
            agendar_atendimento_com,
            descreva_reclamacao,
+           motivo_solicitacao,
+           atendimento_inicial,
            modelo,
            tag_problema,
            plataforma_atendimento
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -640,6 +718,8 @@ router.post('/at', async (req, res) => {
           payload.rua,
           payload.agendarAtendimentoCom,
           payload.descrevaReclamacao,
+          payload.motivoSolicitacao,
+          payload.atendimentoInicial,
           payload.modelo,
           payload.tagProblema,
           payload.plataformaAtendimento,
@@ -691,6 +771,8 @@ router.get('/at/atendimentos', async (_req, res) => {
          a.estado,
          a.cidade,
          a.descreva_reclamacao,
+         a.atendimento_inicial,
+         a.motivo_solicitacao,
          COALESCE(a.modelo, s.modelo) AS modelo,
          a.tag_problema,
          a.plataforma_atendimento,
@@ -738,9 +820,11 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     estado:                 'estado',
     cidade:                 'cidade',
     descreva_reclamacao:    'descreva_reclamacao',
+    motivo_solicitacao:     'motivo_solicitacao',
     modelo:                 'modelo',
     tag_problema:           'tag_problema',
     plataforma_atendimento: 'plataforma_atendimento',
+    atendimento_inicial:    'atendimento_inicial',
   };
 
   const setClauses = [];
@@ -1415,7 +1499,7 @@ router.get('/at/busca-serie', async (req, res) => {
           cliente: '',
           nota_fiscal: '',
           chave_nfe: '',
-          data_entrega: '',
+          data_entrega: dataVenda,
           teste_tipo_gas: testeTipoGas,
           pedido,
           ordem_producao: ordemProducao,
@@ -1462,7 +1546,7 @@ router.get('/at/busca-serie', async (req, res) => {
             cliente: '',
             nota_fiscal: '',
             chave_nfe: '',
-            data_entrega: '',
+            data_entrega: dataVenda,
             teste_tipo_gas: '',
             pedido: serie,
             ordem_producao: op,
@@ -1814,6 +1898,786 @@ router.delete('/at/anexos/:id_at/:id_anexo', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT] erro ao deletar anexo:', err);
     res.status(500).json({ error: 'Falha ao deletar anexo.' });
+  }
+});
+
+// GET /at/os-data/:id — dados completos para o formulário PDF de AT
+router.get('/at/os-data/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         a.nome_revenda_cliente,
+         a.data                   AS data_abertura,
+         a.numero_telefone          AS at_celular,
+         a.cpf_cnpj,
+         a.estado,
+         a.cidade,
+         a.rua,
+         a.numero                 AS num_endereco,
+         a.bairro,
+         a.cep,
+         a.agendar_atendimento_com,
+         a.modelo                 AS at_modelo,
+         a.descreva_reclamacao,
+         a.motivo_solicitacao,
+         a.atendimento_inicial,
+         s.cliente                AS revenda_cliente,
+         s.ordem_producao,
+         s.modelo                 AS serie_modelo,
+         s.nota_fiscal,
+         s.data_entrega,
+         s.teste_tipo_gas,
+         f.telefone1_ddd          AS rev_ddd,
+         f.telefone1_numero       AS rev_tel,
+         COALESCE(NULLIF(TRIM(f.nome_fantasia),''), NULLIF(TRIM(f.razao_social),'')) AS revenda_nome
+       FROM sac.at a
+       LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+       LEFT JOIN LATERAL (
+         SELECT telefone1_ddd, telefone1_numero, nome_fantasia, razao_social
+         FROM omie.fornecedores
+         WHERE nome_fantasia ILIKE s.cliente OR razao_social ILIKE s.cliente
+         ORDER BY CASE WHEN nome_fantasia ILIKE s.cliente THEN 0 ELSE 1 END
+         LIMIT 1
+       ) f ON true
+       WHERE a.id = (
+         SELECT a2.id FROM sac.at a2
+         JOIN sac.at_busca_selecionada s2 ON s2.id_at = a2.id
+         WHERE s2.ordem_producao = (
+           SELECT s3.ordem_producao FROM sac.at_busca_selecionada s3 WHERE s3.id_at = $1
+         )
+         ORDER BY a2.id DESC LIMIT 1
+       )
+       LIMIT 1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'AT não encontrado.' });
+    const r = rows[0];
+
+    // Formata data (pode vir como string DD/MM/YYYY ou ISO ou outro)
+    let dataVenda = '';
+    if (r.data_entrega) {
+      const raw = String(r.data_entrega).trim();
+      // Aceita DD/MM/YYYY com ou sem hora: "26/06/2025" ou "26/06/2025 14:08:14"
+      const dmyMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      if (dmyMatch) {
+        dataVenda = `${dmyMatch[1].padStart(2,'0')}/${dmyMatch[2].padStart(2,'0')}/${dmyMatch[3]}`;
+      } else {
+        const d = new Date(raw);
+        if (!isNaN(d)) dataVenda = d.toLocaleDateString('pt-BR');
+      }
+    }
+
+    // Modelo: pode vir da planilha ou do campo at.modelo
+    const modelo = r.serie_modelo || r.at_modelo || '';
+
+    // Extrai a primeira letra após a 1ª sequência de dígitos no modelo
+    // ex: FTI185LPTBR → 185 → próxima letra = L
+    let letraModelo = '';
+    const letraMatch = modelo.match(/[A-Za-z]+\d+([A-Za-z])/);
+    if (letraMatch) letraModelo = letraMatch[1].toUpperCase();
+
+    // Busca alimentação no banco
+    let alimentacao = '';
+    let degelo = '';
+    if (letraModelo) {
+      const { rows: alRows } = await pool.query(
+        `SELECT alimentacao, degelo FROM sac.alimentacao WHERE UPPER(letra_codigo)=$1 LIMIT 1`,
+        [letraModelo]
+      );
+      if (alRows.length) { alimentacao = alRows[0].alimentacao; degelo = alRows[0].degelo || ''; }
+    }
+
+    // Busca specs técnicas na planilha (ORDEM DE PRODUÇÃO) — apenas CONTROLADOR
+    // FLUIDO REFRIG vem do campo teste_tipo_gas já gravado em at_busca_selecionada
+    let quadroExt = '';
+    const fluidoRefrig = r.teste_tipo_gas || '';
+    const ordemProd = r.ordem_producao || '';
+    if (ordemProd) {
+      try {
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${SPEC_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SPEC_SHEET_GID}`;
+        const resp = await fetchWithTimeout(csvUrl, { headers: { Accept: 'text/csv' } }, 15000);
+        if (resp.ok) {
+          const csvText = await resp.text();
+          const specRows = csvParse(csvText, { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true, trim: true });
+          if (specRows.length > 0) {
+            const headers = Object.keys(specRows[0]);
+            const colOrdem       = headers.find(h => normalizeText(h).includes('ORDEM') && normalizeText(h).includes('PROD'));
+            const colControlador = headers.find(h => normalizeText(h).includes('CONTROLADOR'));
+            if (colOrdem) {
+              const found = specRows.find(row => normalizeText(row[colOrdem]) === normalizeText(ordemProd));
+              if (found && colControlador) quadroExt = found[colControlador] || '';
+            }
+          }
+        }
+      } catch (sheetErr) {
+        console.warn('[SAC/AT] spec-sheet lookup falhou:', sheetErr.message);
+      }
+    }
+
+    // Histórico de reclamações para o mesmo orden_producao
+    let historico = [];
+    if (ordemProd) {
+      try {
+        const hRes = await pool.query(
+          `SELECT a.id, a.data, a.descreva_reclamacao
+           FROM sac.at a
+           JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+           WHERE s.ordem_producao = $1
+             AND a.descreva_reclamacao IS NOT NULL
+             AND trim(a.descreva_reclamacao) != ''
+           ORDER BY a.id DESC`,
+          [ordemProd]
+        );
+        historico = hRes.rows.map(h => {
+          const dt = h.data ? new Date(h.data) : null;
+          const yy = dt && !isNaN(dt) ? String(dt.getFullYear()).slice(-2) : '';
+          return `${yy}-${h.id} ${h.descreva_reclamacao}`;
+        });
+      } catch (hErr) {
+        console.warn('[SAC/AT] falha ao buscar histórico:', hErr.message);
+      }
+    }
+
+    res.json({
+      revenda:        r.revenda_nome    || r.revenda_cliente || '',
+      revenda_cel:    r.rev_ddd && r.rev_tel ? `${r.rev_ddd} ${r.rev_tel}` : '',
+      cliente:        r.nome_revenda_cliente || '',
+      cidade_uf:      [r.cidade, r.estado].filter(Boolean).join(' / '),
+      endereco:       [r.rua, r.num_endereco].filter(Boolean).join(', '),
+      cep:            r.cep            || '',
+      contato:        r.agendar_atendimento_com || '',
+      celular:        r.at_celular     || '',
+      cpf_cnpj:       r.cpf_cnpj       || '',
+      num_serie:      ordemProd,
+      nota_fiscal:    r.nota_fiscal    || '',
+      modelo,
+      data_venda:     dataVenda,
+      quadro_ext:     quadroExt,
+      fluido_refrig:  fluidoRefrig,
+      alimentacao,
+      degelo,
+      descricao_problema:  r.descreva_reclamacao || '',
+      motivo_solicitacao:  r.motivo_solicitacao  || '',
+      atendimento_inicial: r.atendimento_inicial || '',
+      data_abertura: (() => {
+        if (!r.data_abertura) return '';
+        const dt = new Date(r.data_abertura);
+        if (isNaN(dt)) return String(r.data_abertura);
+        return dt.toLocaleDateString('pt-BR');
+      })(),
+      historico,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao buscar dados OS:', err);
+    res.status(500).json({ error: 'Falha ao buscar dados.' });
+  }
+});
+
+// CRUD sac.alimentacao
+router.get('/at/alimentacao', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM sac.alimentacao ORDER BY letra_codigo');
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/at/alimentacao', async (req, res) => {
+  const { letra_codigo, degelo, alimentacao } = req.body || {};
+  if (!letra_codigo || !alimentacao) return res.status(400).json({ error: 'letra_codigo e alimentacao são obrigatórios.' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sac.alimentacao (letra_codigo, degelo, alimentacao)
+       VALUES (UPPER($1), $2, $3)
+       ON CONFLICT (letra_codigo) DO UPDATE SET degelo=$2, alimentacao=$3
+       RETURNING *`,
+      [letra_codigo.trim(), degelo || null, alimentacao.trim()]
+    );
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/at/alimentacao/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'ID inválido.' });
+  try {
+    await pool.query('DELETE FROM sac.alimentacao WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /at/tecnicos/ufs — lista UFs distintas disponíveis
+router.get('/at/tecnicos/ufs', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT UPPER(TRIM(uf)) AS uf FROM sac.controle_tecnicos
+       WHERE uf IS NOT NULL AND TRIM(uf) != ''
+       ORDER BY 1`
+    );
+    res.json(rows.map(r => r.uf));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/geocode-cidade?municipio=X&uf=Y&cep=XXXXXXXX — geocoding de cidade: BrasilAPI CEP → Nominatim (proxy, sem CORS)
+router.get('/at/geocode-cidade', async (req, res) => {
+  const municipio = String(req.query.municipio || '').trim();
+  const uf        = String(req.query.uf || '').trim();
+  const cep       = String(req.query.cep || '').replace(/\D/g, '');
+  let c = null;
+  if (cep.length === 8) c = await geocodeByCep(cep);
+  if (!c && municipio) c = await geocodeByNominatimBackend(municipio, uf);
+  res.json(c || null);
+});
+
+// POST /at/tecnicos/geocode?uf=SC — geocodifica entradas sem lat/lng via BrasilAPI CEP (paralelo),
+// armazena no banco e retorna lista completa com coordenadas
+router.post('/at/tecnicos/geocode', async (req, res) => {
+  const uf = req.query.uf ? String(req.query.uf).trim().toUpperCase() : null;
+  try {
+    // Identifica técnicos sem coordenadas (filtrado por UF se informado)
+    const whereMissing = uf
+      ? `WHERE UPPER(TRIM(uf)) = $1 AND lat IS NULL`
+      : `WHERE lat IS NULL`;
+    const paramsMissing = uf ? [uf] : [];
+    const { rows: missing } = await pool.query(
+      `SELECT ctid, cep, municipio, uf FROM sac.controle_tecnicos ${whereMissing}`,
+      paramsMissing
+    );
+
+    // Geocodifica em paralelo: BrasilAPI CEP primeiro, Nominatim como fallback
+    if (missing.length) {
+      await Promise.all(missing.map(async t => {
+        let c = await geocodeByCep(t.cep);
+        if (!c) c = await geocodeByNominatimBackend(t.municipio, t.uf);
+        if (c) {
+          await pool.query(
+            `UPDATE sac.controle_tecnicos SET lat = $1, lng = $2 WHERE ctid = $3`,
+            [c.lat, c.lng, t.ctid]
+          );
+        }
+      }));
+    }
+
+    // Retorna lista completa com coordenadas (filtrado por UF se informado)
+    const whereFinal = uf ? `WHERE UPPER(TRIM(uf)) = $1` : '';
+    const paramsFinal = uf ? [uf] : [];
+    const { rows } = await pool.query(
+      `SELECT nome, municipio, uf, celular, tipo, lat, lng
+       FROM sac.controle_tecnicos ${whereFinal}
+       ORDER BY nome LIMIT 200`,
+      paramsFinal
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao geocodificar técnicos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/tecnicos — lista técnicos com filtro opcional por uf (pode ser múltiplas separadas por vírgula) e busca por nome
+router.get('/at/tecnicos', async (req, res) => {
+  const { uf, q } = req.query;
+  const params = [];
+  const conditions = [];
+  if (uf && String(uf).trim()) {
+    const ufs = String(uf).split(',').map(u => u.trim().toUpperCase()).filter(Boolean);
+    if (ufs.length) {
+      params.push(ufs);
+      conditions.push(`UPPER(TRIM(uf)) = ANY($${params.length})`);
+    }
+  }
+  if (q && String(q).trim().length >= 1) {
+    params.push(`%${String(q).trim()}%`);
+    conditions.push(`UPPER(nome) LIKE UPPER($${params.length})`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  try {
+    const { rows } = await pool.query(
+      `SELECT nome, municipio, uf, celular, tipo, lat, lng FROM sac.controle_tecnicos ${where} ORDER BY nome LIMIT 100`,
+      params
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[SAC/AT] erro ao buscar técnicos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Portal AT: autenticação por token único por técnico ───────────────────────
+const BCRYPT_ROUNDS = 10;
+const AT_SESSION_SECRET = process.env.AT_SESSION_SECRET || 'at_portal_s3cr3t';
+
+// Cria/retorna token único do técnico e, se id_at informado, vincula ao fechamento
+// GET /at/tecnico/token?nome=NOME&id_at=ID
+router.get('/at/tecnico/token', async (req, res) => {
+  const nome  = String(req.query.nome  || '').trim();
+  const id_at = parseInt(req.query.id_at, 10) || null;
+  if (!nome) return res.status(400).json({ error: 'nome obrigatório' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, ctid, nome, token FROM sac.controle_tecnicos WHERE nome = $1 LIMIT 1`,
+      [nome]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Técnico não encontrado' });
+    let { id: tecId, ctid, token } = rows[0];
+    if (!token) {
+      token = crypto.randomBytes(32).toString('hex');
+      await pool.query(
+        `UPDATE sac.controle_tecnicos SET token = $1 WHERE ctid = $2`,
+        [token, ctid]
+      );
+    }
+    // Vincula ao atendimento em sac.fechamento (sem duplicar id_at + id_tecnico)
+    if (id_at && tecId) {
+      await pool.query(
+        `INSERT INTO sac.fechamento (id_at, id_tecnico)
+         SELECT $1, $2
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sac.fechamento WHERE id_at = $1 AND id_tecnico = $2
+         )`,
+        [id_at, tecId]
+      );
+    }
+    res.json({ token });
+  } catch (err) {
+    console.error('[AT/token] erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/tecnico/status?token=TOKEN
+router.get('/at/tecnico/status', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length < 32) return res.status(400).json({ error: 'token inválido' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT nome, senha FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+      [token]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Link inválido' });
+    res.json({ temSenha: !!rows[0].senha, nome: rows[0].nome });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/set-senha  { token, senha }
+router.post('/at/tecnico/set-senha', async (req, res) => {
+  const { token, senha } = req.body || {};
+  if (!token || !senha) return res.status(400).json({ error: 'token e senha obrigatórios' });
+  if (String(senha).length < 6) return res.status(400).json({ error: 'Senha deve ter no mínimo 6 dígitos' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT ctid, senha FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+      [String(token)]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Link inválido' });
+    if (rows[0].senha) return res.status(409).json({ error: 'Senha já cadastrada. Use o login.' });
+    const hash = await bcrypt.hash(String(senha), BCRYPT_ROUNDS);
+    await pool.query(
+      `UPDATE sac.controle_tecnicos SET senha = $1 WHERE ctid = $2`,
+      [hash, rows[0].ctid]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/login  { token, senha }
+router.post('/at/tecnico/login', async (req, res) => {
+  const { token, senha } = req.body || {};
+  if (!token || !senha) return res.status(400).json({ error: 'token e senha obrigatórios' });
+  const rl = _atLoginRL;
+  const key = String(token).slice(0, 16);
+  const now = Date.now();
+  const entry = rl.get(key) || { count: 0, reset: now + 5 * 60 * 1000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 5 * 60 * 1000; }
+  if (entry.count >= 10) return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });
+  entry.count++;
+  rl.set(key, entry);
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome, cnpj_cpf, tipo, municipio, uf, celular, senha, qtd_atend_ult_1_ano
+       FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+      [String(token)]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Link inválido' });
+    const row = rows[0];
+    if (!row.senha) return res.status(403).json({ error: 'Senha não cadastrada. Cadastre primeiro.' });
+    const ok = await bcrypt.compare(String(senha), row.senha);
+    if (!ok) return res.status(401).json({ error: 'Senha incorreta' });
+    rl.delete(key);
+    const ts  = Date.now();
+    const sig = crypto.createHmac('sha256', AT_SESSION_SECRET).update(`${token}|${ts}`).digest('hex');
+    const session = Buffer.from(JSON.stringify({ token, ts, sig })).toString('base64url');
+    res.json({
+      session,
+      nome: row.nome,
+      cnpj_cpf: row.cnpj_cpf || '',
+      tipo: row.tipo || '',
+      municipio: row.municipio || '',
+      uf: row.uf || '',
+      celular: row.celular || '',
+      qtd_atend_ult_1_ano: row.qtd_atend_ult_1_ano || 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+const _atLoginRL = new Map();
+
+// GET /at/tecnico/atendimentos?token=TOKEN — lista OS vinculados a este técnico
+router.get('/at/tecnico/atendimentos', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT id FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`, [token]
+    );
+    if (!tRows.length) return res.status(404).json({ error: 'Link inválido' });
+    const tecId = tRows[0].id;
+    const { rows } = await pool.query(
+      `SELECT
+         f.id_at,
+         f.created_at,
+         f.status_os,
+         f.nfe_url,
+         a.data            AS data_abertura,
+         a.descreva_reclamacao,
+         a.motivo_solicitacao,
+         a.nome_revenda_cliente,
+         s.modelo          AS modelo,
+         s.ordem_producao
+       FROM sac.fechamento f
+       JOIN sac.at a ON a.id = f.id_at
+       LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+       WHERE f.id_tecnico = $1
+       ORDER BY f.id_at DESC`,
+      [tecId]
+    );
+    res.json(rows.map(r => {
+      const dt  = r.data_abertura ? new Date(r.data_abertura) : null;
+      const ano = dt && !isNaN(dt) ? String(dt.getFullYear()).slice(-2) : '??';
+      return {
+        id_at: r.id_at,
+        os_num: `${ano}-${r.id_at}`,
+        data: dt && !isNaN(dt) ? dt.toLocaleDateString('pt-BR') : '',
+        cliente: r.nome_revenda_cliente || r.cliente || '',
+        modelo: r.modelo || '',
+        problema: r.descreva_reclamacao || r.motivo_solicitacao || '',
+        status_os: r.status_os || 'aberta',
+        nfe_url: r.nfe_url || null
+      };
+    }));
+  } catch (err) {
+    console.error('[AT/atendimentos] erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/tecnico/os-portal/:id_at?token=TOKEN — dados completos de uma OS para o portal
+router.get('/at/tecnico/os-portal/:id_at', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  try {
+    // Verifica acesso: técnico deve ter este atendimento vinculado
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado a este atendimento.' });
+
+    const { rows } = await pool.query(
+      `SELECT
+         a.nome_revenda_cliente,
+         a.data              AS data_abertura,
+         a.numero_telefone   AS at_celular,
+         a.cpf_cnpj,
+         a.estado, a.cidade, a.rua, a.numero AS num_end, a.bairro, a.cep,
+         a.agendar_atendimento_com,
+         a.modelo            AS at_modelo,
+         a.descreva_reclamacao,
+         a.motivo_solicitacao,
+         a.atendimento_inicial,
+         s.cliente           AS revenda_cliente,
+         s.ordem_producao,
+         s.modelo            AS serie_modelo,
+         s.nota_fiscal,
+         s.data_entrega,
+         s.teste_tipo_gas,
+         COALESCE(NULLIF(TRIM(f2.nome_fantasia),''), NULLIF(TRIM(f2.razao_social),'')) AS revenda_nome,
+         f2.telefone1_ddd    AS rev_ddd,
+         f2.telefone1_numero AS rev_tel
+       FROM sac.at a
+       LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+       LEFT JOIN LATERAL (
+         SELECT telefone1_ddd, telefone1_numero, nome_fantasia, razao_social
+         FROM omie.fornecedores
+         WHERE nome_fantasia ILIKE s.cliente OR razao_social ILIKE s.cliente
+         ORDER BY CASE WHEN nome_fantasia ILIKE s.cliente THEN 0 ELSE 1 END
+         LIMIT 1
+       ) f2 ON true
+       WHERE a.id = $1 LIMIT 1`,
+      [id_at]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'OS não encontrada.' });
+    const r = rows[0];
+
+    let dataVenda = '';
+    if (r.data_entrega) {
+      const raw = String(r.data_entrega).trim();
+      const m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+      if (m) { dataVenda = `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3]}`; }
+      else { const d = new Date(raw); if (!isNaN(d)) dataVenda = d.toLocaleDateString('pt-BR'); }
+    }
+    const modelo = r.serie_modelo || r.at_modelo || '';
+    const ordemProd = r.ordem_producao || '';
+
+    let historico = [];
+    if (ordemProd) {
+      const hRes = await pool.query(
+        `SELECT a2.id, a2.data, a2.descreva_reclamacao
+         FROM sac.at a2
+         JOIN sac.at_busca_selecionada s2 ON s2.id_at = a2.id
+         WHERE s2.ordem_producao = $1 AND a2.descreva_reclamacao IS NOT NULL
+           AND trim(a2.descreva_reclamacao) != ''
+         ORDER BY a2.id DESC`,
+        [ordemProd]
+      );
+      historico = hRes.rows.map(h => {
+        const dt = h.data ? new Date(h.data) : null;
+        const yy = dt && !isNaN(dt) ? String(dt.getFullYear()).slice(-2) : '';
+        return `${yy}-${h.id} ${h.descreva_reclamacao}`;
+      });
+    }
+
+    res.json({
+      id_at,
+      os_num: (() => { const d = r.data_abertura ? new Date(r.data_abertura) : null; return `${d && !isNaN(d) ? String(d.getFullYear()).slice(-2) : ''}-${id_at}`; })(),
+      revenda: r.revenda_nome || r.revenda_cliente || '',
+      revenda_cel: r.rev_ddd && r.rev_tel ? `${r.rev_ddd} ${r.rev_tel}` : '',
+      cliente: r.nome_revenda_cliente || '',
+      cidade_uf: [r.cidade, r.estado].filter(Boolean).join(' / '),
+      endereco: [r.rua, r.num_end].filter(Boolean).join(', '),
+      cep: r.cep || '',
+      contato: r.agendar_atendimento_com || '',
+      celular: r.at_celular || '',
+      cpf_cnpj: r.cpf_cnpj || '',
+      num_serie: ordemProd,
+      nota_fiscal: r.nota_fiscal || '',
+      modelo,
+      data_venda: dataVenda,
+      fluido_refrig: r.teste_tipo_gas || '',
+      descricao_problema: r.descreva_reclamacao || '',
+      motivo_solicitacao: r.motivo_solicitacao || '',
+      atendimento_inicial: r.atendimento_inicial || '',
+      data_abertura: (() => {
+        if (!r.data_abertura) return '';
+        const d = new Date(r.data_abertura);
+        return isNaN(d) ? String(r.data_abertura) : d.toLocaleDateString('pt-BR');
+      })(),
+      historico
+    });
+  } catch (err) {
+    console.error('[AT/os-portal] erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/tecnico/fechamento/:id_at?token=TOKEN — busca dados de fechamento para o portal do técnico
+router.get('/at/tecnico/fechamento/:id_at', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const { rows } = await pool.query(
+      `SELECT status_os, nfe_url, descricao_servico_realizado, pecas_reposicao,
+              valor_total_mao_obra, valor_gasto_pecas, data_conclusao_servico, observacao_tecnico
+       FROM sac.fechamento WHERE id_at = $1 LIMIT 1`,
+      [id_at]
+    );
+    res.json(rows[0] || { status_os: 'aberta' });
+  } catch (err) {
+    console.error('[AT/fechamento] get erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /at/tecnico/fechamento/:id_at?token=TOKEN — salva dados de fechamento pelo técnico
+router.patch('/at/tecnico/fechamento/:id_at', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const ALLOWED = [
+      'status_os', 'descricao_servico_realizado', 'pecas_reposicao',
+      'valor_total_mao_obra', 'valor_gasto_pecas', 'data_conclusao_servico', 'observacao_tecnico'
+    ];
+    const cols = [], vals = [];
+    for (const f of ALLOWED) {
+      if (Object.prototype.hasOwnProperty.call(req.body, f)) {
+        cols.push(f);
+        vals.push(req.body[f] === '' || req.body[f] == null ? null : req.body[f]);
+      }
+    }
+    if (!cols.length) return res.status(400).json({ error: 'Nenhum campo válido.' });
+    const { rows: ex } = await pool.query('SELECT id FROM sac.fechamento WHERE id_at = $1', [id_at]);
+    if (ex.length) {
+      await pool.query(
+        `UPDATE sac.fechamento SET ${cols.map((c, i) => `${c}=$${i + 2}`).join(', ')} WHERE id_at=$1`,
+        [id_at, ...vals]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO sac.fechamento (id_at, ${cols.join(', ')}) VALUES ($1, ${cols.map((_, i) => `$${i + 2}`).join(', ')})`,
+        [id_at, ...vals]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AT/fechamento] patch erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/fechamento/:id_at/nfe?token=TOKEN — upload da NFe do serviço pelo técnico
+router.post('/at/tecnico/fechamento/:id_at/nfe', atUpload.single('nfe'), async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const { rows: fRows } = await pool.query(
+      'SELECT nfe_path_key FROM sac.fechamento WHERE id_at = $1 LIMIT 1', [id_at]
+    );
+    const oldPathKey = fRows[0]?.nfe_path_key || null;
+    const file = req.file;
+    const mimeExt = mime.extension(file.mimetype);
+    const originalExt = (file.originalname || '').split('.').pop();
+    const ext = (mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8) || 'bin';
+    const safeName = atSanitizeFileName(file.originalname, ext);
+    const pathKey  = `at-nfe/${id_at}/${uuidv4()}_${safeName}`;
+    const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
+      contentType: file.mimetype || 'application/octet-stream',
+      upsert: false
+    });
+    if (upErr) throw new Error(`Supabase upload: ${upErr.message}`);
+    const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
+    const nfeUrl = pubData?.publicUrl || '';
+    const { rows: ex } = await pool.query('SELECT id FROM sac.fechamento WHERE id_at = $1', [id_at]);
+    if (ex.length) {
+      await pool.query("UPDATE sac.fechamento SET nfe_url=$2, nfe_path_key=$3, status_os='finalizado', data_envio_nfe=NOW() WHERE id_at=$1", [id_at, nfeUrl, pathKey]);
+    } else {
+      await pool.query("INSERT INTO sac.fechamento (id_at, nfe_url, nfe_path_key, status_os, data_envio_nfe) VALUES ($1,$2,$3,'finalizado',NOW())", [id_at, nfeUrl, pathKey]);
+    }
+    if (oldPathKey && oldPathKey !== pathKey) {
+      supabase.storage.from(AT_BUCKET).remove([oldPathKey]).catch(() => {});
+    }
+    res.json({ ok: true, nfe_url: nfeUrl });
+  } catch (err) {
+    console.error('[AT/nfe] upload erro:', err);
+    res.status(500).json({ error: 'Falha no upload da NFe.', detail: String(err.message || err) });
+  }
+});
+
+// GET /at/tecnico/fechamento/:id_at/evidencias?token=TOKEN — lista evidências enviadas pelo técnico
+router.get('/at/tecnico/fechamento/:id_at/evidencias', async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const { rows } = await pool.query(
+      `SELECT id, nome_arquivo, url_publica, content_type, tamanho_bytes, criado_em
+       FROM sac.at_anexos WHERE id_at = $1 ORDER BY criado_em ASC`,
+      [id_at]
+    );
+    res.json({ ok: true, evidencias: rows });
+  } catch (err) {
+    console.error('[AT/evidencias] get erro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/fechamento/:id_at/evidencias?token=TOKEN — upload de fotos/vídeos de evidência
+router.post('/at/tecnico/fechamento/:id_at/evidencias', atUpload.array('evidencias', 10), async (req, res) => {
+  const token = String(req.query.token || '').trim();
+  const id_at = parseInt(req.params.id_at, 10);
+  if (!token || token.length < 32) return res.status(401).json({ error: 'token inválido' });
+  if (!id_at) return res.status(400).json({ error: 'id_at inválido' });
+  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  try {
+    const { rows: tRows } = await pool.query(
+      `SELECT ct.id FROM sac.controle_tecnicos ct
+       JOIN sac.fechamento f ON f.id_tecnico = ct.id
+       WHERE ct.token = $1 AND f.id_at = $2 LIMIT 1`,
+      [token, id_at]
+    );
+    if (!tRows.length) return res.status(403).json({ error: 'Acesso negado.' });
+    const inseridos = [];
+    for (const file of req.files) {
+      const mimeExt = mime.extension(file.mimetype);
+      const originalExt = (file.originalname || '').split('.').pop();
+      const ext = (mimeExt || originalExt || 'bin').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
+      const safeName = atSanitizeFileName(file.originalname, ext);
+      const pathKey = `at-evidencias/${id_at}/${uuidv4()}_${safeName}`;
+      const { error: upErr } = await supabase.storage.from(AT_BUCKET).upload(pathKey, file.buffer, {
+        contentType: file.mimetype || 'application/octet-stream',
+        upsert: false
+      });
+      if (upErr) throw new Error(`Supabase upload: ${upErr.message}`);
+      const { data: pubData } = supabase.storage.from(AT_BUCKET).getPublicUrl(pathKey);
+      const urlPublica = pubData?.publicUrl || '';
+      const ins = await pool.query(
+        `INSERT INTO sac.at_anexos (id_at, nome_arquivo, path_key, url_publica, content_type, tamanho_bytes, enviado_por)
+         VALUES ($1,$2,$3,$4,$5,$6,'tecnico') RETURNING id, nome_arquivo, url_publica, content_type, tamanho_bytes, criado_em`,
+        [id_at, safeName, pathKey, urlPublica, file.mimetype || null, file.size || null]
+      );
+      inseridos.push(ins.rows[0]);
+    }
+    res.json({ ok: true, evidencias: inseridos });
+  } catch (err) {
+    console.error('[AT/evidencias] upload erro:', err);
+    res.status(500).json({ error: 'Falha no upload.', detail: String(err.message || err) });
   }
 });
 
