@@ -6361,7 +6361,7 @@ async function carregarHistoricoReclamacao(ordemProducao, modelo) {
 
 // ─── estado interno da lista de atendimentos ────────────────────────────────
 let _atAllRows       = [];   // todos os registros carregados
-let _atViewMode      = 'tabela'; // 'tabela' | 'card'
+let _atViewMode      = 'card'; // 'tabela' | 'card'
 let _atSortCol       = 'id';
 let _atSortDir       = 'desc'; // 'asc' | 'desc'
 let _atFiltroTimer   = null;
@@ -6371,6 +6371,21 @@ const _atFormatDateBr = (value) => {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('pt-BR');
 };
+
+/** Badge colorido para status_os */
+function _atStatusOsBadge(status) {
+  const s = String(status || '').toLowerCase().trim();
+  const styles = {
+    aberta:      'background:#dcfce7;color:#15803d;border:1px solid #16a34a;',
+    aguardando:  'background:#fef9c3;color:#92400e;border:1px solid #d97706;',
+    finalizado:  'background:#dbeafe;color:#1d4ed8;border:1px solid #3b82f6;',
+    fechado:     'background:#e5e7eb;color:#374151;border:1px solid #9ca3af;',
+  };
+  const style = styles[s] || 'background:#f1f5f9;color:#475569;border:1px solid #94a3b8;';
+  const label = status ? escapeAtHtml(String(status)) : '-';
+  if (!status) return '<span style="color:#6b7280">-</span>';
+  return `<span style="display:inline-block;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;${style}">${label}</span>`;
+}
 
 /** Compara dois valores para ordenação */
 function _atCompare(a, b, col, dir) {
@@ -6383,16 +6398,81 @@ function _atCompare(a, b, col, dir) {
   return 0;
 }
 
+/** Lê os filtros avançados do painel; retorna objeto com os valores ativos */
+function _atLerFiltros() {
+  return {
+    tipo:     (document.getElementById('atFiltroTipo')?.value   || '').trim(),
+    status:   (document.getElementById('atFiltroStatus')?.value || '').trim(),
+    dataIni:  (document.getElementById('atFiltroDataIni')?.value || '').trim(),
+    dataFim:  (document.getElementById('atFiltroDataFim')?.value || '').trim(),
+  };
+}
+
+/** Atualiza o badge "!" no botão de filtro quando há filtros não-padrão */
+function _atAtualizarFiltroBadge(f) {
+  const badge = document.getElementById('atFiltroBadge');
+  const btn   = document.getElementById('atFiltroBtn');
+  if (!badge || !btn) return;
+  // dataIni preenchido conta como ativo apenas se diferente do padrão (vazio = 2026 automático não é considerado ativo)
+  const ativo = f.tipo !== 'EXCLUIR_RAPIDO' || f.status !== 'EXCLUIR_FECHADO' || f.dataIni || f.dataFim;
+  badge.style.display = ativo ? 'inline-block' : 'none';
+  btn.style.borderColor = ativo ? '#0ea5e9' : '';
+  btn.style.color = ativo ? '#0ea5e9' : '';
+}
+
 /** Filtra + ordena e re-renderiza conforme o modo atual */
 function _atRenderCurrent() {
   const filtroEl = document.getElementById('atAtendimentosFiltro');
   const q = String(filtroEl?.value || '').toLowerCase().trim();
+  const f = _atLerFiltros();
+  _atAtualizarFiltroBadge(f);
 
   let rows = _atAllRows;
+
+  // Filtro de texto livre — busca nas colunas específicas
   if (q) {
+    const _at = v => String(v ?? '').toLowerCase().includes(q);
     rows = rows.filter(r =>
-      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))
+      _at(r.id)                   ||
+      _at(r.atendimento_inicial)  ||
+      _at(r.nome_revenda_cliente) ||
+      _at(r.telefone)             ||
+      _at(r.cpf_cnpj)             ||
+      _at(r.estado)               ||
+      _at(r.descreva_reclamacao)  ||
+      _at(r.pedido)               ||
+      _at(r.modelo)               ||
+      _at(r.nota_fiscal)          ||
+      _at(r.tecnico_nome)
     );
+  }
+
+  // Filtro Tipo
+  if (f.tipo === 'EXCLUIR_RAPIDO') {
+    rows = rows.filter(r => String(r.tipo || '').toLowerCase() !== 'atendimento rapido');
+  } else if (f.tipo) {
+    rows = rows.filter(r => String(r.tipo || '').toLowerCase() === f.tipo.toLowerCase());
+  }
+
+  // Filtro Status OS
+  if (f.status === 'EXCLUIR_FECHADO') {
+    rows = rows.filter(r => String(r.status_os || '').toLowerCase() !== 'fechado');
+  } else if (f.status) {
+    rows = rows.filter(r => String(r.status_os || '').toLowerCase() === f.status.toLowerCase());
+  }
+
+  // Filtro Data
+  // Padrão: se nenhuma data-ini foi definida, exibe apenas registros de 2026 em diante
+  const dataPadraoIni = new Date('2026-01-01T00:00:00');
+  if (f.dataIni) {
+    const ini = new Date(f.dataIni + 'T00:00:00');
+    rows = rows.filter(r => r.data && new Date(r.data) >= ini);
+  } else {
+    rows = rows.filter(r => r.data && new Date(r.data) >= dataPadraoIni);
+  }
+  if (f.dataFim) {
+    const fim = new Date(f.dataFim + 'T23:59:59');
+    rows = rows.filter(r => r.data && new Date(r.data) <= fim);
   }
 
   rows = [...rows].sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
@@ -6426,16 +6506,8 @@ function _atUpdateSortIcons() {
   });
 }
 
-/** Renderiza modo tabela — agrupa por ordem_producao igual ao modo card */
-function _renderAtTabela(rows) {
-  const tbody = document.getElementById('atAtendimentosTbody');
-  if (!tbody) return;
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum atendimento encontrado.</td></tr>';
-    return;
-  }
-
-  // Agrupa por ordem_producao (mesmo item físico)
+/** Agrupa rows por ordem_producao */
+function _atAgruparRows(rows) {
   const groups = [];
   const byOP = {};
   rows.forEach(row => {
@@ -6447,8 +6519,28 @@ function _renderAtTabela(rows) {
       groups.push({ key: null, rows: [row] });
     }
   });
+  return groups;
+}
 
-  tbody.innerHTML = groups.map(group => {
+/** Renderiza modo tabela — agrupa por ordem_producao igual ao modo card */
+function _renderAtTabela(rows) {
+  const tbody = document.getElementById('atAtendimentosTbody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum atendimento encontrado.</td></tr>';
+    return;
+  }
+
+  const groups = _atAgruparRows(rows);
+
+  // Renderiza em lotes para não travar a UI
+  const LOTE = 30;
+  let idx = 0;
+  tbody.innerHTML = '';
+  const renderLote = () => {
+    const frag = document.createDocumentFragment();
+    const fim = Math.min(idx + LOTE, groups.length);
+    const html = groups.slice(idx, fim).map(group => {
     const primary = group.rows[0];
     const allIds  = group.rows.map(r => r.id);
     const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
@@ -6486,6 +6578,7 @@ function _renderAtTabela(rows) {
       <td>${idBadges}</td>
       <td>${escapeAtHtml(_atFormatDateBr(primary.data))}</td>
       <td>${escapeAtHtml(primary.tipo || '-')}</td>
+      <td>${_atStatusOsBadge(primary.status_os)}</td>
       <td>${escapeAtHtml(primary.nome_revenda_cliente || '-')}</td>
       <td>${reclamacoes || '-'}</td>
       <td>${escapeAtHtml(primary.pedido || '-')}</td>
@@ -6498,8 +6591,19 @@ function _renderAtTabela(rows) {
       <td>${escapeAtHtml(primary.atendimento_inicial || '-')}</td>
       <td style="text-align:center;">${docsCell}</td>
     </tr>`;
-  }).join('');
+    }).join('');
+    const tmp = document.createElement('tbody');
+    tmp.innerHTML = html;
+    while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+    tbody.appendChild(frag);
+    idx = fim;
+    if (idx < groups.length) setTimeout(renderLote, 0);
+    else _atBindTabelaListeners(tbody);
+  };
+  renderLote();
+}
 
+function _atBindTabelaListeners(tbody) {
   // clique na linha abre modal de edição
   tbody.querySelectorAll('tr[data-id]').forEach(tr => {
     tr.addEventListener('click', e => {
@@ -6542,25 +6646,13 @@ function _renderAtCards(rows) {
     return;
   }
 
-  // Agrupa por ordem_producao (mesmo item físico)
-  const groups = [];
-  const byOP   = {};
-  rows.forEach(row => {
-    const op = row.ordem_producao;
-    if (op) {
-      if (!byOP[op]) { byOP[op] = []; groups.push({ key: op, rows: byOP[op] }); }
-      byOP[op].push(row);
-    } else {
-      groups.push({ key: null, rows: [row] });
-    }
-  });
+  const groups = _atAgruparRows(rows);
+  const empty  = `<em style="opacity:.4">—</em>`;
 
-  const empty = `<em style="opacity:.4">—</em>`;
-
-  container.innerHTML = groups.map(group => {
+  const buildCard = group => {
     const primary = group.rows[0];
     const id      = primary.id;
-    const allIds  = group.rows.map(r => r.id);
+    const allIds  = [...new Set(group.rows.map(r => r.id))];
 
     const idBadges = allIds.map(aid =>
       `<span class="at-ci-badge">#${escapeAtHtml(String(aid))}</span>`
@@ -6571,6 +6663,12 @@ function _renderAtCards(rows) {
       : '';
 
     const hasAnexos = group.rows.some(r => Number(r.qtd_anexos) > 0);
+    const hasPecas  = group.rows.some(r => r.has_pecas_enviadas);
+    const pecasBtnCard = hasPecas
+      ? `<span title="Peças enviadas para esta OS" style="color:#a78bfa;font-size:13px;padding:2px 4px;flex-shrink:0;">
+           <i class="fa-solid fa-box"></i>
+         </span>`
+      : '';
     const anexoBtnCard = hasAnexos
       ? `<button class="at-card-anexo-btn" data-id="${escapeAtHtml(String(id))}" data-nome="${escapeAtHtml(primary.nome_revenda_cliente || '')}"
            type="button" title="Ver/enviar anexos" style="background:none;border:none;cursor:pointer;color:#f59e0b;padding:2px 4px;font-size:13px;flex-shrink:0;">
@@ -6611,6 +6709,7 @@ function _renderAtCards(rows) {
           ${editInfo}
         </div>
         <div style="display:flex;gap:2px;align-items:center;flex-shrink:0;">
+          ${pecasBtnCard}
           ${anexoBtnCard}
           ${pdfBtnCard}
         </div>
@@ -6633,29 +6732,42 @@ function _renderAtCards(rows) {
       </div>
       ${fechInfo}
     </div>`;
-  }).join('');
+  };
 
-  // clique no card abre modal de edição (exceto no botão de anexo ou PDF)
-  container.querySelectorAll('.at-card-item').forEach(card => {
-    card.addEventListener('click', e => {
-      if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn')) return;
-      _abrirAtEditModal(card.dataset.id);
+  // Render em lotes para não travar a UI
+  const LOTE = 20;
+  let idx = 0;
+  container.innerHTML = '';
+  const _bindCardListeners = (node) => {
+    node.querySelectorAll('.at-card-item').forEach(card => {
+      card.addEventListener('click', e => {
+        if (e.target.closest('.at-card-anexo-btn') || e.target.closest('.at-card-os-btn')) return;
+        _abrirAtEditModal(card.dataset.id);
+      });
     });
-  });
-  // botão de anexo no card
-  container.querySelectorAll('.at-card-anexo-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      _atVerAnexos(btn.dataset.id, btn.dataset.nome);
+    node.querySelectorAll('.at-card-anexo-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        _atVerAnexos(btn.dataset.id, btn.dataset.nome);
+      });
     });
-  });
-  // botão PDF no card
-  container.querySelectorAll('.at-card-os-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      _abrirAtOsModal(btn.dataset.id);
+    node.querySelectorAll('.at-card-os-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        _abrirAtOsModal(btn.dataset.id);
+      });
     });
-  });
+  };
+  const renderLoteCards = () => {
+    const fim  = Math.min(idx + LOTE, groups.length);
+    const frag = document.createElement('div');
+    frag.innerHTML = groups.slice(idx, fim).map(buildCard).join('');
+    _bindCardListeners(frag);
+    while (frag.firstChild) container.appendChild(frag.firstChild);
+    idx = fim;
+    if (idx < groups.length) setTimeout(renderLoteCards, 0);
+  };
+  renderLoteCards();
 }
 
 function _atCardToggleEdit()  { /* substituído por modal */ }
@@ -6663,7 +6775,39 @@ function _atCardMarkDirty()   { /* substituído por modal */ }
 function _atCardSave()        { /* substituído por modal */ }
 
 // ── Modal Solicitação de AT (Formulário OS) ─────────────────────────────────
-function _abrirAtOsModal(id) {
+// Lista de rows visíveis no momento em que o modal foi aberto (para navegação)
+let _atOsNavRows = [];
+
+function _abrirAtOsModal(id, navRows) {
+  // Se navRows foi passado (chamada de navegação), usa ela; senão recalcula a lista visível atual
+  if (navRows) {
+    _atOsNavRows = navRows;
+  } else {
+    // Coleta rows visíveis (mesma lógica de filtro de _atRenderCurrent)
+    const filtroEl = document.getElementById('atAtendimentosFiltro');
+    const q = String(filtroEl?.value || '').toLowerCase().trim();
+    const f = _atLerFiltros();
+    let rows = _atAllRows;
+    if (q) {
+      const _at = v => String(v ?? '').toLowerCase().includes(q);
+      rows = rows.filter(r =>
+        _at(r.id) || _at(r.atendimento_inicial) ||
+        _at(r.nome_revenda_cliente) || _at(r.telefone) || _at(r.cpf_cnpj) ||
+        _at(r.estado) || _at(r.descreva_reclamacao) || _at(r.pedido) ||
+        _at(r.modelo) || _at(r.nota_fiscal) || _at(r.tecnico_nome)
+      );
+    }
+    if (f.tipo === 'EXCLUIR_RAPIDO') rows = rows.filter(r => String(r.tipo||'').toLowerCase() !== 'atendimento rapido');
+    else if (f.tipo) rows = rows.filter(r => String(r.tipo||'').toLowerCase() === f.tipo.toLowerCase());
+    if (f.status === 'EXCLUIR_FECHADO') rows = rows.filter(r => String(r.status_os||'').toLowerCase() !== 'fechado');
+    else if (f.status) rows = rows.filter(r => String(r.status_os||'').toLowerCase() === f.status.toLowerCase());
+    if (f.dataIni) { const ini = new Date(f.dataIni+'T00:00:00'); rows = rows.filter(r => r.data && new Date(r.data) >= ini); }
+    else { rows = rows.filter(r => r.data && new Date(r.data) >= new Date('2026-01-01T00:00:00')); }
+    if (f.dataFim) { const fim = new Date(f.dataFim+'T23:59:59'); rows = rows.filter(r => r.data && new Date(r.data) <= fim); }
+    rows = [...rows].sort((a, b) => _atCompare(a, b, _atSortCol, _atSortDir));
+    _atOsNavRows = rows;
+  }
+
   const row = _atAllRows.find(r => String(r.id) === String(id));
   if (!row) return;
 
@@ -6671,23 +6815,58 @@ function _abrirAtOsModal(id) {
   if (!modal) return;
   modal.dataset.osId = String(id);
 
+  // Atualiza contador de navegação
+  const navIdx   = _atOsNavRows.findIndex(r => String(r.id) === String(id));
+  const navTotal = _atOsNavRows.length;
+  const navInfoEl = document.getElementById('atOsNavInfo');
+  if (navInfoEl) navInfoEl.textContent = navTotal ? `${navIdx + 1} / ${navTotal}` : '';
+  const prevBtn = document.getElementById('atOsNavPrev');
+  const nextBtn = document.getElementById('atOsNavNext');
+  if (prevBtn) { prevBtn.disabled = navIdx <= 0;               prevBtn.style.opacity = navIdx <= 0 ? '0.3' : '1'; }
+  if (nextBtn) { nextBtn.disabled = navIdx >= navTotal - 1;    nextBtn.style.opacity = navIdx >= navTotal - 1 ? '0.3' : '1'; }
+
   // Número da OS: AA-ID
   const ano = String(new Date().getFullYear()).slice(-2);
   const numEl = document.getElementById('atOsNumero');
   if (numEl) numEl.textContent = `${ano}-${row.id}`;
 
   // Desabilita botões de ação até os dados carregarem
-  const _btnsAcao = ['atOsImprimirBtn','atOsEnviarLinkBtn','atOsMapaBtn']
+  const _btnsAcao = ['atOsImprimirBtn','atOsEnviarLinkBtn','atOsMapaBtn','atOsRetirarBtn']
     .map(bid => document.getElementById(bid)).filter(Boolean);
   _btnsAcao.forEach(b => { b.disabled = true; b.style.opacity = '0.4'; b.style.cursor = 'not-allowed'; });
 
-  // Limpa campos enquanto carrega
-  const campos = ['atOsRevenda','atOsRevendaCel','atOsCliente','atOsCidadeUf','atOsEndereco',
-                  'atOsCep','atOsContato','atOsCelular','atOsCpfCnpj','atOsNumSerie',
-                  'atOsNf','atOsModelo','atOsDataVenda','atOsQuadroExt','atOsControlador',
-                  'atOsAlimentacao','atOsFluidoRefrig','atOsDescricaoProblema',
-                  'atOsMotivoSolicitacao','atOsAtendimentoInicial','atOsHistorico','atOsDataAbertura'];
-  campos.forEach(cid => { const el = document.getElementById(cid); if (el) el.textContent = '…'; });
+  // ── FASE 1: preenche imediatamente com dados já disponíveis no _atAllRows ──
+  const setEl = (cid, val) => { const el = document.getElementById(cid); if (el) el.textContent = val || ''; };
+  const spin = `<span class="at-os-loading-spin"></span>`;
+  const setHtml = (cid, html) => { const el = document.getElementById(cid); if (el) el.innerHTML = html; };
+
+  setEl('atOsCliente',            row.nome_revenda_cliente || '');
+  setEl('atOsCelular',            row.telefone || '');
+  setEl('atOsCpfCnpj',            row.cpf_cnpj || '');
+  setEl('atOsCidadeUf',           [row.cidade, row.estado].filter(Boolean).join(' / '));
+  setEl('atOsModelo',             row.modelo || '');
+  setEl('atOsNf',                 row.nota_fiscal || '');
+  setEl('atOsAtendimentoInicial', row.atendimento_inicial || '');
+  setEl('atOsDescricaoProblema',  row.descreva_reclamacao || '');
+  setEl('atOsMotivoSolicitacao',  row.motivo_solicitacao || '');
+  setEl('atOsFecTecnico',         row.tecnico_nome || '');
+  setEl('atOsFecStatus',          row.status_os || '');
+  setEl('atOsDataAbertura', (() => {
+    if (!row.data) return '';
+    const d = new Date(row.data);
+    return isNaN(d) ? '' : d.toLocaleDateString('pt-BR');
+  })());
+
+  // Campos que dependem do backend — mostra spinner enquanto carrega
+  const camposBackend = ['atOsRevenda','atOsRevendaCel','atOsEndereco','atOsCep','atOsContato',
+    'atOsNumSerie','atOsDataVenda','atOsQuadroExt','atOsControlador','atOsAlimentacao',
+    'atOsFluidoRefrig','atOsHistorico','atOsDataConclusao',
+    'atOsFecMaoObra','atOsFecPecas','atOsFecDescricao','atOsFecObservacoes'];
+  camposBackend.forEach(cid => setHtml(cid, spin));
+
+  // Barra de loading animada
+  const loadingBar = document.getElementById('atOsLoadingBar');
+  if (loadingBar) loadingBar.style.display = 'block';
 
   modal.style.display = 'flex';
 
@@ -6695,31 +6874,41 @@ function _abrirAtOsModal(id) {
   fetch(`/api/sac/at/os-data/${row.id}`, { credentials: 'same-origin' })
     .then(r => r.ok ? r.json() : Promise.reject(r.status))
     .then(d => {
-      const set = (cid, val) => { const el = document.getElementById(cid); if (el) el.textContent = val || ''; };
-      set('atOsRevenda',    d.revenda);
-      set('atOsRevendaCel', d.revenda_cel);
-      set('atOsCliente',    d.cliente);
-      set('atOsCidadeUf',   d.cidade_uf);
-      set('atOsEndereco',   d.endereco);
-      set('atOsCep',        d.cep);
-      set('atOsContato',    d.contato);
-      set('atOsCelular',    d.celular);
-      set('atOsCpfCnpj',    d.cpf_cnpj);
-      set('atOsNumSerie',   d.num_serie);
-      set('atOsNf',         d.nota_fiscal);
-      set('atOsModelo',     d.modelo);
-      set('atOsDataVenda',  d.data_venda);
+      if (loadingBar) loadingBar.style.display = 'none';
+      setEl('atOsRevenda',    d.revenda);
+      setEl('atOsRevendaCel', d.revenda_cel);
+      // Sobrescreve com dados mais completos do backend quando disponíveis
+      if (d.cliente)       setEl('atOsCliente',    d.cliente);
+      if (d.cidade_uf)     setEl('atOsCidadeUf',   d.cidade_uf);
+      setEl('atOsEndereco',   d.endereco);
+      setEl('atOsCep',        d.cep);
+      setEl('atOsContato',    d.contato);
+      if (d.celular)       setEl('atOsCelular',    d.celular);
+      if (d.cpf_cnpj)      setEl('atOsCpfCnpj',   d.cpf_cnpj);
+      setEl('atOsNumSerie',   d.num_serie);
+      if (d.nota_fiscal)   setEl('atOsNf',         d.nota_fiscal);
+      if (d.modelo)        setEl('atOsModelo',     d.modelo);
+      setEl('atOsDataVenda',  d.data_venda);
       // QUADRO EXT: Sim se o controlador contém "EXT", caso contrário Não
       const controlador = d.quadro_ext || '';
-      set('atOsControlador', controlador);
-      set('atOsQuadroExt', /ext/i.test(controlador) ? 'Sim' : (controlador ? 'Não' : ''));
-      set('atOsAlimentacao',  d.alimentacao);
-      set('atOsFluidoRefrig', d.fluido_refrig);
-      set('atOsDescricaoProblema',  d.descricao_problema);
-      set('atOsMotivoSolicitacao',  d.motivo_solicitacao);
-      set('atOsAtendimentoInicial', d.atendimento_inicial);
-      set('atOsDataAbertura',       d.data_abertura);
-      // Histórico de atendimento: lista de reclamações no formato AA-ID texto
+      setEl('atOsControlador', controlador);
+      setEl('atOsQuadroExt', /ext/i.test(controlador) ? 'Sim' : (controlador ? 'Não' : ''));
+      setEl('atOsAlimentacao',  d.alimentacao);
+      setEl('atOsFluidoRefrig', d.fluido_refrig);
+      if (d.descricao_problema)  setEl('atOsDescricaoProblema',  d.descricao_problema);
+      if (d.motivo_solicitacao)  setEl('atOsMotivoSolicitacao',  d.motivo_solicitacao);
+      if (d.atendimento_inicial) setEl('atOsAtendimentoInicial', d.atendimento_inicial);
+      if (d.data_abertura)       setEl('atOsDataAbertura',       d.data_abertura);
+      setEl('atOsDataConclusao',      d.fechamento?.data_conclusao || '');
+      // Seção FECHAMENTO
+      const fc = d.fechamento;
+      if (fc?.tecnico_nome) setEl('atOsFecTecnico', fc.tecnico_nome);
+      if (fc?.status_os)    setEl('atOsFecStatus',  fc.status_os);
+      setEl('atOsFecMaoObra',     fc?.valor_total_mao_obra ? 'R$ ' + fc.valor_total_mao_obra : '');
+      setEl('atOsFecPecas',       fc?.valor_gasto_pecas    ? 'R$ ' + fc.valor_gasto_pecas    : '');
+      setEl('atOsFecDescricao',   fc?.descricao_servico_realizado || '');
+      setEl('atOsFecObservacoes', fc?.observacao_tecnico || '');
+      // Histórico de atendimento
       const histEl = document.getElementById('atOsHistorico');
       if (histEl) {
         if (d.historico && d.historico.length) {
@@ -6730,14 +6919,87 @@ function _abrirAtOsModal(id) {
           histEl.textContent = '';
         }
       }
-      // Habilita botões de ação após todos os dados estarem prontos
-      _btnsAcao.forEach(b => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; });
+      // Habilita botões de ação
+      _btnsAcao.forEach(b => {
+        if (b.id === 'atOsRetirarBtn') {
+          const temTecnico = !!(row.tecnico_nome);
+          b.disabled = !temTecnico;
+          b.style.opacity = temTecnico ? '' : '0.4';
+          b.style.cursor  = temTecnico ? '' : 'not-allowed';
+        } else {
+          b.disabled = false; b.style.opacity = ''; b.style.cursor = '';
+        }
+      });
     })
     .catch(() => {
-      campos.forEach(cid => { const el = document.getElementById(cid); if (el) el.textContent = ''; });
+      if (loadingBar) loadingBar.style.display = 'none';
+      // Limpa spinners nos campos de backend em caso de erro
+      camposBackend.forEach(cid => { const el = document.getElementById(cid); if (el) el.textContent = ''; });
       // Habilita mesmo em erro para não travar interação
       _btnsAcao.forEach(b => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; });
     });
+
+  // Busca peças enviadas vinculadas a esta OS (paralelo ao os-data)
+  const pecasSection = document.getElementById('atOsPecasSection');
+  const pecasBody    = document.getElementById('atOsPecasBody');
+  if (pecasSection) pecasSection.style.display = 'none';
+  if (pecasBody)    pecasBody.innerHTML = '';
+
+  fetch(`/api/sac/at/pecas-enviadas/${row.id}`, { credentials: 'same-origin' })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(lista => {
+      if (!lista.length || !pecasSection || !pecasBody) return;
+      pecasSection.style.display = '';
+      pecasBody.innerHTML = lista.map(env => {
+        // Links de arquivos
+        const linkLabel = url => {
+          try { const u = new URL(url); return u.pathname.split('/').pop() || 'arquivo'; } catch { return 'arquivo'; }
+        };
+        const linksHtml = [
+          ...(env.etiqueta_url    ? [`<a href="${escapeAtHtml(env.etiqueta_url)}"    target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📦 Etiqueta</a>`]    : []),
+          ...(env.declaracao_url  ? [`<a href="${escapeAtHtml(env.declaracao_url)}"  target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">📄 Declaração</a>`]  : []),
+          ...(env.anexos.filter(a => a !== env.etiqueta_url && a !== env.declaracao_url).map((a, i) =>
+            `<a href="${escapeAtHtml(a)}" target="_blank" style="color:#0ea5e9;text-decoration:underline;font-size:11px;">🔗 Anexo ${i + 1}</a>`
+          )),
+        ].join(' &nbsp;');
+
+        // Tabela de itens
+        const itensHtml = env.itens.length
+          ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;">
+               <thead>
+                 <tr style="background:#1e3a5f;color:#fff;">
+                   <th style="padding:4px 8px;text-align:left;font-weight:700;">Conteúdo</th>
+                   <th style="padding:4px 8px;text-align:center;font-weight:700;white-space:nowrap;">Qtd</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${env.itens.map((it, i) =>
+                   `<tr style="background:${i % 2 === 0 ? '#f8fafc' : '#fff'};">
+                      <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;">${escapeAtHtml(it.conteudo || '')}</td>
+                      <td style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">${escapeAtHtml(String(it.quantidade || ''))}</td>
+                    </tr>`
+                 ).join('')}
+               </tbody>
+             </table>`
+          : '';
+
+        const statusBadge = env.status
+          ? `<span style="display:inline-block;background:#e0f2fe;color:#0369a1;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;">${escapeAtHtml(env.status)}</span>`
+          : '';
+
+        return `<div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <span style="font-weight:700;font-size:11px;color:#111;">Rastreio: ${escapeAtHtml(env.identificacao)}</span>
+            ${statusBadge}
+            ${env.rastreio_status ? `<span style="font-size:10px;color:#6b7280;">${escapeAtHtml(env.rastreio_status)}</span>` : ''}
+            <span style="font-size:10px;color:#9ca3af;margin-left:auto;">${escapeAtHtml(env.created_at)}${env.usuario ? ' · ' + escapeAtHtml(env.usuario) : ''}</span>
+          </div>
+          ${linksHtml ? `<div style="margin-bottom:4px;">${linksHtml}</div>` : ''}
+          ${itensHtml}
+        </div>`;
+      }).join('');
+    })
+    .catch(() => { /* sem peças, seção fica oculta */ });
 }
 
 // Listeners do modal OS
@@ -6751,7 +7013,61 @@ function _abrirAtOsModal(id) {
   document.body.appendChild(modal);
   if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.style.display !== 'none') modal.style.display = 'none'; });
+  document.addEventListener('keydown', e => {
+    if (modal.style.display === 'none') return;
+    if (e.key === 'Escape') { modal.style.display = 'none'; return; }
+    if (e.key === 'ArrowLeft')  { document.getElementById('atOsNavPrev')?.click(); return; }
+    if (e.key === 'ArrowRight') { document.getElementById('atOsNavNext')?.click(); return; }
+  });
+
+  // Botões de navegação prev/next
+  const navPrev = document.getElementById('atOsNavPrev');
+  const navNext = document.getElementById('atOsNavNext');
+  function _navTo(delta) {
+    const curId  = modal.dataset.osId;
+    const curIdx = _atOsNavRows.findIndex(r => String(r.id) === String(curId));
+    const newIdx = curIdx + delta;
+    if (newIdx < 0 || newIdx >= _atOsNavRows.length) return;
+    _abrirAtOsModal(_atOsNavRows[newIdx].id, _atOsNavRows);
+  }
+  if (navPrev) navPrev.addEventListener('click', () => _navTo(-1));
+  if (navNext) navNext.addEventListener('click', () => _navTo(1));
+
+  // Botão Retirar Técnico
+  const retirarBtn = document.getElementById('atOsRetirarBtn');
+  if (retirarBtn) {
+    retirarBtn.addEventListener('click', async () => {
+      const osId = modal.dataset.osId;
+      if (!osId) return;
+      if (!confirm('Retirar o técnico vinculado a esta OS?\n\nO atendimento deixará de aparecer para ele.')) return;
+      const orig = retirarBtn.innerHTML;
+      retirarBtn.disabled = true;
+      retirarBtn.style.opacity = '0.4';
+      retirarBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Retirando…';
+      try {
+        const r = await fetch('/api/sac/at/tecnico/retirar', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id_at: parseInt(osId, 10) })
+        });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Erro: ' + (e.error || r.status)); }
+        else {
+          retirarBtn.innerHTML = '<i class="fa-solid fa-check"></i> Técnico retirado';
+          setTimeout(() => {
+            retirarBtn.innerHTML = orig;
+            retirarBtn.style.opacity = '0.4';
+            retirarBtn.style.cursor  = 'not-allowed';
+            retirarBtn.disabled = true;
+          }, 2000);
+          return;
+        }
+      } catch (e) { alert('Erro: ' + e.message); }
+      retirarBtn.innerHTML = orig;
+      retirarBtn.disabled = false;
+      retirarBtn.style.opacity = '';
+    });
+  }
   if (printBtn) printBtn.addEventListener('click', () => {
     const docEl = document.querySelector('.at-os-doc');
     if (!docEl) return;
@@ -6935,17 +7251,30 @@ function _abrirAtOsModal(id) {
       .then(rows => {
         loadingEl.style.display = 'none';
         if (!rows.length) { emptyEl.style.display = 'block'; return; }
-        lista.innerHTML = rows.map(t => `
+        lista.innerHTML = rows.map(t => {
+          const tNome = escapeAtHtml(t.nome);
+          return `
           <div style="padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px;">
             <div style="flex:1;min-width:0;">
-              <div style="font-weight:600;font-size:13px;color:#e5e7eb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeAtHtml(t.nome)}</div>
+              <div style="font-weight:600;font-size:13px;color:#e5e7eb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tNome}</div>
               <div style="font-size:11px;color:#9ca3af;margin-top:2px;">
                 ${escapeAtHtml(t.municipio || '')}${t.municipio && t.uf ? ' / ' : ''}${escapeAtHtml(t.uf || '')}
                 ${t.celular ? ' &nbsp;·&nbsp; ' + escapeAtHtml(t.celular) : ''}
                 ${t.tipo ? ' &nbsp;·&nbsp; ' + escapeAtHtml(t.tipo) : ''}
               </div>
             </div>
-          </div>`).join('');
+            <button onclick="window._atCopiarLinkOs(this)" data-tec="${tNome}"
+              title="Gerar e copiar link da OS para este técnico"
+              style="display:inline-flex;align-items:center;gap:4px;background:#3b82f6;color:#fff;font-size:11px;font-weight:600;padding:5px 11px;border-radius:6px;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;">
+              🔗 Link OS
+            </button>
+            <button onclick="window._atResetarSenhaTecnico(this)" data-tec="${tNome}"
+              title="Resetar senha — técnico precisará criar uma nova senha ao acessar o link"
+              style="display:inline-flex;align-items:center;gap:4px;background:#dc2626;color:#fff;font-size:11px;font-weight:600;padding:5px 11px;border-radius:6px;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;">
+              🔑 Resetar Senha
+            </button>
+          </div>`;
+        }).join('');
       })
       .catch(() => {
         loadingEl.style.display = 'none';
@@ -6991,6 +7320,34 @@ function _abrirAtOsModal(id) {
   let mapaInst  = null;
   let geocoding = false; // impede duplo disparo
 
+  // Função global para resetar senha do técnico — usada no modal Enviar Link
+  window._atResetarSenhaTecnico = async function(btn) {
+    var tecNome = btn.getAttribute('data-tec') || '';
+    if (!tecNome) { alert('Nome do técnico não encontrado.'); return; }
+    if (!confirm(`Resetar senha de "${tecNome}"?\n\nO técnico precisará criar uma nova senha ao acessar o link.`)) return;
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳…';
+    try {
+      var r = await fetch('/api/sac/at/tecnico/reset-senha', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: tecNome })
+      });
+      if (!r.ok) {
+        var err = await r.json().catch(() => ({}));
+        alert('Erro: ' + (err.error || r.status));
+        btn.innerHTML = orig; btn.disabled = false; return;
+      }
+      btn.innerHTML = '✅ Senha resetada!';
+      setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2500);
+    } catch (e) {
+      alert('Erro ao resetar senha: ' + e.message);
+      btn.innerHTML = orig; btn.disabled = false;
+    }
+  };
+
   // Função global para copiar link da OS — usada nos onclick dos popups Leaflet
   window._atCopiarLinkOs = async function(btn) {
     var tecNome = btn.getAttribute('data-tec') || '';
@@ -7010,6 +7367,14 @@ function _abrirAtOsModal(id) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(url);
         btn.innerHTML = '✅ Link copiado!';
+        // Atualiza _atAllRows para que o botão Retirar habilite ao reabrir o modal
+        if (osId && window._atAllRows) {
+          const rowIdx = window._atAllRows.findIndex(rr => String(rr.id) === String(osId));
+          if (rowIdx !== -1) window._atAllRows[rowIdx].tecnico_nome = tecNome;
+        }
+        // Habilita o botão Retirar imediatamente (modal da OS ainda pode estar aberto)
+        const retirarBtn = document.getElementById('atOsRetirarBtn');
+        if (retirarBtn) { retirarBtn.disabled = false; retirarBtn.style.opacity = ''; retirarBtn.style.cursor = ''; }
         setTimeout(function() { btn.innerHTML = orig; btn.disabled = false; }, 2500);
       } else {
         prompt('Copie o link do técnico:', url);
@@ -7583,17 +7948,48 @@ function renderAtAtendimentosRows(rows) {
   _atUpdateSortIcons();
 }
 
+/** Exibe spinner no container de cards ou tabela enquanto carrega */
+function _atMostrarSpinnerLista() {
+  const spinHtml = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:14px;">
+      <div style="width:40px;height:40px;border:4px solid #374151;border-top-color:#0ea5e9;border-radius:50%;animation:atSpin .8s linear infinite;"></div>
+      <span style="color:#6b7280;font-size:13px;">Carregando atendimentos...</span>
+    </div>`;
+  if (_atViewMode === 'card') {
+    const cards = document.getElementById('atCardsContainer');
+    if (cards) { cards.style.display = 'grid'; cards.innerHTML = spinHtml; }
+    const tabela = document.getElementById('atTabelaWrapper');
+    if (tabela) tabela.style.display = 'none';
+  } else {
+    const tbody = document.getElementById('atAtendimentosTbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="15">${spinHtml}</td></tr>`;
+    const tabela = document.getElementById('atTabelaWrapper');
+    if (tabela) tabela.style.display = '';
+    const cards = document.getElementById('atCardsContainer');
+    if (cards) cards.style.display = 'none';
+  }
+}
+
 async function carregarAtAtendimentos() {
-  setAtAtendimentosStatus('Carregando atendimentos...', false);
+  const _t = { inicio: performance.now() };
+  _atMostrarSpinnerLista();
+  setAtAtendimentosStatus('Carregando...', false);
   try {
+    _t.fetchInicio = performance.now();
     const resp = await fetch('/api/sac/at/atendimentos', { credentials: 'include' });
     const data = await resp.json().catch(() => ({}));
+    _t.fetchFim = performance.now();
     if (!resp.ok || data.ok === false) {
       throw new Error(data.error || 'Falha ao carregar atendimentos.');
     }
     const rows = Array.isArray(data.rows) ? data.rows : [];
+    _t.renderInicio = performance.now();
     renderAtAtendimentosRows(rows);
-    setAtAtendimentosStatus(`${rows.length} atendimento(s) encontrado(s).`, false);
+    _t.renderFim = performance.now();
+    console.log(
+      `%c[AT Timing]%c fetch: ${(_t.fetchFim - _t.fetchInicio).toFixed(0)}ms | render: ${(_t.renderFim - _t.renderInicio).toFixed(0)}ms | total: ${(_t.renderFim - _t.inicio).toFixed(0)}ms | ${rows.length} rows`,
+      'color:#0ea5e9;font-weight:bold', 'color:inherit'
+    );
   } catch (err) {
     console.error('[SAC/AT] erro ao listar atendimentos', err);
     renderAtAtendimentosRows([]);
@@ -7603,9 +7999,27 @@ async function carregarAtAtendimentos() {
 
 function abrirTelaAtAtendimentos() {
   if (atFormView) atFormView.style.display = 'none';
-  if (atAtendimentosView) atAtendimentosView.style.display = 'block';
+  if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
   if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'none';
   if (atBackToFormBtn) atBackToFormBtn.style.display = 'inline-flex';
+  const pane = document.getElementById('sacAtPane');
+  if (pane) {
+    pane.classList.add('at-lista-ativa');
+    if (_atViewMode === 'tabela') pane.classList.add('at-modo-tabela');
+    else pane.classList.remove('at-modo-tabela');
+  }
+  // Sincroniza visual dos botões de toggle com o modo atual
+  const _btnTab  = document.getElementById('atViewTabela');
+  const _btnCard = document.getElementById('atViewCard');
+  if (_btnTab && _btnCard) {
+    if (_atViewMode === 'card') {
+      _btnCard.style.background = '#0ea5e9'; _btnCard.style.color = '#fff';
+      _btnTab.style.background  = 'var(--input-bg,#1e2535)'; _btnTab.style.color = 'var(--inactive-color)';
+    } else {
+      _btnTab.style.background  = '#0ea5e9'; _btnTab.style.color = '#fff';
+      _btnCard.style.background = 'var(--input-bg,#1e2535)'; _btnCard.style.color = 'var(--inactive-color)';
+    }
+  }
 }
 
 function abrirTelaAtFormulario() {
@@ -7613,6 +8027,8 @@ function abrirTelaAtFormulario() {
   if (atAtendimentosView) atAtendimentosView.style.display = 'none';
   if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'inline-flex';
   if (atBackToFormBtn) atBackToFormBtn.style.display = 'none';
+  const pane = document.getElementById('sacAtPane');
+  if (pane) pane.classList.remove('at-lista-ativa');
 }
 
 function mergeAtSerieRows(rows) {
@@ -8069,6 +8485,7 @@ if (_atViewTabelaBtn) {
     _atViewMode = 'tabela';
     document.getElementById('atTabelaWrapper').style.display = '';
     document.getElementById('atCardsContainer').style.display = 'none';
+    document.getElementById('sacAtPane').classList.add('at-modo-tabela');
     _atViewTabelaBtn.style.background = '#0ea5e9';
     _atViewTabelaBtn.style.color = '#fff';
     _atViewCardBtn.style.background = 'var(--input-bg,#1e2535)';
@@ -8081,7 +8498,8 @@ if (_atViewCardBtn) {
   _atViewCardBtn.addEventListener('click', () => {
     _atViewMode = 'card';
     document.getElementById('atTabelaWrapper').style.display = 'none';
-    document.getElementById('atCardsContainer').style.display = '';
+    document.getElementById('atCardsContainer').style.display = 'grid';
+    document.getElementById('sacAtPane').classList.remove('at-modo-tabela');
     _atViewCardBtn.style.background = '#0ea5e9';
     _atViewCardBtn.style.color = '#fff';
     _atViewTabelaBtn.style.background = 'var(--input-bg,#1e2535)';
@@ -8098,6 +8516,53 @@ if (_atFiltroEl) {
     _atFiltroTimer = setTimeout(() => _atRenderCurrent(), 200);
   });
 }
+
+// ── Painel de filtros avançados ──────────────────────────────────────────────
+(function _initAtFiltroPanel() {
+  const btn    = document.getElementById('atFiltroBtn');
+  const panel  = document.getElementById('atFiltroPanel');
+  const aplicar= document.getElementById('atFiltroAplicar');
+  const limpar = document.getElementById('atFiltroLimpar');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (panel.style.display !== 'none' && panel.style.display !== '') {
+      panel.style.display = 'none';
+    } else {
+      const rect = btn.getBoundingClientRect();
+      panel.style.top   = (rect.bottom + 6) + 'px';
+      panel.style.right = (window.innerWidth - rect.right) + 'px';
+      panel.style.left  = 'auto';
+      panel.style.display = 'block';
+    }
+  });
+
+  // Fecha ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (!panel.contains(e.target) && e.target !== btn) {
+      panel.style.display = 'none';
+    }
+  });
+
+  aplicar.addEventListener('click', () => {
+    panel.style.display = 'none';
+    _atRenderCurrent();
+  });
+
+  limpar.addEventListener('click', () => {
+    const tipoEl   = document.getElementById('atFiltroTipo');
+    const statusEl = document.getElementById('atFiltroStatus');
+    const iniEl    = document.getElementById('atFiltroDataIni');
+    const fimEl    = document.getElementById('atFiltroDataFim');
+    if (tipoEl)   tipoEl.value   = 'EXCLUIR_RAPIDO';
+    if (statusEl) statusEl.value = 'EXCLUIR_FECHADO';
+    if (iniEl)    iniEl.value    = '';
+    if (fimEl)    fimEl.value    = '';
+    panel.style.display = 'none';
+    _atRenderCurrent();
+  });
+})();
 
 // Ordenação por coluna (modo tabela)
 document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {

@@ -2314,13 +2314,75 @@
               <div id="atAtendimentosView" style="display:none;margin-top:12px;">
 
                 <!-- Toolbar: pesquisa + toggle lista/card -->
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;position:sticky;top:0;z-index:50;background:var(--theme-bg-color,#0f172a);padding:8px 0;">
                   <div style="position:relative;flex:1;min-width:200px;">
                     <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--inactive-color);pointer-events:none;"></i>
                     <input id="atAtendimentosFiltro" type="text" placeholder="Pesquisar atendimentos..."
                       style="width:100%;padding:7px 10px 7px 32px;background:var(--input-bg,#1e2535);border:1px solid var(--border-color,#374151);border-radius:8px;color:var(--content-title-color);font-size:13px;box-sizing:border-box;">
                   </div>
                   <div id="atAtendimentosStatus" style="color:var(--inactive-color);font-size:13px;white-space:nowrap;"></div>
+
+                  <!-- Botão filtro avançado -->
+                  <div style="position:relative;">
+                    <button id="atFiltroBtn" title="Filtros avançados" type="button"
+                      style="position:relative;padding:6px 12px;border-radius:8px;border:1px solid var(--border-color,#374151);background:var(--input-bg,#1e2535);color:var(--inactive-color);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                      <i class="fa-solid fa-filter"></i>
+                      <span>Filtros</span>
+                      <span id="atFiltroBadge" style="display:none;position:absolute;top:-5px;right:-5px;background:#0ea5e9;color:#fff;font-size:9px;font-weight:700;border-radius:20px;padding:1px 5px;">!</span>
+                    </button>
+                    <!-- Painel de filtros -->
+                    <div id="atFiltroPanel" style="display:none;position:fixed;z-index:9999;background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,.5);">
+                      <div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:12px;">Filtros avançados</div>
+
+                      <!-- Tipo -->
+                      <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;">Tipo</label>
+                        <select id="atFiltroTipo" style="width:100%;padding:7px 10px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:13px;">
+                          <option value="">Todos</option>
+                          <option value="Qualidade">Qualidade</option>
+                          <option value="Comercial">Comercial</option>
+                          <option value="Extanção de garantia">Extanção de garantia</option>
+                          <option value="Extensão Garantia">Extensão Garantia</option>
+                          <option value="Atendimento Rapido">Atendimento Rápido</option>
+                          <option value="EXCLUIR_RAPIDO" selected>≠ Atendimento Rápido (padrão)</option>
+                        </select>
+                      </div>
+
+                      <!-- Status OS -->
+                      <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;">Status OS</label>
+                        <select id="atFiltroStatus" style="width:100%;padding:7px 10px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:13px;">
+                          <option value="">Todos</option>
+                          <option value="aberta">Aberta</option>
+                          <option value="aguardando">Aguardando</option>
+                          <option value="finalizado">Finalizado</option>
+                          <option value="EXCLUIR_FECHADO" selected>≠ Fechado (padrão)</option>
+                        </select>
+                      </div>
+
+                      <!-- Data range -->
+                      <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;">Data — de</label>
+                        <input id="atFiltroDataIni" type="date" style="width:100%;padding:7px 10px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:13px;">
+                      </div>
+                      <div style="margin-bottom:16px;">
+                        <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;">Data — até</label>
+                        <input id="atFiltroDataFim" type="date" style="width:100%;padding:7px 10px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:13px;">
+                      </div>
+
+                      <div style="display:flex;gap:8px;">
+                        <button id="atFiltroAplicar" type="button"
+                          style="flex:1;padding:8px;background:#0ea5e9;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+                          Aplicar
+                        </button>
+                        <button id="atFiltroLimpar" type="button"
+                          style="padding:8px 12px;background:#374151;color:#9ca3af;border:none;border-radius:8px;font-size:13px;cursor:pointer;">
+                          Limpar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style="display:flex;gap:4px;">
                     <button id="atViewTabela" title="Modo tabela" type="button"
                       style="padding:6px 10px;border-radius:8px 0 0 8px;border:1px solid var(--border-color,#374151);background:#0ea5e9;color:#fff;cursor:pointer;">
@@ -2334,13 +2396,14 @@
                 </div>
 
                 <!-- Modo tabela -->
-                <div id="atTabelaWrapper" class="tabela-wrapper" style="overflow:auto;">
-                  <table class="tabela padrao" style="min-width:1550px;">
+                <div id="atTabelaWrapper" class="tabela-wrapper" style="overflow:auto;display:none;">
+                  <table class="tabela padrao" style="min-width:1700px;">
                     <thead>
                       <tr>
                         <th data-col="id" style="cursor:pointer;user-select:none;">ID <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="data" style="cursor:pointer;user-select:none;">Data <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="tipo" style="cursor:pointer;user-select:none;">Tipo <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
+                        <th data-col="status_os" style="cursor:pointer;user-select:none;">Status OS <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="nome_revenda_cliente" style="cursor:pointer;user-select:none;">Nome revenda/cliente <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="descreva_reclamacao" style="cursor:pointer;user-select:none;">Descreva reclamação <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
                         <th data-col="pedido" style="cursor:pointer;user-select:none;">Pedido <i class="fa-solid fa-sort" style="font-size:10px;opacity:.5;"></i></th>
@@ -2355,13 +2418,13 @@
                       </tr>
                     </thead>
                     <tbody id="atAtendimentosTbody">
-                      <tr><td colspan="14" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
+                      <tr><td colspan="15" style="text-align:center;padding:16px;color:var(--inactive-color);">Sem dados.</td></tr>
                     </tbody>
                   </table>
                 </div>
 
                 <!-- Modo card -->
-                <div id="atCardsContainer" style="display:none;"></div>
+                <div id="atCardsContainer" style="display:grid;"></div>
               </div>
             </div>
           </div>
@@ -2540,6 +2603,18 @@
             <!-- Cabeçalho fixo do modal -->
             <div class="modal-header" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:6;background:#1f2937;">
               <span style="font-size:13px;color:var(--inactive-color);">Solicitação de AT</span>
+              <!-- Navegação entre OS -->
+              <div style="display:flex;align-items:center;gap:4px;">
+                <button id="atOsNavPrev" type="button" title="OS anterior"
+                  style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.07);color:#fff;cursor:pointer;font-size:14px;">
+                  <i class="fa-solid fa-chevron-left"></i>
+                </button>
+                <span id="atOsNavInfo" style="font-size:12px;color:#94a3b8;min-width:52px;text-align:center;"></span>
+                <button id="atOsNavNext" type="button" title="Próxima OS"
+                  style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.07);color:#fff;cursor:pointer;font-size:14px;">
+                  <i class="fa-solid fa-chevron-right"></i>
+                </button>
+              </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <button id="atOsImprimirBtn" type="button"
                   style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;cursor:pointer;font-size:13px;font-weight:600;"
@@ -2556,9 +2631,16 @@
                   title="Ver mapa de técnicos">
                   <i class="fa-solid fa-map-location-dot"></i> Ver Mapa
                 </button>
+                <button id="atOsRetirarBtn" type="button"
+                  style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;cursor:pointer;font-size:13px;font-weight:600;opacity:0.4;cursor:not-allowed;"
+                  title="Retirar técnico vinculado a esta OS" disabled>
+                  <i class="fa-solid fa-user-minus"></i> Retirar Técnico
+                </button>
                 <button id="atOsModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
               </div>
             </div>
+            <!-- Barra de progresso de carregamento -->
+            <div id="atOsLoadingBar" style="height:3px;background:linear-gradient(90deg,#0ea5e9,#3b82f6,#0ea5e9);background-size:200% 100%;animation:atLoadingSlide 1.2s linear infinite;display:none;"></div>
             <!-- Corpo — documento branco imprimível -->
             <div class="at-os-doc">
 
@@ -2651,22 +2733,62 @@
                   SERÃO COBRADAS DO CLIENTE/SOLICITANTE.
                 </p>
               </div>
-              <!-- Assinaturas e datas -->
-              <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
-                <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
-                  <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO TÉCNICO:</span>
-                </div>
-                <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
-                  <span style="font-weight:700;font-size:11px;color:#111;">DATA DE ABERTURA:</span>
-                  <span class="at-os-fv" id="atOsDataAbertura" style="font-size:11px;"></span>
-                </div>
+
+              <!-- PEÇAS ENVIADAS -->
+              <div id="atOsPecasSection" style="display:none;">
+                <div class="at-os-section-bar">PEÇAS ENVIADAS</div>
+                <div id="atOsPecasBody"></div>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
-                <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
-                  <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO CLIENTE:</span>
+
+              <!-- FECHAMENTO -->
+              <div id="atOsFechamentoSection">
+                <div class="at-os-section-bar">FECHAMENTO</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                  <div style="padding:6px 10px;border-right:1px solid #d1d5db;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">TÉCNICO: </span>
+                    <span class="at-os-fv" id="atOsFecTecnico" style="font-size:11px;"></span>
+                  </div>
+                  <div style="padding:6px 10px;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">STATUS: </span>
+                    <span class="at-os-fv" id="atOsFecStatus" style="font-size:11px;"></span>
+                  </div>
                 </div>
-                <div style="padding:8px 10px;">
-                  <span style="font-weight:700;font-size:11px;color:#111;">DATA DE CONCLUSÃO:</span>
+                <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                  <div style="padding:6px 10px;border-right:1px solid #d1d5db;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">MÃO DE OBRA: </span>
+                    <span class="at-os-fv" id="atOsFecMaoObra" style="font-size:11px;"></span>
+                  </div>
+                  <div style="padding:6px 10px;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">PEÇAS: </span>
+                    <span class="at-os-fv" id="atOsFecPecas" style="font-size:11px;"></span>
+                  </div>
+                </div>
+                <div style="padding:6px 10px;border-bottom:1px solid #d1d5db;">
+                  <div style="font-weight:700;font-size:11px;color:#111;margin-bottom:3px;">SERVIÇO REALIZADO:</div>
+                  <span class="at-os-fv" id="atOsFecDescricao" style="font-size:11px;white-space:pre-wrap;"></span>
+                </div>
+                <div style="padding:6px 10px;border-bottom:1px solid #d1d5db;">
+                  <div style="font-weight:700;font-size:11px;color:#111;margin-bottom:3px;">OBSERVAÇÃO DO TÉCNICO:</div>
+                  <span class="at-os-fv" id="atOsFecObservacoes" style="font-size:11px;white-space:pre-wrap;"></span>
+                </div>
+                <!-- Assinaturas e datas -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                  <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO TÉCNICO:</span>
+                  </div>
+                  <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">DATA DE ABERTURA:</span>
+                    <span class="at-os-fv" id="atOsDataAbertura" style="font-size:11px;"></span>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+                  <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO CLIENTE:</span>
+                  </div>
+                  <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+                    <span style="font-weight:700;font-size:11px;color:#111;">DATA DE CONCLUSÃO:</span>
+                    <span class="at-os-fv" id="atOsDataConclusao" style="font-size:11px;"></span>
+                  </div>
                 </div>
               </div>
 
@@ -4214,6 +4336,21 @@
                 justify-content:center;
                 gap:12px;
               }
+              @keyframes atLoadingSlide {
+                0%   { background-position: 200% 0; }
+                100% { background-position: -200% 0; }
+              }
+              .at-os-loading-spin {
+                display:inline-block;
+                width:10px; height:10px;
+                border:2px solid #d1d5db;
+                border-top-color:#0ea5e9;
+                border-radius:50%;
+                animation:atSpin .7s linear infinite;
+                vertical-align:middle;
+                margin-left:4px;
+              }
+              @keyframes atSpin { to { transform:rotate(360deg); } }
               .at-os-agenda-hint {
                 color:#ef4444;
                 font-size:11px;
@@ -7156,6 +7293,38 @@ function attachDropZone(ul) {
 }
 #modalCarrinhoLista {
   scrollbar-color: #9ca3af #1f2937;
+}
+
+/* ── AT — scrollbar da tabela de atendimentos ── */
+#atTabelaWrapper::-webkit-scrollbar { width: 8px; height: 8px; }
+#atTabelaWrapper::-webkit-scrollbar-track { background: #1e293b; border-radius: 4px; }
+#atTabelaWrapper::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; border: 1px solid #1e293b; }
+#atTabelaWrapper::-webkit-scrollbar-thumb:hover { background: #64748b; }
+#atTabelaWrapper { scrollbar-color: #475569 #1e293b; scrollbar-width: thin; }
+
+/* ── AT — scroll no #atAtendimentosView; título acima nunca rola ── */
+/* content-wrapper e content-section ficam intactos (sem flex chain) */
+#sacAtPane.at-lista-ativa #atAtendimentosView {
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+  min-width: 0;
+}
+#sacAtPane #atAtendimentosView { flex-direction: column; min-width: 0; }
+
+/* tabela: scroll H+V com max-height absoluto */
+#sacAtPane #atTabelaWrapper {
+  overflow: auto;
+  max-height: calc(100vh - 250px);
+  height: auto !important;
+}
+/* card: nenhuma restrição de altura — scroll vem do #atAtendimentosView */
+
+/* ── AT — cabeçalho da tabela congelado ── */
+#atTabelaWrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #222;
 }
 
 .familia-id-display {
