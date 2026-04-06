@@ -760,48 +760,90 @@ router.post('/at', async (req, res) => {
 
 router.get('/at/atendimentos', async (_req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT
-         a.id,
-         a.data,
-         a.tipo,
-         a.nome_revenda_cliente,
-         a.numero_telefone          AS telefone,
-         a.cpf_cnpj,
-         a.estado,
-         a.cidade,
-         a.descreva_reclamacao,
-         a.atendimento_inicial,
-         a.motivo_solicitacao,
-         COALESCE(a.modelo, s.modelo) AS modelo,
-         a.tag_problema,
-         a.plataforma_atendimento,
-         a.editado_por,
-         a.editado_em,
-         s.pedido,
-         s.ordem_producao,
-         s.cliente,
-         s.nota_fiscal,
-         s.data_entrega,
-         s.teste_tipo_gas,
-         f.id                        AS fech_id,
-         f.tag_problema             AS fech_tag,
-         f.plataforma_atendimento   AS fech_plataforma,
-         f.descricao_servico_realizado AS fech_descricao,
-         f.valor_total_mao_obra     AS fech_valor_mo,
-         f.valor_gasto_pecas        AS fech_valor_pecas,
-         f.pecas_reposicao          AS fech_pecas,
-         f.data_conclusao_servico   AS fech_data_conclusao,
-         f.observacoes              AS fech_obs,
-         f.midias_servico           AS fech_midias,
-         (SELECT COUNT(*) FROM sac.at_anexos anx WHERE anx.id_at = a.id) AS qtd_anexos
-       FROM sac.at a
-       LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
-       LEFT JOIN sac.fechamento           f ON f.id_at = a.id
-       ORDER BY a.id DESC`
-    );
+    const t0 = Date.now();
 
-    return res.json({ ok: true, rows: result.rows || [] });
+    // 1) Query principal (sem has_pecas_enviadas — evita EXISTS com regex lento)
+    const [mainResult, solResult] = await Promise.all([
+      pool.query(
+        `WITH anexos_cnt AS (
+           SELECT id_at, COUNT(*) AS qtd
+           FROM sac.at_anexos
+           GROUP BY id_at
+         )
+         SELECT DISTINCT ON (a.id)
+           a.id,
+           a.data,
+           a.tipo,
+           a.nome_revenda_cliente,
+           a.numero_telefone          AS telefone,
+           a.cpf_cnpj,
+           a.estado,
+           a.cidade,
+           a.descreva_reclamacao,
+           a.atendimento_inicial,
+           a.motivo_solicitacao,
+           COALESCE(a.modelo, s.modelo) AS modelo,
+           a.tag_problema,
+           a.plataforma_atendimento,
+           a.editado_por,
+           a.editado_em,
+           s.pedido,
+           s.ordem_producao,
+           s.cliente,
+           s.nota_fiscal,
+           s.data_entrega,
+           s.teste_tipo_gas,
+           f.id                        AS fech_id,
+           f.tag_problema             AS fech_tag,
+           f.plataforma_atendimento   AS fech_plataforma,
+           f.descricao_servico_realizado AS fech_descricao,
+           f.valor_total_mao_obra     AS fech_valor_mo,
+           f.valor_gasto_pecas        AS fech_valor_pecas,
+           f.pecas_reposicao          AS fech_pecas,
+           f.data_conclusao_servico   AS fech_data_conclusao,
+           f.observacoes              AS fech_obs,
+           f.midias_servico           AS fech_midias,
+           f.status_os                AS status_os,
+           ct.nome                    AS tecnico_nome,
+           COALESCE(anx.qtd, 0)       AS qtd_anexos
+         FROM sac.at a
+         LEFT JOIN sac.at_busca_selecionada s  ON s.id_at = a.id
+         LEFT JOIN sac.fechamento           f  ON f.id_at = a.id
+         LEFT JOIN sac.controle_tecnicos    ct ON ct.id = f.id_tecnico
+         LEFT JOIN anexos_cnt              anx ON anx.id_at = a.id
+         ORDER BY a.id DESC, f.id DESC`
+      ),
+      // 2) Busca observacoes das solicitações (poucas linhas) em paralelo
+      pool.query(`SELECT observacao FROM envios.solicitacoes WHERE observacao IS NOT NULL`)
+    ]);
+
+    const tQuery = Date.now() - t0;
+
+    // 3) Computa has_pecas_enviadas em JS (~7ms em vez de ~38s no SQL)
+    const osPattern = /O\.S\s+(\S+)/gi;
+    const osTokens = new Set();
+    for (const row of solResult.rows) {
+      let m;
+      while ((m = osPattern.exec(row.observacao)) !== null) {
+        // Normaliza removendo hífens para match com "YYID" e "YY-ID"
+        const raw = m[1].replace(/-/g, '');
+        // Se tiver barra (ex: "260020/260021"), separa cada token
+        for (const part of raw.split('/')) {
+          if (part) osTokens.add(part);
+        }
+      }
+    }
+
+    const rows = mainResult.rows;
+    for (const at of rows) {
+      const yr = at.data ? new Date(at.data).getFullYear().toString().slice(-2) : '';
+      const chaves = [at.atendimento_inicial, yr ? yr + at.id : ''].filter(Boolean);
+      at.has_pecas_enviadas = chaves.some(ch => osTokens.has(ch.replace(/-/g, '')));
+    }
+
+    console.log(`[SAC/AT] /at/atendimentos ${rows.length} rows em ${Date.now() - t0}ms (query: ${tQuery}ms)`);
+
+    return res.json({ ok: true, rows: rows || [] });
   } catch (err) {
     console.error('[SAC/AT] erro ao listar atendimentos:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao listar atendimentos AT.' });
@@ -2040,6 +2082,44 @@ router.get('/at/os-data/:id', async (req, res) => {
       }
     }
 
+    // Busca dados de fechamento (registro mais recente com técnico vinculado, ou qualquer um)
+    let fechamento = null;
+    try {
+      const fRes = await pool.query(
+        `SELECT f.descricao_servico_realizado, f.valor_total_mao_obra, f.valor_gasto_pecas,
+                f.data_conclusao_servico, f.observacao_tecnico, f.status_os,
+                ct.nome AS tecnico_nome
+         FROM sac.fechamento f
+         LEFT JOIN sac.controle_tecnicos ct ON ct.id = f.id_tecnico
+         WHERE f.id_at = $1
+         ORDER BY f.id_tecnico DESC NULLS LAST, f.id DESC
+         LIMIT 1`,
+        [id]
+      );
+      if (fRes.rows.length) {
+        const fc = fRes.rows[0];
+        const fmt2 = v => v != null && v !== '' ? Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '';
+        fechamento = {
+          tecnico_nome:                 fc.tecnico_nome || '',
+          descricao_servico_realizado:  fc.descricao_servico_realizado || '',
+          valor_total_mao_obra:         fmt2(fc.valor_total_mao_obra),
+          valor_gasto_pecas:            fmt2(fc.valor_gasto_pecas),
+          data_conclusao: (() => {
+            if (!fc.data_conclusao_servico) return '';
+            const dt = new Date(fc.data_conclusao_servico);
+            if (isNaN(dt)) return String(fc.data_conclusao_servico);
+            // data_conclusao_servico é DATE (sem timezone) — lê como local
+            const [y, m, d2] = String(fc.data_conclusao_servico).substring(0, 10).split('-');
+            return `${d2}/${m}/${y}`;
+          })(),
+          observacao_tecnico:           fc.observacao_tecnico || '',
+          status_os:                    fc.status_os || '',
+        };
+      }
+    } catch (fErr) {
+      console.warn('[SAC/AT] falha ao buscar fechamento:', fErr.message);
+    }
+
     res.json({
       revenda:        r.revenda_nome    || r.revenda_cliente || '',
       revenda_cel:    r.rev_ddd && r.rev_tel ? `${r.rev_ddd} ${r.rev_tel}` : '',
@@ -2068,6 +2148,7 @@ router.get('/at/os-data/:id', async (req, res) => {
         return dt.toLocaleDateString('pt-BR');
       })(),
       historico,
+      fechamento,
     });
   } catch (err) {
     console.error('[SAC/AT] erro ao buscar dados OS:', err);
@@ -2117,6 +2198,64 @@ router.get('/at/tecnicos/ufs', async (req, res) => {
     );
     res.json(rows.map(r => r.uf));
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/pecas-enviadas/:id — envios vinculados a esta OS via campo observacao
+router.get('/at/pecas-enviadas/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
+  try {
+    // Busca atendimento_inicial e id da AT para montar os padrões de busca
+    const { rows: atRows } = await pool.query(
+      `SELECT a.id, a.atendimento_inicial, a.data
+       FROM sac.at a WHERE a.id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!atRows.length) return res.json([]);
+    const at = atRows[0];
+    // Padrões de match no campo observacao:
+    // 1. atendimento_inicial exato (ex: "260093")
+    // 2. formato ano2digitos + id sem zeros (ex: "262177")
+    // 3. formato com traço (ex: "26-2177")
+    const anoAT = at.data ? String(new Date(at.data).getFullYear()).slice(-2) : '';
+    const patterns = [];
+    if (at.atendimento_inicial) patterns.push(at.atendimento_inicial.trim());
+    if (anoAT) {
+      patterns.push(`${anoAT}${at.id}`);
+      patterns.push(`${anoAT}-${at.id}`);
+    }
+    if (!patterns.length) return res.json([]);
+
+    // Busca todos os registros onde algum padrão aparece após "O.S "
+    const { rows } = await pool.query(
+      `SELECT id, identificacao, observacao, conteudo, etiqueta_url, declaracao_url, anexos,
+              status, created_at, usuario, rastreio_status
+       FROM envios.solicitacoes
+       WHERE ${ patterns.map((_, i) => `observacao ~* ('O\.S[[:space:]]+' || $${i + 1})`).join(' OR ') }
+       ORDER BY id DESC`,
+      patterns
+    );
+    res.json(rows.map(r => {
+      let itens = [];
+      try { itens = JSON.parse(r.conteudo || '[]'); } catch { itens = []; }
+      return {
+        id:              r.id,
+        identificacao:   r.identificacao || '',
+        observacao:      r.observacao || '',
+        status:          r.status || '',
+        rastreio_status: r.rastreio_status || '',
+        usuario:         r.usuario || '',
+        created_at:      r.created_at ? new Date(r.created_at).toLocaleDateString('pt-BR') : '',
+        etiqueta_url:    r.etiqueta_url || null,
+        declaracao_url:  r.declaracao_url || null,
+        anexos:          Array.isArray(r.anexos) ? r.anexos : [],
+        itens,
+      };
+    }));
+  } catch (err) {
+    console.error('[AT/pecas-enviadas] erro:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2230,16 +2369,30 @@ router.get('/at/tecnico/token', async (req, res) => {
         [token, ctid]
       );
     }
-    // Vincula ao atendimento em sac.fechamento (sem duplicar id_at + id_tecnico)
+    // Vincula técnico ao fechamento existente (UPDATE); se não existir, cria linha mínima
     if (id_at && tecId) {
-      await pool.query(
-        `INSERT INTO sac.fechamento (id_at, id_tecnico)
-         SELECT $1, $2
-         WHERE NOT EXISTS (
-           SELECT 1 FROM sac.fechamento WHERE id_at = $1 AND id_tecnico = $2
-         )`,
+      // Se o par (id_at, id_tecnico) já existe, nada a fazer — vínculo já está correto
+      const { rows: jaExiste } = await pool.query(
+        `SELECT id FROM sac.fechamento WHERE id_at = $1 AND id_tecnico = $2 LIMIT 1`,
         [id_at, tecId]
       );
+      if (!jaExiste.length) {
+        // Atualiza o registro mais recente; se não existir nenhum, insere
+        const { rowCount } = await pool.query(
+          `UPDATE sac.fechamento SET id_tecnico = $1
+           WHERE id = (
+             SELECT id FROM sac.fechamento WHERE id_at = $2 ORDER BY id DESC LIMIT 1
+           )`,
+          [tecId, id_at]
+        );
+        if (rowCount === 0) {
+          await pool.query(
+            `INSERT INTO sac.fechamento (id_at, id_tecnico) VALUES ($1, $2)
+             ON CONFLICT (id_at, id_tecnico) WHERE id_tecnico IS NOT NULL DO NOTHING`,
+            [id_at, tecId]
+          );
+        }
+      }
     }
     res.json({ token });
   } catch (err) {
@@ -2259,6 +2412,37 @@ router.get('/at/tecnico/status', async (req, res) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'Link inválido' });
     res.json({ temSenha: !!rows[0].senha, nome: rows[0].nome });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/retirar  { id_at } — remove técnico do fechamento
+router.post('/at/tecnico/retirar', async (req, res) => {
+  const id_at = parseInt(req.body?.id_at, 10);
+  if (!id_at) return res.status(400).json({ error: 'id_at obrigatório' });
+  try {
+    await pool.query(
+      `UPDATE sac.fechamento SET id_tecnico = NULL WHERE id_at = $1`,
+      [id_at]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnico/reset-senha  { nome } — apaga a senha para recriar
+router.post('/at/tecnico/reset-senha', async (req, res) => {
+  const { nome } = req.body || {};
+  if (!nome) return res.status(400).json({ error: 'nome obrigatório' });
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE sac.controle_tecnicos SET senha = NULL WHERE nome = $1`,
+      [String(nome)]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Técnico não encontrado' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

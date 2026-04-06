@@ -189,7 +189,8 @@
     .fech-upload-btn:disabled { opacity:.5; cursor:not-allowed; }
     .fech-save-btn { padding:10px 22px; background:#16a34a; color:#fff; border:none; border-radius:10px; font-size:14px; font-weight:700; cursor:pointer; transition:background .15s; }
     .fech-save-btn:hover { background:#15803d; }
-    .fech-save-btn:disabled { opacity:.5; cursor:not-allowed; }
+    .fech-save-btn:disabled { opacity:.45; cursor:not-allowed; background:#6b7280; }
+    .tbl-nfe-disabled { opacity:.35; cursor:not-allowed; pointer-events:none; filter:grayscale(1); }
     /* ── Evidências ── */
     .evid-item { position:relative; width:70px; height:70px; border-radius:8px; overflow:hidden; border:1.5px solid #374151; flex-shrink:0; }
     .evid-item img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -549,7 +550,9 @@
           const m  = _statusMeta(st);
           const nfeCell = a.nfe_url
             ? '<a href="' + esc(a.nfe_url) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>'
-            : '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>';
+            : st === 'aberta'
+              ? '<span class="tbl-icon-btn tbl-nfe-disabled" title="Finalize o atendimento primeiro">📎</span>'
+              : '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>';
           const fechCls = st === 'aberta' ? '' : ' is-fechada';
           return `
           <tr data-id-at="${a.id_at}">
@@ -646,6 +649,12 @@
     let _fechStatusOs  = 'aberta';
     let _inlineNfeIdAt = null;
 
+    function _checkFechForm() {
+      const descricao = (document.getElementById('fechDescricao').value || '').trim();
+      const valorMo   = (document.getElementById('fechValorMo').value  || '').trim();
+      document.getElementById('fechSaveBtn').disabled = !(descricao && valorMo);
+    }
+
     async function abrirFechModal(idAt) {
       _fechIdAt    = idAt;
       _fechStatusOs = 'aberta';
@@ -661,6 +670,10 @@
 
       document.getElementById('fechModalOv').classList.add('open');
       document.body.style.overflow = 'hidden';
+      // Listeners dos campos obrigatórios
+      document.getElementById('fechDescricao').oninput = _checkFechForm;
+      document.getElementById('fechValorMo').oninput   = _checkFechForm;
+      _checkFechForm();
 
       try {
         const r = await fetch(`${BASE}/api/sac/at/tecnico/fechamento/${idAt}?token=${encodeURIComponent(TOKEN)}`);
@@ -682,6 +695,7 @@
         }
       } catch {}
       _atualizarUiFechStatus();
+      _checkFechForm(); // habilita Salvar se dados já foram carregados
     }
 
     function _atualizarUiFechStatus() {
@@ -820,6 +834,13 @@
       if (badge) { badge.textContent = m.label; badge.className = 'status-badge status-' + m.cls; }
       const fbtn = row.querySelector('.tbl-fechar-btn');
       if (fbtn) fbtn.className = 'tbl-icon-btn tbl-fechar-btn' + (novoStatus === 'aberta' ? '' : ' is-fechada');
+      // Ativa botão NFe quando sai de 'aberta'
+      if (novoStatus !== 'aberta') {
+        const nfeTd = row.querySelector('.tbl-nfe-cell');
+        if (nfeTd && nfeTd.querySelector('.tbl-nfe-disabled')) {
+          nfeTd.innerHTML = '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + idAt + ')" title="Anexar NFe">📎</button>';
+        }
+      }
     }
 
     function _atualizarNfeLinha(idAt, nfeUrl) {
@@ -972,7 +993,7 @@
 
         <!-- Ações -->
         <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
-          <button class="fech-save-btn" id="fechSaveBtn" onclick="salvarFechamento()">💾 Salvar</button>
+          <button class="fech-save-btn" id="fechSaveBtn" onclick="salvarFechamento()" disabled>💾 Salvar</button>
           <button class="modal-close-btn" onclick="fecharFechModal()">Cancelar</button>
         </div>
         <div class="erro" id="fechErro" style="margin-top:12px;"></div>
