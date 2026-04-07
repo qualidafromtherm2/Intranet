@@ -509,6 +509,12 @@ async function ensureSchema() {
       criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS sac.tag (
+      id         BIGSERIAL PRIMARY KEY,
+      nome       TEXT NOT NULL UNIQUE,
+      criado_em  TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS sac.fechamento (
       id BIGSERIAL PRIMARY KEY,
       id_at BIGINT NOT NULL REFERENCES sac.at(id) ON DELETE CASCADE,
@@ -1818,16 +1824,41 @@ router.get('/at/opcoes-campo', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Campo inválido.' });
   }
   try {
-    const result = await pool.query(
-      `SELECT DISTINCT "${campo}" AS valor
-         FROM sac.at
-        WHERE "${campo}" IS NOT NULL AND "${campo}" <> ''
-        ORDER BY "${campo}"`
-    );
+    let result;
+    if (campo === 'tag_problema') {
+      // Retorna somente as tags cadastradas no catálogo sac.tag
+      result = await pool.query(`
+        SELECT nome AS valor FROM sac.tag
+        ORDER BY nome
+      `);
+    } else {
+      result = await pool.query(
+        `SELECT DISTINCT "${campo}" AS valor
+           FROM sac.at
+          WHERE "${campo}" IS NOT NULL AND "${campo}" <> ''
+          ORDER BY "${campo}"`
+      );
+    }
     return res.json({ ok: true, opcoes: result.rows.map(r => r.valor) });
   } catch (err) {
     console.error(`[SAC/AT] erro ao buscar opcoes de ${campo}:`, err);
     return res.status(500).json({ ok: false, error: 'Falha ao buscar opções.' });
+  }
+});
+
+// POST /at/tags — registra uma nova tag no catálogo sac.tag
+router.post('/at/tags', async (req, res) => {
+  const nome = String(req.body?.nome || '').trim();
+  if (!nome) return res.status(400).json({ ok: false, error: 'Nome obrigatório.' });
+  try {
+    await pool.query(
+      `INSERT INTO sac.tag (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING`,
+      [nome]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao salvar tag:', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -2045,13 +2076,14 @@ router.get('/at/os-data/:id', async (req, res) => {
          ORDER BY CASE WHEN nome_fantasia ILIKE s.cliente THEN 0 ELSE 1 END
          LIMIT 1
        ) f ON true
-       WHERE a.id = (
-         SELECT a2.id FROM sac.at a2
-         JOIN sac.at_busca_selecionada s2 ON s2.id_at = a2.id
-         WHERE s2.ordem_producao = (
-           SELECT s3.ordem_producao FROM sac.at_busca_selecionada s3 WHERE s3.id_at = $1
-         )
-         ORDER BY a2.id DESC LIMIT 1
+       WHERE a.id = COALESCE(
+         (SELECT a2.id FROM sac.at a2
+          JOIN sac.at_busca_selecionada s2 ON s2.id_at = a2.id
+          WHERE s2.ordem_producao = (
+            SELECT s3.ordem_producao FROM sac.at_busca_selecionada s3 WHERE s3.id_at = $1
+          )
+          ORDER BY a2.id DESC LIMIT 1),
+         $1
        )
        LIMIT 1`,
       [id]
@@ -2312,9 +2344,79 @@ router.get('/at/graficos/por-mes', async (req, res) => {
   }
 });
 
-// GET /at/graficos/por-estado-mes — quantidade de atendimentos por estado agrupado por mês/ano
-router.get('/at/graficos/por-estado-mes', async (req, res) => {
+// GET /at/graficos/relatorio — dados para relatório PDF (últimos 3 meses), breakdown por tag × mês
+router.get('/at/graficos/relatorio', async (req, res) => {
   try {
+    const [rQ, rR, rM] = await Promise.all([
+      // OS aberta (Qualidade) — por tag × mês
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(tag_problema),''), '(sem tag)') AS tag,
+          TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')        AS mes,
+          COUNT(*)::int                                         AS total
+        FROM sac.at
+        WHERE LOWER(TRIM(tipo)) = 'qualidade'
+          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+        GROUP BY 1, 2
+        ORDER BY tag, mes
+      `),
+      // Atendimento Rápido — por tag × mês
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(tag_problema),''), '(sem tag)') AS tag,
+          TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')        AS mes,
+          COUNT(*)::int                                         AS total
+        FROM sac.at
+        WHERE LOWER(TRIM(tipo)) IN ('atendimento rapido','atendimento rápido')
+          AND data >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+          AND data <  DATE_TRUNC('month', CURRENT_DATE)
+        GROUP BY 1, 2
+        ORDER BY tag, mes
+      `),
+      // Menções (Pós abertura de OS) — somente AT != Atend. Rápido — por tag × mês
+      pool.query(`
+        SELECT
+          COALESCE(NULLIF(TRIM(a.tag_problema),''), '(sem tag)') AS tag,
+          TO_CHAR(DATE_TRUNC('month', m.criado_em), 'YYYY-MM')   AS mes,
+          COUNT(*)::int                                           AS total
+        FROM sac.mencoes m
+        JOIN sac.at a ON a.id = m.id_at
+        WHERE m.criado_em >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+          AND m.criado_em <  DATE_TRUNC('month', CURRENT_DATE)
+          AND LOWER(TRIM(a.tipo)) NOT IN ('atendimento rapido','atendimento rápido')
+        GROUP BY 1, 2
+        ORDER BY tag, mes
+      `),
+    ]);
+
+    // Meses do eixo X (YYYY-MM e label legível)
+    const meses = [];
+    const nomesMes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    for (let i = 3; i >= 1; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const yyyymm = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      meses.push({ yyyymm, label: `${nomesMes[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}` });
+    }
+
+    res.json({
+      ok:      true,
+      periodo: meses.map(m => m.label).join(' – '),
+      meses,
+      qualidade: rQ.rows,
+      rapido:    rR.rows,
+      mencoes:   rM.rows,
+    });
+  } catch (err) {
+    console.error('[SAC/AT] erro relatorio:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/por-estado-mes — quantidade de atendimentos por estado agrupado por mês/ano
+router.get('/at/graficos/por-estado-mes', async (req, res) => {  try {
     const tipo = String(req.query.tipo || '').trim();
     const params = [];
     const whereExtra = tipo ? ` AND LOWER(tipo) = LOWER($1)` : '';
