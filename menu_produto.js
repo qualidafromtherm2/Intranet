@@ -6062,15 +6062,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && _atLightbo
 function inicializarComboboxAt(inputEl, dropdownEl, campo) {
   if (!inputEl || !dropdownEl) return;
   let opcoesBanco = [];
-  let carregado = false;
 
   async function carregarOpcoes() {
-    if (carregado) return;
     try {
-      const r = await fetch(`/api/sac/at/opcoes-campo?campo=${campo}`);
+      const r = await fetch(`/api/sac/at/opcoes-campo?campo=${campo}`, { credentials: 'include' });
       const data = await r.json();
       if (data.ok) opcoesBanco = data.opcoes || [];
-      carregado = true;
     } catch (_) {}
   }
 
@@ -6132,6 +6129,16 @@ function inicializarComboboxAt(inputEl, dropdownEl, campo) {
 inicializarComboboxAt(
   atTagProblemaInput,
   document.getElementById('atTagProblemaDropdown'),
+  'tag_problema'
+);
+inicializarComboboxAt(
+  document.getElementById('atEmTag'),
+  document.getElementById('atEmTagDropdown'),
+  'tag_problema'
+);
+inicializarComboboxAt(
+  document.getElementById('atEmFechTag'),
+  document.getElementById('atEmFechTagDropdown'),
   'tag_problema'
 );
 // Plataforma usa botões — não usa combobox
@@ -6789,7 +6796,6 @@ function _renderAtCards(rows) {
         ${_atCiFieldRO('Modelo', primary.modelo)}
         ${_atCiFieldRO('Estado', primary.estado)}
         ${_atCiFieldRO('Tag', primary.tag_problema)}
-        ${_atCiFieldRO('Plataforma', primary.plataforma_atendimento)}
         ${primary.atendimento_inicial ? _atCiFieldRO('Atend. inicial', primary.atendimento_inicial) : ''}
         ${primary.motivo_solicitacao  ? _atCiFieldRO('Motivo', primary.motivo_solicitacao) : ''}
       </div>
@@ -6877,8 +6883,10 @@ function _abrirAtOsModal(id, navRows) {
     _atOsNavRows = rows;
   }
 
-  const row = _atAllRows.find(r => String(r.id) === String(id));
-  if (!row) return;
+  let row = _atAllRows.find(r => String(r.id) === String(id));
+  // Se _atAllRows ainda não foi carregado (ex: acesso direto pelo Gráfico AT),
+  // cria um row mínimo — a Fase 2 (os-data/:id) preencherá os campos do modal.
+  if (!row) row = { id };
 
   const modal = document.getElementById('atOsModal');
   if (!modal) return;
@@ -6936,6 +6944,9 @@ function _abrirAtOsModal(id, navRows) {
   // Barra de loading animada
   const loadingBar = document.getElementById('atOsLoadingBar');
   if (loadingBar) loadingBar.style.display = 'block';
+
+  // Garante que o modal está no <body> e não dentro de um pane oculto (display:none)
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
 
   modal.style.display = 'flex';
 
@@ -7983,6 +7994,16 @@ async function _salvarAtEditModal() {
 
     _atRenderCurrent();
 
+    // Auto-registra tags no catálogo sac.tag (fire-and-forget)
+    const _tagsParaSalvar = [payload.tag_problema, fechPayload.tag_problema].filter(Boolean);
+    _tagsParaSalvar.forEach(t => {
+      fetch('/api/sac/at/tags', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: t.trim() })
+      }).catch(() => null);
+    });
+
     // Upload de arquivos pendentes do modal
     if (_atEmAnexosPendentes.length) {
       const fd = new FormData();
@@ -8435,6 +8456,16 @@ if (atEnviarBtn) {
       }
 
       setAtEnvioStatus(`Atendimento salvo com sucesso (ID ${idAtSalvo || 'n/a'}).`, false);
+
+      // Auto-registra tag no catálogo sac.tag (fire-and-forget)
+      const _tagPrinc = payload.tag_problema;
+      if (_tagPrinc) {
+        fetch('/api/sac/at/tags', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nome: _tagPrinc.trim() })
+        }).catch(() => null);
+      }
 
       if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
       if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
@@ -9122,7 +9153,7 @@ if (atBackToFormBtn) {
   let _pg1Instance = null;
   let _pg2Instance = null;
   let _pgMesesSet  = [];
-  let _pgPeriodo   = 6;
+  let _pgPeriodo   = 3;
   let _pgInicializado = false;
 
   // Helpers locais (réplica das funções da IIFE principal)
@@ -9175,9 +9206,18 @@ if (atBackToFormBtn) {
       const CORES = ['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#a855f7','#f97316','#84cc16'];
 
       if (_pgPeriodo > 0) {
-        const limite = _mesesRange(_pgPeriodo)[0];
-        linhas = linhas.filter(r => r.mes >= limite);
+        const _hoje = new Date();
+        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
+        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
+        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
+        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
       }
+
+      // Top 5 estados por total acumulado no período
+      const _totEst = {};
+      linhas.forEach(r => { _totEst[r.estado||'N/D'] = (_totEst[r.estado||'N/D']||0) + r.total; });
+      const _top5 = Object.keys(_totEst).sort((a,b) => _totEst[b]-_totEst[a]).slice(0,5);
+      linhas = linhas.filter(r => _top5.includes(r.estado||'N/D'));
 
       const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
       const meses   = [...new Set(linhas.map(r => r.mes))].sort();
@@ -9242,10 +9282,13 @@ if (atBackToFormBtn) {
       let linhasM = dM.rows || [];
 
       if (_pgPeriodo > 0) {
-        const lim = _mesesRange(_pgPeriodo)[0];
-        linhasQ = linhasQ.filter(r => r.mes >= lim);
-        linhasR = linhasR.filter(r => r.mes >= lim);
-        linhasM = linhasM.filter(r => r.mes >= lim);
+        const _hoje2 = new Date();
+        const _mesAtual2 = `${_hoje2.getFullYear()}-${String(_hoje2.getMonth()+1).padStart(2,'0')}`;
+        const _dLim2 = new Date(_hoje2.getFullYear(), _hoje2.getMonth() - _pgPeriodo, 1);
+        const _lim2 = `${_dLim2.getFullYear()}-${String(_dLim2.getMonth()+1).padStart(2,'0')}`;
+        linhasQ = linhasQ.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
+        linhasR = linhasR.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
+        linhasM = linhasM.filter(r => r.mes >= _lim2 && r.mes < _mesAtual2);
       }
 
       const mesesSet = [...new Set([...linhasQ, ...linhasR, ...linhasM].map(r => r.mes))].sort();
@@ -9376,6 +9419,351 @@ if (atBackToFormBtn) {
     }
   }
 
+  // ── Relatório PDF ────────────────────────────────────────────────────────
+  async function _gerarRelatorioGrafAt() {
+    const btn = document.getElementById('atGrafPgRelatorioBtn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...'; }
+
+    try {
+      // ── 1) Ativa gridlines visíveis + cores escuras para captura de impressão ──
+      const GRID_COR   = 'rgba(0,0,0,0.13)';
+      const TICK_COR   = '#333';
+      const LEGEND_COR = '#222';
+
+      function _salvarOpcoes(inst) {
+        if (!inst) return {};
+        const sx = inst.options.scales?.x || {};
+        const sy = inst.options.scales?.y || {};
+        const lbl = inst.options.plugins?.legend?.labels || {};
+        return {
+          xGrid:   sx.grid?.color,
+          yGrid:   sy.grid?.color,
+          xTick:   sx.ticks?.color,
+          yTick:   sy.ticks?.color,
+          xFont:   sx.ticks?.font?.size,
+          yFont:   sy.ticks?.font?.size,
+          legend:  lbl?.color,
+        };
+      }
+
+      function _aplicarOpcoesPrint(inst) {
+        if (!inst) return;
+        const sx = inst.options.scales?.x;
+        const sy = inst.options.scales?.y;
+        const lbl = inst.options.plugins?.legend?.labels;
+        if (sx?.grid)  sx.grid.color           = GRID_COR;
+        if (sy?.grid)  sy.grid.color           = GRID_COR;
+        if (sx?.ticks) { sx.ticks.color       = TICK_COR; if (sx.ticks.font) sx.ticks.font.size = 11; }
+        if (sy?.ticks) { sy.ticks.color       = TICK_COR; if (sy.ticks.font) sy.ticks.font.size = 11; }
+        if (lbl)       lbl.color              = LEGEND_COR;
+        inst.update('none');
+      }
+
+      function _restaurarOpcoes(inst, saved) {
+        if (!inst) return;
+        const sx = inst.options.scales?.x;
+        const sy = inst.options.scales?.y;
+        const lbl = inst.options.plugins?.legend?.labels;
+        if (sx?.grid)  sx.grid.color           = saved.xGrid;
+        if (sy?.grid)  sy.grid.color           = saved.yGrid;
+        if (sx?.ticks) { sx.ticks.color        = saved.xTick; if (sx.ticks.font) sx.ticks.font.size = saved.xFont; }
+        if (sy?.ticks) { sy.ticks.color        = saved.yTick; if (sy.ticks.font) sy.ticks.font.size = saved.yFont; }
+        if (lbl)       lbl.color              = saved.legend;
+        inst.update('none');
+      }
+
+      // Helper: captura canvas com fundo branco (garante impressão limpa)
+      function _canvasParaImg(canvas) {
+        if (!canvas) return '';
+        const tmp = document.createElement('canvas');
+        tmp.width  = canvas.width;
+        tmp.height = canvas.height;
+        const ctx = tmp.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, tmp.width, tmp.height);
+        ctx.drawImage(canvas, 0, 0);
+        return tmp.toDataURL('image/png');
+      }
+
+      const saved1 = _salvarOpcoes(_pg1Instance);
+      const saved2 = _salvarOpcoes(_pg2Instance);
+      _aplicarOpcoesPrint(_pg1Instance);
+      _aplicarOpcoesPrint(_pg2Instance);
+
+      const c1 = document.getElementById('atGrafPg1Canvas');
+      const c2 = document.getElementById('atGrafPg2Canvas');
+      const img1 = _canvasParaImg(c1);
+      const img2 = _canvasParaImg(c2);
+
+      _restaurarOpcoes(_pg1Instance, saved1);
+      _restaurarOpcoes(_pg2Instance, saved2);
+
+      // ── 2) Busca dados com breakdown por mês ──
+      const resp = await fetch('/api/sac/at/graficos/relatorio', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
+
+      const meses   = data.meses  || [];
+      const periodo = data.periodo || '';
+
+      // ── 3) Pivot: tabela com colunas de mês lado a lado ──
+      function pivotHtml(titulo, cor, rows) {
+        if (!rows || !rows.length) {
+          return `<div class="rs">
+            <div class="rs-title" style="border-color:${cor};">${titulo}</div>
+            <p class="rs-empty">Nenhum registro no período.</p>
+          </div>`;
+        }
+        const totaisPorTag = {};
+        rows.forEach(r => { totaisPorTag[r.tag] = (totaisPorTag[r.tag] || 0) + r.total; });
+        const tags = Object.keys(totaisPorTag).sort((a, b) => totaisPorTag[b] - totaisPorTag[a]);
+
+        const thMeses = meses.map(m =>
+          `<th class="th-mes" style="background:${cor};">${m.label}</th>`
+        ).join('');
+
+        const linhas = tags.map((tag, idx) => {
+          const par = idx % 2 === 0;
+          const cells = meses.map(m => {
+            const found = rows.find(r => r.tag === tag && r.mes === m.yyyymm);
+            const v = found ? found.total : 0;
+            return `<td class="td-num${par ? ' par' : ''}">${v || '<span class="zero">—</span>'}</td>`;
+          }).join('');
+          const soma = totaisPorTag[tag];
+          return `<tr>
+            <td class="td-tag${par ? ' par' : ''}">${tag}</td>
+            ${cells}
+            <td class="td-total${par ? ' par' : ''}" style="color:${cor};">${soma}</td>
+          </tr>`;
+        }).join('');
+
+        const totCells = meses.map(m => {
+          const v = rows.filter(r => r.mes === m.yyyymm).reduce((s, r) => s + r.total, 0);
+          return `<td class="td-num footer">${v || '—'}</td>`;
+        }).join('');
+        const totalGeral = Object.values(totaisPorTag).reduce((s, v) => s + v, 0);
+
+        return `<div class="rs">
+          <div class="rs-title" style="border-color:${cor};">${titulo}</div>
+          <table class="rt">
+            <thead>
+              <tr>
+                <th class="th-tag" style="background:${cor};">Tag / Problema</th>
+                ${thMeses}
+                <th class="th-mes" style="background:${cor};">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${linhas}
+              <tr>
+                <td class="td-tag footer">Total</td>
+                ${totCells}
+                <td class="td-total footer">${totalGeral}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      // ── 4) HTML do relatório ──
+      const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório AT — ${periodo}</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px;
+    color: #1a1a1a;
+    background: #fff;
+    padding: 28px 36px;
+    line-height: 1.4;
+  }
+
+  /* ── Cabeçalho ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid #1e3a5f;
+    padding-bottom: 12px;
+    margin-bottom: 22px;
+  }
+  .header h1 { font-size: 20px; color: #1e3a5f; font-weight: 700; margin-bottom: 3px; }
+  .header .sub { font-size: 11px; color: #666; }
+  .header .badge {
+    background: #1e3a5f;
+    color: #fff;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* ── Gráficos lado a lado ── */
+  .graficos-row {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 30px;
+    align-items: stretch;
+  }
+  .grafico-card {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid #dde3ef;
+    border-radius: 8px;
+    padding: 14px 16px;
+    background: #fafbfd;
+  }
+  .grafico-card .gc-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1e3a5f;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #dde3ef;
+  }
+  .grafico-card img {
+    width: 100%;
+    display: block;
+    border-radius: 4px;
+  }
+
+  /* ── Seções de tabela ── */
+  .rs { margin-bottom: 26px; page-break-inside: avoid; }
+  .rs-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1a1a1a;
+    border-left: 4px solid #999;
+    padding-left: 10px;
+    margin-bottom: 10px;
+    line-height: 1.3;
+  }
+  .rs-empty { color: #888; font-size: 11px; padding-left: 14px; }
+
+  /* ── Tabela pivot ── */
+  .rt {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    border: 1px solid #d1d9e6;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .rt thead tr { border-bottom: 2px solid rgba(0,0,0,.2); }
+  .th-tag {
+    text-align: left;
+    padding: 7px 12px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 180px;
+  }
+  .th-mes {
+    text-align: center;
+    padding: 7px 14px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 72px;
+    white-space: nowrap;
+  }
+  .td-tag {
+    padding: 6px 12px;
+    border-bottom: 1px solid #e8ecf4;
+    color: #2d3748;
+  }
+  .td-num {
+    text-align: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid #e8ecf4;
+    font-weight: 600;
+    color: #2d3748;
+  }
+  .td-total {
+    text-align: center;
+    padding: 6px 14px;
+    border-bottom: 1px solid #e8ecf4;
+    font-weight: 800;
+    font-size: 13px;
+  }
+  .par { background: #f7f9fc; }
+  .zero { color: #bbb; font-weight: 400; }
+  .footer {
+    background: #eef2fb !important;
+    font-weight: 700 !important;
+    color: #1e3a5f !important;
+    border-top: 2px solid #c9d4eb;
+  }
+
+  /* ── Print ── */
+  @media print {
+    @page { margin: 12mm 14mm; size: A4 landscape; }
+    body { padding: 0; font-size: 11px; }
+    .no-print { display: none !important; }
+    .rt { font-size: 11px; }
+    .graficos-row { break-inside: avoid; }
+    .rs { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Relatório — Gráfico AT</h1>
+    <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')}</div>
+  </div>
+  <div class="badge">Período: ${periodo}</div>
+</div>
+
+<div class="graficos-row">
+  <div class="grafico-card">
+    <div class="gc-title">Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)</div>
+    ${img1 ? `<img src="${img1}" alt="Gráfico 1">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
+  </div>
+  <div class="grafico-card">
+    <div class="gc-title">Gráfico 2 — Picos de Atendimento por Mês</div>
+    ${img2 ? `<img src="${img2}" alt="Gráfico 2">` : '<p style="color:#aaa;font-size:11px;">Gráfico não disponível.</p>'}
+  </div>
+</div>
+
+${pivotHtml('OS aberta', '#1d6a2f', data.qualidade)}
+${pivotHtml('Atendimento Rápido', '#7c2d12', data.rapido)}
+${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
+
+<div class="no-print" style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
+  <button onclick="window.print()"
+    style="padding:9px 22px;background:#1e3a5f;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;">
+    &#128438; Imprimir / Salvar PDF
+  </button>
+</div>
+
+</body>
+</html>`;
+
+      // ── 5) Abre janela de impressão ──
+      const win = window.open('', '_blank', 'width=1150,height=780');
+      if (!win) { alert('Permita pop-ups para gerar o relatório.'); return; }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+
+    } catch (err) {
+      alert('Erro ao gerar relatório: ' + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Relatório';
+      }
+    }
+  }
+
   // ── API pública chamada pelo listener do menu lateral ────────────────────
   window._iniciarGrafAtPagina = function () {
     if (!_pgInicializado) {
@@ -9398,6 +9786,9 @@ if (atBackToFormBtn) {
 
       const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
       if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg1(); _carregarPg2(); });
+
+      const relatorioBtn = document.getElementById('atGrafPgRelatorioBtn');
+      if (relatorioBtn) relatorioBtn.addEventListener('click', _gerarRelatorioGrafAt);
     }
     _carregarPg1();
     _carregarPg2();
@@ -26204,7 +26595,7 @@ async function abrirModalCotadoEscolhaItem(itemId) {
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
           <div><strong>ID de referência:</strong> ${escapeHtml(String(item.id || '-'))}</div>
           <div><strong>Grupo:</strong> ${escapeHtml(grupoModal)}</div>
-          <div><strong>Objetivo da Compra:</strong> ${linkifyText(objetivoCompra)}</div>
+          <div><strong>Objetivo da Compra/Observações:</strong> ${linkifyText(objetivoCompra)}</div>
           <div><strong>Link:</strong> ${linksDetalhesItemHtml}</div>
           ${anexosItemHtml}
           ${itensGrupoHtml}
@@ -26734,6 +27125,126 @@ function fecharModalCotacaoKanban() {
   window.cotacaoKanbanDetalhesContexto = null;
 }
 
+// Comentário: abre janela de impressão do Pedido de Compra com base nos dados da cotação atual
+function abrirPedidoCompraCotacaoKanban() {
+  const grupo = window.cotacaoKanbanGrupoRequisicao || '-';
+  const item = window.cotacaoKanbanItem || {};
+  const itemId = window.cotacaoKanbanItemId || '-';
+  const itensGrupo = Array.isArray(window.cotacaoKanbanItensGrupo) ? window.cotacaoKanbanItensGrupo : [];
+  const cotacoes = Array.isArray(window.cotacaoKanbanCotacoes) ? window.cotacaoKanbanCotacoes : [];
+  const agora = new Date();
+  const dataHora = agora.toLocaleDateString('pt-BR') + ' às ' + agora.toLocaleTimeString('pt-BR');
+  const userNome = (document.getElementById('userNameDisplay')?.textContent || '').trim() || '';
+
+  const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Determina fornecedor vencedor (menor valor BRL)
+  const cotacoesBrl = cotacoes.filter(c => String(c.moeda || 'BRL').toUpperCase() !== 'USD');
+  const fornecedorVencedor = cotacoesBrl.length > 0
+    ? cotacoesBrl.reduce((a, b) => Number(a.valor_cotado || 0) <= Number(b.valor_cotado || 0) ? a : b)
+    : cotacoes[0] || null;
+
+  // Monta linhas de itens do grupo
+  const itensHtml = itensGrupo.length > 0
+    ? itensGrupo.map((it, idx) => {
+        const qtd = Number(it.quantidade || 1);
+        const codigo = String(it.produto_codigo || '-');
+        const descricao = String(it.produto_descricao || it.descricao || '-');
+        return `<tr>
+          <td style="padding:8px 10px;border:1px solid #d1d5db;text-align:center;">${idx + 1}</td>
+          <td style="padding:8px 10px;border:1px solid #d1d5db;font-family:monospace;font-size:12px;">${codigo}</td>
+          <td style="padding:8px 10px;border:1px solid #d1d5db;">${descricao}</td>
+          <td style="padding:8px 10px;border:1px solid #d1d5db;text-align:center;">${qtd}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="4" style="padding:16px;text-align:center;color:#9ca3af;border:1px solid #d1d5db;">Sem itens</td></tr>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF - ID ${itemId}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #111; padding: 30px; max-width: 900px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1e3a5f; padding-bottom: 16px; margin-bottom: 24px; gap: 20px; }
+    .header-logo { flex-shrink: 0; }
+    .header-logo img { height: 60px; width: auto; display: block; }
+    .header-empresa { flex: 1; }
+    .header-empresa h1 { font-size: 16px; font-weight: 700; color: #1e3a5f; margin-bottom: 4px; }
+    .header-empresa p { font-size: 11px; color: #555; line-height: 1.6; }
+    .header-titulo { text-align: right; flex-shrink: 0; }
+    .header-titulo h2 { font-size: 20px; font-weight: 700; color: #1e3a5f; }
+    .header-titulo p { font-size: 11px; color: #888; margin-top: 4px; }
+    .section-title { font-size: 13px; font-weight: 700; color: #1e3a5f; background: #f0f4ff; padding: 8px 12px; margin: 20px 0 10px; border-left: 4px solid #1e3a5f; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    th { background: #1e3a5f; color: #fff; padding: 8px 10px; font-size: 12px; text-align: left; }
+    td { font-size: 12px; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .info-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; font-size: 12px; line-height: 1.8; }
+    .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #d1d5db; font-size: 11px; color: #888; text-align: center; }
+    @media print {
+      body { padding: 15px; }
+      @page { margin: 15mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-logo">
+      <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png" alt="Logo" />
+    </div>
+    <div class="header-empresa">
+      <h1>FROMTHERM SISTEMAS TERMICOS LTDA</h1>
+      <p>
+        CNPJ: 12.659.566/0001-09 &nbsp;|&nbsp; Inscrição Estadual: 256.225.389<br>
+        RUA EDGARD HOFFMANN, 699 - LOTE CICOB, BEIRA RIO<br>
+        Biguaçu - SC - CEP: 88164-275<br>
+        Telefone: (48) 99652-4210
+      </p>
+    </div>
+    <div class="header-titulo">
+      <h2>Pedido de Compra</h2>
+      <p>ID de referência: <strong>${itemId}</strong></p>
+    </div>
+  </div>
+
+  ${fornecedorVencedor ? `
+  <div class="section-title">Fornecedor Selecionado (Menor Valor)</div>
+  <div class="info-box">
+    <strong>${fornecedorVencedor.fornecedor_nome || '-'}</strong>
+    ${fornecedorVencedor.cnpj ? `<br>CNPJ: ${fornecedorVencedor.cnpj}` : ''}
+    ${fornecedorVencedor.observacao ? `<br>Obs: ${fornecedorVencedor.observacao}` : ''}
+  </div>
+  ` : ''}
+
+  <div class="section-title">Itens do Pedido</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40px;">Item</th>
+        <th style="width:160px;">Código</th>
+        <th>Descrição</th>
+        <th style="width:70px;text-align:center;">Qtd</th>
+      </tr>
+    </thead>
+    <tbody>${itensHtml}</tbody>
+  </table>
+
+  <div class="footer">
+    Gerado em ${dataHora}${userNome ? ' por ' + userNome : ''} &nbsp;|&nbsp; ID de referência: ${itemId}
+  </div>
+</body>
+</html>`;
+
+  const janela = window.open('', '_blank', 'width=960,height=700,scrollbars=yes');
+  if (!janela) { alert('Permita pop-ups para abrir o PDF.'); return; }
+  janela.document.write(html);
+  janela.document.close();
+  janela.focus();
+  setTimeout(() => janela.print(), 600);
+}
+
 function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
   const container = document.getElementById('detalhesItemCotacaoKanbanContainer');
   if (!container) return;
@@ -26779,6 +27290,14 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
             </span>
             <button
               type="button"
+              onclick="abrirPedidoCompraCotacaoKanban()"
+              title="Gerar PDF"
+              style="background:#059669;color:#ffffff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-file-pdf"></i>
+              PDF
+            </button>
+            <button
+              type="button"
               onclick="iniciarEdicaoDetalhesCotacaoKanban()"
               style="background:#2563eb;color:#ffffff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
               <i class="fa-solid fa-pen"></i>
@@ -26789,7 +27308,7 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
         <div style="display:grid;gap:10px;font-size:12px;color:#1f2937;">
           <div><strong>ID de referência:</strong> ${escapeHtml(String(itemId))}</div>
           <div><strong>Grupo:</strong> ${escapeHtml(String(grupoModal || '-'))}</div>
-          <div><strong>Objetivo da Compra:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
+          <div><strong>Objetivo da Compra/Observações:</strong> ${linkifyText(item.objetivo_compra || '-')}</div>
           <div><strong>Link:</strong> ${linksCotacaoHtml}</div>
           ${anexosItemHtml}
           ${itensGrupoHtml}
@@ -26849,7 +27368,7 @@ function renderizarDetalhesItemCotacaoKanban(contexto = {}) {
         <div><strong>ID de referência:</strong> ${escapeHtml(String(itemId))}</div>
         <div><strong>Grupo:</strong> ${escapeHtml(String(grupoModal || '-'))}</div>
         <label style="display:grid;gap:6px;">
-          <span style="font-weight:600;">Objetivo da Compra</span>
+          <span style="font-weight:600;">Objetivo da Compra/Observações</span>
           <textarea id="cotacaoKanbanDetalhesObjetivo" style="padding:8px;border:1px solid #d1d5db;border-radius:6px;min-height:72px;resize:vertical;">${escapeHtml(objetivoAtual)}</textarea>
         </label>
         <label style="display:grid;gap:6px;">
@@ -28860,6 +29379,7 @@ window.retificarCotadoEscolha = retificarCotadoEscolha;
 window.cancelarCotadoEscolha = cancelarCotadoEscolha;
 window.abrirModalCotacaoKanban = abrirModalCotacaoKanban;
 window.fecharModalCotacaoKanban = fecharModalCotacaoKanban;
+window.abrirPedidoCompraCotacaoKanban = abrirPedidoCompraCotacaoKanban;
 window.iniciarEdicaoDetalhesCotacaoKanban = iniciarEdicaoDetalhesCotacaoKanban;
 window.cancelarEdicaoDetalhesCotacaoKanban = cancelarEdicaoDetalhesCotacaoKanban;
 window.salvarDetalhesCotacaoKanban = salvarDetalhesCotacaoKanban;

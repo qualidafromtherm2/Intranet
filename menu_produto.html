@@ -926,7 +926,7 @@
                   </div>
 
                   <label style="display:block;font-size:11px;color:#e5e7eb;font-weight:700;">
-                    Objetivo da Compra
+                    Objetivo da Compra/Observações
                   </label>
                   <textarea id="carrinhoObjetivoCompraGlobal"
                             placeholder="Descreva o objetivo/finalidade da compra..."
@@ -1526,7 +1526,7 @@
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-bullseye" style="color:#3b82f6;margin-right:4px;"></i>
-                      Objetivo da Compra
+                      Objetivo da Compra/Observações
                     </label>
                     <textarea 
                       id="catalogoObservacaoGlobal"
@@ -2607,7 +2607,10 @@
                   </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tag do problema</label>
-                    <input type="text" id="atEmTag" class="at-em-input" placeholder="Tag">
+                    <div class="at-combobox-wrapper">
+                      <input type="text" id="atEmTag" class="at-em-input" placeholder="Tag" autocomplete="off">
+                      <div id="atEmTagDropdown" class="at-combobox-dropdown"></div>
+                    </div>
                   </div>
                   <div class="at-em-wrap" style="grid-column:1/-1;">
                     <label class="at-em-lbl">Plataforma do atendimento</label>
@@ -2633,7 +2636,10 @@
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tag</label>
-                    <input type="text" id="atEmFechTag" class="at-em-input" placeholder="Tag">
+                    <div class="at-combobox-wrapper">
+                      <input type="text" id="atEmFechTag" class="at-em-input" placeholder="Tag" autocomplete="off">
+                      <div id="atEmFechTagDropdown" class="at-combobox-dropdown"></div>
+                    </div>
                   </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Plataforma</label>
@@ -3211,13 +3217,18 @@
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
                   <div style="display:flex;gap:6px;">
-                    <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">6 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="3" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">3 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">6 meses</button>
                     <button class="at-graf-periodo-btn-pg" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
                     <button class="at-graf-periodo-btn-pg" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
                   </div>
                   <button id="atGrafPgRefreshBtn" type="button" title="Atualizar"
                     style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
                     <i class="fa-solid fa-rotate"></i>
+                  </button>
+                  <button id="atGrafPgRelatorioBtn" type="button" title="Gerar relatório PDF"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #f59e0b;background:rgba(245,158,11,.15);color:#fbbf24;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-file-pdf"></i> Relatório
                   </button>
                 </div>
               </div>
@@ -7654,10 +7665,10 @@ function attachDropZone(ul) {
 <style>
 /* ===== Chat (escopado ao #chatPane) ===== */
 #chatPane #chatLayout{display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 220px);min-height:420px;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,24,39,.6)}
-#chatPane .chat-users{background:rgba(31,41,55,.75);display:flex;flex-direction:column}
+#chatPane .chat-users{background:rgba(31,41,55,.75);display:flex;flex-direction:column;overflow:hidden;min-height:0}
 #chatPane .chat-users-header{padding:10px;border-bottom:1px solid rgba(255,255,255,.08)}
 #chatPane .chat-users-header input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111827;color:#e8ecff}
-#chatPane .chat-user-list{list-style:none;margin:0;padding:0;overflow:auto}
+#chatPane .chat-user-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1;min-height:0}
 #chatPane .chat-user-list li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
 #chatPane .chat-user-list li:hover{background:rgba(255,255,255,.06)}
 #chatPane .chat-user-list li.active{background:rgba(59,130,246,.18)}
