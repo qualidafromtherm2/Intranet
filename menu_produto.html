@@ -2156,6 +2156,9 @@
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar para AT</span>
                   </button>
+                  <button id="atGraficosBtn" class="content-button" type="button" title="Ver gráficos" style="display:none;align-items:center;gap:6px;background:linear-gradient(135deg,#4f46e5 0%,#3730a3 100%);color:white;padding:8px 12px;">
+                    <i class="fa-solid fa-chart-bar"></i>
+                  </button>
                 </div>
               </div>
 
@@ -2265,23 +2268,46 @@
                   </div>
                 </div>
 
-                <div class="form-field at-campo-rapidoonly" style="display:none;">
-                  <label for="atPlataformaAtendimento">Plataforma do atendimento</label>
-                  <div class="at-combobox-wrapper">
-                    <input id="atPlataformaAtendimento" type="text" placeholder="Ex: WhatsApp, Telefone, E-mail" autocomplete="off" style="width:100%;" />
-                    <div id="atPlataformaAtendimentoDropdown" class="at-combobox-dropdown"></div>
+                <!-- Motivo e Ação — exclusivos do Atendimento rápido -->
+                <div class="form-field at-campo-rapidoonly" style="display:none;grid-column:1/-1;">
+                  <label for="atRapidoMotivo">Motivo da solicitação</label>
+                  <textarea id="atRapidoMotivo" rows="3" placeholder="Descreva o motivo da solicitação..." style="width:100%;"></textarea>
+                </div>
+
+                <div class="form-field at-campo-rapidoonly" style="display:none;grid-column:1/-1;">
+                  <label for="atRapidoAcao">Ação tomada</label>
+                  <textarea id="atRapidoAcao" rows="3" placeholder="Descreva a ação tomada..." style="width:100%;"></textarea>
+                </div>
+
+                <!-- Plataforma visível para todos os modos — botões ícone -->
+                <div class="form-field" style="grid-column:1/-1;">
+                  <label>Plataforma do atendimento</label>
+                  <div style="display:flex;gap:10px;margin-top:6px;" id="atFormPlataformaGroup">
+                    <button type="button" class="at-form-plat-btn" data-plat="Telefone"
+                      style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                      <i class="fa-solid fa-phone" style="font-size:18px;"></i>Telefone
+                    </button>
+                    <button type="button" class="at-form-plat-btn" data-plat="WhatsApp"
+                      style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                      <i class="fa-brands fa-whatsapp" style="font-size:18px;"></i>WhatsApp
+                    </button>
+                    <button type="button" class="at-form-plat-btn" data-plat="DataCrazy"
+                      style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                      <i class="fa-solid fa-database" style="font-size:18px;"></i>DataCrazy
+                    </button>
                   </div>
+                  <input type="hidden" id="atPlataformaAtendimento">
                 </div>
               </div>
 
-              <div style="grid-column:1/-1;margin-top:12px;">
+              <div class="at-campo-fullonly" style="grid-column:1/-1;margin-top:12px;">
                 <div class="form-field">
                   <label for="atAtendimentoInicial">Atendimento inicial realizado com o cliente:</label>
                   <textarea id="atAtendimentoInicial" rows="2" placeholder="Descreva o atendimento inicial com o cliente" style="width:100%;"></textarea>
                 </div>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+              <div class="at-campo-fullonly" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
                 <div class="form-field">
                   <label for="atMotivoSolicitacao">Motivo da Solicitação</label>
                   <textarea id="atMotivoSolicitacao" rows="3" placeholder="Descreva o motivo da solicitação" style="width:100%;"></textarea>
@@ -2438,7 +2464,13 @@
                 <i class="fa-solid fa-pen-to-square" style="color:#0ea5e9;"></i>
                 <span id="atEditModalTitle">Editar Atendimento</span>
               </h3>
-              <button id="atEditModalClose" class="modal-close-btn" type="button">×</button>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <button id="atMencaoOpenBtn" type="button" title="Registrar menção"
+                  style="background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.4);color:#a855f7;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                  <i class="fa-solid fa-at"></i>
+                </button>
+                <button id="atEditModalClose" class="modal-close-btn" type="button">×</button>
+              </div>
             </div>
             <div style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;">
               <!-- Seção AT -->
@@ -2574,6 +2606,113 @@
 
         <!-- Modal de visualização de anexos de AT -->
         <!-- Lightbox AT -->
+
+        <!-- Modal Gráficos AT -->
+        <div id="atGraficosModal" class="modal-overlay" style="display:none;z-index:10060;">
+          <div class="modal-container" style="max-width:900px;width:97%;max-height:92vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-chart-bar" style="color:#818cf8;"></i>
+                Gráficos — Atendimentos AT
+              </h3>
+              <button id="atGraficosModalClose" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div style="padding:20px 20px 24px;">
+
+              <!-- Filtros do gráfico -->
+              <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;">
+                <div>
+                  <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.03em;text-transform:uppercase;margin-bottom:4px;">Período</label>
+                  <div style="display:flex;gap:6px;">
+                    <button class="at-graf-periodo-btn" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">6 meses</button>
+                    <button class="at-graf-periodo-btn" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
+                    <button class="at-graf-periodo-btn" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+                  </div>
+                </div>
+                <div style="margin-left:auto;">
+                  <button id="atGrafRefreshBtn" type="button" title="Atualizar" style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Gráfico 1 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
+                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-map-location-dot"></i>
+                  Gráfico 1 — Atendimentos por Estado / Mês
+                </div>
+                <div id="atGraf1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:340px;">
+                  <canvas id="atGraf1Canvas"></canvas>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Menção AT -->
+        <div id="atMencaoModal" class="modal-overlay" style="display:none;z-index:10055;">
+          <div class="modal-container" style="max-width:520px;width:96%;max-height:90vh;overflow-y:auto;">
+            <div class="modal-header">
+              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-at" style="color:#a855f7;"></i>
+                <span id="atMencaoModalTitle">Registrar Menção</span>
+              </h3>
+              <button id="atMencaoModalClose" class="modal-close-btn" type="button">×</button>
+            </div>
+            <div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;">
+              <div class="at-em-wrap">
+                <label class="at-em-lbl">Telefone</label>
+                <input type="text" id="atMencaoTelefone" class="at-em-input" placeholder="(00) 00000-0000">
+              </div>
+              <div class="at-em-wrap">
+                <label class="at-em-lbl">Nome Revenda/Cliente</label>
+                <input type="text" id="atMencaoNome" class="at-em-input" placeholder="Nome">
+              </div>
+              <div class="at-em-wrap">
+                <label class="at-em-lbl">Plataforma do atendimento</label>
+                <div style="display:flex;gap:10px;margin-top:6px;" id="atMencaoPlataformaGroup">
+                  <button type="button" class="at-mencao-plat-btn" data-plat="Telefone"
+                    style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                    <i class="fa-solid fa-phone" style="font-size:18px;"></i>Telefone
+                  </button>
+                  <button type="button" class="at-mencao-plat-btn" data-plat="WhatsApp"
+                    style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                    <i class="fa-brands fa-whatsapp" style="font-size:18px;"></i>WhatsApp
+                  </button>
+                  <button type="button" class="at-mencao-plat-btn" data-plat="DataCrazy"
+                    style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
+                    <i class="fa-solid fa-database" style="font-size:18px;"></i>DataCrazy
+                  </button>
+                </div>
+                <input type="hidden" id="atMencaoPlataforma">
+              </div>
+              <div class="at-em-wrap">
+                <label class="at-em-lbl">Motivo da solicitação</label>
+                <textarea id="atMencaoMotivo" class="at-em-input" rows="3"
+                  style="width:100%;box-sizing:border-box;" placeholder="Descreva o motivo..."></textarea>
+              </div>
+              <div class="at-em-wrap">
+                <label class="at-em-lbl">Ação tomada</label>
+                <textarea id="atMencaoAcao" class="at-em-input" rows="3"
+                  style="width:100%;box-sizing:border-box;" placeholder="Descreva a ação tomada..."></textarea>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid #374151;">
+              <span id="atMencaoSavedMsg" style="font-size:12px;color:#4ade80;display:none;">Salvo!</span>
+              <span id="atMencaoErrMsg" style="font-size:12px;color:#f87171;display:none;max-width:280px;text-align:right;"></span>
+              <button id="atMencaoCancelBtn" type="button"
+                style="padding:7px 16px;border-radius:8px;border:1px solid #374151;background:transparent;color:var(--content-title-color);cursor:pointer;">Cancelar</button>
+              <button id="atMencaoSaveBtn" type="button"
+                style="padding:7px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,#7e22ce,#a855f7);color:#fff;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-at"></i> Registrar
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div id="atLightbox">
           <div class="at-lb-bar">
             <span class="at-lb-name" id="atLbName"></span>

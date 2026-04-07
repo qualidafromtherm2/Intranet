@@ -6117,17 +6117,75 @@ function inicializarComboboxAt(inputEl, dropdownEl, campo) {
   });
 }
 
-// Inicializa combobox para ambos os campos
+// Inicializa combobox para campos que ainda usam combobox
 inicializarComboboxAt(
   atTagProblemaInput,
   document.getElementById('atTagProblemaDropdown'),
   'tag_problema'
 );
-inicializarComboboxAt(
-  atPlataformaInput,
-  document.getElementById('atPlataformaAtendimentoDropdown'),
-  'plataforma_atendimento'
-);
+// Plataforma usa botões — não usa combobox
+
+// ---- Botões de plataforma no formulário AT ----
+(function () {
+  function _setPlatAtivo(plat) {
+    document.querySelectorAll('.at-form-plat-btn').forEach(b => {
+      const ativo = b.dataset.plat === plat;
+      b.style.borderColor = ativo ? '#0ea5e9' : '#374151';
+      b.style.background  = ativo ? 'rgba(14,165,233,.18)' : 'rgba(255,255,255,.04)';
+      b.style.color       = ativo ? '#7dd3fc' : '#9ca3af';
+    });
+    const h = document.getElementById('atPlataformaAtendimento');
+    if (h) h.value = plat || '';
+  }
+  document.querySelectorAll('.at-form-plat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const h = document.getElementById('atPlataformaAtendimento');
+      const atual = h ? h.value : '';
+      _setPlatAtivo(atual === btn.dataset.plat ? '' : btn.dataset.plat);
+    });
+  });
+  window._atFormResetPlataforma = () => _setPlatAtivo('');
+})();
+
+// ---- DDD → Estado automático ----
+const _DDD_ESTADO = {
+  '11':'SP','12':'SP','13':'SP','14':'SP','15':'SP','16':'SP','17':'SP','18':'SP','19':'SP',
+  '21':'RJ','22':'RJ','24':'RJ',
+  '27':'ES','28':'ES',
+  '31':'MG','32':'MG','33':'MG','34':'MG','35':'MG','37':'MG','38':'MG',
+  '41':'PR','42':'PR','43':'PR','44':'PR','45':'PR','46':'PR',
+  '47':'SC','48':'SC','49':'SC',
+  '51':'RS','53':'RS','54':'RS','55':'RS',
+  '61':'DF',
+  '62':'GO','64':'GO',
+  '63':'TO',
+  '65':'MT','66':'MT',
+  '67':'MS',
+  '68':'AC',
+  '69':'RO',
+  '71':'BA','73':'BA','74':'BA','75':'BA','77':'BA',
+  '79':'SE',
+  '81':'PE','87':'PE',
+  '82':'AL',
+  '83':'PB',
+  '84':'RN',
+  '85':'CE','88':'CE',
+  '86':'PI','89':'PI',
+  '91':'PA','93':'PA','94':'PA',
+  '92':'AM','97':'AM',
+  '95':'RR',
+  '96':'AP',
+  '98':'MA','99':'MA',
+};
+if (atTelefoneInput) {
+  atTelefoneInput.addEventListener('input', () => {
+    const digits = atTelefoneInput.value.replace(/\D/g, '');
+    if (digits.length >= 2) {
+      const uf = _DDD_ESTADO[digits.slice(0, 2)];
+      if (uf && atEstadoInput && !atEstadoInput.value) atEstadoInput.value = uf;
+    }
+  });
+}
 // ---------------------------------------------------
 const atSerieBuscaInput = document.getElementById('atSerieBusca');
 const atSerieBuscaBtn = document.getElementById('atSerieBuscaBtn');
@@ -8344,6 +8402,27 @@ if (atEnviarBtn) {
         await _atFazerUploadAnexos(idAtSalvo);
       }
 
+      // Se for Atendimento rápido, registra também em sac.mencoes
+      if (payload.tipo === 'Atendimento rápido' && idAtSalvo) {
+        try {
+          await fetch('/api/sac/at/mencoes', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id_at: idAtSalvo,
+              telefone: payload.numero_telefone || null,
+              nome_revenda_cliente: payload.nome_revenda_cliente || null,
+              plataforma: payload.plataforma_atendimento || null,
+              motivo_solicitacao: document.getElementById('atRapidoMotivo')?.value?.trim() || null,
+              acao_tomada: document.getElementById('atRapidoAcao')?.value?.trim() || null,
+            }),
+          });
+        } catch (mErr) {
+          console.warn('[SAC/AT] falha ao registrar menção automática:', mErr);
+        }
+      }
+
       setAtEnvioStatus(`Atendimento salvo com sucesso (ID ${idAtSalvo || 'n/a'}).`, false);
 
       if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
@@ -8363,6 +8442,9 @@ if (atEnviarBtn) {
       if (atModeloInput) atModeloInput.value = '';
       if (atTagProblemaInput) atTagProblemaInput.value = '';
       if (atPlataformaInput) atPlataformaInput.value = '';
+      if (window._atFormResetPlataforma) window._atFormResetPlataforma();
+      const rapidoMotivoReset = document.getElementById('atRapidoMotivo'); if (rapidoMotivoReset) rapidoMotivoReset.value = '';
+      const rapidoAcaoReset   = document.getElementById('atRapidoAcao');   if (rapidoAcaoReset)   rapidoAcaoReset.value   = '';
       const hist = document.getElementById('atDescricaoHistorico');
       if (hist) hist.innerHTML = '';
       atIdExistente = null;
@@ -8585,6 +8667,165 @@ if (atBackToFormBtn) {
   });
 }
 
+// ── Gráficos AT ──────────────────────────────────────────────────────────────
+(function () {
+  const _grafModal      = document.getElementById('atGraficosModal');
+  const _grafCloseBtn   = document.getElementById('atGraficosModalClose');
+  const _grafRefreshBtn = document.getElementById('atGrafRefreshBtn');
+  const _grafOpenBtn    = document.getElementById('atGraficosBtn');
+  const _graf1Status    = document.getElementById('atGraf1Status');
+
+  let _graf1Instance    = null;
+  let _grafPeriodo      = 6; // meses; 0 = tudo
+
+  // Mostra/oculta botão junto com atBackToFormBtn
+  const _origAbrirAtend = abrirTelaAtAtendimentos;
+  abrirTelaAtAtendimentos = function () {
+    _origAbrirAtend.apply(this, arguments);
+    if (_grafOpenBtn) _grafOpenBtn.style.display = 'inline-flex';
+  };
+  const _origAbrirForm = abrirTelaAtFormulario;
+  abrirTelaAtFormulario = function () {
+    _origAbrirForm.apply(this, arguments);
+    if (_grafOpenBtn) _grafOpenBtn.style.display = 'none';
+  };
+
+  // Cores para as barras por estado
+  const CORES_PALETA = [
+    '#818cf8','#34d399','#fb923c','#f472b6','#38bdf8','#a3e635',
+    '#facc15','#c084fc','#f87171','#2dd4bf','#60a5fa','#e879f9',
+    '#86efac','#fcd34d','#93c5fd','#fca5a5','#6ee7b7','#fbcfe8',
+  ];
+
+  function _mesesRange(meses) {
+    if (!meses) return null;
+    const hoje = new Date();
+    const arr = [];
+    for (let i = meses - 1; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return arr;
+  }
+
+  function _labelMes(yyyymm) {
+    const [y, m] = yyyymm.split('-');
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return `${nomes[parseInt(m, 10) - 1]}/${y.slice(2)}`;
+  }
+
+  async function _carregarGraf1() {
+    if (!_graf1Status) return;
+    _graf1Status.style.display = 'block';
+    _graf1Status.textContent   = 'Carregando...';
+
+    try {
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=Qualidade', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar dados.');
+
+      let linhas = data.rows || [];
+
+      // Filtra por período
+      if (_grafPeriodo > 0) {
+        const limite = _mesesRange(_grafPeriodo)[0];
+        linhas = linhas.filter(r => r.mes >= limite);
+      }
+
+      // Monta eixo X (meses)
+      const mesesSet = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels   = mesesSet.map(_labelMes);
+
+      // Monta datasets por estado
+      const estadosSet = [...new Set(linhas.map(r => r.estado))].sort();
+      const datasets = estadosSet.map((est, idx) => {
+        const cor = CORES_PALETA[idx % CORES_PALETA.length];
+        return {
+          label: est,
+          data: mesesSet.map(mes => {
+            const row = linhas.find(r => r.estado === est && r.mes === mes);
+            return row ? row.total : 0;
+          }),
+          backgroundColor: cor + 'cc',
+          borderColor: cor,
+          borderWidth: 1,
+          borderRadius: 4,
+        };
+      });
+
+      // Destrói instância anterior se existir
+      if (_graf1Instance) { _graf1Instance.destroy(); _graf1Instance = null; }
+
+      const canvas = document.getElementById('atGraf1Canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      _graf1Instance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} atendimento(s)`,
+              },
+            },
+          },
+          scales: {
+            x: {
+              stacked: false,
+              ticks: { color: '#94a3b8', font: { size: 11 } },
+              grid:   { color: 'rgba(255,255,255,.05)' },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#94a3b8', font: { size: 11 }, stepSize: 1 },
+              grid: { color: 'rgba(255,255,255,.07)' },
+            },
+          },
+        },
+      });
+
+      _graf1Status.style.display = 'none';
+    } catch (err) {
+      _graf1Status.textContent   = err.message || 'Erro ao carregar.';
+      _graf1Status.style.color   = '#f87171';
+    }
+  }
+
+  function _abrirGraficos() {
+    if (_grafModal) _grafModal.style.display = 'flex';
+    _carregarGraf1();
+  }
+
+  function _fecharGraficos() {
+    if (_grafModal) _grafModal.style.display = 'none';
+  }
+
+  // Botões de período
+  document.querySelectorAll('.at-graf-periodo-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _grafPeriodo = parseInt(btn.dataset.per, 10);
+      document.querySelectorAll('.at-graf-periodo-btn').forEach(b => {
+        const ativo = b === btn;
+        b.style.borderColor = ativo ? '#4f46e5' : '#374151';
+        b.style.background  = ativo ? 'rgba(79,70,229,.25)' : 'rgba(255,255,255,.04)';
+        b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
+      });
+      _carregarGraf1();
+    });
+  });
+
+  if (_grafOpenBtn)   _grafOpenBtn.addEventListener('click',   _abrirGraficos);
+  if (_grafCloseBtn)  _grafCloseBtn.addEventListener('click',  _fecharGraficos);
+  if (_grafRefreshBtn)_grafRefreshBtn.addEventListener('click', _carregarGraf1);
+  if (_grafModal)     _grafModal.addEventListener('click', e => { if (e.target === _grafModal) _fecharGraficos(); });
+})();
+
 // Listeners modal edição AT
 const _atEditModal      = document.getElementById('atEditModal');
 const _atEditModalClose = document.getElementById('atEditModalClose');
@@ -8606,6 +8847,121 @@ if (_atEmAnexarBtn && _atEmAnexarInput) {
     _atEmRenderChips();
   });
 }
+
+// ── Modal Menção AT ──────────────────────────────────────────────────────────
+(function () {
+  const _mencaoModal      = document.getElementById('atMencaoModal');
+  const _mencaoCloseBtn   = document.getElementById('atMencaoModalClose');
+  const _mencaoCancelBtn  = document.getElementById('atMencaoCancelBtn');
+  const _mencaoSaveBtn    = document.getElementById('atMencaoSaveBtn');
+  const _mencaoOpenBtn    = document.getElementById('atMencaoOpenBtn');
+
+  function _fecharMencaoModal() {
+    if (_mencaoModal) _mencaoModal.style.display = 'none';
+  }
+
+  function _abrirMencaoModal() {
+    const id = _atEditModalCurrentId;
+    if (!id) return;
+    const row = _atAllRows.find(r => String(r.id) === String(id));
+
+    // pré-preenche telefone e nome do AT corrente
+    const tel  = document.getElementById('atMencaoTelefone');
+    const nome = document.getElementById('atMencaoNome');
+    if (tel)  tel.value  = (row && row.telefone)              || document.getElementById('atEmTelefone')?.value || '';
+    if (nome) nome.value = (row && row.nome_revenda_cliente)  || document.getElementById('atEmNome')?.value    || '';
+
+    // reset plataforma
+    const platHidden = document.getElementById('atMencaoPlataforma');
+    if (platHidden) platHidden.value = '';
+    document.querySelectorAll('.at-mencao-plat-btn').forEach(b => {
+      b.style.borderColor = '#374151';
+      b.style.background  = 'rgba(255,255,255,.04)';
+      b.style.color       = '#9ca3af';
+    });
+
+    // reset campos livres
+    ['atMencaoMotivo','atMencaoAcao'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    const saved = document.getElementById('atMencaoSavedMsg');
+    const err   = document.getElementById('atMencaoErrMsg');
+    if (saved) saved.style.display = 'none';
+    if (err)   err.style.display   = 'none';
+    if (_mencaoSaveBtn) { _mencaoSaveBtn.disabled = false; _mencaoSaveBtn.innerHTML = '<i class="fa-solid fa-at"></i> Registrar'; }
+
+    if (_mencaoModal) _mencaoModal.style.display = 'flex';
+  }
+
+  // Seleção de plataforma (toggle)
+  document.querySelectorAll('.at-mencao-plat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const plat     = btn.dataset.plat;
+      const platHid  = document.getElementById('atMencaoPlataforma');
+      const active   = platHid && platHid.value === plat;
+      document.querySelectorAll('.at-mencao-plat-btn').forEach(b => {
+        b.style.borderColor = '#374151';
+        b.style.background  = 'rgba(255,255,255,.04)';
+        b.style.color       = '#9ca3af';
+      });
+      if (!active) {
+        btn.style.borderColor = '#a855f7';
+        btn.style.background  = 'rgba(168,85,247,.18)';
+        btn.style.color       = '#d8b4fe';
+        if (platHid) platHid.value = plat;
+      } else {
+        if (platHid) platHid.value = '';
+      }
+    });
+  });
+
+  async function _salvarMencao() {
+    const id = _atEditModalCurrentId;
+    if (!id) return;
+
+    const salvo  = document.getElementById('atMencaoSavedMsg');
+    const errEl  = document.getElementById('atMencaoErrMsg');
+    if (salvo) salvo.style.display = 'none';
+    if (errEl) errEl.style.display = 'none';
+
+    const telefone   = document.getElementById('atMencaoTelefone')?.value.trim()  || '';
+    const nome       = document.getElementById('atMencaoNome')?.value.trim()      || '';
+    const plataforma = document.getElementById('atMencaoPlataforma')?.value       || '';
+    const motivo     = document.getElementById('atMencaoMotivo')?.value.trim()    || '';
+    const acao       = document.getElementById('atMencaoAcao')?.value.trim()      || '';
+
+    if (!motivo) {
+      if (errEl) { errEl.textContent = 'Informe o motivo da solicitação.'; errEl.style.display = 'inline'; }
+      return;
+    }
+
+    if (_mencaoSaveBtn) { _mencaoSaveBtn.disabled = true; _mencaoSaveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...'; }
+
+    try {
+      const resp = await fetch('/api/sac/at/mencoes', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_at: id, telefone, nome_revenda_cliente: nome, plataforma, motivo_solicitacao: motivo, acao_tomada: acao }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+      if (salvo) { salvo.style.display = 'inline'; }
+      if (_mencaoSaveBtn) { _mencaoSaveBtn.disabled = false; _mencaoSaveBtn.innerHTML = '<i class="fa-solid fa-at"></i> Registrar'; }
+      setTimeout(_fecharMencaoModal, 900);
+    } catch (e) {
+      if (errEl) { errEl.textContent = e.message || 'Erro ao salvar.'; errEl.style.display = 'inline'; }
+      if (_mencaoSaveBtn) { _mencaoSaveBtn.disabled = false; _mencaoSaveBtn.innerHTML = '<i class="fa-solid fa-at"></i> Registrar'; }
+    }
+  }
+
+  if (_mencaoOpenBtn)  _mencaoOpenBtn.addEventListener('click',  _abrirMencaoModal);
+  if (_mencaoCloseBtn) _mencaoCloseBtn.addEventListener('click', _fecharMencaoModal);
+  if (_mencaoCancelBtn)_mencaoCancelBtn.addEventListener('click',_fecharMencaoModal);
+  if (_mencaoSaveBtn)  _mencaoSaveBtn.addEventListener('click',  _salvarMencao);
+  if (_mencaoModal)    _mencaoModal.addEventListener('click', e => { if (e.target === _mencaoModal) _fecharMencaoModal(); });
+})();
 
 async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly = false, filterByUser = false } = {}) {
   const bodyEl = targetBody || sacTabelaBody;
