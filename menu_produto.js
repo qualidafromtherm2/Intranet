@@ -5822,6 +5822,17 @@ if (sacAtMenuLink) {
   });
 }
 
+const sacAtGraficosMenuLink = document.getElementById('menu-sac-at-graficos');
+if (sacAtGraficosMenuLink) {
+  sacAtGraficosMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    sacAtGraficosMenuLink.classList.add('is-active');
+    showMainTab('sacAtGraficosPane');
+    _iniciarGrafAtPagina();
+  });
+}
+
 // COMPRAS: Configurações de Departamentos e Categorias
 const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
 if (comprasConfigMenuLink) {
@@ -8669,26 +8680,41 @@ if (atBackToFormBtn) {
 
 // ── Gráficos AT ──────────────────────────────────────────────────────────────
 (function () {
-  const _grafModal      = document.getElementById('atGraficosModal');
-  const _grafCloseBtn   = document.getElementById('atGraficosModalClose');
+  const _grafView       = document.getElementById('atGraficosView');
   const _grafRefreshBtn = document.getElementById('atGrafRefreshBtn');
   const _grafOpenBtn    = document.getElementById('atGraficosBtn');
+  const _grafVoltarBtn  = document.getElementById('atGraficosVoltarBtn');
   const _graf1Status    = document.getElementById('atGraf1Status');
+  const _graf2Status    = document.getElementById('atGraf2Status');
 
   let _graf1Instance    = null;
+  let _graf2Instance    = null;
+  let _graf2MesesSet    = [];  // meses do eixo X do gráfico 2
   let _grafPeriodo      = 6; // meses; 0 = tudo
 
-  // Mostra/oculta botão junto com atBackToFormBtn
+  // Mostra/oculta view junto com navegação
   const _origAbrirAtend = abrirTelaAtAtendimentos;
   abrirTelaAtAtendimentos = function () {
     _origAbrirAtend.apply(this, arguments);
-    if (_grafOpenBtn) _grafOpenBtn.style.display = 'inline-flex';
+    if (_grafView) _grafView.style.display = 'none';
   };
   const _origAbrirForm = abrirTelaAtFormulario;
   abrirTelaAtFormulario = function () {
     _origAbrirForm.apply(this, arguments);
-    if (_grafOpenBtn) _grafOpenBtn.style.display = 'none';
+    if (_grafView) _grafView.style.display = 'none';
   };
+
+  function abrirTelaAtGraficos() {
+    if (typeof atFormView !== 'undefined' && atFormView) atFormView.style.display = 'none';
+    if (typeof atAtendimentosView !== 'undefined' && atAtendimentosView) atAtendimentosView.style.display = 'none';
+    if (_grafView) _grafView.style.display = 'block';
+    if (typeof atOpenAtendimentosBtn !== 'undefined' && atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'none';
+    if (typeof atBackToFormBtn !== 'undefined' && atBackToFormBtn) atBackToFormBtn.style.display = 'none';
+    const pane = document.getElementById('sacAtPane');
+    if (pane) pane.classList.remove('at-lista-ativa', 'at-modo-tabela');
+    _carregarGraf1();
+    _carregarGraf2();
+  }
 
   // Cores para as barras por estado
   const CORES_PALETA = [
@@ -8797,13 +8823,275 @@ if (atBackToFormBtn) {
     }
   }
 
-  function _abrirGraficos() {
-    if (_grafModal) _grafModal.style.display = 'flex';
-    _carregarGraf1();
+  async function _carregarGraf2() {
+    if (!_graf2Status) return;
+    _graf2Status.style.display = 'block';
+    _graf2Status.textContent   = 'Carregando...';
+
+    try {
+      const [respQ, respR, respM] = await Promise.all([
+        fetch('/api/sac/at/graficos/por-mes?tipo=Qualidade',            { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/por-mes?tipo=Atendimento%20Rapido', { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/mencoes-por-mes',                   { credentials: 'include' }),
+      ]);
+      const [dataQ, dataR, dataM] = await Promise.all([
+        respQ.json().catch(() => ({})),
+        respR.json().catch(() => ({})),
+        respM.json().catch(() => ({})),
+      ]);
+      if (!respQ.ok || dataQ.ok === false) throw new Error(dataQ.error || 'Erro ao carregar dados.');
+      if (!respR.ok || dataR.ok === false) throw new Error(dataR.error || 'Erro ao carregar dados.');
+      if (!respM.ok || dataM.ok === false) throw new Error(dataM.error || 'Erro ao carregar dados.');
+
+      let linhasQ = dataQ.rows || [];
+      let linhasR = dataR.rows || [];
+      let linhasM = dataM.rows || [];
+
+      // Filtra por período
+      if (_grafPeriodo > 0) {
+        const limite = _mesesRange(_grafPeriodo)[0];
+        linhasQ = linhasQ.filter(r => r.mes >= limite);
+        linhasR = linhasR.filter(r => r.mes >= limite);
+        linhasM = linhasM.filter(r => r.mes >= limite);
+      }
+
+      // Eixo X unificado com todos os meses das três séries
+      const mesesSet = [...new Set([
+        ...linhasQ.map(r => r.mes),
+        ...linhasR.map(r => r.mes),
+        ...linhasM.map(r => r.mes),
+      ])].sort();
+      const labels = mesesSet.map(_labelMes);
+
+      const valQ = mesesSet.map(m => { const r = linhasQ.find(x => x.mes === m); return r ? r.total : 0; });
+      const valR = mesesSet.map(m => { const r = linhasR.find(x => x.mes === m); return r ? r.total : 0; });
+      const valM = mesesSet.map(m => { const r = linhasM.find(x => x.mes === m); return r ? r.total : 0; });
+
+      if (_graf2Instance) { _graf2Instance.destroy(); _graf2Instance = null; }
+
+      const canvas = document.getElementById('atGraf2Canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      // mesesSet e labels precisam ficar acessíveis no onClick
+      _graf2MesesSet = mesesSet;
+
+      _graf2Instance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Qualidade',
+              data: valQ,
+              borderColor: '#34d399',
+              backgroundColor: 'rgba(52,211,153,.10)',
+              borderWidth: 2,
+              pointBackgroundColor: '#34d399',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              tension: 0.3,
+              fill: true,
+            },
+            {
+              label: 'Atend. Rápido',
+              data: valR,
+              borderColor: '#fb923c',
+              backgroundColor: 'rgba(251,146,60,.10)',
+              borderWidth: 2,
+              pointBackgroundColor: '#fb923c',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              tension: 0.3,
+              fill: false,
+            },
+            {
+              label: 'Menções (OS não-rápido)',
+              data: valM,
+              borderColor: '#a855f7',
+              backgroundColor: 'rgba(168,85,247,.10)',
+              borderWidth: 2,
+              pointBackgroundColor: '#a855f7',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+              tension: 0.3,
+              fill: false,
+              borderDash: [5, 4],
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'nearest',
+            intersect: false,
+            axis: 'xy',
+          },
+          onClick: (evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el         = elements[0];
+            const datasetIdx = el.datasetIndex;
+            const pointIdx   = el.index;
+            const mes        = _graf2MesesSet[pointIdx];
+            if (!mes) return;
+            const nomes = ['Qualidade', 'Atend. Rápido', 'Menções (OS não-rápido)'];
+            _carregarGrafDetalhe(mes, datasetIdx, nomes[datasetIdx] || '');
+          },
+          plugins: {
+            legend: {
+              display: true,
+              labels: { color: '#94a3b8', font: { size: 12 }, boxWidth: 12, padding: 16 },
+            },
+            tooltip: {
+              mode: 'nearest',
+              intersect: false,
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} registro(s)`,
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: '#94a3b8', font: { size: 11 } },
+              grid:  { color: 'rgba(255,255,255,.05)' },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#94a3b8', font: { size: 11 }, stepSize: 1 },
+              grid:  { color: 'rgba(255,255,255,.07)' },
+            },
+          },
+        },
+      });
+
+      _graf2Status.style.display = 'none';
+    } catch (err) {
+      _graf2Status.textContent = err.message || 'Erro ao carregar.';
+      _graf2Status.style.color = '#f87171';
+    }
   }
 
-  function _fecharGraficos() {
-    if (_grafModal) _grafModal.style.display = 'none';
+  // ── Detalhe ao clicar no nó do gráfico 2 ────────────────────────────────
+  function _fmtDataDetalhe(raw) {
+    if (!raw) return '-';
+    const d = new Date(raw);
+    if (isNaN(d)) return String(raw).slice(0, 10);
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const aa = String(d.getUTCFullYear()).slice(-2);
+    return `${dd}/${mm}/${aa}`;
+  }
+
+  function _fmtOsId(id) {
+    const aa = String(new Date().getFullYear()).slice(-2);
+    return `${aa} - ${id}`;
+  }
+
+  async function _carregarGrafDetalhe(mes, datasetIdx, labelSerie) {
+    const panel   = document.getElementById('atGrafDetalhePanel');
+    const titulo  = document.getElementById('atGrafDetalheTitulo');
+    const qtdEl   = document.getElementById('atGrafDetalheQtd');
+    const status  = document.getElementById('atGrafDetalheStatus');
+    const tbody   = document.getElementById('atGrafDetalheTbody');
+    if (!panel || !tbody) return;
+
+    panel.style.display = 'block';
+    if (titulo) titulo.textContent = `${labelSerie} — ${_labelMes(mes)}`;
+    if (qtdEl)  qtdEl.textContent  = '';
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+    tbody.innerHTML = '';
+
+    try {
+      let url;
+      if (datasetIdx === 2) {
+        // Menções
+        url = `/api/sac/at/graficos/mencoes-detalhe-mes?mes=${encodeURIComponent(mes)}`;
+      } else {
+        const tipos = ['Qualidade', 'Atendimento Rapido'];
+        url = `/api/sac/at/graficos/detalhe-mes?mes=${encodeURIComponent(mes)}&tipo=${encodeURIComponent(tipos[datasetIdx])}`;
+      }
+
+      const resp = await fetch(url, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      const rows = data.rows || [];
+      if (status) status.style.display = 'none';
+      if (qtdEl)  qtdEl.textContent    = `(${rows.length} registro${rows.length !== 1 ? 's' : ''})`;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(r => `
+        <tr class="at-graf-detalhe-row" data-id="${r.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .15s;">
+          <td style="padding:8px 10px;white-space:nowrap;color:#a5b4fc;font-weight:700;">${_fmtOsId(r.id)}</td>
+          <td style="padding:8px 10px;white-space:nowrap;color:#cbd5e1;">${_fmtDataDetalhe(r.data)}</td>
+          <td style="padding:8px 10px;color:#e5e7eb;max-width:520px;">${r.descreva_reclamacao ? String(r.descreva_reclamacao).slice(0, 200) : '-'}</td>
+        </tr>
+      `).join('');
+
+      // Hover visual
+      tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+        tr.addEventListener('mouseenter', () => { tr.style.background = 'rgba(255,255,255,.06)'; });
+        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
+        tr.addEventListener('click', () => _abrirAtOsModalSoPdf(tr.dataset.id));
+      });
+
+      // Campo de pesquisa por OS
+      const pesqEl = document.getElementById('atGrafDetalhePesquisa');
+      if (pesqEl) {
+        // Remove listener anterior clonando o nó
+        const novo = pesqEl.cloneNode(true);
+        pesqEl.parentNode.replaceChild(novo, pesqEl);
+        novo.value = '';
+        novo.addEventListener('input', () => {
+          const q = novo.value.toLowerCase();
+          tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+            tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+          });
+        });
+      }
+
+      // Rola para o painel
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  function _abrirAtOsModalSoPdf(id) {
+    // Abre o modal normal
+    if (typeof _abrirAtOsModal === 'function') _abrirAtOsModal(id);
+
+    // Após o modal abrir, desabilita todos os botões exceto "Salvar PDF"
+    requestAnimationFrame(() => {
+      const MANTER  = ['atOsImprimirBtn'];
+      const DISABLE = ['atOsEnviarLinkBtn', 'atOsMapaBtn', 'atOsRetirarBtn', 'atOsNavPrev', 'atOsNavNext'];
+      DISABLE.forEach(bid => {
+        const b = document.getElementById(bid);
+        if (!b) return;
+        b.disabled            = true;
+        b.style.opacity       = '0.25';
+        b.style.cursor        = 'not-allowed';
+        b.style.pointerEvents = 'none';
+        b.style.filter        = 'grayscale(60%)';
+      });
+      // Garante que o PDF está habilitado
+      MANTER.forEach(bid => {
+        const b = document.getElementById(bid);
+        if (!b) return;
+        b.disabled            = false;
+        b.style.opacity       = '1';
+        b.style.cursor        = 'pointer';
+        b.style.pointerEvents = '';
+        b.style.filter        = '';
+      });
+    });
   }
 
   // Botões de período
@@ -8817,13 +9105,303 @@ if (atBackToFormBtn) {
         b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
       });
       _carregarGraf1();
+      _carregarGraf2();
     });
   });
 
-  if (_grafOpenBtn)   _grafOpenBtn.addEventListener('click',   _abrirGraficos);
-  if (_grafCloseBtn)  _grafCloseBtn.addEventListener('click',  _fecharGraficos);
-  if (_grafRefreshBtn)_grafRefreshBtn.addEventListener('click', _carregarGraf1);
-  if (_grafModal)     _grafModal.addEventListener('click', e => { if (e.target === _grafModal) _fecharGraficos(); });
+  if (_grafVoltarBtn) _grafVoltarBtn.addEventListener('click',  () => abrirTelaAtAtendimentos());
+  if (_grafRefreshBtn)_grafRefreshBtn.addEventListener('click', () => { _carregarGraf1(); _carregarGraf2(); });
+
+  // Expõe para uso pela página standalone
+  window._abrirAtOsModalSoPdf = _abrirAtOsModalSoPdf;
+})();
+
+// ── Página standalone "Gráfico AT" ──────────────────────────────────────────
+// Espelha a lógica da IIFE acima mas usa os elementos "#atGrafPg*"
+(function () {
+  let _pg1Instance = null;
+  let _pg2Instance = null;
+  let _pgMesesSet  = [];
+  let _pgPeriodo   = 6;
+  let _pgInicializado = false;
+
+  // Helpers locais (réplica das funções da IIFE principal)
+  function _mesesRange(n) {
+    const hoje  = new Date();
+    const meses = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      meses.push(`${d.getFullYear()}-${mm}`);
+    }
+    return meses.sort();
+  }
+
+  function _labelMes(yyyymm) {
+    if (!yyyymm) return '';
+    const [y, m] = yyyymm.split('-');
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return `${nomes[parseInt(m, 10) - 1]}/${String(y).slice(-2)}`;
+  }
+
+  function _fmtData(raw) {
+    if (!raw) return '-';
+    const d = new Date(raw);
+    if (isNaN(d)) return String(raw).slice(0, 10);
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const aa = String(d.getUTCFullYear()).slice(-2);
+    return `${dd}/${mm}/${aa}`;
+  }
+
+  function _fmtOs(id) {
+    const aa = String(new Date().getFullYear()).slice(-2);
+    return `${aa} - ${id}`;
+  }
+
+  // ── Gráfico 1 — barras por estado ──────────────────────────────────────
+  async function _carregarPg1() {
+    const status = document.getElementById('atGrafPg1Status');
+    const canvas = document.getElementById('atGrafPg1Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const resp = await fetch('/api/sac/at/graficos/por-estado-mes?tipo=Qualidade', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      let linhas = data.rows || [];
+      const CORES = ['#6366f1','#10b981','#f59e0b','#ef4444','#06b6d4','#a855f7','#f97316','#84cc16'];
+
+      if (_pgPeriodo > 0) {
+        const limite = _mesesRange(_pgPeriodo)[0];
+        linhas = linhas.filter(r => r.mes >= limite);
+      }
+
+      const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
+      const meses   = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels  = meses.map(_labelMes);
+
+      const datasets = estados.map((est, idx) => ({
+        label: est,
+        data: meses.map(m => {
+          const r = linhas.find(x => (x.estado || 'N/D') === est && x.mes === m);
+          return r ? r.total : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_pg1Instance) { _pg1Instance.destroy(); _pg1Instance = null; }
+      const ctx = canvas.getContext('2d');
+      _pg1Instance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: { callbacks: { label: (item) => ` ${item.dataset.label}: ${item.raw}` } },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Gráfico 2 — linhas (3 séries) ──────────────────────────────────────
+  async function _carregarPg2() {
+    const status = document.getElementById('atGrafPg2Status');
+    const canvas = document.getElementById('atGrafPg2Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const [rQ, rR, rM] = await Promise.all([
+        fetch('/api/sac/at/graficos/por-mes?tipo=Qualidade',            { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/por-mes?tipo=Atendimento%20Rapido', { credentials: 'include' }),
+        fetch('/api/sac/at/graficos/mencoes-por-mes',                   { credentials: 'include' }),
+      ]);
+      const [dQ, dR, dM] = await Promise.all([rQ.json().catch(() => ({})), rR.json().catch(() => ({})), rM.json().catch(() => ({}))]);
+      if (!rQ.ok || dQ.ok === false) throw new Error(dQ.error || 'Erro.');
+      if (!rR.ok || dR.ok === false) throw new Error(dR.error || 'Erro.');
+      if (!rM.ok || dM.ok === false) throw new Error(dM.error || 'Erro.');
+
+      let linhasQ = dQ.rows || [];
+      let linhasR = dR.rows || [];
+      let linhasM = dM.rows || [];
+
+      if (_pgPeriodo > 0) {
+        const lim = _mesesRange(_pgPeriodo)[0];
+        linhasQ = linhasQ.filter(r => r.mes >= lim);
+        linhasR = linhasR.filter(r => r.mes >= lim);
+        linhasM = linhasM.filter(r => r.mes >= lim);
+      }
+
+      const mesesSet = [...new Set([...linhasQ, ...linhasR, ...linhasM].map(r => r.mes))].sort();
+      const labels   = mesesSet.map(_labelMes);
+      const valQ = mesesSet.map(m => { const r = linhasQ.find(x => x.mes === m); return r ? r.total : 0; });
+      const valR = mesesSet.map(m => { const r = linhasR.find(x => x.mes === m); return r ? r.total : 0; });
+      const valM = mesesSet.map(m => { const r = linhasM.find(x => x.mes === m); return r ? r.total : 0; });
+
+      _pgMesesSet = mesesSet;
+      if (_pg2Instance) { _pg2Instance.destroy(); _pg2Instance = null; }
+      const ctx = canvas.getContext('2d');
+
+      _pg2Instance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Qualidade',              data: valQ, borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.10)', borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: true },
+            { label: 'Atend. Rápido',          data: valR, borderColor: '#fb923c', backgroundColor: 'rgba(251,146,60,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false },
+            { label: 'Menções (OS não-rápido)', data: valM, borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,.10)',  borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false, borderDash: [5,4] },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: false, axis: 'xy' },
+          onClick: (evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const mes = _pgMesesSet[el.index];
+            if (!mes) return;
+            const nomes = ['Qualidade', 'Atend. Rápido', 'Menções (OS não-rápido)'];
+            _carregarPgDetalhe(mes, el.datasetIndex, nomes[el.datasetIndex] || '');
+          },
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 12 }, boxWidth: 12, padding: 16 } },
+            tooltip: {
+              mode: 'nearest',
+              intersect: false,
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} registro(s)`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Detalhe ao clicar em nó ─────────────────────────────────────────────
+  async function _carregarPgDetalhe(mes, datasetIdx, labelSerie) {
+    const panel  = document.getElementById('atGrafPgDetalhePanel');
+    const titulo = document.getElementById('atGrafPgDetalheTitulo');
+    const qtdEl  = document.getElementById('atGrafPgDetalheQtd');
+    const status = document.getElementById('atGrafPgDetalheStatus');
+    const tbody  = document.getElementById('atGrafPgDetalheTbody');
+    if (!panel || !tbody) return;
+
+    panel.style.display = 'block';
+    if (titulo) titulo.textContent = `${labelSerie} — ${_labelMes(mes)}`;
+    if (qtdEl)  qtdEl.textContent  = '';
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+    tbody.innerHTML = '';
+
+    try {
+      let url;
+      if (datasetIdx === 2) {
+        url = `/api/sac/at/graficos/mencoes-detalhe-mes?mes=${encodeURIComponent(mes)}`;
+      } else {
+        const tipos = ['Qualidade', 'Atendimento Rapido'];
+        url = `/api/sac/at/graficos/detalhe-mes?mes=${encodeURIComponent(mes)}&tipo=${encodeURIComponent(tipos[datasetIdx])}`;
+      }
+
+      const resp = await fetch(url, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro.');
+
+      const rows = data.rows || [];
+      if (status) status.style.display = 'none';
+      if (qtdEl)  qtdEl.textContent    = `(${rows.length} registro${rows.length !== 1 ? 's' : ''})`;
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(r => `
+        <tr class="at-graf-detalhe-row" data-id="${r.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .15s;">
+          <td style="padding:8px 10px;white-space:nowrap;color:#a5b4fc;font-weight:700;">${_fmtOs(r.id)}</td>
+          <td style="padding:8px 10px;white-space:nowrap;color:#cbd5e1;">${_fmtData(r.data)}</td>
+          <td style="padding:8px 10px;color:#e5e7eb;max-width:520px;">${r.descreva_reclamacao ? String(r.descreva_reclamacao).slice(0, 200) : '-'}</td>
+        </tr>
+      `).join('');
+
+      tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+        tr.addEventListener('mouseenter', () => { tr.style.background = 'rgba(255,255,255,.06)'; });
+        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
+        tr.addEventListener('click', () => {
+          if (typeof _abrirAtOsModalSoPdf === 'function') _abrirAtOsModalSoPdf(tr.dataset.id);
+        });
+      });
+
+      // Campo de pesquisa
+      const pesqEl = document.getElementById('atGrafPgDetalhePesquisa');
+      if (pesqEl) {
+        const novo = pesqEl.cloneNode(true);
+        pesqEl.parentNode.replaceChild(novo, pesqEl);
+        novo.value = '';
+        novo.addEventListener('input', () => {
+          const q = novo.value.toLowerCase();
+          tbody.querySelectorAll('.at-graf-detalhe-row').forEach(tr => {
+            tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+          });
+        });
+      }
+
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── API pública chamada pelo listener do menu lateral ────────────────────
+  window._iniciarGrafAtPagina = function () {
+    if (!_pgInicializado) {
+      _pgInicializado = true;
+
+      // Botões de período
+      document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _pgPeriodo = parseInt(btn.dataset.per, 10);
+          document.querySelectorAll('.at-graf-periodo-btn-pg').forEach(b => {
+            const ativo = b === btn;
+            b.style.borderColor = ativo ? '#4f46e5' : '#374151';
+            b.style.background  = ativo ? 'rgba(79,70,229,.25)' : 'rgba(255,255,255,.04)';
+            b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
+          });
+          _carregarPg1();
+          _carregarPg2();
+        });
+      });
+
+      const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
+      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg1(); _carregarPg2(); });
+    }
+    _carregarPg1();
+    _carregarPg2();
+  };
 })();
 
 // Listeners modal edição AT
