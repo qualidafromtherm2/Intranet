@@ -2219,6 +2219,99 @@ router.get('/at/os-data/:id', async (req, res) => {
 });
 
 // ── GRÁFICOS AT ──────────────────────────────────────────────────────────────
+// GET /at/graficos/mencoes-por-mes — menções agrupadas por mês, excluindo AT tipo Atendimento rápido
+router.get('/at/graficos/mencoes-por-mes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', m.criado_em), 'YYYY-MM') AS mes,
+        COUNT(*)::int                                         AS total
+      FROM sac.mencoes m
+      JOIN sac.at a ON a.id = m.id_at
+      WHERE m.criado_em IS NOT NULL
+        AND LOWER(TRIM(a.tipo)) <> 'atendimento rápido'
+        AND LOWER(TRIM(a.tipo)) <> 'atendimento rapido'
+      GROUP BY 1
+      ORDER BY 1
+    `);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos mencoes-por-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/detalhe-mes — registros de sac.at de um mês/tipo específico
+router.get('/at/graficos/detalhe-mes', async (req, res) => {
+  try {
+    const tipo = String(req.query.tipo || '').trim();
+    const mes  = String(req.query.mes  || '').trim(); // YYYY-MM
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ ok: false, error: 'Parâmetro mes (YYYY-MM) obrigatório.' });
+
+    const params = [mes];
+    let whereExtra = '';
+    if (tipo) { whereExtra = ' AND LOWER(tipo) = LOWER($2)'; params.push(tipo); }
+
+    const { rows } = await pool.query(`
+      SELECT id, data, descreva_reclamacao
+      FROM sac.at
+      WHERE TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM') = $1
+        ${whereExtra}
+      ORDER BY data, id
+    `, params);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos detalhe-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/mencoes-detalhe-mes — registros de sac.at vinculados a menções de um mês específico
+router.get('/at/graficos/mencoes-detalhe-mes', async (req, res) => {
+  try {
+    const mes = String(req.query.mes || '').trim();
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ ok: false, error: 'Parâmetro mes (YYYY-MM) obrigatório.' });
+
+    const { rows } = await pool.query(`
+      SELECT DISTINCT a.id, a.data, a.descreva_reclamacao
+      FROM sac.mencoes m
+      JOIN sac.at a ON a.id = m.id_at
+      WHERE TO_CHAR(DATE_TRUNC('month', m.criado_em), 'YYYY-MM') = $1
+        AND LOWER(TRIM(a.tipo)) <> 'atendimento rápido'
+        AND LOWER(TRIM(a.tipo)) <> 'atendimento rapido'
+      ORDER BY a.data, a.id
+    `, [mes]);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos mencoes-detalhe-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/por-mes — quantidade total de atendimentos agrupado por mês/ano
+router.get('/at/graficos/por-mes', async (req, res) => {
+  try {
+    const tipo = String(req.query.tipo || '').trim();
+    const params = [];
+    const whereExtra = tipo ? ` AND LOWER(tipo) = LOWER($1)` : '';
+    if (tipo) params.push(tipo);
+
+    const { rows } = await pool.query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM') AS mes,
+        COUNT(*)::int                                  AS total
+      FROM sac.at
+      WHERE data IS NOT NULL${whereExtra}
+      GROUP BY 1
+      ORDER BY 1
+    `, params);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos por-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /at/graficos/por-estado-mes — quantidade de atendimentos por estado agrupado por mês/ano
 router.get('/at/graficos/por-estado-mes', async (req, res) => {
   try {

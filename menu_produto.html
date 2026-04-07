@@ -325,6 +325,18 @@
       <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
       AT
     </a>
+
+    <a href="#"
+       id="menu-sac-at-graficos"
+       class="menu-link"
+       data-nav-key="side:sac:at-graficos"
+       data-nav-parent="side:sac"
+       data-nav-pos="side"
+       data-nav-label="Gráfico AT"
+       data-nav-selector="#menu-sac-at-graficos">
+      <i class="fa-solid fa-chart-line" style="margin-right:8px;"></i>
+      Gráfico AT
+    </a>
   </div>
 </div>
 
@@ -2156,9 +2168,7 @@
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar para AT</span>
                   </button>
-                  <button id="atGraficosBtn" class="content-button" type="button" title="Ver gráficos" style="display:none;align-items:center;gap:6px;background:linear-gradient(135deg,#4f46e5 0%,#3730a3 100%);color:white;padding:8px 12px;">
-                    <i class="fa-solid fa-chart-bar"></i>
-                  </button>
+
                 </div>
               </div>
 
@@ -2456,6 +2466,89 @@
           </div>
         </div>
 
+        <!-- View Gráficos AT -->
+        <div id="atGraficosView" style="display:none;margin-top:12px;">
+          <!-- Cabeçalho inline -->
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;position:sticky;top:0;z-index:50;background:var(--theme-bg-color,#0f172a);padding:8px 0;">
+            <button id="atGraficosVoltarBtn" type="button"
+              style="padding:6px 14px;border-radius:8px;border:1px solid var(--border-color,#374151);background:var(--input-bg,#1e2535);color:var(--inactive-color);cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+              <i class="fa-solid fa-arrow-left"></i> Atendimentos
+            </button>
+            <div style="display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;color:#a5b4fc;">
+              <i class="fa-solid fa-chart-bar"></i>
+              Gráficos — Atendimentos AT
+            </div>
+            <div style="margin-left:auto;">
+              <button id="atGrafRefreshBtn" type="button" title="Atualizar"
+                style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                <i class="fa-solid fa-rotate"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Filtro de período -->
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;">
+            <div>
+              <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.03em;text-transform:uppercase;margin-bottom:4px;">Período</label>
+              <div style="display:flex;gap:6px;">
+                <button class="at-graf-periodo-btn" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">6 meses</button>
+                <button class="at-graf-periodo-btn" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
+                <button class="at-graf-periodo-btn" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gráfico 1 -->
+          <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
+            <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-map-location-dot"></i>
+              Gráfico 1 — Atendimentos por Estado / Mês
+            </div>
+            <div id="atGraf1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+            <div style="position:relative;height:340px;">
+              <canvas id="atGraf1Canvas"></canvas>
+            </div>
+          </div>
+
+          <!-- Gráfico 2 -->
+          <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
+            <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-chart-line"></i>
+              Gráfico 2 — Picos de Atendimento por Mês
+            </div>
+            <div id="atGraf2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+            <div style="position:relative;height:280px;">
+              <canvas id="atGraf2Canvas"></canvas>
+            </div>
+          </div>
+
+          <!-- Detalhes do nó clicado -->
+          <div id="atGrafDetalhePanel" style="display:none;margin-top:18px;background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+              <i class="fa-solid fa-list-ul" style="color:#94a3b8;"></i>
+              <span id="atGrafDetalheTitulo" style="font-size:13px;font-weight:700;color:#e5e7eb;"></span>
+              <span id="atGrafDetalheQtd" style="font-size:11px;color:#94a3b8;margin-left:4px;"></span>
+            </div>
+            <div id="atGrafDetalheStatus" style="font-size:12px;color:var(--inactive-color);display:none;">Carregando...</div>
+            <div style="margin-bottom:10px;">
+              <input id="atGrafDetalhePesquisa" type="text" placeholder="Pesquisar OS..."
+                style="width:100%;max-width:280px;padding:6px 10px;background:rgba(255,255,255,.06);border:1px solid #374151;border-radius:7px;color:#e5e7eb;font-size:12px;outline:none;">
+            </div>
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;" id="atGrafDetalheTabela">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">OS</th>
+                    <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Data</th>
+                    <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Reclamação</th>
+                  </tr>
+                </thead>
+                <tbody id="atGrafDetalheTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal de edição de OS -->
         <div id="atEditModal" class="modal-overlay" style="display:none;z-index:10042;">
           <div class="modal-container" style="max-width:800px;width:96%;max-height:90vh;overflow-y:auto;">
@@ -2606,51 +2699,6 @@
 
         <!-- Modal de visualização de anexos de AT -->
         <!-- Lightbox AT -->
-
-        <!-- Modal Gráficos AT -->
-        <div id="atGraficosModal" class="modal-overlay" style="display:none;z-index:10060;">
-          <div class="modal-container" style="max-width:900px;width:97%;max-height:92vh;overflow-y:auto;">
-            <div class="modal-header">
-              <h3 style="margin:0;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-chart-bar" style="color:#818cf8;"></i>
-                Gráficos — Atendimentos AT
-              </h3>
-              <button id="atGraficosModalClose" class="modal-close-btn" type="button">×</button>
-            </div>
-            <div style="padding:20px 20px 24px;">
-
-              <!-- Filtros do gráfico -->
-              <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;">
-                <div>
-                  <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.03em;text-transform:uppercase;margin-bottom:4px;">Período</label>
-                  <div style="display:flex;gap:6px;">
-                    <button class="at-graf-periodo-btn" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">6 meses</button>
-                    <button class="at-graf-periodo-btn" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
-                    <button class="at-graf-periodo-btn" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
-                  </div>
-                </div>
-                <div style="margin-left:auto;">
-                  <button id="atGrafRefreshBtn" type="button" title="Atualizar" style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
-                    <i class="fa-solid fa-rotate"></i>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Gráfico 1 -->
-              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
-                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-map-location-dot"></i>
-                  Gráfico 1 — Atendimentos por Estado / Mês
-                </div>
-                <div id="atGraf1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
-                <div style="position:relative;height:340px;">
-                  <canvas id="atGraf1Canvas"></canvas>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
 
         <!-- Modal Menção AT -->
         <div id="atMencaoModal" class="modal-overlay" style="display:none;z-index:10055;">
@@ -3148,6 +3196,83 @@
                   Salvar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Gráfico AT -->
+        <div id="sacAtGraficosPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-chart-line" style="color:#818cf8;"></i>
+                  Gráfico AT
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+                  <div style="display:flex;gap:6px;">
+                    <button class="at-graf-periodo-btn-pg" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #4f46e5;background:rgba(79,70,229,.25);color:#a5b4fc;font-size:12px;cursor:pointer;">6 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
+                    <button class="at-graf-periodo-btn-pg" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+                  </div>
+                  <button id="atGrafPgRefreshBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Gráfico 1 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
+                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-map-location-dot"></i>
+                  Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)
+                </div>
+                <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:340px;">
+                  <canvas id="atGrafPg1Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Gráfico 2 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
+                <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-chart-line"></i>
+                  Gráfico 2 — Picos de Atendimento por Mês
+                </div>
+                <div id="atGrafPg2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:280px;">
+                  <canvas id="atGrafPg2Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Detalhes do nó clicado -->
+              <div id="atGrafPgDetalhePanel" style="display:none;margin-top:18px;background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                  <i class="fa-solid fa-list-ul" style="color:#94a3b8;"></i>
+                  <span id="atGrafPgDetalheTitulo" style="font-size:13px;font-weight:700;color:#e5e7eb;"></span>
+                  <span id="atGrafPgDetalheQtd" style="font-size:11px;color:#94a3b8;margin-left:4px;"></span>
+                  <div style="margin-left:auto;position:relative;">
+                    <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#6b7280;pointer-events:none;font-size:12px;"></i>
+                    <input id="atGrafPgDetalhePesquisa" type="text" placeholder="Pesquisar OS..."
+                      style="padding:6px 10px 6px 30px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:12px;width:200px;">
+                  </div>
+                </div>
+                <div id="atGrafPgDetalheStatus" style="font-size:12px;color:var(--inactive-color);display:none;">Carregando...</div>
+                <div style="overflow-x:auto;">
+                  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                      <tr>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">OS</th>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Data</th>
+                        <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #374151;color:#94a3b8;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Reclamação</th>
+                      </tr>
+                    </thead>
+                    <tbody id="atGrafPgDetalheTbody"></tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -7457,6 +7582,12 @@ function attachDropZone(ul) {
   height: auto !important;
 }
 /* card: nenhuma restrição de altura — scroll vem do #atAtendimentosView */
+
+/* ── AT — gráficos: scroll vertical na view inline ── */
+#atGraficosView {
+  overflow-y: auto;
+  max-height: calc(90vh - 160px);
+}
 
 /* ── AT — cabeçalho da tabela congelado ── */
 #atTabelaWrapper thead th {
