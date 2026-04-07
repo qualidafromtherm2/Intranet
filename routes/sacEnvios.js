@@ -566,6 +566,18 @@ async function ensureSchema() {
     ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS nfe_path_key TEXT;
     ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS observacao_tecnico TEXT;
     ALTER TABLE sac.fechamento ADD COLUMN IF NOT EXISTS data_envio_nfe TIMESTAMPTZ;
+
+    CREATE TABLE IF NOT EXISTS sac.mencoes (
+      id                   BIGSERIAL PRIMARY KEY,
+      id_at                BIGINT NOT NULL REFERENCES sac.at(id) ON DELETE CASCADE,
+      telefone             TEXT,
+      nome_revenda_cliente TEXT,
+      plataforma           TEXT,
+      motivo_solicitacao   TEXT,
+      acao_tomada          TEXT,
+      criado_por           TEXT,
+      criado_em            TIMESTAMP NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
@@ -1943,6 +1955,56 @@ router.delete('/at/anexos/:id_at/:id_anexo', async (req, res) => {
   }
 });
 
+// ── MENÇÕES ──────────────────────────────────────────────────────────────────
+// POST /at/mencoes — registra uma menção vinculada a um AT
+router.post('/at/mencoes', async (req, res) => {
+  const body = req.body || {};
+  const idAt = parseInt(body.id_at, 10);
+  if (!idAt || idAt < 1) return res.status(400).json({ error: 'id_at inválido.' });
+
+  const criado_por = req.session?.user?.fullName
+                  || req.session?.user?.username
+                  || req.session?.user?.login
+                  || null;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sac.mencoes (id_at, telefone, nome_revenda_cliente, plataforma, motivo_solicitacao, acao_tomada, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, criado_em`,
+      [
+        idAt,
+        String(body.telefone || '').trim() || null,
+        String(body.nome_revenda_cliente || '').trim() || null,
+        String(body.plataforma || '').trim() || null,
+        String(body.motivo_solicitacao || '').trim() || null,
+        String(body.acao_tomada || '').trim() || null,
+        criado_por,
+      ]
+    );
+    return res.json({ ok: true, id: rows[0].id, criado_em: rows[0].criado_em });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao salvar menção:', err);
+    return res.status(500).json({ error: 'Falha ao salvar menção.' });
+  }
+});
+
+// GET /at/mencoes/:id_at — lista menções de um AT
+router.get('/at/mencoes/:id_at', async (req, res) => {
+  const idAt = parseInt(req.params.id_at, 10);
+  if (!idAt || idAt < 1) return res.status(400).json({ error: 'id_at inválido.' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, telefone, nome_revenda_cliente, plataforma, motivo_solicitacao, acao_tomada, criado_por, criado_em
+       FROM sac.mencoes WHERE id_at = $1 ORDER BY criado_em DESC`,
+      [idAt]
+    );
+    return res.json({ ok: true, mencoes: rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao listar menções:', err);
+    return res.status(500).json({ error: 'Falha ao listar menções.' });
+  }
+});
+
 // GET /at/os-data/:id — dados completos para o formulário PDF de AT
 router.get('/at/os-data/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -2153,6 +2215,32 @@ router.get('/at/os-data/:id', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT] erro ao buscar dados OS:', err);
     res.status(500).json({ error: 'Falha ao buscar dados.' });
+  }
+});
+
+// ── GRÁFICOS AT ──────────────────────────────────────────────────────────────
+// GET /at/graficos/por-estado-mes — quantidade de atendimentos por estado agrupado por mês/ano
+router.get('/at/graficos/por-estado-mes', async (req, res) => {
+  try {
+    const tipo = String(req.query.tipo || '').trim();
+    const params = [];
+    const whereExtra = tipo ? ` AND LOWER(tipo) = LOWER($1)` : '';
+    if (tipo) params.push(tipo);
+
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(NULLIF(TRIM(estado), ''), 'N/D')      AS estado,
+        TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')  AS mes,
+        COUNT(*)::int                                   AS total
+      FROM sac.at
+      WHERE data IS NOT NULL${whereExtra}
+      GROUP BY 1, 2
+      ORDER BY 2, 1
+    `, params);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos por-estado-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
