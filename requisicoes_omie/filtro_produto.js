@@ -4,10 +4,41 @@ let allItems = [];
 let lastFiltered = [];
 
 // Filtros ativos (aplicados ao clicar em "Aplicar")
-let activeFamilyValue = '';
-let activeTipoValue   = '';
+let activeFamilyValue     = '';
+let activeTipoValue       = '';
+let activeShowInactive    = false;
+let activeSemEstoqueMin   = false;
+let activeHideObsolete    = false;
+let activeHideEngineering = false;
+let activeLocalValue      = '';
 
-let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay;
+// Cache dos locais com saldo positivo: Map<local_codigo, Set<codigo_produto>>
+let _locaisCache = null;
+let _locaisCachePromise = null;
+
+async function getLocaisInventario() {
+  if (_locaisCache) return _locaisCache;
+  if (_locaisCachePromise) return _locaisCachePromise;
+  _locaisCachePromise = fetch('/api/logistica/locais-inventario')
+    .then(r => r.json())
+    .then(data => {
+      _locaisCache = {};
+      (data.locais || []).forEach(l => {
+        _locaisCache[l.local_codigo] = {
+          local_nome: l.local_nome,
+          codigos: new Set(Array.isArray(l.codigos) ? l.codigos : []),
+          total: Number(l.total || 0)
+        };
+      });
+      _locaisCachePromise = null;
+      return _locaisCache;
+    })
+    .catch(() => { _locaisCachePromise = null; return {}; });
+  return _locaisCachePromise;
+}
+
+let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel;
+let filterShowInactiveCb, filterSemEstoqueMinCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
 /**
@@ -42,7 +73,12 @@ export function initFiltros({
   familySelect   = _familySelect;
   tipoItemSelect = _tipoItemSelect;
   filterBtn      = _filterBtn;
-  filterOverlay  = document.getElementById('filterPanelOverlay');
+  filterOverlay         = document.getElementById('filterPanelOverlay');
+  filterShowInactiveCb   = document.getElementById('filterShowInactive');
+  filterSemEstoqueMinCb  = document.getElementById('filterSemEstoqueMin');
+  filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
+  filterHideEngineeringCb = document.getElementById('filterHideEngineering');
+  filterLocalSel           = document.getElementById('filterLocalSelect');
   _onFiltered    = onFiltered;
 
   if (!codeInput) {
@@ -81,8 +117,18 @@ export function initFiltros({
     limparBtn.addEventListener('click', () => {
       if (familySelect)   familySelect.value   = '';
       if (tipoItemSelect) tipoItemSelect.value = '';
-      activeFamilyValue = '';
-      activeTipoValue   = '';
+      activeFamilyValue     = '';
+      activeTipoValue       = '';
+      activeShowInactive    = false;
+      activeSemEstoqueMin   = false;
+      activeHideObsolete    = false;
+      activeHideEngineering = false;
+      if (filterShowInactiveCb)    filterShowInactiveCb.checked    = false;
+      if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = false;
+      if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
+      if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
+      if (filterLocalSel)          filterLocalSel.value            = '';
+      activeLocalValue = '';
       fecharModalFiltro(true);
     });
   }
@@ -91,8 +137,13 @@ export function initFiltros({
   const aplicarBtn = document.getElementById('filterPanelAplicarBtn');
   if (aplicarBtn) {
     aplicarBtn.addEventListener('click', () => {
-      activeFamilyValue = familySelect?.value   || '';
-      activeTipoValue   = tipoItemSelect?.value || '';
+      activeFamilyValue     = familySelect?.value   || '';
+      activeTipoValue       = tipoItemSelect?.value || '';
+      activeShowInactive    = filterShowInactiveCb?.checked    || false;
+      activeSemEstoqueMin   = filterSemEstoqueMinCb?.checked   || false;
+      activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
+      activeHideEngineering = filterHideEngineeringCb?.checked || false;
+      activeLocalValue      = filterLocalSel?.value            || '';
       fecharModalFiltro(true);
     });
   }
@@ -103,9 +154,15 @@ function abrirModalFiltro() {
   // Restaura selecoes ativas
   if (familySelect)   familySelect.value   = activeFamilyValue;
   if (tipoItemSelect) tipoItemSelect.value = activeTipoValue;
+  if (filterShowInactiveCb)    filterShowInactiveCb.checked    = activeShowInactive;
+  if (filterSemEstoqueMinCb)   filterSemEstoqueMinCb.checked   = activeSemEstoqueMin;
+  if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
+  if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
+  if (filterLocalSel)          filterLocalSel.value            = activeLocalValue;
   // Carrega opcoes
   popularFamilias();
   popularTipoItem();
+  popularLocais();
   filterOverlay.style.display = 'flex';
 }
 
@@ -193,6 +250,31 @@ function popularTipoItem() {
 }
 
 /**
+ * Popula o select de locais buscando do endpoint /api/logistica/locais-inventario.
+ * Mostra apenas armazens com saldo positivo e a contagem de produtos distintos.
+ */
+async function popularLocais() {
+  if (!filterLocalSel) return;
+  const selAtual = filterLocalSel.value;
+
+  const mapa = await getLocaisInventario();
+  filterLocalSel.innerHTML = '<option value="">– todos –</option>';
+
+  Object.entries(mapa)
+    .sort(([, a], [, b]) => a.local_nome.localeCompare(b.local_nome))
+    .forEach(([codigo, { local_nome, total }]) => {
+      const o = document.createElement('option');
+      o.value = codigo;
+      o.textContent = local_nome + ' (' + total + ')';
+      filterLocalSel.appendChild(o);
+    });
+
+  if (filterLocalSel.querySelector('option[value="' + selAtual + '"]')) {
+    filterLocalSel.value = selAtual;
+  }
+}
+
+/**
  * Define o cache completo
  */
 export function setCache(items) {
@@ -241,6 +323,32 @@ function applyFilters() {
         extractTipoFromCodigo(i.codigo) === activeTipoValue
       );
     }
+  }
+
+  // Filtro por local de estoque (produto deve ter saldo > 0 naquele local)
+  if (activeLocalValue && _locaisCache && _locaisCache[activeLocalValue]) {
+    const codigosNoLocal = _locaisCache[activeLocalValue].codigos;
+    filtered = filtered.filter(i => codigosNoLocal.has(i.codigo));
+  }
+
+  // Inativos: por padrão oculta produtos com inativo='S'
+  if (!activeShowInactive) {
+    filtered = filtered.filter(i => i.inativo !== 'S');
+  }
+
+  // Apenas produtos sem estoque mínimo definido
+  if (activeSemEstoqueMin) {
+    filtered = filtered.filter(i => !i.estoque_minimo || Number(i.estoque_minimo) === 0);
+  }
+
+  // Ocultar produtos com prefixo OBSOLETO
+  if (activeHideObsolete) {
+    filtered = filtered.filter(i => !(i.descricao || '').toUpperCase().startsWith('OBSOLETO'));
+  }
+
+  // Ocultar produtos com prefixo ENGENHARIA
+  if (activeHideEngineering) {
+    filtered = filtered.filter(i => !(i.descricao || '').toUpperCase().startsWith('ENGENHARIA'));
   }
 
   lastFiltered = filtered;
