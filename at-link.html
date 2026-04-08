@@ -440,9 +440,11 @@
       if (el) el.textContent = val || '';
     }
     function _statusMeta(st) {
-      if (st === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
-      if (st === 'fechado')        return { cls: 'finalizado',  label: 'Finalizado' };
-      if (st === 'aguardando_nfe') return { cls: 'aguardando', label: 'Aguardando NFe' };
+      const s = String(st || '').toLowerCase().trim();
+      if (s === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
+      if (s === 'fechado')        return { cls: 'finalizado',  label: 'Finalizado' };
+      if (s === 'aguardando_nfe') return { cls: 'aguardando',  label: 'Aguardando NFe' };
+      if (s === 'aguardando')     return { cls: 'aguardando',  label: 'Aguardando' };
       return { cls: 'aberta', label: 'Aberta' };
     }
 
