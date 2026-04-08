@@ -441,6 +441,7 @@
     }
     function _statusMeta(st) {
       if (st === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
+      if (st === 'fechado')        return { cls: 'finalizado',  label: 'Finalizado' };
       if (st === 'aguardando_nfe') return { cls: 'aguardando', label: 'Aguardando NFe' };
       return { cls: 'aberta', label: 'Aberta' };
     }

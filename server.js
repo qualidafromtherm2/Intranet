@@ -60,6 +60,8 @@ const callOmieDedup = require('./utils/callOmieDedup');
 const { registrarModificacao } = require('./utils/auditoria');
 const LOCAIS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
 const locaisEstoqueCache = { at: 0, data: [], fonte: 'omie' };
+// Data (YYYY-MM-DD) do último sync de omie_locais_estoque — reseta a cada restart
+let locaisSyncDate = null;
 app.set('trust proxy', 1); // necessário no Render (proxy) para cookie Secure funcionar
 app.use(express.json({ limit: '5mb' })); // precisa vir ANTES de app.use('/api/auth', ...)
 
@@ -12827,6 +12829,72 @@ async function ensureNotasEntradaOmieTables(client) {
   _notasEntradaOmieTablesReady = true;
 }
 
+// ---------------------------------------------------------------
+// logistica.estoque_atual — posição única por produto+local
+// ---------------------------------------------------------------
+let _estoqueAtualTableReady = false;
+async function ensureEstoqueAtualTable() {
+  if (_estoqueAtualTableReady) return;
+  await pool.query(`
+    CREATE SCHEMA IF NOT EXISTS logistica;
+
+    CREATE TABLE IF NOT EXISTS logistica.estoque_atual (
+      id               BIGSERIAL PRIMARY KEY,
+      local_codigo     TEXT NOT NULL,
+      local_nome       TEXT,
+      omie_prod_id     BIGINT,
+      codigo           TEXT NOT NULL,
+      cod_int          TEXT,
+      descricao        TEXT,
+      saldo            NUMERIC(18,4) DEFAULT 0,
+      fisico           NUMERIC(18,4) DEFAULT 0,
+      reservado        NUMERIC(18,4) DEFAULT 0,
+      pendente         NUMERIC(18,4) DEFAULT 0,
+      estoque_minimo   NUMERIC(18,4) DEFAULT 0,
+      cmc              NUMERIC(18,4) DEFAULT 0,
+      preco_unitario   NUMERIC(18,4) DEFAULT 0,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      origem           TEXT NOT NULL DEFAULT 'sync',
+      CONSTRAINT uq_estoque_atual_prod_local UNIQUE (codigo, local_codigo)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_estoque_atual_local ON logistica.estoque_atual(local_codigo);
+    CREATE INDEX IF NOT EXISTS idx_estoque_atual_codigo ON logistica.estoque_atual(codigo);
+    CREATE INDEX IF NOT EXISTS idx_estoque_atual_prod_id ON logistica.estoque_atual(omie_prod_id);
+  `);
+  _estoqueAtualTableReady = true;
+  console.log('[logistica] tabela estoque_atual garantida');
+}
+
+const UPSERT_ESTOQUE_ATUAL_SQL = `
+  INSERT INTO logistica.estoque_atual
+    (local_codigo, local_nome, omie_prod_id, codigo, cod_int, descricao,
+     saldo, fisico, reservado, pendente, estoque_minimo, cmc, preco_unitario,
+     updated_at, origem)
+  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now(), $14)
+  ON CONFLICT ON CONSTRAINT uq_estoque_atual_prod_local
+  DO UPDATE SET
+    local_nome     = COALESCE(EXCLUDED.local_nome, logistica.estoque_atual.local_nome),
+    omie_prod_id   = COALESCE(EXCLUDED.omie_prod_id, logistica.estoque_atual.omie_prod_id),
+    cod_int        = COALESCE(EXCLUDED.cod_int, logistica.estoque_atual.cod_int),
+    descricao      = COALESCE(EXCLUDED.descricao, logistica.estoque_atual.descricao),
+    saldo          = EXCLUDED.saldo,
+    fisico         = EXCLUDED.fisico,
+    reservado      = EXCLUDED.reservado,
+    pendente       = EXCLUDED.pendente,
+    estoque_minimo = EXCLUDED.estoque_minimo,
+    cmc            = EXCLUDED.cmc,
+    preco_unitario = EXCLUDED.preco_unitario,
+    updated_at     = now(),
+    origem         = EXCLUDED.origem
+`;
+
+async function upsertEstoqueAtual(client, params) {
+  await ensureEstoqueAtualTable();
+  const q = client || pool;
+  await q.query(UPSERT_ESTOQUE_ATUAL_SQL, params);
+}
+
 async function upsertNotaEntradaEstado(client, dados = {}) {
   await ensureNotasEntradaOmieTables(client);
 
@@ -13136,6 +13204,13 @@ async function upsertRecebimentoFromWebhookPayload(rawBody = {}) {
 }
 
 // ====== rota do webhook ======
+async function getLocalNome(localCodigo) {
+  try {
+    const { rows } = await pool.query('SELECT nome FROM omie_locais_estoque WHERE local_codigo = $1 LIMIT 1', [localCodigo]);
+    return rows[0]?.nome || null;
+  } catch { return null; }
+}
+
 app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
   try {
     // 1) token opcional (se OMIE_WEBHOOK_TOKEN estiver setado, passa a exigir)
@@ -13160,6 +13235,32 @@ app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, re
     if (isRecebimentoNfeLifecycleTopic(topic)) {
       const upsertInfo = await upsertRecebimentoFromWebhookPayload(body);
       return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
+    }
+
+    // 2b) Se for movimentação de estoque, atualiza logistica.estoque_atual imediatamente
+    const ev = body?.event || body?.dados || body || {};
+    if (ev.codigo_local_estoque && (ev.codigo || ev.codigo_produto_integracao)) {
+      try {
+        const localNome = await getLocalNome(String(ev.codigo_local_estoque));
+        await upsertEstoqueAtual(null, [
+          String(ev.codigo_local_estoque),
+          localNome,
+          Number(ev.codigo_produto) || null,
+          ev.codigo || ev.codigo_produto_integracao || '',
+          ev.codigo_produto_integracao || ev.codigo || null,
+          null,                              // descricao (webhook não traz)
+          Number(ev.saldo)           || 0,
+          Number(ev.fisico)          || 0,
+          Number(ev.reservado)       || 0,
+          Number(ev.pendente)        || 0,
+          Number(ev.estoque_minimo)  || 0,
+          Number(ev.cmc_unitario)    || 0,
+          Number(ev.preco_unitario)  || 0,
+          'webhook'
+        ]);
+      } catch (e) {
+        console.error('[webhook/estoque_atual] upsert falhou:', e?.message || e);
+      }
     }
 
     // 3) agenda re-sync
@@ -13196,6 +13297,27 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
       return res.json({ ok: true, routed: 'recebimentos-nfe', upsert: upsertInfo });
     }
 
+    // 1b) Se tiver dados de estoque, atualiza logistica.estoque_atual
+    const ev2 = body?.event || body?.dados || body || {};
+    if (ev2.codigo_local_estoque && (ev2.codigo || ev2.codigo_produto_integracao)) {
+      try {
+        const localNome = await getLocalNome(String(ev2.codigo_local_estoque));
+        await upsertEstoqueAtual(null, [
+          String(ev2.codigo_local_estoque), localNome,
+          Number(ev2.codigo_produto) || null,
+          ev2.codigo || ev2.codigo_produto_integracao || '',
+          ev2.codigo_produto_integracao || ev2.codigo || null,
+          null,
+          Number(ev2.saldo) || 0, Number(ev2.fisico) || 0,
+          Number(ev2.reservado) || 0, Number(ev2.pendente) || 0,
+          Number(ev2.estoque_minimo) || 0, Number(ev2.cmc_unitario) || 0,
+          Number(ev2.preco_unitario) || 0, 'webhook'
+        ]);
+      } catch (e) {
+        console.error('[api/webhook/estoque_atual] upsert falhou:', e?.message || e);
+      }
+    }
+
     // 2) tenta descobrir o local do estoque no payload; se não achar, usa o padrão
     const localDoPayload =
       body?.codigo_local_estoque ||
@@ -13217,6 +13339,65 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
 });
 
 // ------------------------------------------------------------------
+// Sincroniza omie_locais_estoque via API Omie ListarLocaisEstoque
+// Chamada automaticamente 1x/dia antes do primeiro sync de posição
+// ------------------------------------------------------------------
+async function syncLocaisEstoqueOmie() {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) return;
+
+  const perPage = 50;
+  let pagina = 1;
+  let total = null;
+  const locais = [];
+
+  try {
+    do {
+      const resp = await fetch('https://app.omie.com.br/api/v1/estoque/local/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ListarLocaisEstoque',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ nPagina: pagina, nRegPorPagina: perPage }]
+        })
+      });
+      if (!resp.ok) throw new Error(`Omie HTTP ${resp.status} ${resp.statusText}`);
+      const data = await resp.json();
+      if (total === null) total = Number(data.nTotRegistros || 0);
+      // A Omie retorna o array na chave "locaisEncontrados"
+      const lista = Array.isArray(data.locaisEncontrados) ? data.locaisEncontrados : [];
+      locais.push(...lista);
+      pagina++;
+    } while (locais.length < total && total > 0 && pagina <= 50);
+
+    if (!locais.length) {
+      console.warn('[syncLocaisEstoqueOmie] Nenhum local retornado pela Omie.');
+      return;
+    }
+
+    for (const loc of locais) {
+      const codigo = loc.codigo_local_estoque;
+      const nome   = loc.descricao || '';
+      const ativo  = String(loc.inativo || '').toUpperCase() !== 'S';
+      if (!codigo) continue;
+      await pool.query(
+        `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (local_codigo)
+         DO UPDATE SET nome = EXCLUDED.nome, ativo = EXCLUDED.ativo, updated_at = now()`,
+        [String(codigo), nome, ativo]
+      );
+    }
+
+    locaisSyncDate = new Date().toISOString().slice(0, 10);
+    console.log(`[syncLocaisEstoqueOmie] ${locais.length} locais sincronizados (${locaisSyncDate}).`);
+  } catch (err) {
+    console.error('[syncLocaisEstoqueOmie] erro:', err?.message || err);
+  }
+}
+
+// ------------------------------------------------------------------
 // Admin → Importar posição de estoque da Omie para o Postgres
 // Agora: cExibeTodos = 'N' (apenas itens com saldo) e filtro por codigo_local_estoque
 // ------------------------------------------------------------------
@@ -13227,6 +13408,12 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
   const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     return res.status(500).json({ ok:false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.' });
+  }
+
+  // Primeiro sync do dia → atualiza lista de locais de estoque da Omie
+  const hojeSyncDate = new Date().toISOString().slice(0, 10);
+  if (locaisSyncDate !== hojeSyncDate) {
+    await syncLocaisEstoqueOmie();
   }
 
   const localCodigo = String(req.body?.local || 10408201806);
@@ -13310,8 +13497,8 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
         `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
          VALUES ($1, $2, TRUE, now())
          ON CONFLICT (local_codigo)
-         DO UPDATE SET nome = EXCLUDED.nome, ativo = TRUE, updated_at = now()`,
-        [localCodigo, 'Almoxarifado/Produção']
+         DO UPDATE SET ativo = TRUE, updated_at = now()`,
+        [localCodigo, '']
       );
 
       const upsertSQL = `
@@ -13338,6 +13525,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
       `;
 
       let count = 0;
+      const localNome = await getLocalNome(localCodigo);
       for (const p of itens) {
         await cli.query(upsertSQL, [
           dataISO, localCodigo,
@@ -13353,6 +13541,24 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
           clamp(p.reservado),
           clamp(p.fisico),
         ]);
+
+        // Espelha em logistica.estoque_atual
+        await upsertEstoqueAtual(cli, [
+          localCodigo, localNome,
+          Number(p.nCodProd) || null,
+          p.cCodigo || '',
+          p.cCodInt || null,
+          p.cDescricao || '',
+          clamp(p.nSaldo),
+          clamp(p.fisico),
+          clamp(p.reservado),
+          clamp(p.nPendente),
+          clamp(p.estoque_minimo),
+          clamp(p.nCMC),
+          clamp(p.nPrecoUnitario),
+          'sync'
+        ]);
+
         count++;
       }
 
@@ -13370,7 +13576,236 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
   }
 });
 
+// ------------------------------------------------------------------
+// Consulta logistica.estoque_atual (posição atual por local + produto)
+// ------------------------------------------------------------------
+app.get('/api/logistica/estoque', async (req, res) => {
+  try {
+    await ensureEstoqueAtualTable();
+    const local = req.query.local || null;
+    const q = req.query.q || null;
 
+    let sql = `
+      SELECT e.local_codigo, e.local_nome, e.omie_prod_id, e.codigo, e.cod_int,
+             e.descricao, e.saldo, e.fisico, e.reservado, e.pendente,
+             e.estoque_minimo, e.cmc, e.preco_unitario, e.updated_at, e.origem
+      FROM logistica.estoque_atual e
+      WHERE 1=1
+    `;
+    const params = [];
+    if (local) { params.push(String(local)); sql += ` AND e.local_codigo = $${params.length}`; }
+    if (q) { params.push(`%${q}%`); sql += ` AND (e.codigo ILIKE $${params.length} OR e.descricao ILIKE $${params.length} OR e.cod_int ILIKE $${params.length})`; }
+    sql += ' ORDER BY e.local_nome NULLS LAST, e.codigo';
+
+    const { rows } = await pool.query(sql, params);
+    res.json({ ok: true, total: rows.length, dados: rows });
+  } catch (err) {
+    console.error('[logistica/estoque] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Lista locais com saldo positivo + codigos de produtos neles (para filtro do catálogo)
+app.get('/api/logistica/locais-inventario', async (req, res) => {
+  try {
+    await ensureEstoqueAtualTable();
+    const { rows } = await pool.query(`
+      SELECT local_codigo, local_nome, array_agg(DISTINCT codigo) as codigos, COUNT(DISTINCT codigo) as total
+      FROM logistica.estoque_atual
+      WHERE saldo > 0
+      GROUP BY local_codigo, local_nome
+      ORDER BY local_nome NULLS LAST
+    `);
+    res.json({ ok: true, locais: rows });
+  } catch (err) {
+    console.error('[logistica/locais-inventario] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// POST /api/logistica/separacao - Adiciona produto ao carrinho de separação
+app.post('/api/logistica/separacao', express.json(), async (req, res) => {
+  try {
+    const id_user   = req.session?.user?.id || 'desconhecido';
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
+    const { codigo, descricao, quantidade, unidade } = req.body || {};
+    if (!codigo || !quantidade || Number(quantidade) <= 0) {
+      return res.status(400).json({ ok: false, error: 'Dados inválidos: código e quantidade são obrigatórios.' });
+    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS logistica.carrinho (
+        id             BIGSERIAL PRIMARY KEY,
+        id_user        TEXT NOT NULL,
+        nome_user      TEXT NOT NULL,
+        codigo_produto TEXT NOT NULL,
+        descricao      TEXT,
+        unidade        TEXT NOT NULL DEFAULT 'UN',
+        quantidade     NUMERIC(18,4) NOT NULL,
+        criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS logistica.itens_solicitados (
+        id       BIGSERIAL PRIMARY KEY,
+        id_carr  BIGINT,
+        n_solic  TEXT,
+        status   TEXT
+      )
+    `);
+    const { rows } = await pool.query(
+      `INSERT INTO logistica.carrinho (id_user, nome_user, codigo_produto, descricao, unidade, quantidade)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [id_user, nome_user, codigo, descricao || null, unidade || 'UN', Number(quantidade)]
+    );
+    console.log(`[Carrinho] Item #${rows[0].id} adicionado — ${codigo} x${quantidade} por ${nome_user}`);
+    res.json({ ok: true, id: rows[0].id });
+  } catch (err) {
+    console.error('[logistica/separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/carrinho - Retorna itens do carrinho do usuário atual
+app.get('/api/logistica/carrinho', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { rows } = await pool.query(
+      `SELECT id, codigo_produto, descricao, unidade, quantidade, criado_em
+         FROM logistica.carrinho
+        WHERE id_user = $1
+        ORDER BY criado_em ASC`,
+      [id_user]
+    );
+    res.json({ ok: true, itens: rows });
+  } catch (err) {
+    console.error('[logistica/carrinho GET] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// DELETE /api/logistica/carrinho/:id - Remove item do carrinho do usuário atual
+app.delete('/api/logistica/carrinho/:id', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const itemId = parseInt(req.params.id, 10);
+    if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+    await pool.query(
+      `DELETE FROM logistica.carrinho WHERE id = $1 AND id_user = $2`,
+      [itemId, id_user]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/carrinho DELETE] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// POST /api/logistica/separacao/enviar - Envia separação e limpa carrinho do usuário
+app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => {
+  try {
+    const id_user   = req.session?.user?.id;
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solicitado_para, data_prevista, horario, observacao } = req.body || {};
+
+    // Garante tabela de solicitações
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS logistica.solicitacoes_separacao (
+        id             BIGSERIAL PRIMARY KEY,
+        id_user        TEXT NOT NULL,
+        nome_user      TEXT NOT NULL,
+        solicitado_para TEXT,
+        codigo_produto TEXT NOT NULL,
+        descricao      TEXT,
+        unidade        TEXT NOT NULL DEFAULT 'UN',
+        quantidade     NUMERIC(18,4) NOT NULL,
+        data_prevista  DATE,
+        horario        TEXT,
+        observacao     TEXT,
+        status         TEXT NOT NULL DEFAULT 'pendente',
+        criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+
+    // Busca itens do carrinho do usuário
+    const { rows: itens } = await pool.query(
+      `SELECT codigo_produto, descricao, unidade, quantidade FROM logistica.carrinho WHERE id_user = $1`,
+      [id_user]
+    );
+    if (!itens.length) return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
+
+    // Insere cada item como solicitação
+    for (const item of itens) {
+      await pool.query(
+        `INSERT INTO logistica.solicitacoes_separacao
+           (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, observacao)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [id_user, nome_user, solicitado_para || nome_user, item.codigo_produto, item.descricao, item.unidade, item.quantidade,
+         data_prevista || null, horario || null, observacao || null]
+      );
+    }
+
+    // Limpa carrinho após envio
+    await pool.query(`DELETE FROM logistica.carrinho WHERE id_user = $1`, [id_user]);
+    console.log(`[Separação] Pedido enviado por ${nome_user} (${itens.length} itens)`);
+    res.json({ ok: true, total: itens.length });
+  } catch (err) {
+    console.error('[logistica/separacao/enviar] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Busca estoque por múltiplos códigos de produto (para cards do catálogo)
+app.get('/api/logistica/estoque/batch', async (req, res) => {
+  try {
+    await ensureEstoqueAtualTable();
+    const codigos = (req.query.codigos || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!codigos.length) return res.json({ ok: true, dados: {} });
+
+    const { rows } = await pool.query(
+      `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.estoque_minimo,
+              p.unidade
+       FROM logistica.estoque_atual e
+       LEFT JOIN public.produtos_omie p ON p.codigo = e.codigo
+       WHERE e.codigo = ANY($1::text[])
+       ORDER BY e.codigo, e.local_nome NULLS LAST`,
+      [codigos]
+    );
+
+    const dados = {};
+    const minimos = {};
+
+    // Passo 1: coleta todos os dados
+    for (const row of rows) {
+      if (!dados[row.codigo]) dados[row.codigo] = [];
+      dados[row.codigo].push({ local_nome: row.local_nome || row.local_codigo, saldo: row.saldo, unidade: row.unidade || '' });
+
+      if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: null, abaixo: false };
+      const min = parseFloat(row.estoque_minimo) || 0;
+      // Guarda o maior estoque_minimo encontrado para o produto
+      if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
+      // Guarda saldo do local ALMOXARIFADO
+      if (row.local_nome && row.local_nome.toUpperCase().includes('ALMOXARIFADO')) {
+        minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
+      }
+    }
+
+    // Passo 2: calcula abaixo_minimo com o min correto
+    for (const cod of Object.keys(minimos)) {
+      const info = minimos[cod];
+      if (info.min > 0 && info.saldoAlmox !== null) {
+        info.abaixo = info.saldoAlmox < info.min;
+      }
+    }
+
+    res.json({ ok: true, dados, minimos });
+  } catch (err) {
+    console.error('[logistica/estoque/batch] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
 
 
 // ========== Produção ==========
@@ -23049,18 +23484,20 @@ app.post('/api/compras/agrupar-itens', express.json(), async (req, res) => {
 app.get('/api/compras/catalogo-omie', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT 
+      SELECT
         p.codigo,
         p.descricao,
         p.descricao_familia,
         p.codigo_produto,
+        p.inativo,
         TRIM(i.url_imagem) as url_imagem,
-        COALESCE(e.saldo, 0) as saldo_estoque,
-        COALESCE(e.estoque_minimo, 0) as estoque_minimo,
-        CASE 
-          WHEN e.estoque_minimo > 0 AND e.saldo < e.estoque_minimo THEN true 
-          ELSE false 
-        END as abaixo_minimo
+        COALESCE(ea.saldo_total, 0) as saldo_estoque,
+        COALESCE(ea.estoque_minimo, 0) as estoque_minimo,
+        CASE
+          WHEN ea.estoque_minimo > 0 AND ea.saldo_total < ea.estoque_minimo THEN true
+          ELSE false
+        END as abaixo_minimo,
+        COALESCE(ea.locais, '[]'::json) as locais
       FROM public.produtos_omie p
       LEFT JOIN LATERAL (
         SELECT url_imagem
@@ -23070,14 +23507,17 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
         LIMIT 1
       ) i ON true
       LEFT JOIN LATERAL (
-        SELECT saldo, estoque_minimo
-        FROM public.omie_estoque_posicao
-        WHERE omie_prod_id = p.codigo_produto::bigint
-        ORDER BY data_posicao DESC
-        LIMIT 1
-      ) e ON true
-      WHERE p.inativo = 'N' 
-        AND p.bloqueado = 'N'
+        SELECT
+          SUM(saldo) as saldo_total,
+          MAX(estoque_minimo) as estoque_minimo,
+          json_agg(
+            json_build_object('local_codigo', local_codigo, 'local_nome', local_nome, 'saldo', saldo)
+            ORDER BY local_nome
+          ) FILTER (WHERE saldo > 0) as locais
+        FROM logistica.estoque_atual
+        WHERE codigo = p.codigo
+      ) ea ON true
+      WHERE p.bloqueado = 'N'
       ORDER BY p.descricao
     `);
     
@@ -23088,44 +23528,64 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
   }
 });
 
+// Fila para chamadas à Omie — serializa requisições com delay de 350ms (3 req/s max)
+const _omieImageQueue = (() => {
+  const DELAY_MS = 370; // um pouco acima de 333ms para margem de segurança
+  let _lastCall = 0;
+  let _pending = 0;
+
+  return async function enqueue(fn) {
+    _pending++;
+    const now = Date.now();
+    const wait = Math.max(0, _lastCall + DELAY_MS - now);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    _lastCall = Date.now();
+    try {
+      return await fn();
+    } finally {
+      _pending--;
+    }
+  };
+})();
+
 // GET /api/compras/imagem-fresca/:codigo_produto - Busca URL fresca da imagem direto da Omie
 app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
   try {
     const codigoProduto = req.params.codigo_produto;
-    
-    // Consulta produto na Omie para pegar URLs frescas das imagens
-    const omieBody = {
-      call: 'ConsultarProduto',
-      app_key: process.env.OMIE_APP_KEY,
-      app_secret: process.env.OMIE_APP_SECRET,
-      param: [{ codigo_produto: parseInt(codigoProduto) }]
-    };
-    
-    const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(omieBody)
+
+    const omieData = await _omieImageQueue(async () => {
+      const omieBody = {
+        call: 'ConsultarProduto',
+        app_key: process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param: [{ codigo_produto: parseInt(codigoProduto) }]
+      };
+
+      const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(omieBody)
+      });
+
+      if (!omieResp.ok) {
+        const err = new Error(`HTTP_${omieResp.status}`);
+        err.httpStatus = omieResp.status;
+        throw err;
+      }
+
+      return omieResp.json();
     });
-    
-    if (!omieResp.ok) {
-      console.error(`[Imagem Fresca] Erro HTTP ${omieResp.status} ao consultar produto ${codigoProduto}`);
-      return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
-    }
-    
-    const omieData = await omieResp.json();
-    
+
     // Verifica se houve erro na resposta da Omie
     if (omieData.faultstring || omieData.faultcode) {
       console.warn(`[Imagem Fresca] Erro Omie para produto ${codigoProduto}:`, omieData.faultstring);
-      return res.json({ ok: true, url_imagem: null }); // Produto não encontrado ou sem acesso
+      return res.json({ ok: true, url_imagem: null });
     }
-    
+
     // Atualiza URLs no banco se houver imagens
     if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-      // Remove imagens antigas
       await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
-      
-      // Insere novas imagens com URLs frescas
+
       for (let pos = 0; pos < omieData.imagens.length; pos++) {
         const img = omieData.imagens[pos];
         if (img.url_imagem) {
@@ -23136,15 +23596,21 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
           );
         }
       }
-      
-      // Retorna primeira imagem
+
       const primeiraImagem = omieData.imagens[0]?.url_imagem?.trim() || null;
       res.json({ ok: true, url_imagem: primeiraImagem });
     } else {
-      // Produto sem imagens
       res.json({ ok: true, url_imagem: null });
     }
   } catch (err) {
+    if (err.httpStatus === 429) {
+      console.warn(`[Imagem Fresca] Rate limit Omie para produto ${req.params.codigo_produto} — retornando sem imagem`);
+      return res.json({ ok: true, url_imagem: null });
+    }
+    if (err.httpStatus) {
+      console.error(`[Imagem Fresca] Erro HTTP ${err.httpStatus} ao consultar produto ${req.params.codigo_produto}`);
+      return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
+    }
     console.error('[Imagem Fresca] Erro ao buscar imagem:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem' });
   }

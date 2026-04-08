@@ -82,6 +82,87 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================================
+// GUIAS: Lista de produtos / Solicitações
+// ============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  const tabBtns = document.querySelectorAll('.lp-tab-btn[data-lp-tab]');
+  const tabPanes = {
+    listaProdutosConteudo: document.getElementById('listaProdutosConteudo'),
+    solicitacoesConteudo: document.getElementById('solicitacoesConteudo'),
+  };
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.dataset.lpTab;
+      // Atualiza botões
+      tabBtns.forEach(b => b.classList.remove('lp-tab-active'));
+      btn.classList.add('lp-tab-active');
+
+      // Mostra/esconde conteúdo
+      Object.entries(tabPanes).forEach(([id, el]) => {
+        if (!el) return;
+        el.style.display = id === targetId ? '' : 'none';
+      });
+
+      // Carrega solicitações sob demanda
+      if (targetId === 'solicitacoesConteudo' && typeof window._loadSolicitacoesTab === 'function') {
+        window._loadSolicitacoesTab();
+      }
+    });
+  });
+});
+
+// Placeholder para carregar dados de solicitações (implementar endpoint depois)
+window._loadSolicitacoesTab = async function() {
+  const corpo = document.getElementById('solicitacoesCorpo');
+  const vazio = document.getElementById('solicitacoesVazio');
+  const countEl = document.getElementById('solicitacoesCount');
+  if (!corpo) return;
+
+  // Se já carregou, não recarrega (pode forçar com _loadSolicitacoesTab.force = true)
+  if (corpo.dataset.loaded === '1' && !window._loadSolicitacoesTab.force) return;
+  window._loadSolicitacoesTab.force = false;
+
+  try {
+    const resp = await fetch('/api/solicitacoes-produto');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const items = data.solicitacoes || [];
+
+    if (countEl) countEl.textContent = items.length;
+    corpo.innerHTML = '';
+
+    if (items.length === 0) {
+      if (vazio) vazio.style.display = 'flex';
+      return;
+    }
+    if (vazio) vazio.style.display = 'none';
+
+    items.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'border-bottom:1px solid #e5e7eb;';
+      tr.innerHTML = `
+        <td style="padding:10px;text-align:center;font-size:13px;">${s.id || ''}</td>
+        <td style="padding:10px;font-size:13px;">${s.produto || ''}</td>
+        <td style="padding:10px;text-align:center;font-size:13px;">${s.quantidade || ''}</td>
+        <td style="padding:10px;font-size:13px;">${s.solicitante || ''}</td>
+        <td style="padding:10px;text-align:center;font-size:13px;">${s.status || ''}</td>
+        <td style="padding:10px;text-align:center;font-size:13px;">${s.data || ''}</td>
+      `;
+      corpo.appendChild(tr);
+    });
+    corpo.dataset.loaded = '1';
+  } catch (err) {
+    console.warn('[SOLICITACOES] Erro ao carregar solicitações:', err.message);
+    if (vazio) {
+      vazio.style.display = 'flex';
+      vazio.querySelector('p').textContent = 'Erro ao carregar solicitações';
+    }
+    if (countEl) countEl.textContent = '0';
+  }
+};
+
+// ============================================================================
 // FUNÇÃO GLOBAL PARA ABRIR O CHAT - Disponível imediatamente
 // ============================================================================
 window.openChat = async function() {
@@ -32039,12 +32120,13 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         
         <!-- Informações -->
         <div style="padding:10px;flex:1;display:flex;flex-direction:column;">
-          <div style="font-size:9px;color:#6b7280;margin-bottom:3px;">
-            Cód: ${escapeHtml(produto.codigo)}
+          <div style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:3px;">
+            ${escapeHtml(produto.codigo)}
           </div>
-          <div style="font-size:12px;font-weight:600;color:#1f2937;margin-bottom:6px;line-height:1.3;min-height:32px;">
+          <div style="font-size:10px;font-weight:400;color:#4b5563;margin-bottom:6px;line-height:1.3;min-height:32px;">
             ${escapeHtml(produto.descricao)}
           </div>
+          <div id="estoque-card-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}" style="margin-bottom:6px;min-height:14px;"></div>
           
           <!-- Badges: Família e Estoque -->
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">
@@ -32053,6 +32135,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
               ${escapeHtml(produto.descricao_familia)}
             </span>
             ` : ''}
+            <span id="min-badge-${escapeHtml(produto.codigo)}" data-codigo="${escapeHtml(produto.codigo)}"></span>
             ${produto.abaixo_minimo ? `
             <span style="background:#fef3c7;color:#92400e;padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;display:flex;align-items:center;gap:3px;" title="Estoque: ${produto.saldo_estoque} | Mínimo: ${produto.estoque_minimo}">
               <i class="fa-solid fa-triangle-exclamation" style="font-size:8px;"></i>
@@ -32062,7 +32145,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
           </div>
           
           <!-- Linha com Editar, Quantidade, Prazo e Carrinho -->
-          <div style="margin-top:auto;display:flex;gap:6px;align-items:stretch;">
+          <div style="margin-top:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;">
             <!-- Botão Editar -->
             <button 
               onclick="abrirModalEditarProduto('${produto.codigo}')" 
@@ -32126,6 +32209,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
               title="Adicionar ao carrinho"
               style="
                 flex:1;
+                min-width:32px;
                 background:linear-gradient(135deg,#10b981 0%,#059669 100%);
                 color:white;
                 border:none;
@@ -32140,6 +32224,50 @@ function renderizarCatalogoOmie(produtos, options = {}) {
               onmouseover="this.style.transform='scale(1.02)'"
               onmouseout="this.style.transform='scale(1)'">
               <i class="fa-solid fa-cart-plus"></i>
+            </button>
+
+            <!-- Botão Adicionar à Separação -->
+            <button
+              onclick="event.stopPropagation();abrirModalSeparacaoQtd('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', '${escapeHtml((produto.unidade || 'UN').replace(/'/g, "\\'"))}')"
+              title="Adicionar à separação"
+              style="
+                flex-shrink:0;
+                background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);
+                color:#1a1200;
+                border:none;
+                padding:6px 9px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:15px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+              "
+              onmouseover="this.style.transform='scale(1.02)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-clipboard-plus"></i>
+            </button>
+
+            <!-- Botão Movimentar Estoque -->
+            <button 
+              onclick="abrirModalMovimentacao('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}')"
+              title="Movimentar estoque"
+              style="
+                flex-shrink:0;
+                background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);
+                color:white;
+                border:none;
+                padding:6px 10px;
+                border-radius:4px;
+                cursor:pointer;
+                font-size:16px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+              "
+              onmouseover="this.style.transform='scale(1.02)'"
+              onmouseout="this.style.transform='scale(1)'">
+              <i class="fa-solid fa-arrows-rotate"></i>
             </button>
           </div>
           
@@ -32165,10 +32293,138 @@ function renderizarCatalogoOmie(produtos, options = {}) {
   
   // Atualiza automaticamente todas as imagens expiradas em lote
   setTimeout(() => atualizarImagensExpiradasEmLote(), 100);
+
+  // Carrega estoque por local para os cards
+  setTimeout(() => carregarEstoqueCards(), 200);
+}
+
+// Carrega estoque por local para todos os cards visíveis
+async function carregarEstoqueCards() {
+  const placeholders = document.querySelectorAll('[id^="estoque-card-"]');
+  if (!placeholders.length) return;
+
+  const codigos = Array.from(placeholders).map(el => el.dataset.codigo).filter(Boolean);
+  if (!codigos.length) return;
+
+  try {
+    const resp = await fetch('/api/logistica/estoque/batch?codigos=' + encodeURIComponent(codigos.join(',')));
+    if (!resp.ok) return;
+    const { dados, minimos } = await resp.json();
+
+    placeholders.forEach(el => {
+      const cod = el.dataset.codigo;
+      const locais = dados[cod];
+      if (!locais || locais.length === 0) {
+        el.innerHTML = '<span style="font-size:9px;color:#9ca3af;">Sem estoque</span>';
+        return;
+      }
+      el.innerHTML = locais.map(l =>
+        `<div style="display:flex;justify-content:space-between;font-size:9px;color:#374151;line-height:1.4;">
+          <span style="color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${l.local_nome || l.local_codigo}</span>
+          <span style="font-weight:600;white-space:nowrap;">${Number(l.saldo).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}${l.unidade ? ' ' + l.unidade : ''}</span>
+        </div>`
+      ).join('');
+    });
+
+    // Preenche badges de mínimo
+    if (minimos) {
+      document.querySelectorAll('[id^="min-badge-"]').forEach(badge => {
+        const cod = badge.dataset.codigo;
+        const info = minimos[cod];
+        if (!info || info.min <= 0) return;
+        const cor = info.abaixo ? '#dc2626' : '#16a34a';
+        const bg  = info.abaixo ? '#fee2e2'  : '#dcfce7';
+        badge.innerHTML = `<span style="background:${bg};color:${cor};padding:3px 6px;border-radius:4px;font-size:9px;font-weight:600;">Min. ${Number(info.min).toLocaleString('pt-BR', {minimumFractionDigits:0, maximumFractionDigits:2})}</span>`;
+      });
+    }
+  } catch (e) {
+    // silencia erros de rede
+  }
 }
 
 // Disponibiliza para uso externo (ex.: lista de produtos)
 window.renderizarCatalogoOmie = renderizarCatalogoOmie;
+
+// ===================== MODAL SEPARAÇÃO =====================
+(function() {
+  let _sepCtx = null;
+
+  // Cria o modal diretamente como filho de <body> para position:fixed funcionar
+  // independente de transforms/backdrop-filter em containers pais
+  const ov = document.createElement('div');
+  ov.id = 'modalSeparacaoQtd';
+  ov.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);z-index:99999;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = `
+    <div style="width:min(420px,95%);background:#1c1c1c;border-radius:16px;padding:20px;box-shadow:0 18px 48px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:14px;">
+      <h3 id="sepQtyTitle" style="margin:0;font-size:1.05rem;color:#f0f0f0;">Quantidade para separação</h3>
+      <div id="sepQtyProd" style="font-weight:700;font-size:.95rem;color:#e5e7eb;"></div>
+      <div id="sepQtyUnit" style="display:inline-block;padding:10px 12px;border-radius:12px;background:#2a1b00;border:1px solid #ffb400;color:#ffda7a;font-weight:800;font-size:1.05rem;letter-spacing:.03em;"></div>
+      <input id="sepQtyInput" type="number" min="0.001" step="0.001" value="1" style="width:100%;padding:12px;border:none;border-radius:12px;background:#2a2a2a;color:#fff;font-size:1rem;box-sizing:border-box;" />
+      <div style="display:flex;gap:10px;">
+        <button id="sepQtyCancel" type="button" style="flex:1;border:none;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;background:#2a2a2a;color:#fff;font-size:14px;">Cancelar</button>
+        <button id="sepQtyOk" type="button" style="flex:1;border:none;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;background:#f59e0b;color:#1a1200;font-size:14px;">Confirmar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  function fechar() {
+    ov.style.display = 'none';
+    _sepCtx = null;
+  }
+
+  async function confirmar() {
+    if (!_sepCtx) return;
+    const input = document.getElementById('sepQtyInput');
+    const qty = Number(String(input?.value || '').replace(',', '.'));
+    if (!Number.isFinite(qty) || qty <= 0) { input?.focus({ preventScroll: true }); return; }
+    const { codigo, descricao, unidade } = _sepCtx;
+    fechar();
+    try {
+      const resp = await fetch('/api/logistica/separacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ codigo, descricao, quantidade: qty, unidade })
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        alert('Erro ao registrar separação: ' + (data.error || 'tente novamente.'));
+      } else {
+        // Atualiza badge do botão de separações
+        const badge = document.getElementById('listaSeparacaoCount');
+        if (badge) {
+          const atual = parseInt(badge.textContent) || 0;
+          badge.textContent = atual + 1;
+          badge.style.display = '';
+        }
+      }
+    } catch (err) {
+      console.error('[Separação] Erro:', err);
+      alert('Erro ao conectar ao servidor.');
+    }
+  }
+
+  // eventos do overlay
+  ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
+  document.getElementById('sepQtyCancel').addEventListener('click', fechar);
+  document.getElementById('sepQtyOk').addEventListener('click', confirmar);
+  document.getElementById('sepQtyInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmar();
+    if (e.key === 'Escape') fechar();
+  });
+
+  window.abrirModalSeparacaoQtd = function(codigo, descricao, unidade) {
+    _sepCtx = { codigo, descricao, unidade: (unidade || 'UN').toUpperCase() };
+    const el = id => document.getElementById(id);
+    el('sepQtyTitle').textContent = 'Quantidade para separação';
+    el('sepQtyProd').textContent  = descricao || codigo;
+    el('sepQtyUnit').textContent  = 'SOLICITAR COMO: ' + _sepCtx.unidade;
+    const inp = el('sepQtyInput'); if (inp) inp.value = 1;
+    ov.style.display = 'flex';
+    try { inp?.focus({ preventScroll: true }); } catch {}
+  };
+})();
 
 // Atualiza automaticamente todas as imagens expiradas em lote (com controle de concorrência)
 async function atualizarImagensExpiradasEmLote() {
@@ -50660,3 +50916,499 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('[UPDATE-CHECK] Usuário não logado, monitoramento de atualização desativado');
   }
 });
+
+// ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
+(function () {
+  const overlay   = document.getElementById('modalMovimentacao');
+  const fecharBtn = document.getElementById('movimFecharBtn');
+  const cancelBtn = document.getElementById('movimCancelarBtn');
+  const salvarBtn = document.getElementById('movimSalvarBtn');
+  const tipoDiv   = document.getElementById('movimTipo');
+  const qtdInput  = document.getElementById('movimQtdInput');
+  const qtdResult = document.getElementById('movimQtdResultado');
+  const operDiv   = document.getElementById('movimOperadores');
+  const localSel  = document.getElementById('movimLocalSelect');
+
+  let tipoAtivo = null;
+
+  function fechar() {
+    if (overlay) overlay.style.display = 'none';
+    tipoAtivo = null;
+    if (qtdInput)  qtdInput.value = '';
+    if (qtdResult) qtdResult.textContent = '';
+    document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
+    const msg = document.getElementById('movimMensagem');
+    if (msg) { msg.textContent = ''; msg.className = 'movim-mensagem'; }
+    const sol = document.getElementById('movimSolicitante');
+    if (sol) sol.value = '';
+    const apo = document.getElementById('movimApontamento');
+    if (apo) apo.value = '';
+  }
+
+  if (fecharBtn) fecharBtn.addEventListener('click', fechar);
+  if (cancelBtn) cancelBtn.addEventListener('click', fechar);
+  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+
+  // Tipo de movimentação
+  if (tipoDiv) {
+    tipoDiv.addEventListener('click', e => {
+      const btn = e.target.closest('.movimTipoBtn');
+      if (!btn) return;
+      document.querySelectorAll('.movimTipoBtn').forEach(b => b.classList.remove('ativo'));
+      btn.classList.add('ativo');
+      tipoAtivo = btn.dataset.type;
+    });
+  }
+
+  // Operadores de quantidade
+  if (operDiv) {
+    operDiv.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-insert]');
+      if (!btn || !qtdInput) return;
+      qtdInput.value += btn.dataset.insert;
+      qtdInput.focus();
+      avaliarExpressao();
+    });
+  }
+
+  // Avalia expressão matemática
+  function avaliarExpressao() {
+    if (!qtdInput || !qtdResult) return;
+    try {
+      const expr = qtdInput.value.replace(',', '.');
+      if (!expr.trim()) { qtdResult.textContent = ''; return; }
+      // eslint-disable-next-line no-new-func
+      const val = Function('"use strict"; return (' + expr + ')')();
+      if (typeof val === 'number' && isFinite(val)) {
+        qtdResult.textContent = '= ' + val.toFixed(4).replace(/\.?0+$/, '');
+      } else {
+        qtdResult.textContent = '';
+      }
+    } catch { qtdResult.textContent = ''; }
+  }
+  if (qtdInput) qtdInput.addEventListener('input', avaliarExpressao);
+
+  // Carrega os locais de estoque no select
+  async function carregarLocais() {
+    if (!localSel) return;
+    try {
+      const r = await fetch('/api/armazem/locais?fonte=db');
+      const d = await r.json();
+      localSel.innerHTML = '';
+      (d.locais || []).filter(l => !l.inativo).forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.codigo_local_estoque;
+        opt.textContent = l.descricao || l.codigo_local_estoque;
+        localSel.appendChild(opt);
+      });
+      // Pré-seleciona o local ALMOXARIFADO por padrão
+      const optAlmox = Array.from(localSel.options).find(o =>
+        o.textContent.toUpperCase().includes('ALMOXARIFADO')
+      );
+      if (optAlmox) localSel.value = optAlmox.value;
+    } catch (e) {
+      console.warn('[modalMovimentacao] erro ao carregar locais:', e);
+    }
+  }
+
+  // Carrega estoque atual do produto+local
+  async function carregarEstoque(codigo, local) {
+    const badge = document.getElementById('movimEstoqueAtual');
+    if (!badge) return;
+    badge.textContent = 'Estoque atual: ...';
+    try {
+      const r = await fetch(`/api/logistica/estoque?local=${local}&q=${encodeURIComponent(codigo)}`);
+      const d = await r.json();
+      const item = (d.dados || []).find(i => i.codigo === codigo);
+      badge.textContent = item ? `Estoque atual: ${Number(item.saldo)} UN` : 'Estoque atual: —';
+    } catch { badge.textContent = 'Estoque atual: —'; }
+  }
+
+  // Atualiza estoque ao trocar o local
+  let _codigoProdutoAtual = null;
+  if (localSel) {
+    localSel.addEventListener('change', () => {
+      if (_codigoProdutoAtual) carregarEstoque(_codigoProdutoAtual, localSel.value);
+    });
+  }
+
+  // Abre o modal
+  window.abrirModalMovimentacao = async function(codigo, descricao) {
+    _codigoProdutoAtual = codigo;
+    const titulo   = document.getElementById('movimTitulo');
+    const subtitulo= document.getElementById('movimSubtitulo');
+    if (titulo)    titulo.textContent    = descricao || codigo;
+    if (subtitulo) subtitulo.textContent = 'Codigo: ' + codigo;
+    if (overlay)   overlay.style.display = 'flex';
+
+    await carregarLocais();
+    if (localSel && localSel.value) {
+      await carregarEstoque(codigo, localSel.value);
+    }
+  };
+
+  // Salvar (placeholder para lógica futura)
+  if (salvarBtn) {
+    salvarBtn.addEventListener('click', () => {
+      const msg = document.getElementById('movimMensagem');
+      if (!tipoAtivo) {
+        if (msg) { msg.textContent = 'Selecione o tipo de movimentação.'; msg.className = 'movim-mensagem erro'; }
+        return;
+      }
+      // TODO: implementar lógica de salvar
+      if (msg) { msg.textContent = 'Funcionalidade em desenvolvimento.'; msg.className = 'movim-mensagem info'; }
+    });
+  }
+})();
+// ===================== FIM MODAL MOVIMENTAÇÃO =====================
+
+// ===================== PALLET PICKER =====================
+(function () {
+  const NUM_COLS   = 5;
+  const NUM_LEVELS = 4;
+  const NUM_BAYS   = 2;
+
+  let colunaSelecionada = null;
+
+  const overlay   = document.getElementById('modalPalletPicker');
+  const viewSide  = document.getElementById('ppickerViewSide');
+  const viewFront = document.getElementById('ppickerViewFront');
+  const voltarBtn = document.getElementById('ppickerVoltar');
+  const tituloEl  = document.getElementById('ppickerTitulo');
+  const fecharBtn = document.getElementById('ppickerFechar');
+  const abrirBtn  = document.getElementById('movimAbrirPalletBtn');
+
+  if (!overlay) return;
+
+  // ── Vista Lateral: 5 colunas ──────────────────────────────────
+  function renderSide() {
+    colunaSelecionada = null;
+    viewSide.style.display = 'flex';
+    viewFront.style.display = 'none';
+    voltarBtn.style.display = 'none';
+    tituloEl.textContent = 'Selecione a Coluna';
+    viewSide.innerHTML = '';
+
+    for (let c = 1; c <= NUM_COLS; c++) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ppicker-col-wrap';
+
+      // Corpo da coluna com prateleiras
+      const body = document.createElement('div');
+      body.className = 'ppicker-col-body';
+      for (let n = 0; n < NUM_LEVELS; n++) {
+        const space = document.createElement('div'); space.className = 'ppicker-shelf-space';
+        const shelf = document.createElement('div'); shelf.className = 'ppicker-shelf-line';
+        body.appendChild(space);
+        body.appendChild(shelf);
+      }
+
+      const floor = document.createElement('div'); floor.className = 'ppicker-col-floor-strip';
+      const label = document.createElement('div'); label.className = 'ppicker-col-label';
+      label.textContent = 'C' + c;
+
+      wrap.appendChild(body);
+      wrap.appendChild(floor);
+      wrap.appendChild(label);
+      wrap.addEventListener('click', () => { colunaSelecionada = c; renderFront(c); });
+      viewSide.appendChild(wrap);
+    }
+  }
+
+  // ── Vista Frontal: 2 prateleiras × 4 níveis ──────────────────
+  function renderFront(col) {
+    viewSide.style.display = 'none';
+    viewFront.style.display = 'block';
+    voltarBtn.style.display = 'flex';
+    tituloEl.textContent = 'Coluna ' + col + ' — Vista Frontal';
+    viewFront.innerHTML = '';
+
+    // Cabeçalho dos bays
+    const header = document.createElement('div');
+    header.className = 'ppicker-front-bays-header';
+    header.innerHTML = '<div>Prateleira 1</div><div>Prateleira 2</div>';
+    viewFront.appendChild(header);
+
+    // Níveis do topo (N4) até o chão (N1)
+    for (let n = NUM_LEVELS; n >= 1; n--) {
+      const row = document.createElement('div');
+      row.className = 'ppicker-front-row';
+      for (let b = 1; b <= NUM_BAYS; b++) {
+        const cell = document.createElement('div');
+        cell.className = 'ppicker-front-cell';
+        cell.textContent = 'N' + n;
+        const addr = 'C' + col + '.P' + b + '.N' + n;
+        cell.title = addr;
+        cell.addEventListener('click', () => selecionarEndereco(addr));
+        row.appendChild(cell);
+      }
+      viewFront.appendChild(row);
+    }
+
+    const floorLbl = document.createElement('div');
+    floorLbl.className = 'ppicker-front-floor-label';
+    floorLbl.textContent = 'P I S O';
+    viewFront.appendChild(floorLbl);
+  }
+
+  // ── Adiciona endereço na lista do modal ───────────────────────
+  function adicionarEndereco(address) {
+    const lista = document.getElementById('movimEnderecoLista');
+    const vazio = document.getElementById('movimEnderecoVazio');
+    if (!lista) return;
+
+    // Evita duplicata
+    const existentes = lista.querySelectorAll('.movim-endereco-item');
+    for (const ex of existentes) {
+      if (ex.dataset.address === address) return;
+    }
+
+    const item = document.createElement('div');
+    item.className = 'movim-endereco-item';
+    item.dataset.address = address;
+    item.innerHTML = `
+      <span><i class="fa-solid fa-location-dot" style="color:#60a5fa;margin-right:6px;font-size:10px;"></i>${address}</span>
+      <button type="button" title="Remover"><i class="fa-solid fa-xmark"></i></button>
+    `;
+    item.querySelector('button').addEventListener('click', () => {
+      item.remove();
+      if (!lista.children.length && vazio) vazio.style.display = 'block';
+    });
+
+    lista.appendChild(item);
+    if (vazio) vazio.style.display = 'none';
+  }
+
+  function selecionarEndereco(address) {
+    adicionarEndereco(address);
+    fechar();
+  }
+
+  function abrir() { renderSide(); overlay.style.display = 'flex'; }
+  function fechar() { overlay.style.display = 'none'; }
+
+  fecharBtn.addEventListener('click', fechar);
+  voltarBtn.addEventListener('click', renderSide);
+  overlay.addEventListener('click', e => { if (e.target === overlay) fechar(); });
+  if (abrirBtn) abrirBtn.addEventListener('click', abrir);
+
+  window.abrirPalletPicker = abrir;
+})();
+// ===================== FIM PALLET PICKER =====================
+
+// ===================== MODAL CARRINHO DE SEPARAÇÃO =====================
+(function () {
+  // ── Overlay slide-from-bottom ──
+  const ov = document.createElement('div');
+  ov.id = 'modalCarrinhoSepOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10300;align-items:flex-end;justify-content:center;';
+
+  ov.innerHTML = `
+    <div id="modalCarrinhoSepPanel" style="width:min(720px,96%);background:#1c1c1c;border-radius:20px 20px 0 0;padding:0;max-height:94vh;display:flex;flex-direction:column;transform:translateY(40px);transition:transform .22s ease;overflow:hidden;">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 20px 14px;border-bottom:1px solid #2a2a2a;flex-shrink:0;">
+        <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;">Sol. de separação</h2>
+        <button id="modalCarrinhoSepClose" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:4px 8px;">&#x2715;</button>
+      </div>
+      <!-- Itens do carrinho -->
+      <div id="modalCarrinhoSepItems" style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px;"></div>
+      <div id="modalCarrinhoSepEmpty" style="display:none;color:#6b7280;font-size:.9rem;padding:24px 20px;text-align:center;">Nenhum produto adicionado.</div>
+      <!-- Formulário de envio -->
+      <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:18px 20px 24px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;">
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Solicitado por</label>
+          <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;width:100%;"></select>
+          <small style="color:#6b7280;font-size:.78rem;">Caso necessário altere o user que vai receber.</small>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Data prevista</label>
+          <div style="display:flex;gap:10px;">
+            <input id="modalCarrinhoSepDate" type="date" style="flex:1;background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;" />
+            <select id="modalCarrinhoSepHorario" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;">
+              <option value="08:00">08:00</option>
+              <option value="12:00">12:00</option>
+              <option value="17:30" selected>17:30</option>
+            </select>
+          </div>
+          <small style="color:#6b7280;font-size:.78rem;">Corte 14h: após esse horário, entrega sugerida na próxima janela (17h30 do dia seguinte).</small>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Observação (opcional)</label>
+          <textarea id="modalCarrinhoSepObs" rows="3" placeholder="Instruções adicionais para o almoxarifado" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;resize:vertical;"></textarea>
+        </div>
+        <button id="modalCarrinhoSepSend" style="background:#ffb400;color:#1a1200;font-weight:700;border:none;border-radius:12px;padding:14px;width:100%;font-size:1rem;cursor:pointer;letter-spacing:.02em;">Enviar separação</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  const panel = document.getElementById('modalCarrinhoSepPanel');
+
+  function fechar() {
+    panel.style.transform = 'translateY(40px)';
+    setTimeout(() => { ov.style.display = 'none'; }, 220);
+  }
+
+  function _fmtQty(q) {
+    const n = parseFloat(q);
+    return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
+  }
+
+  function _renderItens(itens) {
+    const container = document.getElementById('modalCarrinhoSepItems');
+    const empty     = document.getElementById('modalCarrinhoSepEmpty');
+    const form      = document.getElementById('modalCarrinhoSepForm');
+    container.innerHTML = '';
+    if (!itens.length) {
+      empty.style.display = 'block';
+      form.style.display  = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    form.style.display  = 'flex';
+    itens.forEach(item => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a2a2a;border-radius:12px;background:#171717;';
+      // Thumb imagem
+      const thumb = document.createElement('div');
+      thumb.style.cssText = 'width:64px;height:64px;border-radius:10px;background:#0f0f0f;overflow:hidden;flex-shrink:0;';
+      const imgEl = document.createElement('img');
+      imgEl.src   = `/imagens_produtos/${item.codigo_produto}.jpg`;
+      imgEl.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+      imgEl.onerror = () => { imgEl.style.display = 'none'; };
+      thumb.appendChild(imgEl);
+      // Info
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;';
+      info.innerHTML = `
+        <span style="font-weight:700;font-size:.85rem;color:#f59e0b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.codigo_produto}</span>
+        <span style="font-size:.82rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</span>
+        <span style="font-size:.78rem;color:#9ca3af;">${_fmtQty(item.quantidade)} ${item.unidade || 'UN'}</span>
+      `;
+      // Botão remover
+      const btn = document.createElement('button');
+      btn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+      btn.style.cssText = 'background:#2a1b1b;border:none;border-radius:8px;color:#f87171;padding:8px 10px;cursor:pointer;flex-shrink:0;';
+      btn.title = 'Remover';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await fetch(`/api/logistica/carrinho/${item.id}`, { method: 'DELETE', credentials: 'include' });
+          row.remove();
+          // Atualiza badge
+          const badge = document.getElementById('listaSeparacaoCount');
+          if (badge) {
+            const n = Math.max(0, (parseInt(badge.textContent) || 0) - 1);
+            badge.textContent = n;
+            if (n === 0) badge.style.display = 'none';
+          }
+          // Verifica se ficou vazio
+          if (!container.children.length) {
+            empty.style.display = 'block';
+            form.style.display  = 'none';
+          }
+        } catch (e) {
+          btn.disabled = false;
+          alert('Erro ao remover item.');
+        }
+      });
+      row.appendChild(thumb);
+      row.appendChild(info);
+      row.appendChild(btn);
+      container.appendChild(row);
+    });
+  }
+
+  async function _carregarUsuarios() {
+    const sel = document.getElementById('modalCarrinhoSepRequester');
+    sel.innerHTML = '<option value="">— carregando... —</option>';
+    try {
+      const resp = await fetch('/api/usuarios/ativos', { credentials: 'include' });
+      const data = await resp.json();
+      const lista = data.usuarios || [];
+      sel.innerHTML = lista.map(u => `<option value="${u.username}">${u.username}</option>`).join('');
+      // Seleciona o usuário logado por padrão
+      try {
+        const me = await fetch('/api/auth/status', { credentials: 'include' }).then(r => r.json());
+        const username = me?.user?.username;
+        if (username) {
+          const opt = Array.from(sel.options).find(o => o.value === username);
+          if (opt) opt.selected = true;
+        }
+      } catch {}
+    } catch {
+      sel.innerHTML = '<option value="">— erro ao carregar —</option>';
+    }
+  }
+
+  async function abrir() {
+    ov.style.display = 'flex';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      panel.style.transform = 'translateY(0)';
+    }));
+    // Preenche data de hoje por padrão
+    const dateEl = document.getElementById('modalCarrinhoSepDate');
+    if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
+
+    await Promise.all([
+      (async () => {
+        try {
+          const resp = await fetch('/api/logistica/carrinho', { credentials: 'include' });
+          const data = await resp.json();
+          _renderItens(data.itens || []);
+          // Sincroniza badge com total real do servidor
+          const badge = document.getElementById('listaSeparacaoCount');
+          if (badge) {
+            const n = (data.itens || []).length;
+            badge.textContent = n;
+            badge.style.display = n > 0 ? '' : 'none';
+          }
+        } catch { _renderItens([]); }
+      })(),
+      _carregarUsuarios()
+    ]);
+  }
+
+  // Enviar separação
+  document.getElementById('modalCarrinhoSepSend').addEventListener('click', async () => {
+    const btn = document.getElementById('modalCarrinhoSepSend');
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+    try {
+      const resp = await fetch('/api/logistica/separacao/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          solicitado_para: document.getElementById('modalCarrinhoSepRequester').value,
+          data_prevista:   document.getElementById('modalCarrinhoSepDate').value || null,
+          horario:         document.getElementById('modalCarrinhoSepHorario').value,
+          observacao:      document.getElementById('modalCarrinhoSepObs').value.trim() || null
+        })
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        // Zera badge e fecha modal
+        const badge = document.getElementById('listaSeparacaoCount');
+        if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+        document.getElementById('modalCarrinhoSepObs').value = '';
+        fechar();
+        alert(`Separação enviada com sucesso! (${data.total} ${data.total === 1 ? 'item' : 'itens'})`);
+      } else {
+        alert('Erro: ' + (data.error || 'tente novamente.'));
+      }
+    } catch (e) {
+      console.error('[CarrinhoSep] Erro ao enviar:', e);
+      alert('Erro ao conectar ao servidor.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Enviar separação';
+    }
+  });
+
+  document.getElementById('modalCarrinhoSepClose').addEventListener('click', fechar);
+  ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
+
+  window.abrirModalCarrinhoSeparacao = abrir;
+})();
+// ===================== FIM MODAL CARRINHO DE SEPARAÇÃO =====================

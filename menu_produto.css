@@ -1519,6 +1519,63 @@ body:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > 
 }
 
 /* ————————————————————————————————
+   Guias: Lista de produtos / Solicitações
+   ———————————————————————————————— */
+.lp-tabs-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border-color, #e5e7eb);
+  padding-bottom: 0;
+}
+.lp-tab-btn {
+  background: none;
+  border: none;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #9ca3af;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.2s, border-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lp-tab-btn:hover {
+  color: var(--theme-color, #3b82f6);
+}
+.lp-tab-btn.lp-tab-active {
+  color: var(--theme-color, #3b82f6);
+  border-bottom-color: var(--theme-color, #3b82f6);
+}
+body:not(.light-mode) .lp-tab-btn {
+  color: #6b7280;
+}
+body:not(.light-mode) .lp-tab-btn:hover,
+body:not(.light-mode) .lp-tab-btn.lp-tab-active {
+  color: #60a5fa;
+  border-bottom-color: #60a5fa;
+}
+body:not(.light-mode) .lp-tabs-nav {
+  border-bottom-color: #374151;
+}
+body:not(.light-mode) #solicitacoesTabela {
+  background: #1e293b;
+  border-color: #334155;
+}
+body:not(.light-mode) #solicitacoesTabela thead tr {
+  background: #1e293b;
+}
+body:not(.light-mode) #solicitacoesTabela thead th {
+  color: #e2e8f0;
+  background: #1e293b;
+  box-shadow: 0 2px 0 #334155;
+}
+
+/* ————————————————————————————————
    Lista de produtos - Linhas clicáveis (sem botão Abrir)
    ———————————————————————————————— */
 .product-list-item {
@@ -9365,3 +9422,376 @@ table.tabela td.num {
   color: #ff9800;
   font-weight: bold;
 }
+
+/* ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE ===================== */
+.movim-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10050;
+  padding: 16px;
+}
+.movim-panel {
+  width: min(540px, 100%);
+  background: #1a1d27;
+  border: 1px solid rgba(113,119,144,.25);
+  border-radius: 22px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 92vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.movim-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(113,119,144,.18);
+}
+.movim-header-info { display: flex; flex-direction: column; gap: 3px; }
+.movim-titulo { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; }
+.movim-subtitulo { font-size: .8rem; color: #8ea0b8; }
+.movim-close {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: background .2s, color .2s;
+}
+.movim-close:hover { background: rgba(255,255,255,.08); color: #f1f5f9; }
+
+/* Estoque + controles */
+.movim-stock-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.movim-stock-badge {
+  flex: 1 1 160px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(13,110,253,.18);
+  border: 1px solid rgba(13,110,253,.45);
+  padding: 11px 16px;
+  border-radius: 14px;
+  letter-spacing: .01em;
+}
+.movim-stock-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.movim-btn-hist {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #0d6efd;
+  color: #fff;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  transition: filter .2s;
+}
+.movim-btn-hist:hover { filter: brightness(1.1); }
+.movim-btn-comp {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #136f63;
+  color: #fff;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  transition: filter .2s;
+}
+.movim-btn-comp:hover { filter: brightness(1.1); }
+.movim-btn-print {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #ffd35c;
+  background: #ffb400;
+  color: #1b1b1b;
+  font-size: .9rem;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 40px;
+  transition: filter .2s;
+}
+.movim-btn-print:hover { filter: brightness(1.08); }
+
+/* Local de estoque + tipo */
+.movim-field { display: flex; flex-direction: column; gap: 6px; }
+.movim-field label { font-size: .82rem; color: #9ca3af; }
+.movim-field select,
+.movim-field input,
+.movim-field textarea {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #2f3545;
+  background: #252833;
+  color: #f1f5f9;
+  font-size: .92rem;
+}
+.movim-field textarea { min-height: 60px; resize: vertical; }
+
+/* Tipo de movimentação */
+.movim-tipo { display: flex; gap: 10px; flex-wrap: wrap; }
+.movimTipoBtn {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  background: #2a2d3a;
+  color: #d1d5db;
+  font-weight: 600;
+  font-size: .95rem;
+  min-height: 46px;
+  transition: background .2s, transform .15s;
+}
+.movimTipoBtn:hover { background: #333748; }
+.movimTipoBtn.ativo { transform: translateY(-1px); }
+.movimTipoBtn[data-type="ENTRADA"].ativo  { background: #166b16; color: #fff; }
+.movimTipoBtn[data-type="SAIDA"].ativo    { background: #8a2020; color: #fff; }
+.movimTipoBtn[data-type="TRANSFERENCIA"].ativo { background: #105c7a; color: #fff; }
+
+/* Operadores quantidade */
+#movimQtdResultado { min-height: 20px; font-size: .88rem; color: #7bfa8b; text-align: right; }
+#movimOperadores { display: flex; gap: 8px; }
+#movimOperadores button {
+  flex: 1;
+  padding: 9px;
+  border: none;
+  border-radius: 10px;
+  background: #2a2d3a;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background .2s;
+}
+#movimOperadores button:hover { background: #373b4d; }
+
+/* Mensagem */
+.movim-mensagem { min-height: 22px; font-size: .88rem; }
+.movim-mensagem.ok    { color: #7bfa8b; }
+.movim-mensagem.erro  { color: #ff7373; }
+.movim-mensagem.info  { color: #93c5fd; }
+
+/* Endereços */
+.movim-enderecos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: #22253299;
+  border-radius: 14px;
+  border: 1px solid #2f3545;
+}
+.movim-enderecos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.movim-enderecos-header h4 { margin: 0; font-size: .93rem; color: #d1d5db; }
+.movim-endereco-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid #2f3545;
+  background: #2a2d3a;
+  color: #d1d5db;
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+}
+.movim-endereco-add:hover { background: #333748; }
+.movim-endereco-vazio { font-size: .85rem; color: #6b7280; }
+
+/* Ações */
+.movim-acoes { display: flex; gap: 12px; margin-top: 4px; }
+.movim-acoes button {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: .95rem;
+  transition: filter .2s;
+}
+#movimCancelarBtn { background: #2a2d3a; color: #d1d5db; }
+#movimCancelarBtn:hover { filter: brightness(1.1); }
+#movimSalvarBtn { background: #4f46e5; color: #fff; }
+#movimSalvarBtn:hover { filter: brightness(1.1); }
+/* Media queries responsividade modal movimentação */
+@media (max-width: 480px) {
+  .movim-panel {
+    padding: 16px 14px;
+    border-radius: 16px;
+    gap: 12px;
+  }
+  .movim-titulo { font-size: .92rem; }
+  .movim-stock-badge { font-size: 1.1rem; padding: 9px 12px; flex: 1 1 100%; }
+  .movim-stock-controls { width: 100%; }
+  .movim-btn-hist, .movim-btn-comp, .movim-btn-print {
+    padding: 8px 10px; font-size: .8rem; min-height: 38px; flex: 1;
+  }
+  .movimTipoBtn { font-size: .8rem; padding: 10px 4px; min-height: 42px; }
+  .movim-acoes button { padding: 11px; font-size: .88rem; }
+  #movimOperadores button { padding: 8px; }
+}
+@media (max-width: 360px) {
+  .movimTipoBtn[data-type="TRANSFERENCIA"] { font-size: .72rem; padding: 10px 2px; }
+}
+/* ===================== FIM MODAL MOVIMENTAÇÃO ===================== */
+
+/* ===================== PALLET PICKER ===================== */
+.ppicker-panel {
+  background: #12151f;
+  border: 1px solid #2d3748;
+  border-radius: clamp(12px, 3vw, 18px);
+  padding: clamp(14px, 4vw, 22px);
+  max-width: 500px;
+  width: min(500px, 95vw);
+  color: white;
+  font-family: inherit;
+}
+.ppicker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.ppicker-header-left { display: flex; flex-direction: column; gap: 6px; }
+.ppicker-titulo { font-size: 15px; font-weight: 700; color: #e2e8f0; }
+.ppicker-voltar {
+  background: none; border: none; color: #60a5fa; font-size: 12px;
+  cursor: pointer; padding: 0; display: flex; align-items: center; gap: 5px; font-family: inherit;
+}
+.ppicker-fechar {
+  background: #1e2535; border: 1px solid #374151; color: #9ca3af;
+  width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+/* SIDE VIEW */
+.ppicker-side-view {
+  display: flex; gap: clamp(5px, 2vw, 10px); justify-content: center;
+  padding: clamp(6px, 2vw, 10px) 0 clamp(12px, 4vw, 24px);
+  flex-wrap: nowrap;
+}
+.ppicker-col-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0; cursor: pointer;
+}
+.ppicker-col-body {
+  width: clamp(40px, 12vw, 56px);
+  height: clamp(120px, 36vw, 168px);
+  background: linear-gradient(160deg, #1e2d40 0%, #162030 100%);
+  border: 2px solid #2e4a6a;
+  border-radius: 3px 3px 0 0;
+  position: relative;
+  display: flex; flex-direction: column;
+  padding: 5px 5px 5px;
+  transition: all 0.2s;
+  box-shadow: -6px 5px 0 #0a1018, 0 4px 16px rgba(0,0,0,0.5);
+}
+.ppicker-col-body::after {
+  content: '';
+  position: absolute;
+  top: -8px; left: -6px; right: -2px; height: 8px;
+  background: #2a4a6e;
+  border: 1px solid #3a6a9e;
+  border-bottom: none;
+  transform: skewX(-45deg);
+  transform-origin: bottom left;
+}
+.ppicker-col-wrap:hover .ppicker-col-body {
+  border-color: #60a5fa;
+  background: linear-gradient(160deg, #1e3a5f 0%, #162a45 100%);
+  box-shadow: -6px 5px 0 #0a1018, 0 0 20px rgba(96,165,250,0.3);
+  transform: translateY(-5px);
+}
+.ppicker-shelf-space { flex: 1; }
+.ppicker-shelf-line {
+  height: 3px;
+  background: linear-gradient(90deg, #3a7acc, #60a5fa);
+  border-radius: 2px; margin: 0 1px;
+  box-shadow: 0 0 4px rgba(96,165,250,0.3);
+}
+.ppicker-col-floor-strip {
+  width: clamp(40px, 12vw, 56px);
+  height: 7px;
+  background: #1a3a5c;
+  border: 1px solid #2e4a6a; border-top: 2px solid #3a7acc;
+  border-radius: 0 0 3px 3px;
+}
+.ppicker-col-label {
+  font-size: 11px; color: #9ca3af; font-weight: 700;
+  letter-spacing: 1px; margin-top: 7px;
+}
+/* FRONT VIEW */
+.ppicker-front-view { padding: 4px 0 8px; }
+.ppicker-front-bays-header {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px; margin-bottom: 8px; padding: 0 2px;
+}
+.ppicker-front-bays-header div {
+  text-align: center; font-size: 11px; color: #60a5fa;
+  font-weight: 700; padding: 5px; background: #1a2535;
+  border-radius: 6px; letter-spacing: 0.5px;
+}
+.ppicker-front-row {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px; margin-bottom: 8px; padding: 0 2px;
+}
+.ppicker-front-cell {
+  background: linear-gradient(160deg, #1e2d40 0%, #162030 100%);
+  border: 2px solid #2e4a6a;
+  border-radius: 8px;
+  padding: clamp(12px, 4vw, 18px) clamp(6px, 2vw, 8px);
+  text-align: center; font-size: clamp(11px, 3vw, 13px); font-weight: 700;
+  color: #93c5fd; cursor: pointer;
+  transition: all 0.15s;
+  box-shadow: 0 3px 0 #0a1018, 0 4px 8px rgba(0,0,0,0.3);
+}
+.ppicker-front-cell:hover {
+  background: linear-gradient(160deg, #1e3a5f 0%, #162a45 100%);
+  border-color: #60a5fa; color: white;
+  transform: translateY(-3px);
+  box-shadow: 0 6px 0 #0a1018, 0 8px 16px rgba(96,165,250,0.25);
+}
+.ppicker-front-cell:active { transform: translateY(0); box-shadow: 0 1px 0 #0a1018; }
+.ppicker-front-floor-label {
+  text-align: center; font-size: 10px; font-weight: 700;
+  color: #374151; letter-spacing: 4px; margin-top: 6px;
+}
+/* Itens de endereço no modal movimentação */
+.movim-endereco-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: #1a2535; border: 1px solid #2e4a6a;
+  border-radius: 8px; padding: 7px 12px; margin-bottom: 6px;
+  font-size: 12px; font-weight: 700; color: #93c5fd;
+}
+.movim-endereco-item button {
+  background: none; border: none; color: #ef4444;
+  cursor: pointer; font-size: 13px; padding: 2px 4px; line-height: 1;
+}
+/* Media queries responsividade pallet picker */
+@media (max-width: 400px) {
+  .ppicker-col-label { font-size: 9px; letter-spacing: 0; margin-top: 4px; }
+  .ppicker-titulo { font-size: 13px; }
+  .ppicker-front-bays-header div { font-size: 10px; padding: 4px; }
+}
+/* ===================== FIM PALLET PICKER ===================== */
