@@ -44,10 +44,10 @@
     .dash-header .dash-nome { font-size: 20px; font-weight: 800; line-height: 1.25; word-break: break-word; }
     .badge { display: inline-block; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-top: 8px; text-transform: uppercase; letter-spacing: .4px; }
     .tbl-titulo { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 10px; margin-top: 4px; }
-    .tbl-wrap { overflow-x: auto; border-radius: 10px; border: 1.5px solid rgba(255,255,255,.12); }
+    .tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 200px); border-radius: 10px; border: 1.5px solid rgba(255,255,255,.12); }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead tr { background: #2c3e6b; }
-    thead th { padding: 9px 10px; text-align: left; font-weight: 700; font-size: 11px; letter-spacing: .3px; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    thead th { padding: 9px 10px; text-align: left; font-weight: 700; font-size: 11px; letter-spacing: .3px; text-transform: uppercase; color: #fff; white-space: nowrap; position: sticky; top: 0; z-index: 2; background: #2c3e6b; }
     tbody tr { transition: background .12s; border-bottom: 1px solid #d1d5db; background: #fff; color: #111827; }
     tbody tr:hover { background: #f0f4ff; }
     tbody td { padding: 8px 10px; color: #1e293b; vertical-align: top; font-weight: 500; }
