@@ -260,7 +260,13 @@
         <button class="logout-btn" onclick="sair()" title="Sair" style="margin-top:0;width:auto;padding:8px 10px;flex-shrink:0;line-height:1;"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
       </div>
     </div>
-    <div class="tbl-titulo">Meus Atendimentos</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <div class="tbl-titulo" style="margin-bottom:0;">Meus Atendimentos</div>
+      <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
+        style="padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+        Exibir finalizados
+      </button>
+    </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
@@ -538,38 +544,66 @@
     }
 
     // ── Tabela de atendimentos ──
+    let _listaAtend = [];
+    let _exibirFinaliz = false;
+
+    function _toggleFinaliz() {
+      _exibirFinaliz = !_exibirFinaliz;
+      const btn = document.getElementById('btnToggleFinaliz');
+      if (btn) {
+        btn.textContent   = _exibirFinaliz ? 'Ocultar finalizados' : 'Exibir finalizados';
+        btn.style.borderColor  = _exibirFinaliz ? '#6366f1' : '#d97706';
+        btn.style.background   = _exibirFinaliz ? 'rgba(99,102,241,.18)' : 'rgba(217,119,6,.12)';
+        btn.style.color        = _exibirFinaliz ? '#a5b4fc' : '#f59e0b';
+      }
+      _renderAtendimentos();
+    }
+
+    function _isFinalizado(st) {
+      const s = String(st || '').toLowerCase().trim();
+      return s === 'finalizado' || s === 'fechado';
+    }
+
+    function _renderAtendimentos() {
+      const tbody = document.getElementById('atendTbody');
+      const lista = _exibirFinaliz ? _listaAtend : _listaAtend.filter(a => !_isFinalizado(a.status_os));
+      if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">' +
+          (_exibirFinaliz ? 'Nenhum atendimento vinculado.' : 'Nenhum atendimento em aberto.') +
+          '</td></tr>';
+        return;
+      }
+      tbody.innerHTML = lista.map(a => {
+        const st = a.status_os || 'aberta';
+        const m  = _statusMeta(st);
+        const nfeCell = a.nfe_url
+          ? '<a href="' + esc(a.nfe_url) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>'
+          : _isFinalizado(st)
+            ? '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>'
+            : '<span class="tbl-icon-btn tbl-nfe-disabled" title="Finalize o atendimento primeiro">📎</span>';
+        const fechCls = _isFinalizado(st) ? ' is-fechada' : '';
+        return `
+        <tr data-id-at="${a.id_at}">
+          <td class="tbl-os" onclick="abrirOsModal(${a.id_at})" style="cursor:pointer;" title="Ver OS">${esc(a.os_num)}</td>
+          <td style="white-space:nowrap;">${esc(a.data)}</td>
+          <td>${esc(a.cliente)}</td>
+          <td style="white-space:nowrap;">${esc(a.modelo)}</td>
+          <td class="tbl-prob">${esc(a.problema)}</td>
+          <td><button class="tbl-icon-btn" onclick="event.stopPropagation();abrirEvidModal(${a.id_at})" title="Ver evidências">📷</button></td>
+          <td><button class="tbl-icon-btn tbl-fechar-btn${fechCls}" onclick="event.stopPropagation();abrirFechModal(${a.id_at})" title="Finalizar atendimento" style="white-space:nowrap;font-size:11px;">Finalizar</button></td>
+          <td class="tbl-nfe-cell">${nfeCell}</td>
+          <td><span class="status-badge status-${m.cls}">${m.label}</span></td>
+        </tr>`;
+      }).join('');
+    }
+
     async function carregarAtendimentos() {
       const tbody = document.getElementById('atendTbody');
-      tbody.innerHTML = '<tr><td colspan="5" class="tbl-empty">Carregando…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">Carregando…</td></tr>';
       try {
         const r = await fetch(`${BASE}/api/sac/at/tecnico/atendimentos?token=${encodeURIComponent(TOKEN)}`);
-        const lista = r.ok ? await r.json() : [];
-        if (!lista.length) {
-          tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">Nenhum atendimento vinculado.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = lista.map(a => {
-          const st = a.status_os || 'aberta';
-          const m  = _statusMeta(st);
-          const nfeCell = a.nfe_url
-            ? '<a href="' + esc(a.nfe_url) + '" target="_blank" onclick="event.stopPropagation()" title="Ver NFe" class="tbl-icon-btn">📄</a>'
-            : st === 'aberta'
-              ? '<span class="tbl-icon-btn tbl-nfe-disabled" title="Finalize o atendimento primeiro">📎</span>'
-              : '<button class="tbl-icon-btn" onclick="event.stopPropagation();abrirNfeUpload(' + a.id_at + ')" title="Anexar NFe">📎</button>';
-          const fechCls = st === 'aberta' ? '' : ' is-fechada';
-          return `
-          <tr data-id-at="${a.id_at}">
-            <td class="tbl-os" onclick="abrirOsModal(${a.id_at})" style="cursor:pointer;" title="Ver OS">${esc(a.os_num)}</td>
-            <td style="white-space:nowrap;">${esc(a.data)}</td>
-            <td>${esc(a.cliente)}</td>
-            <td style="white-space:nowrap;">${esc(a.modelo)}</td>
-            <td class="tbl-prob">${esc(a.problema)}</td>
-            <td><button class="tbl-icon-btn" onclick="event.stopPropagation();abrirEvidModal(${a.id_at})" title="Ver evidências">📷</button></td>
-            <td><button class="tbl-icon-btn tbl-fechar-btn${fechCls}" onclick="event.stopPropagation();abrirFechModal(${a.id_at})" title="Finalizar atendimento" style="white-space:nowrap;font-size:11px;">Finalizar</button></td>
-            <td class="tbl-nfe-cell">${nfeCell}</td>
-            <td><span class="status-badge status-${m.cls}">${m.label}</span></td>
-          </tr>`;
-        }).join('');
+        _listaAtend = r.ok ? await r.json() : [];
+        _renderAtendimentos();
       } catch {
         tbody.innerHTML = '<tr><td colspan="9" class="tbl-empty">Erro ao carregar.</td></tr>';
       }
@@ -830,13 +864,22 @@
     }
 
     function _atualizarBadgeLinha(idAt, novoStatus) {
+      // Atualiza cache
+      const cached = _listaAtend.find(a => a.id_at === idAt);
+      if (cached) cached.status_os = novoStatus;
+      // Se filtro ativo e a linha ficou finalizada, remove da tabela
+      if (!_exibirFinaliz && _isFinalizado(novoStatus)) {
+        const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
+        if (row) row.remove();
+        return;
+      }
       const row = document.querySelector('#atendTbody tr[data-id-at="' + idAt + '"]');
       if (!row) return;
       const m = _statusMeta(novoStatus);
       const badge = row.querySelector('.status-badge');
       if (badge) { badge.textContent = m.label; badge.className = 'status-badge status-' + m.cls; }
       const fbtn = row.querySelector('.tbl-fechar-btn');
-      if (fbtn) fbtn.className = 'tbl-icon-btn tbl-fechar-btn' + (novoStatus === 'aberta' ? '' : ' is-fechada');
+      if (fbtn) fbtn.className = 'tbl-icon-btn tbl-fechar-btn' + (_isFinalizado(novoStatus) ? ' is-fechada' : '');
       // Ativa botão NFe quando sai de 'aberta'
       if (novoStatus !== 'aberta') {
         const nfeTd = row.querySelector('.tbl-nfe-cell');
