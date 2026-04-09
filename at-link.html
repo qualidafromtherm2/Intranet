@@ -460,8 +460,9 @@
       const sessRaw = sessionStorage.getItem(SESS_KEY);
       if (sessRaw) {
         try {
-          const d = JSON.parse(atob(sessRaw.replace(/-/g,'+').replace(/_/g,'/')));
-          mostrarDash(d);
+          const uRaw = sessionStorage.getItem(SESS_KEY + '_u');
+          const u = uRaw ? JSON.parse(uRaw) : {};
+          mostrarDash(u);
           carregarAtendimentos();
           return;
         } catch {}
@@ -526,6 +527,7 @@
           return;
         }
         sessionStorage.setItem(SESS_KEY, d.session);
+        sessionStorage.setItem(SESS_KEY + '_u', JSON.stringify({ nome: d.nome, tipo: d.tipo }));
         mostrarDash(d);
         carregarAtendimentos();
       } catch { setErro('loginErro', 'Erro de conexão.'); }
@@ -539,6 +541,7 @@
     }
     function sair() {
       sessionStorage.removeItem(SESS_KEY);
+      sessionStorage.removeItem(SESS_KEY + '_u');
       document.getElementById('senhaLogin').value = '';
       mostrar('loginSection');
     }

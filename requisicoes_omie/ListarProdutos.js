@@ -305,6 +305,9 @@ function renderFromCache() {
   const pane = document.getElementById(__listaPaneId);
   const title = pane?.querySelector('.content-section-title');
   if (title) title.textContent = `Lista de produtos (${itens.length})`;
+  // Atualiza badge da aba
+  const productCountEl = document.getElementById('productCount');
+  if (productCountEl) productCountEl.textContent = itens.length;
 }
 
 async function hardRefreshLista() {
