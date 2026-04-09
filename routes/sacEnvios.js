@@ -614,6 +614,9 @@ router.post('/at', async (req, res) => {
     plataformaAtendimento: String(body.plataforma_atendimento || '').trim() || null,
   };
 
+  // Atendimento Rápido → sempre fechado automaticamente
+  const statusInicial = (payload.tipo || '').toLowerCase() === 'atendimento rapido' ? 'Fechado' : null;
+
   // Se vier id_at_existente significa que é um novo registro de reclamação sobre um AT já existente
   const idAtExistente = body.id_at_existente && Number.isInteger(Number(body.id_at_existente))
     ? Number(body.id_at_existente)
@@ -669,8 +672,9 @@ router.post('/at', async (req, res) => {
            atendimento_inicial,
            modelo,
            tag_problema,
-           plataforma_atendimento
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           plataforma_atendimento,
+           status
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -690,6 +694,7 @@ router.post('/at', async (req, res) => {
           payload.modelo,
           payload.tagProblema,
           payload.plataformaAtendimento,
+          statusInicial,
         ]
       );
       atRow = result.rows[0];
@@ -720,8 +725,9 @@ router.post('/at', async (req, res) => {
            atendimento_inicial,
            modelo,
            tag_problema,
-           plataforma_atendimento
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           plataforma_atendimento,
+           status
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -741,6 +747,7 @@ router.post('/at', async (req, res) => {
           payload.modelo,
           payload.tagProblema,
           payload.plataformaAtendimento,
+          statusInicial,
         ]
       );
       atRow = result.rows[0];
@@ -822,6 +829,7 @@ router.get('/at/atendimentos', async (_req, res) => {
            f.observacoes              AS fech_obs,
            f.midias_servico           AS fech_midias,
            f.status_os                AS status_os,
+           a.status                   AS status,
            ct.nome                    AS tecnico_nome,
            COALESCE(anx.qtd, 0)       AS qtd_anexos
          FROM sac.at a
@@ -921,6 +929,30 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
   } catch (err) {
     console.error('[SAC/AT] erro ao atualizar atendimento:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao atualizar atendimento.' });
+  }
+});
+
+// ─── PATCH /at/status/:id — altera apenas o campo status de sac.at ───────────
+router.patch('/at/status/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+  const VALORES_VALIDOS = ['Aberto', 'Fechado', 'Aguardando NF AT'];
+  const { status } = req.body || {};
+  if (!status || !VALORES_VALIDOS.includes(status)) {
+    return res.status(400).json({ ok: false, error: `Status inválido. Use: ${VALORES_VALIDOS.join(', ')}.` });
+  }
+
+  try {
+    const r = await pool.query(
+      `UPDATE sac.at SET status = $1 WHERE id = $2 RETURNING id, status`,
+      [status, id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, error: 'OS não encontrada.' });
+    return res.json({ ok: true, id, status: r.rows[0].status });
+  } catch (err) {
+    console.error('[SAC/AT] erro ao atualizar status:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao atualizar status.' });
   }
 });
 
@@ -1869,22 +1901,43 @@ router.get('/at/cep/:cep', async (req, res) => {
   }
 
   try {
-    const resp = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {
+    // BrasilAPI v2 — retorna endereço + coordenadas GPS
+    const resp = await fetchWithTimeout(`https://brasilapi.com.br/api/cep/v2/${cep}`, {
       headers: { Accept: 'application/json' }
     }, 10000);
 
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.erro) {
-      return res.status(404).json({ ok: false, error: 'CEP não encontrado.' });
+    if (!resp.ok || !data || !data.city) {
+      // Fallback: ViaCEP (sem coordenadas)
+      const r2 = await fetchWithTimeout(`https://viacep.com.br/ws/${cep}/json/`, {
+        headers: { Accept: 'application/json' }
+      }, 8000);
+      const d2 = await r2.json().catch(() => ({}));
+      if (!r2.ok || d2?.erro) {
+        return res.status(404).json({ ok: false, error: 'CEP não encontrado.' });
+      }
+      return res.json({
+        ok: true,
+        cep:       String(d2.cep  || '').replace(/\D/g,''),
+        municipio: String(d2.localidade || '').trim(),
+        uf:        String(d2.uf   || '').trim(),
+        bairro:    String(d2.bairro     || '').trim(),
+        rua:       String(d2.logradouro || '').trim(),
+        lat: null,
+        lng: null,
+      });
     }
 
+    const coords = data.location && data.location.coordinates;
     return res.json({
       ok: true,
-      cep: String(data.cep || '').trim(),
-      rua: String(data.logradouro || '').trim(),
-      bairro: String(data.bairro || '').trim(),
-      cidade: String(data.localidade || '').trim(),
-      estado: String(data.uf || '').trim(),
+      cep:       cep,
+      municipio: String(data.city         || '').trim(),
+      uf:        String(data.state        || '').trim(),
+      bairro:    String(data.neighborhood || '').trim(),
+      rua:       String(data.street       || '').trim(),
+      lat: coords && coords.latitude  ? parseFloat(coords.latitude)  : null,
+      lng: coords && coords.longitude ? parseFloat(coords.longitude) : null,
     });
   } catch (err) {
     console.error('[SAC/AT] erro ao consultar CEP:', err);
@@ -2618,12 +2671,89 @@ router.get('/at/tecnicos', async (req, res) => {
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   try {
     const { rows } = await pool.query(
-      `SELECT nome, municipio, uf, celular, tipo, lat, lng FROM sac.controle_tecnicos ${where} ORDER BY nome LIMIT 100`,
+      `SELECT id, nome, municipio, uf, celular, tipo, lat, lng FROM sac.controle_tecnicos ${where} ORDER BY nome LIMIT 100`,
       params
     );
     res.json(rows);
   } catch (err) {
     console.error('[SAC/AT] erro ao buscar técnicos:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /at/tecnicos/:id — dados completos de um técnico pelo id
+router.get('/at/tecnicos/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng, qtd_atend_ult_1_ano
+       FROM sac.controle_tecnicos WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Técnico não encontrado.' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /at/tecnicos — cria novo técnico
+router.post('/at/tecnicos', async (req, res) => {
+  const { nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
+  if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO sac.controle_tecnicos (nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng`,
+      [
+        String(nome).trim(),
+        cnpj_cpf  ? String(cnpj_cpf).trim()  : null,
+        endereco  ? String(endereco).trim()  : null,
+        municipio ? String(municipio).trim() : null,
+        uf        ? String(uf).trim().toUpperCase() : null,
+        cep       ? String(cep).replace(/\D/g, '') || null : null,
+        celular   ? String(celular).trim() : null,
+        tipo      ? String(tipo).trim() : null,
+        lat != null ? parseFloat(lat) || null : null,
+        lng != null ? parseFloat(lng) || null : null,
+      ]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /at/tecnicos/:id — atualiza dados de um técnico
+router.put('/at/tecnicos/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.status(400).json({ error: 'ID inválido.' });
+  const { nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng } = req.body || {};
+  if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome obrigatório.' });
+  try {
+    const { rows } = await pool.query(
+      `UPDATE sac.controle_tecnicos
+       SET nome=$1, cnpj_cpf=$2, endereco=$3, municipio=$4, uf=$5, cep=$6, celular=$7, tipo=$8, lat=$9, lng=$10
+       WHERE id=$11
+       RETURNING id, nome, cnpj_cpf, endereco, municipio, uf, cep, celular, tipo, lat, lng`,
+      [
+        String(nome).trim(),
+        cnpj_cpf  ? String(cnpj_cpf).trim()  : null,
+        endereco  ? String(endereco).trim()  : null,
+        municipio ? String(municipio).trim() : null,
+        uf        ? String(uf).trim().toUpperCase() : null,
+        cep       ? String(cep).replace(/\D/g, '') || null : null,
+        celular   ? String(celular).trim() : null,
+        tipo      ? String(tipo).trim() : null,
+        lat != null ? parseFloat(lat) || null : null,
+        lng != null ? parseFloat(lng) || null : null,
+        id,
+      ]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Técnico não encontrado.' });
+    res.json(rows[0]);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

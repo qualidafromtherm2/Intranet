@@ -13641,9 +13641,17 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
         descricao      TEXT,
         unidade        TEXT NOT NULL DEFAULT 'UN',
         quantidade     NUMERIC(18,4) NOT NULL,
+        data_prevista  DATE,
+        horario        TEXT,
+        cod_omie       TEXT,
         criado_em      TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    // Garante colunas em tabela já existente
+    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
+    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
+    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
+    await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS logistica.itens_solicitados (
         id       BIGSERIAL PRIMARY KEY,
@@ -13652,15 +13660,57 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
         status   TEXT
       )
     `);
-    const { rows } = await pool.query(
-      `INSERT INTO logistica.carrinho (id_user, nome_user, codigo_produto, descricao, unidade, quantidade)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [id_user, nome_user, codigo, descricao || null, unidade || 'UN', Number(quantidade)]
+    // Busca codigo_produto (Omie) na tabela de produtos
+    const omieRes = await pool.query(
+      `SELECT codigo_produto FROM public.produtos_omie WHERE codigo = $1 LIMIT 1`,
+      [codigo]
     );
-    console.log(`[Carrinho] Item #${rows[0].id} adicionado — ${codigo} x${quantidade} por ${nome_user}`);
+    const cod_omie = omieRes.rows[0]?.codigo_produto || null;
+
+    const { rows } = await pool.query(
+      `INSERT INTO logistica.carrinho (id_user, nome_user, codigo_produto, descricao, unidade, quantidade, cod_omie)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [id_user, nome_user, codigo, descricao || null, unidade || 'UN', Number(quantidade), cod_omie]
+    );
+    console.log(`[Carrinho] Item #${rows[0].id} adicionado — ${codigo} (omie:${cod_omie}) x${quantidade} por ${nome_user}`);
     res.json({ ok: true, id: rows[0].id });
   } catch (err) {
     console.error('[logistica/separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/solicitacoes-pendentes - Retorna itens pendentes agrupados por usuário
+app.get('/api/logistica/solicitacoes-pendentes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT i.id AS solic_id, i.status,
+             c.id AS carr_id, c.nome_user, c.retirada_por, c.codigo_produto, c.descricao, c.quantidade, c.unidade, c.criado_em
+        FROM logistica.itens_solicitados i
+        JOIN logistica.carrinho c ON c.id = i.id_carr
+       WHERE i.status = 'pendente'
+       ORDER BY COALESCE(c.retirada_por, c.nome_user), c.criado_em ASC
+    `);
+    // Agrupa por retirada_por (fallback: nome_user)
+    const grupos = {};
+    for (const row of rows) {
+      const chave = row.retirada_por || row.nome_user;
+      if (!grupos[chave]) grupos[chave] = [];
+      grupos[chave].push({
+        solic_id:       row.solic_id,
+        carr_id:        row.carr_id,
+        codigo_produto: row.codigo_produto,
+        descricao:      row.descricao,
+        quantidade:     row.quantidade,
+        unidade:        row.unidade,
+        status:         row.status,
+        criado_em:      row.criado_em
+      });
+    }
+    const resultado = Object.entries(grupos).map(([retirada_por, itens]) => ({ nome_user: retirada_por, itens }));
+    res.json({ ok: true, grupos: resultado });
+  } catch (err) {
+    console.error('[logistica/solicitacoes-pendentes] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -13672,9 +13722,12 @@ app.get('/api/logistica/carrinho', async (req, res) => {
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { rows } = await pool.query(
       `SELECT id, codigo_produto, descricao, unidade, quantidade, criado_em
-         FROM logistica.carrinho
-        WHERE id_user = $1
-        ORDER BY criado_em ASC`,
+         FROM logistica.carrinho c
+        WHERE c.id_user = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
+          )
+        ORDER BY c.criado_em ASC`,
       [id_user]
     );
     res.json({ ok: true, itens: rows });
@@ -13729,14 +13782,22 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       )
     `);
 
-    // Busca itens do carrinho do usuário
+    // Grava data_prevista, horario e retirada_por nos itens do carrinho antes de processar
+    await pool.query(
+      `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
+        WHERE id_user = $4
+          AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
+      [data_prevista || null, horario || null, solicitado_para || nome_user, id_user]
+    );
+
+    // Busca itens do carrinho do usuário (com id para popular itens_solicitados)
     const { rows: itens } = await pool.query(
-      `SELECT codigo_produto, descricao, unidade, quantidade FROM logistica.carrinho WHERE id_user = $1`,
+      `SELECT id, codigo_produto, descricao, unidade, quantidade FROM logistica.carrinho WHERE id_user = $1 AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id) ORDER BY criado_em ASC`,
       [id_user]
     );
     if (!itens.length) return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
 
-    // Insere cada item como solicitação
+    // Insere cada item em solicitacoes_separacao e em itens_solicitados
     for (const item of itens) {
       await pool.query(
         `INSERT INTO logistica.solicitacoes_separacao
@@ -13745,11 +13806,15 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         [id_user, nome_user, solicitado_para || nome_user, item.codigo_produto, item.descricao, item.unidade, item.quantidade,
          data_prevista || null, horario || null, observacao || null]
       );
+      await pool.query(
+        `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status)
+         VALUES ($1, NULL, 'pendente')`,
+        [item.id]
+      );
     }
 
-    // Limpa carrinho após envio
-    await pool.query(`DELETE FROM logistica.carrinho WHERE id_user = $1`, [id_user]);
-    console.log(`[Separação] Pedido enviado por ${nome_user} (${itens.length} itens)`);
+    // Carrinho mantido — itens ficam ocultos via itens_solicitados.id_carr
+    console.log(`[Separação] Pedido enviado por ${nome_user} (${itens.length} itens) — carrinho preservado`);
     res.json({ ok: true, total: itens.length });
   } catch (err) {
     console.error('[logistica/separacao/enviar] erro:', err);

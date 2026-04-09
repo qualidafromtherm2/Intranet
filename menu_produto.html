@@ -2249,9 +2249,22 @@
                     <i class="fa-solid fa-table-list"></i>
                     <span>Atendimentos</span>
                   </button>
-                  <button id="atConfigAlimentacaoBtn" class="content-button" type="button" title="Configurar Alimentação" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#374151 0%,#1f2937 100%);color:#9ca3af;padding:8px 12px;">
-                    <i class="fa-solid fa-gear"></i>
-                  </button>
+                  <!-- Dropdown Configuração -->
+                  <div id="atConfigDropdownWrap" style="position:relative;">
+                    <button id="atConfigAlimentacaoBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#374151 0%,#1f2937 100%);color:#9ca3af;padding:8px 14px;">
+                      <i class="fa-solid fa-gear"></i>
+                      <span>Configuração</span>
+                      <i class="fa-solid fa-chevron-down" style="font-size:10px;margin-left:2px;"></i>
+                    </button>
+                    <div id="atConfigDropdownMenu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);min-width:200px;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);overflow:hidden;">
+                      <button id="atConfigAlimMenuBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
+                        <i class="fa-solid fa-bolt" style="color:#facc15;"></i> Configurar Alimentação
+                      </button>
+                      <button id="atAtualizarTecBtn" type="button" style="width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;color:#e5e7eb;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='transparent'">
+                        <i class="fa-solid fa-user-gear" style="color:#38bdf8;"></i> Atualizar Técnico
+                      </button>
+                    </div>
+                  </div>
                   <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar para AT</span>
@@ -2269,7 +2282,7 @@
                     <option value="">Selecione</option>
                     <option value="Qualidade">Qualidade</option>
                     <option value="Comercial">Comercial</option>
-                    <option value="Extanção de garantia">Extanção de garantia</option>
+                    <option value="Extensão de garantia">Extensão de garantia</option>
                     <option value="Atendimento rápido">Atendimento rápido</option>
                   </select>
                 </div>
@@ -2465,9 +2478,9 @@
                           <option value="">Todos</option>
                           <option value="Qualidade">Qualidade</option>
                           <option value="Comercial">Comercial</option>
-                          <option value="Extanção de garantia">Extanção de garantia</option>
+                          <option value="Extensão de garantia">Extensão de garantia</option>
                           <option value="Extensão Garantia">Extensão Garantia</option>
-                          <option value="Atendimento Rapido">Atendimento Rápido</option>
+                          <option value="Atendimento rápido">Atendimento rápido</option>
                           <option value="EXCLUIR_RAPIDO" selected>≠ Atendimento Rápido (padrão)</option>
                         </select>
                       </div>
@@ -2477,10 +2490,10 @@
                         <label style="display:block;font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;">Status OS</label>
                         <select id="atFiltroStatus" style="width:100%;padding:7px 10px;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;font-size:13px;">
                           <option value="">Todos</option>
-                          <option value="aberta">Aberta</option>
-                          <option value="aguardando">Aguardando</option>
-                          <option value="finalizado">Finalizado</option>
                           <option value="EXCLUIR_FECHADO" selected>≠ Fechado (padrão)</option>
+                          <option value="Aberto">Aberto</option>
+                          <option value="Aguardando NF AT">Aguardando NF AT</option>
+                          <option value="Fechado">Fechado</option>
                         </select>
                       </div>
 
@@ -2646,6 +2659,26 @@
                 <span id="atEditModalTitle">Editar Atendimento</span>
               </h3>
               <div style="display:flex;align-items:center;gap:6px;">
+                <!-- Botão Status OS -->
+                <div style="position:relative;">
+                  <button id="atStatusOsBtn" type="button" title="Alterar status da OS"
+                    style="background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);color:#eab308;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px;transition:background .2s;">
+                    <i class="fa-solid fa-circle-half-stroke"></i>
+                    <span id="atStatusOsBadge" style="font-size:11px;font-weight:600;">status</span>
+                    <i class="fa-solid fa-chevron-down" style="font-size:10px;"></i>
+                  </button>
+                  <div id="atStatusOsDropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#1e293b;border:1px solid #334155;border-radius:10px;padding:4px;min-width:160px;z-index:10060;box-shadow:0 8px 24px rgba(0,0,0,.4);">
+                    <button class="at-status-opt" data-v="Aberto"           style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:none;color:#94a3b8;border-radius:6px;cursor:pointer;font-size:13px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;display:inline-block;"></span> Aberto
+                    </button>
+                    <button class="at-status-opt" data-v="Fechado"          style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:none;color:#94a3b8;border-radius:6px;cursor:pointer;font-size:13px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0;display:inline-block;"></span> Fechado
+                    </button>
+                    <button class="at-status-opt" data-v="Aguardando NF AT" style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;background:none;border:none;color:#94a3b8;border-radius:6px;cursor:pointer;font-size:13px;">
+                      <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;flex-shrink:0;display:inline-block;"></span> Aguardando NF AT
+                    </button>
+                  </div>
+                </div>
                 <button id="atMencaoOpenBtn" type="button" title="Registrar menção"
                   style="background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.4);color:#a855f7;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:5px;transition:background .2s;">
                   <i class="fa-solid fa-at"></i>
@@ -2665,6 +2698,7 @@
                     <select id="atEmTipo" class="at-em-input">
                       <option value="Qualidade">Qualidade</option>
                       <option value="Garantia">Garantia</option>
+                      <option value="Extensão de garantia">Extensão de garantia</option>
                       <option value="Atendimento rápido">Atendimento rápido</option>
                       <option value="Troca">Troca</option>
                     </select>
@@ -3117,6 +3151,124 @@
               <div id="atTecLista" style="display:flex;flex-direction:column;gap:6px;"></div>
               <div id="atTecEmpty" style="display:none;text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum técnico encontrado.</div>
               <div id="atTecLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Atualizar Técnico -->
+        <div id="atAtualizarTecModal" class="modal-overlay" style="display:none;z-index:10056;">
+          <div class="modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+              <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-user-gear" style="color:#38bdf8;"></i>
+                Atualizar Técnico
+              </h3>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <button id="atNovoTecBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:8px;border:none;background:#22c55e;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">
+                  <i class="fas fa-plus"></i> Novo Técnico
+                </button>
+                <button id="atAtualizarTecModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+              </div>
+            </div>
+            <div style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <div style="position:relative;flex:1;min-width:180px;">
+                  <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:12px;"></i>
+                  <input id="atUpdTecBuscaInput" type="text" placeholder="Buscar por nome..."
+                    style="width:100%;padding:7px 10px 7px 30px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.07);color:#e5e7eb;font-size:13px;box-sizing:border-box;outline:none;">
+                </div>
+                <button id="atUpdTecFiltroBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid rgba(14,165,233,.4);background:rgba(14,165,233,.12);color:#38bdf8;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap;">
+                  <i class="fas fa-filter"></i>
+                  <span id="atUpdTecFiltroLabel">Todos</span>
+                </button>
+              </div>
+              <div id="atUpdTecFiltroDropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
+                <div style="padding:6px 12px 4px;font-size:11px;color:#6b7280;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">Estados</div>
+                <div id="atUpdTecUfCheckList" style="display:flex;flex-direction:column;"></div>
+              </div>
+            </div>
+            <div id="atUpdTecListWrap" style="flex:1;overflow-y:auto;padding:10px 14px;min-height:120px;max-height:55vh;">
+              <div id="atUpdTecLista" style="display:flex;flex-direction:column;gap:6px;"></div>
+              <div id="atUpdTecEmpty" style="display:none;text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;">Nenhum técnico encontrado.</div>
+              <div id="atUpdTecLoading" style="text-align:center;padding:24px;color:var(--inactive-color);font-size:13px;"><i class="fas fa-circle-notch fa-spin"></i> Carregando...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Formulário Técnico (editar / criar) -->
+        <div id="atTecFormModal" class="modal-overlay" style="display:none;z-index:10057;">
+          <div class="modal-container" style="max-width:520px;width:96%;">
+            <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);">
+              <h3 id="atTecFormTitle" style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-user-pen" style="color:#38bdf8;"></i>
+                Editar Técnico
+              </h3>
+              <button id="atTecFormClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+              <input type="hidden" id="atTecFormId">
+              <input type="hidden" id="atTecFormLat">
+              <input type="hidden" id="atTecFormLng">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <!-- Nome -->
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">NOME <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormNome" class="input-padrao" type="text" placeholder="Nome completo ou razão social" required>
+                </div>
+                <!-- CEP com auto-preenchimento -->
+                <div style="grid-column:1/-1;position:relative;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">
+                    CEP <span style="color:#ef4444;">*</span>
+                    <span id="atTecFormCepStatus" style="margin-left:8px;font-size:10px;color:#9ca3af;font-weight:400;"></span>
+                  </label>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="atTecFormCep" class="input-padrao" type="text" maxlength="9" placeholder="00000-000" required style="flex:1;">
+                    <div id="atTecFormCepSpinner" style="display:none;width:18px;height:18px;border:2px solid rgba(14,165,233,.3);border-top-color:#0ea5e9;border-radius:50%;animation:atSpinAnim .7s linear infinite;flex-shrink:0;"></div>
+                  </div>
+                </div>
+                <!-- Endereço (rua + número) — preenchido pelo CEP -->
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">ENDEREÇO <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormEndereco" class="input-padrao" type="text" placeholder="Rua, número, complemento" required>
+                </div>
+                <!-- Cidade / Município -->
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">CIDADE / MUNICÍPIO <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormMunicipio" class="input-padrao" type="text" placeholder="Ex: Itajaí" required>
+                </div>
+                <!-- UF -->
+                <div>
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">ESTADO (UF) <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormUf" class="input-padrao" type="text" maxlength="2" placeholder="Ex: SC" required style="text-transform:uppercase;">
+                </div>
+                <!-- CNPJ / CPF -->
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">CNPJ / CPF <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormCnpjCpf" class="input-padrao" type="text" placeholder="00.000.000/0000-00 ou 000.000.000-00" required>
+                </div>
+                <!-- Celular -->
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">CELULAR <span style="color:#ef4444;">*</span></label>
+                  <input id="atTecFormCelular" class="input-padrao" type="text" placeholder="(00) 00000-0000" required>
+                </div>
+                <!-- Tipo -->
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:11px;color:var(--inactive-color);display:block;margin-bottom:3px;">TIPO <span style="color:#ef4444;">*</span></label>
+                  <select id="atTecFormTipo" class="input-padrao" required style="width:100%;">
+                    <option value="">Selecione</option>
+                    <option value="AT Autorizada">AT Autorizada</option>
+                    <option value="AT Habilitada">AT Habilitada</option>
+                  </select>
+                </div>
+              </div>
+              <div id="atTecFormMsg" style="display:none;font-size:12px;padding:6px 10px;border-radius:6px;"></div>
+            </div>
+            <div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);display:flex;justify-content:flex-end;gap:8px;">
+              <button id="atTecFormCancelar" type="button" class="btn-secondary">Cancelar</button>
+              <button id="atTecFormSalvar" type="button" class="content-button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:#fff;">
+                <i class="fa-solid fa-floppy-disk"></i> Salvar
+              </button>
             </div>
           </div>
         </div>
@@ -4138,24 +4290,11 @@
                     </svg>
                   </button>
                 </div>
-                <div id="solicitacoesListaWrapper" style="max-height:calc(100vh - 220px);overflow-y:auto;">
-                  <table id="solicitacoesTabela" style="width:100%;border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;">
-                    <thead>
-                      <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
-                        <th style="padding:12px 10px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;width:80px;">ID</th>
-                        <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Produto</th>
-                        <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Qtd</th>
-                        <th style="padding:12px 16px;text-align:left;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Solicitante</th>
-                        <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Status</th>
-                        <th style="padding:12px 16px;text-align:center;font-weight:600;color:#111827;font-size:13px;position:sticky;top:0;z-index:60;background:#f9fafb;box-shadow:0 2px 0 #e5e7eb;">Data</th>
-                      </tr>
-                    </thead>
-                    <tbody id="solicitacoesCorpo">
-                    </tbody>
-                  </table>
+                <div id="solicitacoesListaWrapper" style="max-height:calc(100vh - 220px);overflow-y:auto;padding:16px 0;">
+                  <div id="solicitacoesCards" style="display:flex;flex-direction:column;gap:16px;"></div>
                   <div id="solicitacoesVazio" style="display:none;text-align:center;padding:40px 20px;color:#9ca3af;">
-                    <i class="fa-solid fa-clipboard-list" style="font-size:40px;margin-bottom:12px;"></i>
-                    <p style="font-weight:600;font-size:14px;">Nenhuma solicitação encontrada</p>
+                    <i class="fa-solid fa-clipboard-list" style="font-size:40px;margin-bottom:12px;display:block;"></i>
+                    <p style="font-weight:600;font-size:14px;">Nenhuma solicitação pendente</p>
                   </div>
                 </div>
               </div><!-- /solicitacoesConteudo -->
@@ -6109,6 +6248,9 @@
   <div class="header-menu">
     <a href="#" data-arm-tab="estoque" class="main-header-link is-active">Estoque</a>
     <a href="#" data-arm-tab="transferencia" class="main-header-link">Transferência</a>
+    <a href="#" data-arm-tab="armazem3d" class="main-header-link">
+      <i class="fa-solid fa-warehouse" style="margin-right:5px;"></i>Armazém 3D
+    </a>
   </div>
 </div>
 
@@ -6273,9 +6415,273 @@
       </div>
     </div>
   </div>
-</div>
 
+<!-- ===================== PAINEL ARMAZÉM ===================== -->
+<div id="conteudo-armazem3d" class="armazem-page" style="display:none;">
+  <div class="arm3d-outer">
 
+    <!-- Vista lateral com botões de Rua divididos em Esquerda/Direita -->
+    <div class="arm3d-photo-wrap a3-visible" id="arm3dPhotoWrap">
+      <img src="img/armazem3d_side.png" alt="Vista lateral do armazém"
+           class="arm3d-side-img" id="arm3dSideImg">
+      <div class="arm3d-ruas">
+        <button class="arm3d-rua-btn" data-rua="4" data-lado="D">R4D</button>
+        <button class="arm3d-rua-btn" data-rua="3" data-lado="E">R3E</button>
+        <button class="arm3d-rua-btn" data-rua="3" data-lado="D">R3D</button>
+        <button class="arm3d-rua-btn" data-rua="2" data-lado="E">R2E</button>
+        <button class="arm3d-rua-btn" data-rua="2" data-lado="D">R2D</button>
+        <button class="arm3d-rua-btn" data-rua="1" data-lado="E">R1E</button>
+        <button class="arm3d-rua-btn" data-rua="1" data-lado="D">R1D</button>
+      </div>
+    </div><!-- /arm3d-photo-wrap -->
+
+    <!-- Painel 2D — abre ao selecionar uma rua/lado -->
+    <div class="arm3d-rua-panel" id="arm3dRuaPanel" style="display:none;">
+      <div class="arm3d-rua-panel-header">
+        <button class="arm3d-btn-back" id="arm3dBtnBack">
+          <i class="fa-solid fa-arrow-left"></i> Voltar
+        </button>
+        <span class="arm3d-rua-panel-title" id="arm3dRuaPanelTitle">Rua 1 — Esquerda</span>
+      </div>
+      <div class="arm3d-rua-panel-body" id="arm3dRuaPanelBody">
+        <!-- preenchido dinamicamente pelo JS -->
+      </div>
+    </div><!-- /arm3d-rua-panel -->
+
+  </div><!-- /arm3d-outer -->
+</div><!-- /conteudo-armazem3d -->
+
+<style>
+/* ======================================================
+   ARMAZÉM — vista lateral com seleção de rua/lado
+   ====================================================== */
+.arm3d-outer {
+  width: 100%;
+  height: calc(100vh - 180px);
+  min-height: 460px;
+  background: radial-gradient(ellipse at 50% 55%, #182030 0%, #080c12 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+  border-radius: 8px;
+}
+
+/* Wrapper da foto + botões de Rua */
+.arm3d-photo-wrap {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 75%;
+  aspect-ratio: 1316 / 886;
+  max-height: 82%;
+  z-index: 5;
+}
+.arm3d-photo-wrap.a3-visible {
+  display: block;
+}
+.arm3d-side-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+  pointer-events: none;
+}
+
+/* Container dos grupos de rua */
+.arm3d-ruas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* =====================================================
+   POSIÇÃO INDIVIDUAL DE CADA BOTÃO — edite left e bottom
+   ===================================================== */
+.arm3d-rua-btn {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: rgba(20, 40, 80, 0.85);
+  color: #fff;
+  border: 1.5px solid rgba(100, 160, 255, 0.6);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s, transform 0.1s;
+  white-space: nowrap;
+}
+/* --- Rua 4 --- */
+.arm3d-rua-btn[data-rua="4"][data-lado="D"] { left: 5.5%;  bottom: 8%; }
+/* --- Rua 3 --- */
+.arm3d-rua-btn[data-rua="3"][data-lado="E"] { left: 13.5%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="3"][data-lado="D"] { left: 34.5%;  bottom: 8%; }
+/* --- Rua 2 --- */
+.arm3d-rua-btn[data-rua="2"][data-lado="E"] { left: 43.2%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="2"][data-lado="D"] { left: 63.3%;  bottom: 8%; }
+/* --- Rua 1 --- */
+.arm3d-rua-btn[data-rua="1"][data-lado="E"] { left: 71.5%;  bottom: 8%; }
+.arm3d-rua-btn[data-rua="1"][data-lado="D"] { left: 93.2%;  bottom: 8%; }
+.arm3d-rua-btn:hover {
+  background: rgba(40, 90, 180, 0.95);
+  transform: translateY(-2px) translateX(-50%);
+}
+.arm3d-rua-btn[data-lado="E"] { border-right-width: 1px; border-radius: 6px 3px 3px 6px; }
+.arm3d-rua-btn[data-lado="D"] { border-left-width: 1px;  border-radius: 3px 6px 6px 3px; }
+
+/* ---- Painel 2D ---- */
+.arm3d-rua-panel {
+  position: absolute;
+  inset: 0;
+  background: #0d1420;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  overflow: hidden;
+}
+.arm3d-rua-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(100,160,255,0.15);
+  flex-shrink: 0;
+}
+.arm3d-btn-back {
+  background: rgba(20, 40, 80, 0.85);
+  color: #fff;
+  border: 1px solid rgba(100, 160, 255, 0.4);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.arm3d-btn-back:hover { background: rgba(40, 90, 180, 0.95); }
+.arm3d-rua-panel-title {
+  color: rgba(255,255,255,0.85);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.arm3d-rua-panel-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: hidden;
+}
+/* Wrapper da estante: mantém proporção 3:2 e ocupa o máximo possível */
+.arm3d-shelf-wrap {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  /* mantém a proporção dentro da caixa disponível */
+  height: auto;
+  width: auto;
+  /* ajuste fino: se largura limitar antes */
+  flex-shrink: 0;
+}
+.arm3d-estante-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+  user-select: none;
+  pointer-events: none;
+}
+/* Grid overlay alinhado com as células da prateleira.
+   grid-template-rows usa fr proporcional às alturas reais da imagem —
+   não usa px fixo, então escala em qualquer dispositivo */
+.arm3d-shelf-grid {
+  position: absolute;
+  inset: 1.8% 1.5% 6.4% 1.5%;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: 203fr 145fr 147fr 148fr 149fr 148fr;
+  pointer-events: none;
+}
+.arm3d-cell {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0;
+  padding: 0 2px 4px;
+  pointer-events: auto;
+}
+/* ---- Ajuste fino por linha: padding-bottom sobe o card — linha 6 é referência ---- */
+.arm3d-shelf-grid > .arm3d-cell:nth-child(n+11):nth-child(-n+20) { padding-bottom: 9px; }
+.arm3d-shelf-grid > .arm3d-cell:nth-child(n+21):nth-child(-n+30) { padding-bottom: 14px; }
+.arm3d-shelf-grid > .arm3d-cell:nth-child(n+31):nth-child(-n+40) { padding-bottom: 19px; }
+.arm3d-shelf-grid > .arm3d-cell:nth-child(n+41):nth-child(-n+50) { padding-bottom: 24px; }
+.arm3d-shelf-grid > .arm3d-cell:nth-child(n+51)                  { padding-bottom: 29px; }
+.arm3d-cell-card {
+  background: rgba(10, 20, 50, 0.65);
+  border: 1px solid rgba(100, 160, 255, 0.35);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 27px 2px 27px;
+  white-space: nowrap;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  letter-spacing: 0.03em;
+  width: 45%;
+  text-align: center;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.arm3d-card-label {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* Cards lado a lado sem cantos internos arredondados */
+.arm3d-cell .arm3d-cell-card:first-child { border-radius: 4px 0 0 4px; border-right-width: 0; }
+.arm3d-cell .arm3d-cell-card:last-child  { border-radius: 0 4px 4px 0; }
+.arm3d-cell-card:hover {
+  background: rgba(40, 90, 200, 0.85);
+  border-color: rgba(100, 180, 255, 0.75);
+  transform: scale(1.06);
+  z-index: 2;
+  position: relative;
+}
+
+.arm3d-empty-msg {
+  font-size: 0.9rem;
+  text-align: center;
+  margin-top: 40px;
+  opacity: 0.5;
+}
+</style>
+
+</div><!-- /#armazemContent -->
 
   <!-- Comercial -->
 <div id="kanbanContent" style="display:none;">

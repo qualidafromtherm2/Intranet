@@ -252,17 +252,11 @@ export function attachSelectEditor(li, f, currentValue) {
   
       if (isEditing) {
         // === entra em modo edição e carrega lista ===
-        const famRes = await fetch(`${API_BASE}/api/omie/familias`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            call: 'PesquisarFamilias',
-            param: [{ pagina:1, registros_por_pagina:50 }],
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET
-          })
-        });
-        const { famCadastro = [] } = await famRes.json();
+        const famRes = await fetch(`${API_BASE}/api/familia/list`);
+        const famData = await famRes.json();
+        const familiasRaw = Array.isArray(famData.familias) ? famData.familias : [];
+        // Mapeia campos do banco para formato esperado
+        const famCadastro = familiasRaw.map(f => ({ codigo: f.cod, nomeFamilia: f.nome_familia }));
         familyCache = famCadastro;
   
         originalValue = currentValue;
