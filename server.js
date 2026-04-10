@@ -1,7 +1,7 @@
 // server.js
 // Carrega as variáveis de ambiente definidas em .env
 // no topo do intranet/server.js
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -123,6 +123,7 @@ app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
 app.use('/api/registros', require('./routes/registros'));
 app.use('/api/sac', require('./routes/sacEnvios'));
+app.use('/api/ai', require('./routes/ai_assistant'));
 
 app.get('/api/produtos/stream', (req, res) => {
   const accept = String(req.headers?.accept || '');
@@ -7384,21 +7385,6 @@ app.get('/api/compras/categorias', async (_req, res) => {
        ORDER BY descricao ASC`
     );
 
-    // Se não houver dados, tenta sincronizar uma vez
-    if (rows.length === 0) {
-      try {
-        await syncCategoriasCompraOmie();
-        const { rows: rows2 } = await pool.query(
-          `SELECT codigo, descricao
-           FROM configuracoes.categoria_compra
-           ORDER BY descricao ASC`
-        );
-        return res.json({ ok: true, total: rows2.length, categorias: rows2 });
-      } catch (e) {
-        return res.status(500).json({ ok: false, error: e.message });
-      }
-    }
-
     res.json({ ok: true, total: rows.length, categorias: rows });
   } catch (err) {
     console.error('[API /api/compras/categorias] Erro:', err);
@@ -12514,7 +12500,9 @@ app.get('/api/armazem/locais', async (req, res) => {
     }
   };
 
-  if (preferSource === 'db') {
+  // Padrão: sempre servir do banco (sem chamar Omie API).
+  // Para forçar refresh via Omie use ?fonte=omie explicitamente.
+  if (preferSource !== 'omie') {
     return servirDoBanco();
   }
 
@@ -12618,8 +12606,24 @@ function scheduleSync(localCodigo, dataBR) {
 }
 
 async function scheduleSyncAll(dataBR) {
-  const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE');
-  for (const r of rows) scheduleSync(String(r.local_codigo), dataBR);
+  const { rows } = await pool.query('SELECT local_codigo FROM omie_locais_estoque WHERE ativo = TRUE ORDER BY local_codigo');
+  // Escalonar cada local com +3s extra além do debounce para evitar rajada simultânea → 429 Omie
+  rows.forEach((r, idx) => {
+    const staggerMs = idx * 3000;
+    clearTimeout(syncTimers.get(String(r.local_codigo)));
+    const t = setTimeout(async () => {
+      try {
+        await fetch(`http://localhost:${process.env.PORT || 5001}/api/admin/sync/almoxarifado?timeout=90000&retry=1`, {
+          method : 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body   : JSON.stringify({ local: Number(r.local_codigo), data: dataBR }),
+        });
+      } catch (e) {
+        console.error('[webhook] re-sync (all) falhou local', r.local_codigo, e);
+      }
+    }, SYNC_DEBOUNCE_MS + staggerMs);
+    syncTimers.set(String(r.local_codigo), t);
+  });
 }
 
 function pickLocalFromPayload(body) {
@@ -13263,17 +13267,9 @@ app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, re
       }
     }
 
-    // 3) agenda re-sync
-    const hojeBR = new Date().toLocaleDateString('pt-BR');
-    const localDoPayload = pickLocalFromPayload(body);
-
-    if (localDoPayload) {
-      scheduleSync(String(localDoPayload), hojeBR);
-      return res.json({ ok:true, scheduled:true, scope:'local', local:String(localDoPayload) });
-    } else {
-      await scheduleSyncAll(hojeBR);
-      return res.json({ ok:true, scheduled:true, scope:'all' });
-    }
+    // Re-sync completo via API Omie desativado: o webhook já atualizou estoque_atual acima.
+    // Use /api/admin/sync/almoxarifado manualmente se precisar reconciliar posição histórica.
+    return res.json({ ok:true, updated:'estoque_atual', scope: ev.codigo_local_estoque ? 'local' : 'sem_local' });
   } catch (err) {
     console.error('[webhook/omie/estoque]', err);
     res.status(500).json({ ok:false, error:String(err.message || err) });
@@ -13318,20 +13314,9 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
       }
     }
 
-    // 2) tenta descobrir o local do estoque no payload; se não achar, usa o padrão
-    const localDoPayload =
-      body?.codigo_local_estoque ||
-      body?.param?.[0]?.codigo_local_estoque ||
-      body?.dados?.codigo_local_estoque ||
-      10408201806;
-
-    // data de posição padrão = hoje (BR)
-    const hojeBR = new Date().toLocaleDateString('pt-BR');
-
-    // 3) agenda re-sync (debounced)
-    scheduleSync(String(localDoPayload), hojeBR);
-
-    res.json({ ok:true, scheduled:true, local: String(localDoPayload) });
+    // Re-sync completo via API Omie desativado: o webhook já atualizou estoque_atual acima.
+    // Use /api/admin/sync/almoxarifado manualmente se precisar reconciliar posição histórica.
+    res.json({ ok:true, updated:'estoque_atual' });
   } catch (err) {
     console.error('[webhook/omie/estoque]', err);
     res.status(500).json({ ok:false, error: String(err.message || err) });
@@ -13398,6 +13383,20 @@ async function syncLocaisEstoqueOmie() {
 }
 
 // ------------------------------------------------------------------
+// Admin → Atualiza omie_locais_estoque manualmente (não automático)
+// ------------------------------------------------------------------
+app.post('/api/admin/sync/locais-estoque', async (req, res) => {
+  try {
+    await syncLocaisEstoqueOmie();
+    const { rows } = await pool.query('SELECT local_codigo, nome, ativo FROM omie_locais_estoque ORDER BY local_codigo');
+    res.json({ ok: true, total: rows.length, locais: rows });
+  } catch (err) {
+    console.error('[admin/sync/locais-estoque]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+// ------------------------------------------------------------------
 // Admin → Importar posição de estoque da Omie para o Postgres
 // Agora: cExibeTodos = 'N' (apenas itens com saldo) e filtro por codigo_local_estoque
 // ------------------------------------------------------------------
@@ -13410,11 +13409,8 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
     return res.status(500).json({ ok:false, error: 'OMIE_APP_KEY/OMIE_APP_SECRET ausentes no ambiente.' });
   }
 
-  // Primeiro sync do dia → atualiza lista de locais de estoque da Omie
-  const hojeSyncDate = new Date().toISOString().slice(0, 10);
-  if (locaisSyncDate !== hojeSyncDate) {
-    await syncLocaisEstoqueOmie();
-  }
+  // syncLocaisEstoqueOmie() removido do fluxo automático.
+  // Use GET /api/admin/sync/locais-estoque para atualizar manualmente quando necessário.
 
   const localCodigo = String(req.body?.local || 10408201806);
   const dataInput   = String(req.body?.data || new Date().toLocaleDateString('pt-BR')); // dd/mm/aaaa
@@ -13447,8 +13443,15 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
     for (let i = 0; i <= retryCount; i++) {
       try { return await omieFetch(payload); }
       catch (e) {
-        const isCache = String(e?.message||'').includes('Consumo redundante detectado');
-        if (isCache && i < retryCount) { await sleep(35000); continue; }
+        const msg = String(e?.message || '');
+        const isCache  = msg.includes('Consumo redundante detectado');
+        const is429    = msg.includes('429') || msg.toLowerCase().includes('too many requests');
+        const isDupReq = msg.includes('Client-8020');
+        if (i < retryCount) {
+          if (isCache)  { await sleep(35000); continue; }
+          if (is429)    { await sleep(20000); continue; } // 429 → aguarda 20s e retenta
+          if (isDupReq) { await sleep(5000);  continue; } // requisição duplicada Omie → aguarda 5s
+        }
         throw e;
       }
     }
@@ -13680,38 +13683,215 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
   }
 });
 
-// GET /api/logistica/solicitacoes-pendentes - Retorna itens pendentes agrupados por usuário
+// GET /api/logistica/solicitacoes-pendentes - Retorna itens pendentes agrupados por usuário+produto
 app.get('/api/logistica/solicitacoes-pendentes', async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT i.id AS solic_id, i.status,
-             c.id AS carr_id, c.nome_user, c.retirada_por, c.codigo_produto, c.descricao, c.quantidade, c.unidade, c.criado_em
-        FROM logistica.itens_solicitados i
-        JOIN logistica.carrinho c ON c.id = i.id_carr
-       WHERE i.status = 'pendente'
-       ORDER BY COALESCE(c.retirada_por, c.nome_user), c.criado_em ASC
+      SELECT
+        COALESCE(c.retirada_por, c.nome_user)           AS nome_user,
+        c.codigo_produto, c.descricao, c.unidade,
+        SUM(c.quantidade)::numeric                      AS quantidade,
+        MIN(c.data_prevista)::text                      AS data_prevista,
+        MIN(c.horario)                                  AS horario,
+        array_agg(i.id  ORDER BY c.criado_em ASC)       AS solic_ids,
+        array_agg(c.id  ORDER BY c.criado_em ASC)       AS carr_ids
+      FROM logistica.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+     WHERE i.status = 'pendente'
+     GROUP BY COALESCE(c.retirada_por, c.nome_user), c.codigo_produto, c.descricao, c.unidade
+     ORDER BY COALESCE(c.retirada_por, c.nome_user), MIN(c.criado_em) ASC
     `);
-    // Agrupa por retirada_por (fallback: nome_user)
     const grupos = {};
     for (const row of rows) {
-      const chave = row.retirada_por || row.nome_user;
-      if (!grupos[chave]) grupos[chave] = [];
-      grupos[chave].push({
-        solic_id:       row.solic_id,
-        carr_id:        row.carr_id,
+      if (!grupos[row.nome_user]) grupos[row.nome_user] = [];
+      grupos[row.nome_user].push({
         codigo_produto: row.codigo_produto,
         descricao:      row.descricao,
-        quantidade:     row.quantidade,
         unidade:        row.unidade,
-        status:         row.status,
-        criado_em:      row.criado_em
+        quantidade:     row.quantidade,
+        data_prevista:  row.data_prevista,
+        horario:        row.horario,
+        solic_ids:      row.solic_ids,
+        carr_ids:       row.carr_ids,
+        status:         'pendente'
       });
     }
-    const resultado = Object.entries(grupos).map(([retirada_por, itens]) => ({ nome_user: retirada_por, itens }));
+    const resultado = Object.entries(grupos).map(([nome_user, itens]) => ({ nome_user, itens }));
     res.json({ ok: true, grupos: resultado });
   } catch (err) {
     console.error('[logistica/solicitacoes-pendentes] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/separacao - Muda status dos itens para 'Separação'
+app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || solic_ids.length === 0) {
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    }
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[])`,
+      [ids]
+    );
+    console.log(`[logistica/separacao] ${ids.length} item(ns) alterado(s) para Separação por user ${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/itens_solicitados/separacao] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/reverter-pendente - Reverte itens para 'pendente'
+app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || solic_ids.length === 0) {
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    }
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'pendente' WHERE id = ANY($1::bigint[])`,
+      [ids]
+    );
+    console.log(`[logistica/reverter-pendente] ${ids.length} item(ns) revertido(s) para pendente por user ${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/reverter-pendente] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/:id/separado - Muda um item para 'Separado'
+app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const itemId = parseInt(req.params.id, 10);
+    if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Separado' WHERE id = $1`,
+      [itemId]
+    );
+    console.log(`[logistica/separado] item #${itemId} marcado como Separado por user ${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/separado] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/separar - Marca array de itens como 'Separado'
+app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [ids]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/separar] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
+app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { carr_ids, solic_ids, quantidade_separada } = req.body;
+    const qtySep = parseFloat(quantidade_separada);
+    if (!Array.isArray(carr_ids) || !carr_ids.length || isNaN(qtySep) || qtySep <= 0)
+      return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
+    const cIds = carr_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    const sIds = (solic_ids || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+
+    await client.query('BEGIN');
+
+    const { rows: carrs } = await client.query(
+      `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`, [cIds]
+    );
+    if (!carrs.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Carrinho não encontrado.' }); }
+
+    const base = carrs[0];
+
+    // Clona o primeiro cart entry com a quantidade separada
+    const { rows: [newCarr] } = await client.query(
+      `INSERT INTO logistica.carrinho
+         (id_user, nome_user, retirada_por, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, cod_omie)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [base.id_user, base.nome_user, base.retirada_por, base.codigo_produto, base.descricao,
+       base.unidade, qtySep, base.data_prevista, base.horario, base.cod_omie]
+    );
+
+    let nSolic = null;
+    if (sIds.length > 0) {
+      const { rows: [fs] } = await client.query(
+        `SELECT n_solic FROM logistica.itens_solicitados WHERE id = $1`, [sIds[0]]
+      );
+      nSolic = fs?.n_solic || null;
+    }
+    await client.query(
+      `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status) VALUES ($1,$2,'Separado')`,
+      [newCarr.id, nSolic]
+    );
+
+    // Reduz quantidades dos entries originais do último para o primeiro
+    let toRemove   = qtySep;
+    const deletedIds = [];
+    const keptIds    = [];
+    for (let i = carrs.length - 1; i >= 0 && toRemove > 0.0001; i--) {
+      const c   = carrs[i];
+      const qty = parseFloat(c.quantidade);
+      if (qty <= toRemove + 0.0001) {
+        await client.query(`DELETE FROM logistica.itens_solicitados WHERE id_carr = $1`, [c.id]);
+        await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [c.id]);
+        toRemove -= qty;
+        deletedIds.push(c.id);
+      } else {
+        await client.query(
+          `UPDATE logistica.carrinho SET quantidade = quantidade - $1 WHERE id = $2`, [toRemove, c.id]
+        );
+        keptIds.push(c.id);
+        toRemove = 0;
+      }
+    }
+    // Entries não tocados
+    const touchedSet = new Set([...deletedIds, ...keptIds]);
+    carrs.forEach(c => { if (!touchedSet.has(c.id)) keptIds.push(c.id); });
+
+    // Reverte entries remanescentes para 'pendente'
+    if (keptIds.length > 0) {
+      await client.query(
+        `UPDATE logistica.itens_solicitados SET status = 'pendente' WHERE id_carr = ANY($1::bigint[])`,
+        [keptIds]
+      );
+    }
+
+    await client.query('COMMIT');
+    console.log(`[separar-parcial] ${qtySep} de ${base.codigo_produto} separados por user ${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[separar-parcial] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
@@ -17476,13 +17656,6 @@ async function ensureComprasSchema() {
       )
     `);
 
-    // Popula tabela ListarCategorias na inicialização
-    try {
-      await syncListarCategoriasOmie();
-    } catch (e) {
-      console.warn('[Sync ListarCategorias] Falha ao popular na inicialização:', e?.message || e);
-    }
-    
     // Insere departamentos padrão se não existirem
     await pool.query(`
       INSERT INTO configuracoes.departamento (nome) 
