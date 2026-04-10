@@ -123,6 +123,76 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// Helpers compartilhados pela aba de solicitações
+function _solFmtQty(q) {
+  const n = parseFloat(q);
+  return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
+}
+function _solFmtDataPrevista(d) {
+  if (!d) return '';
+  const s = String(d).substring(0, 10); // garante "YYYY-MM-DD"
+  const parts = s.split('-');
+  if (parts.length !== 3) return '';
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+function _solStatusBadge(status) {
+  const map = {
+    'pendente':  { color: '#6b7280', bg: '#1f2937', label: 'Pendente' },
+    'Separação': { color: '#f59e0b', bg: '#292218', label: 'Separação' },
+    'Separado':  { color: '#22c55e', bg: '#0f2018', label: 'Separado' },
+  };
+  const s = map[status] || { color: '#6b7280', bg: '#1f2937', label: status || '?' };
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:20px;font-size:.68rem;font-weight:700;color:${s.color};background:${s.bg};border:1px solid ${s.color}33;">${s.label}</span>`;
+}
+// mode: 'normal' | 'separado-btn' | 'disabled'
+function _solRenderItemRow(item, mode) {
+  const solicIds = Array.isArray(item.solic_ids) ? item.solic_ids : (item.solic_id ? [item.solic_id] : []);
+  const carrIds  = Array.isArray(item.carr_ids)  ? item.carr_ids  : (item.carr_id  ? [item.carr_id]  : []);
+  const qty      = parseFloat(item.quantidade) || 0;
+  const rowKey   = item.codigo_produto || (solicIds[0] || '');
+  const dataPrev = _solFmtDataPrevista(item.data_prevista);
+  const horario  = item.horario || '';
+  const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
+  const op = mode === 'disabled' ? 'opacity:.45;pointer-events:none;' : '';
+  let btnHtml = '';
+  if (mode === 'separado-btn') {
+    btnHtml = `
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+        <button class="btn-item-separado"
+          data-solic-ids='${JSON.stringify(solicIds)}'
+          data-carr-ids='${JSON.stringify(carrIds)}'
+          data-qty="${qty}"
+          style="padding:4px 10px;border:none;border-radius:6px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:background .2s;">
+          <i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado
+        </button>
+        <div class="sep-qty-form" style="display:none;align-items:center;gap:4px;">
+          <input type="number" class="sep-qty-input" min="0.001" max="${qty}" step="0.001" value="${qty}"
+            style="width:60px;padding:3px 6px;border-radius:5px;border:1px solid #4b5563;background:#111;color:#f0f0f0;font-size:.75rem;">
+          <span style="font-size:.72rem;color:#9ca3af;">/${_solFmtQty(qty)}</span>
+          <button class="btn-sep-ok" style="padding:3px 8px;border:none;border-radius:5px;background:#16a34a;color:#fff;font-weight:700;font-size:.72rem;cursor:pointer;">OK</button>
+          <button class="btn-sep-x" style="padding:3px 7px;border:none;border-radius:5px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;">&#x2715;</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div data-item-row="${rowKey}" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #222;${op}">
+      <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
+        <img src="/imagens_produtos/${item.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:.80rem;color:#f59e0b;">${item.codigo_produto}</div>
+        <div style="font-size:.78rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</div>
+        <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${dataHora ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dataHora}</span>` : ''}
+          <span style="font-weight:700;color:#f0f0f0;">${_solFmtQty(item.quantidade)}</span>
+          <span>${item.unidade || 'UN'}</span>
+          ${_solStatusBadge(item.status || 'pendente')}
+        </div>
+      </div>
+      ${btnHtml}
+    </div>`;
+}
+
 // Carrega e renderiza a aba de solicitações pendentes como cards por usuário
 window._loadSolicitacoesTab = async function() {
   const cards   = document.getElementById('solicitacoesCards');
@@ -136,15 +206,6 @@ window._loadSolicitacoesTab = async function() {
   cards.innerHTML = '<p style="color:#9ca3af;padding:16px;font-size:.85rem;">Carregando...</p>';
   if (vazio) vazio.style.display = 'none';
 
-  function fmtQty(q) {
-    const n = parseFloat(q);
-    return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, '');
-  }
-  function fmtData(d) {
-    if (!d) return '';
-    return new Date(d).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  }
-
   try {
     const resp = await fetch('/api/logistica/solicitacoes-pendentes', { credentials: 'include' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -152,7 +213,11 @@ window._loadSolicitacoesTab = async function() {
     const grupos = data.grupos || [];
 
     cards.innerHTML = '';
-    if (countEl) countEl.textContent = grupos.reduce((s, g) => s + g.itens.length, 0);
+    if (countEl) countEl.textContent = grupos.reduce((s, g) => s + g.itens.reduce((ss, i) => ss + (Array.isArray(i.solic_ids) ? i.solic_ids.length : 1), 0), 0);
+
+    // Armazena dados globalmente para uso no modal
+    window._solicitacoesGruposData = {};
+    grupos.forEach(g => { window._solicitacoesGruposData[g.nome_user] = g; });
 
     if (!grupos.length) {
       if (vazio) vazio.style.display = 'block';
@@ -161,25 +226,34 @@ window._loadSolicitacoesTab = async function() {
 
     grupos.forEach(grupo => {
       const card = document.createElement('div');
+      card.dataset.userCard = grupo.nome_user;
       card.style.cssText = 'background:#1c1c1c;border:1px solid #2a2a2a;border-radius:14px;overflow:hidden;';
 
-      // Cabeçalho do card com nome do usuário
+      const solicIds = grupo.itens.flatMap(i => Array.isArray(i.solic_ids) ? i.solic_ids : (i.solic_id ? [i.solic_id] : []));
       const header = document.createElement('div');
       header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #2a2a2a;background:#171717;';
       header.innerHTML = `
         <i class="fa-solid fa-user-circle" style="color:#f59e0b;font-size:1.2rem;"></i>
         <span style="font-weight:700;font-size:.95rem;color:#f0f0f0;">${grupo.nome_user}</span>
         <span style="margin-left:auto;font-size:.78rem;color:#6b7280;">${grupo.itens.length} ${grupo.itens.length === 1 ? 'item' : 'itens'}</span>
+        <button class="btn-iniciar-separacao"
+          data-solic-ids='${JSON.stringify(solicIds)}'
+          data-nome-user="${grupo.nome_user.replace(/"/g, '&quot;')}"
+          style="margin-left:10px;padding:5px 12px;border:none;border-radius:7px;background:#f59e0b;color:#111;font-weight:700;font-size:.78rem;cursor:pointer;white-space:nowrap;">
+          <i class="fa-solid fa-boxes-stacked" style="margin-right:4px;"></i>Iniciar separação
+        </button>
       `;
       card.appendChild(header);
 
-      // Lista de itens
       const lista = document.createElement('div');
       lista.style.cssText = 'display:flex;flex-direction:column;';
       grupo.itens.forEach((item, idx) => {
         const row = document.createElement('div');
         row.dataset.codigo   = item.codigo_produto;
         row.dataset.descricao = (item.descricao || '').toLowerCase();
+        const dataPrev = _solFmtDataPrevista(item.data_prevista);
+        const horario  = item.horario || '';
+        const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
         row.style.cssText = `display:flex;align-items:center;gap:14px;padding:12px 18px;${idx > 0 ? 'border-top:1px solid #222;' : ''}`;
         row.innerHTML = `
           <div style="width:48px;height:48px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
@@ -188,10 +262,12 @@ window._loadSolicitacoesTab = async function() {
           <div style="flex:1;min-width:0;">
             <div style="font-weight:700;font-size:.82rem;color:#f59e0b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.codigo_produto}</div>
             <div style="font-size:.80rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</div>
-          </div>
-          <div style="text-align:right;flex-shrink:0;">
-            <div style="font-weight:700;font-size:.88rem;color:#f0f0f0;">${fmtQty(item.quantidade)}</div>
-            <div style="font-size:.75rem;color:#9ca3af;">${item.unidade || 'UN'}</div>
+            <div style="font-size:.75rem;color:#9ca3af;margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              ${dataHora ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dataHora}</span>` : ''}
+              <span style="font-weight:700;color:#f0f0f0;">${_solFmtQty(item.quantidade)}</span>
+              <span style="color:#9ca3af;">${item.unidade || 'UN'}</span>
+              ${_solStatusBadge(item.status || 'pendente')}
+            </div>
           </div>
         `;
         lista.appendChild(row);
@@ -201,6 +277,55 @@ window._loadSolicitacoesTab = async function() {
     });
 
     cards.dataset.loaded = '1';
+
+    // Delegação de evento para botões "Iniciar separação"
+    if (!cards._separacaoBound) {
+      cards._separacaoBound = true;
+      cards.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.btn-iniciar-separacao');
+        if (!btn) return;
+        const ids      = JSON.parse(btn.dataset.solicIds || '[]');
+        const nomeUser = btn.dataset.nomeUser || '';
+        const grupoAtual = window._solicitacoesGruposData?.[nomeUser];
+        if (!ids.length || !grupoAtual) return;
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Aguarde...';
+        try {
+          const r = await fetch('/api/logistica/itens_solicitados/separacao', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ solic_ids: ids })
+          });
+          const res = await r.json();
+          if (res.ok) {
+            // Remove card da lista principal
+            const cardEl = document.querySelector(`[data-user-card="${CSS.escape(nomeUser)}"]`);
+            cardEl?.remove();
+            delete window._solicitacoesGruposData[nomeUser];
+            const countEl2 = document.getElementById('solicitacoesCount');
+            if (countEl2) countEl2.textContent = String(Math.max(0, parseInt(countEl2.textContent || '0') - ids.length));
+
+            // Verifica outros grupos com os mesmos produtos
+            const codigosAtuais = new Set(grupoAtual.itens.map(i => i.codigo_produto));
+            const gruposConflito = Object.values(window._solicitacoesGruposData || {})
+              .map(g => ({ ...g, itensConflito: g.itens.filter(i => codigosAtuais.has(i.codigo_produto)) }))
+              .filter(g => g.itensConflito.length > 0);
+
+            _abrirModalSeparacao(grupoAtual, gruposConflito);
+          } else {
+            alert('Erro: ' + res.error);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:4px;"></i>Iniciar separação';
+          }
+        } catch (err) {
+          alert('Erro ao iniciar separação.');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:4px;"></i>Iniciar separação';
+        }
+      });
+    }
 
     // Filtro de pesquisa em tempo real
     const filtroEl = document.getElementById('solicitacoesFilter');
@@ -232,6 +357,220 @@ window._loadSolicitacoesTab = async function() {
     if (countEl) countEl.textContent = '0';
   }
 };
+
+// Modal de separação — exibe os itens separados e conflitos com outros usuários
+function _abrirModalSeparacao(grupoAtual, gruposConflito) {
+  document.getElementById('modalSeparacaoLogistica')?.remove();
+
+  // Rastreia quais solic_ids foram marcados como "Separado" pelo operador
+  const separadosSet = new Set();
+  const todosIds = grupoAtual.itens.flatMap(i => Array.isArray(i.solic_ids) ? i.solic_ids : (i.solic_id ? [i.solic_id] : []));
+
+  // Função de fechamento com reversão dos não-separados
+  async function fecharModal() {
+    const naoSeparados = todosIds.filter(id => !separadosSet.has(id));
+    modal.remove();
+    if (naoSeparados.length > 0) {
+      try {
+        await fetch('/api/logistica/itens_solicitados/reverter-pendente', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: naoSeparados })
+        });
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+      } catch (e) {
+        console.warn('[modal-sep] erro ao reverter pendente:', e.message);
+      }
+    }
+  }
+
+  // Executa separação de um item — completa ou parcial
+  async function executarSepItem(mainBtn, solicIds, carrIds, qtySep, qtyTotal) {
+    mainBtn.disabled = true;
+    mainBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    try {
+      let r;
+      if (qtySep >= qtyTotal) {
+        r = await fetch('/api/logistica/itens_solicitados/separar', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+      } else {
+        r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep })
+        });
+      }
+      const res = await r.json();
+      if (res.ok) {
+        solicIds.forEach(id => separadosSet.add(id));
+        const row = mainBtn.closest('[data-item-row]');
+        if (row) {
+          row.style.opacity = '.6';
+          mainBtn.style.background = '#16a34a';
+          mainBtn.style.color = '#fff';
+          mainBtn.innerHTML = '<i class="fa-solid fa-check"></i> Separado';
+          mainBtn.disabled = true;
+          const form = row.querySelector('.sep-qty-form');
+          if (form) form.style.display = 'none';
+        }
+        // Separação parcial: força recarregamento ao fechar
+        if (qtySep < qtyTotal) {
+          window._loadSolicitacoesTab.force = true;
+        }
+      } else {
+        alert('Erro: ' + (res.error || res.message || 'desconhecido'));
+        mainBtn.disabled = false;
+        mainBtn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado';
+      }
+    } catch (err) {
+      alert('Erro ao marcar como separado.');
+      mainBtn.disabled = false;
+      mainBtn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado';
+    }
+  }
+
+  let conflitosHtml = '';
+  if (gruposConflito.length > 0) {
+    conflitosHtml = `
+      <div style="margin-top:18px;padding-top:14px;border-top:2px solid #333;">
+        <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:0 16px 8px;letter-spacing:.05em;text-transform:uppercase;">Outros usuários com os mesmos produtos</div>
+        ${gruposConflito.map(g => {
+          const idsConflito = g.itensConflito.flatMap(i => Array.isArray(i.solic_ids) ? i.solic_ids : (i.solic_id ? [i.solic_id] : []));
+          return `
+            <div class="modal-sep-conflito" data-conflito-user="${g.nome_user.replace(/"/g, '&quot;')}" style="background:#171717;border:1px solid #2a2a2a;border-radius:10px;margin:0 12px 10px;overflow:hidden;">
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #2a2a2a;">
+                <i class="fa-solid fa-user-circle" style="color:#f59e0b;font-size:1rem;"></i>
+                <span style="font-weight:700;font-size:.88rem;color:#f0f0f0;">${g.nome_user}</span>
+                <button class="btn-modal-sep-conflito"
+                  data-solic-ids='${JSON.stringify(idsConflito)}'
+                  data-nome-user="${g.nome_user.replace(/"/g, '&quot;')}"
+                  style="margin-left:auto;padding:4px 10px;border:none;border-radius:6px;background:#f59e0b;color:#111;font-weight:700;font-size:.73rem;cursor:pointer;white-space:nowrap;">
+                  <i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação
+                </button>
+              </div>
+              ${g.itensConflito.map(i => _solRenderItemRow(i, 'disabled')).join('')}
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'modalSeparacaoLogistica';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);z-index:10050;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(500px,95vw);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;flex-shrink:0;">
+        <i class="fa-solid fa-boxes-stacked" style="color:#f59e0b;font-size:1.1rem;"></i>
+        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">Separação — ${grupoAtual.nome_user}</span>
+        <button id="btnModalSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
+      </div>
+      <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
+        <div style="font-size:.75rem;color:#6b7280;font-weight:700;padding:12px 16px 4px;letter-spacing:.05em;text-transform:uppercase;">Itens em separação</div>
+        ${grupoAtual.itens.map(i => _solRenderItemRow({ ...i, status: 'Separação' }, 'separado-btn')).join('')}
+        ${conflitosHtml}
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  document.getElementById('btnModalSepFechar')?.addEventListener('click', () => fecharModal());
+  modal.addEventListener('click', e => { if (e.target === modal) fecharModal(); });
+
+  const modalInner = document.getElementById('modalSepInner');
+
+  // Delegação de clique única para todos os botões do modal
+  modalInner.addEventListener('click', async (e) => {
+    // Botão "Separado" por item
+    const sepBtn = e.target.closest('.btn-item-separado');
+    if (sepBtn && !sepBtn.disabled) {
+      const solicIds = JSON.parse(sepBtn.dataset.solicIds || '[]');
+      const carrIds  = JSON.parse(sepBtn.dataset.carrIds  || '[]');
+      const qty      = parseFloat(sepBtn.dataset.qty) || 0;
+      if (qty > 1) {
+        const form = sepBtn.closest('[data-item-row]')?.querySelector('.sep-qty-form');
+        if (form) {
+          form.style.display = 'flex';
+          const input = form.querySelector('.sep-qty-input');
+          if (input) { input.value = qty; input.focus(); input.select(); }
+        }
+      } else {
+        await executarSepItem(sepBtn, solicIds, carrIds, qty, qty);
+      }
+      return;
+    }
+
+    // Botão OK do formulário de quantidade
+    const okBtn = e.target.closest('.btn-sep-ok');
+    if (okBtn) {
+      const row      = okBtn.closest('[data-item-row]');
+      const mainBtn  = row?.querySelector('.btn-item-separado');
+      if (!mainBtn) return;
+      const solicIds = JSON.parse(mainBtn.dataset.solicIds || '[]');
+      const carrIds  = JSON.parse(mainBtn.dataset.carrIds  || '[]');
+      const qtyTotal = parseFloat(mainBtn.dataset.qty) || 0;
+      const input    = row.querySelector('.sep-qty-input');
+      const qtySep   = parseFloat(input?.value) || 0;
+      if (qtySep <= 0 || qtySep > qtyTotal) {
+        alert(`Digite um valor entre 0,001 e ${_solFmtQty(qtyTotal)}.`);
+        return;
+      }
+      const form = row.querySelector('.sep-qty-form');
+      if (form) form.style.display = 'none';
+      await executarSepItem(mainBtn, solicIds, carrIds, qtySep, qtyTotal);
+      return;
+    }
+
+    // Botão X — cancela formulário de quantidade
+    const xBtn = e.target.closest('.btn-sep-x');
+    if (xBtn) {
+      const form = xBtn.closest('.sep-qty-form');
+      if (form) form.style.display = 'none';
+      return;
+    }
+
+    // Botão "Iniciar separação" dos grupos conflitantes
+    const conflBtn = e.target.closest('.btn-modal-sep-conflito');
+    if (conflBtn && !conflBtn.disabled) {
+      const ids      = JSON.parse(conflBtn.dataset.solicIds || '[]');
+      const nomeUser = conflBtn.dataset.nomeUser || '';
+      if (!ids.length) return;
+      conflBtn.disabled = true;
+      conflBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/separacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: ids })
+        });
+        const res = await r.json();
+        if (res.ok) {
+          conflBtn.closest('.modal-sep-conflito')?.remove();
+          const mainCard = document.querySelector(`[data-user-card="${CSS.escape(nomeUser)}"]`);
+          mainCard?.remove();
+          if (window._solicitacoesGruposData) delete window._solicitacoesGruposData[nomeUser];
+          const countEl = document.getElementById('solicitacoesCount');
+          if (countEl) countEl.textContent = String(Math.max(0, parseInt(countEl.textContent || '0') - ids.length));
+        } else {
+          alert('Erro: ' + res.error);
+          conflBtn.disabled = false;
+          conflBtn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação';
+        }
+      } catch (err) {
+        alert('Erro ao iniciar separação.');
+        conflBtn.disabled = false;
+        conflBtn.innerHTML = '<i class="fa-solid fa-boxes-stacked" style="margin-right:3px;"></i>Iniciar separação';
+      }
+    }
+  });
+}
 
 // ============================================================================
 // FUNÇÃO GLOBAL PARA ABRIR O CHAT - Disponível imediatamente
@@ -10662,7 +11001,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
     // Atualiza badge no título da aba com quantidade filtrada (Enviado/Finalizado ocultos)
     // mesmo que a aba ativa seja outra.
     if (hideDone) {
-      const baseTitle = 'Produtos';
+      const baseTitle = 'SGF';
       const pendentes = rows.filter(r => normalizeSacStatus(r.status) === 'Pendente');
       const count = pendentes.length;
       document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle;
@@ -10859,7 +11198,7 @@ function _pararBadgeEnvio() {
     clearInterval(envioBadgeTimer);
     envioBadgeTimer = null;
   }
-  document.title = 'Produtos';
+  document.title = 'SGF';
 }
 
 function garantirBadgeEnvioParaLogistica() {
@@ -10915,7 +11254,7 @@ async function _atualizarTituloCompras() {
       (item.status || '').toLowerCase() === 'aguardando cotação'
     ).length;
     
-    const baseTitle = 'Produtos';
+    const baseTitle = 'SGF';
     
     // Atualiza título apenas se houver itens pendentes
     if (aguardandoCompra > 0 || aguardandoCotacao > 0) {
@@ -10933,7 +11272,7 @@ function _pararBadgeCompras() {
     clearInterval(comprasBadgeTimer);
     comprasBadgeTimer = null;
   }
-  document.title = 'Produtos';
+  document.title = 'SGF';
 }
 
 function garantirBadgeComprasParaCompras() {
