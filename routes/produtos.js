@@ -2,6 +2,7 @@
 const express  = require('express');
 const router   = express.Router();
 const { dbQuery, dbGetClient } = require('../src/db');
+const callOmieDedup = require('../utils/callOmieDedup');
 
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
@@ -87,13 +88,7 @@ async function consultarProdutoOmie({ codigo_produto, codigo }) {
     param: [param]
   };
 
-  const r = await httpFetch(OMIE_PROD_URL, {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!r.ok) throw new Error(`Omie HTTP ${r.status}`);
-  const j = await r.json();
+  const j = await callOmieDedup(OMIE_PROD_URL, payload, { waitMs: 5000 });
 
   // pode vir como { produto_servico_cadastro: {...} } ou já flat
   return j?.produto_servico_cadastro || j;

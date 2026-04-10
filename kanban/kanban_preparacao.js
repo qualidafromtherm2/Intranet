@@ -85,11 +85,12 @@ class CacheManager {
     console.groupCollapsed(`[Tipo03] Req #${requestId} (descobrir total)`);
 
     try {
+      const pageSize = 100;
       const basePayload = {
         call: 'ListarProdutosResumido',
         param: [{
           pagina: 1,
-          registros_por_pagina: 1,
+          registros_por_pagina: pageSize,
           apenas_importado_api: 'N',
           filtrar_apenas_omiepdv: 'N',
           filtrar_apenas_tipo: '03'
@@ -105,24 +106,33 @@ class CacheManager {
         body: JSON.stringify(basePayload)
       });
 
-      const total = firstResponse.total_de_registros || 0;
-      console.log(`[Tipo03] total_de_registros = ${total}`);
+      const total = Number(firstResponse.total_de_registros || 0);
+      const totalPaginas = Math.max(1, Number(firstResponse.total_de_paginas || Math.ceil(total / pageSize) || 1));
+      console.log(`[Tipo03] total_de_registros = ${total} | total_de_paginas = ${totalPaginas}`);
 
-      // Buscar todos os registros
-      const fullPayload = {
-        ...basePayload,
-        param: [{ ...basePayload.param[0], registros_por_pagina: total }]
-      };
-
-      const fullResponse = await this.fetchWithErrorHandling(`${API_BASE}/api/omie/produtos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fullPayload)
-      });
-
-      this.tipo03Cache = Array.isArray(fullResponse.produto_servico_resumido)
-        ? fullResponse.produto_servico_resumido
+      const itens = Array.isArray(firstResponse.produto_servico_resumido)
+        ? [...firstResponse.produto_servico_resumido]
         : [];
+
+      for (let pagina = 2; pagina <= totalPaginas; pagina += 1) {
+        await new Promise(resolve => setTimeout(resolve, 350));
+        const pagePayload = {
+          ...basePayload,
+          param: [{ ...basePayload.param[0], pagina }]
+        };
+
+        const pageResponse = await this.fetchWithErrorHandling(`${API_BASE}/api/omie/produtos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pagePayload)
+        });
+
+        if (Array.isArray(pageResponse.produto_servico_resumido)) {
+          itens.push(...pageResponse.produto_servico_resumido);
+        }
+      }
+
+      this.tipo03Cache = itens;
 
       console.log(`[Tipo03] cache pronto – itens:`, this.tipo03Cache.length);
       return this.tipo03Cache;

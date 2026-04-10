@@ -1,11 +1,14 @@
 // utils/omieCall.js
 
+const { clampOmiePayloadPagination } = require('./omiePolicy');
+
 // utils/omieCall.js
 // Chama endpoints JSON da OMIE e SEMPRE preserva faultstring/faultcode no erro.
 
 async function omieCall(url, body, options = {}) {
+  const sanitizedBody = clampOmiePayloadPagination(body || {});
   const bodyMasked = (() => {
-    const p = JSON.parse(JSON.stringify(body || {}));
+    const p = JSON.parse(JSON.stringify(sanitizedBody || {}));
     if (p?.app_secret) p.app_secret = String(p.app_secret).slice(0,2) + '***' + String(p.app_secret).slice(-2);
     return p;
   })();
@@ -17,14 +20,15 @@ async function omieCall(url, body, options = {}) {
 
   const aguardar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const retryRedundant = options?.retryRedundant !== false;
-  const maxTentativas = retryRedundant ? 2 : 1;
+  const retryRateLimit = options?.retryRateLimit !== false;
+  const maxTentativas = retryRedundant || retryRateLimit ? 2 : 1;
 
   for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
     const t0 = Date.now();
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
+      body: JSON.stringify(sanitizedBody)
     });
     const text = await res.text();
     const ms = Date.now() - t0;
@@ -34,13 +38,32 @@ async function omieCall(url, body, options = {}) {
 
     if (!res.ok) {
       const faultString = String(json?.faultstring || '');
-      const isRedundant = /REDUNDANT|consumo redundante/i.test(faultString || text || '');
+      const rawError = String(faultString || text || '');
+      const isRedundant = /REDUNDANT|consumo redundante/i.test(rawError);
+      const isRateLimit = retryRateLimit && (res.status === 429 || res.status === 425);
 
       if (isRedundant && tentativa < maxTentativas) {
-        const match = String(faultString || text || '').match(/Aguarde\s+(\d+)\s+segundos?/i);
+        const match = rawError.match(/Aguarde\s+(\d+)\s+segundos?/i);
         const segundos = match ? Number(match[1]) : 5;
         const esperaMs = Math.max(1000, Math.min((Number.isFinite(segundos) ? segundos : 5) * 1000, 60000));
         console.warn('[omieCall] REDUNDANT detectado, aguardando retry...', { url, tentativa, esperaMs });
+        await aguardar(esperaMs);
+        continue;
+      }
+
+      if (isRateLimit && tentativa < maxTentativas) {
+        const retryAfterHeader = Number(res.headers.get('retry-after'));
+        const match = rawError.match(/Aguarde\s+(\d+)\s+segundos?/i);
+        const segundos = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? retryAfterHeader
+          : (match ? Number(match[1]) : 10);
+        const esperaMs = Math.max(2000, Math.min((Number.isFinite(segundos) ? segundos : 10) * 1000, 60000));
+        console.warn('[omieCall] RATE LIMIT detectado, aguardando retry...', {
+          url,
+          tentativa,
+          status: res.status,
+          esperaMs,
+        });
         await aguardar(esperaMs);
         continue;
       }
@@ -58,4 +81,3 @@ async function omieCall(url, body, options = {}) {
   throw new Error('Falha inesperada ao chamar API da Omie');
 }
 module.exports = omieCall;
-
