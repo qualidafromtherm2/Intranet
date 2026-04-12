@@ -48,3 +48,6 @@ data/kanban_preparacao.json
 backup/
 Historico de conversar IA/
 
+# cache local do chatbot de manuais
+uploads/chatbot_manual_pdfs/
+uploads/chatbot_manual_previews/

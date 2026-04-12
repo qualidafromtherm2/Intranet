@@ -128,6 +128,18 @@ async function syncUserProdutoPermissoes(client, userId, codigos) {
   );
 }
 
+async function seedUserPermissionOverridesFalse(client, userId) {
+  await client.query(
+    `INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+     SELECT $1, n.id, false
+       FROM public.nav_node n
+      WHERE n.active = TRUE
+     ON CONFLICT (user_id, node_id)
+     DO UPDATE SET allow = EXCLUDED.allow`,
+    [userId]
+  );
+}
+
 // util
 async function withTx(fn) {
   const client = await pool.connect();
@@ -311,6 +323,7 @@ SELECT * FROM upsert;
       // 2) vincula setor/função (perfil)
       await upsertUserProfile(cx, userRow.id, { funcao_id, setor_id, operacao_id });
       await syncUserOperacoes(cx, userRow.id, operacao_ids);
+        await seedUserPermissionOverridesFalse(cx, userRow.id);
 
   // 3) vincula permissões de produto
   try { console.log('[POST sync] user=', userRow.id, 'perms=', produto_permissao_codigos); } catch {}
