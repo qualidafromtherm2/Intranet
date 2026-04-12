@@ -254,27 +254,35 @@
 	      gap: 8px;
 	    }
 	    .sgf-ai-manual-preview {
-	      display: block;
-	      text-decoration: none;
-	      color: inherit;
+	      display: grid;
+	      gap: 10px;
 	      border: 1px solid rgba(148,163,184,.22);
 	      border-radius: 10px;
-	      overflow: hidden;
-	      background: rgba(15,23,42,.65);
+	      background: rgba(15,23,42,.72);
+	      padding: 10px;
 	    }
 	    .sgf-ai-manual-preview:hover { border-color: rgba(99,102,241,.55); }
-	    .sgf-ai-manual-preview img {
-	      display: block;
-	      width: 100%;
-	      height: auto;
-	      max-height: 220px;
-	      object-fit: cover;
-	      background: #0f172a;
+	    .sgf-ai-manual-preview-head {
+	      display: grid;
+	      grid-template-columns: 34px 1fr;
+	      gap: 10px;
+	      align-items: start;
+	    }
+	    .sgf-ai-manual-preview-icon {
+	      width: 34px;
+	      height: 34px;
+	      border-radius: 10px;
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      background: rgba(99,102,241,.16);
+	      border: 1px solid rgba(99,102,241,.3);
+	      color: #c7d2fe;
+	      font-size: 16px;
 	    }
 	    .sgf-ai-manual-preview-meta {
-	      padding: 8px 10px;
 	      display: grid;
-	      gap: 2px;
+	      gap: 3px;
 	      font-size: 11px;
 	      line-height: 1.35;
 	      white-space: normal;
@@ -284,6 +292,31 @@
 	      font-weight: 700;
 	    }
 	    .sgf-ai-manual-preview-page { color: #94a3b8; }
+	    .sgf-ai-manual-preview-note {
+	      color: #94a3b8;
+	    }
+	    .sgf-ai-manual-preview-actions {
+	      display: flex;
+	      flex-wrap: wrap;
+	      gap: 8px;
+	    }
+	    .sgf-ai-manual-preview-action {
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 6px;
+	      text-decoration: none;
+	      padding: 7px 10px;
+	      border-radius: 8px;
+	      border: 1px solid rgba(99,102,241,.35);
+	      background: rgba(99,102,241,.12);
+	      color: #c7d2fe;
+	      font-size: 11px;
+	      font-weight: 600;
+	    }
+	    .sgf-ai-manual-preview-action:hover {
+	      background: rgba(99,102,241,.24);
+	      border-color: rgba(129,140,248,.75);
+	    }
 	    #sgf-ai-suggestions {
 	      padding: 0 12px 10px;
 	      display: flex;
@@ -1104,6 +1137,12 @@
 	      const el = appendPortalAiMessage('assistant', text);
 	      if (!el || !Array.isArray(choices) || !choices.length) return el;
 
+	      appendPortalAiButtonsToMessage(el, choices);
+	      return el;
+	    }
+
+	    function appendPortalAiButtonsToMessage(el, choices = []) {
+	      if (!el || !Array.isArray(choices) || !choices.length) return el;
 	      const wrap = document.createElement('div');
 	      wrap.className = 'sgf-ai-choice-wrap';
 	      choices.forEach((choice) => {
@@ -1113,10 +1152,41 @@
 	        btn.textContent = String(choice.label || '').trim();
 	        if (choice.osId != null) btn.dataset.aiCloseOs = String(choice.osId);
 	        if (choice.value) btn.dataset.aiCloseChoice = String(choice.value);
+	        if (choice.message) btn.dataset.aiChatMsg = String(choice.message);
+	        if (choice.action) btn.dataset.aiChatAction = String(choice.action);
 	        wrap.appendChild(btn);
 	      });
 	      el.appendChild(wrap);
 	      return el;
+	    }
+
+	    function shouldShowPortalAiFollowUps(text) {
+	      const t = String(text || '').trim();
+	      if (!t) return false;
+	      if (/^⚠/.test(t)) return false;
+	      if (/atendimento finalizado/i.test(t)) return false;
+	      return /\bfonte:/i.test(t);
+	    }
+
+	    function buildPortalAiFollowUpChoices(text) {
+	      if (!shouldShowPortalAiFollowUps(text)) return [];
+	      return [
+	        { label: 'Me envie o manual', message: 'Me envie o manual completo desse equipamento' },
+	        { label: 'Me envie a parte do manual', message: 'Me envie a parte do manual que fala disso' },
+	        { label: 'Me envie uma imagem', message: 'Me envie uma imagem da parte do manual que fala disso' },
+	        { label: 'Continuar nessa conversa', action: 'continue_context' }
+	      ];
+	    }
+
+	    function handlePortalAiConversationAction(action) {
+	      const acao = String(action || '').trim();
+	      if (acao !== 'continue_context') return;
+	      const { input } = portalAiEls();
+	      openPortalAiPanel();
+	      if (input) {
+	        input.placeholder = 'Continue perguntando sobre esse mesmo equipamento';
+	        input.focus();
+	      }
 	    }
 
 	    function isPortalAiFechamentoIntent(text) {
@@ -1464,26 +1534,48 @@
 	    }
 
 	    function renderPortalAiManualPreviews(previews) {
-	      const lista = Array.isArray(previews) ? previews.filter((item) => item && item.imageUrl).slice(0, 2) : [];
+	      const lista = Array.isArray(previews)
+	        ? previews.filter((item) => item && (item.openUrl || item.imageUrl || item.sourceUrl)).slice(0, 2)
+	        : [];
 	      if (!lista.length) return null;
 
 	      const wrap = document.createElement('div');
 	      wrap.className = 'sgf-ai-manual-previews';
 
 	      lista.forEach((preview) => {
-	        const link = document.createElement('a');
-	        link.className = 'sgf-ai-manual-preview';
-	        link.href = String(preview.imageUrl || '').trim();
-	        link.target = '_blank';
-	        link.rel = 'noopener noreferrer';
-	        link.innerHTML = `
-	          <img src="${esc(preview.imageUrl)}" alt="${esc(preview.manual || 'Prévia do manual')}" loading="lazy">
-	          <div class="sgf-ai-manual-preview-meta">
-	            <div class="sgf-ai-manual-preview-title">${esc(preview.manual || 'Manual')}</div>
-	            <div class="sgf-ai-manual-preview-page">Página ${esc(String(preview.page || ''))}</div>
+	        const card = document.createElement('div');
+	        card.className = 'sgf-ai-manual-preview';
+	        card.innerHTML = `
+	          <div class="sgf-ai-manual-preview-head">
+	            <div class="sgf-ai-manual-preview-icon">${preview.imageUrl ? 'IMG' : 'PDF'}</div>
+	            <div class="sgf-ai-manual-preview-meta">
+	              <div class="sgf-ai-manual-preview-title">${esc(preview.manual || 'Manual')}</div>
+	              <div class="sgf-ai-manual-preview-page">Página ${esc(String(preview.page || ''))}</div>
+	              <div class="sgf-ai-manual-preview-note">${preview.imageUrl ? 'Atalho para imagem cacheada no manual.' : 'Atalho direto para a página do manual.'}</div>
+	            </div>
 	          </div>
+	          <div class="sgf-ai-manual-preview-actions"></div>
 	        `;
-	        wrap.appendChild(link);
+
+	        const actions = card.querySelector('.sgf-ai-manual-preview-actions');
+	        const createAction = (href, label) => {
+	          const link = document.createElement('a');
+	          link.className = 'sgf-ai-manual-preview-action';
+	          link.href = String(href || '').trim();
+	          link.target = '_blank';
+	          link.rel = 'noopener noreferrer';
+	          link.textContent = label;
+	          actions.appendChild(link);
+	        };
+
+	        if (preview.openUrl || preview.sourceUrl) {
+	          createAction(preview.openUrl || preview.sourceUrl, 'Abrir página do manual');
+	        }
+	        if (preview.imageUrl) {
+	          createAction(preview.imageUrl, 'Abrir imagem');
+	        }
+
+	        wrap.appendChild(card);
 	      });
 
 	      return wrap;
@@ -1497,33 +1589,17 @@
 	        t.includes('imagem') ||
 	        t.includes('pagina') ||
 	        t.includes('página') ||
-	        ((t.includes('manual') || t.includes('link')) && (t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver'))) ||
-	        ((t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver')) && (t.includes('manual') || t.includes('foto') || t.includes('imagem')))
+	        t.includes('pdf') ||
+	        ((t.includes('manual') || t.includes('link') || t.includes('pdf')) && (t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver') || t.includes('abrir') || t.includes('abre'))) ||
+	        ((t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver') || t.includes('abrir') || t.includes('abre')) && (t.includes('manual') || t.includes('foto') || t.includes('imagem') || t.includes('pagina')))
 	      );
-	    }
-
-	    function portalAiAffirmativeForMedia(text) {
-	      const t = normalizePortalAiText(text);
-	      return ['sim', 's', 'quero', 'pode', 'manda', 'envia', 'mostra', 'quero ver'].includes(t);
-	    }
-
-	    function portalAiAssistantOfferedMedia(text) {
-	      return /posso te (mostrar|enviar).*(pagina|página|imagem|foto|manual)/i.test(String(text || '').trim());
-	    }
-
-	    function portalAiAssistantConfirmedMedia(text) {
-	      return /enviei abaixo a pagina|enviei abaixo a página/i.test(String(text || '').trim());
 	    }
 
 	    function getPortalAiAllowedManualPreviews(userText, assistantText, manualPreviews) {
 	      const lista = Array.isArray(manualPreviews) ? manualPreviews : [];
 	      if (!lista.length) return [];
 
-	      const requestedNow = portalAiUserRequestedMedia(userText);
-	      const acceptedOffer = portalAiState.mediaOfferPending && portalAiAffirmativeForMedia(userText);
-	      const assistantConfirmed = portalAiAssistantConfirmedMedia(assistantText);
-
-	      return (requestedNow || acceptedOffer || assistantConfirmed) ? lista : [];
+	      return portalAiUserRequestedMedia(userText) ? lista : [];
 	    }
 
 	    function appendPortalAiMessage(type, text, { manualPreviews = [] } = {}) {
@@ -1537,7 +1613,6 @@
 	      } else {
 	        el.textContent = String(text || '').trim();
 	        if (type === 'assistant') {
-	          portalAiState.mediaOfferPending = portalAiAssistantOfferedMedia(text);
 	          const previewsEl = renderPortalAiManualPreviews(manualPreviews);
 	          if (previewsEl) el.appendChild(previewsEl);
 	        }
@@ -1567,6 +1642,7 @@
 	      if (input) {
 	        input.value = '';
 	        input.style.height = '38px';
+	        input.placeholder = 'Escreva aqui a sua duvida';
 	      }
 	      setPortalAiLoading(false);
 	      if (showWelcome) addPortalAiWelcome();
@@ -1663,6 +1739,7 @@
 	      if (input) {
 	        input.value = '';
 	        input.style.height = '38px';
+	        input.placeholder = 'Escreva aqui a sua duvida';
 	      }
 	      setPortalAiLoading(true);
 	      const typingEl = appendPortalAiMessage('typing', '...');
@@ -1691,9 +1768,12 @@
 	          resposta,
 	          Array.isArray(data.manualPreviews) ? data.manualPreviews : []
 	        );
-	        appendPortalAiMessage(resp.ok ? 'assistant' : 'error', resposta, {
+	        const messageEl = appendPortalAiMessage(resp.ok ? 'assistant' : 'error', resposta, {
 	          manualPreviews
 	        });
+	        if (resp.ok) {
+	          appendPortalAiButtonsToMessage(messageEl, buildPortalAiFollowUpChoices(resposta));
+	        }
 	      } catch {
 	        typingEl.remove();
 	        const resposta = 'Erro de conexão ao consultar os manuais técnicos. Tente novamente.';
@@ -1757,6 +1837,18 @@
 	        if (choiceBtn) {
 	          appendPortalAiMessage('user', choiceBtn.textContent || 'Opção selecionada');
 	          await handlePortalAiFechamentoChoice(choiceBtn.getAttribute('data-ai-close-choice') || '');
+	          return;
+	        }
+
+	        const quickMsgBtn = event.target.closest('[data-ai-chat-msg]');
+	        if (quickMsgBtn) {
+	          sendPortalAiMessage(quickMsgBtn.getAttribute('data-ai-chat-msg') || '');
+	          return;
+	        }
+
+	        const quickActionBtn = event.target.closest('[data-ai-chat-action]');
+	        if (quickActionBtn) {
+	          handlePortalAiConversationAction(quickActionBtn.getAttribute('data-ai-chat-action') || '');
 	        }
 	      });
 
