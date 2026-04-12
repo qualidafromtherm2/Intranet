@@ -10280,6 +10280,24 @@ app.use('/vendor/xlsx', express.static(path.join(__dirname, 'node_modules/xlsx/d
 // Servir anexos de compras
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Servir imagens de produtos com fallback transparente (evita 404s no console)
+const _IMAGENS_PROD_DIR = path.join(__dirname, 'img', 'Produto');
+const _IMG_PLACEHOLDER = Buffer.from(
+  'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiLz4=',
+  'base64'
+); // SVG 1×1 transparente
+app.get('/imagens_produtos/:arquivo', (req, res) => {
+  const arquivo = path.basename(req.params.arquivo); // evita path traversal
+  const filePath = path.join(_IMAGENS_PROD_DIR, arquivo);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.status(200).send(_IMG_PLACEHOLDER);
+    }
+  });
+});
+
 // ——————————————————————————————
 // proteger rotas de etiquetas com token
 // ——————————————————————————————
@@ -13736,10 +13754,10 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
     await pool.query(
-      `UPDATE logistica.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[])`,
+      `UPDATE logistica.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'pendente'`,
       [ids]
     );
-    console.log(`[logistica/separacao] ${ids.length} item(ns) alterado(s) para Separação por user ${id_user}`);
+    console.log(`[logistica/separacao] ${ids.length} id(s) enviados para Separação (somente pendente) por user ${id_user}`);
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/itens_solicitados/separacao] erro:', err);
@@ -13766,6 +13784,28 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
     res.json({ ok: true });
   } catch (err) {
     console.error('[logistica/reverter-pendente] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/reverter-separacao — Reverte 'Separado' → 'Separação'
+app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
+      [ids]
+    );
+    console.log(`[logistica/reverter-separacao] ${ids.length} item(ns) revertido(s) para Separação por user ${id_user}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/reverter-separacao] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
@@ -13809,6 +13849,8 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
 });
 
 // POST /api/logistica/itens_solicitados/separar-parcial - Separa qty parcial, clona carrinho
+// Lógica: original SEP recebe a qty separada → status Separado
+//         novo SEP-NNNN.X recebe o restante → status pendente (volta à fila de Solicitados)
 app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -13828,17 +13870,24 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     );
     if (!carrs.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Carrinho não encontrado.' }); }
 
+    const qtyTotal     = carrs.reduce((s, c) => s + parseFloat(c.quantidade), 0);
+    const qtyRemainder = qtyTotal - qtySep; // o que sobra volta para a fila
+
+    // Se não há restante, apenas marca tudo como Separado sem novo SEP
+    if (qtyRemainder <= 0.0001) {
+      if (sIds.length > 0) {
+        await client.query(
+          `UPDATE logistica.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [sIds]
+        );
+      }
+      await client.query('COMMIT');
+      console.log(`[separar-parcial] separação total (via parcial) de ${carrs[0].codigo_produto} por user ${id_user}`);
+      return res.json({ ok: true, new_n_solic: null });
+    }
+
     const base = carrs[0];
 
-    // Clona o primeiro cart entry com a quantidade separada
-    const { rows: [newCarr] } = await client.query(
-      `INSERT INTO logistica.carrinho
-         (id_user, nome_user, retirada_por, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, cod_omie)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [base.id_user, base.nome_user, base.retirada_por, base.codigo_produto, base.descricao,
-       base.unidade, qtySep, base.data_prevista, base.horario, base.cod_omie]
-    );
-
+    // Obtém n_solic original
     let nSolic = null;
     if (sIds.length > 0) {
       const { rows: [fs] } = await client.query(
@@ -13846,15 +13895,40 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       );
       nSolic = fs?.n_solic || null;
     }
+
+    // Gera SEP-NNNN.X para o restante (volta à fila pendente)
+    let newNSolic = nSolic;
+    if (nSolic) {
+      const baseN = nSolic.replace(/\.\d+$/, '');
+      const { rows: existSeps } = await client.query(
+        `SELECT n_solic FROM logistica.itens_solicitados WHERE n_solic LIKE ($1 || '.%')`, [baseN]
+      );
+      let maxSuffix = 0;
+      existSeps.forEach(r => {
+        const m = r.n_solic.match(/\.(\d+)$/);
+        if (m) { const v = parseInt(m[1]); if (v > maxSuffix) maxSuffix = v; }
+      });
+      newNSolic = `${baseN}.${maxSuffix + 1}`;
+    }
+
+    // Cria novo carrinho com o restante (qtyRemainder) → volta para a fila como pendente
+    const { rows: [newCarr] } = await client.query(
+      `INSERT INTO logistica.carrinho
+         (id_user, nome_user, retirada_por, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, cod_omie)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [base.id_user, base.nome_user, base.retirada_por, base.codigo_produto, base.descricao,
+       base.unidade, qtyRemainder, base.data_prevista, base.horario, base.cod_omie]
+    );
     await client.query(
-      `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status) VALUES ($1,$2,'Separado')`,
-      [newCarr.id, nSolic]
+      `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status) VALUES ($1,$2,'pendente')`,
+      [newCarr.id, newNSolic]
     );
 
-    // Reduz quantidades dos entries originais do último para o primeiro
-    let toRemove   = qtySep;
-    const deletedIds = [];
-    const keptIds    = [];
+    // Reduz os entries originais removendo qtyRemainder do último para o primeiro
+    // → o que sobrar nos originais soma qtySep e será marcado como Separado
+    let toRemove      = qtyRemainder;
+    const deletedIds  = [];
+    const keptIds     = [];
     for (let i = carrs.length - 1; i >= 0 && toRemove > 0.0001; i--) {
       const c   = carrs[i];
       const qty = parseFloat(c.quantidade);
@@ -13871,27 +13945,287 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         toRemove = 0;
       }
     }
-    // Entries não tocados
+    // Entries não tocados no loop também foram mantidos
     const touchedSet = new Set([...deletedIds, ...keptIds]);
     carrs.forEach(c => { if (!touchedSet.has(c.id)) keptIds.push(c.id); });
 
-    // Reverte entries remanescentes para 'pendente'
+    // Entries originais remanescentes (com qtySep) → marcados como Separado
     if (keptIds.length > 0) {
       await client.query(
-        `UPDATE logistica.itens_solicitados SET status = 'pendente' WHERE id_carr = ANY($1::bigint[])`,
+        `UPDATE logistica.itens_solicitados SET status = 'Separado' WHERE id_carr = ANY($1::bigint[])`,
         [keptIds]
       );
     }
 
     await client.query('COMMIT');
-    console.log(`[separar-parcial] ${qtySep} de ${base.codigo_produto} separados por user ${id_user}`);
-    res.json({ ok: true });
+    console.log(`[separar-parcial] ${qtySep} de ${base.codigo_produto} separados (SEP orig), restante ${qtyRemainder} → ${newNSolic}/pendente, user ${id_user}`);
+    res.json({ ok: true, new_n_solic: newNSolic });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[separar-parcial] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
   } finally {
     client.release();
+  }
+});
+
+// GET /api/logistica/kanban — Retorna SEPs agrupadas por coluna/status (só do próprio usuário)
+app.get('/api/logistica/kanban', async (req, res) => {
+  try {
+    const id_user   = req.session?.user?.id;
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || '';
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    // Coluna "carrinho": itens sem itens_solicitados do próprio usuário
+    const { rows: carrinho } = await pool.query(`
+      SELECT
+        NULL          AS n_solic,
+        COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+        MIN(c.data_prevista)::text            AS data_prevista,
+        COUNT(*)                              AS total_itens,
+        'carrinho'                            AS col
+      FROM logistica.carrinho c
+      WHERE c.id_user = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
+        )
+      GROUP BY COALESCE(c.retirada_por, c.nome_user)
+      ORDER BY MIN(c.criado_em) ASC
+    `, [id_user]);
+
+    // Colunas 2-6: SEPs do próprio usuário (id_user ou retirada_por = nome_user)
+    const { rows: seps } = await pool.query(`
+      SELECT
+        i.n_solic,
+        COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+        MIN(c.data_prevista)::text            AS data_prevista,
+        COUNT(*)                              AS total_itens,
+        CASE
+          WHEN bool_or(i.status = 'pendente')            THEN 'pendente'
+          WHEN bool_or(i.status = 'Em compra')           THEN 'Em compra'
+          WHEN bool_or(i.status = 'Separação')           THEN 'Separação'
+          WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
+          WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+          ELSE 'Concluído'
+        END AS col
+      FROM logistica.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.n_solic IS NOT NULL
+        AND (c.id_user = $1 OR c.retirada_por = $2)
+      GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
+      ORDER BY MAX(c.criado_em) ASC
+    `, [id_user, nome_user]);
+
+    const mapCols = {
+      carrinho:              [],
+      pendente:              [],
+      'Em compra':           [],
+      'Separação':           [],
+      'Separado':            [],
+      'Aguardando retirada': [],
+      'Concluído':           [],
+    };
+    [...carrinho, ...seps].forEach(r => {
+      const key = r.col;
+      if (mapCols[key]) mapCols[key].push(r);
+    });
+    res.json({ ok: true, colunas: mapCols });
+  } catch (err) {
+    console.error('[logistica/kanban] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/kanban/itens?n_solic=SEP-1000 — Itens detalhados de uma SEP (tooltip/modal)
+app.get('/api/logistica/kanban/itens', async (req, res) => {
+  try {
+    const id_user   = req.session?.user?.id;
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || '';
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { n_solic } = req.query;
+
+    if (n_solic) {
+      // Itens de uma SEP específica
+      const { rows } = await pool.query(`
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status,
+               c.codigo_produto, c.descricao, c.unidade,
+               c.quantidade::numeric AS quantidade,
+               c.data_prevista::text, c.horario, c.criado_em::text,
+               c.cod_omie,
+               COALESCE(c.retirada_por, c.nome_user) AS nome_user
+          FROM logistica.itens_solicitados i
+          JOIN logistica.carrinho c ON c.id = i.id_carr
+         WHERE i.n_solic = $1
+           AND (c.id_user = $2 OR c.retirada_por = $3)
+         ORDER BY c.criado_em ASC
+      `, [n_solic, id_user, nome_user]);
+      return res.json({ ok: true, itens: rows });
+    } else {
+      // Carrinho sem SEP
+      const { rows } = await pool.query(`
+        SELECT c.id AS carr_id, NULL::bigint AS solic_id,
+               'carrinho' AS status,
+               c.codigo_produto, c.descricao, c.unidade,
+               c.quantidade::numeric AS quantidade,
+               c.data_prevista::text, c.horario, c.criado_em::text,
+               c.cod_omie,
+               COALESCE(c.retirada_por, c.nome_user) AS nome_user
+          FROM logistica.carrinho c
+         WHERE c.id_user = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
+           )
+         ORDER BY c.criado_em ASC
+      `, [id_user]);
+      return res.json({ ok: true, itens: rows });
+    }
+  } catch (err) {
+    console.error('[logistica/kanban/itens] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/carrinho/:id/quantidade — Atualiza quantidade de item do carrinho
+app.patch('/api/logistica/carrinho/:id/quantidade', express.json(), async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const carrId = parseInt(req.params.id, 10);
+    const qty    = parseFloat(req.body?.quantidade);
+    if (!carrId || isNaN(qty) || qty <= 0)
+      return res.status(400).json({ ok: false, error: 'Dados inválidos.' });
+    // Verifica se o item ainda está em status editável (pendente ou carrinho)
+    const { rows } = await pool.query(`
+      SELECT i.status FROM logistica.carrinho c
+      LEFT JOIN logistica.itens_solicitados i ON i.id_carr = c.id
+      WHERE c.id = $1 AND c.id_user = $2
+    `, [carrId, id_user]);
+    if (!rows.length) return res.status(403).json({ ok: false, error: 'Item não encontrado ou sem permissão.' });
+    const status = rows[0]?.status;
+    if (status && status !== 'pendente')
+      return res.status(409).json({ ok: false, error: `Item já está em "${status}" e não pode ser editado.` });
+    await pool.query(
+      `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2 AND id_user = $3`,
+      [qty, carrId, id_user]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/carrinho/quantidade] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/solicitacoes-kanban — Retorna todas as SEPs agrupadas por coluna para o kanban do separador
+app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const { rows } = await pool.query(`
+      SELECT
+        i.n_solic,
+        COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+        MIN(c.data_prevista)::text             AS data_prevista,
+        MIN(c.horario)                         AS horario,
+        COUNT(*)::int                          AS total_itens,
+        MIN(c.criado_em)                       AS criado_em_min,
+        CASE
+          WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
+          WHEN bool_or(i.status = 'Em compra')           THEN 'Em compra'
+          WHEN bool_or(i.status = 'Separação')           THEN 'Separado'
+          WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
+          WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+          ELSE 'Concluído'
+        END AS coluna
+      FROM logistica.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.n_solic IS NOT NULL
+      GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
+      ORDER BY MIN(c.criado_em) ASC
+    `);
+
+    const colunas = { 'Solicitado': [], 'Em compra': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
+    rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
+
+    res.json({ ok: true, colunas });
+  } catch (err) {
+    console.error('[logistica/solicitacoes-kanban] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// GET /api/logistica/solicitacoes-pendentes-sep — Retorna SEPs pendentes agrupadas por n_solic
+app.get('/api/logistica/solicitacoes-pendentes-sep', async (req, res) => {
+  try {
+    const id_user   = req.session?.user?.id;
+    const nome_user = req.session?.user?.username || req.session?.user?.nome || '';
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    // SEPs com ao menos um item pendente, visíveis para este usuário
+    const { rows: sepsRow } = await pool.query(`
+      SELECT
+        i.n_solic,
+        COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+        MIN(c.data_prevista)::text             AS data_prevista,
+        MIN(c.horario)                         AS horario,
+        COUNT(*)                               AS total_itens,
+        SUM(c.quantidade)::numeric             AS quantidade_total,
+        MIN(c.criado_em)                       AS criado_em_min,
+        CASE
+          WHEN bool_or(i.status = 'pendente')  THEN 'pendente'
+          WHEN bool_or(i.status = 'Separação') THEN 'Separação'
+          ELSE 'Separado'
+        END AS status
+      FROM logistica.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+      WHERE i.n_solic IS NOT NULL
+        AND i.status IN ('pendente', 'Separação', 'Separado')
+      GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
+      ORDER BY MIN(c.criado_em) ASC
+    `);
+
+    res.json({ ok: true, seps: sepsRow });
+  } catch (err) {
+    console.error('[logistica/solicitacoes-pendentes-sep] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/aguardando-retirada — muda status para 'Aguardando retirada'
+app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/aguardando-retirada] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// PATCH /api/logistica/itens_solicitados/concluido — muda status para 'Concluído'
+app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
+  try {
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    const { solic_ids } = req.body;
+    if (!Array.isArray(solic_ids) || !solic_ids.length)
+      return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
+    const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await pool.query(
+      `UPDATE logistica.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`, [ids]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[logistica/concluido] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
 });
 
@@ -13937,14 +14271,22 @@ app.delete('/api/logistica/carrinho/:id', async (req, res) => {
 
 // POST /api/logistica/separacao/enviar - Envia separação e limpa carrinho do usuário
 app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => {
+  const client = await pool.connect();
   try {
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solicitado_para, data_prevista, horario, observacao } = req.body || {};
 
+    await client.query('BEGIN');
+
+    // Garante coluna criado_em em itens_solicitados (para controle de janela 14h)
+    await client.query(
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`
+    );
+
     // Garante tabela de solicitações
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS logistica.solicitacoes_separacao (
         id             BIGSERIAL PRIMARY KEY,
         id_user        TEXT NOT NULL,
@@ -13963,42 +14305,91 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     `);
 
     // Grava data_prevista, horario e retirada_por nos itens do carrinho antes de processar
-    await pool.query(
+    await client.query(
       `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
         WHERE id_user = $4
           AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
       [data_prevista || null, horario || null, solicitado_para || nome_user, id_user]
     );
 
-    // Busca itens do carrinho do usuário (com id para popular itens_solicitados)
-    const { rows: itens } = await pool.query(
-      `SELECT id, codigo_produto, descricao, unidade, quantidade FROM logistica.carrinho WHERE id_user = $1 AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id) ORDER BY criado_em ASC`,
+    // Busca itens do carrinho do usuário
+    const { rows: itens } = await client.query(
+      `SELECT id, codigo_produto, descricao, unidade, quantidade FROM logistica.carrinho
+       WHERE id_user = $1
+         AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
+       ORDER BY criado_em ASC`,
       [id_user]
     );
-    if (!itens.length) return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
+    if (!itens.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Carrinho vazio.' });
+    }
+
+    // ─── Calcula n_solic com regra de janela 14h (horário de Brasília UTC-3) ───
+    const now     = new Date();
+    const brtHour = ((now.getUTCHours() - 3) + 24) % 24;   // BRT = UTC-3 (sem DST no BR desde 2019)
+    const todayBRT = (() => {
+      const d = new Date(now.getTime() - 3 * 3600000);
+      return d.toISOString().slice(0, 10);                   // YYYY-MM-DD em BRT
+    })();
+
+    let nSolic = null;
+
+    if (brtHour < 14) {
+      // Antes das 14h: reutiliza n_solic do mesmo usuário criado hoje antes das 14h
+      const { rows: existing } = await client.query(`
+        SELECT DISTINCT i.n_solic
+          FROM logistica.itens_solicitados i
+          JOIN logistica.carrinho c ON c.id = i.id_carr
+         WHERE c.id_user = $1
+           AND i.n_solic IS NOT NULL
+           AND i.n_solic LIKE 'SEP-%'
+           AND (i.criado_em AT TIME ZONE 'America/Sao_Paulo')::date = $2::date
+           AND EXTRACT(HOUR FROM i.criado_em AT TIME ZONE 'America/Sao_Paulo') < 14
+         LIMIT 1
+      `, [id_user, todayBRT]);
+      nSolic = existing[0]?.n_solic || null;
+    }
+
+    if (!nSolic) {
+      // Gera próximo número sequencial (mínimo 1000, nunca repete)
+      const { rows: [seq] } = await client.query(`
+        SELECT COALESCE(MAX(
+          CASE WHEN n_solic ~ '^SEP-[0-9]+$'
+               THEN SUBSTRING(n_solic FROM 5)::integer
+               ELSE NULL END
+        ), 999) + 1 AS next_num
+          FROM logistica.itens_solicitados
+      `);
+      nSolic = `SEP-${Math.max(1000, seq.next_num)}`;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Insere cada item em solicitacoes_separacao e em itens_solicitados
     for (const item of itens) {
-      await pool.query(
+      await client.query(
         `INSERT INTO logistica.solicitacoes_separacao
            (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, observacao)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [id_user, nome_user, solicitado_para || nome_user, item.codigo_produto, item.descricao, item.unidade, item.quantidade,
          data_prevista || null, horario || null, observacao || null]
       );
-      await pool.query(
+      await client.query(
         `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status)
-         VALUES ($1, NULL, 'pendente')`,
-        [item.id]
+         VALUES ($1, $2, 'pendente')`,
+        [item.id, nSolic]
       );
     }
 
-    // Carrinho mantido — itens ficam ocultos via itens_solicitados.id_carr
-    console.log(`[Separação] Pedido enviado por ${nome_user} (${itens.length} itens) — carrinho preservado`);
-    res.json({ ok: true, total: itens.length });
+    await client.query('COMMIT');
+    console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens)`);
+    res.json({ ok: true, total: itens.length, n_solic: nSolic });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[logistica/separacao/enviar] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 

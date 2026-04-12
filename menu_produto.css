@@ -573,6 +573,8 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   display: flex;
   flex-grow: 1;
   overflow: hidden;
+  position: relative;
+  min-height: 0;
 }
 
 .left-side {
@@ -582,6 +584,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   overflow: visible;
   flex-shrink: 0;
   position: relative;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -622,17 +625,18 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   position: absolute;
   left: 76px;
   top: 16px;
+  bottom: 16px;
   width: 240px;
   height: auto;
-  max-height: calc(100vh - 40px);
+  max-height: none;
   background: rgba(30, 30, 30, 0.98);
   border: 2px solid var(--card-border-color);
   border-radius: 12px;
   padding: 20px;
-  padding-bottom: 10px;
+  padding-bottom: 28px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   backdrop-filter: blur(10px);
-  z-index: 1000;
+  z-index: 1005;
   overflow-y: auto;
   overflow-x: hidden;
   transition: all 0.3s ease;
@@ -824,6 +828,7 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   flex-grow: 1;
   /* evita que o conteúdo interno force largura além do disponível */
   min-width: 0;
+  min-height: 0;
 }
 
 .menu-link-main {
@@ -4522,6 +4527,22 @@ ul#comprasList li ,
   overflow: auto;
 }
 
+#atEnviarLinkModal .at-tec-modal-container,
+#atAtualizarTecModal .at-tec-modal-container {
+  overflow: visible;
+}
+
+#atEnviarLinkModal .at-tec-filter-bar,
+#atAtualizarTecModal .at-tec-filter-bar {
+  z-index: 2;
+  overflow: visible;
+}
+
+#atEnviarLinkModal .at-tec-filter-dropdown,
+#atAtualizarTecModal .at-tec-filter-dropdown {
+  z-index: 30 !important;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -7370,6 +7391,7 @@ table.tabela td.num {
   .sidebar-content {
     left: 46px;
     top: 0;
+    bottom: auto;
     max-height: 72vh;
   }
 
