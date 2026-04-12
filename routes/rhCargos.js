@@ -493,8 +493,16 @@ router.post('/colaboradores/novo-usuario', async (req, res) => {
       [created.id, funcaoVal, setorVal]
     );
 
-    // Garante que o novo usuário inicie sem permissões marcadas por override/processo legado
-    await client.query('DELETE FROM public.auth_user_permission WHERE user_id = $1', [created.id]);
+    // Garante que o novo usuário inicie com todas as permissões da árvore desmarcadas
+    await client.query(
+      `INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+       SELECT $1, n.id, false
+         FROM public.nav_node n
+        WHERE n.active = TRUE
+       ON CONFLICT (user_id, node_id)
+       DO UPDATE SET allow = EXCLUDED.allow`,
+      [created.id]
+    );
     await client.query('DELETE FROM public.auth_user_produto_permissao WHERE user_id = $1', [created.id]);
     await client.query('DELETE FROM public.auth_user_operacao WHERE user_id = $1', [created.id]);
 
