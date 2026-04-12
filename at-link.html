@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Portal AT — Fromtherm</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
+  <link rel="shortcut icon" type="image/png" href="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/compras-anexos/favicons/logo_guia_favicon_20260323.png">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -37,15 +41,21 @@
     .btn:disabled { opacity: .5; cursor: not-allowed; }
     .erro { background: #fee2e2; color: #b91c1c; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 14px; display: none; }
 
-    /* ── Dashboard ── */
-    #dashSection { max-width: 720px; width: 100%; }
-    .dash-header { background: linear-gradient(90deg, #1e3a5f, #3b82f6); color: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; }
-    .dash-header .saudacao { font-size: 12px; opacity: .8; margin-bottom: 2px; }
-    .dash-header .dash-nome { font-size: 20px; font-weight: 800; line-height: 1.25; word-break: break-word; }
-    .badge { display: inline-block; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-top: 8px; text-transform: uppercase; letter-spacing: .4px; }
-    .tbl-titulo { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 10px; margin-top: 4px; }
-    .tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 200px); border-radius: 10px; border: 1.5px solid rgba(255,255,255,.12); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+	    /* ── Dashboard ── */
+	    #dashSection { max-width: 720px; width: 100%; }
+	    .dash-header { background: linear-gradient(90deg, #1e3a5f, #3b82f6); color: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; }
+	    .dash-head-row { display: flex; align-items: center; gap: 16px; }
+	    .dash-logo { height: 54px; object-fit: contain; flex-shrink: 0; }
+	    .dash-copy { flex: 1; min-width: 0; }
+	    .dash-header .saudacao { font-size: 12px; opacity: .8; margin-bottom: 2px; }
+	    .dash-header .dash-nome { font-size: 20px; font-weight: 800; line-height: 1.25; word-break: break-word; }
+	    .badge { display: inline-block; background: rgba(255,255,255,.22); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 20px; margin-top: 8px; text-transform: uppercase; letter-spacing: .4px; }
+	    .tbl-titulo { font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 10px; margin-top: 4px; }
+	    .dash-toolbar { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; margin-bottom: 12px; }
+	    .dash-toolbar .tbl-titulo { margin: 0; }
+	    .dash-chat-mobile-slot { display: none; margin-top: 14px; }
+	    .tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 200px); border-radius: 10px; border: 1.5px solid rgba(255,255,255,.12); }
+	    table { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead tr { background: #2c3e6b; }
     thead th { padding: 9px 10px; text-align: left; font-weight: 700; font-size: 11px; letter-spacing: .3px; text-transform: uppercase; color: #fff; white-space: nowrap; position: sticky; top: 0; z-index: 2; background: #2c3e6b; }
     tbody tr { transition: background .12s; border-bottom: 1px solid #d1d5db; background: #fff; color: #111827; }
@@ -54,12 +64,296 @@
     .tbl-os { font-weight: 700; color: #1d4ed8; white-space: nowrap; }
     .tbl-prob { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tbl-empty { text-align: center; color: #94a3b8; padding: 28px; font-size: 13px; }
-    .logout-btn { background: rgba(255,255,255,.15); border: 1.5px solid rgba(255,255,255,.5); color: #fff; border-radius: 10px; padding: 9px 18px; font-size: 13px; cursor: pointer; margin-top: 18px; width: 100%; transition: background .15s, border-color .15s; }
-    .logout-btn:hover { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.8); }
+	    .logout-btn { background: rgba(255,255,255,.15); border: 1.5px solid rgba(255,255,255,.5); color: #fff; border-radius: 10px; padding: 9px 18px; font-size: 13px; cursor: pointer; margin-top: 18px; width: 100%; transition: background .15s, border-color .15s; }
+	    .logout-btn:hover { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.8); }
 
-    /* ── Spinner ── */
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 5px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+	    /* ── Assistente técnico com visual do menu_produto ── */
+	    .sgf-ai-trigger {
+	      position: relative;
+	      width: 84px;
+	      height: 84px;
+	      border-radius: 50%;
+	      background: transparent;
+	      border: none;
+	      cursor: pointer;
+	      box-shadow: none;
+	      display: none;
+	      align-items: center;
+	      justify-content: center;
+	      transition: transform .2s, box-shadow .2s;
+	      color: #fff;
+	      font-size: 22px;
+	      padding: 0;
+	      overflow: visible;
+	      flex-shrink: 0;
+	    }
+	    .sgf-ai-trigger.is-visible { display: flex; }
+	    .sgf-ai-trigger:hover { transform: scale(1.08); box-shadow: none; }
+	    .sgf-ai-trigger img {
+	      width: 76px;
+	      height: 76px;
+	      object-fit: contain;
+	      display: block;
+	    }
+	    .sgf-ai-trigger .sgf-ai-badge {
+	      position: absolute;
+	      top: -4px;
+	      right: -4px;
+	      background: #ef4444;
+	      color: #fff;
+	      font-size: 10px;
+	      font-weight: 700;
+	      border-radius: 10px;
+	      padding: 1px 5px;
+	      display: none;
+	    }
+	    #sgf-ai-panel {
+	      position: fixed;
+	      bottom: 132px;
+	      left: 18px;
+	      z-index: 10031;
+	      width: 360px;
+	      max-width: calc(100vw - 36px);
+	      height: 480px;
+	      max-height: calc(100vh - 160px);
+	      background: #0f172a;
+	      border: 1px solid rgba(99,102,241,.35);
+	      border-radius: 16px;
+	      box-shadow: 0 12px 48px rgba(0,0,0,.6);
+	      display: none;
+	      flex-direction: column;
+	      overflow: hidden;
+	      font-family: inherit;
+	    }
+	    #sgf-ai-panel.open { display: flex; }
+	    #sgf-ai-header {
+	      display: flex;
+	      align-items: center;
+	      gap: 12px;
+	      padding: 12px 14px 12px 96px;
+	      min-height: 74px;
+	      background: linear-gradient(135deg, #312e81 0%, #1e1b4b 100%);
+	      border-bottom: 1px solid rgba(99,102,241,.25);
+	      flex-shrink: 0;
+	      position: relative;
+	      overflow: visible;
+	    }
+	    #sgf-ai-header .sgf-ai-avatar {
+	      width: 72px;
+	      height: 72px;
+	      background: transparent;
+	      border-radius: 0;
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      position: absolute;
+	      left: 10px;
+	      top: 50%;
+	      transform: translateY(-50%);
+	      overflow: visible;
+	      z-index: 3;
+	      pointer-events: none;
+	    }
+	    #sgf-ai-header .sgf-ai-avatar img {
+	      width: 72px;
+	      height: 72px;
+	      object-fit: contain;
+	      display: block;
+	    }
+	    #sgf-ai-header .sgf-ai-title { flex: 1; min-width: 0; }
+	    #sgf-ai-header .sgf-ai-title strong { display: block; font-size: 14px; color: #e0e7ff; }
+	    #sgf-ai-header .sgf-ai-title span { font-size: 11px; color: #818cf8; }
+	    #sgf-ai-panel-close {
+	      background: none;
+	      border: none;
+	      color: #94a3b8;
+	      font-size: 18px;
+	      cursor: pointer;
+	      padding: 4px;
+	      line-height: 1;
+	      border-radius: 6px;
+	      transition: color .15s;
+	    }
+	    #sgf-ai-panel-close:hover { color: #e2e8f0; }
+	    #sgf-ai-messages {
+	      flex: 1;
+	      overflow-y: auto;
+	      padding: 14px 12px;
+	      display: flex;
+	      flex-direction: column;
+	      gap: 10px;
+	      scrollbar-width: thin;
+	      scrollbar-color: rgba(99,102,241,.3) transparent;
+	    }
+	    .sgf-ai-msg {
+	      max-width: 82%;
+	      padding: 9px 12px;
+	      border-radius: 12px;
+	      font-size: 13px;
+	      line-height: 1.5;
+	      word-break: break-word;
+	      white-space: pre-wrap;
+	    }
+	    .sgf-ai-msg.user {
+	      align-self: flex-end;
+	      background: linear-gradient(135deg, #4338ca 0%, #3730a3 100%);
+	      color: #e0e7ff;
+	      border-bottom-right-radius: 4px;
+	    }
+	    .sgf-ai-msg.assistant {
+	      align-self: flex-start;
+	      background: #1e293b;
+	      color: #cbd5e1;
+	      border-bottom-left-radius: 4px;
+	      border: 1px solid rgba(99,102,241,.15);
+	    }
+	    .sgf-ai-msg.typing {
+	      align-self: flex-start;
+	      background: #1e293b;
+	      color: #64748b;
+	      border: 1px solid rgba(99,102,241,.15);
+	      border-bottom-left-radius: 4px;
+	      font-style: italic;
+	      font-size: 12px;
+	    }
+	    .sgf-ai-msg.error {
+	      align-self: flex-start;
+	      background: rgba(239,68,68,.12);
+	      color: #fca5a5;
+	      border: 1px solid rgba(239,68,68,.25);
+	      font-size: 12px;
+	    }
+	    .sgf-ai-choice-wrap {
+	      margin-top: 8px;
+	      display: flex;
+	      flex-direction: column;
+	      gap: 6px;
+	    }
+	    .sgf-ai-choice-btn {
+	      padding: 7px 10px;
+	      border: 1px solid rgba(99,102,241,.35);
+	      border-radius: 8px;
+	      background: rgba(99,102,241,.12);
+	      color: #c7d2fe;
+	      font-size: 12px;
+	      text-align: left;
+	      cursor: pointer;
+	      transition: background .15s, border-color .15s;
+	    }
+	    .sgf-ai-choice-btn:hover {
+	      background: rgba(99,102,241,.25);
+	      border-color: rgba(129,140,248,.8);
+	    }
+	    .sgf-ai-choice-btn:disabled {
+	      opacity: .55;
+	      cursor: not-allowed;
+	    }
+	    .sgf-ai-manual-previews {
+	      margin-top: 10px;
+	      display: grid;
+	      gap: 8px;
+	    }
+	    .sgf-ai-manual-preview {
+	      display: block;
+	      text-decoration: none;
+	      color: inherit;
+	      border: 1px solid rgba(148,163,184,.22);
+	      border-radius: 10px;
+	      overflow: hidden;
+	      background: rgba(15,23,42,.65);
+	    }
+	    .sgf-ai-manual-preview:hover { border-color: rgba(99,102,241,.55); }
+	    .sgf-ai-manual-preview img {
+	      display: block;
+	      width: 100%;
+	      height: auto;
+	      max-height: 220px;
+	      object-fit: cover;
+	      background: #0f172a;
+	    }
+	    .sgf-ai-manual-preview-meta {
+	      padding: 8px 10px;
+	      display: grid;
+	      gap: 2px;
+	      font-size: 11px;
+	      line-height: 1.35;
+	      white-space: normal;
+	    }
+	    .sgf-ai-manual-preview-title {
+	      color: #e2e8f0;
+	      font-weight: 700;
+	    }
+	    .sgf-ai-manual-preview-page { color: #94a3b8; }
+	    #sgf-ai-suggestions {
+	      padding: 0 12px 10px;
+	      display: flex;
+	      flex-wrap: wrap;
+	      gap: 6px;
+	      flex-shrink: 0;
+	    }
+	    .sgf-ai-sugg {
+	      padding: 5px 10px;
+	      background: rgba(99,102,241,.15);
+	      border: 1px solid rgba(99,102,241,.3);
+	      border-radius: 20px;
+	      color: #a5b4fc;
+	      font-size: 11px;
+	      cursor: pointer;
+	      transition: background .15s;
+	      white-space: nowrap;
+	    }
+	    .sgf-ai-sugg:hover { background: rgba(99,102,241,.3); }
+	    .sgf-ai-sugg:disabled { opacity: .5; cursor: not-allowed; }
+	    #sgf-ai-footer {
+	      padding: 10px 12px;
+	      border-top: 1px solid rgba(99,102,241,.15);
+	      display: flex;
+	      gap: 8px;
+	      align-items: flex-end;
+	      flex-shrink: 0;
+	      background: #0f172a;
+	    }
+	    #sgf-ai-input {
+	      flex: 1;
+	      background: #1e293b;
+	      border: 1px solid rgba(99,102,241,.25);
+	      border-radius: 10px;
+	      color: #e2e8f0;
+	      font-size: 13px;
+	      padding: 8px 10px;
+	      resize: none;
+	      outline: none;
+	      height: 38px;
+	      max-height: 100px;
+	      overflow-y: auto;
+	      font-family: inherit;
+	      line-height: 1.4;
+	      transition: border-color .15s;
+	    }
+	    #sgf-ai-input::placeholder { color: #64748b; }
+	    #sgf-ai-input:focus { border-color: rgba(99,102,241,.6); }
+	    #sgf-ai-send {
+	      width: 38px;
+	      height: 38px;
+	      background: linear-gradient(135deg, #6366f1, #4f46e5);
+	      border: none;
+	      border-radius: 10px;
+	      color: #fff;
+	      cursor: pointer;
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      flex-shrink: 0;
+	      transition: opacity .15s;
+	      padding: 0;
+	    }
+	    #sgf-ai-send:hover { opacity: .85; }
+	    #sgf-ai-send:disabled,
+	    #sgf-ai-input:disabled { opacity: .4; cursor: not-allowed; }
+
+	    /* ── Spinner ── */
+	    .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 5px; }
+	    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ══════════════════════════════════════════════════════
        MODAL OS — CSS idêntico ao menu_produto.html
@@ -155,12 +449,182 @@
     .at-os-fl { font-weight: 700; white-space: nowrap; font-size: 12px; color: #111; }
     .at-os-fv { font-size: 12px; color: #222; border-bottom: 1px solid #ccc; flex: 1; min-width: 60px; padding-bottom: 1px; }
 
-    @media (max-width: 540px) {
-      .card { padding: 26px 18px; }
-      .at-os-doc .at-os-header { grid-template-columns: 90px 1fr 120px; }
-      .at-os-hcol-os { padding-left: 6px; }
-      .at-os-doc { margin: 0 8px 12px; }
-    }
+	    @media (max-width: 780px) {
+	      body {
+	        padding: 14px 10px;
+	        align-items: flex-start;
+	      }
+	      #dashSection {
+	        max-width: 100%;
+	      }
+	      .dash-header {
+	        padding: 16px;
+	        margin-bottom: 14px;
+	      }
+	      .dash-head-row {
+	        flex-wrap: wrap;
+	        align-items: flex-start;
+	      }
+	      .dash-logo {
+	        height: 46px;
+	      }
+	      .dash-copy {
+	        min-width: calc(100% - 84px);
+	      }
+	      .dash-chat-mobile-slot {
+	        display: flex;
+	        justify-content: flex-start;
+	      }
+	      .dash-toolbar {
+	        grid-template-columns: 1fr auto;
+	        align-items: center;
+	        gap: 10px;
+	      }
+	      #sgf-ai-btn-desktop {
+	        display: none !important;
+	      }
+	      .sgf-ai-trigger {
+	        width: 64px;
+	        height: 64px;
+	      }
+	      .sgf-ai-trigger img {
+	        width: 64px;
+	        height: 64px;
+	      }
+	      #sgf-ai-panel {
+	        position: fixed;
+	        top: 68px;
+	        bottom: auto;
+	        left: 8px;
+	        width: calc(100vw - 16px);
+	        max-width: calc(100vw - 16px);
+	        max-height: calc(100vh - 80px);
+	      }
+	      .tbl-wrap {
+	        max-height: none;
+	      }
+	      .card {
+	        padding: 26px 18px;
+	      }
+	      .modal-container {
+	        width: 100%;
+	        max-width: 100%;
+	        max-height: calc(100vh - 10px);
+	        border-radius: 12px;
+	      }
+	      .modal-header {
+	        padding: 8px 12px;
+	      }
+	      .modal-header-title {
+	        font-size: 12px;
+	      }
+	      .modal-close-btn {
+	        padding: 6px 10px;
+	        font-size: 12px;
+	      }
+	      .at-os-doc {
+	        margin: 0 6px 10px;
+	      }
+	      .at-os-doc .at-os-header {
+	        display: flex;
+	        align-items: center;
+	        gap: 10px;
+	        padding: 10px 8px;
+	      }
+	      .at-os-hcol-center {
+	        display: none;
+	      }
+	      .at-os-hcol-logo {
+	        flex: 0 0 82px;
+	        justify-content: center;
+	      }
+	      .at-os-logo {
+	        max-height: 46px !important;
+	        max-width: 82px !important;
+	      }
+	      .at-os-hcol-os {
+	        flex: 1 1 auto;
+	        min-width: 0;
+	        border-left: none;
+	        padding-left: 0;
+	        align-items: stretch;
+	      }
+	      .at-os-doc .at-os-os-label {
+	        width: 100%;
+	        font-size: 11px;
+	        line-height: 1.15;
+	        padding: 5px 6px 4px;
+	        white-space: normal;
+	      }
+	      .at-os-doc .at-os-os-num {
+	        width: 100%;
+	        font-size: 28px;
+	        line-height: 1;
+	        letter-spacing: .6px;
+	        padding: 10px 8px;
+	        word-break: normal;
+	      }
+	      .at-os-section-bar {
+	        flex-direction: column;
+	        gap: 4px;
+	        padding: 7px 8px;
+	        font-size: 11px;
+	        line-height: 1.2;
+	      }
+	      .at-os-agenda-hint {
+	        display: block;
+	        text-align: center;
+	        font-size: 10px;
+	      }
+	      .at-os-fields-row,
+	      .at-os-fields-grid {
+	        display: grid;
+	        grid-template-columns: 1fr;
+	        gap: 6px;
+	        padding: 8px;
+	      }
+	      .at-os-span2 {
+	        grid-column: auto;
+	      }
+	      .at-os-equip-row {
+	        justify-content: initial;
+	      }
+	      .at-os-field {
+	        display: grid;
+	        gap: 2px;
+	        min-width: 0;
+	        padding: 0;
+	      }
+	      .at-os-fl {
+	        font-size: 10px;
+	        white-space: normal;
+	        letter-spacing: .2px;
+	      }
+	      .at-os-fv {
+	        min-width: 0;
+	        font-size: 11px;
+	        padding-bottom: 3px;
+	        overflow-wrap: anywhere;
+	      }
+	      .at-os-problem-grid,
+	      .at-os-sign-row {
+	        grid-template-columns: 1fr !important;
+	      }
+	      .at-os-problem-col-left,
+	      .at-os-sign-col-left {
+	        border-right: none !important;
+	        border-bottom: 1px solid #e5e7eb;
+	      }
+	      .at-os-warning {
+	        font-size: 10px !important;
+	        line-height: 1.45 !important;
+	      }
+	    }
+	    @media (min-width: 781px) {
+	      #sgf-ai-btn-mobile {
+	        display: none !important;
+	      }
+	    }
 
     /* ── Status badges ── */
     .status-badge { display:inline-block; font-size:10px; font-weight:700; padding:2px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
@@ -246,27 +710,37 @@
     <button class="btn" id="loginBtn" onclick="fazerLogin()">Entrar</button>
   </div>
 
-  <!-- ── Dashboard ─────────────────────────────────────── -->
-  <div id="dashSection" style="display:none;">
-    <div class="dash-header">
-      <div style="display:flex;align-items:center;gap:16px;">
-        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/logo.png"
-             alt="Logo" style="height:54px;object-fit:contain;flex-shrink:0;">
-        <div style="flex:1;min-width:0;">
-          <div class="saudacao">Bem-vindo(a)</div>
-          <div class="dash-nome" id="dashNome">—</div>
-          <div class="badge" id="dashTipo">—</div>
-        </div>
-        <button class="logout-btn" onclick="sair()" title="Sair" style="margin-top:0;width:auto;padding:8px 10px;flex-shrink:0;line-height:1;"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
-      <div class="tbl-titulo" style="margin-bottom:0;">Meus Atendimentos</div>
-      <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
-        style="padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
-        Exibir finalizados
-      </button>
-    </div>
+	  <!-- ── Dashboard ─────────────────────────────────────── -->
+	  <div id="dashSection" style="display:none;">
+	    <div class="dash-header">
+	      <div class="dash-head-row">
+	        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/logo.png"
+	             alt="Logo" class="dash-logo">
+	        <div class="dash-copy">
+	          <div class="saudacao">Bem-vindo(a)</div>
+	          <div class="dash-nome" id="dashNome">—</div>
+	          <div class="badge" id="dashTipo">—</div>
+	        </div>
+	        <button class="logout-btn" onclick="sair()" title="Sair" style="margin-top:0;width:auto;padding:8px 10px;flex-shrink:0;line-height:1;"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+	      </div>
+	      <div class="dash-chat-mobile-slot">
+	        <button type="button" class="sgf-ai-trigger" id="sgf-ai-btn-mobile" title="Assistente técnico" aria-label="Abrir assistente técnico">
+	          <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+	          <span class="sgf-ai-badge" id="sgf-ai-badge-mobile">!</span>
+	        </button>
+	      </div>
+	    </div>
+	    <div class="dash-toolbar">
+	      <div class="tbl-titulo">Meus Atendimentos</div>
+	      <button type="button" class="sgf-ai-trigger" id="sgf-ai-btn-desktop" title="Assistente técnico" aria-label="Abrir assistente técnico">
+	        <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+	        <span class="sgf-ai-badge" id="sgf-ai-badge-desktop">!</span>
+	      </button>
+	      <button id="btnToggleFinaliz" onclick="_toggleFinaliz()"
+	        style="padding:6px 14px;border-radius:20px;border:1px solid #d97706;background:rgba(217,119,6,.12);color:#f59e0b;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">
+	        Exibir finalizados
+	      </button>
+	    </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
@@ -284,11 +758,41 @@
           <tr><td colspan="9" class="tbl-empty">Carregando…</td></tr>
         </tbody>
       </table>
-    </div>
-  </div>
+	    </div>
+	  </div>
 
-  <!-- ══════════════════════════════════════════════════
-       MODAL OS — estrutura idêntica ao menu_produto.html
+	  <div id="sgf-ai-panel" role="dialog" aria-label="Assistente técnico">
+	    <div id="sgf-ai-header">
+	      <div class="sgf-ai-avatar"><img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
+	      <div class="sgf-ai-title">
+	        <strong>Assistente técnico</strong>
+	        <span>Fromtherm</span>
+	      </div>
+	      <button id="sgf-ai-panel-close" title="Fechar" aria-label="Fechar assistente">
+	        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+	          <path d="M18 6L6 18M6 6l12 12"></path>
+	        </svg>
+	      </button>
+	    </div>
+	    <div id="sgf-ai-messages"></div>
+	    <div id="sgf-ai-suggestions">
+	      <button class="sgf-ai-sugg" data-msg="Como colocar a bomba de calor em modo aquecimento?">Modo aquecimento</button>
+	      <button class="sgf-ai-sugg" data-msg="Como configurar o wifi da bomba de calor?">Configuração do wifi</button>
+	      <button class="sgf-ai-sugg" data-msg="Como ajustar a temperatura no painel do controlador?">Ajuste de temperatura</button>
+	      <button class="sgf-ai-sugg" data-msg="Finalizar atendimento">Finalizar atendimento</button>
+	    </div>
+	    <div id="sgf-ai-footer">
+	      <textarea id="sgf-ai-input" placeholder="Escreva aqui a sua duvida" rows="1" aria-label="Mensagem para o assistente técnico"></textarea>
+	      <button id="sgf-ai-send" title="Enviar" aria-label="Enviar mensagem">
+	        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+	          <path d="M21.8 2.2a1 1 0 0 0-1.04-.24l-17 6a1 1 0 0 0 .08 1.91l7.1 1.97 1.98 7.1a1 1 0 0 0 .9.73h.06a1 1 0 0 0 .92-.62l6-17a1 1 0 0 0-.24-1.05Zm-7.41 14.23-1.45-5.18a1 1 0 0 0-.7-.7L7.06 9.1l10.94-3.86-3.61 11.19Z"></path>
+	        </svg>
+	      </button>
+	    </div>
+	  </div>
+
+	  <!-- ══════════════════════════════════════════════════
+	       MODAL OS — estrutura idêntica ao menu_produto.html
        ══════════════════════════════════════════════════ -->
   <div class="modal-overlay" id="osModal" onclick="if(event.target===this)fecharOsModal()">
     <div class="modal-container">
@@ -303,7 +807,7 @@
         <!-- CABEÇALHO -->
         <div class="at-os-header">
           <div class="at-os-hcol at-os-hcol-logo">
-            <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png"
+            <img class="at-os-logo" src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Logo_OS.png"
                  alt="Logo" style="max-height:72px;max-width:160px;object-fit:contain;">
           </div>
           <div class="at-os-hcol at-os-hcol-center">
@@ -365,12 +869,12 @@
 
         <!-- DESCRIÇÃO DO PROBLEMA -->
         <div class="at-os-section-bar">DESCRIÇÃO DO PROBLEMA</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
-          <div style="padding:6px 10px;border-right:1px solid #e5e7eb;">
+        <div class="at-os-problem-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+          <div class="at-os-problem-col at-os-problem-col-left" style="padding:6px 10px;border-right:1px solid #e5e7eb;">
             <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">MOTIVO DA SOLICITAÇÃO</div>
             <span class="at-os-fv" id="osMotivo" style="display:block;min-height:36px;white-space:pre-wrap;"></span>
           </div>
-          <div style="padding:6px 10px;">
+          <div class="at-os-problem-col" style="padding:6px 10px;">
             <div style="font-weight:700;font-size:11px;color:#555;margin-bottom:4px;">DESCRIÇÃO DO PROBLEMA</div>
             <span class="at-os-fv" id="osDescricao" style="display:block;min-height:36px;white-space:pre-wrap;"></span>
           </div>
@@ -385,27 +889,27 @@
         <!-- OBSERVAÇÕES -->
         <div class="at-os-section-bar">OBSERVAÇÕES</div>
         <div style="padding:8px 10px;border-bottom:1px solid #d1d5db;">
-          <p style="margin:0;font-weight:700;font-style:italic;font-size:11px;color:#111;text-align:center;line-height:1.55;">
+          <p class="at-os-warning" style="margin:0;font-weight:700;font-style:italic;font-size:11px;color:#111;text-align:center;line-height:1.55;">
             AS PEÇAS E A MÃO DE OBRA QUE NÃO CARACTERIZAM DEFEITO DE FABRICAÇÃO, CONFORME MANUAL DO EQUIPAMENTO,<br>
             SERÃO COBRADAS DO CLIENTE/SOLICITANTE.
           </p>
         </div>
 
         <!-- Assinaturas -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
-          <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+        <div class="at-os-sign-row" style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+          <div class="at-os-sign-col at-os-sign-col-left" style="padding:8px 10px;border-right:1px solid #d1d5db;">
             <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO TÉCNICO:</span>
           </div>
-          <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+          <div class="at-os-sign-col" style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
             <span style="font-weight:700;font-size:11px;color:#111;">DATA DE ABERTURA:</span>
             <span class="at-os-fv" id="osDataAbertura" style="font-size:11px;"></span>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
-          <div style="padding:8px 10px;border-right:1px solid #d1d5db;">
+        <div class="at-os-sign-row" style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #d1d5db;">
+          <div class="at-os-sign-col at-os-sign-col-left" style="padding:8px 10px;border-right:1px solid #d1d5db;">
             <span style="font-weight:700;font-size:11px;color:#111;">ASSINATURA DO CLIENTE:</span>
           </div>
-          <div style="padding:8px 10px;">
+          <div class="at-os-sign-col" style="padding:8px 10px;">
             <span style="font-weight:700;font-size:11px;color:#111;">DATA DE CONCLUSÃO:</span>
           </div>
         </div>
@@ -426,13 +930,14 @@
     const TOKEN    = new URLSearchParams(location.search).get('token') || '';
     const SESS_KEY = 'at_portal_sess_' + TOKEN.slice(0, 8);
 
-    function mostrar(id) {
-      ['loadingSection','invalidSection','cadastroSection','loginSection','dashSection']
-        .forEach(s => {
-          const el = document.getElementById(s);
-          if (el) el.style.display = s === id ? '' : 'none';
-        });
-    }
+	    function mostrar(id) {
+	      ['loadingSection','invalidSection','cadastroSection','loginSection','dashSection']
+	        .forEach(s => {
+	          const el = document.getElementById(s);
+	          if (el) el.style.display = s === id ? '' : 'none';
+	        });
+	      togglePortalAi(id === 'dashSection');
+	    }
     function setErro(id, msg) {
       const el = document.getElementById(id);
       if (el) { el.textContent = msg; el.style.display = msg ? 'block' : 'none'; }
@@ -445,17 +950,832 @@
       const el = document.getElementById(id);
       if (el) el.textContent = val || '';
     }
-    function _statusMeta(st) {
-      const s = String(st || '').toLowerCase().trim();
-      if (s === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
-      if (s === 'fechado')        return { cls: 'finalizado',  label: 'Finalizado' };
-      if (s === 'aguardando_nfe') return { cls: 'aguardando',  label: 'Aguardando NFe' };
-      if (s === 'aguardando')     return { cls: 'aguardando',  label: 'Aguardando' };
-      return { cls: 'aberta', label: 'Aberta' };
-    }
+	    function _statusMeta(st) {
+	      const s = String(st || '').toLowerCase().trim();
+	      if (s === 'finalizado')     return { cls: 'finalizado',  label: 'Finalizado' };
+	      if (s === 'fechado')        return { cls: 'finalizado',  label: 'Finalizado' };
+	      if (s === 'aguardando_nfe') return { cls: 'aguardando',  label: 'Aguardando NFe' };
+	      if (s === 'aguardando')     return { cls: 'aguardando',  label: 'Aguardando' };
+	      return { cls: 'aberta', label: 'Aberta' };
+	    }
 
-    // ── Init ──
-    async function init() {
+	    const portalAiState = {
+	      enabled: false,
+	      open: false,
+	      loading: false,
+	      conversationId: '',
+	      history: [],
+	      finalizedIds: new Set(),
+	      mediaOfferPending: false
+	    };
+	    const portalFechamentoFlow = {
+	      active: false,
+	      step: '',
+	      os: null,
+	      data: {}
+	    };
+
+	    function portalAiEls() {
+	      return {
+	        desktopBtn: document.getElementById('sgf-ai-btn-desktop'),
+	        mobileBtn: document.getElementById('sgf-ai-btn-mobile'),
+	        panel: document.getElementById('sgf-ai-panel'),
+	        closeBtn: document.getElementById('sgf-ai-panel-close'),
+	        messages: document.getElementById('sgf-ai-messages'),
+	        input: document.getElementById('sgf-ai-input'),
+	        sendBtn: document.getElementById('sgf-ai-send'),
+	        suggestions: document.getElementById('sgf-ai-suggestions')
+	      };
+	    }
+
+	    function togglePortalAi(ativo) {
+	      portalAiState.enabled = !!ativo;
+	      const { desktopBtn, mobileBtn, panel } = portalAiEls();
+	      [desktopBtn, mobileBtn].forEach((btn) => {
+	        if (!btn) return;
+	        btn.classList.toggle('is-visible', portalAiState.enabled);
+	        btn.setAttribute('aria-hidden', portalAiState.enabled ? 'false' : 'true');
+	      });
+	      if (!portalAiState.enabled) {
+	        portalAiState.open = false;
+	        if (panel) {
+	          panel.classList.remove('open');
+	        }
+	      }
+	    }
+
+	    function scrollPortalAiToBottom() {
+	      const { messages } = portalAiEls();
+	      if (messages) messages.scrollTop = messages.scrollHeight;
+	    }
+
+	    function normalizePortalAiText(value) {
+	      return String(value || '')
+	        .toLowerCase()
+	        .normalize('NFD')
+	        .replace(/[\u0300-\u036f]/g, '')
+	        .replace(/\s+/g, ' ')
+	        .trim();
+	    }
+
+	    function formatPortalAiDatePtBr(value) {
+	      const iso = String(value || '').trim();
+	      const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	      if (!match) return iso;
+	      return `${match[3]}/${match[2]}/${match[1]}`;
+	    }
+
+	    function getPortalAiTodayIso() {
+	      const now = new Date();
+	      const offset = now.getTimezoneOffset() * 60000;
+	      return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+	    }
+
+	    function parsePortalAiMoney(rawValue) {
+	      const raw = String(rawValue || '').trim();
+	      if (!raw) return { ok: false, error: 'Informe um valor numérico.' };
+	      const cleaned = raw.replace(/[R$\s]/gi, '').replace(/\./g, '').replace(',', '.');
+	      const value = Number(cleaned);
+	      if (!Number.isFinite(value) || value < 0) {
+	        return { ok: false, error: 'Valor inválido. Use um formato como 150 ou 150,00.' };
+	      }
+	      return {
+	        ok: true,
+	        value: value.toFixed(2),
+	        label: value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+	      };
+	    }
+
+	    function parsePortalAiDate(rawValue) {
+	      const raw = String(rawValue || '').trim();
+	      const normalized = normalizePortalAiText(raw);
+	      if (!raw) return { ok: false, error: 'Informe uma data válida.' };
+	      if (['hoje', 'usar data de hoje', 'manter data', 'confirmar data', 'confirmar'].includes(normalized)) {
+	        const iso = getPortalAiTodayIso();
+	        return { ok: true, value: iso, label: formatPortalAiDatePtBr(iso) };
+	      }
+
+	      const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	      if (isoMatch) {
+	        const dt = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+	        if (
+	          dt.getFullYear() === Number(isoMatch[1]) &&
+	          dt.getMonth() === Number(isoMatch[2]) - 1 &&
+	          dt.getDate() === Number(isoMatch[3])
+	        ) {
+	          return { ok: true, value: raw, label: formatPortalAiDatePtBr(raw) };
+	        }
+	      }
+
+	      const brMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+	      if (brMatch) {
+	        const day = Number(brMatch[1]);
+	        const month = Number(brMatch[2]);
+	        const year = Number(brMatch[3]);
+	        const dt = new Date(year, month - 1, day);
+	        if (dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day) {
+	          const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+	          return { ok: true, value: iso, label: formatPortalAiDatePtBr(iso) };
+	        }
+	      }
+
+	      return { ok: false, error: 'Data inválida. Use DD/MM/AAAA, DD-MM-AAAA, YYYY-MM-DD ou "hoje".' };
+	    }
+
+	    function parsePortalAiYesNo(rawValue) {
+	      const normalized = normalizePortalAiText(rawValue);
+	      if (['sim', 's', 'yes', 'claro', 'positivo'].includes(normalized)) return true;
+	      if (['nao', 'não', 'n', 'no', 'negativo'].includes(normalized)) return false;
+	      return null;
+	    }
+
+	    function getPortalAiOsAbertas() {
+	      return _listaAtend.filter((item) => normalizePortalAiText(item?.status_os || 'aberta') === 'aberta');
+	    }
+
+	    function resetPortalAiFechamentoFlow() {
+	      portalFechamentoFlow.active = false;
+	      portalFechamentoFlow.step = '';
+	      portalFechamentoFlow.os = null;
+	      portalFechamentoFlow.data = {};
+	    }
+
+	    function appendPortalAiChoiceMessage(text, choices = []) {
+	      const el = appendPortalAiMessage('assistant', text);
+	      if (!el || !Array.isArray(choices) || !choices.length) return el;
+
+	      const wrap = document.createElement('div');
+	      wrap.className = 'sgf-ai-choice-wrap';
+	      choices.forEach((choice) => {
+	        const btn = document.createElement('button');
+	        btn.type = 'button';
+	        btn.className = 'sgf-ai-choice-btn';
+	        btn.textContent = String(choice.label || '').trim();
+	        if (choice.osId != null) btn.dataset.aiCloseOs = String(choice.osId);
+	        if (choice.value) btn.dataset.aiCloseChoice = String(choice.value);
+	        wrap.appendChild(btn);
+	      });
+	      el.appendChild(wrap);
+	      return el;
+	    }
+
+	    function isPortalAiFechamentoIntent(text) {
+	      const t = normalizePortalAiText(text);
+	      if (!t) return false;
+	      return (
+	        (t.includes('fechar') && t.includes('os')) ||
+	        (t.includes('fechamento') && t.includes('os')) ||
+	        (t.includes('finalizar') && t.includes('os')) ||
+	        (t.includes('realizar') && t.includes('fechamento')) ||
+	        (t.includes('quero') && t.includes('fechamento'))
+	      );
+	    }
+
+	    function startPortalAiFechamentoFlow() {
+	      const abertas = getPortalAiOsAbertas();
+	      resetPortalAiFechamentoFlow();
+	      if (!abertas.length) {
+	        appendPortalAiMessage('assistant', 'Não encontrei OS com status aberta para realizar o fechamento.');
+	        return true;
+	      }
+
+	      portalFechamentoFlow.active = true;
+	      portalFechamentoFlow.step = 'select_os';
+	      appendPortalAiChoiceMessage(
+	        'Selecione a OS aberta que você deseja fechar:',
+	        abertas.slice(0, 8).map((item) => ({
+	          label: `OS ${item.os_num || item.id_at} • ${item.cliente || 'Cliente'} • ${item.modelo || 'Modelo não informado'}`,
+	          osId: item.id_at
+	        }))
+	      );
+	      return true;
+	    }
+
+	    function askPortalAiPecasQuestion() {
+	      portalFechamentoFlow.step = 'pecas_flag';
+	      appendPortalAiChoiceMessage(
+	        'Foi utilizada Peças para este atendimento? Se sim, clique em "Sim" e depois escreva quais foram utilizadas.',
+	        [
+	          { label: 'Sim', value: 'sim' },
+	          { label: 'Não', value: 'nao' }
+	        ]
+	      );
+	    }
+
+	    function askPortalAiDataQuestion() {
+	      portalFechamentoFlow.step = 'data';
+	      const todayIso = getPortalAiTodayIso();
+	      appendPortalAiChoiceMessage(
+	        `Data de conclusão sugerida: ${formatPortalAiDatePtBr(todayIso)}. Se quiser manter a data do dia, clique abaixo. Se preferir, envie outra data.`,
+	        [
+	          { label: `Usar ${formatPortalAiDatePtBr(todayIso)}`, value: 'usar_data_hoje' }
+	        ]
+	      );
+	    }
+
+	    function askPortalAiObservacoesQuestion() {
+	      portalFechamentoFlow.step = 'observacoes_flag';
+	      appendPortalAiChoiceMessage(
+	        'Deseja informar Observações do técnico?',
+	        [
+	          { label: 'Sim', value: 'sim' },
+	          { label: 'Não', value: 'nao' }
+	        ]
+	      );
+	    }
+
+	    function askPortalAiConfirmacaoFechamento() {
+	      portalFechamentoFlow.step = 'confirm';
+	      const resumo = [
+	        `OS: ${portalFechamentoFlow.os?.os_num || portalFechamentoFlow.os?.id_at || '—'}`,
+	        `Descrição do serviço realizado: ${portalFechamentoFlow.data.descricao || '—'}`,
+	        `Peças utilizadas: ${portalFechamentoFlow.data.pecas || 'Não informado'}`,
+	        `Valor peças: ${portalFechamentoFlow.data.valorPecasLabel || '0,00'}`,
+	        `Valor mão de obra: ${portalFechamentoFlow.data.valorMoLabel || '—'}`,
+	        `Data de conclusão: ${formatPortalAiDatePtBr(portalFechamentoFlow.data.dataConclusao || '') || '—'}`,
+	        `Observações do técnico: ${portalFechamentoFlow.data.observacoes || 'Sem observações'}`
+	      ].join('\n');
+	      appendPortalAiChoiceMessage(
+	        `Confirma o fechamento desta OS?\n\n${resumo}`,
+	        [
+	          { label: 'Confirmar fechamento', value: 'confirmar_fechamento' },
+	          { label: 'Cancelar', value: 'cancelar_fechamento' }
+	        ]
+	      );
+	    }
+
+	    function selecionarPortalAiFechamentoOs(idAt) {
+	      const aberta = getPortalAiOsAbertas().find((item) => Number(item.id_at) === Number(idAt));
+	      if (!aberta) {
+	        appendPortalAiMessage('error', '⚠ Não encontrei essa OS entre as abertas.');
+	        return;
+	      }
+	      portalFechamentoFlow.active = true;
+	      portalFechamentoFlow.step = 'descricao';
+	      portalFechamentoFlow.os = aberta;
+	      portalFechamentoFlow.data = {
+	        descricao: '',
+	        pecas: '',
+	        valorPecas: '',
+	        valorPecasLabel: '',
+	        valorMo: '',
+	        valorMoLabel: '',
+	        dataConclusao: getPortalAiTodayIso(),
+	        observacoes: ''
+	      };
+	      appendPortalAiMessage(
+	        'assistant',
+	        `OS ${aberta.os_num || aberta.id_at} selecionada.\nCliente: ${aberta.cliente || '—'}\nModelo: ${aberta.modelo || '—'}\n\nDescrição do serviço realizado`
+	      );
+	    }
+
+	    async function submitPortalAiFechamento() {
+	      const idAt = Number(portalFechamentoFlow.os?.id_at || 0);
+	      if (!idAt) {
+	        appendPortalAiMessage('error', '⚠ Não consegui identificar a OS selecionada para fechamento.');
+	        resetPortalAiFechamentoFlow();
+	        return true;
+	      }
+
+	      const payload = {
+	        status_os: 'aguardando_nfe',
+	        descricao_servico_realizado: portalFechamentoFlow.data.descricao || '',
+	        pecas_reposicao: portalFechamentoFlow.data.pecas || '',
+	        valor_total_mao_obra: portalFechamentoFlow.data.valorMo || null,
+	        valor_gasto_pecas: portalFechamentoFlow.data.valorPecas || null,
+	        data_conclusao_servico: portalFechamentoFlow.data.dataConclusao || null,
+	        observacao_tecnico: portalFechamentoFlow.data.observacoes || ''
+	      };
+
+	      setPortalAiLoading(true);
+	      const typingEl = appendPortalAiMessage('typing', '...');
+	      try {
+	        const resp = await fetch(
+	          `${BASE}/api/sac/at/tecnico/fechamento/${idAt}?token=${encodeURIComponent(TOKEN)}`,
+	          {
+	            method: 'PATCH',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify(payload)
+	          }
+	        );
+	        const data = await resp.json().catch(() => ({}));
+	        typingEl.remove();
+	        if (!resp.ok) {
+	          appendPortalAiMessage('error', `⚠ ${data.error || 'Não foi possível concluir o fechamento da OS.'}`);
+	          return true;
+	        }
+
+	        _atualizarBadgeLinha(idAt, 'aguardando_nfe');
+	        void carregarAtendimentos();
+	        appendPortalAiMessage(
+	          'assistant',
+	          `Fechamento registrado com sucesso para a OS ${portalFechamentoFlow.os?.os_num || idAt}.\nO atendimento agora está com status Aguardando NFe.`
+	        );
+	        resetPortalAiFechamentoFlow();
+	        return true;
+	      } catch {
+	        typingEl.remove();
+	        appendPortalAiMessage('error', '⚠ Erro de conexão ao salvar o fechamento da OS.');
+	        return true;
+	      } finally {
+	        setPortalAiLoading(false);
+	      }
+	    }
+
+	    async function handlePortalAiFechamentoChoice(value) {
+	      if (!portalFechamentoFlow.active) return false;
+	      const normalized = normalizePortalAiText(value);
+
+	      if (portalFechamentoFlow.step === 'pecas_flag') {
+	        if (normalized === 'sim') {
+	          portalFechamentoFlow.step = 'pecas_descricao';
+	          appendPortalAiMessage('assistant', 'Escreva aqui quais foram utilizadas.');
+	          return true;
+	        }
+	        if (normalized === 'nao') {
+	          portalFechamentoFlow.data.pecas = '';
+	          portalFechamentoFlow.data.valorPecas = '';
+	          portalFechamentoFlow.data.valorPecasLabel = '0,00';
+	          portalFechamentoFlow.step = 'valor_mo';
+	          appendPortalAiMessage('assistant', 'Valor mão de obra (R$)');
+	          return true;
+	        }
+	      }
+
+	      if (portalFechamentoFlow.step === 'data' && normalized === 'usar_data_hoje') {
+	        const todayIso = getPortalAiTodayIso();
+	        portalFechamentoFlow.data.dataConclusao = todayIso;
+	        askPortalAiObservacoesQuestion();
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'observacoes_flag') {
+	        if (normalized === 'sim') {
+	          portalFechamentoFlow.step = 'observacoes_texto';
+	          appendPortalAiMessage('assistant', 'Observações do técnico');
+	          return true;
+	        }
+	        if (normalized === 'nao') {
+	          portalFechamentoFlow.data.observacoes = '';
+	          askPortalAiConfirmacaoFechamento();
+	          return true;
+	        }
+	      }
+
+	      if (portalFechamentoFlow.step === 'confirm') {
+	        if (normalized === 'confirmar_fechamento') {
+	          await submitPortalAiFechamento();
+	          return true;
+	        }
+	        if (normalized === 'cancelar_fechamento') {
+	          resetPortalAiFechamentoFlow();
+	          appendPortalAiMessage('assistant', 'Fluxo de fechamento cancelado.');
+	          return true;
+	        }
+	      }
+
+	      return false;
+	    }
+
+	    async function handlePortalAiFechamentoText(rawText) {
+	      const text = String(rawText || '').trim();
+	      const normalized = normalizePortalAiText(text);
+
+	      if (!text) return false;
+	      if (!portalFechamentoFlow.active) {
+	        if (isPortalAiFechamentoIntent(text)) {
+	          startPortalAiFechamentoFlow();
+	          return true;
+	        }
+	        return false;
+	      }
+
+	      if (['cancelar', 'cancelar fechamento', 'desistir'].includes(normalized)) {
+	        resetPortalAiFechamentoFlow();
+	        appendPortalAiMessage('assistant', 'Fluxo de fechamento cancelado.');
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'select_os') {
+	        appendPortalAiMessage('assistant', 'Clique em uma das OS abertas listadas para seguir com o fechamento.');
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'descricao') {
+	        portalFechamentoFlow.data.descricao = text;
+	        askPortalAiPecasQuestion();
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'pecas_flag') {
+	        const parsed = parsePortalAiYesNo(text);
+	        if (parsed == null) {
+	          appendPortalAiMessage('assistant', 'Responda com "Sim" ou "Não".');
+	          return true;
+	        }
+	        return handlePortalAiFechamentoChoice(parsed ? 'sim' : 'nao');
+	      }
+
+	      if (portalFechamentoFlow.step === 'pecas_descricao') {
+	        portalFechamentoFlow.data.pecas = text;
+	        portalFechamentoFlow.step = 'valor_pecas';
+	        appendPortalAiMessage('assistant', 'Valor peças (R$)');
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'valor_pecas') {
+	        const parsed = parsePortalAiMoney(text);
+	        if (!parsed.ok) {
+	          appendPortalAiMessage('assistant', parsed.error);
+	          return true;
+	        }
+	        portalFechamentoFlow.data.valorPecas = parsed.value;
+	        portalFechamentoFlow.data.valorPecasLabel = parsed.label;
+	        portalFechamentoFlow.step = 'valor_mo';
+	        appendPortalAiMessage('assistant', 'Valor mão de obra (R$)');
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'valor_mo') {
+	        const parsed = parsePortalAiMoney(text);
+	        if (!parsed.ok) {
+	          appendPortalAiMessage('assistant', parsed.error);
+	          return true;
+	        }
+	        portalFechamentoFlow.data.valorMo = parsed.value;
+	        portalFechamentoFlow.data.valorMoLabel = parsed.label;
+	        askPortalAiDataQuestion();
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'data') {
+	        const parsed = parsePortalAiDate(text);
+	        if (!parsed.ok) {
+	          appendPortalAiMessage('assistant', parsed.error);
+	          return true;
+	        }
+	        portalFechamentoFlow.data.dataConclusao = parsed.value;
+	        askPortalAiObservacoesQuestion();
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'observacoes_flag') {
+	        const parsed = parsePortalAiYesNo(text);
+	        if (parsed == null) {
+	          appendPortalAiMessage('assistant', 'Responda com "Sim" ou "Não".');
+	          return true;
+	        }
+	        return handlePortalAiFechamentoChoice(parsed ? 'sim' : 'nao');
+	      }
+
+	      if (portalFechamentoFlow.step === 'observacoes_texto') {
+	        portalFechamentoFlow.data.observacoes = text;
+	        askPortalAiConfirmacaoFechamento();
+	        return true;
+	      }
+
+	      if (portalFechamentoFlow.step === 'confirm') {
+	        if (['confirmar', 'confirmo', 'sim'].includes(normalized)) {
+	          await submitPortalAiFechamento();
+	          return true;
+	        }
+	        if (['nao', 'não'].includes(normalized)) {
+	          resetPortalAiFechamentoFlow();
+	          appendPortalAiMessage('assistant', 'Fluxo de fechamento cancelado.');
+	          return true;
+	        }
+	        appendPortalAiMessage('assistant', 'Responda com "Confirmar" ou "Cancelar".');
+	        return true;
+	      }
+
+	      return false;
+	    }
+
+	    function setPortalAiLoading(loading) {
+	      portalAiState.loading = !!loading;
+	      const { input, sendBtn, suggestions } = portalAiEls();
+	      if (input) input.disabled = portalAiState.loading;
+	      if (sendBtn) sendBtn.disabled = portalAiState.loading;
+	      if (suggestions) {
+	        suggestions.querySelectorAll('.sgf-ai-sugg').forEach((btn) => {
+	          btn.disabled = portalAiState.loading;
+	        });
+	      }
+	    }
+
+	    function renderPortalAiManualPreviews(previews) {
+	      const lista = Array.isArray(previews) ? previews.filter((item) => item && item.imageUrl).slice(0, 2) : [];
+	      if (!lista.length) return null;
+
+	      const wrap = document.createElement('div');
+	      wrap.className = 'sgf-ai-manual-previews';
+
+	      lista.forEach((preview) => {
+	        const link = document.createElement('a');
+	        link.className = 'sgf-ai-manual-preview';
+	        link.href = String(preview.imageUrl || '').trim();
+	        link.target = '_blank';
+	        link.rel = 'noopener noreferrer';
+	        link.innerHTML = `
+	          <img src="${esc(preview.imageUrl)}" alt="${esc(preview.manual || 'Prévia do manual')}" loading="lazy">
+	          <div class="sgf-ai-manual-preview-meta">
+	            <div class="sgf-ai-manual-preview-title">${esc(preview.manual || 'Manual')}</div>
+	            <div class="sgf-ai-manual-preview-page">Página ${esc(String(preview.page || ''))}</div>
+	          </div>
+	        `;
+	        wrap.appendChild(link);
+	      });
+
+	      return wrap;
+	    }
+
+	    function portalAiUserRequestedMedia(text) {
+	      const t = normalizePortalAiText(text);
+	      if (!t) return false;
+	      return (
+	        t.includes('foto') ||
+	        t.includes('imagem') ||
+	        t.includes('pagina') ||
+	        t.includes('página') ||
+	        ((t.includes('manual') || t.includes('link')) && (t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver'))) ||
+	        ((t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver')) && (t.includes('manual') || t.includes('foto') || t.includes('imagem')))
+	      );
+	    }
+
+	    function portalAiAffirmativeForMedia(text) {
+	      const t = normalizePortalAiText(text);
+	      return ['sim', 's', 'quero', 'pode', 'manda', 'envia', 'mostra', 'quero ver'].includes(t);
+	    }
+
+	    function portalAiAssistantOfferedMedia(text) {
+	      return /posso te (mostrar|enviar).*(pagina|página|imagem|foto|manual)/i.test(String(text || '').trim());
+	    }
+
+	    function portalAiAssistantConfirmedMedia(text) {
+	      return /enviei abaixo a pagina|enviei abaixo a página/i.test(String(text || '').trim());
+	    }
+
+	    function getPortalAiAllowedManualPreviews(userText, assistantText, manualPreviews) {
+	      const lista = Array.isArray(manualPreviews) ? manualPreviews : [];
+	      if (!lista.length) return [];
+
+	      const requestedNow = portalAiUserRequestedMedia(userText);
+	      const acceptedOffer = portalAiState.mediaOfferPending && portalAiAffirmativeForMedia(userText);
+	      const assistantConfirmed = portalAiAssistantConfirmedMedia(assistantText);
+
+	      return (requestedNow || acceptedOffer || assistantConfirmed) ? lista : [];
+	    }
+
+	    function appendPortalAiMessage(type, text, { manualPreviews = [] } = {}) {
+	      const { messages } = portalAiEls();
+	      if (!messages) return null;
+
+	      const el = document.createElement('div');
+	      el.className = 'sgf-ai-msg ' + type;
+	      if (type === 'typing') {
+	        el.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;margin-right:6px;"></span>Digitando...';
+	      } else {
+	        el.textContent = String(text || '').trim();
+	        if (type === 'assistant') {
+	          portalAiState.mediaOfferPending = portalAiAssistantOfferedMedia(text);
+	          const previewsEl = renderPortalAiManualPreviews(manualPreviews);
+	          if (previewsEl) el.appendChild(previewsEl);
+	        }
+	      }
+
+	      messages.appendChild(el);
+	      scrollPortalAiToBottom();
+	      return el;
+	    }
+
+	    function addPortalAiWelcome() {
+	      const { messages } = portalAiEls();
+	      if (!messages || messages.children.length) return;
+	      appendPortalAiMessage(
+	        'assistant',
+	        'Olá! Sou o assistente técnico Fromtherm.\n\nInforme o modelo do equipamento e sua duvida que farei o possivel para lhe atender.'
+	      );
+	    }
+
+	    function resetPortalAiConversation({ showWelcome = true } = {}) {
+	      portalAiState.loading = false;
+	      portalAiState.conversationId = '';
+	      portalAiState.history = [];
+	      resetPortalAiFechamentoFlow();
+	      const { messages, input } = portalAiEls();
+	      if (messages) messages.innerHTML = '';
+	      if (input) {
+	        input.value = '';
+	        input.style.height = '38px';
+	      }
+	      setPortalAiLoading(false);
+	      if (showWelcome) addPortalAiWelcome();
+	    }
+
+	    function openPortalAiPanel() {
+	      if (!portalAiState.enabled) return;
+	      const { panel, input } = portalAiEls();
+	      portalAiState.open = true;
+	      if (panel) panel.classList.add('open');
+	      addPortalAiWelcome();
+	      scrollPortalAiToBottom();
+	      setTimeout(() => { if (input) input.focus(); }, 60);
+	    }
+
+	    function closePortalAiPanel() {
+	      const { panel } = portalAiEls();
+	      portalAiState.open = false;
+	      if (panel) panel.classList.remove('open');
+	    }
+
+	    function isResetAssistantIntent(text) {
+	      const t = String(text || '').trim().toLowerCase();
+	      return (
+	        t === 'finalizar atendimento' ||
+	        t === 'encerrar atendimento' ||
+	        t === 'encerrar conversa' ||
+	        t === 'finalizar conversa' ||
+	        t === 'nova conversa' ||
+	        t === 'reiniciar conversa' ||
+	        t === 'limpar conversa' ||
+	        t === 'resetar conversa'
+	      );
+	    }
+
+	    async function finalizePortalAiConversation(reason, { useBeacon = false } = {}) {
+	      const conversationId = String(portalAiState.conversationId || '').trim();
+	      if (!conversationId || portalAiState.finalizedIds.has(conversationId)) return false;
+
+	      const payload = JSON.stringify({
+	        conversationId,
+	        reason: reason || 'conversa encerrada',
+	        source: 'manual_tecnico_portal_at',
+	        chatbotUser: document.getElementById('dashNome')?.textContent?.trim() || '',
+	        chatbotToken: TOKEN
+	      });
+
+	      portalAiState.finalizedIds.add(conversationId);
+
+	      try {
+	        if (useBeacon && navigator.sendBeacon) {
+	          const blob = new Blob([payload], { type: 'application/json' });
+	          navigator.sendBeacon(`${BASE}/api/ai/manual-chat/finalize`, blob);
+	          return true;
+	        }
+
+	        await fetch(`${BASE}/api/ai/manual-chat/finalize`, {
+	          method: 'POST',
+	          headers: { 'Content-Type': 'application/json' },
+	          body: payload,
+	          keepalive: true
+	        });
+	        return true;
+	      } catch {
+	        return false;
+	      }
+	    }
+
+	    async function sendPortalAiMessage(rawText) {
+	      const texto = String(rawText || '').trim();
+	      const { input } = portalAiEls();
+	      if (!portalAiState.enabled || portalAiState.loading || !texto) return;
+
+	      openPortalAiPanel();
+	      appendPortalAiMessage('user', texto);
+	      if (isResetAssistantIntent(texto)) {
+	        await finalizePortalAiConversation(`reinicio solicitado pelo usuário: ${texto}`);
+	        resetPortalAiFechamentoFlow();
+	        resetPortalAiConversation({ showWelcome: false });
+	        appendPortalAiMessage('assistant', 'Atendimento finalizado. O contexto anterior foi limpo.');
+	        addPortalAiWelcome();
+	        return;
+	      }
+
+	      if (await handlePortalAiFechamentoText(texto)) {
+	        if (input) {
+	          input.value = '';
+	          input.style.height = '38px';
+	        }
+	        return;
+	      }
+
+	      portalAiState.history.push({ role: 'user', content: texto });
+	      if (input) {
+	        input.value = '';
+	        input.style.height = '38px';
+	      }
+	      setPortalAiLoading(true);
+	      const typingEl = appendPortalAiMessage('typing', '...');
+
+	      try {
+	        const resp = await fetch(`${BASE}/api/ai/manual-chat`, {
+	          method: 'POST',
+	          headers: { 'Content-Type': 'application/json' },
+	          credentials: 'include',
+	          body: JSON.stringify({
+	            conversationId: portalAiState.conversationId || undefined,
+	            source: 'manual_tecnico_portal_at',
+	            chatbotUser: document.getElementById('dashNome')?.textContent?.trim() || '',
+	            chatbotToken: TOKEN,
+	            messages: portalAiState.history
+	          })
+	        });
+	        const data = await resp.json().catch(() => ({}));
+	        typingEl.remove();
+
+	        const resposta = String(data.content || data.error || 'Não consegui responder a partir dos manuais técnicos neste momento.').trim();
+	        if (data.conversationId) portalAiState.conversationId = data.conversationId;
+	        portalAiState.history.push({ role: 'assistant', content: resposta });
+	        const manualPreviews = getPortalAiAllowedManualPreviews(
+	          texto,
+	          resposta,
+	          Array.isArray(data.manualPreviews) ? data.manualPreviews : []
+	        );
+	        appendPortalAiMessage(resp.ok ? 'assistant' : 'error', resposta, {
+	          manualPreviews
+	        });
+	      } catch {
+	        typingEl.remove();
+	        const resposta = 'Erro de conexão ao consultar os manuais técnicos. Tente novamente.';
+	        appendPortalAiMessage('error', `⚠ ${resposta}`);
+	      } finally {
+	        setPortalAiLoading(false);
+	        scrollPortalAiToBottom();
+	      }
+	    }
+
+	    function bindPortalAi() {
+	      const { desktopBtn, mobileBtn, closeBtn, input, sendBtn, suggestions, panel } = portalAiEls();
+	      if (desktopBtn && desktopBtn.dataset.bound === '1') return;
+	      if (desktopBtn) desktopBtn.dataset.bound = '1';
+	      if (mobileBtn) mobileBtn.dataset.bound = '1';
+
+	      [desktopBtn, mobileBtn].forEach((btn) => {
+	        if (!btn) return;
+	        btn.addEventListener('click', () => {
+	          if (portalAiState.open) closePortalAiPanel();
+	          else openPortalAiPanel();
+	        });
+	      });
+
+	      if (closeBtn) closeBtn.addEventListener('click', closePortalAiPanel);
+
+	      if (input) {
+	        input.addEventListener('keydown', (event) => {
+	          if (event.key === 'Enter' && !event.shiftKey) {
+	            event.preventDefault();
+	            sendPortalAiMessage(input.value);
+	          }
+	        });
+	        input.addEventListener('input', () => {
+	          input.style.height = '38px';
+	          input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+	        });
+	      }
+
+	      if (sendBtn) {
+	        sendBtn.addEventListener('click', () => sendPortalAiMessage(input ? input.value : ''));
+	      }
+
+	      if (suggestions) {
+	        suggestions.addEventListener('click', (event) => {
+	          const btn = event.target.closest('[data-msg]');
+	          if (!btn) return;
+	          sendPortalAiMessage(btn.getAttribute('data-msg') || '');
+	        });
+	      }
+
+	      panel?.addEventListener('click', async (event) => {
+	        const osBtn = event.target.closest('[data-ai-close-os]');
+	        if (osBtn) {
+	          appendPortalAiMessage('user', osBtn.textContent || 'OS selecionada');
+	          selecionarPortalAiFechamentoOs(osBtn.getAttribute('data-ai-close-os'));
+	          return;
+	        }
+
+	        const choiceBtn = event.target.closest('[data-ai-close-choice]');
+	        if (choiceBtn) {
+	          appendPortalAiMessage('user', choiceBtn.textContent || 'Opção selecionada');
+	          await handlePortalAiFechamentoChoice(choiceBtn.getAttribute('data-ai-close-choice') || '');
+	        }
+	      });
+
+	      document.addEventListener('mousedown', (event) => {
+	        if (!portalAiState.open) return;
+	        const target = event.target;
+	        if (panel?.contains(target)) return;
+	        if (desktopBtn?.contains(target)) return;
+	        if (mobileBtn?.contains(target)) return;
+	        closePortalAiPanel();
+	      });
+
+	      window.addEventListener('pagehide', () => {
+	        finalizePortalAiConversation('saída do portal técnico', { useBeacon: true });
+	      });
+	    }
+
+	    // ── Init ──
+	    async function init() {
       if (!TOKEN || TOKEN.length < 32) { mostrar('invalidSection'); return; }
       const sessRaw = sessionStorage.getItem(SESS_KEY);
       if (sessRaw) {
@@ -534,17 +1854,21 @@
     }
 
     // ── Dashboard ──
-    function mostrarDash(d) {
-      document.getElementById('dashNome').textContent = d.nome || '—';
-      document.getElementById('dashTipo').textContent = d.tipo || '';
-      mostrar('dashSection');
-    }
-    function sair() {
-      sessionStorage.removeItem(SESS_KEY);
-      sessionStorage.removeItem(SESS_KEY + '_u');
-      document.getElementById('senhaLogin').value = '';
-      mostrar('loginSection');
-    }
+	    function mostrarDash(d) {
+	      document.getElementById('dashNome').textContent = d.nome || '—';
+	      document.getElementById('dashTipo').textContent = d.tipo || '';
+	      mostrar('dashSection');
+	      resetPortalAiConversation({ showWelcome: true });
+	    }
+	    function sair() {
+	      finalizePortalAiConversation('logout do portal técnico').catch(() => {});
+	      closePortalAiPanel();
+	      resetPortalAiConversation({ showWelcome: false });
+	      sessionStorage.removeItem(SESS_KEY);
+	      sessionStorage.removeItem(SESS_KEY + '_u');
+	      document.getElementById('senhaLogin').value = '';
+	      mostrar('loginSection');
+	    }
 
     // ── Tabela de atendimentos ──
     let _listaAtend = [];
@@ -680,9 +2004,9 @@
       document.body.style.overflow = '';
     }
 
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { fecharOsModal(); fecharFechModal(); fecharEvidModal(); }
-    });
+	    document.addEventListener('keydown', e => {
+	      if (e.key === 'Escape') { fecharOsModal(); fecharFechModal(); fecharEvidModal(); closePortalAiPanel(); }
+	    });
 
     // ── Estado do modal fechamento ──────────────────────────────────────────
     let _fechIdAt      = null;
@@ -978,8 +2302,9 @@
       if (fi) fi.value = '';
     }
 
-    init();
-  </script>
+	    bindPortalAi();
+	    init();
+	  </script>
   <!-- ══════════════════════════════════════════════════
        MODAL FECHAMENTO — preenchimento e upload NFe
        ══════════════════════════════════════════════════ -->
