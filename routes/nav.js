@@ -92,13 +92,61 @@ router.post('/sync', requireLogin, async (req, res) => {
   }
 
   // Para cada nó sincronizado, garante permissões por role.
-  // Assim, novos botões/telas não ficam liberados para todos por padrão:
+  // Primeiro tentamos herdar permissões explícitas do irmão mais próximo
+  // (ou do pai, se for o primeiro filho). Isso evita que novos itens
+  // do mesmo grupo fiquem invisíveis para quem já acessa a área.
+  // Se não houver referência, cai no padrão:
   // - admin: true
   // - demais roles: false
   if (syncedNodeKeys.length) {
     await pool.query(
       `WITH target_nodes AS (
+         SELECT id, parent_id
+           FROM public.nav_node
+          WHERE key = ANY($1::text[])
+       ),
+       refs AS (
+         SELECT
+           tn.id AS target_id,
+           COALESCE(
+             CASE
+               WHEN tn.parent_id IS NULL THEN NULL
+               ELSE (
+                 SELECT s.id
+                   FROM public.nav_node s
+                  WHERE s.parent_id = tn.parent_id
+                    AND s.id <> tn.id
+                    AND s.active = TRUE
+                  ORDER BY s.sort, s.id
+                  LIMIT 1
+               )
+             END,
+             tn.parent_id
+           ) AS ref_id
+         FROM target_nodes tn
+       )
+       INSERT INTO public.auth_role_permission (role, node_id, allow)
+       SELECT arp.role, refs.target_id, arp.allow
+         FROM refs
+         JOIN public.auth_role_permission arp
+           ON arp.node_id = refs.ref_id
+        WHERE refs.ref_id IS NOT NULL
+       ON CONFLICT (role, node_id) DO NOTHING`,
+      [syncedNodeKeys]
+    );
+
+    await pool.query(
+      `WITH target_nodes AS (
          SELECT id FROM public.nav_node WHERE key = ANY($1::text[])
+       ),
+       nodes_without_roles AS (
+         SELECT tn.id
+           FROM target_nodes tn
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM public.auth_role_permission arp
+             WHERE arp.node_id = tn.id
+          )
        ),
        known_roles AS (
          SELECT DISTINCT role
@@ -113,11 +161,47 @@ router.post('/sync', requireLogin, async (req, res) => {
        INSERT INTO public.auth_role_permission (role, node_id, allow)
        SELECT
          kr.role,
-         tn.id,
+         nwr.id,
          CASE WHEN kr.role = 'admin' THEN TRUE ELSE FALSE END AS allow
        FROM known_roles kr
-       CROSS JOIN target_nodes tn
+       CROSS JOIN nodes_without_roles nwr
        ON CONFLICT (role, node_id) DO NOTHING`,
+      [syncedNodeKeys]
+    );
+
+    await pool.query(
+      `WITH target_nodes AS (
+         SELECT id, parent_id
+           FROM public.nav_node
+          WHERE key = ANY($1::text[])
+       ),
+       refs AS (
+         SELECT
+           tn.id AS target_id,
+           COALESCE(
+             CASE
+               WHEN tn.parent_id IS NULL THEN NULL
+               ELSE (
+                 SELECT s.id
+                   FROM public.nav_node s
+                  WHERE s.parent_id = tn.parent_id
+                    AND s.id <> tn.id
+                    AND s.active = TRUE
+                  ORDER BY s.sort, s.id
+                  LIMIT 1
+               )
+             END,
+             tn.parent_id
+           ) AS ref_id
+         FROM target_nodes tn
+       )
+       INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+       SELECT aup.user_id, refs.target_id, aup.allow
+         FROM refs
+         JOIN public.auth_user_permission aup
+           ON aup.node_id = refs.ref_id
+        WHERE refs.ref_id IS NOT NULL
+       ON CONFLICT (user_id, node_id) DO NOTHING`,
       [syncedNodeKeys]
     );
   }

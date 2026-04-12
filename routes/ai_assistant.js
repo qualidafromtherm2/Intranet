@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { Pool } = require('pg');
+const JSZip = require('jszip');
 const supabase = require('../utils/supabase');
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
@@ -30,7 +31,70 @@ const MANUAL_PREVIEW_SUPABASE_PREFIX = 'chatbot/manual_previews';
 const MANUAL_CACHE_TMP_DIR = path.resolve(os.tmpdir(), 'fromtherm_chatbot_manual_cache');
 const MANUAL_PREVIEW_TMP_DIR = path.join(MANUAL_CACHE_TMP_DIR, 'manual_previews');
 const MANUAL_PDF_CACHE_DIR = path.join(MANUAL_CACHE_TMP_DIR, 'manual_pdfs');
+const QUALIDADE_MANUAIS_BUCKET = process.env.QUALIDADE_MANUAIS_BUCKET || 'Manuais';
+const QUALIDADE_MANUAIS_PREFIX = process.env.QUALIDADE_MANUAIS_PREFIX || 'Manuais principais';
+const QUALIDADE_MANUAIS_CACHE_TTL_MS = 10 * 60 * 1000;
+const QUALIDADE_MANUAIS_MAX_CHUNKS = 6;
+const QUALIDADE_MANUAIS_MAX_CHARS = 1800;
+const QUALIDADE_MANUAIS_TMP_DIR = path.join(MANUAL_CACHE_TMP_DIR, 'qualidade_manuais');
+const QUALIDADE_MANUAIS_DOWNLOAD_DIR = path.join(QUALIDADE_MANUAIS_TMP_DIR, 'downloads');
+const QUALIDADE_MANUAIS_TEXT_DIR = path.join(QUALIDADE_MANUAIS_TMP_DIR, 'textos');
 const execFileAsync = promisify(execFile);
+
+const QUALIDADE_MANUAIS_PRINCIPAIS_META = [
+  {
+    order: 1,
+    code: 'FT-M01-MSGQ',
+    title: 'Manual do Sistema de Gestão da Qualidade',
+    aliases: ['msgq', 'manual do sistema de gestao da qualidade', 'sgq', 'manual da qualidade', 'gestao da qualidade', 'sistema de gestao']
+  },
+  {
+    order: 2,
+    code: 'FT-M02-MGPMBC',
+    title: 'Manual de Garantia do Processo de Montagem das Bombas de Calor',
+    aliases: ['mgpmbc', 'manual de garantia do processo de montagem das bombas de calor', 'montagem das bombas de calor', 'garantia do processo de montagem', 'bombas de calor']
+  },
+  {
+    order: 3,
+    code: 'FT-M03-MFP',
+    title: 'Manual de Fornecedores de Produtos',
+    aliases: ['mfp', 'manual de fornecedores de produtos', 'fornecedores de produtos', 'manual de fornecedores', 'fornecedores', 'fornecedor']
+  },
+  {
+    order: 4,
+    code: 'FT-M04-MSASC',
+    title: 'Manual de Serviço de Atendimento e Satisfação do Consumidor',
+    aliases: ['msasc', 'manual de servico de atendimento e satisfacao do consumidor', 'atendimento e satisfacao do consumidor', 'satisfacao do consumidor', 'consumidor', 'atendimento']
+  },
+  {
+    order: 5,
+    code: 'FT-M05-MAE',
+    title: 'Manual de Auditoria Escalonada',
+    aliases: ['mae', 'manual de auditoria escalonada', 'auditoria escalonada', 'auditoria', 'ft-m01-mae']
+  },
+  {
+    order: 6,
+    code: 'FT-M06-MER',
+    title: 'Manual de Expedição e Recebimento',
+    aliases: ['mer', 'manual de expedicao e recebimento', 'expedicao e recebimento', 'expedicao', 'recebimento']
+  },
+  {
+    order: 7,
+    code: 'FT-M07-MPTNC',
+    title: 'Manual do Processo de Tratativa de Não-Conformidades',
+    aliases: ['mptnc', 'manual do processo de tratativa de nao conformidades', 'tratativa de nao conformidades', 'tratativa', 'nao conformidades', 'nao conformidade']
+  },
+  {
+    order: 99,
+    code: 'FT-M04-ITSAT',
+    title: 'FT-M04-ITSAT',
+    aliases: ['itsat', 'ft-m04-itsat']
+  }
+];
+
+let qualidadeManuaisCatalogCache = { expiresAt: 0, items: [] };
+let qualidadeManuaisIndexCache = { expiresAt: 0, items: [] };
+let qualidadeManuaisIndexPromise = null;
 
 const UFS_BRASIL = new Set([
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS',
@@ -181,6 +245,20 @@ Regras obrigatórias:
 - Ao final, inclua uma linha começando com "Fonte:" citando manual e página(s) usadas.
 `;
 
+const QUALIDADE_MANUAL_CHAT_PROMPT = `Você responde perguntas sobre os manuais principais da Qualidade da Fromtherm SOMENTE com base nos trechos fornecidos.
+
+Regras obrigatórias:
+- Use apenas as informações presentes nos trechos.
+- Não invente, não complete com conhecimento externo e não chute.
+- Quando o usuário citar um manual específico, priorize estritamente esse manual.
+- Se houver informação parcial útil, entregue primeiro o que foi possível confirmar.
+- Para procedimentos, responda em passos curtos e objetivos.
+- Se a informação não estiver clara nos trechos, diga explicitamente isso.
+- Responda em português brasileiro.
+- Seja objetivo e útil.
+- Ao final, inclua uma linha começando com "Fonte:" citando os manuais usados.
+`;
+
 const CHATBOT_FAQ_SEED = [
   {
     pergunta: 'como realizar uma compra para produto cadastrado na omie',
@@ -245,6 +323,544 @@ function normalizarTextoManualBusca(texto) {
 
 function compactarTextoManual(texto) {
   return normalizarTextoManualBusca(texto).replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizarCodigoManualQualidade(texto) {
+  return compactarTextoManual(texto).replace(/^(ftm)/, 'ftm');
+}
+
+function obterTermosManualQualidade(meta = {}) {
+  return Array.from(
+    new Set([
+      meta.code,
+      meta.title,
+      ...(Array.isArray(meta.aliases) ? meta.aliases : [])
+    ]
+      .map((item) => normalizarTextoBusca(item))
+      .filter(Boolean))
+  );
+}
+
+function resolverMetaManualQualidadePorNome(fileName = '') {
+  const baseName = String(fileName || '').replace(/\.[^.]+$/, '').trim();
+  const baseNorm = normalizarCodigoManualQualidade(baseName);
+  return QUALIDADE_MANUAIS_PRINCIPAIS_META.find((meta) => {
+    const codigoNorm = normalizarCodigoManualQualidade(meta.code);
+    if (codigoNorm && (baseNorm === codigoNorm || baseNorm.includes(codigoNorm))) return true;
+    return obterTermosManualQualidade(meta).some((termo) => {
+      const termoNorm = normalizarCodigoManualQualidade(termo);
+      return termoNorm && (baseNorm === termoNorm || baseNorm.includes(termoNorm));
+    });
+  }) || null;
+}
+
+function formatarTituloManualQualidade(item = {}) {
+  const code = String(item.code || '').trim();
+  const title = String(item.title || '').trim();
+  if (code && title && title !== code) return `${code} - ${title}`;
+  return code || title || String(item.fileName || 'Manual').trim() || 'Manual';
+}
+
+async function garantirPastasCacheManuaisQualidade() {
+  await Promise.all([
+    fsp.mkdir(QUALIDADE_MANUAIS_DOWNLOAD_DIR, { recursive: true }),
+    fsp.mkdir(QUALIDADE_MANUAIS_TEXT_DIR, { recursive: true })
+  ]);
+}
+
+async function listarCatalogoManuaisQualidade({ force = false } = {}) {
+  if (!force && qualidadeManuaisCatalogCache.expiresAt > Date.now() && Array.isArray(qualidadeManuaisCatalogCache.items)) {
+    return qualidadeManuaisCatalogCache.items;
+  }
+
+  const { data, error } = await supabase.storage.from(QUALIDADE_MANUAIS_BUCKET).list(QUALIDADE_MANUAIS_PREFIX, {
+    limit: 100,
+    sortBy: { column: 'name', order: 'asc' }
+  });
+  if (error) throw error;
+
+  const items = (Array.isArray(data) ? data : [])
+    .filter((item) => item && item.name && !String(item.name).endsWith('/'))
+    .map((item) => {
+      const meta = resolverMetaManualQualidadePorNome(item.name);
+      const pathKey = `${QUALIDADE_MANUAIS_PREFIX}/${item.name}`;
+      const { data: publicData } = supabase.storage.from(QUALIDADE_MANUAIS_BUCKET).getPublicUrl(pathKey);
+      const publicUrl = String(publicData?.publicUrl || '').trim();
+      return {
+        fileName: String(item.name || '').trim(),
+        pathKey,
+        mimeType: String(item?.metadata?.mimetype || item?.metadata?.contentType || '').trim(),
+        publicUrl,
+        sourceUrl: publicUrl,
+        openUrl: publicUrl,
+        code: meta?.code || String(item.name || '').replace(/\.[^.]+$/, '').trim(),
+        title: meta?.title || String(item.name || '').replace(/\.[^.]+$/, '').trim(),
+        aliases: Array.isArray(meta?.aliases) ? meta.aliases : [],
+        order: Number(meta?.order || 9999),
+        assetType: 'document',
+        pageLabel: 'Arquivo',
+        openLabel: 'Abrir arquivo',
+        note: 'Atalho direto para o arquivo do manual.'
+      };
+    })
+    .sort((a, b) => {
+      if (Number(a.order || 9999) !== Number(b.order || 9999)) {
+        return Number(a.order || 9999) - Number(b.order || 9999);
+      }
+      return String(a.fileName || '').localeCompare(String(b.fileName || ''), 'pt-BR');
+    });
+
+  qualidadeManuaisCatalogCache = {
+    expiresAt: Date.now() + QUALIDADE_MANUAIS_CACHE_TTL_MS,
+    items
+  };
+  return items;
+}
+
+function perguntaPedeManualQualidade(pergunta) {
+  const raw = String(pergunta || '').trim();
+  const t = normalizarTextoBusca(raw);
+  if (!t) return false;
+
+  if (/\b(?:ft|fti|fh)\s*[- ]?\s*\d+/i.test(raw)) return false;
+
+  const temCodigoManual = /\bft\s*-\s*m\d{2}\s*-\s*[a-z0-9]+\b/i.test(raw);
+  const temContextoManual = /\bmanual\b|\bmanuais\b/.test(t);
+  const termosQualidade = Array.from(
+    new Set(
+      QUALIDADE_MANUAIS_PRINCIPAIS_META.flatMap((meta) => [
+        meta.code,
+        meta.title,
+        ...(Array.isArray(meta.aliases) ? meta.aliases : [])
+      ])
+        .map((item) => normalizarTextoBusca(item))
+        .filter((item) => item && item.length >= 3)
+    )
+  );
+  const temTemaQualidade = termosQualidade.some((item) => t.includes(item));
+  const pedidoGenericoQualidade = temContextoManual && (
+    t.includes('principal') ||
+    t.includes('principais') ||
+    t.includes('manual da qualidade') ||
+    t.includes('manuais da qualidade')
+  );
+
+  return temCodigoManual || temTemaQualidade || pedidoGenericoQualidade || (temContextoManual && t.includes('qualidade')) || (temContextoManual && temTemaQualidade);
+}
+
+function perguntaPedeListaManuaisQualidade(pergunta) {
+  const t = normalizarTextoBusca(pergunta);
+  if (!t) return false;
+  return perguntaPedeManualQualidade(pergunta) && (
+    /\bquais\b/.test(t) ||
+    /\blista\b/.test(t) ||
+    t.includes('manuais principais') ||
+    t.includes('todos os manuais') ||
+    t.includes('manuais da qualidade')
+  );
+}
+
+function extrairCodigosMemoriaManuaisQualidade(memoria = {}) {
+  return Array.isArray(memoria?.ultimos_manuais_qualidade?.codigos)
+    ? memoria.ultimos_manuais_qualidade.codigos.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+}
+
+function selecionarManuaisQualidadeRelacionados(pergunta, catalogo = [], memoria = {}) {
+  const raw = String(pergunta || '').trim();
+  const t = normalizarTextoBusca(raw);
+  const tCompact = compactarTextoManual(raw);
+  let encontrados = (Array.isArray(catalogo) ? catalogo : []).filter((manual) => {
+    const termos = [
+      manual.code,
+      manual.title,
+      manual.fileName,
+      ...(Array.isArray(manual.aliases) ? manual.aliases : [])
+    ];
+    return termos.some((termo) => {
+      const termoNorm = normalizarTextoBusca(termo);
+      const termoCompact = compactarTextoManual(termo);
+      return (termoNorm && t.includes(termoNorm)) || (termoCompact && tCompact.includes(termoCompact));
+    });
+  });
+
+  if (!encontrados.length && perguntaDependeDeContextoCurto(pergunta)) {
+    const memoriaCodigos = extrairCodigosMemoriaManuaisQualidade(memoria);
+    if (memoriaCodigos.length) {
+      const memoriaCompact = new Set(memoriaCodigos.map((item) => compactarTextoManual(item)));
+      encontrados = (Array.isArray(catalogo) ? catalogo : []).filter((manual) => memoriaCompact.has(compactarTextoManual(manual.code)));
+    }
+  }
+
+  return encontrados;
+}
+
+function montarManualPreviewsQualidade(manuais = [], limit = 3) {
+  return (Array.isArray(manuais) ? manuais : [])
+    .filter((item) => item && item.openUrl)
+    .slice(0, Math.max(1, Number(limit || 3)))
+    .map((item) => ({
+      manual: formatarTituloManualQualidade(item),
+      page: '',
+      pageLabel: 'Arquivo',
+      assetType: 'document',
+      sourceUrl: item.sourceUrl,
+      openUrl: item.openUrl,
+      openLabel: 'Abrir arquivo',
+      note: 'Atalho direto para o arquivo do manual.'
+    }));
+}
+
+function normalizarTextoManualQualidadeExtraido(texto) {
+  return String(texto || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function quebrarTextoManualQualidadeEmChunks(texto) {
+  const blocos = normalizarTextoManualQualidadeExtraido(texto)
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const chunks = [];
+  let buffer = '';
+  for (const bloco of blocos) {
+    const candidato = buffer ? `${buffer}\n\n${bloco}` : bloco;
+    if (candidato.length > QUALIDADE_MANUAIS_MAX_CHARS && buffer) {
+      chunks.push(buffer.trim());
+      buffer = bloco;
+    } else {
+      buffer = candidato;
+    }
+  }
+  if (buffer.trim()) chunks.push(buffer.trim());
+  return chunks.slice(0, 80);
+}
+
+async function baixarManualQualidadeCacheado(manual = {}) {
+  await garantirPastasCacheManuaisQualidade();
+  const ext = path.extname(String(manual.fileName || '').trim()).toLowerCase() || '.docx';
+  const fileHash = hashCurtoManual(`${manual.pathKey}|${manual.publicUrl}`);
+  const localPath = path.join(QUALIDADE_MANUAIS_DOWNLOAD_DIR, `${fileHash}${ext}`);
+  if (fs.existsSync(localPath)) return localPath;
+
+  const response = await axios.get(String(manual.publicUrl || '').trim(), {
+    responseType: 'arraybuffer',
+    timeout: 60000
+  });
+  await fsp.writeFile(localPath, Buffer.from(response.data));
+  return localPath;
+}
+
+async function converterDocxQualidadeParaTxt(localPath = '') {
+  await garantirPastasCacheManuaisQualidade();
+  const baseName = path.basename(String(localPath || ''), path.extname(String(localPath || '')));
+  const txtPath = path.join(QUALIDADE_MANUAIS_TEXT_DIR, `${baseName}.txt`);
+  if (fs.existsSync(txtPath)) return txtPath;
+
+  await execFileAsync('soffice', [
+    '--headless',
+    '--convert-to',
+    'txt:Text',
+    '--outdir',
+    QUALIDADE_MANUAIS_TEXT_DIR,
+    localPath
+  ], {
+    timeout: 120000,
+    maxBuffer: 10 * 1024 * 1024
+  });
+
+  if (!fs.existsSync(txtPath)) {
+    throw new Error(`Falha ao converter ${path.basename(localPath)} para texto.`);
+  }
+  return txtPath;
+}
+
+async function carregarTextoManualQualidade(manual = {}) {
+  const localPath = await baixarManualQualidadeCacheado(manual);
+  const ext = path.extname(localPath).toLowerCase();
+
+  if (ext === '.docx' || ext === '.doc' || ext === '.pdf') {
+    const txtPath = await converterDocxQualidadeParaTxt(localPath);
+    return normalizarTextoManualQualidadeExtraido(await fsp.readFile(txtPath, 'utf8'));
+  }
+
+  if (ext === '.txt') {
+    return normalizarTextoManualQualidadeExtraido(await fsp.readFile(localPath, 'utf8'));
+  }
+
+  const buffer = await fsp.readFile(localPath);
+  const zip = await JSZip.loadAsync(buffer);
+  const documentXml = await zip.file('word/document.xml')?.async('string');
+  return normalizarTextoManualQualidadeExtraido(String(documentXml || '').replace(/<[^>]+>/g, ' '));
+}
+
+async function carregarIndiceManuaisQualidade({ force = false } = {}) {
+  if (!force && qualidadeManuaisIndexCache.expiresAt > Date.now() && Array.isArray(qualidadeManuaisIndexCache.items)) {
+    return qualidadeManuaisIndexCache.items;
+  }
+  if (qualidadeManuaisIndexPromise) return qualidadeManuaisIndexPromise;
+
+  qualidadeManuaisIndexPromise = (async () => {
+    const catalogo = await listarCatalogoManuaisQualidade({ force });
+    const itens = [];
+
+    for (const manual of catalogo) {
+      try {
+        const texto = await carregarTextoManualQualidade(manual);
+        const chunks = quebrarTextoManualQualidadeEmChunks(texto).map((chunk, index) => ({
+          chunk_ordem: index + 1,
+          texto: chunk,
+          texto_normalizado: normalizarTextoManualBusca(chunk)
+        }));
+        itens.push({
+          ...manual,
+          chunks
+        });
+      } catch (err) {
+        console.warn('[AI/Qualidade/Manuais] Falha ao preparar manual:', manual.fileName, err?.message || err);
+      }
+    }
+
+    qualidadeManuaisIndexCache = {
+      expiresAt: Date.now() + QUALIDADE_MANUAIS_CACHE_TTL_MS,
+      items: itens
+    };
+    return itens;
+  })();
+
+  try {
+    return await qualidadeManuaisIndexPromise;
+  } finally {
+    qualidadeManuaisIndexPromise = null;
+  }
+}
+
+function extrairTokensBuscaManualQualidade(pergunta) {
+  const stopwords = new Set([
+    'a', 'ao', 'aos', 'as', 'com', 'como', 'da', 'das', 'de', 'do', 'dos', 'e',
+    'em', 'manual', 'manuais', 'na', 'nas', 'no', 'nos', 'o', 'os', 'ou', 'para',
+    'por', 'qual', 'quais', 'que', 'sobre', 'uma', 'um'
+  ]);
+
+  return Array.from(
+    new Set(
+      normalizarTextoManualBusca(pergunta)
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter((item) => item.length >= 3 && !stopwords.has(item))
+    )
+  ).slice(0, 10);
+}
+
+function scoreChunkManualQualidade(pergunta, manual = {}, chunk = {}, manuaisRelacionados = []) {
+  const perguntaNorm = normalizarTextoBusca(pergunta);
+  const tituloNorm = normalizarTextoBusca(`${manual.code || ''} ${manual.title || ''} ${manual.fileName || ''}`);
+  const chunkNorm = String(chunk?.texto_normalizado || '');
+  const relacionados = new Set((Array.isArray(manuaisRelacionados) ? manuaisRelacionados : []).map((item) => String(item.code || '')));
+  const tokens = extrairTokensBuscaManualQualidade(pergunta);
+  let score = 0;
+
+  if (relacionados.has(String(manual.code || ''))) score += 220;
+
+  for (const token of tokens) {
+    if (tituloNorm.includes(token)) score += 30;
+    if (chunkNorm.includes(token)) score += token.length >= 6 ? 18 : 10;
+  }
+
+  const codigoCompact = compactarTextoManual(manual.code);
+  if (codigoCompact && compactarTextoManual(perguntaNorm).includes(codigoCompact)) score += 160;
+
+  return score;
+}
+
+async function buscarTrechosManuaisQualidade(pergunta, memoria = {}) {
+  const indice = await carregarIndiceManuaisQualidade();
+  const catalogo = Array.isArray(indice) ? indice : [];
+  const manuaisRelacionados = selecionarManuaisQualidadeRelacionados(pergunta, catalogo, memoria);
+  const universo = manuaisRelacionados.length ? manuaisRelacionados : catalogo;
+  const trechos = [];
+
+  for (const manual of universo) {
+    for (const chunk of Array.isArray(manual.chunks) ? manual.chunks : []) {
+      const score = scoreChunkManualQualidade(pergunta, manual, chunk, manuaisRelacionados);
+      if (score <= 0) continue;
+      trechos.push({
+        manual,
+        texto: chunk.texto,
+        score,
+        chunk_ordem: chunk.chunk_ordem
+      });
+    }
+  }
+
+  return trechos
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || String(a.manual?.code || '').localeCompare(String(b.manual?.code || '')))
+    .slice(0, QUALIDADE_MANUAIS_MAX_CHUNKS);
+}
+
+function formatarFonteTrechosManuaisQualidade(trechos = []) {
+  return Array.from(
+    new Set(
+      (Array.isArray(trechos) ? trechos : [])
+        .map((item) => formatarTituloManualQualidade(item.manual))
+        .filter(Boolean)
+    )
+  ).join(' | ');
+}
+
+function montarMemoriaManuaisQualidade(manuais = []) {
+  const codigos = Array.from(
+    new Set(
+      (Array.isArray(manuais) ? manuais : [])
+        .map((item) => String(item?.code || '').trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 4);
+
+  if (!codigos.length) return [];
+  return [
+    {
+      chave: 'ultimos_manuais_qualidade',
+      valor: { codigos },
+      relevancia: 8,
+      ttlDias: 21
+    }
+  ];
+}
+
+async function tentarResponderComManuaisQualidade({
+  apiKey,
+  pergunta,
+  memoria = {},
+  manualMediaMode = 'none'
+}) {
+  if (!perguntaPedeManualQualidade(pergunta) && !(perguntaDependeDeContextoCurto(pergunta) && String(memoria?.ultimo_assunto?.assunto || '') === 'manuais_qualidade')) {
+    return null;
+  }
+
+  const catalogo = await listarCatalogoManuaisQualidadePrincipaisSafe(memoria);
+  if (!catalogo.length) {
+    return {
+      content: 'Não encontrei os arquivos de manuais principais da Qualidade no Supabase configurado para o chatbot.',
+      manualPreviews: [],
+      manuaisQualidade: []
+    };
+  }
+
+  const manuaisRelacionados = selecionarManuaisQualidadeRelacionados(pergunta, catalogo, memoria);
+  const listaSolicitada = perguntaPedeListaManuaisQualidade(pergunta);
+  const midiaSolicitada = manualMediaMode !== 'none';
+
+  if (listaSolicitada) {
+    const alvo = manuaisRelacionados.length ? manuaisRelacionados : catalogo;
+    let content = `Hoje a pasta "${QUALIDADE_MANUAIS_PREFIX}" do bucket "${QUALIDADE_MANUAIS_BUCKET}" possui ${catalogo.length} arquivo(s):\n\n`;
+    content += alvo.map((manual, index) => `${index + 1}. ${formatarTituloManualQualidade(manual)}`).join('\n');
+    content += `\n\nFonte: Supabase / ${QUALIDADE_MANUAIS_BUCKET} / ${QUALIDADE_MANUAIS_PREFIX}`;
+    if (midiaSolicitada) {
+      content += '\n\nAnexei abaixo os atalhos para abrir os arquivos.';
+    }
+    return {
+      content,
+      manualPreviews: midiaSolicitada ? montarManualPreviewsQualidade(alvo, alvo.length) : [],
+      manuaisQualidade: alvo
+    };
+  }
+
+  if (manuaisRelacionados.length && !/\b(como|qual|quais|quando|onde|requisito|procedimento|fala|diz|explica|explicar|detalha|detalhar|conteudo|conteúdo|sobre)\b/.test(normalizarTextoBusca(pergunta))) {
+    const alvo = manuaisRelacionados.slice(0, 3);
+    let content = alvo.length === 1
+      ? `Encontrei o manual ${formatarTituloManualQualidade(alvo[0])}.`
+      : `Encontrei estes manuais relacionados ao seu pedido:\n\n${alvo.map((manual, index) => `${index + 1}. ${formatarTituloManualQualidade(manual)}`).join('\n')}`;
+    content += midiaSolicitada
+      ? '\n\nAnexei abaixo o atalho para abrir o arquivo.'
+      : '\n\nSe quiser, posso te mandar o link direto do arquivo.';
+    content += `\n\nFonte: Supabase / ${QUALIDADE_MANUAIS_BUCKET} / ${QUALIDADE_MANUAIS_PREFIX}`;
+    return {
+      content,
+      manualPreviews: midiaSolicitada ? montarManualPreviewsQualidade(alvo, alvo.length) : [],
+      manuaisQualidade: alvo
+    };
+  }
+
+  const trechos = await buscarTrechosManuaisQualidade(pergunta, memoria);
+  if (!trechos.length) {
+    const alvo = manuaisRelacionados.length ? manuaisRelacionados : [];
+    let content = alvo.length
+      ? `Identifiquei o manual ${formatarTituloManualQualidade(alvo[0])}, mas não achei um trecho confiável no conteúdo extraído para responder isso com segurança.`
+      : 'Não encontrei um trecho confiável nesses manuais principais da Qualidade para responder isso com segurança.';
+    content += midiaSolicitada && alvo.length
+      ? '\n\nAnexei abaixo o atalho para abrir o arquivo.'
+      : '\n\nSe quiser, eu posso listar os manuais principais ou abrir um arquivo específico.';
+    content += `\n\nFonte: Supabase / ${QUALIDADE_MANUAIS_BUCKET} / ${QUALIDADE_MANUAIS_PREFIX}`;
+    return {
+      content,
+      manualPreviews: midiaSolicitada && alvo.length ? montarManualPreviewsQualidade(alvo, alvo.length) : [],
+      manuaisQualidade: alvo
+    };
+  }
+
+  const contexto = trechos.map((item, idx) => (
+    `[Trecho ${idx + 1}]\nManual: ${formatarTituloManualQualidade(item.manual)}\nConteúdo:\n${String(item.texto || '').trim().slice(0, 1800)}`
+  )).join('\n\n');
+
+  const response = await chamarOpenAiComRetry(
+    apiKey,
+    {
+      model: 'gpt-4o-mini',
+      temperature: 0.1,
+      max_tokens: 650,
+      messages: [
+        { role: 'system', content: QUALIDADE_MANUAL_CHAT_PROMPT },
+        {
+          role: 'user',
+          content:
+`Pergunta do usuário:
+${pergunta}
+
+Trechos relevantes dos manuais principais da Qualidade:
+${contexto}`
+        }
+      ]
+    },
+    { timeout: 30000, contexto: 'AI/Chat/Qualidade/Manuais' }
+  );
+
+  let content = String(response.data?.choices?.[0]?.message?.content || '').trim();
+  if (!content) {
+    content = 'Não consegui montar uma resposta confiável a partir dos manuais principais da Qualidade.';
+  }
+
+  if (!/\bfonte:/i.test(content)) {
+    content += `\n\nFonte: ${formatarFonteTrechosManuaisQualidade(trechos)}`;
+  }
+
+  const manuaisUsados = Array.from(new Map(trechos.map((item) => [String(item.manual?.code || item.manual?.fileName || ''), item.manual])).values());
+  const manualPreviews = midiaSolicitada ? montarManualPreviewsQualidade(manuaisUsados, Math.min(3, manuaisUsados.length)) : [];
+  if (manualPreviews.length && !/anexei abaixo/i.test(content)) {
+    content += '\n\nAnexei abaixo o atalho para abrir o arquivo correspondente.';
+  }
+
+  return {
+    content,
+    manualPreviews,
+    manuaisQualidade: manuaisUsados
+  };
+}
+
+async function listarCatalogoManuaisQualidadePrincipaisSafe(memoria = {}) {
+  try {
+    return await listarCatalogoManuaisQualidade();
+  } catch (err) {
+    console.warn('[AI/Qualidade/Manuais] Falha ao listar catálogo:', err?.message || err, {
+      assunto: memoria?.ultimo_assunto?.assunto || ''
+    });
+    return [];
+  }
 }
 
 function extrairModelosPergunta(pergunta) {
@@ -738,6 +1354,7 @@ function resolverUsuarioMemoriaChatbot(req) {
 function inferirAreaPerguntaChatbot(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return '';
+  if (perguntaPedeManualQualidade(pergunta)) return 'manuais_qualidade';
   if (perguntaPedeManualBombaCalor(pergunta)) return 'manuais_produto';
   if (/\b(compra|compras|omie|cotacao|cotação|pedido|pedidos|fornecedor)\b/.test(t)) return 'compras';
   if (/\b(os|ordem de servico|ordem de serviço|assistencia tecnica|assistência técnica|sac)\b/.test(t)) return 'os';
@@ -801,6 +1418,9 @@ function formatarValorMemoriaPrompt(memoria) {
     : [];
   if (modelos.length) itens.push(`Últimos modelos citados: ${modelos.join(', ')}`);
 
+  const manuaisQualidade = extrairCodigosMemoriaManuaisQualidade(memoria);
+  if (manuaisQualidade.length) itens.push(`Últimos manuais de qualidade citados: ${manuaisQualidade.join(', ')}`);
+
   const ultimaPergunta = String(memoria?.ultima_pergunta?.pergunta || '').trim();
   if (ultimaPergunta) itens.push(`Última pergunta recente: ${ultimaPergunta.slice(0, 220)}`);
 
@@ -828,6 +1448,11 @@ function montarPerguntaComMemoria(pergunta, memoria) {
     : [];
   if (modelos.length && perguntaCurtaContextual && assuntoCompativel) {
     itens.push(`Últimos modelos citados na conversa: ${modelos.join(', ')}`);
+  }
+
+  const manuaisQualidade = extrairCodigosMemoriaManuaisQualidade(memoria);
+  if (manuaisQualidade.length && perguntaCurtaContextual && assuntoCompativel) {
+    itens.push(`Últimos manuais de qualidade citados na conversa: ${manuaisQualidade.join(', ')}`);
   }
 
   if (assunto && perguntaCurtaContextual && assuntoCompativel) {
@@ -884,14 +1509,15 @@ function extrairMemoriaCurtaDaConversa({ pergunta, resposta = '' } = {}) {
 function devePriorizarManuaisPorContexto(pergunta, memoria = {}) {
   if (!perguntaDependeDeContextoCurto(pergunta)) return false;
   const areaPergunta = inferirAreaPerguntaChatbot(pergunta);
-  if (areaPergunta && !['geral', 'produto', 'manuais_produto'].includes(areaPergunta)) {
+  if (areaPergunta && !['geral', 'produto', 'manuais_produto', 'manuais_qualidade'].includes(areaPergunta)) {
     return false;
   }
   const assunto = String(memoria?.ultimo_assunto?.assunto || '').trim();
   const modelos = Array.isArray(memoria?.ultimos_modelos?.modelos)
     ? memoria.ultimos_modelos.modelos.map((item) => String(item || '').trim()).filter(Boolean)
     : [];
-  return assunto === 'manuais_produto' || modelos.length > 0;
+  const manuaisQualidade = extrairCodigosMemoriaManuaisQualidade(memoria);
+  return assunto === 'manuais_produto' || assunto === 'manuais_qualidade' || modelos.length > 0 || manuaisQualidade.length > 0;
 }
 
 function formatarDataIsoLocal(date) {
@@ -3658,17 +4284,54 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
   }
   const perguntaContextual = montarPerguntaComMemoria(perguntaAtual, memoriaUsuario);
   const memoriaPrompt = formatarValorMemoriaPrompt(memoriaUsuario);
+  const manualMediaMode = resolverModoMidiaManual(perguntaAtual);
+  const perguntaPedeManualQualidadeAtual = perguntaPedeManualQualidade(perguntaContextual || perguntaAtual);
   const perguntaPedeManualAtual = perguntaPedeManualBombaCalor(perguntaContextual || perguntaAtual);
   const priorizarManuaisPorContexto = devePriorizarManuaisPorContexto(perguntaAtual, memoriaUsuario);
+  const priorizarManuaisQualidade = perguntaPedeManualQualidadeAtual || (priorizarManuaisPorContexto && String(memoriaUsuario?.ultimo_assunto?.assunto || '') === 'manuais_qualidade');
   const priorizarManuais = perguntaPedeManualAtual || priorizarManuaisPorContexto;
   logAiChatInfo('inicio', {
     totalMessages: sanitizedMessages.length,
     lastUserChars: perguntaAtual.length,
     memoriaItens: Object.keys(memoriaUsuario || {}).length,
+    perguntaPedeManualQualidadeAtual,
+    priorizarManuaisQualidade,
     priorizarManuaisPorContexto,
     perguntaPedeManualAtual,
     priorizarManuais
   });
+
+  if (perguntaAtual && priorizarManuaisQualidade) {
+    try {
+      const respostaManualQualidade = await tentarResponderComManuaisQualidade({
+        apiKey,
+        pergunta: perguntaContextual || perguntaAtual,
+        memoria: memoriaUsuario,
+        manualMediaMode
+      });
+      if (respostaManualQualidade?.content) {
+        await salvarMemoriaUsuarioChatbot(req, [
+          ...extrairMemoriaCurtaDaConversa({
+            pergunta: perguntaAtual,
+            resposta: respostaManualQualidade.content
+          }),
+          ...montarMemoriaManuaisQualidade(respostaManualQualidade.manuaisQualidade)
+        ]);
+        logAiChatInfo('sucesso-manuais-qualidade', {
+          duracaoMs: Date.now() - startedAt,
+          respostaChars: respostaManualQualidade.content.length,
+          manuais: Array.isArray(respostaManualQualidade.manuaisQualidade) ? respostaManualQualidade.manuaisQualidade.length : 0,
+          previews: Array.isArray(respostaManualQualidade.manualPreviews) ? respostaManualQualidade.manualPreviews.length : 0
+        });
+        return res.json({
+          content: respostaManualQualidade.content,
+          manualPreviews: Array.isArray(respostaManualQualidade.manualPreviews) ? respostaManualQualidade.manualPreviews : []
+        });
+      }
+    } catch (errManualQualidade) {
+      console.warn('[AI/Chat] Fallback para próximas fontes (manuais de qualidade falharam):', errManualQualidade?.message || errManualQualidade);
+    }
+  }
 
   if (perguntaAtual && dbPool && !priorizarManuais) {
     try {
@@ -3697,7 +4360,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
         apiKey,
         pergunta: perguntaContextual || perguntaAtual,
         messages: sanitizedMessages,
-        manualMediaMode: resolverModoMidiaManual(perguntaAtual)
+        manualMediaMode
       });
       if (respostaManual?.content) {
         await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
