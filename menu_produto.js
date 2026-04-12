@@ -5800,6 +5800,7 @@ document.getElementById('menu-recebimento')?.addEventListener('click', async e =
 
 // QUALIDADE: abre painel de Qualidade Fábrica
 const qualidadeFabricaMenuLink = document.getElementById('menu-qualidade-fabrica');
+const qualidadeManuaisMenuLink = document.getElementById('menu-qualidade-manuais');
 if (qualidadeFabricaMenuLink) {
   qualidadeFabricaMenuLink.addEventListener('click', (e) => {
     e.preventDefault();
@@ -5808,6 +5809,15 @@ if (qualidadeFabricaMenuLink) {
     showMainTab('qualidadeFabricaPane');
     mostrarPainelQualidade('registro');
     carregarStatusVerificacaoPirQualidade(obterCodigoProdutoQualidadeAtual());
+  });
+}
+
+if (qualidadeManuaisMenuLink) {
+  qualidadeManuaisMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    qualidadeManuaisMenuLink.classList.add('is-active');
+    showMainTab('qualidadeManuaisPane');
   });
 }
 
@@ -5843,8 +5853,136 @@ const qualidadeNfeLista = document.getElementById('qualidadeNfeLista');
 const qualidadeQuantidadeOk = document.getElementById('qualidadeQuantidadeOk');
 const qualidadeQuantidadeNok = document.getElementById('qualidadeQuantidadeNok');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
+const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
+const qualidadeManuaisRecarregarBtn = document.getElementById('qualidadeManuaisRecarregarBtn');
+const qualidadeManuaisListaWrap = document.getElementById('qualidadeManuaisListaWrap');
+const qualidadeManuaisLista = document.getElementById('qualidadeManuaisLista');
+const qualidadeManuaisMeta = document.getElementById('qualidadeManuaisMeta');
 let qualidadePirVerificacaoSalvando = false;
 let qualidadeListaPirOrigem = 'pir';
+let qualidadeManuaisCarregando = false;
+
+function qualidadeManuaisEscapeHtml(value) {
+  return String(value ?? '').replace(/[&<>\"]/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;'
+  }[ch]));
+}
+
+function formatarTamanhoArquivoQualidade(bytes) {
+  const numero = Number(bytes || 0);
+  if (!Number.isFinite(numero) || numero <= 0) return '';
+  if (numero < 1024) return `${numero} B`;
+  if (numero < 1024 * 1024) return `${(numero / 1024).toFixed(1).replace('.', ',')} KB`;
+  return `${(numero / (1024 * 1024)).toFixed(2).replace('.', ',')} MB`;
+}
+
+function renderQualidadeManuaisLista(itens = []) {
+  if (!qualidadeManuaisLista || !qualidadeManuaisListaWrap) return;
+
+  qualidadeManuaisListaWrap.style.display = 'block';
+
+  const lista = Array.isArray(itens) ? itens : [];
+  if (!lista.length) {
+    qualidadeManuaisLista.innerHTML = `
+      <div style="grid-column:1 / -1;padding:18px;border:1px dashed var(--border-color);border-radius:12px;color:var(--inactive-color);text-align:center;">
+        Nenhum manual encontrado na pasta.
+      </div>
+    `;
+    return;
+  }
+
+  qualidadeManuaisLista.innerHTML = lista.map((item) => {
+    const nomeExibicao = qualidadeManuaisEscapeHtml(item?.nome_exibicao || item?.codigo || item?.nome_arquivo || 'Manual');
+    const nomeArquivo = qualidadeManuaisEscapeHtml(item?.nome_arquivo || '');
+    const tamanho = formatarTamanhoArquivoQualidade(item?.tamanho_bytes);
+    const meta = [nomeArquivo, tamanho].filter(Boolean).join(' • ');
+    const url = qualidadeManuaisEscapeHtml(item?.public_url || '#');
+    return `
+      <article style="display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--border-color);border-radius:14px;background:var(--content-bg);box-shadow:0 10px 24px rgba(15,23,42,.08);">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div style="width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%);color:#1d4ed8;flex:0 0 auto;">
+            <i class="fa-solid fa-file-word"></i>
+          </div>
+          <div style="min-width:0;">
+            <div style="font-weight:700;color:var(--content-color);line-height:1.4;">${nomeExibicao}</div>
+            ${meta ? `<div style="margin-top:6px;font-size:12px;color:var(--inactive-color);word-break:break-word;">${qualidadeManuaisEscapeHtml(meta)}</div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;">
+          <a href="${url}" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;text-decoration:none;">
+            <i class="fa-solid fa-up-right-from-square"></i>
+            <span>Abrir manual</span>
+          </a>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+async function carregarQualidadeManuaisPrincipais({ force = false } = {}) {
+  if (qualidadeManuaisCarregando) return;
+  qualidadeManuaisCarregando = true;
+
+  try {
+    if (qualidadeManuaisMeta) {
+      qualidadeManuaisMeta.textContent = 'Carregando manuais...';
+    }
+    if (qualidadeManuaisListaWrap) {
+      qualidadeManuaisListaWrap.style.display = 'block';
+    }
+    if (qualidadeManuaisLista) {
+      qualidadeManuaisLista.innerHTML = `
+        <div style="grid-column:1 / -1;padding:18px;border:1px dashed var(--border-color);border-radius:12px;color:var(--inactive-color);text-align:center;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Carregando lista de manuais...
+        </div>
+      `;
+    }
+
+    const cacheBust = force ? `?t=${Date.now()}` : '';
+    const response = await fetch(`${API_BASE}/api/qualidade/manuais-principais${cacheBust}`, {
+      credentials: 'include'
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const data = await response.json();
+    const itens = Array.isArray(data?.itens) ? data.itens : [];
+    renderQualidadeManuaisLista(itens);
+
+    if (qualidadeManuaisMeta) {
+      qualidadeManuaisMeta.textContent = `Bucket: ${data?.bucket || 'Manuais'} | Pasta: ${data?.pasta || 'Manuais principais'} | Total: ${itens.length}`;
+    }
+  } catch (error) {
+    console.error('[QUALIDADE] Erro ao carregar manuais principais:', error);
+    if (qualidadeManuaisMeta) {
+      qualidadeManuaisMeta.textContent = 'Não foi possível carregar os manuais.';
+    }
+    if (qualidadeManuaisListaWrap) {
+      qualidadeManuaisListaWrap.style.display = 'block';
+    }
+    if (qualidadeManuaisLista) {
+      qualidadeManuaisLista.innerHTML = `
+        <div style="grid-column:1 / -1;padding:18px;border:1px dashed #fca5a5;border-radius:12px;color:#b91c1c;text-align:center;background:rgba(254,242,242,.9);">
+          Erro ao carregar os manuais principais.
+        </div>
+      `;
+    }
+  } finally {
+    qualidadeManuaisCarregando = false;
+  }
+}
+
+qualidadeManuaisPrincipaisBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeManuaisPrincipais();
+});
+
+qualidadeManuaisRecarregarBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarQualidadeManuaisPrincipais({ force: true });
+});
 
 function obterCodigoProdutoQualidadeAtual() {
   return String(

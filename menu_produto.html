@@ -295,6 +295,18 @@
       <i class="fa-solid fa-clipboard-check" style="margin-right:8px;"></i>
       PIR
     </a>
+
+    <a href="#"
+       id="menu-qualidade-manuais"
+       class="menu-link"
+       data-nav-key="side:qualidade:manuais"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Manuais"
+       data-nav-selector="#menu-qualidade-manuais">
+      <i class="fa-solid fa-book-open" style="margin-right:8px;"></i>
+      Manuais
+    </a>
   </div>
 </div>
 
@@ -2176,6 +2188,44 @@
                   </div>
                 </div>
               </div>
+          </div>
+        </div>
+
+          <div id="qualidadeManuaisPane" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section" style="margin-top:0;">
+                <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-book-open" style="color:#2563eb;"></i>
+                    Manuais da Qualidade
+                  </div>
+                  <div style="color:var(--inactive-color);font-size:13px;">Arquivos da pasta <strong>Manuais principais</strong> no Supabase.</div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">
+                  <button id="qualidadeManuaisPrincipaisBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;">
+                    <i class="fa-solid fa-folder-open"></i>
+                    <span>Principais manuais</span>
+                  </button>
+                  <button id="qualidadeManuaisRecarregarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:#334155;color:#fff;">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span>Recarregar</span>
+                  </button>
+                  <div id="qualidadeManuaisMeta" style="font-size:12px;color:var(--inactive-color);"></div>
+                </div>
+
+                <div id="qualidadeManuaisListaWrap" style="display:none;margin-top:16px;">
+                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <i class="fa-solid fa-folder-tree" style="color:#2563eb;"></i>
+                        <div style="font-weight:600;">Pasta: Manuais principais</div>
+                      </div>
+                    </div>
+                    <div id="qualidadeManuaisLista" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;"></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2189,6 +2239,12 @@
                   Solicitação de envio (SAC)
                 </div>
                 <div style="color:var(--inactive-color);font-size:13px;">Obrigatório anexar 2 arquivos: Etiqueta e Declaração de conteúdo (use os botões abaixo).</div>
+                <div style="margin-left:auto;display:flex;align-items:center;">
+                  <a href="https://vipp.visualset.com.br/vipp/inicio/index.php" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#111827 0%,#1f2937 100%);color:white;text-decoration:none;">
+                    <img src="https://vipp.visualset.com.br/vipp/img/logo-visualset5.png" alt="Visualset" style="width:22px;height:22px;object-fit:contain;display:block;">
+                    <span>VIPP</span>
+                  </a>
+                </div>
               </div>
 
               <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;">
@@ -2270,7 +2326,7 @@
                   AT
                 </div>
                 <div style="color:var(--inactive-color);font-size:13px;">Abertura de OS</div>
-                <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+                <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                   <button id="atOpenAtendimentosBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#1f2937 0%,#111827 100%);color:white;">
                     <i class="fa-solid fa-table-list"></i>
                     <span>Atendimentos</span>
@@ -2291,6 +2347,10 @@
                       </button>
                     </div>
                   </div>
+                  <a href="https://crm.datacrazy.io/login" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:white;text-decoration:none;">
+                    <img src="https://crm.datacrazy.io/_next/static/media/datacrazy.6026d362.svg" alt="DataCrazy" style="width:22px;height:22px;object-fit:contain;display:block;">
+                    <span>DataCrazy</span>
+                  </a>
                   <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar para AT</span>
@@ -14156,15 +14216,21 @@ function attachDropZone(ul) {
     wrap.className = 'sgf-ai-manual-previews';
 
     previews.forEach((preview) => {
+      const pageLabel = String(preview.pageLabel || '').trim();
+      const pageValue = preview.assetType === 'document'
+        ? ''
+        : String(preview.page || '').trim();
+      const note = String(preview.note || '').trim() || (preview.imageUrl ? 'Atalho para imagem cacheada do manual.' : 'Atalho direto para a página do manual.');
+      const openLabel = String(preview.openLabel || '').trim() || 'Abrir página do manual';
       const card = document.createElement('div');
       card.className = 'sgf-ai-manual-preview';
       card.innerHTML = `
         <div class="sgf-ai-manual-preview-head">
-          <div class="sgf-ai-manual-preview-icon">${preview.imageUrl ? 'IMG' : 'PDF'}</div>
+          <div class="sgf-ai-manual-preview-icon">${preview.imageUrl ? 'IMG' : (preview.assetType === 'document' ? 'DOC' : 'PDF')}</div>
           <div class="sgf-ai-manual-preview-meta">
             <div class="sgf-ai-manual-preview-title">${escapeHtml(preview.manual || 'Manual')}</div>
-            <div class="sgf-ai-manual-preview-page">Página ${escapeHtml(String(preview.page || ''))}</div>
-            <div class="sgf-ai-manual-preview-note">${preview.imageUrl ? 'Atalho para imagem cacheada do manual.' : 'Atalho direto para a página do manual.'}</div>
+            ${pageValue ? `<div class="sgf-ai-manual-preview-page">${escapeHtml(pageLabel || 'Página')} ${escapeHtml(String(pageValue))}</div>` : ''}
+            <div class="sgf-ai-manual-preview-note">${escapeHtml(note)}</div>
           </div>
         </div>
         <div class="sgf-ai-manual-preview-actions"></div>
@@ -14182,7 +14248,7 @@ function attachDropZone(ul) {
       };
 
       if (preview.openUrl || preview.sourceUrl) {
-        addAction(preview.openUrl || preview.sourceUrl, 'Abrir página do manual');
+        addAction(preview.openUrl || preview.sourceUrl, openLabel);
       }
       if (preview.imageUrl) {
         addAction(preview.imageUrl, 'Abrir imagem');
