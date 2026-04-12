@@ -11267,29 +11267,37 @@ function attachDropZone(ul) {
   gap: 8px;
 }
 .sgf-ai-manual-preview {
-  display: block;
-  text-decoration: none;
-  color: inherit;
+  display: grid;
+  gap: 10px;
   border: 1px solid rgba(148,163,184,.22);
   border-radius: 10px;
-  overflow: hidden;
-  background: rgba(15,23,42,.65);
+  background: rgba(15,23,42,.72);
+  padding: 10px;
 }
 .sgf-ai-manual-preview:hover {
   border-color: rgba(99,102,241,.55);
 }
-.sgf-ai-manual-preview img {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 220px;
-  object-fit: cover;
-  background: #0f172a;
+.sgf-ai-manual-preview-head {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.sgf-ai-manual-preview-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99,102,241,.16);
+  border: 1px solid rgba(99,102,241,.3);
+  color: #c7d2fe;
+  font-size: 16px;
 }
 .sgf-ai-manual-preview-meta {
-  padding: 8px 10px;
   display: grid;
-  gap: 2px;
+  gap: 3px;
   font-size: 11px;
   line-height: 1.35;
   white-space: normal;
@@ -11300,6 +11308,31 @@ function attachDropZone(ul) {
 }
 .sgf-ai-manual-preview-page {
   color: #94a3b8;
+}
+.sgf-ai-manual-preview-note {
+  color: #94a3b8;
+}
+.sgf-ai-manual-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sgf-ai-manual-preview-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(99,102,241,.35);
+  background: rgba(99,102,241,.12);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 600;
+}
+.sgf-ai-manual-preview-action:hover {
+  background: rgba(99,102,241,.24);
+  border-color: rgba(129,140,248,.75);
 }
 
 /* ── Sugestões rápidas ── */
@@ -11645,6 +11678,33 @@ function attachDropZone(ul) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+  const normalizeAiText = (value) => String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  function userRequestedManualMedia(text) {
+    const t = normalizeAiText(text);
+    if (!t) return false;
+    return (
+      t.includes('foto') ||
+      t.includes('imagem') ||
+      t.includes('pagina') ||
+      t.includes('pdf') ||
+      ((t.includes('manual') || t.includes('link') || t.includes('pdf')) &&
+        (t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver') || t.includes('abrir') || t.includes('abre'))) ||
+      ((t.includes('mostrar') || t.includes('manda') || t.includes('envia') || t.includes('ver') || t.includes('abrir') || t.includes('abre')) &&
+        (t.includes('manual') || t.includes('foto') || t.includes('imagem') || t.includes('pagina')))
+    );
+  }
+
+  function getAllowedManualPreviews(userText, manualPreviews) {
+    const lista = Array.isArray(manualPreviews) ? manualPreviews : [];
+    if (!lista.length) return [];
+    return userRequestedManualMedia(userText) ? lista : [];
+  }
 
   async function reportAiClientLog(level, mensagem, contexto = {}) {
     try {
@@ -13773,7 +13833,10 @@ function attachDropZone(ul) {
       }
 
       const content = (data.content || '').trim();
-      const manualPreviews = Array.isArray(data?.manualPreviews) ? data.manualPreviews : [];
+      const manualPreviews = getAllowedManualPreviews(
+        text,
+        Array.isArray(data?.manualPreviews) ? data.manualPreviews : []
+      );
       const parsedAction = tryParseAssistantAction(content);
       void reportAiClientLog('info', 'Resposta recebida do assistente', {
         status: resp.status,
@@ -14084,26 +14147,48 @@ function attachDropZone(ul) {
 
   // ── Helpers de UI ────────────────────────────────────────────────────────
   function renderManualPreviews(container, manualPreviews) {
-    const previews = Array.isArray(manualPreviews) ? manualPreviews.filter((item) => item && item.imageUrl) : [];
+    const previews = Array.isArray(manualPreviews)
+      ? manualPreviews.filter((item) => item && (item.openUrl || item.imageUrl || item.sourceUrl))
+      : [];
     if (!previews.length) return;
 
     const wrap = document.createElement('div');
     wrap.className = 'sgf-ai-manual-previews';
 
     previews.forEach((preview) => {
-      const link = document.createElement('a');
-      link.className = 'sgf-ai-manual-preview';
-      link.href = String(preview.imageUrl || '').trim();
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.innerHTML = `
-        <img src="${escapeHtml(preview.imageUrl)}" alt="${escapeHtml(preview.manual || 'Prévia do manual')}" loading="lazy">
-        <div class="sgf-ai-manual-preview-meta">
-          <div class="sgf-ai-manual-preview-title">${escapeHtml(preview.manual || 'Manual')}</div>
-          <div class="sgf-ai-manual-preview-page">Página ${escapeHtml(String(preview.page || ''))}</div>
+      const card = document.createElement('div');
+      card.className = 'sgf-ai-manual-preview';
+      card.innerHTML = `
+        <div class="sgf-ai-manual-preview-head">
+          <div class="sgf-ai-manual-preview-icon">${preview.imageUrl ? 'IMG' : 'PDF'}</div>
+          <div class="sgf-ai-manual-preview-meta">
+            <div class="sgf-ai-manual-preview-title">${escapeHtml(preview.manual || 'Manual')}</div>
+            <div class="sgf-ai-manual-preview-page">Página ${escapeHtml(String(preview.page || ''))}</div>
+            <div class="sgf-ai-manual-preview-note">${preview.imageUrl ? 'Atalho para imagem cacheada do manual.' : 'Atalho direto para a página do manual.'}</div>
+          </div>
         </div>
+        <div class="sgf-ai-manual-preview-actions"></div>
       `;
-      wrap.appendChild(link);
+
+      const actions = card.querySelector('.sgf-ai-manual-preview-actions');
+      const addAction = (href, label) => {
+        const link = document.createElement('a');
+        link.className = 'sgf-ai-manual-preview-action';
+        link.href = String(href || '').trim();
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = label;
+        actions.appendChild(link);
+      };
+
+      if (preview.openUrl || preview.sourceUrl) {
+        addAction(preview.openUrl || preview.sourceUrl, 'Abrir página do manual');
+      }
+      if (preview.imageUrl) {
+        addAction(preview.imageUrl, 'Abrir imagem');
+      }
+
+      wrap.appendChild(card);
     });
 
     container.appendChild(wrap);

@@ -7,11 +7,13 @@ const router  = express.Router();
 const axios   = require('axios');
 const fs = require('fs');
 const fsp = require('fs/promises');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { Pool } = require('pg');
+const supabase = require('../utils/supabase');
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const REPORT_MAX_ROWS = 200;
@@ -23,8 +25,11 @@ const MANUAL_MAX_CHUNKS = 6;
 const MANUAL_PREVIEW_LIMIT = 2;
 const CHATBOT_MEMORY_MAX_ITEMS = 8;
 const CHATBOT_MEMORY_TTL_DAYS = 21;
-const MANUAL_PREVIEW_CACHE_DIR = path.resolve(__dirname, '..', 'uploads', 'chatbot_manual_previews');
-const MANUAL_PDF_CACHE_DIR = path.resolve(__dirname, '..', 'uploads', 'chatbot_manual_pdfs');
+const MANUAL_PREVIEW_BUCKET = process.env.SUPABASE_BUCKET || 'produtos';
+const MANUAL_PREVIEW_SUPABASE_PREFIX = 'chatbot/manual_previews';
+const MANUAL_CACHE_TMP_DIR = path.resolve(os.tmpdir(), 'fromtherm_chatbot_manual_cache');
+const MANUAL_PREVIEW_TMP_DIR = path.join(MANUAL_CACHE_TMP_DIR, 'manual_previews');
+const MANUAL_PDF_CACHE_DIR = path.join(MANUAL_CACHE_TMP_DIR, 'manual_pdfs');
 const execFileAsync = promisify(execFile);
 
 const UFS_BRASIL = new Set([
@@ -409,7 +414,7 @@ function montarRespostaSolicitandoModeloManual() {
   return 'Esse número parece ser da OS, não do modelo do equipamento. Pelos manuais eu preciso do modelo ou do número de série para confirmar voltagem, quadro externo, Wi-Fi e demais dados técnicos.';
 }
 
-function perguntaPedeMidiaManual(pergunta, messages = []) {
+function perguntaPedeImagemManual(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return false;
 
@@ -417,41 +422,133 @@ function perguntaPedeMidiaManual(pergunta, messages = []) {
     t.includes('foto') ||
     t.includes('imagem') ||
     t.includes('print') ||
-    t.includes('pagina') ||
-    (t.includes('link') && (t.includes('manual') || t.includes('foto') || t.includes('imagem'))) ||
+    t.includes('screenshot') ||
     ((t.includes('mostrar') || t.includes('mostra') || t.includes('manda') || t.includes('envia')) &&
-      (t.includes('manual') || t.includes('pagina') || t.includes('foto') || t.includes('imagem')));
+      (t.includes('foto') || t.includes('imagem') || t.includes('print')));
 
-  if (pedidoDireto) return true;
-
-  const ultimaAssistente = [...messages]
-    .reverse()
-    .find((item) => item?.role === 'assistant' && String(item?.content || '').trim());
-  const ultimaAssistenteTexto = String(ultimaAssistente?.content || '');
-  const aceitouOferta =
-    /^(sim|quero|pode|manda|envia|mostra|quero ver)\b/i.test(String(pergunta || '').trim()) &&
-    /posso te (mostrar|enviar).*(pagina|imagem|foto|manual)/i.test(ultimaAssistenteTexto);
-
-  return aceitouOferta;
+  return pedidoDireto;
 }
 
-function perguntaMereceOfertaMidiaManual(pergunta) {
+function perguntaPedeLinkManual(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return false;
 
-  return [
-    'wifi',
-    'wi fi',
-    'controlador',
-    'painel',
-    'display',
-    'icone',
-    'alarme',
-    'botao',
-    'configur',
-    'ligacao',
-    'modo'
-  ].some((item) => t.includes(item));
+  if (perguntaPedeImagemManual(pergunta)) return false;
+
+  const pediuPagina =
+    t.includes('pagina') ||
+    t.includes('pag ') ||
+    t.includes('pdf') ||
+    /^qual pagina\b/.test(t) ||
+    /^onde .*manual\b/.test(t);
+
+  const pediuLinkManual =
+    (t.includes('link') && (t.includes('manual') || t.includes('pagina') || t.includes('pdf'))) ||
+    ((t.includes('mostrar') || t.includes('mostra') || t.includes('manda') || t.includes('envia') || t.includes('abrir') || t.includes('abre') || t.includes('ver')) &&
+      (t.includes('manual') || t.includes('pagina') || t.includes('pdf')));
+
+  return pediuPagina || pediuLinkManual;
+}
+
+function perguntaPedeManualCompleto(pergunta) {
+  const t = normalizarTextoBusca(pergunta);
+  if (!t) return false;
+
+  return (
+    /\bmanual completo\b/.test(t) ||
+    /\bmanual inteiro\b/.test(t) ||
+    /\bpdf do manual\b/.test(t) ||
+    ((t.includes('manual') || t.includes('pdf')) &&
+      (t.includes('manda') || t.includes('envia') || t.includes('mostra') || t.includes('abrir') || t.includes('abre')))
+  );
+}
+
+function perguntaPedeTrechoManual(pergunta) {
+  const t = normalizarTextoBusca(pergunta);
+  if (!t) return false;
+
+  return (
+    /\btrecho\b/.test(t) ||
+    /\bparte\b/.test(t) ||
+    /\bonde fala\b/.test(t) ||
+    /\bqual parte\b/.test(t) ||
+    /\bfala isso\b/.test(t) ||
+    /\bfala disso\b/.test(t) ||
+    /\btexto do manual\b/.test(t) ||
+    (((t.includes('manda') || t.includes('envia') || t.includes('mostra')) && (t.includes('parte') || t.includes('trecho'))) ||
+      (t.includes('manual') && (t.includes('parte') || t.includes('trecho'))))
+  );
+}
+
+function resolverModoMidiaManual(pergunta) {
+  if (perguntaPedeImagemManual(pergunta)) return 'image';
+  if (perguntaPedeLinkManual(pergunta)) return 'link';
+  return 'none';
+}
+
+function extrairFonteDaRespostaAssistente(texto) {
+  return String(texto || '')
+    .split(/\n+/)
+    .map((linha) => String(linha || '').trim())
+    .find((linha) => /^fonte:/i.test(linha)) || '';
+}
+
+function resumirRespostaAssistenteSemFonte(texto, max = 280) {
+  const linhas = String(texto || '')
+    .split(/\n+/)
+    .map((linha) => String(linha || '').trim())
+    .filter((linha) => linha && !/^fonte:/i.test(linha) && !/^anexei abaixo/i.test(linha));
+  const resumo = linhas.join(' ').replace(/\s+/g, ' ').trim();
+  if (!resumo) return '';
+  return resumo.length > max ? `${resumo.slice(0, max - 3)}...` : resumo;
+}
+
+function extrairInteracaoAnteriorManual(messages = []) {
+  const lista = Array.isArray(messages) ? messages : [];
+  let ultimaAssistente = null;
+  let ultimaPerguntaAnterior = null;
+
+  for (let i = lista.length - 2; i >= 0; i -= 1) {
+    const item = lista[i];
+    if (!ultimaAssistente && item?.role === 'assistant' && String(item?.content || '').trim()) {
+      ultimaAssistente = String(item.content || '').trim();
+      continue;
+    }
+    if (ultimaAssistente && item?.role === 'user' && String(item?.content || '').trim()) {
+      ultimaPerguntaAnterior = String(item.content || '').trim();
+      break;
+    }
+  }
+
+  return {
+    perguntaAnterior: ultimaPerguntaAnterior || '',
+    respostaAnterior: ultimaAssistente || '',
+    fonteAnterior: extrairFonteDaRespostaAssistente(ultimaAssistente || ''),
+    resumoAnterior: resumirRespostaAssistenteSemFonte(ultimaAssistente || '')
+  };
+}
+
+function enriquecerPerguntaManualComHistorico(pergunta, messages = []) {
+  const perguntaAtual = String(pergunta || '').trim();
+  if (!perguntaAtual) return '';
+
+  const dependeContexto =
+    perguntaDependeDeContextoCurto(perguntaAtual) ||
+    perguntaPedeTrechoManual(perguntaAtual) ||
+    perguntaPedeManualCompleto(perguntaAtual) ||
+    perguntaPedeLinkManual(perguntaAtual) ||
+    perguntaPedeImagemManual(perguntaAtual);
+
+  if (!dependeContexto) return perguntaAtual;
+
+  const contexto = extrairInteracaoAnteriorManual(messages);
+  const itens = [];
+  if (contexto.perguntaAnterior) itens.push(`Pergunta anterior do usuário: ${contexto.perguntaAnterior}`);
+  if (contexto.resumoAnterior) itens.push(`Resumo da resposta anterior: ${contexto.resumoAnterior}`);
+  if (contexto.fonteAnterior) itens.push(`Fonte anterior citada: ${contexto.fonteAnterior}`);
+  if (!itens.length) return perguntaAtual;
+
+  return `${perguntaAtual}\n\n[Contexto imediato da conversa]\n- ${itens.join('\n- ')}`;
 }
 
 function truncateText(value, max = 80) {
@@ -942,23 +1039,173 @@ function resumirReferenciasManuais(trechos, limit = 2) {
   return refs;
 }
 
-function acrescentarOfertaMidiaManual(content, trechos) {
-  const texto = String(content || '').trim();
-  if (!texto) return texto;
-  if (/posso te (mostrar|enviar).*(pagina|imagem|foto|manual)/i.test(texto)) return texto;
+function selecionarTrechosUnicosParaResposta(trechos, limit = 2) {
+  const lista = [];
+  const vistos = new Set();
 
-  const refs = resumirReferenciasManuais(trechos, 2);
-  const oferta = refs.length
-    ? `Se quiser, posso te mostrar a página do manual em imagem ou te indicar exatamente onde isso aparece: ${refs.join(' | ')}.`
-    : 'Se quiser, posso te mostrar a página do manual em imagem ou te indicar a página exata.';
+  for (const trecho of Array.isArray(trechos) ? trechos : []) {
+    const chave = `${Number(trecho?.manual_id || 0)}:${Number(trecho?.pagina_inicial || 0)}:${Number(trecho?.chunk_ordem || 0)}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    lista.push(trecho);
+    if (lista.length >= Math.max(1, Number(limit || 2))) break;
+  }
 
-  return `${texto}\n\n${oferta}`;
+  return lista;
 }
 
-async function inferirRespostaConfiguracaoWifi(pergunta, trechos) {
+function extrairNumerosRelevantesTexto(texto) {
+  return Array.from(
+    new Set(
+      (String(texto || '').match(/\b\d[\d\.\,]{2,}\b/g) || [])
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 8);
+}
+
+function extrairSegmentosRelevantesTrecho(texto, pergunta, limit = 2) {
+  const bruto = String(texto || '').trim();
+  if (!bruto) return [];
+
+  const tokens = tokenizarPerguntaParaPreview(pergunta);
+  const numeros = extrairNumerosRelevantesTexto(pergunta);
+  const linhas = bruto
+    .split(/\n+/)
+    .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const ranqueados = linhas
+    .map((linha, index) => {
+      const norm = normalizarTextoManualBusca(linha);
+      let score = 0;
+      for (const token of tokens) {
+        if (norm.includes(token)) score += token.length >= 6 ? 3 : 1;
+      }
+      for (const numero of numeros) {
+        if (linha.includes(numero)) score += 12;
+      }
+      if (/\b(btu|btus|kw|cop|eer|potencia|capacidade|alimentacao|voltagem)\b/i.test(linha)) score += 2;
+      if (/manual fromtherm|^modelo$|^fti$|temperatura ambiente/i.test(linha)) score -= 12;
+      return { linha, index, score };
+    })
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || a.index - b.index);
+
+  const melhor = ranqueados.find((item) => Number(item.score || 0) > 0);
+  if (melhor) {
+    const janela = [];
+    let anterior = melhor.index > 0 ? linhas[melhor.index - 1] : '';
+    const atual = linhas[melhor.index] || '';
+    const proxima = melhor.index + 1 < linhas.length ? linhas[melhor.index + 1] : '';
+    const regexRotulo = /\b(btu|btus|kw|cop|eer|potencia|capacidade|alimentacao|voltagem|corrente)\b/i;
+
+    if (!regexRotulo.test(anterior) && /\d/.test(atual)) {
+      for (let i = melhor.index - 2; i >= Math.max(0, melhor.index - 4); i -= 1) {
+        if (regexRotulo.test(linhas[i] || '')) {
+          anterior = linhas[i];
+          break;
+        }
+      }
+    }
+
+    if (anterior && !/manual fromtherm/i.test(anterior)) janela.push(anterior);
+    if (atual) janela.push(atual);
+    if (proxima && !janela.includes(proxima) && (/\d/.test(proxima) || /\b(btu|kw|cop|eer|potencia|capacidade)\b/i.test(proxima))) {
+      janela.push(proxima);
+    }
+
+    return [janela.join(' ').replace(/\s+/g, ' ').trim()];
+  }
+
+  return linhas
+    .filter((item) => item.length >= 18)
+    .slice(0, Math.max(1, Number(limit || 2)));
+}
+
+function montarLinksManuaisCompletos(trechos, limit = 2) {
+  const manuais = [];
+  const vistos = new Set();
+
+  for (const trecho of Array.isArray(trechos) ? trechos : []) {
+    const manualId = Number(trecho?.manual_id || 0);
+    if (!manualId || vistos.has(manualId)) continue;
+    vistos.add(manualId);
+    manuais.push({
+      manual: String(trecho?.nome_arquivo || 'Manual').trim() || 'Manual',
+      page: Math.max(1, Number(trecho?.pagina_inicial || trecho?.pagina_final || 1)),
+      assetType: 'manual',
+      sourceUrl: String(trecho?.caminho_manual || '').trim(),
+      openUrl: String(trecho?.caminho_manual || '').trim()
+    });
+    if (manuais.length >= Math.max(1, Number(limit || 2))) break;
+  }
+
+  return manuais.filter((item) => item.sourceUrl);
+}
+
+async function montarRespostaManualCompletoDireta(trechos, pergunta, manualMediaMode) {
+  if (!perguntaPedeManualCompleto(pergunta) || manualMediaMode === 'none') return null;
+
+  const baseTrechos = selecionarTrechosUnicosParaResposta(trechos, 2);
+  const manualPreviews = montarLinksManuaisCompletos(baseTrechos, 2);
+  if (!manualPreviews.length) return null;
+
+  const lista = manualPreviews.map((item) => `${item.manual}`).join(' | ');
+  const content = `Segue o manual usado nesta conversa para você consultar direto.\n\nManual: ${lista}\n\nFonte: ${formatarFontesManuais(baseTrechos)}`;
+
+  return {
+    content,
+    trechos: baseTrechos,
+    manualPreviews
+  };
+}
+
+async function montarRespostaTrechoManualDireta(trechos, pergunta, manualMediaMode, messages = []) {
+  if (!perguntaPedeTrechoManual(pergunta)) return null;
+
+  const contextoAnterior = extrairInteracaoAnteriorManual(messages);
+  const textoFoco = [contextoAnterior.resumoAnterior, pergunta]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .join('\n');
+
+  const ordenados = [...(Array.isArray(trechos) ? trechos : [])]
+    .map((trecho) => ({ trecho, scoreResposta: scoreTrechoParaPreview(textoFoco || pergunta, trecho) }))
+    .sort((a, b) => Number(b.scoreResposta || 0) - Number(a.scoreResposta || 0))
+    .map((item) => item.trecho);
+
+  const baseTrechos = selecionarTrechosUnicosParaResposta(ordenados, 1);
+  if (!baseTrechos.length) return null;
+
+  const blocos = baseTrechos.map((trecho) => {
+    const segmentos = extrairSegmentosRelevantesTrecho(trecho?.texto, textoFoco || pergunta, 2);
+    const cabecalho = `${String(trecho?.nome_arquivo || 'Manual').trim() || 'Manual'} (${formatarPaginasManual(trecho?.pagina_inicial, trecho?.pagina_final)})`;
+    return `${cabecalho}:\n- ${segmentos.join('\n- ')}`;
+  });
+
+  let manualPreviews = [];
+  if (manualMediaMode !== 'none') {
+    manualPreviews = await montarPreviewsManuais(baseTrechos, MANUAL_PREVIEW_LIMIT, pergunta, manualMediaMode);
+  }
+
+  let content = `Encontrei a parte do manual relacionada ao que acabamos de falar:\n\n${blocos.join('\n\n')}\n\nFonte: ${formatarFontesManuais(baseTrechos)}`;
+  if (manualPreviews.length && !/anexei abaixo/i.test(content)) {
+    content += manualMediaMode === 'image'
+      ? '\n\nAnexei abaixo um atalho para abrir a imagem dessa parte do manual.'
+      : '\n\nAnexei abaixo um atalho para abrir a página correspondente do manual.';
+  }
+
+  return {
+    content,
+    trechos: baseTrechos,
+    manualPreviews
+  };
+}
+
+async function inferirRespostaConfiguracaoWifi(pergunta, trechos, { allowGenericWifi = false } = {}) {
   const t = normalizarTextoBusca(pergunta);
   if (!t || !t.includes('wifi')) return null;
-  if (!['configur', 'conectar', 'parear', 'ajustar'].some((item) => t.includes(item))) return null;
+  if (!allowGenericWifi && !['configur', 'conectar', 'parear', 'ajustar'].some((item) => t.includes(item))) return null;
 
   let candidatos = Array.isArray(trechos) ? [...trechos] : [];
   if (dbPool) {
@@ -1143,7 +1390,7 @@ function hashCurtoManual(valor) {
 
 async function garantirPastasCacheManuais() {
   await Promise.all([
-    fsp.mkdir(MANUAL_PREVIEW_CACHE_DIR, { recursive: true }),
+    fsp.mkdir(MANUAL_PREVIEW_TMP_DIR, { recursive: true }),
     fsp.mkdir(MANUAL_PDF_CACHE_DIR, { recursive: true })
   ]);
 }
@@ -1164,19 +1411,116 @@ async function baixarPdfManualCacheado({ caminhoManual, conteudoHash }) {
   return arquivoPdf;
 }
 
-async function gerarPreviewPaginaManual(trecho) {
+function obterHashReferenciaPreview(trecho) {
+  const raw = String(trecho?.conteudo_hash || '').trim();
+  return raw || hashCurtoManual(`${trecho?.manual_id || 0}|${trecho?.caminho_manual || ''}`);
+}
+
+function montarUrlPaginaManual(caminhoManual, pagina) {
+  const url = String(caminhoManual || '').trim();
+  const paginaNum = Math.max(1, Number(pagina || 1));
+  if (!url) return '';
+  return `${url}#page=${paginaNum}`;
+}
+
+async function buscarPreviewManualCacheado({ manualId, pagina, conteudoHashRef }) {
+  if (!dbPool || !manualId || !pagina || !conteudoHashRef) return null;
+
+  const { rows } = await dbPool.query(
+    `
+      SELECT manual_id, pagina, conteudo_hash_ref, source_url, bucket, path_key, public_url
+      FROM "Chatbot".manual_preview_cache
+      WHERE manual_id = $1
+        AND pagina = $2
+        AND conteudo_hash_ref = $3
+      LIMIT 1
+    `,
+    [manualId, pagina, conteudoHashRef]
+  );
+
+  return rows?.[0] || null;
+}
+
+async function salvarPreviewManualCacheado({
+  manualId,
+  pagina,
+  conteudoHashRef,
+  sourceUrl,
+  bucket,
+  pathKey,
+  publicUrl
+}) {
+  if (!dbPool || !manualId || !pagina || !conteudoHashRef || !bucket || !pathKey || !publicUrl) return null;
+
+  const { rows } = await dbPool.query(
+    `
+      INSERT INTO "Chatbot".manual_preview_cache (
+        manual_id,
+        pagina,
+        conteudo_hash_ref,
+        source_url,
+        bucket,
+        path_key,
+        public_url,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ON CONFLICT (manual_id, pagina, conteudo_hash_ref)
+      DO UPDATE SET
+        source_url = EXCLUDED.source_url,
+        bucket = EXCLUDED.bucket,
+        path_key = EXCLUDED.path_key,
+        public_url = EXCLUDED.public_url,
+        updated_at = NOW()
+      RETURNING manual_id, pagina, conteudo_hash_ref, source_url, bucket, path_key, public_url
+    `,
+    [manualId, pagina, conteudoHashRef, sourceUrl || null, bucket, pathKey, publicUrl]
+  );
+
+  return rows?.[0] || null;
+}
+
+function montarAnexoManualBase(trecho, pagina, assetType = 'link') {
+  const caminhoManual = String(trecho?.caminho_manual || '').trim();
+  return {
+    manual: String(trecho?.nome_arquivo || 'Manual').trim() || 'Manual',
+    page: pagina,
+    assetType,
+    sourceUrl: caminhoManual,
+    openUrl: montarUrlPaginaManual(caminhoManual, pagina)
+  };
+}
+
+async function gerarPreviewPaginaManual(trecho, { mediaMode = 'link' } = {}) {
   const pagina = Math.max(1, Number(trecho?.pagina_inicial || trecho?.pagina_final || 1));
   const manualId = Number(trecho?.manual_id || 0);
   const caminhoManual = String(trecho?.caminho_manual || '').trim();
   if (!manualId || !caminhoManual) return null;
 
+  const base = montarAnexoManualBase(trecho, pagina, mediaMode === 'image' ? 'image' : 'link');
+  if (mediaMode !== 'image') return base;
+
+  const conteudoHashRef = obterHashReferenciaPreview(trecho);
+  const cacheExistente = await buscarPreviewManualCacheado({ manualId, pagina, conteudoHashRef }).catch((err) => {
+    console.warn('[AI/Manuais] Falha ao consultar cache de preview:', err?.message || err);
+    return null;
+  });
+  if (cacheExistente?.public_url) {
+    return {
+      ...base,
+      imageUrl: String(cacheExistente.public_url || '').trim()
+    };
+  }
+
   const pdfPath = await baixarPdfManualCacheado({
     caminhoManual,
-    conteudoHash: trecho?.conteudo_hash || ''
+    conteudoHash: conteudoHashRef
   });
 
-  const nomeBase = `manual-${manualId}-p${pagina}-${hashCurtoManual(`${trecho?.conteudo_hash || ''}|${caminhoManual}`)}`;
-  const outputBase = path.join(MANUAL_PREVIEW_CACHE_DIR, nomeBase);
+  const nomeHash = hashCurtoManual(`${conteudoHashRef}|${caminhoManual}|${pagina}`);
+  const nomeBase = `manual-${manualId}-p${pagina}-${nomeHash}`;
+  const outputBase = path.join(MANUAL_PREVIEW_TMP_DIR, nomeBase);
   const outputFile = `${outputBase}.jpg`;
 
   if (!fs.existsSync(outputFile)) {
@@ -1193,11 +1537,40 @@ async function gerarPreviewPaginaManual(trecho) {
 
   if (!fs.existsSync(outputFile)) return null;
 
+  const buffer = await fsp.readFile(outputFile);
+  const pathKey = `${MANUAL_PREVIEW_SUPABASE_PREFIX}/manual-${manualId}/pagina-${pagina}-${nomeHash}.jpg`;
+  const { error: uploadErr } = await supabase
+    .storage
+    .from(MANUAL_PREVIEW_BUCKET)
+    .upload(pathKey, buffer, {
+      contentType: 'image/jpeg',
+      upsert: true
+    });
+
+  if (uploadErr) {
+    console.warn('[AI/Manuais] Falha ao enviar preview para Supabase:', uploadErr?.message || uploadErr);
+    return base;
+  }
+
+  const { data: publicData } = supabase.storage.from(MANUAL_PREVIEW_BUCKET).getPublicUrl(pathKey);
+  const publicUrl = String(publicData?.publicUrl || '').trim();
+  if (!publicUrl) return base;
+
+  await salvarPreviewManualCacheado({
+    manualId,
+    pagina,
+    conteudoHashRef,
+    sourceUrl: caminhoManual,
+    bucket: MANUAL_PREVIEW_BUCKET,
+    pathKey,
+    publicUrl
+  }).catch((err) => {
+    console.warn('[AI/Manuais] Falha ao salvar cache SQL do preview:', err?.message || err);
+  });
+
   return {
-    manual: String(trecho?.nome_arquivo || 'Manual').trim() || 'Manual',
-    page: pagina,
-    imageUrl: `/uploads/chatbot_manual_previews/${path.basename(outputFile)}`,
-    sourceUrl: caminhoManual
+    ...base,
+    imageUrl: publicUrl
   };
 }
 
@@ -1221,14 +1594,21 @@ function tokenizarPerguntaParaPreview(pergunta) {
 
 function scoreTrechoParaPreview(pergunta, trecho) {
   const tokens = tokenizarPerguntaParaPreview(pergunta);
+  const numeros = extrairNumerosRelevantesTexto(pergunta);
   const modelos = extrairModelosPergunta(pergunta);
   const nome = normalizarTextoManualBusca(trecho?.nome_arquivo);
   const texto = normalizarTextoManualBusca(trecho?.texto);
+  const textoBruto = String(trecho?.texto || '');
   let score = Number(trecho?.score || 0);
 
   for (const token of tokens) {
     if (nome.includes(token)) score += 40;
     if (texto.includes(token)) score += 14;
+  }
+
+  for (const numero of numeros) {
+    if (textoBruto.includes(numero)) score += 120;
+    if (texto.includes(normalizarTextoManualBusca(numero))) score += 80;
   }
 
   score += calcularScoreModeloNoTexto(`${nome} ${texto}`, modelos, {
@@ -1240,7 +1620,9 @@ function scoreTrechoParaPreview(pergunta, trecho) {
   return score;
 }
 
-async function montarPreviewsManuais(trechos, limit = MANUAL_PREVIEW_LIMIT, pergunta = '') {
+async function montarPreviewsManuais(trechos, limit = MANUAL_PREVIEW_LIMIT, pergunta = '', mediaMode = 'link') {
+  if (mediaMode === 'none') return [];
+
   const candidatos = [];
   const vistos = new Set();
   const listaBase = Array.isArray(trechos) ? [...trechos] : [];
@@ -1262,7 +1644,7 @@ async function montarPreviewsManuais(trechos, limit = MANUAL_PREVIEW_LIMIT, perg
 
   const previews = await Promise.all(candidatos.map(async (trecho) => {
     try {
-      return await gerarPreviewPaginaManual(trecho);
+      return await gerarPreviewPaginaManual(trecho, { mediaMode });
     } catch (err) {
       console.warn('[AI/Manuais] Falha ao gerar preview da página:', err?.message || err);
       return null;
@@ -1391,6 +1773,92 @@ async function buscarTrechosManuaisLike(tokens, limit, manualIds = []) {
   return Array.isArray(resultado.rows) ? resultado.rows : [];
 }
 
+function extrairPaginasDaFonteManual(textoFonte) {
+  const texto = String(textoFonte || '');
+  const paginas = new Set();
+  const regex = /p[aá]g(?:s?\.?)?\s*(\d+)(?:\s*[-–]\s*(\d+))?/ig;
+  let match;
+
+  while ((match = regex.exec(texto))) {
+    const ini = Number(match[1] || 0);
+    const fim = Number(match[2] || 0);
+    if (ini) paginas.add(ini);
+    if (ini && fim && fim >= ini && fim - ini <= 8) {
+      for (let p = ini + 1; p <= fim; p += 1) paginas.add(p);
+    } else if (fim) {
+      paginas.add(fim);
+    }
+  }
+
+  return Array.from(paginas).sort((a, b) => a - b);
+}
+
+async function buscarTrechosManuaisPorPaginas(paginas, limit, manualIds = []) {
+  if (!dbPool || !Array.isArray(paginas) || !paginas.length) return [];
+
+  const params = [paginas.map((item) => Number(item)).filter(Boolean)];
+  let filtroManual = '';
+  let orderManual = '';
+
+  if (Array.isArray(manualIds) && manualIds.length) {
+    params.push(manualIds.map((item) => Number(item)).filter(Boolean));
+    filtroManual = ` AND c.manual_id = ANY($${params.length}::bigint[])`;
+    orderManual = `array_position($${params.length}::bigint[], c.manual_id) ASC NULLS LAST,`;
+  }
+
+  params.push(Math.max(1, Number(limit || MANUAL_MAX_CHUNKS)));
+
+  const { rows } = await dbPool.query(
+    `
+    SELECT
+      c.manual_id,
+      m.nome_arquivo,
+      m.caminho_manual,
+      m.conteudo_hash,
+      c.chunk_ordem,
+      c.pagina_inicial,
+      c.pagina_final,
+      c.texto,
+      1000::float AS score
+    FROM "Chatbot".manuais_instrucao_chunks c
+    JOIN "Chatbot".manuais_instrucao m
+      ON m.id = c.manual_id
+    WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
+      ${filtroManual}
+      AND EXISTS (
+        SELECT 1
+        FROM unnest($1::int[]) AS p(pagina)
+        WHERE p.pagina BETWEEN c.pagina_inicial AND c.pagina_final
+      )
+    ORDER BY ${orderManual} c.manual_id ASC, c.pagina_inicial ASC, c.chunk_ordem ASC
+    LIMIT $${params.length}
+    `,
+    params
+  );
+
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function buscarTrechosReferenciaisPorFonteAnterior(pergunta, messages = []) {
+  const contexto = extrairInteracaoAnteriorManual(messages);
+  const paginas = extrairPaginasDaFonteManual(contexto.fonteAnterior);
+  if (!paginas.length) return [];
+
+  const modelos = extrairModelosPergunta(pergunta);
+  const manuaisPrioritarios = await listarManuaisPrioritariosPorModelo(modelos);
+  const manualIdsPrioritarios = manuaisPrioritarios
+    .slice(0, 3)
+    .map((manual) => Number(manual.id || 0))
+    .filter(Boolean);
+
+  let rows = await buscarTrechosManuaisPorPaginas(paginas, MANUAL_MAX_CHUNKS, manualIdsPrioritarios);
+  if (!rows.length) {
+    rows = await buscarTrechosManuaisPorPaginas(paginas, MANUAL_MAX_CHUNKS);
+  }
+
+  return rows;
+}
+
 function deduplicarTrechosManuais(trechos) {
   const mapa = new Map();
   for (const trecho of Array.isArray(trechos) ? trechos : []) {
@@ -1506,7 +1974,7 @@ async function tentarResponderComManuais({
   pergunta,
   forceManual = false,
   messages = [],
-  manualMediaMode = 'auto'
+  manualMediaMode = 'none'
 }) {
   if (!dbPool || (!forceManual && !perguntaPedeManualBombaCalor(pergunta))) return null;
 
@@ -1518,7 +1986,20 @@ async function tentarResponderComManuais({
     };
   }
 
-  const trechos = await buscarTrechosManuais(pergunta, { limit: MANUAL_MAX_CHUNKS });
+  const perguntaEfetiva = enriquecerPerguntaManualComHistorico(pergunta, messages);
+  const pedidoReferencial =
+    perguntaPedeTrechoManual(pergunta) ||
+    perguntaPedeManualCompleto(pergunta) ||
+    perguntaPedeImagemManual(pergunta) ||
+    perguntaPedeLinkManual(pergunta);
+
+  let trechos = [];
+  if (pedidoReferencial) {
+    trechos = await buscarTrechosReferenciaisPorFonteAnterior(perguntaEfetiva, messages);
+  }
+  if (!trechos.length) {
+    trechos = await buscarTrechosManuais(perguntaEfetiva, { limit: MANUAL_MAX_CHUNKS });
+  }
   if (!trechos.length) {
     return {
       content: forceManual
@@ -1529,21 +2010,34 @@ async function tentarResponderComManuais({
     };
   }
 
-  const respostaWifi = await inferirRespostaConfiguracaoWifi(pergunta, trechos);
+  const respostaManualCompleto = await montarRespostaManualCompletoDireta(trechos, perguntaEfetiva, manualMediaMode);
+  if (respostaManualCompleto?.content) {
+    return respostaManualCompleto;
+  }
+
+  const respostaTrechoManual = await montarRespostaTrechoManualDireta(trechos, perguntaEfetiva, manualMediaMode, messages);
+  if (respostaTrechoManual?.content) {
+    return respostaTrechoManual;
+  }
+
+  const respostaWifi = await inferirRespostaConfiguracaoWifi(perguntaEfetiva, trechos, {
+    allowGenericWifi: manualMediaMode !== 'none'
+  });
   if (respostaWifi?.content) {
     let contentWifi = String(respostaWifi.content || '').trim();
-    const shouldOffer = manualMediaMode === 'offer' && perguntaMereceOfertaMidiaManual(pergunta);
-    const shouldInclude = manualMediaMode === 'include';
     let manualPreviewsWifi = [];
 
-    if (shouldOffer) {
-      contentWifi = acrescentarOfertaMidiaManual(contentWifi, respostaWifi.trechos || []);
-    }
-
-    if (shouldInclude) {
-      manualPreviewsWifi = await montarPreviewsManuais(respostaWifi.trechos || [], MANUAL_PREVIEW_LIMIT, pergunta);
-      if (manualPreviewsWifi.length && !/enviei abaixo a pagina/i.test(contentWifi)) {
-        contentWifi += '\n\nEnviei abaixo a página do manual correspondente.';
+    if (manualMediaMode !== 'none') {
+      manualPreviewsWifi = await montarPreviewsManuais(
+        respostaWifi.trechos || [],
+        MANUAL_PREVIEW_LIMIT,
+        perguntaEfetiva,
+        manualMediaMode
+      );
+      if (manualPreviewsWifi.length && !/anexei abaixo/i.test(contentWifi)) {
+        contentWifi += manualMediaMode === 'image'
+          ? '\n\nAnexei abaixo um atalho para abrir a imagem da página correspondente.'
+          : '\n\nAnexei abaixo um atalho para abrir a página do manual correspondente.';
       }
     }
 
@@ -1554,21 +2048,22 @@ async function tentarResponderComManuais({
     };
   }
 
-  const respostaDeterministica = await inferirRespostaTensaoModeloFti(pergunta, trechos);
+  const respostaDeterministica = await inferirRespostaTensaoModeloFti(perguntaEfetiva, trechos);
   if (respostaDeterministica?.content) {
     let contentDet = String(respostaDeterministica.content || '').trim();
-    const shouldOffer = manualMediaMode === 'offer' && perguntaMereceOfertaMidiaManual(pergunta);
-    const shouldInclude = manualMediaMode === 'include';
     let manualPreviewsDet = [];
 
-    if (shouldOffer) {
-      contentDet = acrescentarOfertaMidiaManual(contentDet, respostaDeterministica.trechos || []);
-    }
-
-    if (shouldInclude) {
-      manualPreviewsDet = await montarPreviewsManuais(respostaDeterministica.trechos || [], MANUAL_PREVIEW_LIMIT, pergunta);
-      if (manualPreviewsDet.length && !/enviei abaixo a pagina/i.test(contentDet)) {
-        contentDet += '\n\nEnviei abaixo a página do manual correspondente.';
+    if (manualMediaMode !== 'none') {
+      manualPreviewsDet = await montarPreviewsManuais(
+        respostaDeterministica.trechos || [],
+        MANUAL_PREVIEW_LIMIT,
+        perguntaEfetiva,
+        manualMediaMode
+      );
+      if (manualPreviewsDet.length && !/anexei abaixo/i.test(contentDet)) {
+        contentDet += manualMediaMode === 'image'
+          ? '\n\nAnexei abaixo um atalho para abrir a imagem da página correspondente.'
+          : '\n\nAnexei abaixo um atalho para abrir a página do manual correspondente.';
       }
     }
 
@@ -1579,7 +2074,7 @@ async function tentarResponderComManuais({
     };
   }
 
-  const modelos = extrairModelosPergunta(pergunta);
+  const modelos = extrairModelosPergunta(perguntaEfetiva);
   const contextoModelos = modelos.length
     ? `Modelos citados pelo usuário: ${modelos.map((modelo) => modelo.canonico).join(', ')}. Priorize somente esses modelos ao responder.\n\n`
     : '';
@@ -1602,7 +2097,7 @@ async function tentarResponderComManuais({
           role: 'user',
           content:
 `Pergunta do usuário:
-${pergunta}
+${perguntaEfetiva}
 
 ${contextoModelos}Trechos relevantes dos manuais indexados:
 ${contexto}`
@@ -1621,20 +2116,13 @@ ${contexto}`
   }
 
   let manualPreviews = [];
-  const shouldOfferMedia = manualMediaMode === 'offer' && !respostaIndicaLacunaConhecimento(content) && perguntaMereceOfertaMidiaManual(pergunta);
-  const shouldIncludeMedia = manualMediaMode === 'include';
-
-  if (shouldOfferMedia) {
-    content = acrescentarOfertaMidiaManual(content, trechos);
-  }
-
-  if (shouldIncludeMedia) {
-    manualPreviews = await montarPreviewsManuais(trechos, MANUAL_PREVIEW_LIMIT, pergunta);
-    if (manualPreviews.length && !/enviei abaixo a pagina/i.test(content)) {
-      content += '\n\nEnviei abaixo a página do manual correspondente.';
+  if (manualMediaMode !== 'none') {
+    manualPreviews = await montarPreviewsManuais(trechos, MANUAL_PREVIEW_LIMIT, perguntaEfetiva, manualMediaMode);
+    if (manualPreviews.length && !/anexei abaixo/i.test(content)) {
+      content += manualMediaMode === 'image'
+        ? '\n\nAnexei abaixo um atalho para abrir a imagem da página correspondente.'
+        : '\n\nAnexei abaixo um atalho para abrir a página do manual correspondente.';
     }
-  } else if (manualMediaMode === 'auto') {
-    manualPreviews = await montarPreviewsManuais(trechos, MANUAL_PREVIEW_LIMIT, pergunta);
   }
 
   return { content, trechos, manualPreviews };
@@ -1713,6 +2201,19 @@ async function garantirTabelasManuaisChatbot() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        CREATE TABLE IF NOT EXISTS "Chatbot".manual_preview_cache (
+          id BIGSERIAL PRIMARY KEY,
+          manual_id BIGINT NOT NULL REFERENCES "Chatbot".manuais_instrucao(id) ON DELETE CASCADE,
+          pagina INTEGER NOT NULL,
+          conteudo_hash_ref TEXT NOT NULL DEFAULT '',
+          source_url TEXT NULL,
+          bucket TEXT NOT NULL,
+          path_key TEXT NOT NULL,
+          public_url TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_instrucao_caminho
           ON "Chatbot".manuais_instrucao (caminho_manual);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_manual_ordem
@@ -1724,6 +2225,10 @@ async function garantirTabelasManuaisChatbot() {
         CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_busca
           ON "Chatbot".manuais_instrucao_chunks
           USING GIN (to_tsvector('simple', COALESCE(texto_normalizado, '')));
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manual_preview_cache_manual_pagina_hash
+          ON "Chatbot".manual_preview_cache (manual_id, pagina, conteudo_hash_ref);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manual_preview_cache_path_key
+          ON "Chatbot".manual_preview_cache (path_key);
       `);
     })().catch((err) => {
       chatbotManualTableReadyPromise = null;
@@ -2992,11 +3497,7 @@ router.post('/manual-chat', express.json({ limit: '50kb' }), async (req, res) =>
   }
 
   const perguntaContextual = montarPerguntaComMemoria(perguntaAtual, memoriaUsuario);
-  const manualMediaMode = perguntaPedeMidiaManual(perguntaAtual, sanitizedMessages)
-    ? 'include'
-    : perguntaMereceOfertaMidiaManual(perguntaAtual)
-      ? 'offer'
-      : 'none';
+  const manualMediaMode = resolverModoMidiaManual(perguntaAtual);
 
   try {
     const respostaManual = await tentarResponderComManuais({
@@ -3192,7 +3693,12 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
 
   if (perguntaAtual && dbPool) {
     try {
-      const respostaManual = await tentarResponderComManuais({ apiKey, pergunta: perguntaContextual || perguntaAtual });
+      const respostaManual = await tentarResponderComManuais({
+        apiKey,
+        pergunta: perguntaContextual || perguntaAtual,
+        messages: sanitizedMessages,
+        manualMediaMode: resolverModoMidiaManual(perguntaAtual)
+      });
       if (respostaManual?.content) {
         await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
           pergunta: perguntaAtual,
