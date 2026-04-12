@@ -77,6 +77,10 @@
 
   <!-- Ícones da direita -->
   <div class="header-profile">
+    <button id="sgf-ai-btn" title="Assistente SGF" aria-label="Abrir assistente SGF">
+      <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
+      <span class="sgf-ai-badge" id="sgf-ai-badge">!</span>
+    </button>
     <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
     <div id="notification-wrapper" class="notification" style="display:none;">
       <span class="notification-number">5</span>
@@ -99,7 +103,7 @@
 
     <div class="wrapper">
       <!-- Menu lateral -->
-  <div class="left-side" style="height: 100vh; overflow: visible;">
+  <div class="left-side">
         
         <!-- Botão Hambúrguer do Menu Lateral -->
         <button class="sidebar-hamburger" id="sidebarHamburger" title="Menu lateral">
@@ -370,6 +374,28 @@
        data-nav-selector="#menu-compras-configuracoes">
       <i class="fa-solid fa-cog" style="margin-right:8px;"></i>
       Configurações
+    </a>
+  </div>
+</div>
+
+<!-- Nova categoria: Chatbot (somente admin) -->
+<div class="side-wrapper" id="chatbotSideWrapper">
+  <div class="side-title"
+       data-nav-key="side:chatbot"
+       data-nav-pos="side"
+       data-nav-label="Chatbot">Chatbot</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-chatbot-monitor"
+       class="menu-link"
+       data-nav-key="side:chatbot:monitor"
+       data-nav-parent="side:chatbot"
+       data-nav-pos="side"
+       data-nav-label="Monitoramento do Chatbot"
+       data-nav-selector="#menu-chatbot-monitor">
+      <i class="fa-solid fa-robot" style="margin-right:8px;"></i>
+      Monitoramento
     </a>
   </div>
 </div>
@@ -3119,7 +3145,7 @@
 
         <!-- Modal Enviar Link — seleção de técnico -->
         <div id="atEnviarLinkModal" class="modal-overlay" style="display:none;z-index:10055;">
-          <div class="modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
+          <div class="modal-container at-tec-modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
             <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
               <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-paper-plane" style="color:#38bdf8;"></i>
@@ -3127,7 +3153,7 @@
               </h3>
               <button id="atEnviarLinkModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
             </div>
-            <div style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
+            <div class="at-tec-filter-bar" style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
               <div style="display:flex;gap:8px;align-items:center;">
                 <div style="position:relative;flex:1;min-width:180px;">
                   <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:12px;"></i>
@@ -3142,7 +3168,7 @@
                 </button>
               </div>
               <!-- Dropdown de checkboxes por UF -->
-              <div id="atTecFiltroDropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
+              <div id="atTecFiltroDropdown" class="at-tec-filter-dropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
                 <div style="padding:6px 12px 4px;font-size:11px;color:#6b7280;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">Estados</div>
                 <div id="atTecUfCheckList" style="display:flex;flex-direction:column;"></div>
               </div>
@@ -3157,7 +3183,7 @@
 
         <!-- Modal Atualizar Técnico -->
         <div id="atAtualizarTecModal" class="modal-overlay" style="display:none;z-index:10056;">
-          <div class="modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
+          <div class="modal-container at-tec-modal-container" style="max-width:560px;width:96%;max-height:90vh;display:flex;flex-direction:column;">
             <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
               <h3 style="margin:0;font-size:15px;display:flex;align-items:center;gap:8px;">
                 <i class="fa-solid fa-user-gear" style="color:#38bdf8;"></i>
@@ -3170,7 +3196,7 @@
                 <button id="atAtualizarTecModalClose" class="modal-close-btn" type="button"><i class="fas fa-times"></i></button>
               </div>
             </div>
-            <div style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
+            <div class="at-tec-filter-bar" style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.08);position:relative;">
               <div style="display:flex;gap:8px;align-items:center;">
                 <div style="position:relative;flex:1;min-width:180px;">
                   <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:12px;"></i>
@@ -3183,7 +3209,7 @@
                   <span id="atUpdTecFiltroLabel">Todos</span>
                 </button>
               </div>
-              <div id="atUpdTecFiltroDropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
+              <div id="atUpdTecFiltroDropdown" class="at-tec-filter-dropdown" style="display:none;position:absolute;right:16px;top:calc(100% + 4px);min-width:180px;max-height:260px;overflow-y:auto;background:#1f2937;border:1px solid rgba(255,255,255,.15);border-radius:10px;z-index:10;padding:8px 0;box-shadow:0 8px 24px rgba(0,0,0,.5);">
                 <div style="padding:6px 12px 4px;font-size:11px;color:#6b7280;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">Estados</div>
                 <div id="atUpdTecUfCheckList" style="display:flex;flex-direction:column;"></div>
               </div>
@@ -4176,6 +4202,10 @@
                   <i class="fa-solid fa-clipboard-list"></i>
                   Solicitações (<span id="solicitacoesCount">0</span>)
                 </button>
+                <button class="lp-tab-btn" data-lp-tab="kanbanSolicitacoesConteudo">
+                  <i class="fa-solid fa-columns"></i>
+                  Kanban de Solicitações
+                </button>
                 <div id="productSpinner" data-pct="0" style="display:none;margin-left:auto;">
                   <svg id="svg" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid meet">
                     <circle r="90" cx="100" cy="100" fill="transparent"
@@ -4277,27 +4307,33 @@
               <div id="pagination" class="pagination-wrapper"></div>
               </div><!-- /listaProdutosConteudo -->
 
-              <!-- Conteúdo: Solicitações -->
+              <!-- Conteúdo: Solicitações (Kanban do separador) -->
               <div id="solicitacoesConteudo" style="display:none;">
-                <div class="filter-bar">
-                  <div style="position:relative;flex:1;">
-                    <input type="text" id="solicitacoesFilter" placeholder="Pesquisar solicitação..." style="width:100%;padding-right:30px;"/>
-                  </div>
+                <div class="filter-bar" style="padding:10px 0;">
                   <button id="solicitacoesRefreshBtn" class="filter-icon" title="Atualizar">
                     <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
                       <polyline points="22 3 21 12 12 11"/>
                     </svg>
                   </button>
+                  <span id="solicitacoesKanbanStatus" style="font-size:.78rem;color:#6b7280;margin-left:8px;"></span>
                 </div>
-                <div id="solicitacoesListaWrapper" style="max-height:calc(100vh - 220px);overflow-y:auto;padding:16px 0;">
-                  <div id="solicitacoesCards" style="display:flex;flex-direction:column;gap:16px;"></div>
-                  <div id="solicitacoesVazio" style="display:none;text-align:center;padding:40px 20px;color:#9ca3af;">
-                    <i class="fa-solid fa-clipboard-list" style="font-size:40px;margin-bottom:12px;display:block;"></i>
-                    <p style="font-weight:600;font-size:14px;">Nenhuma solicitação pendente</p>
-                  </div>
-                </div>
+                <div id="solicitacoesKanbanBoard" style="display:flex;gap:14px;overflow-x:auto;padding:0 0 16px;min-height:400px;align-items:flex-start;"></div>
               </div><!-- /solicitacoesConteudo -->
+
+              <!-- Conteúdo: Kanban de Solicitações -->
+              <div id="kanbanSolicitacoesConteudo" style="display:none;">
+                <div class="filter-bar" style="padding:10px 0;">
+                  <button id="kanbanSolicRefreshBtn" class="filter-icon" title="Atualizar kanban">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+                      <polyline points="22 3 21 12 12 11"/>
+                    </svg>
+                  </button>
+                  <span id="kanbanSolicStatus" style="font-size:.78rem;color:#6b7280;margin-left:8px;"></span>
+                </div>
+                <div id="kanbanSolicBoard" style="display:flex;gap:14px;overflow-x:auto;padding:0 0 16px;min-height:400px;align-items:flex-start;"></div>
+              </div><!-- /kanbanSolicitacoesConteudo -->
             </div>
           </div>
         </div>
@@ -5180,6 +5216,133 @@
                 <tr><td colspan="5" style="padding:32px 12px;text-align:center;color:#9ca3af;font-size:13px;">Clique na guia Engenharia para carregar.</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel de Monitoramento do Chatbot -->
+      <div id="chatbotMonitorPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-robot" style="color:#06b6d4;"></i>
+                <span>Monitoramento do Chatbot</span>
+              </h3>
+              <div class="content-text">Acompanhe aprendizado, cobertura de conhecimento, lacunas abertas e erros recentes do assistente.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <div id="chatbotMonitorAtualizadoEm" style="padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.08);color:var(--theme-color);font-size:12px;font-weight:600;">
+                Atualização pendente
+              </div>
+              <button id="chatbotMonitorRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:white;">
+                <i class="fa-solid fa-rotate"></i>
+                <span>Atualizar dados</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="chatbotMonitorAviso" style="display:none;margin-top:16px;padding:14px 16px;border-radius:12px;font-size:13px;font-weight:600;"></div>
+
+          <div class="content-section" style="margin-top:20px;">
+            <div style="display:grid;grid-template-columns:minmax(320px,1.4fr) minmax(280px,1fr);gap:18px;align-items:stretch;">
+              <div style="background:linear-gradient(135deg,rgba(8,145,178,0.18) 0%,rgba(14,116,144,0.10) 100%);border:1px solid rgba(6,182,212,0.28);border-radius:18px;padding:20px;">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+                  <div>
+                    <div style="font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#0e7490;">Nível de conhecimento</div>
+                    <div id="chatbotMonitorKnowledgeLabel" style="margin-top:8px;font-size:28px;font-weight:800;color:var(--theme-color);">Carregando...</div>
+                    <div id="chatbotMonitorKnowledgeSummary" style="margin-top:8px;font-size:13px;line-height:1.5;color:var(--inactive-color);">Aguardando dados do monitoramento.</div>
+                  </div>
+                  <div style="min-width:110px;text-align:right;">
+                    <div id="chatbotMonitorKnowledgeScore" style="font-size:36px;font-weight:800;color:#0891b2;line-height:1;">--</div>
+                    <div style="font-size:12px;color:var(--inactive-color);margin-top:4px;">score estimado</div>
+                  </div>
+                </div>
+                <div style="margin-top:18px;height:12px;border-radius:999px;background:rgba(15,23,42,0.08);overflow:hidden;">
+                  <div id="chatbotMonitorKnowledgeBar" style="width:0%;height:100%;border-radius:999px;background:linear-gradient(90deg,#06b6d4 0%,#0e7490 100%);transition:width .25s ease;"></div>
+                </div>
+                <div id="chatbotMonitorKnowledgeFactors" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;"></div>
+              </div>
+
+              <div id="chatbotMonitorCards" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;"></div>
+            </div>
+          </div>
+
+          <div class="content-section" style="margin-top:20px;">
+            <div class="title-wrapper" style="margin-bottom:14px;">
+              <div class="content-section-title" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-chart-column" style="color:#06b6d4;"></i>
+                Relatório de aprendizagem
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">
+              <div style="background:rgba(15,23,42,0.04);border:1px solid rgba(148,163,184,0.18);border-radius:16px;padding:16px;">
+                <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--theme-color);margin-bottom:12px;">FAQ por área</div>
+                <div id="chatbotMonitorFaqAreas" style="display:flex;flex-direction:column;gap:10px;"></div>
+              </div>
+              <div style="background:rgba(15,23,42,0.04);border:1px solid rgba(148,163,184,0.18);border-radius:16px;padding:16px;">
+                <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--theme-color);margin-bottom:12px;">Lacunas por motivo</div>
+                <div id="chatbotMonitorLacunasMotivo" style="display:flex;flex-direction:column;gap:10px;"></div>
+              </div>
+              <div style="background:rgba(15,23,42,0.04);border:1px solid rgba(148,163,184,0.18);border-radius:16px;padding:16px;">
+                <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--theme-color);margin-bottom:12px;">Status dos manuais</div>
+                <div id="chatbotMonitorManuaisStatus" style="display:flex;flex-direction:column;gap:10px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="content-section" style="margin-top:20px;">
+            <div class="title-wrapper" style="margin-bottom:14px;">
+              <div class="content-section-title" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-circle-question" style="color:#f59e0b;"></i>
+                Dúvidas que o chatbot não resolveu
+              </div>
+            </div>
+            <div class="tabela-wrapper" style="overflow:auto;border:1px solid rgba(148,163,184,0.2);border-radius:16px;">
+              <table class="tabela padrao" style="min-width:980px;">
+                <thead>
+                  <tr>
+                    <th style="width:160px;">Quando</th>
+                    <th>Pergunta</th>
+                    <th style="width:180px;">Motivo</th>
+                    <th style="width:160px;">Origem</th>
+                    <th style="width:220px;">Sugestão de fonte</th>
+                  </tr>
+                </thead>
+                <tbody id="chatbotMonitorLacunasTbody">
+                  <tr>
+                    <td colspan="5" style="text-align:center;padding:32px;color:var(--inactive-color);">Carregando lacunas do chatbot...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="content-section" style="margin-top:20px;">
+            <div class="title-wrapper" style="margin-bottom:14px;">
+              <div class="content-section-title" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-triangle-exclamation" style="color:#ef4444;"></i>
+                Erros recentes do chatbot
+              </div>
+            </div>
+            <div class="tabela-wrapper" style="overflow:auto;border:1px solid rgba(148,163,184,0.2);border-radius:16px;">
+              <table class="tabela padrao" style="min-width:920px;">
+                <thead>
+                  <tr>
+                    <th style="width:170px;">Quando</th>
+                    <th style="width:120px;">Rota</th>
+                    <th style="width:190px;">Motivo</th>
+                    <th style="width:110px;">HTTP</th>
+                    <th>Pergunta</th>
+                  </tr>
+                </thead>
+                <tbody id="chatbotMonitorErrorsTbody">
+                  <tr>
+                    <td colspan="5" style="text-align:center;padding:32px;color:var(--inactive-color);">Carregando erros recentes...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -10897,24 +11060,31 @@ function attachDropZone(ul) {
 /* ── Botão flutuante ── */
 #sgf-ai-btn {
   position: fixed;
-  bottom: 72px;
-  left: 18px;
-  z-index: 10030;
-  width: 52px;
-  height: 52px;
+  left: 40px;
+  bottom: 16px;
+  z-index: 998;
+  width: 116px;
+  height: 116px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  background: transparent;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(99,102,241,.55);
+  box-shadow: none;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: transform .2s, box-shadow .2s;
+  transform: translateX(-50%);
   color: #fff;
   font-size: 22px;
 }
-#sgf-ai-btn:hover { transform: scale(1.1); box-shadow: 0 6px 20px rgba(99,102,241,.7); }
+#sgf-ai-btn:hover { transform: translateX(-50%) scale(1.08); box-shadow: none; }
+#sgf-ai-btn img {
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+  display: block;
+}
 #sgf-ai-btn .sgf-ai-badge {
   position: absolute;
   top: -4px;
@@ -10953,25 +11123,41 @@ function attachDropZone(ul) {
 #sgf-ai-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 12px 14px 12px 96px;
+  min-height: 74px;
   background: linear-gradient(135deg, #312e81 0%, #1e1b4b 100%);
   border-bottom: 1px solid rgba(99,102,241,.25);
   flex-shrink: 0;
+  position: relative;
+  overflow: visible;
 }
 #sgf-ai-header .sgf-ai-avatar {
-  width: 34px;
-  height: 34px;
-  background: linear-gradient(135deg, #6366f1, #818cf8);
-  border-radius: 50%;
+  width: 72px;
+  height: 72px;
+  background: transparent;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 16px;
   color: #fff;
-  flex-shrink: 0;
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  overflow: visible;
+  z-index: 3;
+  pointer-events: none;
 }
-#sgf-ai-header .sgf-ai-title { flex: 1; }
+#sgf-ai-header .sgf-ai-avatar img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  display: block;
+  position: static;
+}
+#sgf-ai-header .sgf-ai-title { flex: 1; min-width: 0; }
 #sgf-ai-header .sgf-ai-title strong { display: block; font-size: 14px; color: #e0e7ff; }
 #sgf-ai-header .sgf-ai-title span  { font-size: 11px; color: #818cf8; }
 #sgf-ai-panel-close {
@@ -11074,6 +11260,46 @@ function attachDropZone(ul) {
 .sgf-ai-choice-btn:hover {
   background: rgba(99,102,241,.25);
   border-color: rgba(129,140,248,.8);
+}
+.sgf-ai-manual-previews {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.sgf-ai-manual-preview {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid rgba(148,163,184,.22);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(15,23,42,.65);
+}
+.sgf-ai-manual-preview:hover {
+  border-color: rgba(99,102,241,.55);
+}
+.sgf-ai-manual-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: cover;
+  background: #0f172a;
+}
+.sgf-ai-manual-preview-meta {
+  padding: 8px 10px;
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.sgf-ai-manual-preview-title {
+  color: #e2e8f0;
+  font-weight: 700;
+}
+.sgf-ai-manual-preview-page {
+  color: #94a3b8;
 }
 
 /* ── Sugestões rápidas ── */
@@ -11296,19 +11522,43 @@ function attachDropZone(ul) {
     bottom: 624px;
   }
 }
+@media screen and (max-width: 945px) {
+  #config-icon {
+    display: none !important;
+  }
+  #sgf-ai-btn {
+    position: static;
+    width: 64px;
+    height: 64px;
+    transform: none;
+    flex-shrink: 0;
+    padding: 0;
+    overflow: visible;
+  }
+  #sgf-ai-btn img {
+    width: 64px;
+    height: 64px;
+  }
+  #sgf-ai-btn:hover {
+    transform: scale(1.08);
+  }
+  #sgf-ai-panel {
+    position: fixed;
+    top: 68px;
+    bottom: auto;
+    left: 8px;
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 80px);
+  }
+}
 </style>
-
-<!-- Botão flutuante -->
-<button id="sgf-ai-btn" title="Assistente SGF" aria-label="Abrir assistente SGF">
-  <i class="fa-solid fa-robot"></i>
-  <span class="sgf-ai-badge" id="sgf-ai-badge">!</span>
-</button>
 
 <!-- Painel do chat -->
 <div id="sgf-ai-panel" role="dialog" aria-label="Assistente SGF">
   <!-- Header -->
   <div id="sgf-ai-header">
-    <div class="sgf-ai-avatar"><i class="fa-solid fa-robot"></i></div>
+    <div class="sgf-ai-avatar"><img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
     <div class="sgf-ai-title">
       <strong>Assistente SGF</strong>
       <span>Powered by ChatGPT</span>
@@ -11389,6 +11639,12 @@ function attachDropZone(ul) {
   let history = [];   // [{role, content}]
   let loading = false;
   const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
   async function reportAiClientLog(level, mensagem, contexto = {}) {
     try {
@@ -13392,6 +13648,14 @@ function attachDropZone(ul) {
 
   btn.addEventListener('click', () => panel.classList.contains('open') ? closePanel() : openPanel());
   closeBtn.addEventListener('click', closePanel);
+  document.addEventListener('mousedown', (event) => {
+    if (!panel.classList.contains('open')) return;
+    const target = event.target;
+    if (panel.contains(target)) return;
+    if (btn.contains(target)) return;
+    if (participantsPanel?.contains(target)) return;
+    closePanel();
+  });
   participantsCloseBtn?.addEventListener('click', () => {
     resetMeetingFlow();
     appendMsg('assistant', 'Fluxo de reserva cancelado.');
@@ -13509,25 +13773,25 @@ function attachDropZone(ul) {
       }
 
       const content = (data.content || '').trim();
+      const manualPreviews = Array.isArray(data?.manualPreviews) ? data.manualPreviews : [];
+      const parsedAction = tryParseAssistantAction(content);
       void reportAiClientLog('info', 'Resposta recebida do assistente', {
         status: resp.status,
         contentChars: content.length,
-        hasActionJson: content.startsWith('{') && content.includes('"action"')
+        hasActionJson: Boolean(parsedAction),
+        manualPreviewCount: manualPreviews.length
       });
 
-      // Detectar JSON de ação
-      if (content.startsWith('{') && content.includes('"action"')) {
+      if (parsedAction) {
         try {
-          const action = JSON.parse(content);
-          await handleAction(action);
-          // Não adiciona o JSON bruto; em vez disso, mantém o histórico para contexto
-          history.push({ role: 'assistant', content: content });
+          await handleAction(parsedAction);
+          history.push({ role: 'assistant', content: JSON.stringify(parsedAction) });
         } catch (_) {
-          appendMsg('assistant', content);
+          appendMsg('assistant', content, { manualPreviews });
           history.push({ role: 'assistant', content });
         }
       } else {
-        appendMsg('assistant', content);
+        appendMsg('assistant', content, { manualPreviews });
         history.push({ role: 'assistant', content });
       }
 
@@ -13819,14 +14083,68 @@ function attachDropZone(ul) {
   }
 
   // ── Helpers de UI ────────────────────────────────────────────────────────
-  function appendMsg(type, text) {
+  function renderManualPreviews(container, manualPreviews) {
+    const previews = Array.isArray(manualPreviews) ? manualPreviews.filter((item) => item && item.imageUrl) : [];
+    if (!previews.length) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'sgf-ai-manual-previews';
+
+    previews.forEach((preview) => {
+      const link = document.createElement('a');
+      link.className = 'sgf-ai-manual-preview';
+      link.href = String(preview.imageUrl || '').trim();
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.innerHTML = `
+        <img src="${escapeHtml(preview.imageUrl)}" alt="${escapeHtml(preview.manual || 'Prévia do manual')}" loading="lazy">
+        <div class="sgf-ai-manual-preview-meta">
+          <div class="sgf-ai-manual-preview-title">${escapeHtml(preview.manual || 'Manual')}</div>
+          <div class="sgf-ai-manual-preview-page">Página ${escapeHtml(String(preview.page || ''))}</div>
+        </div>
+      `;
+      wrap.appendChild(link);
+    });
+
+    container.appendChild(wrap);
+  }
+
+  function appendMsg(type, text, options = {}) {
     const el = document.createElement('div');
     el.className = 'sgf-ai-msg ' + type;
-    if (type !== 'typing') el.textContent = text;
-    else el.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin" style="margin-right:6px;"></i>Digitando...';
+    if (type !== 'typing') {
+      el.textContent = text;
+      if (type === 'assistant') {
+        renderManualPreviews(el, options.manualPreviews);
+      }
+    } else el.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin" style="margin-right:6px;"></i>Digitando...';
     messages.appendChild(el);
     messages.scrollTop = messages.scrollHeight;
     return el;
+  }
+
+  function tryParseAssistantAction(content) {
+    const raw = String(content || '').trim();
+    if (!raw || !raw.includes('"action"')) return null;
+
+    const candidates = [raw];
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      const extracted = raw.slice(firstBrace, lastBrace + 1).trim();
+      if (extracted && extracted !== raw) candidates.push(extracted);
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed.action === 'string') {
+          return parsed;
+        }
+      } catch (_) {}
+    }
+
+    return null;
   }
 
   // Auto-resize do textarea
