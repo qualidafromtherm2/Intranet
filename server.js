@@ -5435,11 +5435,22 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
     const etapa          = String(ev.etapa || ev.cEtapa || '').trim();   // ex.: "80", "20"…
     const idPedido       = ev.idPedido || ev.codigo_pedido || ev.codigoPedido;
     const numeroPedido   = ev.numeroPedido || ev.numero_pedido;
+    const messageId      = body.messageId || ev.messageId || null;
+    const topic          = body.topic || ev.topic || ev.tipo || body.tipo || null;
 
     const ret = { ok:true, updated:0, upserted:false, etapa: etapa || null,
                   idPedido: idPedido || null, numeroPedido: numeroPedido || null };
 
     try {
+      console.log('[webhooks/omie/pedidos] Evento recebido:', JSON.stringify({
+        path: req.path,
+        topic,
+        messageId,
+        etapa: etapa || null,
+        idPedido: idPedido || null,
+        numeroPedido: numeroPedido || null
+      }));
+
       // 1) Atualiza etapa rapidamente (reflexo imediato no Kanban /api/comercial/pedidos/kanban)
       if (usarDb && (idPedido || numeroPedido) && etapa) {
         if (idPedido) {
@@ -5477,7 +5488,22 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
             param
           };
 
+          console.log('[ConsultarPedido][webhook] Iniciando consulta:', JSON.stringify({
+            path: req.path,
+            topic,
+            messageId,
+            numeroPedido: numeroPedido || null,
+            idPedido: idPedido || null
+          }));
           const j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload, 20000);
+          console.log('[ConsultarPedido][webhook] Consulta concluida:', JSON.stringify({
+            path: req.path,
+            topic,
+            messageId,
+            numeroPedido: numeroPedido || null,
+            idPedido: idPedido || null,
+            encontrouPedido: Boolean(j?.pedido_venda_produto)
+          }));
           // normaliza em lista:
           const ped = Array.isArray(j?.pedido_venda_produto)
                         ? j.pedido_venda_produto
@@ -14650,7 +14676,19 @@ app.post('/api/omie/cliente', express.json(), async (req, res) => {
 // ─── Rota para ConsultarPedido ───
 // ─── Rota para ConsultarPedido (com debug) ───
 app.post('/api/omie/pedido', express.json(), async (req, res) => {
-  console.log('[pedido] body recebido →', JSON.stringify(req.body, null, 2));
+  const source = String(
+    req.body?.source
+    || req.headers['x-debug-source']
+    || req.query?.source
+    || 'desconhecido'
+  ).trim();
+  const primeiroParam = Array.isArray(req.body?.param) ? req.body.param[0] : null;
+  console.log('[ConsultarPedido][proxy] body recebido →', JSON.stringify({
+    source,
+    numero_pedido: primeiroParam?.numero_pedido || null,
+    codigo_pedido: primeiroParam?.codigo_pedido || null,
+    path: req.path
+  }, null, 2));
   console.log('[pedido] chaves Omie →', OMIE_APP_KEY, OMIE_APP_SECRET ? 'OK' : 'MISSING');
   try {
     const data = await omieCall(
@@ -14662,10 +14700,20 @@ app.post('/api/omie/pedido', express.json(), async (req, res) => {
         param:      req.body.param
       }
     );
-    console.log('[pedido] resposta OMIE →', JSON.stringify(data, null, 2));
+    console.log('[ConsultarPedido][proxy] resposta OMIE →', JSON.stringify({
+      source,
+      numero_pedido: primeiroParam?.numero_pedido || null,
+      codigo_pedido: primeiroParam?.codigo_pedido || null,
+      encontrouPedido: Boolean(data?.pedido_venda_produto)
+    }, null, 2));
     return res.json(data);
   } catch (err) {
-    console.error('[pedido] erro ao chamar OMIE →', err.faultstring || err.message, err);
+    console.error('[ConsultarPedido][proxy] erro ao chamar OMIE →', JSON.stringify({
+      source,
+      numero_pedido: primeiroParam?.numero_pedido || null,
+      codigo_pedido: primeiroParam?.codigo_pedido || null,
+      erro: err.faultstring || err.message || String(err)
+    }), err);
     return res
       .status(err.status || 500)
       .json({ error: err.faultstring || err.message });

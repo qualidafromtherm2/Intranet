@@ -30,6 +30,7 @@ const WONCA_TRACK_URL = (process.env.WONCA_TRACK_URL || 'https://api-labs.wonca.
 // TrackingMore: fallback com carrier dos Correios
 const TRACKINGMORE_API_KEY = process.env.TRACKINGMORE_API_KEY || process.env.TRACKINGMORE_TOKEN || '';
 const TRACKINGMORE_URL = (process.env.TRACKINGMORE_URL || 'https://api.trackingmore.com/v2/trackings/realtime').replace(/\/$/, '');
+const WHATSAPP_WEBHOOK_VERIFY_TOKEN = String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.META_WHATSAPP_VERIFY_TOKEN || 'fromtherm-sac-wa-teste-2026').trim();
 const AT_SERIE_SHEETS_PUB_KEY = '2PACX-1vTBZcTPkowyN_dViQlzWd4noEgssByJR3f6YPtnR234sYIT5gTFI5PZXw3ZdPUOWAlxp_RDMo_I8JFm';
 const AT_SERIE_SHEETS = ['PRODUÇÃO 1 - ESCOPO', 'PRODUÇÃO 2 - F/ ESCOPO'];
 const AT_SERIE_PUBHTML_URL = `https://docs.google.com/spreadsheets/d/e/${AT_SERIE_SHEETS_PUB_KEY}/pubhtml`;
@@ -208,6 +209,10 @@ function isAbortError(err) {
 
 function sanitizeIdentificacao(codigo) {
   return String(codigo || '').replace(/\s+/g, '').toUpperCase() || null;
+}
+
+function normalizePhoneDigits(value) {
+  return String(value || '').replace(/\D/g, '');
 }
 
 async function getStoredStatus(codigo) {
@@ -584,6 +589,25 @@ async function ensureSchema() {
       criado_por           TEXT,
       criado_em            TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS sac.whatsapp_webhook_messages (
+      id                   BIGSERIAL PRIMARY KEY,
+      wa_message_id        TEXT UNIQUE,
+      from_phone           TEXT,
+      from_phone_digits    TEXT,
+      profile_name         TEXT,
+      message_type         TEXT,
+      message_text         TEXT,
+      phone_number_id      TEXT,
+      display_phone_number TEXT,
+      payload_json         JSONB NOT NULL DEFAULT '{}'::jsonb,
+      received_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS whatsapp_webhook_messages_phone_idx
+      ON sac.whatsapp_webhook_messages(from_phone_digits, received_at DESC);
+    CREATE INDEX IF NOT EXISTS whatsapp_webhook_messages_received_idx
+      ON sac.whatsapp_webhook_messages(received_at DESC);
   `);
 }
 
@@ -3275,6 +3299,183 @@ router.post('/at/tecnico/fechamento/:id_at/evidencias', atUpload.array('evidenci
   } catch (err) {
     console.error('[AT/evidencias] upload erro:', err);
     res.status(500).json({ error: 'Falha no upload.', detail: String(err.message || err) });
+  }
+});
+
+router.get('/whatsapp/webhook', (req, res) => {
+  const mode = String(req.query['hub.mode'] || '').trim();
+  const token = String(req.query['hub.verify_token'] || '').trim();
+  const challenge = String(req.query['hub.challenge'] || '').trim();
+
+  if (mode === 'subscribe' && token && token === WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+    return res.status(200).send(challenge || 'ok');
+  }
+  return res.status(403).send('forbidden');
+});
+
+router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res) => {
+  const body = req.body || {};
+  const entries = Array.isArray(body.entry) ? body.entry : [];
+  const receivedPhones = new Set();
+
+  try {
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        const value = change?.value || {};
+        const metadata = value?.metadata || {};
+        const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
+        const messages = Array.isArray(value?.messages) ? value.messages : [];
+
+        const profileNameByWaId = new Map();
+        contacts.forEach((contact) => {
+          const waId = String(contact?.wa_id || '').trim();
+          const name = String(contact?.profile?.name || '').trim();
+          if (waId) profileNameByWaId.set(waId, name);
+        });
+
+        for (const message of messages) {
+          const waMessageId = String(message?.id || '').trim() || null;
+          const fromPhone = String(message?.from || '').trim() || null;
+          const fromPhoneDigits = normalizePhoneDigits(fromPhone);
+          const messageType = String(message?.type || '').trim() || null;
+          const textBody = String(message?.text?.body || '').trim() || null;
+          const profileName = profileNameByWaId.get(String(message?.from || '').trim()) || null;
+          if (fromPhoneDigits) receivedPhones.add(fromPhoneDigits);
+
+          await pool.query(
+            `INSERT INTO sac.whatsapp_webhook_messages (
+               wa_message_id,
+               from_phone,
+               from_phone_digits,
+               profile_name,
+               message_type,
+               message_text,
+               phone_number_id,
+               display_phone_number,
+               payload_json
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (wa_message_id) DO UPDATE
+               SET message_text = EXCLUDED.message_text,
+                   profile_name = COALESCE(EXCLUDED.profile_name, sac.whatsapp_webhook_messages.profile_name),
+                   payload_json = EXCLUDED.payload_json`,
+            [
+              waMessageId,
+              fromPhone,
+              fromPhoneDigits || null,
+              profileName,
+              messageType,
+              textBody,
+              String(metadata?.phone_number_id || '').trim() || null,
+              String(metadata?.display_phone_number || '').trim() || null,
+              message || {}
+            ]
+          );
+        }
+      }
+    }
+
+    if (receivedPhones.size) {
+      try {
+        const sse = req.app?.get('sseBroadcast');
+        if (typeof sse === 'function') {
+          const phones = Array.from(receivedPhones);
+          sse({
+            type: 'whatsapp_message_received',
+            at: Date.now(),
+            phones
+          });
+        }
+      } catch (_) {}
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao processar webhook:', err);
+    return res.status(500).json({ ok: false });
+  }
+});
+
+router.get('/whatsapp/conversations', async (req, res) => {
+  const limitValue = Number.parseInt(String(req.query.limit || ''), 10);
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 30;
+
+  try {
+    const { rows } = await pool.query(
+      `WITH ranked AS (
+         SELECT id,
+                from_phone,
+                from_phone_digits,
+                profile_name,
+                message_type,
+                message_text,
+                received_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY from_phone_digits
+                  ORDER BY received_at DESC, id DESC
+                ) AS rn,
+                COUNT(*) OVER (PARTITION BY from_phone_digits) AS total_messages
+           FROM sac.whatsapp_webhook_messages
+          WHERE COALESCE(from_phone_digits, '') <> ''
+       )
+       SELECT from_phone,
+              from_phone_digits,
+              profile_name,
+              message_type AS last_message_type,
+              message_text AS last_message_text,
+              received_at AS last_received_at,
+              total_messages
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY last_received_at DESC
+        LIMIT $1`,
+      [limit]
+    );
+    return res.json({ ok: true, conversations: rows });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao listar conversas:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao listar conversas do WhatsApp.' });
+  }
+});
+
+router.get('/whatsapp/messages', async (req, res) => {
+  const phoneDigits = normalizePhoneDigits(req.query.phone);
+
+  try {
+    let rows;
+    if (phoneDigits) {
+      const candidates = Array.from(new Set([
+        phoneDigits,
+        phoneDigits.startsWith('55') ? phoneDigits.slice(2) : `55${phoneDigits}`
+      ].filter(Boolean)));
+
+      ({ rows } = await pool.query(
+        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
+                message_text, phone_number_id, display_phone_number, received_at
+           FROM (
+             SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
+                    message_text, phone_number_id, display_phone_number, received_at
+               FROM sac.whatsapp_webhook_messages
+              WHERE from_phone_digits = ANY($1::text[])
+              ORDER BY received_at DESC, id DESC
+              LIMIT 50
+           ) latest_messages
+          ORDER BY received_at ASC, id ASC`,
+        [candidates]
+      ));
+    } else {
+      ({ rows } = await pool.query(
+        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
+                message_text, phone_number_id, display_phone_number, received_at
+           FROM sac.whatsapp_webhook_messages
+          ORDER BY received_at DESC, id DESC
+          LIMIT 20`
+      ));
+    }
+    return res.json({ ok: true, messages: rows });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao listar mensagens:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao listar mensagens do WhatsApp.' });
   }
 });
 

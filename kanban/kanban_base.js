@@ -284,7 +284,10 @@ let itemsStr = '';          // <- aqui
     const resp = await fetch('/api/omie/pedido', {
       method : 'POST',
       headers: { 'Content-Type':'application/json' },
-      body   : JSON.stringify({ param:[{ numero_pedido: numPed }] })
+      body   : JSON.stringify({
+        param: [{ numero_pedido: numPed }],
+        source: 'kanban/kanban_base.js:gerarEtiquetaSeparacao'
+      })
     });
     const json = await resp.json();
 
