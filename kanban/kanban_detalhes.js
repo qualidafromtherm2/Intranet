@@ -50,7 +50,8 @@ export function initKanbanDetalhes(itemsKanban) {
         call: 'ConsultarPedido',
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
-        param: [{ numero_pedido: numeroPedido }]
+        param: [{ numero_pedido: numeroPedido }],
+        source: 'kanban/kanban_detalhes.js:dblclick-detalhes'
       };
       const resp = await fetch(`${API_BASE}/api/omie/pedido`, {
         method: 'POST',

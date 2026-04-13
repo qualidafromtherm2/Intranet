@@ -920,20 +920,20 @@ max-width: 480px;          /* 260 → 480 px; ajuste se quiser */
   box-shadow: none !important;
 }
 
-body:not(.light-mode) #comprasListaToolbar {
+:root:not(.light-mode) #comprasListaToolbar {
   background: #0f172a;
   border-bottom-color: #334155;
 }
 
-body:not(.light-mode) #minhasComprasWrapper {
+:root:not(.light-mode) #minhasComprasWrapper {
   background: #0f172a;
 }
 
-body:not(.light-mode) #listaMinhasSolicitacoes {
+:root:not(.light-mode) #listaMinhasSolicitacoes {
   background: #0f172a;
 }
 
-body:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr > th {
+:root:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr > th {
   color: #e5e7eb !important;
   background: #111827 !important;
   box-shadow: 0 2px 0 #334155 !important;
@@ -1556,25 +1556,25 @@ body:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > 
   color: var(--theme-color, #3b82f6);
   border-bottom-color: var(--theme-color, #3b82f6);
 }
-body:not(.light-mode) .lp-tab-btn {
+:root:not(.light-mode) .lp-tab-btn {
   color: #6b7280;
 }
-body:not(.light-mode) .lp-tab-btn:hover,
-body:not(.light-mode) .lp-tab-btn.lp-tab-active {
+:root:not(.light-mode) .lp-tab-btn:hover,
+:root:not(.light-mode) .lp-tab-btn.lp-tab-active {
   color: #60a5fa;
   border-bottom-color: #60a5fa;
 }
-body:not(.light-mode) .lp-tabs-nav {
+:root:not(.light-mode) .lp-tabs-nav {
   border-bottom-color: #374151;
 }
-body:not(.light-mode) #solicitacoesTabela {
+:root:not(.light-mode) #solicitacoesTabela {
   background: #1e293b;
   border-color: #334155;
 }
-body:not(.light-mode) #solicitacoesTabela thead tr {
+:root:not(.light-mode) #solicitacoesTabela thead tr {
   background: #1e293b;
 }
-body:not(.light-mode) #solicitacoesTabela thead th {
+:root:not(.light-mode) #solicitacoesTabela thead th {
   color: #e2e8f0;
   background: #1e293b;
   box-shadow: 0 2px 0 #334155;
@@ -9829,110 +9829,86 @@ table.tabela td.num {
    ──────────────────────────────────────────────────────────────── */
 
 /* --- Detalhes de Pedido --- */
-body:not(.light-mode) .detalhes-wrapper {
+:root:not(.light-mode) .detalhes-wrapper {
   background-color: #1e293b;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
-body:not(.light-mode) .campo-detalhe {
+:root:not(.light-mode) .campo-detalhe {
   background-color: #0f172a;
   border-color: #334155;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
-body:not(.light-mode) .campo-detalhe .label-detalhe {
+:root:not(.light-mode) .campo-detalhe .label-detalhe {
   color: #94a3b8;
 }
-body:not(.light-mode) .campo-detalhe .valor-detalhe {
+:root:not(.light-mode) .campo-detalhe .valor-detalhe {
   color: #e2e8f0;
 }
-body:not(.light-mode) .tabela-detalhes {
+:root:not(.light-mode) .tabela-detalhes {
   background-color: #0f172a;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
-body:not(.light-mode) .tabela-detalhes td {
+:root:not(.light-mode) .tabela-detalhes td {
   color: #e2e8f0;
   border-bottom-color: #334155;
 }
-body:not(.light-mode) .tabela-detalhes tbody tr {
+:root:not(.light-mode) .tabela-detalhes tbody tr {
   background-color: #0f172a;
 }
-body:not(.light-mode) .tabela-detalhes tbody tr:nth-child(even) {
+:root:not(.light-mode) .tabela-detalhes tbody tr:nth-child(even) {
   background-color: #1e293b;
 }
-body:not(.light-mode) .tabela-detalhes tbody tr:hover {
+:root:not(.light-mode) .tabela-detalhes tbody tr:hover {
   background-color: #334155;
 }
-body:not(.light-mode) .loading-details,
-body:not(.light-mode) .fault-message {
+:root:not(.light-mode) .loading-details,
+:root:not(.light-mode) .fault-message {
   background-color: #0f172a;
   color: #94a3b8;
   border-color: #334155;
 }
-body:not(.light-mode) .fault-message {
+:root:not(.light-mode) .fault-message {
   color: #fca5a5;
   background-color: rgba(127, 29, 29, 0.2);
   border-color: #7f1d1d;
 }
 
 /* --- Modal Geral --- */
-body:not(.light-mode) .modal-content {
+:root:not(.light-mode) .modal-content {
   background: #1e293b !important;
   color: #e2e8f0 !important;
   box-shadow: 0 6px 18px rgba(0,0,0,0.5);
 }
-body:not(.light-mode) .etiquetas-list li {
+:root:not(.light-mode) .etiquetas-list li {
   border-bottom-color: #334155;
 }
-body:not(.light-mode) .etiquetas-list li span,
-body:not(.light-mode) .modal-content span {
+:root:not(.light-mode) .etiquetas-list li span,
+:root:not(.light-mode) .modal-content span {
   color: #e2e8f0 !important;
 }
 
-/* --- Auth Popup (Login) no Dark --- */
-body:not(.light-mode) .auth-popup form {
-  background-color: #1e293b;
-}
-body:not(.light-mode) .auth-popup form,
-body:not(.light-mode) .auth-popup form h1,
-body:not(.light-mode) .auth-popup form label,
-body:not(.light-mode) .auth-popup form span {
-  color: #e2e8f0;
-}
-body:not(.light-mode) .auth-popup a {
-  color: #93c5fd;
-}
-body:not(.light-mode) .auth-popup input {
-  background-color: #0f172a;
-  color: #e2e8f0;
-  border: 1px solid #334155;
-}
-body:not(.light-mode) .auth-popup input::placeholder {
-  color: #64748b;
-}
-body:not(.light-mode) .auth-popup .social-container a {
-  border-color: #334155;
-  color: #94a3b8;
-}
+/* --- Auth Popup (Login) — mantém visual original (fundo branco) em ambos os modos --- */
 
 /* --- Compras: Tabela (dark) --- */
-body:not(.light-mode) #listaMinhasSolicitacoes table {
+:root:not(.light-mode) #listaMinhasSolicitacoes table {
   background: #111827;
 }
-body:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr {
+:root:not(.light-mode) #listaMinhasSolicitacoes #listaMinhasSolicitacoesTabela > thead > tr {
   background: #111827 !important;
 }
 
 /* --- Loading bar --- */
-body:not(.light-mode) .loading-bar {
+:root:not(.light-mode) .loading-bar {
   background: #334155;
 }
 
 /* --- Icon inline btn --- */
-body:not(.light-mode) .icon-inline-btn {
+:root:not(.light-mode) .icon-inline-btn {
   color: #e2e8f0;
 }
 
 /* --- Btn secondary no dark --- */
-body:not(.light-mode) .btn-secondary:hover {
+:root:not(.light-mode) .btn-secondary:hover {
   border-color: #e2e8f0;
   color: #e2e8f0;
 }
@@ -10291,6 +10267,50 @@ body:not(.light-mode) .btn-secondary:hover {
   color: #d97706;
 }
 
+/* --- Kanban Programacao: reforco de contraste no modo claro --- */
+.light-mode #coluna-pcp-aprovado .kanban-card {
+  background: linear-gradient(145deg, #e0edff 0%, #cfe2ff 100%);
+  border-color: #93c5fd;
+  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.18);
+}
+.light-mode #coluna-pcp-op .kanban-card {
+  background: linear-gradient(145deg, #dcfce7 0%, #ccfbf1 100%);
+  border-color: #6ee7b7;
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.16);
+}
+.light-mode #coluna-pcp-aprovado .kanban-card.kanban-card-local:hover,
+.light-mode #coluna-pcp-op .kanban-card.kanban-card-production:hover {
+  box-shadow: 0 10px 22px rgba(30, 64, 175, 0.2);
+}
+.light-mode #coluna-pcp-aprovado .kanban-card .kanban-code-header,
+.light-mode #coluna-pcp-op .kanban-card .kanban-code-header,
+.light-mode #coluna-comercial .kanban-card .kanban-code-header {
+  color: #1f2937;
+}
+.light-mode #coluna-pcp-aprovado .kanban-card .kanban-code-count,
+.light-mode #coluna-pcp-op .kanban-card .kanban-code-count,
+.light-mode #coluna-comercial .kanban-card .kanban-code-count {
+  background: rgba(59, 130, 246, 0.16);
+  color: #1e3a8a;
+}
+.light-mode #coluna-comercial .kanban-card .kanban-op-list,
+.light-mode #coluna-pcp-aprovado .kanban-card .kanban-op-list,
+.light-mode #coluna-pcp-op .kanban-card .kanban-op-list {
+  color: #374151;
+}
+.light-mode #coluna-pcp-op .kanban-card .kanban-op-date {
+  color: #0f766e;
+}
+
+/* --- Kanban Minhas Compras: colunas e cards menos esmaecidos no modo claro --- */
+.light-mode .kanban-column-minhas {
+  opacity: 1 !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1) !important;
+}
+.light-mode .kanban-column-minhas .kanban-cards-minhas > .kanban-card {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12) !important;
+}
+
 /* --- Qualidade --- */
 .light-mode .qualidade-nfe-input {
   background: #ffffff;
@@ -10560,93 +10580,437 @@ body:not(.light-mode) .btn-secondary:hover {
 /* --- Elementos com inline styles que precisam de dark override --- */
 
 /* Gráficos e cards de compras com background branco */
-body:not(.light-mode) #graficoPizzaCard,
-body:not(.light-mode) #graficoMesesWrapper,
-body:not(.light-mode) #graficoPizzaDetalheWrapper {
+:root:not(.light-mode) #graficoPizzaCard,
+:root:not(.light-mode) #graficoMesesWrapper,
+:root:not(.light-mode) #graficoPizzaDetalheWrapper {
   background: #1e293b !important;
   box-shadow: 0 2px 12px rgba(0,0,0,0.3) !important;
 }
-body:not(.light-mode) #filterPanel {
+:root:not(.light-mode) #filterPanel {
   background: #1e293b !important;
   color: #e2e8f0 !important;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
 }
 
 /* Tabela de solicitações (compras) */
-body:not(.light-mode) #listaMinhasSolicitacoesTabela {
+:root:not(.light-mode) #listaMinhasSolicitacoesTabela {
   background: #111827 !important;
   border-color: #334155 !important;
 }
-body:not(.light-mode) #listaMinhasSolicitacoesTabela th {
+:root:not(.light-mode) #listaMinhasSolicitacoesTabela th {
   color: #e2e8f0;
 }
-body:not(.light-mode) #listaMinhasSolicitacoesTabela td {
+:root:not(.light-mode) #listaMinhasSolicitacoesTabela td {
   color: #d1d5db;
   border-color: #334155;
 }
 
 /* Inputs de recebimento com fundo branco */
-body:not(.light-mode) #recebimentoGlobalSearch,
-body:not(.light-mode) [id^="recebimentoFilter"] {
+:root:not(.light-mode) #recebimentoGlobalSearch,
+:root:not(.light-mode) [id^="recebimentoFilter"] {
   background: #0f172a !important;
   color: #e2e8f0 !important;
   border-color: #334155 !important;
 }
 
 /* Inputs de atividades */
-body:not(.light-mode) #inputNomeAtividade,
-body:not(.light-mode) #inputDescricaoAtividade,
-body:not(.light-mode) #inputNomeAtividadeCompras,
-body:not(.light-mode) #inputDescricaoAtividadeCompras {
+:root:not(.light-mode) #inputNomeAtividade,
+:root:not(.light-mode) #inputDescricaoAtividade,
+:root:not(.light-mode) #inputNomeAtividadeCompras,
+:root:not(.light-mode) #inputDescricaoAtividadeCompras {
   background: #0f172a !important;
   color: #e2e8f0 !important;
 }
 
 /* Modais genéricos com background branco inline */
-body:not(.light-mode) .modal-content,
-body:not(.light-mode) .modal-header,
-body:not(.light-mode) .modal-footer {
+:root:not(.light-mode) .modal-content,
+:root:not(.light-mode) .modal-header,
+:root:not(.light-mode) .modal-footer {
   background: #1e293b !important;
   color: #e2e8f0 !important;
 }
 
 /* Containers de info com fundo branco dentro de seções */
-body:not(.light-mode) #minhasComprasWrapper div[style*="background:#fff"],
-body:not(.light-mode) #minhasComprasWrapper div[style*="background: #fff"] {
+:root:not(.light-mode) #minhasComprasWrapper div[style*="background:#fff"],
+:root:not(.light-mode) #minhasComprasWrapper div[style*="background: #fff"] {
   background: #1e293b !important;
   color: #e2e8f0 !important;
 }
 
 /* Inputs e selects com fundo branco dentro do app (catch-all safe) */
-body:not(.light-mode) .content-wrapper input[style*="background:#ffffff"],
-body:not(.light-mode) .content-wrapper input[style*="background: #ffffff"],
-body:not(.light-mode) .content-wrapper textarea[style*="background:#ffffff"],
-body:not(.light-mode) .content-wrapper textarea[style*="background: #ffffff"],
-body:not(.light-mode) .content-wrapper select[style*="background:#ffffff"],
-body:not(.light-mode) .content-wrapper select[style*="background: #ffffff"] {
+:root:not(.light-mode) .content-wrapper input[style*="background:#ffffff"],
+:root:not(.light-mode) .content-wrapper input[style*="background: #ffffff"],
+:root:not(.light-mode) .content-wrapper textarea[style*="background:#ffffff"],
+:root:not(.light-mode) .content-wrapper textarea[style*="background: #ffffff"],
+:root:not(.light-mode) .content-wrapper select[style*="background:#ffffff"],
+:root:not(.light-mode) .content-wrapper select[style*="background: #ffffff"] {
   background: #0f172a !important;
   color: #e2e8f0 !important;
 }
 
 /* Container info com borda azul claro */
-body:not(.light-mode) div[style*="border:2px solid #dbeafe"] {
+:root:not(.light-mode) div[style*="border:2px solid #dbeafe"] {
   background: rgba(30, 58, 138, 0.15) !important;
   border-color: #1e3a8a !important;
   color: #e2e8f0 !important;
 }
 
 /* Compras: cards de gráficos */
-body:not(.light-mode) #minhasComprasWrapper [style*="box-shadow:0 2px 12px"] {
+:root:not(.light-mode) #minhasComprasWrapper [style*="box-shadow:0 2px 12px"] {
   box-shadow: 0 2px 12px rgba(0,0,0,0.3) !important;
 }
 
 /* Inputs de catálogo/compras com fundo branco inline */
-body:not(.light-mode) #comprasFormPane input[style*="background:#ffffff"],
-body:not(.light-mode) #comprasFormPane input[style*="background: #ffffff"] {
+:root:not(.light-mode) #comprasFormPane input[style*="background:#ffffff"],
+:root:not(.light-mode) #comprasFormPane input[style*="background: #ffffff"] {
   background: #0f172a !important;
   color: #e2e8f0 !important;
   border-color: #334155 !important;
 }
+
+/* --- Ata de Reunião / Agenda Modal — modo claro --- */
+.light-mode .agenda-modal-overlay {
+  background: rgba(107, 114, 128, 0.5);
+}
+
+/* Calendário de reservas no modo claro: aumenta contraste dos chips */
+.light-mode .agenda-cal-reserva-item {
+  font-weight: 700;
+}
+
+.light-mode .agenda-cal-reserva-item .agenda-chip-hora,
+.light-mode .agenda-cal-reserva-item .agenda-chip-room-icon {
+  color: inherit;
+}
+
+.light-mode .agenda-cal-reserva-item.is-auditorio {
+  background: #ede9fe;
+  border-color: #c4b5fd;
+  color: #4c1d95;
+}
+
+.light-mode .agenda-cal-reserva-item.is-sala {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #14532d;
+}
+
+.light-mode .agenda-cal-reserva-item.is-online {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e3a8a;
+}
+
+.light-mode .agenda-cal-reserva-item.is-visita {
+  background: #ffedd5;
+  border-color: #fdba74;
+  color: #7c2d12;
+}
+
+.light-mode .agenda-cal-reserva-item.is-evento {
+  background: #fce7f3;
+  border-color: #f9a8d4;
+  color: #831843;
+}
+
+.light-mode .agenda-cal-reserva-item.is-lembrete {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #78350f;
+}
+
+.light-mode .agenda-modal-card {
+  background: #ffffff;
+  color: #1f2937;
+  border-color: #e5e7eb;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+}
+.light-mode .agenda-modal-card h3,
+.light-mode .agenda-modal-card label,
+.light-mode .agenda-modal-card span {
+  color: #1f2937;
+}
+.light-mode .agenda-modal-close {
+  color: #6b7280;
+  border-color: #d1d5db;
+}
+.light-mode .agenda-modal-close:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+.light-mode .agenda-opcao-btn {
+  background: #f9fafb;
+  color: #1f2937;
+  border-color: #e5e7eb;
+}
+.light-mode .agenda-opcao-btn:hover {
+  border-color: #3a6df0;
+  background: #eff6ff;
+}
+.light-mode .agenda-form-grid input:not([type="checkbox"]),
+.light-mode .agenda-form-grid select,
+.light-mode .agenda-form-grid textarea {
+  background: #ffffff;
+  color: #1f2937;
+  border-color: #d1d5db;
+}
+.light-mode .agenda-form-grid input::placeholder,
+.light-mode .agenda-form-grid textarea::placeholder {
+  color: #9ca3af;
+}
+
+/* --- Visao Semanal (Inicio): contraste mais claro no modo branco --- */
+.light-mode .semana-day-card {
+  background: #ffffff;
+  border-color: #dbe3ee;
+  color: #1f2937;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+.light-mode .semana-day-dow,
+.light-mode .semana-empty {
+  color: #6b7280;
+}
+.light-mode .semana-day-badge {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1e40af;
+  border-color: rgba(37, 99, 235, 0.25);
+}
+.light-mode .semana-day-card.center {
+  outline-color: #2563eb;
+}
+
+/* --- Chatbot Explorer: contraste no modo preto --- */
+:root:not(.light-mode) #chatbotMonitorExplorerSection > div {
+  background: linear-gradient(135deg, rgba(2, 6, 23, 0.85) 0%, rgba(15, 23, 42, 0.92) 100%) !important;
+  border-color: rgba(51, 65, 85, 0.7) !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="background:rgba(255,255,255,0.72)"] {
+  background: rgba(15, 23, 42, 0.78) !important;
+  border-color: rgba(71, 85, 105, 0.55) !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="background:rgba(15,23,42,0.04)"] {
+  background: rgba(2, 6, 23, 0.42) !important;
+  border-color: rgba(71, 85, 105, 0.45) !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection table.tabela.padrao thead tr,
+:root:not(.light-mode) #chatbotMonitorExplorerSection table.tabela.padrao thead th {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection table.tabela.padrao tbody tr {
+  background: #111827 !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection table.tabela.padrao td {
+  color: #cbd5e1 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="color:#374151"],
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="color: #374151"] {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="color:#6b7280"],
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="color: #6b7280"] {
+  color: #94a3b8 !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="background:#334155"] {
+  background: #1e293b !important;
+}
+
+:root:not(.light-mode) #chatbotMonitorExplorerSection [style*="background:#cbd5e1"] {
+  background: #334155 !important;
+}
+
+/* --- Modal Filtrar Produtos: contraste no modo preto --- */
+:root:not(.light-mode) #filterPanel {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #334155 !important;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.55) !important;
+}
+
+:root:not(.light-mode) #filterPanel [style*="color:#111"],
+:root:not(.light-mode) #filterPanel [style*="color: #111"],
+:root:not(.light-mode) #filterPanel [style*="color:#374151"],
+:root:not(.light-mode) #filterPanel [style*="color: #374151"] {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #filterPanel [style*="border-bottom:1px solid #e5e7eb"] {
+  border-bottom-color: #334155 !important;
+}
+
+:root:not(.light-mode) #filterPanel select,
+:root:not(.light-mode) #filterPanel input[type="text"],
+:root:not(.light-mode) #filterPanel input[type="search"] {
+  background: #111827 !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #filterPanel option {
+  background: #111827;
+  color: #e2e8f0;
+}
+
+:root:not(.light-mode) #filterPanel #filterPanelCloseBtn {
+  color: #94a3b8 !important;
+}
+
+:root:not(.light-mode) #filterPanel #filterPanelCloseBtn:hover {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #filterPanel #filterPanelLimparBtn {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+/* --- Modal Cotacao Kanban: contraste no modo preto --- */
+:root:not(.light-mode) #modalCotacaoKanban .modal-content {
+  background: #0f172a !important;
+  border: 1px solid #334155 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban .modal-header,
+:root:not(.light-mode) #modalCotacaoKanban .modal-footer {
+  background: #111827 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="background:#ede9fe"] {
+  background: rgba(55, 48, 163, 0.22) !important;
+  border-color: #7c3aed !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="background:#f9fafb"] {
+  background: rgba(15, 23, 42, 0.68) !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="background:#ffffff"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="background: #ffffff"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="background:#f3f4f6"] {
+  background: #111827 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="color:#1f2937"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="color: #1f2937"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="color:#374151"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="color:#6b7280"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="color:#5b21b6"] {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody input,
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody textarea,
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody select {
+  background: #0b1220 !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody input::placeholder,
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="border:1px solid #d1d5db"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="border:2px solid #e5e7eb"],
+:root:not(.light-mode) #modalCotacaoKanban #modalCotacaoKanbanBody [style*="border-top:1px solid #e5e7eb"] {
+  border-color: #334155 !important;
+}
+
+/* Dark mode para Modal "Meus Itens - aguardando aprovação" */
+:root:not(.light-mode) #modalPedidoBody {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody [style*="background:#f9fafb"],
+:root:not(.light-mode) #modalPedidoBody [style*="background:#ffffff"],
+:root:not(.light-mode) #modalPedidoBody [style*="background: #ffffff"] {
+  background: #111827 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody [style*="color:#6b7280"],
+:root:not(.light-mode) #modalPedidoBody [style*="color:#374151"],
+:root:not(.light-mode) #modalPedidoBody [style*="color:#059669"],
+:root:not(.light-mode) #modalPedidoBody [style*="color: #6b7280"],
+:root:not(.light-mode) #modalPedidoBody [style*="color: #374151"] {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody [style*="border-bottom:1px solid #e5e7eb"],
+:root:not(.light-mode) #modalPedidoBody [style*="border-bottom:2px solid #e5e7eb"],
+:root:not(.light-mode) #modalPedidoBody [style*="border:1px solid #e5e7eb"] {
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody table {
+  color: #e2e8f0 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody table th {
+  border-bottom-color: #334155 !important;
+}
+
+:root:not(.light-mode) #modalPedidoBody [style*="font-weight:700"] {
+  color: #e2e8f0 !important;
+}
+
+/* ================================================================
+   Dark mode — Kanban "Compras" (colunas kanban-column-minhas)
+   Inline styles no JS usam #f8fafc/#ffffff → sobrescrevemos aqui
+   ================================================================ */
+
+/* Colunas */
+:root:not(.light-mode) .kanban-column-minhas {
+  background: #111827 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35) !important;
+}
+
+/* Cards dentro das colunas */
+:root:not(.light-mode) .kanban-column-minhas .kanban-card {
+  background: #1e293b !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35) !important;
+}
+
+/* Badge de grupo (req. número) com background #f3f4f6 */
+:root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="background:#f3f4f6"] {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+/* Textos do badge de grupo */
+:root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="color:#6b7280"],
+:root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="color:#374151"] {
+  color: #94a3b8 !important;
+}
+
+/* Botões "expandir itens" (chevron) */
+:root:not(.light-mode) .kanban-column-minhas .kanban-card [style*="background:#e5e7eb"] {
+  background: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+/* Placeholder "Nenhum item" e "Carregando..." */
+:root:not(.light-mode) .kanban-column-minhas [style*="background:#f8fafc"] {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+/* Badge contador de itens (verde #10b981 — mantém cor; só texto branco já está ok) */
 
 /* ================================================================
    FIM DO BLOCO DE MODO ESCURO/CLARO

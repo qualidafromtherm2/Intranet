@@ -72,12 +72,54 @@ window.showOnlyInMain = function(element) {
   }
 };
 
+window.forceShowInicio = function() {
+  try {
+    const main = document.querySelector('.main-container');
+    const inicio = document.getElementById('paginaInicio');
+    if (!main || !inicio) return;
+
+    Array.from(main.children).forEach((el) => {
+      if (!el) return;
+      el.style.display = 'none';
+    });
+
+    inicio.style.display = 'block';
+
+    const produtoTabs = document.getElementById('produtoTabs');
+    const kanbanTabs = document.getElementById('kanbanTabs');
+    const armazemTabs = document.getElementById('armazemTabs');
+    const armazemContent = document.getElementById('armazemContent');
+    if (produtoTabs) produtoTabs.style.display = 'none';
+    if (kanbanTabs) kanbanTabs.style.display = 'none';
+    if (armazemTabs) armazemTabs.style.display = 'none';
+    if (armazemContent) armazemContent.style.display = 'none';
+
+    const mainHeader = document.querySelector('.main-header');
+    if (mainHeader) mainHeader.style.display = 'none';
+
+    const menuInicio = document.getElementById('menu-inicio');
+    document.querySelectorAll('.header .header-menu > .menu-link').forEach((a) => a.classList.remove('is-active'));
+    if (menuInicio) menuInicio.classList.add('is-active');
+  } catch (_) {}
+};
+
 // Inicializa a página mostrando APENAS o painel inicial
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[NAV] Inicializando navegação - mostrando página inicial');
   const paginaInicio = document.getElementById('paginaInicio');
   if (paginaInicio) {
     window.showOnlyInMain(paginaInicio);
+  } else {
+    window.forceShowInicio?.();
+  }
+
+  const menuInicio = document.getElementById('menu-inicio');
+  if (menuInicio && !menuInicio.dataset.forceInicioBound) {
+    menuInicio.dataset.forceInicioBound = '1';
+    menuInicio.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      window.forceShowInicio?.();
+    }, true);
   }
 });
 
@@ -2378,9 +2420,25 @@ async function fetchAndRenderProdutos() {
 
 
 function showMainTab(tabId) {
+  // tenta achar o alvo em 2 formatos:
+  //   • id = tabId  (ex.:  "listaPecas")
+  //   • id = "conteudo-" + tabId  (ex.:  "conteudo-pcp")
+  const alvo =
+    document.getElementById(tabId) ||
+    document.getElementById(`conteudo-${tabId}`);
+
+  // Fail-safe: nunca limpa toda a área principal sem ter alvo válido.
+  if (!alvo) {
+    const fallbackInicio = document.getElementById('paginaInicio');
+    if (tabId === 'paginaInicio' && fallbackInicio) {
+      fallbackInicio.style.display = 'block';
+    }
+    return;
+  }
+
   // Limpa TUDO da área principal primeiro
   window.clearMainContainer?.();
-  
+
   // garante que se estava em Armazéns ou Kanban, tudo volte a esconder
   if (typeof hideArmazem === 'function') hideArmazem();
   if (typeof hideKanban === 'function') hideKanban();
@@ -2395,14 +2453,7 @@ function showMainTab(tabId) {
     .querySelectorAll('#armazemContent .armazem-page')
     .forEach(p => (p.style.display = 'none'));
 
-  // tenta achar o alvo em 2 formatos:
-  //   • id = tabId  (ex.:  "listaPecas")
-  //   • id = "conteudo-" + tabId  (ex.:  "conteudo-pcp")
-  const alvo =
-    document.getElementById(tabId) ||
-    document.getElementById(`conteudo-${tabId}`);
-
-  if (alvo) window.showOnlyInMain?.(alvo);
+  window.showOnlyInMain?.(alvo);
 }
 
 
@@ -6871,10 +6922,118 @@ const chatbotMonitorLacunasMotivo = document.getElementById('chatbotMonitorLacun
 const chatbotMonitorManuaisStatus = document.getElementById('chatbotMonitorManuaisStatus');
 const chatbotMonitorLacunasTbody = document.getElementById('chatbotMonitorLacunasTbody');
 const chatbotMonitorErrorsTbody = document.getElementById('chatbotMonitorErrorsTbody');
+const chatbotMonitorExplorerToggleBtn = document.getElementById('chatbotMonitorExplorerToggleBtn');
+const chatbotMonitorExplorerSection = document.getElementById('chatbotMonitorExplorerSection');
 
 let chatbotMonitorCache = null;
 let chatbotMonitorCacheAt = 0;
 let chatbotMonitorPendingPromise = null;
+
+const CHATBOT_MONITOR_EXPLORER_CONFIG = {
+  faq: {
+    label: 'FAQs aprovadas',
+    icon: 'fa-solid fa-circle-check',
+    accent: '#2563eb',
+    searchPlaceholder: 'Buscar em pergunta, resposta, tags ou fonte',
+    sortOptions: [
+      { value: 'updated_at', label: 'Atualização' },
+      { value: 'created_at', label: 'Criação' },
+      { value: 'prioridade', label: 'Prioridade' },
+      { value: 'area', label: 'Área' },
+      { value: 'pergunta', label: 'Pergunta' }
+    ],
+    initialFilters: {
+      search: '',
+      area: '',
+      status: '',
+      sortBy: 'updated_at',
+      sortDir: 'desc',
+      pageSize: 10
+    }
+  },
+  messages: {
+    label: 'Mensagens da conversa',
+    icon: 'fa-solid fa-comments',
+    accent: '#0e7490',
+    searchPlaceholder: 'Buscar em conteúdo, usuário, conversa, origem ou metadados',
+    sortOptions: [
+      { value: 'criado_em', label: 'Mensagem mais recente' },
+      { value: 'ultima_mensagem_em', label: 'Última atividade da conversa' },
+      { value: 'mensagens_na_conversa', label: 'Qtd. na conversa' },
+      { value: 'conversation_id', label: 'Conversa' },
+      { value: 'usuario', label: 'Usuário' },
+      { value: 'papel', label: 'Papel' }
+    ],
+    initialFilters: {
+      search: '',
+      role: '',
+      origin: '',
+      conversationId: '',
+      user: '',
+      sortBy: 'criado_em',
+      sortDir: 'desc',
+      pageSize: 12
+    }
+  },
+  memory: {
+    label: 'Memória do usuário',
+    icon: 'fa-solid fa-brain',
+    accent: '#7c3aed',
+    searchPlaceholder: 'Buscar em usuário, chave ou JSON salvo',
+    sortOptions: [
+      { value: 'atualizado_em', label: 'Atualização' },
+      { value: 'created_at', label: 'Criação' },
+      { value: 'relevancia', label: 'Relevância' },
+      { value: 'expira_em', label: 'Expiração' },
+      { value: 'usuario', label: 'Usuário' },
+      { value: 'chave', label: 'Chave' }
+    ],
+    initialFilters: {
+      search: '',
+      key: '',
+      user: '',
+      activeState: 'all',
+      sortBy: 'atualizado_em',
+      sortDir: 'desc',
+      pageSize: 10
+    }
+  }
+};
+
+function createChatbotMonitorExplorerTabState(initialFilters = {}) {
+  return {
+    loading: false,
+    loaded: false,
+    error: '',
+    rows: [],
+    options: {},
+    summary: {},
+    selectedRowId: null,
+    requestSeq: 0,
+    filters: { ...initialFilters },
+    meta: {
+      total: 0,
+      page: 1,
+      pageSize: Number(initialFilters.pageSize || 10),
+      totalPages: 1,
+      hasPrev: false,
+      hasNext: false,
+      sortBy: String(initialFilters.sortBy || ''),
+      sortDir: String(initialFilters.sortDir || 'desc'),
+      search: String(initialFilters.search || '')
+    }
+  };
+}
+
+const chatbotMonitorExplorerState = {
+  visible: false,
+  activeTab: 'faq',
+  tabs: {
+    faq: createChatbotMonitorExplorerTabState(CHATBOT_MONITOR_EXPLORER_CONFIG.faq.initialFilters),
+    messages: createChatbotMonitorExplorerTabState(CHATBOT_MONITOR_EXPLORER_CONFIG.messages.initialFilters),
+    memory: createChatbotMonitorExplorerTabState(CHATBOT_MONITOR_EXPLORER_CONFIG.memory.initialFilters)
+  }
+};
 
 function formatarNumeroChatbotMonitor(value) {
   const numero = Number(value || 0);
@@ -6886,6 +7045,13 @@ function formatarDataHoraChatbotMonitor(value) {
   const data = new Date(value);
   if (Number.isNaN(data.getTime())) return '—';
   return data.toLocaleString('pt-BR');
+}
+
+function truncateText(str, maxLength = 25) {
+  const texto = String(str ?? '');
+  if (texto.length <= maxLength) return texto;
+  if (maxLength <= 3) return texto.slice(0, maxLength);
+  return `${texto.slice(0, maxLength - 3)}...`;
 }
 
 function setChatbotMonitorAviso(message = '', type = 'info') {
@@ -7058,6 +7224,629 @@ function renderChatbotMonitor(data = {}) {
   renderChatbotMonitorErrors(data?.recentErrors);
 }
 
+function getChatbotMonitorExplorerTabConfig(dataset = chatbotMonitorExplorerState.activeTab) {
+  return CHATBOT_MONITOR_EXPLORER_CONFIG[dataset] || CHATBOT_MONITOR_EXPLORER_CONFIG.faq;
+}
+
+function getChatbotMonitorExplorerTabState(dataset = chatbotMonitorExplorerState.activeTab) {
+  return chatbotMonitorExplorerState.tabs[dataset] || chatbotMonitorExplorerState.tabs.faq;
+}
+
+function formatarJsonChatbotMonitorExplorer(value) {
+  if (value === null || value === undefined) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function renderChatbotMonitorExplorerBadge(text, tone = 'slate') {
+  const palette = {
+    blue: { bg: 'rgba(37,99,235,0.12)', color: '#1d4ed8', border: 'rgba(37,99,235,0.22)' },
+    cyan: { bg: 'rgba(8,145,178,0.12)', color: '#0e7490', border: 'rgba(8,145,178,0.22)' },
+    green: { bg: 'rgba(34,197,94,0.12)', color: '#15803d', border: 'rgba(34,197,94,0.24)' },
+    amber: { bg: 'rgba(245,158,11,0.12)', color: '#b45309', border: 'rgba(245,158,11,0.24)' },
+    rose: { bg: 'rgba(239,68,68,0.12)', color: '#b91c1c', border: 'rgba(239,68,68,0.24)' },
+    violet: { bg: 'rgba(124,58,237,0.12)', color: '#6d28d9', border: 'rgba(124,58,237,0.24)' },
+    slate: { bg: 'rgba(148,163,184,0.12)', color: '#475569', border: 'rgba(148,163,184,0.24)' }
+  };
+  const style = palette[tone] || palette.slate;
+  return `<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:${style.bg};color:${style.color};border:1px solid ${style.border};font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(text || '—')}</span>`;
+}
+
+function renderChatbotMonitorExplorerSelectOptions(items = [], currentValue = '', emptyLabel = 'Todos') {
+  const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const value = String(item?.value || '').trim();
+    if (!value) return;
+    const label = String(item?.label || value).trim() || value;
+    const total = Number(item?.total || 0);
+    const text = total > 0 ? `${label} (${formatarNumeroChatbotMonitor(total)})` : label;
+    options.push(`<option value="${escapeHtml(value)}" ${value === String(currentValue || '') ? 'selected' : ''}>${escapeHtml(text)}</option>`);
+  });
+  return options.join('');
+}
+
+function renderChatbotMonitorExplorerSortOptions(dataset, currentValue = '') {
+  const config = getChatbotMonitorExplorerTabConfig(dataset);
+  return (config.sortOptions || []).map((item) => (
+    `<option value="${escapeHtml(item.value)}" ${item.value === currentValue ? 'selected' : ''}>${escapeHtml(item.label)}</option>`
+  )).join('');
+}
+
+function renderChatbotMonitorExplorerPageSizeOptions(currentValue = 10) {
+  return [10, 20, 50, 100].map((size) => (
+    `<option value="${size}" ${Number(currentValue || 0) === size ? 'selected' : ''}>${size} / página</option>`
+  )).join('');
+}
+
+function getChatbotMonitorExplorerSummaryCards(dataset, tabState) {
+  const summary = tabState?.summary || {};
+  const total = Number(tabState?.meta?.total || 0);
+  if (dataset === 'faq') {
+    return [
+      { label: 'FAQs filtradas', value: total, tone: 'blue' },
+      { label: 'Áreas encontradas', value: Number(summary.areaCount || 0), tone: 'cyan' },
+      { label: 'Prioridade média', value: Number(summary.averagePriority || 0), tone: 'amber' },
+      { label: 'FAQs com tags', value: Number(summary.taggedCount || 0), tone: 'violet' }
+    ];
+  }
+  if (dataset === 'messages') {
+    return [
+      { label: 'Mensagens filtradas', value: total, tone: 'cyan' },
+      { label: 'Conversas únicas', value: Number(summary.conversationCount || 0), tone: 'blue' },
+      { label: 'Usuários', value: Number(summary.userCount || 0), tone: 'green' },
+      { label: 'Respostas do bot', value: Number(summary.assistantCount || 0), tone: 'amber' }
+    ];
+  }
+  return [
+    { label: 'Itens filtrados', value: total, tone: 'violet' },
+    { label: 'Memórias ativas', value: Number(summary.activeCount || 0), tone: 'green' },
+    { label: 'Usuários', value: Number(summary.userCount || 0), tone: 'cyan' },
+    { label: 'Chaves distintas', value: Number(summary.keyCount || 0), tone: 'blue' }
+  ];
+}
+
+function renderChatbotMonitorExplorerSummary(dataset, tabState) {
+  const cards = getChatbotMonitorExplorerSummaryCards(dataset, tabState);
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:16px;">
+      ${cards.map((card) => `
+        <div style="background:rgba(255,255,255,0.72);border:1px solid rgba(148,163,184,0.18);border-radius:16px;padding:14px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">${escapeHtml(card.label)}</div>
+          <div style="margin-top:8px;font-size:28px;font-weight:800;line-height:1;color:${card.tone === 'blue' ? '#2563eb' : card.tone === 'cyan' ? '#0e7490' : card.tone === 'green' ? '#15803d' : card.tone === 'amber' ? '#b45309' : '#6d28d9'};">${formatarNumeroChatbotMonitor(card.value)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderChatbotMonitorExplorerControls(dataset, tabState) {
+  const config = getChatbotMonitorExplorerTabConfig(dataset);
+  const filters = tabState?.filters || {};
+  const options = tabState?.options || {};
+
+  const commonControls = `
+    <label style="display:flex;flex-direction:column;gap:6px;min-width:220px;">
+      <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Busca livre</span>
+      <input type="search" value="${escapeHtml(filters.search || '')}" placeholder="${escapeHtml(config.searchPlaceholder)}" data-chatbot-monitor-text-filter="1" data-dataset="${dataset}" data-field="search" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);" />
+    </label>
+  `;
+
+  let specificControls = '';
+  if (dataset === 'faq') {
+    specificControls = `
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Área</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="area" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSelectOptions(options.areas, filters.area, 'Todas as áreas')}
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Status</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="status" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSelectOptions(options.statuses, filters.status, 'Todos os status')}
+        </select>
+      </label>
+    `;
+  } else if (dataset === 'messages') {
+    specificControls = `
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Conversa</span>
+        <input type="text" value="${escapeHtml(filters.conversationId || '')}" placeholder="Filtrar por conversation_id" data-chatbot-monitor-text-filter="1" data-dataset="${dataset}" data-field="conversationId" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Usuário</span>
+        <input type="text" value="${escapeHtml(filters.user || '')}" placeholder="Filtrar por usuário" data-chatbot-monitor-text-filter="1" data-dataset="${dataset}" data-field="user" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:150px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Papel</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="role" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSelectOptions(options.roles, filters.role, 'Todos os papéis')}
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:180px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Origem</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="origin" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSelectOptions(options.origins, filters.origin, 'Todas as origens')}
+        </select>
+      </label>
+    `;
+  } else {
+    specificControls = `
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Usuário</span>
+        <input type="text" value="${escapeHtml(filters.user || '')}" placeholder="Filtrar por usuário" data-chatbot-monitor-text-filter="1" data-dataset="${dataset}" data-field="user" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);" />
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:170px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Chave</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="key" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSelectOptions(options.keys, filters.key, 'Todas as chaves')}
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:160px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Estado</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="activeState" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          <option value="all" ${filters.activeState === 'all' ? 'selected' : ''}>Todas</option>
+          <option value="active" ${filters.activeState === 'active' ? 'selected' : ''}>Ativas</option>
+          <option value="expired" ${filters.activeState === 'expired' ? 'selected' : ''}>Expiradas</option>
+        </select>
+      </label>
+    `;
+  }
+
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:16px;padding:16px;border-radius:18px;background:rgba(15,23,42,0.04);border:1px solid rgba(148,163,184,0.18);">
+      ${commonControls}
+      ${specificControls}
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:160px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Ordenar por</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="sortBy" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerSortOptions(dataset, filters.sortBy)}
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:140px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Direção</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="sortDir" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          <option value="desc" ${filters.sortDir === 'desc' ? 'selected' : ''}>Decrescente</option>
+          <option value="asc" ${filters.sortDir === 'asc' ? 'selected' : ''}>Crescente</option>
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;min-width:140px;">
+        <span style="font-size:12px;font-weight:700;color:var(--theme-color);">Itens por página</span>
+        <select data-chatbot-monitor-filter="1" data-dataset="${dataset}" data-field="pageSize" style="border:1px solid rgba(148,163,184,0.24);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,0.72);color:var(--theme-color);">
+          ${renderChatbotMonitorExplorerPageSizeOptions(filters.pageSize)}
+        </select>
+      </label>
+      <div style="display:flex;align-items:flex-end;gap:10px;margin-left:auto;flex-wrap:wrap;">
+        <button type="button" class="content-button" data-action="refresh-explorer" style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:white;">
+          <i class="fa-solid fa-rotate"></i>
+          <span>${tabState.loading ? 'Atualizando...' : 'Atualizar guia'}</span>
+        </button>
+        <button type="button" class="content-button" data-action="reset-explorer-filters" style="background:#334155;color:#fff;">
+          <i class="fa-solid fa-filter-circle-xmark"></i>
+          <span>Limpar filtros</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function getChatbotMonitorExplorerSelectedRow(dataset, tabState) {
+  const rows = Array.isArray(tabState?.rows) ? tabState.rows : [];
+  if (!rows.length) return null;
+  const wantedId = Number(tabState?.selectedRowId || 0);
+  return rows.find((row) => Number(row?.id || 0) === wantedId) || rows[0];
+}
+
+function renderChatbotMonitorExplorerFaqTable(tabState) {
+  const rows = Array.isArray(tabState?.rows) ? tabState.rows : [];
+  if (!rows.length) {
+    const message = tabState.loading
+      ? 'Carregando FAQs aprovadas...'
+      : (tabState.error || 'Nenhuma FAQ encontrada para os filtros atuais.');
+    return `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--inactive-color);">${escapeHtml(message)}</td></tr>`;
+  }
+  const selectedId = Number(getChatbotMonitorExplorerSelectedRow('faq', tabState)?.id || 0);
+  return rows.map((row) => `
+    <tr data-action="select-explorer-row" data-dataset="faq" data-row-id="${Number(row.id || 0)}" style="cursor:pointer;${selectedId === Number(row.id || 0) ? 'background:rgba(37,99,235,0.08);' : ''}">
+      <td>${escapeHtml(formatarDataHoraChatbotMonitor(row.updatedAt || row.createdAt))}</td>
+      <td>${renderChatbotMonitorExplorerBadge(row.area || 'geral', 'blue')}</td>
+      <td>${renderChatbotMonitorExplorerBadge(row.approvalStatus || 'aprovado', row.approvalStatus === 'aprovado' ? 'green' : 'amber')}</td>
+      <td style="font-weight:700;color:#b45309;">${formatarNumeroChatbotMonitor(row.priority || 0)}</td>
+      <td title="${escapeHtml(row.question || '')}">${escapeHtml(truncateText(row.question || '—', 90))}</td>
+      <td title="${escapeHtml(row.source || '')}">${escapeHtml(truncateText(row.source || '—', 40))}</td>
+      <td title="${escapeHtml((row.tags || []).join(', '))}">${escapeHtml(truncateText((row.tags || []).join(', ') || '—', 48))}</td>
+    </tr>
+  `).join('');
+}
+
+function renderChatbotMonitorExplorerMessagesTable(tabState) {
+  const rows = Array.isArray(tabState?.rows) ? tabState.rows : [];
+  if (!rows.length) {
+    const message = tabState.loading
+      ? 'Carregando mensagens do chatbot...'
+      : (tabState.error || 'Nenhuma mensagem encontrada para os filtros atuais.');
+    return `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--inactive-color);">${escapeHtml(message)}</td></tr>`;
+  }
+  const selectedId = Number(getChatbotMonitorExplorerSelectedRow('messages', tabState)?.id || 0);
+  return rows.map((row) => `
+    <tr data-action="select-explorer-row" data-dataset="messages" data-row-id="${Number(row.id || 0)}" style="cursor:pointer;${selectedId === Number(row.id || 0) ? 'background:rgba(8,145,178,0.08);' : ''}">
+      <td>${escapeHtml(formatarDataHoraChatbotMonitor(row.createdAt))}</td>
+      <td title="${escapeHtml(row.conversationId || '')}">${escapeHtml(truncateText(row.conversationId || '—', 28))}</td>
+      <td>${renderChatbotMonitorExplorerBadge(row.role || 'sem_papel', row.role === 'assistant' ? 'cyan' : row.role === 'user' ? 'green' : 'slate')}</td>
+      <td>${escapeHtml(row.user || '—')}</td>
+      <td title="${escapeHtml(row.origin || '')}">${escapeHtml(truncateText(row.origin || '—', 28))}</td>
+      <td style="font-weight:700;color:#0e7490;">${formatarNumeroChatbotMonitor(row.conversationMessageCount || 0)}</td>
+      <td title="${escapeHtml(row.content || '')}">${escapeHtml(truncateText(row.content || '—', 120))}</td>
+    </tr>
+  `).join('');
+}
+
+function renderChatbotMonitorExplorerMemoryTable(tabState) {
+  const rows = Array.isArray(tabState?.rows) ? tabState.rows : [];
+  if (!rows.length) {
+    const message = tabState.loading
+      ? 'Carregando memória contextual...'
+      : (tabState.error || 'Nenhum item de memória encontrado para os filtros atuais.');
+    return `<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--inactive-color);">${escapeHtml(message)}</td></tr>`;
+  }
+  const selectedId = Number(getChatbotMonitorExplorerSelectedRow('memory', tabState)?.id || 0);
+  return rows.map((row) => `
+    <tr data-action="select-explorer-row" data-dataset="memory" data-row-id="${Number(row.id || 0)}" style="cursor:pointer;${selectedId === Number(row.id || 0) ? 'background:rgba(124,58,237,0.08);' : ''}">
+      <td>${escapeHtml(formatarDataHoraChatbotMonitor(row.updatedAt || row.createdAt))}</td>
+      <td>${escapeHtml(row.user || '—')}</td>
+      <td>${renderChatbotMonitorExplorerBadge(row.key || 'sem_chave', 'violet')}</td>
+      <td style="font-weight:700;color:#6d28d9;">${formatarNumeroChatbotMonitor(row.relevance || 0)}</td>
+      <td>${renderChatbotMonitorExplorerBadge(row.active ? 'ativa' : 'expirada', row.active ? 'green' : 'rose')}</td>
+      <td>${escapeHtml(formatarDataHoraChatbotMonitor(row.expiresAt))}</td>
+      <td title="${escapeHtml(formatarJsonChatbotMonitorExplorer(row.valueJson))}">${escapeHtml(truncateText(formatarJsonChatbotMonitorExplorer(row.valueJson) || '—', 110))}</td>
+    </tr>
+  `).join('');
+}
+
+function renderChatbotMonitorExplorerTable(dataset, tabState) {
+  const rowsRangeStart = tabState?.meta?.total ? ((Number(tabState.meta.page || 1) - 1) * Number(tabState.meta.pageSize || 10)) + 1 : 0;
+  const rowsRangeEnd = tabState?.meta?.total ? Math.min(Number(tabState.meta.total || 0), rowsRangeStart + Math.max(0, Number(tabState.meta.pageSize || 10) - 1)) : 0;
+  const statusLine = tabState.loading
+    ? '<span style="color:#0e7490;font-weight:700;">Atualizando registros...</span>'
+    : tabState.error
+      ? `<span style="color:#b91c1c;font-weight:700;">${escapeHtml(tabState.error)}</span>`
+      : `<span style="color:var(--inactive-color);">Mostrando ${formatarNumeroChatbotMonitor(rowsRangeStart)}-${formatarNumeroChatbotMonitor(rowsRangeEnd)} de ${formatarNumeroChatbotMonitor(tabState?.meta?.total || 0)} registro(s)</span>`;
+
+  let head = '';
+  let body = '';
+  let minWidth = '1100px';
+
+  if (dataset === 'faq') {
+    head = `
+      <tr>
+        <th style="width:170px;">Atualizada em</th>
+        <th style="width:120px;">Área</th>
+        <th style="width:120px;">Status</th>
+        <th style="width:90px;">Prioridade</th>
+        <th>Pergunta</th>
+        <th style="width:170px;">Fonte</th>
+        <th style="width:200px;">Tags</th>
+      </tr>
+    `;
+    body = renderChatbotMonitorExplorerFaqTable(tabState);
+    minWidth = '1180px';
+  } else if (dataset === 'messages') {
+    head = `
+      <tr>
+        <th style="width:170px;">Quando</th>
+        <th style="width:220px;">Conversa</th>
+        <th style="width:110px;">Papel</th>
+        <th style="width:140px;">Usuário</th>
+        <th style="width:170px;">Origem</th>
+        <th style="width:90px;">Msgs</th>
+        <th>Conteúdo</th>
+      </tr>
+    `;
+    body = renderChatbotMonitorExplorerMessagesTable(tabState);
+    minWidth = '1320px';
+  } else {
+    head = `
+      <tr>
+        <th style="width:170px;">Atualizada em</th>
+        <th style="width:170px;">Usuário</th>
+        <th style="width:180px;">Chave</th>
+        <th style="width:100px;">Relevância</th>
+        <th style="width:110px;">Estado</th>
+        <th style="width:170px;">Expira em</th>
+        <th>Valor JSON</th>
+      </tr>
+    `;
+    body = renderChatbotMonitorExplorerMemoryTable(tabState);
+    minWidth = '1280px';
+  }
+
+  return `
+    <div style="background:rgba(255,255,255,0.72);border:1px solid rgba(148,163,184,0.18);border-radius:18px;padding:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:700;color:var(--theme-color);">Registros detalhados</div>
+        <div style="font-size:12px;">${statusLine}</div>
+      </div>
+      <div class="tabela-wrapper" style="overflow:auto;border:1px solid rgba(148,163,184,0.18);border-radius:14px;">
+        <table class="tabela padrao" style="min-width:${minWidth};">
+          <thead>${head}</thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px;">
+        <div style="font-size:12px;color:var(--inactive-color);">
+          Página ${formatarNumeroChatbotMonitor(tabState?.meta?.page || 1)} de ${formatarNumeroChatbotMonitor(tabState?.meta?.totalPages || 1)}
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="content-button" data-action="explorer-page-prev" style="background:${tabState?.meta?.hasPrev ? '#334155' : '#cbd5e1'};color:${tabState?.meta?.hasPrev ? '#fff' : '#64748b'};" ${tabState?.meta?.hasPrev ? '' : 'disabled'}>
+            <i class="fa-solid fa-chevron-left"></i>
+            <span>Anterior</span>
+          </button>
+          <button type="button" class="content-button" data-action="explorer-page-next" style="background:${tabState?.meta?.hasNext ? '#334155' : '#cbd5e1'};color:${tabState?.meta?.hasNext ? '#fff' : '#64748b'};" ${tabState?.meta?.hasNext ? '' : 'disabled'}>
+            <span>Próxima</span>
+            <i class="fa-solid fa-chevron-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderChatbotMonitorExplorerFaqDetail(tabState) {
+  const row = getChatbotMonitorExplorerSelectedRow('faq', tabState);
+  if (!row) {
+    return '<div style="color:var(--inactive-color);font-size:13px;">Selecione uma FAQ para ver o conteúdo completo.</div>';
+  }
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+      ${renderChatbotMonitorExplorerBadge(row.area || 'geral', 'blue')}
+      ${renderChatbotMonitorExplorerBadge(row.approvalStatus || 'aprovado', row.approvalStatus === 'aprovado' ? 'green' : 'amber')}
+      ${renderChatbotMonitorExplorerBadge(`prioridade ${formatarNumeroChatbotMonitor(row.priority || 0)}`, 'amber')}
+    </div>
+    <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Pergunta</div>
+    <div style="margin-top:6px;font-size:14px;line-height:1.55;color:var(--theme-color);">${escapeHtml(row.question || '—')}</div>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Resposta completa</div>
+    <pre style="margin-top:6px;white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.6;color:var(--theme-color);background:rgba(15,23,42,0.04);border-radius:14px;padding:12px;border:1px solid rgba(148,163,184,0.16);">${escapeHtml(row.answer || '—')}</pre>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px;">
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Fonte</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.source || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Aprovado por</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.approvedBy || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Modelo</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.productModel || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Criada em</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.createdAt))}</div></div>
+    </div>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Normalização + tags</div>
+    <div style="margin-top:6px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.normalizedQuestion || '—')}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+      ${(row.tags || []).length ? row.tags.map((tag) => renderChatbotMonitorExplorerBadge(tag, 'violet')).join('') : '<span style="font-size:13px;color:var(--inactive-color);">Sem tags registradas.</span>'}
+    </div>
+  `;
+}
+
+function renderChatbotMonitorExplorerMessagesDetail(tabState) {
+  const row = getChatbotMonitorExplorerSelectedRow('messages', tabState);
+  if (!row) {
+    return '<div style="color:var(--inactive-color);font-size:13px;">Selecione uma mensagem para ver o contexto da conversa.</div>';
+  }
+  const metadata = formatarJsonChatbotMonitorExplorer(row.metadata);
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+      ${renderChatbotMonitorExplorerBadge(row.role || 'sem_papel', row.role === 'assistant' ? 'cyan' : row.role === 'user' ? 'green' : 'slate')}
+      ${renderChatbotMonitorExplorerBadge(row.origin || 'sem_origem', 'blue')}
+      ${renderChatbotMonitorExplorerBadge(`${formatarNumeroChatbotMonitor(row.conversationMessageCount || 0)} msg(s)`, 'amber')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Conversa</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);word-break:break-word;">${escapeHtml(row.conversationId || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Usuário</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.user || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Mensagem em</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.createdAt))}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Última atividade</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.conversationUpdatedAt))}</div></div>
+    </div>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Conteúdo completo</div>
+    <pre style="margin-top:6px;white-space:pre-wrap;font:inherit;font-size:13px;line-height:1.6;color:var(--theme-color);background:rgba(15,23,42,0.04);border-radius:14px;padding:12px;border:1px solid rgba(148,163,184,0.16);">${escapeHtml(row.content || '—')}</pre>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Metadados</div>
+    <pre style="margin-top:6px;white-space:pre-wrap;font:inherit;font-size:12px;line-height:1.55;color:var(--theme-color);background:rgba(15,23,42,0.04);border-radius:14px;padding:12px;border:1px solid rgba(148,163,184,0.16);">${escapeHtml(metadata || 'Sem metadados adicionais.')}</pre>
+  `;
+}
+
+function renderChatbotMonitorExplorerMemoryDetail(tabState) {
+  const row = getChatbotMonitorExplorerSelectedRow('memory', tabState);
+  if (!row) {
+    return '<div style="color:var(--inactive-color);font-size:13px;">Selecione um item de memória para ver o JSON salvo.</div>';
+  }
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+      ${renderChatbotMonitorExplorerBadge(row.key || 'sem_chave', 'violet')}
+      ${renderChatbotMonitorExplorerBadge(row.active ? 'ativa' : 'expirada', row.active ? 'green' : 'rose')}
+      ${renderChatbotMonitorExplorerBadge(`relevância ${formatarNumeroChatbotMonitor(row.relevance || 0)}`, 'amber')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Usuário</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(row.user || '—')}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Criada em</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.createdAt))}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Atualizada em</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.updatedAt))}</div></div>
+      <div><div style="font-size:11px;color:var(--inactive-color);text-transform:uppercase;font-weight:700;">Expira em</div><div style="margin-top:4px;font-size:13px;color:var(--theme-color);">${escapeHtml(formatarDataHoraChatbotMonitor(row.expiresAt))}</div></div>
+    </div>
+    <div style="margin-top:14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--inactive-color);">Valor JSON</div>
+    <pre style="margin-top:6px;white-space:pre-wrap;font:inherit;font-size:12px;line-height:1.55;color:var(--theme-color);background:rgba(15,23,42,0.04);border-radius:14px;padding:12px;border:1px solid rgba(148,163,184,0.16);">${escapeHtml(formatarJsonChatbotMonitorExplorer(row.valueJson) || '—')}</pre>
+  `;
+}
+
+function renderChatbotMonitorExplorerDetail(dataset, tabState) {
+  let content = '';
+  if (dataset === 'faq') content = renderChatbotMonitorExplorerFaqDetail(tabState);
+  else if (dataset === 'messages') content = renderChatbotMonitorExplorerMessagesDetail(tabState);
+  else content = renderChatbotMonitorExplorerMemoryDetail(tabState);
+
+  return `
+    <div style="background:rgba(255,255,255,0.72);border:1px solid rgba(148,163,184,0.18);border-radius:18px;padding:16px;">
+      <div style="font-size:13px;font-weight:700;color:var(--theme-color);margin-bottom:12px;">Detalhe selecionado</div>
+      ${content}
+    </div>
+  `;
+}
+
+function renderChatbotMonitorExplorer() {
+  if (!chatbotMonitorExplorerSection) return;
+
+  if (chatbotMonitorExplorerToggleBtn) {
+    chatbotMonitorExplorerToggleBtn.innerHTML = chatbotMonitorExplorerState.visible
+      ? '<i class="fa-solid fa-eye-slash"></i><span>Ocultar registros</span>'
+      : '<i class="fa-solid fa-table-list"></i><span>Explorar registros</span>';
+  }
+
+  if (!chatbotMonitorExplorerState.visible) {
+    chatbotMonitorExplorerSection.style.display = 'none';
+    return;
+  }
+
+  const dataset = chatbotMonitorExplorerState.activeTab;
+  const config = getChatbotMonitorExplorerTabConfig(dataset);
+  const tabState = getChatbotMonitorExplorerTabState(dataset);
+
+  chatbotMonitorExplorerSection.style.display = 'block';
+  chatbotMonitorExplorerSection.innerHTML = `
+    <div style="background:linear-gradient(135deg,rgba(15,23,42,0.04) 0%,rgba(255,255,255,0.9) 100%);border:1px solid rgba(148,163,184,0.18);border-radius:22px;padding:20px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:800;color:var(--theme-color);">
+            <i class="${config.icon}" style="color:${config.accent};"></i>
+            <span>Exploração detalhada do chatbot</span>
+          </div>
+          <div style="margin-top:6px;font-size:13px;line-height:1.5;color:var(--inactive-color);">Abra uma das guias abaixo para inspecionar a base aprovada, as mensagens registradas e a memória contextual com filtros, ordenação e paginação.</div>
+        </div>
+        <div style="padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.06);font-size:12px;font-weight:700;color:var(--theme-color);">
+          Guia atual: ${escapeHtml(config.label)}
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
+        ${Object.entries(CHATBOT_MONITOR_EXPLORER_CONFIG).map(([key, item]) => `
+          <button type="button" class="content-button" data-action="switch-explorer-tab" data-dataset="${key}" style="background:${chatbotMonitorExplorerState.activeTab === key ? `linear-gradient(135deg,${item.accent} 0%,#0f172a 100%)` : 'rgba(255,255,255,0.72)'};color:${chatbotMonitorExplorerState.activeTab === key ? '#fff' : 'var(--theme-color)'};border:${chatbotMonitorExplorerState.activeTab === key ? 'none' : '1px solid rgba(148,163,184,0.2)'};">
+            <i class="${item.icon}"></i>
+            <span>${escapeHtml(item.label)}</span>
+          </button>
+        `).join('')}
+      </div>
+
+      ${renderChatbotMonitorExplorerSummary(dataset, tabState)}
+      ${renderChatbotMonitorExplorerControls(dataset, tabState)}
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:16px;align-items:start;">
+        ${renderChatbotMonitorExplorerTable(dataset, tabState)}
+        ${renderChatbotMonitorExplorerDetail(dataset, tabState)}
+      </div>
+    </div>
+  `;
+}
+
+function buildChatbotMonitorExplorerQuery(dataset, tabState) {
+  const filters = tabState?.filters || {};
+  const meta = tabState?.meta || {};
+  const params = new URLSearchParams();
+  params.set('dataset', dataset);
+  params.set('page', String(meta.page || 1));
+  params.set('pageSize', String(filters.pageSize || meta.pageSize || 10));
+  params.set('sortBy', String(filters.sortBy || meta.sortBy || ''));
+  params.set('sortDir', String(filters.sortDir || meta.sortDir || 'desc'));
+  if (filters.search) params.set('search', String(filters.search));
+
+  if (dataset === 'faq') {
+    if (filters.area) params.set('area', String(filters.area));
+    if (filters.status) params.set('status', String(filters.status));
+  } else if (dataset === 'messages') {
+    if (filters.role) params.set('role', String(filters.role));
+    if (filters.origin) params.set('origin', String(filters.origin));
+    if (filters.conversationId) params.set('conversationId', String(filters.conversationId));
+    if (filters.user) params.set('user', String(filters.user));
+  } else if (dataset === 'memory') {
+    if (filters.key) params.set('key', String(filters.key));
+    if (filters.user) params.set('user', String(filters.user));
+    if (filters.activeState) params.set('activeState', String(filters.activeState));
+  }
+
+  return params.toString();
+}
+
+async function carregarDetalhesChatbotMonitorExplorer(dataset = chatbotMonitorExplorerState.activeTab, { force = false } = {}) {
+  const tabState = getChatbotMonitorExplorerTabState(dataset);
+  if (!chatbotMonitorExplorerState.visible) return null;
+  if (!force && tabState.loaded) {
+    renderChatbotMonitorExplorer();
+    return tabState;
+  }
+
+  const requestSeq = Number(tabState.requestSeq || 0) + 1;
+  tabState.requestSeq = requestSeq;
+  tabState.loading = true;
+  tabState.error = '';
+  renderChatbotMonitorExplorer();
+
+  try {
+    const BASE = typeof window.API_BASE === 'string' ? window.API_BASE : '';
+    const response = await fetch(`${BASE}/api/ai/monitor/details?${buildChatbotMonitorExplorerQuery(dataset, tabState)}`, {
+      credentials: 'include'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.error || 'Falha ao carregar exploração detalhada do chatbot.');
+    }
+    if (tabState.requestSeq !== requestSeq) return null;
+
+    tabState.rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    tabState.options = payload?.options || {};
+    tabState.summary = payload?.summary || {};
+    tabState.loaded = true;
+    tabState.loading = false;
+    tabState.error = '';
+    tabState.meta = {
+      ...(tabState.meta || {}),
+      ...(payload?.meta || {}),
+      pageSize: Number(payload?.meta?.pageSize || tabState.filters.pageSize || 10)
+    };
+
+    const selectedRowExists = tabState.rows.some((row) => Number(row?.id || 0) === Number(tabState.selectedRowId || 0));
+    tabState.selectedRowId = selectedRowExists
+      ? Number(tabState.selectedRowId || 0)
+      : Number(tabState.rows?.[0]?.id || 0);
+
+    renderChatbotMonitorExplorer();
+    return payload;
+  } catch (error) {
+    if (tabState.requestSeq !== requestSeq) return null;
+    tabState.loading = false;
+    tabState.error = error?.message || 'Falha ao carregar exploração detalhada do chatbot.';
+    if (!tabState.loaded) {
+      tabState.rows = [];
+      tabState.summary = {};
+    }
+    renderChatbotMonitorExplorer();
+    return null;
+  }
+}
+
+function atualizarFiltroChatbotMonitorExplorer(dataset, field, rawValue) {
+  const tabState = getChatbotMonitorExplorerTabState(dataset);
+  if (!tabState) return;
+  const value = field === 'pageSize'
+    ? Math.max(5, Number.parseInt(String(rawValue || ''), 10) || Number(tabState.filters.pageSize || 10))
+    : String(rawValue ?? '');
+
+  tabState.filters[field] = value;
+  tabState.meta.page = 1;
+  tabState.loaded = false;
+  tabState.selectedRowId = null;
+  carregarDetalhesChatbotMonitorExplorer(dataset, { force: true });
+}
+
+function resetFiltrosChatbotMonitorExplorer(dataset) {
+  const config = getChatbotMonitorExplorerTabConfig(dataset);
+  chatbotMonitorExplorerState.tabs[dataset] = createChatbotMonitorExplorerTabState(config.initialFilters);
+  carregarDetalhesChatbotMonitorExplorer(dataset, { force: true });
+}
+
+const aplicarInputChatbotMonitorExplorerDebounced = debounceMS((dataset, field, value) => {
+  atualizarFiltroChatbotMonitorExplorer(dataset, field, value);
+}, 320);
+
 async function carregarPainelMonitoramentoChatbot({ force = false } = {}) {
   if (!usuarioEhAdminSistema()) {
     setChatbotMonitorAviso('Acesso restrito a administradores.', 'warning');
@@ -7120,18 +7909,101 @@ async function abrirPainelMonitoramentoChatbot(event) {
   document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
   chatbotMonitorMenuLink?.classList.add('is-active');
   showMainTab('chatbotMonitorPane');
+  renderChatbotMonitorExplorer();
   await carregarPainelMonitoramentoChatbot();
+  if (chatbotMonitorExplorerState.visible) {
+    await carregarDetalhesChatbotMonitorExplorer(chatbotMonitorExplorerState.activeTab);
+  }
 }
 
 if (chatbotMonitorRefreshBtn) {
-  chatbotMonitorRefreshBtn.addEventListener('click', () => {
-    carregarPainelMonitoramentoChatbot({ force: true });
+  chatbotMonitorRefreshBtn.addEventListener('click', async () => {
+    await carregarPainelMonitoramentoChatbot({ force: true });
+    if (chatbotMonitorExplorerState.visible) {
+      await carregarDetalhesChatbotMonitorExplorer(chatbotMonitorExplorerState.activeTab, { force: true });
+    }
   });
 }
 
 if (chatbotMonitorMenuLink) {
   chatbotMonitorMenuLink.addEventListener('click', abrirPainelMonitoramentoChatbot);
 }
+
+if (chatbotMonitorExplorerToggleBtn) {
+  chatbotMonitorExplorerToggleBtn.addEventListener('click', async () => {
+    chatbotMonitorExplorerState.visible = !chatbotMonitorExplorerState.visible;
+    renderChatbotMonitorExplorer();
+    if (chatbotMonitorExplorerState.visible) {
+      await carregarDetalhesChatbotMonitorExplorer(chatbotMonitorExplorerState.activeTab);
+    }
+  });
+}
+
+if (chatbotMonitorExplorerSection) {
+  chatbotMonitorExplorerSection.addEventListener('click', async (event) => {
+    const actionEl = event.target.closest('[data-action]');
+    if (!actionEl) return;
+    const action = String(actionEl.dataset.action || '').trim();
+
+    if (action === 'switch-explorer-tab') {
+      const dataset = String(actionEl.dataset.dataset || '').trim();
+      if (!CHATBOT_MONITOR_EXPLORER_CONFIG[dataset]) return;
+      chatbotMonitorExplorerState.activeTab = dataset;
+      renderChatbotMonitorExplorer();
+      await carregarDetalhesChatbotMonitorExplorer(dataset);
+      return;
+    }
+
+    if (action === 'refresh-explorer') {
+      await carregarDetalhesChatbotMonitorExplorer(chatbotMonitorExplorerState.activeTab, { force: true });
+      return;
+    }
+
+    if (action === 'reset-explorer-filters') {
+      resetFiltrosChatbotMonitorExplorer(chatbotMonitorExplorerState.activeTab);
+      return;
+    }
+
+    if (action === 'explorer-page-prev' || action === 'explorer-page-next') {
+      const dataset = chatbotMonitorExplorerState.activeTab;
+      const tabState = getChatbotMonitorExplorerTabState(dataset);
+      const delta = action === 'explorer-page-prev' ? -1 : 1;
+      tabState.meta.page = Math.max(1, Number(tabState.meta.page || 1) + delta);
+      await carregarDetalhesChatbotMonitorExplorer(dataset, { force: true });
+      return;
+    }
+
+    if (action === 'select-explorer-row') {
+      const dataset = String(actionEl.dataset.dataset || chatbotMonitorExplorerState.activeTab).trim();
+      const rowId = Number(actionEl.dataset.rowId || 0);
+      const tabState = getChatbotMonitorExplorerTabState(dataset);
+      tabState.selectedRowId = rowId;
+      renderChatbotMonitorExplorer();
+    }
+  });
+
+  chatbotMonitorExplorerSection.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (!target.matches('[data-chatbot-monitor-filter]')) return;
+    const dataset = String(target.dataset.dataset || chatbotMonitorExplorerState.activeTab).trim();
+    const field = String(target.dataset.field || '').trim();
+    if (!dataset || !field) return;
+    atualizarFiltroChatbotMonitorExplorer(dataset, field, target.value);
+  });
+
+  chatbotMonitorExplorerSection.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.matches('[data-chatbot-monitor-text-filter]')) return;
+    const dataset = String(target.dataset.dataset || chatbotMonitorExplorerState.activeTab).trim();
+    const field = String(target.dataset.field || '').trim();
+    if (!dataset || !field) return;
+    aplicarInputChatbotMonitorExplorerDebounced(dataset, field, target.value);
+  });
+}
+
+renderChatbotMonitorExplorer();
 
 const sacAttachEtiquetaBtn = document.getElementById('sacAttachEtiquetaBtn');
 const sacAttachDeclaracaoBtn = document.getElementById('sacAttachDeclaracaoBtn');
@@ -7164,6 +8036,27 @@ const atEnvioStatus = document.getElementById('atEnvioStatus');
 const atAnexoBtn = document.getElementById('atAnexoBtn');
 const atAnexoInput = document.getElementById('atAnexoInput');
 const atAnexoPreview = document.getElementById('atAnexoPreview');
+const atWhatsappMessagesStatus = document.getElementById('atWhatsappMessagesStatus');
+const atWhatsappMessagesList = document.getElementById('atWhatsappMessagesList');
+const atWhatsappInboxStatus = document.getElementById('atWhatsappInboxStatus');
+const atWhatsappInboxList = document.getElementById('atWhatsappInboxList');
+const atWhatsappInboxCount = document.getElementById('atWhatsappInboxCount');
+const atWhatsappInboxListView = document.getElementById('atWhatsappInboxListView');
+const atWhatsappConversationView = document.getElementById('atWhatsappConversationView');
+const atWhatsappConversationBackBtn = document.getElementById('atWhatsappConversationBackBtn');
+const atWhatsappConversationTitle = document.getElementById('atWhatsappConversationTitle');
+const atWhatsappConversationSubtitle = document.getElementById('atWhatsappConversationSubtitle');
+const atWhatsappConversationCount = document.getElementById('atWhatsappConversationCount');
+const atWhatsappReplyInput = document.getElementById('atWhatsappReplyInput');
+const atWhatsappReplyBtn = document.getElementById('atWhatsappReplyBtn');
+const atWhatsappReplyStatus = document.getElementById('atWhatsappReplyStatus');
+
+let atWhatsappMessagesDebounce = null;
+let atWhatsappMessagesLastPhone = '';
+let atWhatsappMessagesPollTimer = null;
+let atWhatsappConversationRows = [];
+let atWhatsappSelectedPhone = '';
+let atWhatsappRealtimeBound = false;
 
 // -------- Gestão de anexos pendentes (antes de salvar a OS) --------
 let _atAnexosPendentes = []; // Array de File objects
@@ -7492,6 +8385,381 @@ if (atTelefoneInput) {
       if (uf && atEstadoInput && !atEstadoInput.value) atEstadoInput.value = uf;
     }
   });
+}
+
+function normalizeAtWhatsappPhone(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatAtWhatsappTimestamp(value, options) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('pt-BR', options || {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function formatAtWhatsappConversationTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+function formatAtWhatsappPhoneDisplay(value) {
+  const digits = normalizeAtWhatsappPhone(value);
+  if (!digits) return '';
+  if (digits.length === 13 && digits.startsWith('55')) {
+    return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 9)}-${digits.slice(9)}`;
+  }
+  if (digits.length === 12 && digits.startsWith('55')) {
+    return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 8)}-${digits.slice(8)}`;
+  }
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return String(value || digits);
+}
+
+function setAtWhatsappMessagesStatus(text = '', isError = false) {
+  if (!atWhatsappMessagesStatus) return;
+  atWhatsappMessagesStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atWhatsappMessagesStatus.textContent = text || '';
+}
+
+function setAtWhatsappReplyStatus(text = '', isError = false) {
+  if (!atWhatsappReplyStatus) return;
+  atWhatsappReplyStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atWhatsappReplyStatus.textContent = text || '';
+}
+
+function syncAtWhatsappReplyBoxState() {
+  const hasConversation = Boolean(atWhatsappSelectedPhone);
+  const hasText = Boolean(String(atWhatsappReplyInput?.value || '').trim());
+
+  if (atWhatsappReplyInput) {
+    atWhatsappReplyInput.disabled = !hasConversation;
+    atWhatsappReplyInput.placeholder = hasConversation
+      ? 'Digite a resposta para este contato...'
+      : 'Abra uma conversa para responder.';
+  }
+
+  if (atWhatsappReplyBtn) {
+    atWhatsappReplyBtn.disabled = !hasConversation || !hasText;
+    atWhatsappReplyBtn.style.opacity = (!hasConversation || !hasText) ? '.6' : '1';
+    atWhatsappReplyBtn.style.cursor = (!hasConversation || !hasText) ? 'not-allowed' : 'pointer';
+  }
+
+  if (!hasConversation) {
+    setAtWhatsappReplyStatus('Abra uma conversa para responder.', false);
+  } else if (!hasText) {
+    setAtWhatsappReplyStatus('Campo de resposta pronto para integrar o envio.', false);
+  } else {
+    setAtWhatsappReplyStatus('Resposta pronta para envio.', false);
+  }
+}
+
+function setAtWhatsappInboxStatus(text = '', isError = false) {
+  if (!atWhatsappInboxStatus) return;
+  atWhatsappInboxStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
+  atWhatsappInboxStatus.textContent = text || '';
+}
+
+function syncAtWhatsappInboxCount(count = 0) {
+  if (!atWhatsappInboxCount) return;
+  atWhatsappInboxCount.textContent = String(Number.isFinite(Number(count)) ? count : 0);
+}
+
+function syncAtWhatsappConversationCount(count = 0) {
+  if (!atWhatsappConversationCount) return;
+  atWhatsappConversationCount.textContent = String(Number.isFinite(Number(count)) ? count : 0);
+}
+
+function getAtWhatsappConversationMeta(phone) {
+  const phoneDigits = normalizeAtWhatsappPhone(phone);
+  return atWhatsappConversationRows.find((row) => normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone) === phoneDigits) || null;
+}
+
+function showAtWhatsappInboxListView() {
+  if (atWhatsappInboxListView) atWhatsappInboxListView.style.display = 'block';
+  if (atWhatsappConversationView) atWhatsappConversationView.style.display = 'none';
+  syncAtWhatsappReplyBoxState();
+}
+
+function showAtWhatsappConversationView(meta = null, messageCount = null) {
+  if (atWhatsappInboxListView) atWhatsappInboxListView.style.display = 'none';
+  if (atWhatsappConversationView) atWhatsappConversationView.style.display = 'flex';
+
+  const profileName = String(meta?.profile_name || '').trim()
+    || formatAtWhatsappPhoneDisplay(meta?.from_phone_digits || meta?.from_phone)
+    || 'Conversa';
+  const subtitle = formatAtWhatsappPhoneDisplay(meta?.from_phone_digits || meta?.from_phone) || 'Sem número';
+
+  if (atWhatsappConversationTitle) atWhatsappConversationTitle.textContent = profileName;
+  if (atWhatsappConversationSubtitle) atWhatsappConversationSubtitle.textContent = subtitle;
+  syncAtWhatsappConversationCount(messageCount ?? Number(meta?.total_messages || 0));
+  syncAtWhatsappReplyBoxState();
+}
+
+function renderAtWhatsappConversationRows(rows = []) {
+  if (!atWhatsappInboxList) return;
+  syncAtWhatsappInboxCount(Array.isArray(rows) ? rows.length : 0);
+
+  if (!Array.isArray(rows) || !rows.length) {
+    atWhatsappInboxList.innerHTML = '<div style="padding:12px;border:1px dashed rgba(255,255,255,.12);border-radius:12px;color:var(--inactive-color);font-size:12px;">Nenhum número enviou mensagem ao webhook ainda.</div>';
+    return;
+  }
+
+  atWhatsappInboxList.innerHTML = rows.map((row) => {
+    const phoneDigits = normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone);
+    const profileName = escapeAtHtml(String(row.profile_name || '').trim() || formatAtWhatsappPhoneDisplay(phoneDigits) || 'Contato');
+    const phoneLabel = escapeAtHtml(formatAtWhatsappPhoneDisplay(phoneDigits) || String(row.from_phone || '').trim() || 'Sem número');
+    const previewText = escapeAtHtml(String(row.last_message_text || '').trim() || `[mensagem do tipo ${String(row.last_message_type || 'message').trim() || 'message'}]`);
+    const when = escapeAtHtml(formatAtWhatsappConversationTime(row.last_received_at));
+    const total = Number(row.total_messages) || 0;
+    const activeClass = phoneDigits && phoneDigits === atWhatsappSelectedPhone ? ' active' : '';
+    return `
+      <button type="button" class="at-wa-conversation-item${activeClass}" data-phone="${escapeAtHtml(phoneDigits)}">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px;">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${profileName}</div>
+            <div style="font-size:11px;color:var(--inactive-color);margin-top:2px;">${phoneLabel}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+            <span style="font-size:11px;color:var(--inactive-color);">${when}</span>
+            <span style="font-size:10px;color:#d1fae5;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.22);padding:1px 7px;border-radius:999px;">${total}</span>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewText}</div>
+      </button>`;
+  }).join('');
+
+  atWhatsappInboxList.querySelectorAll('[data-phone]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selecionarAtWhatsappConversation(btn.getAttribute('data-phone') || '', { syncField: true, silent: false });
+    });
+  });
+}
+
+function renderAtWhatsappMessages(rows = []) {
+  if (!atWhatsappMessagesList) return;
+  if (!Array.isArray(rows) || !rows.length) {
+    atWhatsappMessagesList.innerHTML = '<div style="padding:10px 12px;border:1px dashed rgba(255,255,255,.12);border-radius:10px;color:var(--inactive-color);font-size:12px;">Nenhuma mensagem recebida para esta conversa ainda.</div>';
+    return;
+  }
+
+  atWhatsappMessagesList.innerHTML = rows.map((row) => {
+    const profileName = escapeAtHtml(String(row.profile_name || '').trim() || 'Contato');
+    const messageType = escapeAtHtml(String(row.message_type || '').trim() || 'message');
+    const text = escapeAtHtml(String(row.message_text || '').trim() || `[mensagem do tipo ${messageType}]`);
+    const when = escapeAtHtml(formatAtWhatsappTimestamp(row.received_at));
+    const fromPhone = escapeAtHtml(formatAtWhatsappPhoneDisplay(row.from_phone || row.from_phone_digits) || String(row.from_phone || '').trim() || '');
+    return `
+      <div style="padding:10px 12px;border:1px solid rgba(16,185,129,.18);border-radius:10px;background:rgba(16,185,129,.05);">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:12px;color:#d1fae5;">${profileName}</strong>
+          <span style="font-size:11px;color:var(--inactive-color);">${when}</span>
+        </div>
+        <div style="font-size:11px;color:var(--inactive-color);margin-bottom:6px;">${fromPhone || 'sem número'} · ${messageType}</div>
+        <div style="font-size:13px;color:var(--content-title-color);white-space:pre-wrap;">${text}</div>
+      </div>`;
+  }).join('');
+}
+
+function selecionarAtWhatsappConversation(phone, { syncField = true, silent = false } = {}) {
+  const phoneDigits = normalizeAtWhatsappPhone(phone);
+  if (!phoneDigits) return;
+  const meta = getAtWhatsappConversationMeta(phoneDigits);
+  atWhatsappSelectedPhone = phoneDigits;
+  atWhatsappMessagesLastPhone = phoneDigits;
+
+  if (syncField && atTelefoneInput) {
+    atTelefoneInput.value = formatAtWhatsappPhoneDisplay(phoneDigits);
+  }
+
+  renderAtWhatsappConversationRows(atWhatsappConversationRows);
+  showAtWhatsappConversationView(meta);
+  carregarAtWhatsappMessages({ phone: phoneDigits, silent });
+}
+
+async function carregarAtWhatsappMessages({ phone = null, silent = false } = {}) {
+  const phoneDigits = normalizeAtWhatsappPhone(phone ?? atTelefoneInput?.value);
+  atWhatsappMessagesLastPhone = phoneDigits;
+  if (phoneDigits) atWhatsappSelectedPhone = phoneDigits;
+  if (atWhatsappConversationRows.length) renderAtWhatsappConversationRows(atWhatsappConversationRows);
+
+  if (!silent) setAtWhatsappMessagesStatus('Consultando mensagens recebidas...', false);
+
+  try {
+    const url = phoneDigits
+      ? `/api/sac/whatsapp/messages?phone=${encodeURIComponent(phoneDigits)}`
+      : '/api/sac/whatsapp/messages';
+    const resp = await fetch(url, { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || 'Falha ao consultar mensagens do WhatsApp.');
+    }
+    const rows = Array.isArray(data.messages) ? data.messages : [];
+    renderAtWhatsappMessages(rows);
+    if (phoneDigits) {
+      showAtWhatsappConversationView(getAtWhatsappConversationMeta(phoneDigits), rows.length);
+      setAtWhatsappMessagesStatus(
+        rows.length
+          ? `Exibindo ${rows.length} mensagem(ns) de ${formatAtWhatsappPhoneDisplay(phoneDigits) || phoneDigits}.`
+          : `Nenhuma mensagem recebida ainda para ${formatAtWhatsappPhoneDisplay(phoneDigits) || phoneDigits}.`,
+        false
+      );
+      return;
+    }
+    setAtWhatsappMessagesStatus(
+      rows.length
+        ? `Exibindo as ${rows.length} mensagem(ns) mais recentes recebidas no webhook.`
+        : 'Nenhuma mensagem recebida no webhook ainda.',
+      false
+    );
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao carregar mensagens', err);
+    renderAtWhatsappMessages([]);
+    setAtWhatsappMessagesStatus(err?.message || 'Erro ao consultar mensagens do WhatsApp.', true);
+  }
+}
+
+async function carregarAtWhatsappConversations({ silent = false } = {}) {
+  if (!silent) setAtWhatsappInboxStatus('Consultando conversas recebidas...', false);
+
+  try {
+    const resp = await fetch('/api/sac/whatsapp/conversations', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || 'Falha ao consultar conversas do WhatsApp.');
+    }
+
+    const rows = Array.isArray(data.conversations) ? data.conversations : [];
+    atWhatsappConversationRows = rows;
+    renderAtWhatsappConversationRows(rows);
+
+    if (!rows.length) {
+      atWhatsappSelectedPhone = '';
+      atWhatsappMessagesLastPhone = '';
+      renderAtWhatsappMessages([]);
+      setAtWhatsappInboxStatus('Nenhuma conversa recebida no webhook ainda.', false);
+      setAtWhatsappMessagesStatus('Aguardando uma primeira conversa no WhatsApp.', false);
+      showAtWhatsappInboxListView();
+      return;
+    }
+
+    setAtWhatsappInboxStatus(`${rows.length} conversa(s) encontrada(s).`, false);
+
+    if (!atWhatsappSelectedPhone) {
+      showAtWhatsappInboxListView();
+      return;
+    }
+
+    const selectedExists = rows.some((row) => normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone) === atWhatsappSelectedPhone);
+    if (!selectedExists) {
+      atWhatsappSelectedPhone = '';
+      atWhatsappMessagesLastPhone = '';
+      renderAtWhatsappMessages([]);
+      showAtWhatsappInboxListView();
+      setAtWhatsappMessagesStatus('A conversa selecionada não está mais disponível.', false);
+      return;
+    }
+
+    if (atWhatsappConversationView && atWhatsappConversationView.style.display !== 'none') {
+      showAtWhatsappConversationView(getAtWhatsappConversationMeta(atWhatsappSelectedPhone));
+      carregarAtWhatsappMessages({ phone: atWhatsappSelectedPhone, silent: true });
+    }
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao carregar conversas', err);
+    atWhatsappConversationRows = [];
+    renderAtWhatsappConversationRows([]);
+    setAtWhatsappInboxStatus(err?.message || 'Erro ao consultar conversas do WhatsApp.', true);
+  }
+}
+
+function bindAtWhatsappRealtimeUpdates() {
+  if (atWhatsappRealtimeBound || !window.EventSource || !atWhatsappInboxList) return;
+  atWhatsappRealtimeBound = true;
+
+  try {
+    if (!window.__appGlobalSse) {
+      window.__appGlobalSse = new EventSource('/api/produtos/stream');
+    }
+
+    window.__appGlobalSse.addEventListener('message', (event) => {
+      let payload = null;
+      try {
+        payload = JSON.parse(event.data || '{}');
+      } catch (_) {
+        return;
+      }
+
+      if (!payload || payload.type !== 'whatsapp_message_received') return;
+
+      const incomingPhones = Array.isArray(payload.phones)
+        ? payload.phones.map((item) => normalizeAtWhatsappPhone(item)).filter(Boolean)
+        : [];
+
+      carregarAtWhatsappConversations({ silent: true });
+
+      if (atWhatsappSelectedPhone && (!incomingPhones.length || incomingPhones.includes(atWhatsappSelectedPhone))) {
+        carregarAtWhatsappMessages({ phone: atWhatsappSelectedPhone, silent: true });
+      }
+    });
+  } catch (err) {
+    atWhatsappRealtimeBound = false;
+    console.warn('[SAC/WhatsApp] falha ao conectar SSE em tempo real', err);
+  }
+}
+
+if (atWhatsappConversationBackBtn) {
+  atWhatsappConversationBackBtn.addEventListener('click', () => {
+    showAtWhatsappInboxListView();
+  });
+}
+
+if (atWhatsappReplyInput) {
+  atWhatsappReplyInput.addEventListener('input', syncAtWhatsappReplyBoxState);
+}
+
+if (atWhatsappReplyBtn) {
+  atWhatsappReplyBtn.addEventListener('click', () => {
+    syncAtWhatsappReplyBoxState();
+    if (!atWhatsappSelectedPhone || !String(atWhatsappReplyInput?.value || '').trim()) return;
+    setAtWhatsappReplyStatus('O campo de resposta já está pronto. No próximo passo eu ligo este botão ao envio real pelo WhatsApp.', false);
+  });
+}
+
+if (atWhatsappInboxList) {
+  renderAtWhatsappConversationRows([]);
+  showAtWhatsappInboxListView();
+  bindAtWhatsappRealtimeUpdates();
+  carregarAtWhatsappConversations({ silent: true });
+}
+
+if (atWhatsappMessagesList) {
+  renderAtWhatsappMessages([]);
+}
+
+syncAtWhatsappReplyBoxState();
+
+if (!atWhatsappMessagesPollTimer && (atWhatsappMessagesList || atWhatsappInboxList)) {
+  atWhatsappMessagesPollTimer = setInterval(() => {
+    if (atWhatsappInboxList) carregarAtWhatsappConversations({ silent: true });
+  }, 15000);
 }
 // ---------------------------------------------------
 const atSerieBuscaInput = document.getElementById('atSerieBusca');
@@ -10185,6 +11453,11 @@ if (atEnviarBtn) {
       const rapidoAcaoReset   = document.getElementById('atRapidoAcao');   if (rapidoAcaoReset)   rapidoAcaoReset.value   = '';
       const hist = document.getElementById('atDescricaoHistorico');
       if (hist) hist.innerHTML = '';
+      atWhatsappMessagesLastPhone = '';
+      atWhatsappSelectedPhone = '';
+      setAtWhatsappMessagesStatus('Consultando mensagens recebidas...', false);
+      renderAtWhatsappMessages([]);
+      carregarAtWhatsappConversations({ silent: true });
       atIdExistente = null;
       _atAnexosPendentes = [];
       _atRenderAnexoChips();
@@ -10293,6 +11566,8 @@ if (atSerieModalTbody) {
       if (atDescricaoInput) atDescricaoInput.value = ''; // deixa vazio para nova inserção
       const motEl = document.getElementById('atMotivoSolicitacao'); if (motEl) motEl.value = '';
       const iniEl = document.getElementById('atAtendimentoInicial'); if (iniEl) iniEl.value = '';
+      showAtWhatsappInboxListView();
+      carregarAtWhatsappConversations({ silent: true });
       aplicarVisibilidadeAtCampos();
       carregarHistoricoReclamacao(rowData.ordem_producao || '', rowData.modelo || '');
       setAtSerieBuscaStatus('OS existente carregada. Preencha a nova reclamação e envie.', false);
@@ -14426,13 +15701,6 @@ function escapeHtml(str) {
     '"': '&quot;',
     '\'': '&#39;'
   }[c]));
-}
-
-function truncateText(str, maxLength = 25) {
-  const texto = String(str ?? '');
-  if (texto.length <= maxLength) return texto;
-  if (maxLength <= 3) return texto.slice(0, maxLength);
-  return `${texto.slice(0, maxLength - 3)}...`;
 }
 
 function getSelectedOrigemLocal() {
@@ -33129,20 +34397,29 @@ function atualizarDescricaoKeywordsHidden() {
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
   if (!tagsContainer || !hidden) return '';
-  // Comentário: formato agora é palavra-quantidade;palavra2-quantidade2;
+  // Comentário: hidden guarda apenas as descrições separadas por ; (quantidade fica no data-quantidade do DOM)
   const keywords = Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
-    .map(tag => {
-      const palavra = tag.getAttribute('data-keyword') || '';
-      const quantidade = tag.getAttribute('data-quantidade') || '1';
-      return palavra ? `${palavra}-${quantidade}` : '';
-    })
+    .map(tag => (tag.getAttribute('data-keyword') || '').trim())
     .filter(Boolean);
   hidden.value = keywords.join(';');
   return hidden.value;
 }
 
-async function adicionarDescricaoKeyword(valor) {
+// Retorna array de {descricao, quantidade} lendo direto do DOM
+function obterItensSemCadastroDoDom() {
+  const tagsContainer = document.getElementById('catalogoDescricaoTags');
+  if (!tagsContainer) return [];
+  return Array.from(tagsContainer.querySelectorAll('[data-keyword]'))
+    .map(row => ({
+      descricao: (row.getAttribute('data-keyword') || '').trim(),
+      quantidade: parseInt(row.getAttribute('data-quantidade'), 10) || 1
+    }))
+    .filter(it => it.descricao);
+}
+
+async function adicionarDescricaoKeyword(valor, quantidadeParam) {
   const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const inputQtd = document.getElementById('catalogoDescricaoQtd');
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
   if (!input || !tagsContainer || !hidden) return;
@@ -33167,61 +34444,47 @@ async function adicionarDescricaoKeyword(valor) {
     return;
   }
 
-  const quantidadeStr = await abrirDialogoEntradaCatalogo({
-    titulo: 'Quantidade do item',
-    label: `Digite a quantidade para "${keyword}"`,
-    placeholder: 'Ex.: 1',
-    valorInicial: '1',
-    tipo: 'number'
-  });
-  if (quantidadeStr === null) {
-    // Cancelou
-    input.value = '';
-    refocarCampoDescricao();
-    return;
-  }
-  
-  const quantidade = parseInt(quantidadeStr, 10);
+  const quantidade = parseInt(quantidadeParam, 10);
   if (!Number.isFinite(quantidade) || quantidade < 1) {
     alert('Quantidade inválida. Deve ser um número maior que zero.');
-    input.value = '';
-    refocarCampoDescricao();
+    if (inputQtd) inputQtd.focus();
     return;
   }
 
-  const tag = document.createElement('span');
-  tag.setAttribute('data-keyword', keyword);
-  tag.setAttribute('data-quantidade', String(quantidade));
-  tag.style.display = 'inline-flex';
-  tag.style.alignItems = 'center';
-  tag.style.gap = '6px';
-  tag.style.padding = '4px 8px';
-  tag.style.background = '#eff6ff';
-  tag.style.border = '1px solid #bfdbfe';
-  tag.style.borderRadius = '999px';
-  tag.style.fontSize = '12px';
-  tag.style.fontWeight = '600';
-  tag.style.color = '#1e40af';
+  // Cria uma LINHA visual (row) com descrição preenchida, quantidade e botão de remover
+  const row = document.createElement('div');
+  row.setAttribute('data-keyword', keyword);
+  row.setAttribute('data-quantidade', String(quantidade));
+  row.style.display = 'flex';
+  row.style.gap = '6px';
+  row.style.alignItems = 'center';
 
-  const texto = document.createElement('span');
-  texto.textContent = `${keyword} (${quantidade})`;
+  const inputDesc = document.createElement('input');
+  inputDesc.type = 'text';
+  inputDesc.value = keyword;
+  inputDesc.readOnly = true;
+  inputDesc.style.cssText = 'flex:1;padding:8px 10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;background:#eff6ff;font-weight:500;color:#1e40af;cursor:default;';
 
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.textContent = '×';
-  btn.setAttribute('aria-label', `Remover ${keyword}`);
-  btn.style.border = 'none';
-  btn.style.background = 'transparent';
-  btn.style.cursor = 'pointer';
-  btn.style.fontSize = '14px';
-  btn.style.lineHeight = '1';
-  btn.style.color = '#1e3a8a';
+  const inputQtdRow = document.createElement('input');
+  inputQtdRow.type = 'number';
+  inputQtdRow.value = String(quantidade);
+  inputQtdRow.min = '1';
+  inputQtdRow.readOnly = true;
+  inputQtdRow.style.cssText = 'width:80px;padding:8px 10px;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;background:#eff6ff;font-weight:600;text-align:center;color:#1e40af;cursor:default;';
 
-  tag.appendChild(texto);
-  tag.appendChild(btn);
-  tagsContainer.appendChild(tag);
+  const btnRemover = document.createElement('button');
+  btnRemover.type = 'button';
+  btnRemover.title = 'Remover item';
+  btnRemover.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+  btnRemover.style.cssText = 'width:36px;height:36px;border:none;background:#fee2e2;color:#dc2626;border-radius:6px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;';
+
+  row.appendChild(inputDesc);
+  row.appendChild(inputQtdRow);
+  row.appendChild(btnRemover);
+  tagsContainer.appendChild(row);
 
   input.value = '';
+  if (inputQtd) inputQtd.value = '1';
   atualizarDescricaoKeywordsHidden();
   refocarCampoDescricao();
 }
@@ -33230,31 +34493,58 @@ function limparDescricaoKeywords() {
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   const hidden = document.getElementById('catalogoDescricaoKeywords');
   const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const inputQtd = document.getElementById('catalogoDescricaoQtd');
   if (tagsContainer) tagsContainer.innerHTML = '';
   if (hidden) hidden.value = '';
   if (input) input.value = '';
+  if (inputQtd) inputQtd.value = '1';
 }
 
 function inicializarDescricaoKeywords() {
   const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  const inputQtd = document.getElementById('catalogoDescricaoQtd');
+  const addBtn = document.getElementById('catalogoDescricaoAddBtn');
   const tagsContainer = document.getElementById('catalogoDescricaoTags');
   if (!input || !tagsContainer || input.dataset.keywordsInit === '1') return;
 
   input.dataset.keywordsInit = '1';
 
+  function adicionarItemAtual() {
+    const qtd = inputQtd ? parseInt(inputQtd.value, 10) || 1 : 1;
+    void adicionarDescricaoKeyword(input.value, qtd);
+  }
+
+  // Enter no campo de descrição adiciona o item
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    void adicionarDescricaoKeyword(input.value);
+    adicionarItemAtual();
   });
+
+  // Enter no campo de quantidade também adiciona
+  if (inputQtd) {
+    inputQtd.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      adicionarItemAtual();
+    });
+  }
+
+  // Botão "+" adiciona o item
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      adicionarItemAtual();
+    });
+  }
 
   tagsContainer.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.tagName !== 'BUTTON') return;
-    const tag = target.closest('[data-keyword]');
-    if (tag) {
-      tag.remove();
+    const btn = target.closest('button');
+    if (!btn) return;
+    const row = btn.closest('[data-keyword]');
+    if (row) {
+      row.remove();
       atualizarDescricaoKeywordsHidden();
     }
   });
@@ -33264,19 +34554,20 @@ function inicializarDescricaoKeywords() {
     document.addEventListener('keydown', async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
-      if (target.id !== 'catalogoDescricaoNaoCadastrado') return;
+      if (target.id !== 'catalogoDescricaoNaoCadastrado' && target.id !== 'catalogoDescricaoQtd') return;
       if (event.key !== 'Enter') return;
       if (event.isComposing) return;
 
       event.preventDefault();
       event.stopPropagation();
 
-      if (target.dataset.keywordDialogOpen === '1') return;
-      target.dataset.keywordDialogOpen = '1';
+      if (input.dataset.keywordDialogOpen === '1') return;
+      input.dataset.keywordDialogOpen = '1';
       try {
-        await adicionarDescricaoKeyword(target.value);
+        const qtd = inputQtd ? parseInt(inputQtd.value, 10) || 1 : 1;
+        await adicionarDescricaoKeyword(input.value, qtd);
       } finally {
-        target.dataset.keywordDialogOpen = '0';
+        input.dataset.keywordDialogOpen = '0';
       }
     }, true);
   }
@@ -34989,22 +36280,14 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   const selectCategoriaGlobal = document.getElementById('catalogoCategoriaCompraGlobal');
   const selectEtapas = document.getElementById('catalogoEtapasPedido');
   
-  // Usa as keywords do campo hidden (separadas por ;) como descrição
-  const descricao = hiddenKeywords ? hiddenKeywords.value.trim() : (inputDescricao ? inputDescricao.value.trim() : '');
+  // Lê itens direto do DOM (descrição + quantidade separados)
+  const itensSemCadastro = obterItensSemCadastroDoDom();
+  const descricao = itensSemCadastro.map(it => it.descricao).join(';');
   const departamento = selectDeptGlobal ? selectDeptGlobal.value.trim() : '';
   const centroCusto = selectCCGlobal ? selectCCGlobal.value.trim() : '';
   let categoriaCompra = selectCategoriaGlobal ? selectCategoriaGlobal.value.trim() : '';
   const etapas = selectEtapas ? selectEtapas.value : '';
 
-  const itensSemCadastro = String(descricao || '')
-    .split(';')
-    .map((token) => String(token || '').trim())
-    .filter(Boolean)
-    .map((token) => ({
-      descricao: token,
-      quantidade: 1
-    }))
-    .filter((itemToken) => itemToken.descricao);
   const quantidade = itensSemCadastro[0]?.quantidade || 1;
   
   // Aplica categoria padrão se não selecionada (campo removido)
@@ -43974,9 +45257,12 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
         }).join('');
       }
       
-      // Estilo visual diferente se o kanban estiver desabilitado (sem itens em kanbans clicáveis)
+      // Em modo claro, nao reduzir opacidade das colunas vazias para evitar efeito "lavado".
       const podeSerClicavel = statusComClique.includes(status);
-      const estiloDesabilitado = (podeSerClicavel && !temItens) ? 'opacity:0.6;' : '';
+      const temaClaroAtivo = document.documentElement.classList.contains('light-mode');
+      const estiloDesabilitado = (podeSerClicavel && !temItens)
+        ? (temaClaroAtivo ? '' : 'opacity:0.75;')
+        : '';
       
       // Botão "Abrir Tudo" para kanbans clicáveis (exceto Requisições)
       const botaoAbrirTudo = (ehClicavel && status !== 'aguardando compra preparação' && status !== 'aguardando cotação') ? `

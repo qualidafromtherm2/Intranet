@@ -4046,6 +4046,499 @@ function calcularNivelConhecimentoChatbot(metricas = {}) {
   };
 }
 
+function parseChatbotMonitorInt(value, fallback, { min = 1, max = 200 } = {}) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function parseChatbotMonitorSortDir(value, fallback = 'desc') {
+  const normalized = String(value || fallback).trim().toLowerCase();
+  return normalized === 'asc' ? 'asc' : 'desc';
+}
+
+function buildChatbotMonitorPagination(totalRows, requestedPage, pageSize) {
+  const safeTotal = Math.max(0, Number(totalRows || 0));
+  const totalPages = Math.max(1, Math.ceil(safeTotal / pageSize));
+  const page = Math.min(Math.max(1, requestedPage), totalPages);
+  const offset = (page - 1) * pageSize;
+  return {
+    total: safeTotal,
+    page,
+    pageSize,
+    totalPages,
+    hasPrev: page > 1,
+    hasNext: page < totalPages,
+    offset
+  };
+}
+
+async function carregarDetalheFaqMonitorChatbot({
+  page = 1,
+  pageSize = 20,
+  search = '',
+  area = '',
+  status = '',
+  sortBy = 'updated_at',
+  sortDir = 'desc'
+} = {}) {
+  const sortMap = {
+    updated_at: 'f.updated_at',
+    created_at: 'f.created_at',
+    prioridade: 'COALESCE(f.prioridade, 0)',
+    area: "COALESCE(NULLIF(f.area, ''), 'geral')",
+    pergunta: "COALESCE(f.pergunta, '')"
+  };
+  const safeSortBy = sortMap[sortBy] ? sortBy : 'updated_at';
+  const safeSortDir = parseChatbotMonitorSortDir(sortDir);
+
+  const filters = [];
+  const values = [];
+  if (search) {
+    values.push(`%${search}%`);
+    const token = `$${values.length}`;
+    filters.push(`(
+      COALESCE(f.pergunta, '') ILIKE ${token}
+      OR COALESCE(f.resposta, '') ILIKE ${token}
+      OR COALESCE(f.area, '') ILIKE ${token}
+      OR COALESCE(f.produto_modelo, '') ILIKE ${token}
+      OR COALESCE(f.fonte, '') ILIKE ${token}
+      OR COALESCE(f.aprovado_por, '') ILIKE ${token}
+      OR array_to_string(COALESCE(f.tags, ARRAY[]::text[]), ' ') ILIKE ${token}
+    )`);
+  }
+  if (area) {
+    values.push(area);
+    filters.push(`COALESCE(NULLIF(f.area, ''), 'geral') = $${values.length}`);
+  }
+  if (status) {
+    values.push(status);
+    filters.push(`COALESCE(NULLIF(f.status_aprovacao, ''), 'aprovado') = $${values.length}`);
+  }
+
+  const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const totalResult = await dbPool.query(
+    `SELECT COUNT(*)::int AS total FROM "Chatbot".faq_aprovadas f ${whereSql}`,
+    values
+  );
+  const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
+
+  const dataResult = await dbPool.query(
+    `
+    SELECT
+      f.id,
+      f.pergunta,
+      f.pergunta_normalizada,
+      f.resposta,
+      COALESCE(NULLIF(f.area, ''), 'geral') AS area,
+      f.produto_modelo,
+      f.tags,
+      COALESCE(f.prioridade, 0) AS prioridade,
+      COALESCE(NULLIF(f.status_aprovacao, ''), 'aprovado') AS status_aprovacao,
+      f.fonte,
+      f.aprovado_por,
+      f.created_at,
+      f.updated_at
+    FROM "Chatbot".faq_aprovadas f
+    ${whereSql}
+    ORDER BY ${sortMap[safeSortBy]} ${safeSortDir.toUpperCase()}, f.id DESC
+    LIMIT $${values.length + 1}
+    OFFSET $${values.length + 2}
+    `,
+    [...values, pagination.pageSize, pagination.offset]
+  );
+
+  const summaryResult = await dbPool.query(
+    `
+    SELECT
+      COUNT(*)::int AS total_rows,
+      COUNT(DISTINCT COALESCE(NULLIF(f.area, ''), 'geral'))::int AS area_count,
+      COALESCE(ROUND(AVG(COALESCE(f.prioridade, 0))::numeric, 1), 0) AS average_priority,
+      COUNT(*) FILTER (WHERE COALESCE(array_length(f.tags, 1), 0) > 0)::int AS tagged_count
+    FROM "Chatbot".faq_aprovadas f
+    ${whereSql}
+    `,
+    values
+  );
+
+  const [areasResult, statusResult] = await Promise.all([
+    dbPool.query(`
+      SELECT
+        COALESCE(NULLIF(area, ''), 'geral') AS value,
+        COUNT(*)::int AS total
+      FROM "Chatbot".faq_aprovadas
+      GROUP BY 1
+      ORDER BY total DESC, value ASC
+      LIMIT 30
+    `),
+    dbPool.query(`
+      SELECT
+        COALESCE(NULLIF(status_aprovacao, ''), 'aprovado') AS value,
+        COUNT(*)::int AS total
+      FROM "Chatbot".faq_aprovadas
+      GROUP BY 1
+      ORDER BY total DESC, value ASC
+      LIMIT 20
+    `)
+  ]);
+
+  const summary = summaryResult.rows?.[0] || {};
+  return {
+    meta: {
+      ...pagination,
+      sortBy: safeSortBy,
+      sortDir: safeSortDir,
+      search
+    },
+    summary: {
+      totalRows: Number(summary.total_rows || 0),
+      areaCount: Number(summary.area_count || 0),
+      averagePriority: Number(summary.average_priority || 0),
+      taggedCount: Number(summary.tagged_count || 0)
+    },
+    options: {
+      areas: (areasResult.rows || []).map((row) => ({
+        value: String(row.value || 'geral'),
+        label: String(row.value || 'geral'),
+        total: Number(row.total || 0)
+      })),
+      statuses: (statusResult.rows || []).map((row) => ({
+        value: String(row.value || 'aprovado'),
+        label: String(row.value || 'aprovado'),
+        total: Number(row.total || 0)
+      }))
+    },
+    rows: (dataResult.rows || []).map((row) => ({
+      id: Number(row.id || 0),
+      question: String(row.pergunta || '').trim(),
+      normalizedQuestion: String(row.pergunta_normalizada || '').trim(),
+      answer: String(row.resposta || '').trim(),
+      area: String(row.area || 'geral').trim() || 'geral',
+      productModel: String(row.produto_modelo || '').trim() || null,
+      tags: Array.isArray(row.tags) ? row.tags.map((item) => String(item || '').trim()).filter(Boolean) : [],
+      priority: Number(row.prioridade || 0),
+      approvalStatus: String(row.status_aprovacao || 'aprovado').trim() || 'aprovado',
+      source: String(row.fonte || '').trim() || null,
+      approvedBy: String(row.aprovado_por || '').trim() || null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }))
+  };
+}
+
+async function carregarDetalheMensagensMonitorChatbot({
+  page = 1,
+  pageSize = 20,
+  search = '',
+  role = '',
+  origin = '',
+  conversationId = '',
+  user = '',
+  sortBy = 'criado_em',
+  sortDir = 'desc'
+} = {}) {
+  const sortMap = {
+    criado_em: 'm.criado_em',
+    conversation_id: 'm.conversation_id',
+    usuario: "COALESCE(NULLIF(m.usuario, ''), '')",
+    papel: "COALESCE(NULLIF(m.papel, ''), 'sem_papel')",
+    mensagens_na_conversa: 'COALESCE(cs.mensagens_na_conversa, 0)',
+    ultima_mensagem_em: 'COALESCE(cs.ultima_mensagem_em, m.criado_em)'
+  };
+  const safeSortBy = sortMap[sortBy] ? sortBy : 'criado_em';
+  const safeSortDir = parseChatbotMonitorSortDir(sortDir);
+
+  const filters = [];
+  const values = [];
+  if (search) {
+    values.push(`%${search}%`);
+    const token = `$${values.length}`;
+    filters.push(`(
+      COALESCE(m.conteudo, '') ILIKE ${token}
+      OR COALESCE(m.usuario, '') ILIKE ${token}
+      OR COALESCE(m.conversation_id, '') ILIKE ${token}
+      OR COALESCE(m.origem, '') ILIKE ${token}
+      OR COALESCE(m.metadados::text, '') ILIKE ${token}
+    )`);
+  }
+  if (role) {
+    values.push(role);
+    filters.push(`COALESCE(NULLIF(m.papel, ''), 'sem_papel') = $${values.length}`);
+  }
+  if (origin) {
+    values.push(origin);
+    filters.push(`COALESCE(NULLIF(m.origem, ''), 'sem_origem') = $${values.length}`);
+  }
+  if (conversationId) {
+    values.push(`%${conversationId}%`);
+    filters.push(`COALESCE(m.conversation_id, '') ILIKE $${values.length}`);
+  }
+  if (user) {
+    values.push(`%${user}%`);
+    filters.push(`COALESCE(m.usuario, '') ILIKE $${values.length}`);
+  }
+
+  const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const totalResult = await dbPool.query(
+    `SELECT COUNT(*)::int AS total FROM "Chatbot".conversa_mensagens m ${whereSql}`,
+    values
+  );
+  const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
+
+  const dataResult = await dbPool.query(
+    `
+    WITH conv_stats AS (
+      SELECT
+        conversation_id,
+        COUNT(*)::int AS mensagens_na_conversa,
+        MIN(criado_em) AS primeira_mensagem_em,
+        MAX(criado_em) AS ultima_mensagem_em
+      FROM "Chatbot".conversa_mensagens
+      GROUP BY 1
+    )
+    SELECT
+      m.id,
+      m.conversation_id,
+      m.usuario,
+      COALESCE(NULLIF(m.papel, ''), 'sem_papel') AS papel,
+      m.conteudo,
+      COALESCE(NULLIF(m.origem, ''), 'sem_origem') AS origem,
+      m.metadados,
+      m.criado_em,
+      COALESCE(cs.mensagens_na_conversa, 0) AS mensagens_na_conversa,
+      cs.primeira_mensagem_em,
+      cs.ultima_mensagem_em
+    FROM "Chatbot".conversa_mensagens m
+    LEFT JOIN conv_stats cs
+      ON cs.conversation_id = m.conversation_id
+    ${whereSql}
+    ORDER BY ${sortMap[safeSortBy]} ${safeSortDir.toUpperCase()}, m.id DESC
+    LIMIT $${values.length + 1}
+    OFFSET $${values.length + 2}
+    `,
+    [...values, pagination.pageSize, pagination.offset]
+  );
+
+  const summaryResult = await dbPool.query(
+    `
+    SELECT
+      COUNT(*)::int AS total_rows,
+      COUNT(DISTINCT m.conversation_id)::int AS conversation_count,
+      COUNT(DISTINCT COALESCE(NULLIF(m.usuario, ''), 'anon'))::int AS user_count,
+      COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'assistant')::int AS assistant_count,
+      COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'user')::int AS user_message_count,
+      COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'system')::int AS system_count
+    FROM "Chatbot".conversa_mensagens m
+    ${whereSql}
+    `,
+    values
+  );
+
+  const [rolesResult, originsResult] = await Promise.all([
+    dbPool.query(`
+      SELECT
+        COALESCE(NULLIF(papel, ''), 'sem_papel') AS value,
+        COUNT(*)::int AS total
+      FROM "Chatbot".conversa_mensagens
+      GROUP BY 1
+      ORDER BY total DESC, value ASC
+      LIMIT 20
+    `),
+    dbPool.query(`
+      SELECT
+        COALESCE(NULLIF(origem, ''), 'sem_origem') AS value,
+        COUNT(*)::int AS total
+      FROM "Chatbot".conversa_mensagens
+      GROUP BY 1
+      ORDER BY total DESC, value ASC
+      LIMIT 30
+    `)
+  ]);
+
+  const summary = summaryResult.rows?.[0] || {};
+  return {
+    meta: {
+      ...pagination,
+      sortBy: safeSortBy,
+      sortDir: safeSortDir,
+      search
+    },
+    summary: {
+      totalRows: Number(summary.total_rows || 0),
+      conversationCount: Number(summary.conversation_count || 0),
+      userCount: Number(summary.user_count || 0),
+      assistantCount: Number(summary.assistant_count || 0),
+      userMessageCount: Number(summary.user_message_count || 0),
+      systemCount: Number(summary.system_count || 0)
+    },
+    options: {
+      roles: (rolesResult.rows || []).map((row) => ({
+        value: String(row.value || 'sem_papel'),
+        label: String(row.value || 'sem_papel'),
+        total: Number(row.total || 0)
+      })),
+      origins: (originsResult.rows || []).map((row) => ({
+        value: String(row.value || 'sem_origem'),
+        label: String(row.value || 'sem_origem'),
+        total: Number(row.total || 0)
+      }))
+    },
+    rows: (dataResult.rows || []).map((row) => ({
+      id: Number(row.id || 0),
+      conversationId: String(row.conversation_id || '').trim(),
+      user: String(row.usuario || '').trim() || null,
+      role: String(row.papel || 'sem_papel').trim() || 'sem_papel',
+      content: String(row.conteudo || '').trim(),
+      origin: String(row.origem || 'sem_origem').trim() || 'sem_origem',
+      metadata: row.metadados && typeof row.metadados === 'object' ? row.metadados : null,
+      createdAt: row.criado_em,
+      conversationMessageCount: Number(row.mensagens_na_conversa || 0),
+      conversationStartedAt: row.primeira_mensagem_em,
+      conversationUpdatedAt: row.ultima_mensagem_em
+    }))
+  };
+}
+
+async function carregarDetalheMemoriaMonitorChatbot({
+  page = 1,
+  pageSize = 20,
+  search = '',
+  key = '',
+  user = '',
+  activeState = 'all',
+  sortBy = 'atualizado_em',
+  sortDir = 'desc'
+} = {}) {
+  const sortMap = {
+    atualizado_em: 'mu.atualizado_em',
+    created_at: 'mu.created_at',
+    relevancia: 'COALESCE(mu.relevancia, 0)',
+    expira_em: 'mu.expira_em',
+    usuario: "COALESCE(NULLIF(mu.usuario, ''), '')",
+    chave: "COALESCE(NULLIF(mu.chave, ''), 'sem_chave')"
+  };
+  const safeSortBy = sortMap[sortBy] ? sortBy : 'atualizado_em';
+  const safeSortDir = parseChatbotMonitorSortDir(sortDir);
+  const safeActiveState = ['all', 'active', 'expired'].includes(String(activeState || '').trim().toLowerCase())
+    ? String(activeState || 'all').trim().toLowerCase()
+    : 'all';
+
+  const filters = [];
+  const values = [];
+  if (search) {
+    values.push(`%${search}%`);
+    const token = `$${values.length}`;
+    filters.push(`(
+      COALESCE(mu.usuario, '') ILIKE ${token}
+      OR COALESCE(mu.chave, '') ILIKE ${token}
+      OR COALESCE(mu.valor_json::text, '') ILIKE ${token}
+    )`);
+  }
+  if (key) {
+    values.push(key);
+    filters.push(`COALESCE(NULLIF(mu.chave, ''), 'sem_chave') = $${values.length}`);
+  }
+  if (user) {
+    values.push(`%${user}%`);
+    filters.push(`COALESCE(mu.usuario, '') ILIKE $${values.length}`);
+  }
+  if (safeActiveState === 'active') {
+    filters.push('(mu.expira_em IS NULL OR mu.expira_em > NOW())');
+  } else if (safeActiveState === 'expired') {
+    filters.push('(mu.expira_em IS NOT NULL AND mu.expira_em <= NOW())');
+  }
+
+  const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const totalResult = await dbPool.query(
+    `SELECT COUNT(*)::int AS total FROM "Chatbot".memoria_usuario mu ${whereSql}`,
+    values
+  );
+  const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
+
+  const dataResult = await dbPool.query(
+    `
+    SELECT
+      mu.id,
+      mu.usuario,
+      COALESCE(NULLIF(mu.chave, ''), 'sem_chave') AS chave,
+      mu.valor_json,
+      COALESCE(mu.relevancia, 0) AS relevancia,
+      mu.expira_em,
+      mu.created_at,
+      mu.atualizado_em,
+      CASE
+        WHEN mu.expira_em IS NULL OR mu.expira_em > NOW() THEN TRUE
+        ELSE FALSE
+      END AS ativa
+    FROM "Chatbot".memoria_usuario mu
+    ${whereSql}
+    ORDER BY ${sortMap[safeSortBy]} ${safeSortDir.toUpperCase()} NULLS LAST, mu.id DESC
+    LIMIT $${values.length + 1}
+    OFFSET $${values.length + 2}
+    `,
+    [...values, pagination.pageSize, pagination.offset]
+  );
+
+  const summaryResult = await dbPool.query(
+    `
+    SELECT
+      COUNT(*)::int AS total_rows,
+      COUNT(*) FILTER (WHERE mu.expira_em IS NULL OR mu.expira_em > NOW())::int AS active_count,
+      COUNT(*) FILTER (WHERE mu.expira_em IS NOT NULL AND mu.expira_em <= NOW())::int AS expired_count,
+      COUNT(DISTINCT COALESCE(NULLIF(mu.usuario, ''), 'anon'))::int AS user_count,
+      COUNT(DISTINCT COALESCE(NULLIF(mu.chave, ''), 'sem_chave'))::int AS key_count
+    FROM "Chatbot".memoria_usuario mu
+    ${whereSql}
+    `,
+    values
+  );
+
+  const keysResult = await dbPool.query(`
+    SELECT
+      COALESCE(NULLIF(chave, ''), 'sem_chave') AS value,
+      COUNT(*)::int AS total
+    FROM "Chatbot".memoria_usuario
+    GROUP BY 1
+    ORDER BY total DESC, value ASC
+    LIMIT 40
+  `);
+
+  const summary = summaryResult.rows?.[0] || {};
+  return {
+    meta: {
+      ...pagination,
+      sortBy: safeSortBy,
+      sortDir: safeSortDir,
+      search
+    },
+    summary: {
+      totalRows: Number(summary.total_rows || 0),
+      activeCount: Number(summary.active_count || 0),
+      expiredCount: Number(summary.expired_count || 0),
+      userCount: Number(summary.user_count || 0),
+      keyCount: Number(summary.key_count || 0)
+    },
+    options: {
+      keys: (keysResult.rows || []).map((row) => ({
+        value: String(row.value || 'sem_chave'),
+        label: String(row.value || 'sem_chave'),
+        total: Number(row.total || 0)
+      }))
+    },
+    rows: (dataResult.rows || []).map((row) => ({
+      id: Number(row.id || 0),
+      user: String(row.usuario || '').trim() || null,
+      key: String(row.chave || 'sem_chave').trim() || 'sem_chave',
+      valueJson: row.valor_json && typeof row.valor_json === 'object' ? row.valor_json : null,
+      relevance: Number(row.relevancia || 0),
+      expiresAt: row.expira_em,
+      createdAt: row.created_at,
+      updatedAt: row.atualizado_em,
+      active: Boolean(row.ativa)
+    }))
+  };
+}
+
 // ─── POST /api/ai/manual-chat ───────────────────────────────────────────────
 router.post('/manual-chat', express.json({ limit: '50kb' }), async (req, res) => {
   const { messages } = req.body || {};
@@ -4682,6 +5175,78 @@ router.get('/monitor', async (req, res) => {
   } catch (err) {
     console.error('[AI/Monitor] Erro ao montar dashboard:', err?.message || err);
     return res.status(500).json({ ok: false, error: 'Não foi possível carregar o monitoramento do chatbot.' });
+  }
+});
+
+router.get('/monitor/details', async (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  }
+  if (!usuarioEhAdminChatbot(req)) {
+    return res.status(403).json({ ok: false, error: 'Acesso restrito a administradores.' });
+  }
+  if (!dbPool) {
+    return res.status(503).json({ ok: false, error: 'Banco de dados não configurado.' });
+  }
+
+  const dataset = String(req.query?.dataset || 'faq').trim().toLowerCase();
+  const page = parseChatbotMonitorInt(req.query?.page, 1, { min: 1, max: 9999 });
+  const pageSize = parseChatbotMonitorInt(req.query?.pageSize, 20, { min: 5, max: 100 });
+  const search = String(req.query?.search || '').trim().slice(0, 200);
+
+  try {
+    await Promise.all([
+      garantirTabelasConhecimentoChatbot(),
+      garantirTabelasHistoricoChatbot()
+    ]);
+
+    let payload = null;
+    if (dataset === 'faq') {
+      payload = await carregarDetalheFaqMonitorChatbot({
+        page,
+        pageSize,
+        search,
+        area: String(req.query?.area || '').trim().slice(0, 80),
+        status: String(req.query?.status || '').trim().slice(0, 80),
+        sortBy: String(req.query?.sortBy || 'updated_at').trim().toLowerCase(),
+        sortDir: String(req.query?.sortDir || 'desc').trim().toLowerCase()
+      });
+    } else if (dataset === 'messages') {
+      payload = await carregarDetalheMensagensMonitorChatbot({
+        page,
+        pageSize,
+        search,
+        role: String(req.query?.role || '').trim().slice(0, 80),
+        origin: String(req.query?.origin || '').trim().slice(0, 120),
+        conversationId: String(req.query?.conversationId || '').trim().slice(0, 120),
+        user: String(req.query?.user || '').trim().slice(0, 120),
+        sortBy: String(req.query?.sortBy || 'criado_em').trim().toLowerCase(),
+        sortDir: String(req.query?.sortDir || 'desc').trim().toLowerCase()
+      });
+    } else if (dataset === 'memory') {
+      payload = await carregarDetalheMemoriaMonitorChatbot({
+        page,
+        pageSize,
+        search,
+        key: String(req.query?.key || '').trim().slice(0, 120),
+        user: String(req.query?.user || '').trim().slice(0, 120),
+        activeState: String(req.query?.activeState || 'all').trim().toLowerCase(),
+        sortBy: String(req.query?.sortBy || 'atualizado_em').trim().toLowerCase(),
+        sortDir: String(req.query?.sortDir || 'desc').trim().toLowerCase()
+      });
+    } else {
+      return res.status(400).json({ ok: false, error: 'Dataset inválido para exploração do monitoramento.' });
+    }
+
+    return res.json({
+      ok: true,
+      dataset,
+      generatedAt: new Date().toISOString(),
+      ...payload
+    });
+  } catch (err) {
+    console.error('[AI/Monitor/Details] Erro ao carregar dataset:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Não foi possível carregar os registros detalhados do chatbot.' });
   }
 });
 

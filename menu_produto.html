@@ -1664,16 +1664,31 @@
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     <label style="display:block;font-size:11px;color:#1f2937;font-weight:700;">
                       <i class="fa-solid fa-align-left" style="color:#3b82f6;margin-right:4px;"></i>
-                      Incluir palavra chave do produto e aperte enter.
+                      Adicionar itens e quantidades
                     </label>
-                    <input 
-                      type="text"
-                      id="catalogoDescricaoNaoCadastrado"
-                      autocomplete="off"
-                      placeholder="Digite a palavra chave e pressione Enter..."
-                      style="width:100%;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      <input 
+                        type="text"
+                        id="catalogoDescricaoNaoCadastrado"
+                        autocomplete="off"
+                        placeholder="Descrição do item..."
+                        style="flex:1;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:500;" />
+                      <input 
+                        type="number"
+                        id="catalogoDescricaoQtd"
+                        min="1"
+                        value="1"
+                        placeholder="Qtd"
+                        style="width:80px;padding:10px;border:2px solid #3b82f6;border-radius:6px;font-size:13px;background:white;font-weight:600;text-align:center;" />
+                      <button 
+                        type="button"
+                        id="catalogoDescricaoAddBtn"
+                        title="Adicionar novo item"
+                        style="border:none;background:#3b82f6;color:white;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;padding:10px 12px;flex-shrink:0;white-space:nowrap;"
+                      ><i class="fa-solid fa-plus"></i> Adicionar</button>
+                    </div>
                     <input type="hidden" id="catalogoDescricaoKeywords" value="" />
-                    <div id="catalogoDescricaoTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;"></div>
+                    <div id="catalogoDescricaoTags" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:6px;">
@@ -2360,6 +2375,86 @@
               </div>
 
               <div id="atFormView">
+              <style>
+                #atWhatsappWorkspace {
+                  display: grid;
+                  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+                  gap: 16px;
+                  align-items: start;
+                }
+                #atWhatsappWorkspaceMain {
+                  min-width: 0;
+                }
+                #atWhatsappInboxPanel {
+                  position: sticky;
+                  top: 12px;
+                  align-self: start;
+                  min-width: 0;
+                  border: 1px solid #374151;
+                  border-radius: 16px;
+                  background: rgba(15, 23, 42, .38);
+                  padding: 12px;
+                  box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+                }
+                #atWhatsappInboxList {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 8px;
+                  max-height: calc(100vh - 220px);
+                  overflow: auto;
+                }
+                #atWhatsappConversationView {
+                  display: none;
+                  flex-direction: column;
+                  gap: 10px;
+                }
+                #atWhatsappReplyBox {
+                  border-top: 1px solid rgba(255,255,255,.08);
+                  padding-top: 10px;
+                  margin-top: 2px;
+                }
+                #atWhatsappConversationMessages {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 8px;
+                  max-height: calc(100vh - 250px);
+                  overflow: auto;
+                }
+                .at-wa-conversation-item {
+                  width: 100%;
+                  text-align: left;
+                  border: 1px solid rgba(255, 255, 255, .08);
+                  border-radius: 14px;
+                  background: rgba(255, 255, 255, .03);
+                  color: var(--content-title-color);
+                  padding: 10px 12px;
+                  cursor: pointer;
+                  transition: border-color .2s ease, background .2s ease, transform .2s ease;
+                }
+                .at-wa-conversation-item:hover {
+                  border-color: rgba(14, 165, 233, .35);
+                  background: rgba(14, 165, 233, .08);
+                  transform: translateY(-1px);
+                }
+                .at-wa-conversation-item.active {
+                  border-color: rgba(16, 185, 129, .45);
+                  background: rgba(16, 185, 129, .12);
+                  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .18);
+                }
+                @media (max-width: 1180px) {
+                  #atWhatsappWorkspace {
+                    grid-template-columns: 1fr;
+                  }
+                  #atWhatsappInboxPanel {
+                    position: static;
+                  }
+                  #atWhatsappInboxList {
+                    max-height: 320px;
+                  }
+                }
+              </style>
+              <div id="atWhatsappWorkspace">
+              <div id="atWhatsappWorkspaceMain">
 
               <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
                 <div class="form-field" style="margin:0;flex:0 1 280px;">
@@ -2495,6 +2590,7 @@
                   </div>
                   <input type="hidden" id="atPlataformaAtendimento">
                 </div>
+
               </div>
 
               <div class="at-campo-fullonly" style="grid-column:1/-1;margin-top:12px;">
@@ -2531,6 +2627,43 @@
                   <i class="fa-solid fa-paper-plane"></i>
                   <span>Enviar solicitação</span>
                 </button>
+              </div>
+              </div>
+              <aside id="atWhatsappInboxPanel">
+                <div id="atWhatsappInboxListView">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+                    <strong style="font-size:14px;color:#e5e7eb;">Conversas do WhatsApp</strong>
+                    <span id="atWhatsappInboxCount" style="font-size:11px;color:#7dd3fc;background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.25);padding:2px 8px;border-radius:999px;">0</span>
+                  </div>
+                  <div id="atWhatsappInboxStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:10px;">Consultando conversas...</div>
+                  <div id="atWhatsappInboxList"></div>
+                </div>
+                <div id="atWhatsappConversationView">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                    <button id="atWhatsappConversationBackBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
+                      <i class="fa-solid fa-arrow-left"></i>
+                      <span>Voltar</span>
+                    </button>
+                    <span id="atWhatsappConversationCount" style="font-size:11px;color:#86efac;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.22);padding:2px 8px;border-radius:999px;">0</span>
+                  </div>
+                  <div>
+                    <div id="atWhatsappConversationTitle" style="font-size:14px;font-weight:700;color:#e5e7eb;">Conversa</div>
+                    <div id="atWhatsappConversationSubtitle" style="font-size:12px;color:var(--inactive-color);margin-top:2px;">Selecione uma conversa.</div>
+                  </div>
+                  <div id="atWhatsappMessagesStatus" style="font-size:12px;color:var(--inactive-color);">Consultando mensagens recebidas...</div>
+                  <div id="atWhatsappMessagesList" style="display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 250px);overflow:auto;"></div>
+                  <div id="atWhatsappReplyBox">
+                    <div id="atWhatsappReplyStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Campo de resposta pronto para integrar o envio.</div>
+                    <textarea id="atWhatsappReplyInput" rows="3" placeholder="Digite a resposta para este contato..." style="width:100%;border:1px solid #374151;border-radius:10px;background:rgba(255,255,255,.04);color:var(--content-title-color);padding:10px 12px;resize:vertical;"></textarea>
+                    <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+                      <button id="atWhatsappReplyBtn" type="button" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                        <i class="fa-solid fa-paper-plane"></i>
+                        <span>Responder</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </aside>
               </div>
               </div>
 
@@ -5291,15 +5424,19 @@
               </h3>
               <div class="content-text">Acompanhe aprendizado, cobertura de conhecimento, lacunas abertas e erros recentes do assistente.</div>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-              <div id="chatbotMonitorAtualizadoEm" style="padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.08);color:var(--theme-color);font-size:12px;font-weight:600;">
-                Atualização pendente
-              </div>
-              <button id="chatbotMonitorRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:white;">
-                <i class="fa-solid fa-rotate"></i>
-                <span>Atualizar dados</span>
-              </button>
-            </div>
+	            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+	              <div id="chatbotMonitorAtualizadoEm" style="padding:8px 12px;border-radius:999px;background:rgba(15,23,42,0.08);color:var(--theme-color);font-size:12px;font-weight:600;">
+	                Atualização pendente
+	              </div>
+	              <button id="chatbotMonitorExplorerToggleBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#334155 0%,#0f172a 100%);color:white;">
+	                <i class="fa-solid fa-table-list"></i>
+	                <span>Explorar registros</span>
+	              </button>
+	              <button id="chatbotMonitorRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0891b2 0%,#0e7490 100%);color:white;">
+	                <i class="fa-solid fa-rotate"></i>
+	                <span>Atualizar dados</span>
+	              </button>
+	            </div>
           </div>
 
           <div id="chatbotMonitorAviso" style="display:none;margin-top:16px;padding:14px 16px;border-radius:12px;font-size:13px;font-weight:600;"></div>
@@ -5378,10 +5515,10 @@
             </div>
           </div>
 
-          <div class="content-section" style="margin-top:20px;">
-            <div class="title-wrapper" style="margin-bottom:14px;">
-              <div class="content-section-title" style="display:flex;align-items:center;gap:10px;">
-                <i class="fa-solid fa-triangle-exclamation" style="color:#ef4444;"></i>
+	          <div class="content-section" style="margin-top:20px;">
+	            <div class="title-wrapper" style="margin-bottom:14px;">
+	              <div class="content-section-title" style="display:flex;align-items:center;gap:10px;">
+	                <i class="fa-solid fa-triangle-exclamation" style="color:#ef4444;"></i>
                 Erros recentes do chatbot
               </div>
             </div>
@@ -5401,11 +5538,13 @@
                     <td colspan="5" style="text-align:center;padding:32px;color:var(--inactive-color);">Carregando erros recentes...</td>
                   </tr>
                 </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
+	              </table>
+	            </div>
+	          </div>
+
+	          <div id="chatbotMonitorExplorerSection" class="content-section" style="display:none;margin-top:20px;"></div>
+	        </div>
+	      </div>
 
       <!-- Painel Sincronização de Produtos -->
       <div id="sincronizacaoProdutosPane" class="tab-pane" style="display:none;">
@@ -11654,7 +11793,7 @@ function attachDropZone(ul) {
     <div class="sgf-ai-avatar"><img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm"></div>
     <div class="sgf-ai-title">
       <strong>Assistente SGF</strong>
-      <span>Powered by ChatGPT</span>
+      <span>Fromtherm</span>
     </div>
     <button id="sgf-ai-panel-close" title="Fechar" aria-label="Fechar assistente">
       <i class="fa-solid fa-xmark"></i>
