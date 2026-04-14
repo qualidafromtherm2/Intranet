@@ -648,12 +648,12 @@ window._loadKanbanSolicitacoesTab = async function() {
   if (statusEl) statusEl.textContent = '';
 
   const COLS = [
-    { key: 'pendente',              label: 'Solicitado',            icon: 'fa-clock',          color: '#3b82f6', bg: '#0f1929', editable: true  },
-    { key: 'Em compra',             label: 'Em compra',             icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', editable: false },
-    { key: 'Separação',             label: 'Em Separação',          icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', editable: false },
-    { key: 'Separado',              label: 'Separado',              icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', editable: false },
-    { key: 'Aguardando retirada',   label: 'Aguardando retirada',   icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', editable: false },
-    { key: 'Concluído',             label: 'Concluído',             icon: 'fa-flag-checkered', color: '#9ca3af', bg: '#111',    editable: false },
+    { key: 'pendente',              label: 'Solicitado',            icon: 'fa-clock',          color: '#3b82f6', bg: '#0f1929', bgLight: '#eff6ff', editable: true  },
+    { key: 'Em compra',             label: 'Em compra',             icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', bgLight: '#fdf2f8', editable: false },
+    { key: 'Separação',             label: 'Em Separação',          icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', bgLight: '#fffbeb', editable: false },
+    { key: 'Separado',              label: 'Separado',              icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', bgLight: '#f0fdf4', editable: false },
+    { key: 'Aguardando retirada',   label: 'Aguardando retirada',   icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', bgLight: '#f5f3ff', editable: false },
+    { key: 'Concluído',             label: 'Concluído',             icon: 'fa-flag-checkered', color: '#9ca3af', bg: '#111',    bgLight: '#f9fafb', editable: false },
   ];
   const editableCols = new Set(['pendente']);
 
@@ -662,6 +662,7 @@ window._loadKanbanSolicitacoesTab = async function() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const colunas = data.colunas || {};
+    const isLight = document.documentElement.classList.contains('light-mode');
 
     board.innerHTML = '';
     let totalCards = 0;
@@ -673,39 +674,54 @@ window._loadKanbanSolicitacoesTab = async function() {
       const colEl = document.createElement('div');
       colEl.style.cssText = 'flex:0 0 200px;display:flex;flex-direction:column;';
 
+      const colBg = isLight ? '#ffffff' : '#141a27';
+      const colBorder = isLight ? '#e2e8f0' : '#1e293b';
+      const headerBg = isLight ? col.bgLight : col.bg;
+      const cardBg = isLight ? '#f9fafb' : '#1e293b';
+      const cardBorder = isLight ? '#e2e8f0' : '#334155';
+      const cardHoverBorder = isLight ? col.color + '88' : col.color + '66';
+      const cardHoverLeave = isLight ? '#e2e8f0' : '#334155';
+      const sepColor = isLight ? '#b45309' : '#f59e0b';
+      const userColor = isLight ? '#374151' : '#d1d5db';
+      const dateColor = isLight ? '#6b7280' : '#9ca3af';
+      const iconColor = isLight ? '#9ca3af' : '#6b7280';
+      const emptyColor = isLight ? '#9ca3af' : '#4b5563';
+      const hintColor = isLight ? '#9ca3af' : '#4b5563';
+      const noCarrinhoColor = isLight ? '#6b7280' : '#6b7280';
+
       const cardsHtml = cards.length === 0
-        ? `<div style="padding:14px;text-align:center;color:#374151;font-size:.73rem;">Nenhum</div>`
+        ? `<div style="padding:14px;text-align:center;color:${emptyColor};font-size:.73rem;">Nenhum</div>`
         : cards.map(card => {
             const dataPrev = _solFmtDataPrevista(card.data_prevista);
             const sepLabel = card.n_solic
-              ? `<span style="font-weight:800;font-size:.85rem;color:#f59e0b;letter-spacing:.03em;">${card.n_solic}</span>`
-              : `<span style="font-weight:700;font-size:.78rem;color:#6b7280;font-style:italic;">No carrinho</span>`;
+              ? `<span style="font-weight:800;font-size:.85rem;color:${sepColor};letter-spacing:.03em;">${card.n_solic}</span>`
+              : `<span style="font-weight:700;font-size:.78rem;color:${noCarrinhoColor};font-style:italic;">No carrinho</span>`;
             const cursor = col.editable ? 'cursor:pointer;' : 'cursor:default;';
-            const editHint = col.editable ? `<span style="font-size:.65rem;color:#4b5563;margin-top:3px;display:block;">clique para editar</span>` : '';
+            const editHint = col.editable ? `<span style="font-size:.65rem;color:${hintColor};margin-top:3px;display:block;">clique para editar</span>` : '';
             return `
               <div class="kanban-sep-card"
                 data-n-solic="${card.n_solic || ''}"
                 data-col="${col.key}"
-                style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;"
-                onmouseenter="this.style.borderColor='${col.color}66'"
-                onmouseleave="this.style.borderColor='#2a2a2a'">
+                style="background:${cardBg};border:1px solid ${cardBorder};border-radius:9px;padding:10px 12px;${cursor}transition:border-color .15s;"
+                onmouseenter="this.style.borderColor='${cardHoverBorder}'"
+                onmouseleave="this.style.borderColor='${cardHoverLeave}'">
                 ${sepLabel}
                 <div style="margin-top:5px;display:flex;align-items:center;gap:5px;">
-                  <i class="fa-solid fa-user-circle" style="color:#6b7280;font-size:.75rem;flex-shrink:0;"></i>
-                  <span style="font-size:.75rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${card.nome_user}</span>
+                  <i class="fa-solid fa-user-circle" style="color:${iconColor};font-size:.75rem;flex-shrink:0;"></i>
+                  <span style="font-size:.75rem;color:${userColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${card.nome_user}</span>
                 </div>
                 ${dataPrev ? `
                 <div style="margin-top:4px;display:flex;align-items:center;gap:5px;">
-                  <i class="fa-regular fa-calendar" style="color:#6b7280;font-size:.72rem;flex-shrink:0;"></i>
-                  <span style="font-size:.72rem;color:#9ca3af;">${dataPrev}</span>
+                  <i class="fa-regular fa-calendar" style="color:${iconColor};font-size:.72rem;flex-shrink:0;"></i>
+                  <span style="font-size:.72rem;color:${dateColor};">${dataPrev}</span>
                 </div>` : ''}
                 ${editHint}
               </div>`;
           }).join('');
 
       colEl.innerHTML = `
-        <div style="border-radius:10px;overflow:hidden;background:#111;border:1px solid #2a2a2a;height:100%;">
-          <div style="display:flex;align-items:center;gap:7px;padding:10px 12px;background:${col.bg};border-bottom:2px solid ${col.color}33;">
+        <div style="border-radius:10px;overflow:hidden;background:${colBg};border:1px solid ${colBorder};height:100%;">
+          <div style="display:flex;align-items:center;gap:7px;padding:10px 12px;background:${headerBg};border-bottom:2px solid ${col.color}33;">
             <i class="fa-solid ${col.icon}" style="color:${col.color};font-size:.88rem;"></i>
             <span style="font-weight:700;font-size:.80rem;color:${col.color};">${col.label}</span>
             <span style="margin-left:auto;font-size:.72rem;font-weight:700;color:${col.color};background:${col.color}22;padding:1px 7px;border-radius:20px;">${cards.length}</span>
@@ -8440,10 +8456,153 @@ function setAtWhatsappMessagesStatus(text = '', isError = false) {
   atWhatsappMessagesStatus.textContent = text || '';
 }
 
+function isAtWhatsappLightMode() {
+  return document.documentElement.classList.contains('light-mode');
+}
+
 function setAtWhatsappReplyStatus(text = '', isError = false) {
   if (!atWhatsappReplyStatus) return;
   atWhatsappReplyStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
   atWhatsappReplyStatus.textContent = text || '';
+}
+
+function shouldShowAtWhatsappFollowUps(row) {
+  const text = String(row?.message_text || '').trim();
+  if (!text) return false;
+  if (String(row?.direction || '').trim() !== 'outbound') return false;
+  if (!/chatbot/i.test(String(row?.profile_name || '').trim())) return false;
+  if (/^⚠/.test(text)) return false;
+  return /\bfonte:/i.test(text) || /\bmanual\b/i.test(text);
+}
+
+function buildAtWhatsappFollowUpChoices(row) {
+  if (!shouldShowAtWhatsappFollowUps(row)) return [];
+  const text = String(row?.message_text || '').trim().toLowerCase();
+  const choices = [
+    { label: 'Me envie o manual', message: 'Me envie o manual completo desse equipamento' },
+    { label: 'Me envie a parte do manual', message: 'Me envie a parte do manual que fala disso' },
+    { label: 'Me envie uma imagem', message: 'Me envie uma imagem da parte do manual que fala disso' }
+  ];
+  if (text.includes('pagina') || text.includes('página') || text.includes('fonte')) {
+    choices.push({ label: 'Qual a página disso?', message: 'Qual a página do manual que fala disso?' });
+  } else {
+    choices.push({ label: 'Continuar no mesmo contexto', action: 'continue_context' });
+  }
+  return choices.slice(0, 4);
+}
+
+function renderAtWhatsappPreviewCards(row) {
+  const isLight = isAtWhatsappLightMode();
+  const payload = row?.payload_json && typeof row.payload_json === 'object' ? row.payload_json : {};
+  const previewList = Array.isArray(payload?.manualPreviews)
+    ? payload.manualPreviews.filter((item) => item && (item.openUrl || item.sourceUrl || item.imageUrl)).slice(0, 2)
+    : [];
+
+  const fallbackList = [];
+  const requestBody = payload?.__meta?.request_body && typeof payload.__meta.request_body === 'object'
+    ? payload.__meta.request_body
+    : {};
+
+  if (!previewList.length && requestBody?.document?.link) {
+    fallbackList.push({
+      manual: requestBody?.document?.filename || 'Manual Fromtherm',
+      page: '',
+      openUrl: requestBody.document.link
+    });
+  }
+  if (!previewList.length && requestBody?.image?.link) {
+    fallbackList.push({
+      manual: requestBody?.image?.caption || 'Imagem do manual',
+      page: '',
+      imageUrl: requestBody.image.link
+    });
+  }
+
+  const finalList = (previewList.length ? previewList : fallbackList).slice(0, 2);
+  if (!finalList.length) return '';
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+      ${finalList.map((preview) => {
+        const title = escapeAtHtml(String(preview.manual || 'Manual').trim() || 'Manual');
+        const page = escapeAtHtml(String(preview.page || '').trim());
+        const openUrl = escapeAtHtml(String(preview.openUrl || preview.sourceUrl || '').trim());
+        const imageUrl = escapeAtHtml(String(preview.imageUrl || '').trim());
+        return `
+          <div style="padding:10px;border:1px solid ${isLight ? 'rgba(15,23,42,.12)' : 'rgba(255,255,255,.08)'};border-radius:10px;background:${isLight ? 'rgba(255,255,255,.82)' : 'rgba(255,255,255,.03)'};">
+            <div style="font-size:12px;font-weight:700;color:${isLight ? '#0f172a' : '#e5e7eb'};">${title}</div>
+            <div style="font-size:11px;color:${isLight ? '#64748b' : 'var(--inactive-color)'};margin-top:2px;">${page ? `Página ${page}` : 'Manual compartilhado pelo chatbot'}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              ${openUrl ? `<a href="${openUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid rgba(14,165,233,.28);background:${isLight ? 'rgba(224,242,254,.95)' : 'rgba(14,165,233,.12)'};color:${isLight ? '#075985' : '#bae6fd'};font-size:11px;font-weight:600;text-decoration:none;">Abrir manual</a>` : ''}
+              ${imageUrl ? `<a href="${imageUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid rgba(16,185,129,.28);background:${isLight ? 'rgba(220,252,231,.95)' : 'rgba(16,185,129,.12)'};color:${isLight ? '#065f46' : '#d1fae5'};font-size:11px;font-weight:600;text-decoration:none;">Abrir imagem</a>` : ''}
+            </div>
+          </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderAtWhatsappChoiceButtons(row) {
+  const isLight = isAtWhatsappLightMode();
+  const choices = buildAtWhatsappFollowUpChoices(row);
+  if (!choices.length) return '';
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+      ${choices.map((choice) => `
+        <button
+          type="button"
+          class="at-wa-choice-btn"
+          ${choice.message ? `data-at-wa-chat-msg="${escapeAtHtml(choice.message)}"` : ''}
+          ${choice.action ? `data-at-wa-chat-action="${escapeAtHtml(choice.action)}"` : ''}
+          style="padding:6px 10px;border-radius:999px;border:1px solid rgba(125,211,252,.24);background:${isLight ? 'rgba(224,242,254,.95)' : 'rgba(14,165,233,.12)'};color:${isLight ? '#075985' : '#dbeafe'};font-size:11px;font-weight:600;cursor:pointer;">
+          ${escapeAtHtml(choice.label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function handleAtWhatsappConversationAction(action) {
+  const acao = String(action || '').trim();
+  if (acao !== 'continue_context') return;
+  if (atWhatsappReplyInput) {
+    atWhatsappReplyInput.placeholder = 'Continue perguntando sobre esse mesmo equipamento';
+    atWhatsappReplyInput.focus();
+  }
+}
+
+async function sendAtWhatsappChatbotPrompt(prompt) {
+  const phone = atWhatsappSelectedPhone;
+  const text = String(prompt || '').trim();
+  if (!phone || !text) return;
+
+  setAtWhatsappReplyStatus('Gerando resposta do chatbot...', false);
+  if (atWhatsappReplyBtn) atWhatsappReplyBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/api/sac/whatsapp/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        phone,
+        text,
+        mode: 'chatbot'
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      throw new Error(data.error || 'Falha ao enviar resposta automática.');
+    }
+    setAtWhatsappReplyStatus('Resposta do chatbot enviada.', false);
+    await carregarAtWhatsappConversations({ silent: true });
+    await carregarAtWhatsappMessages({ phone, silent: true });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao acionar resposta do chatbot', err);
+    setAtWhatsappReplyStatus(err?.message || 'Erro ao acionar o chatbot.', true);
+  } finally {
+    syncAtWhatsappReplyBoxState();
+  }
 }
 
 function syncAtWhatsappReplyBoxState() {
@@ -8516,10 +8675,11 @@ function showAtWhatsappConversationView(meta = null, messageCount = null) {
 
 function renderAtWhatsappConversationRows(rows = []) {
   if (!atWhatsappInboxList) return;
+  const isLight = isAtWhatsappLightMode();
   syncAtWhatsappInboxCount(Array.isArray(rows) ? rows.length : 0);
 
   if (!Array.isArray(rows) || !rows.length) {
-    atWhatsappInboxList.innerHTML = '<div style="padding:12px;border:1px dashed rgba(255,255,255,.12);border-radius:12px;color:var(--inactive-color);font-size:12px;">Nenhum número enviou mensagem ao webhook ainda.</div>';
+    atWhatsappInboxList.innerHTML = `<div style="padding:12px;border:1px dashed ${isLight ? 'rgba(15,23,42,.14)' : 'rgba(255,255,255,.12)'};border-radius:12px;color:${isLight ? '#475569' : 'var(--inactive-color)'};background:${isLight ? 'rgba(255,255,255,.76)' : 'transparent'};font-size:12px;">Nenhum número enviou mensagem ao webhook ainda.</div>`;
     return;
   }
 
@@ -8527,7 +8687,8 @@ function renderAtWhatsappConversationRows(rows = []) {
     const phoneDigits = normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone);
     const profileName = escapeAtHtml(String(row.profile_name || '').trim() || formatAtWhatsappPhoneDisplay(phoneDigits) || 'Contato');
     const phoneLabel = escapeAtHtml(formatAtWhatsappPhoneDisplay(phoneDigits) || String(row.from_phone || '').trim() || 'Sem número');
-    const previewText = escapeAtHtml(String(row.last_message_text || '').trim() || `[mensagem do tipo ${String(row.last_message_type || 'message').trim() || 'message'}]`);
+    const previewBase = String(row.last_message_text || '').trim() || `[mensagem do tipo ${String(row.last_message_type || 'message').trim() || 'message'}]`;
+    const previewText = escapeAtHtml((String(row.last_direction || '').trim() === 'outbound' ? `Você: ${previewBase}` : previewBase));
     const when = escapeAtHtml(formatAtWhatsappConversationTime(row.last_received_at));
     const total = Number(row.total_messages) || 0;
     const activeClass = phoneDigits && phoneDigits === atWhatsappSelectedPhone ? ' active' : '';
@@ -8535,15 +8696,15 @@ function renderAtWhatsappConversationRows(rows = []) {
       <button type="button" class="at-wa-conversation-item${activeClass}" data-phone="${escapeAtHtml(phoneDigits)}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px;">
           <div style="min-width:0;">
-            <div style="font-size:13px;font-weight:700;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${profileName}</div>
-            <div style="font-size:11px;color:var(--inactive-color);margin-top:2px;">${phoneLabel}</div>
+            <div style="font-size:13px;font-weight:700;color:${isLight ? '#0f172a' : '#e5e7eb'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${profileName}</div>
+            <div style="font-size:11px;color:${isLight ? '#64748b' : 'var(--inactive-color)'};margin-top:2px;">${phoneLabel}</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
-            <span style="font-size:11px;color:var(--inactive-color);">${when}</span>
-            <span style="font-size:10px;color:#d1fae5;background:rgba(16,185,129,.14);border:1px solid rgba(16,185,129,.22);padding:1px 7px;border-radius:999px;">${total}</span>
+            <span style="font-size:11px;color:${isLight ? '#64748b' : 'var(--inactive-color)'};">${when}</span>
+            <span style="font-size:10px;color:${isLight ? '#047857' : '#d1fae5'};background:${isLight ? 'rgba(16,185,129,.12)' : 'rgba(16,185,129,.14)'};border:1px solid rgba(16,185,129,.22);padding:1px 7px;border-radius:999px;">${total}</span>
           </div>
         </div>
-        <div style="font-size:12px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewText}</div>
+        <div style="font-size:12px;color:${isLight ? '#334155' : '#cbd5e1'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewText}</div>
       </button>`;
   }).join('');
 
@@ -8556,27 +8717,56 @@ function renderAtWhatsappConversationRows(rows = []) {
 
 function renderAtWhatsappMessages(rows = []) {
   if (!atWhatsappMessagesList) return;
+  const isLight = isAtWhatsappLightMode();
   if (!Array.isArray(rows) || !rows.length) {
-    atWhatsappMessagesList.innerHTML = '<div style="padding:10px 12px;border:1px dashed rgba(255,255,255,.12);border-radius:10px;color:var(--inactive-color);font-size:12px;">Nenhuma mensagem recebida para esta conversa ainda.</div>';
+    atWhatsappMessagesList.innerHTML = `<div style="padding:10px 12px;border:1px dashed ${isLight ? 'rgba(15,23,42,.14)' : 'rgba(255,255,255,.12)'};border-radius:10px;color:${isLight ? '#475569' : 'var(--inactive-color)'};background:${isLight ? 'rgba(255,255,255,.76)' : 'transparent'};font-size:12px;">Nenhuma mensagem recebida para esta conversa ainda.</div>`;
     return;
   }
 
   atWhatsappMessagesList.innerHTML = rows.map((row) => {
-    const profileName = escapeAtHtml(String(row.profile_name || '').trim() || 'Contato');
+    const isOutbound = String(row.direction || '').trim() === 'outbound';
+    const profileName = escapeAtHtml(String(row.profile_name || '').trim() || (isOutbound ? 'Atendimento' : 'Contato'));
     const messageType = escapeAtHtml(String(row.message_type || '').trim() || 'message');
     const text = escapeAtHtml(String(row.message_text || '').trim() || `[mensagem do tipo ${messageType}]`);
     const when = escapeAtHtml(formatAtWhatsappTimestamp(row.received_at));
     const fromPhone = escapeAtHtml(formatAtWhatsappPhoneDisplay(row.from_phone || row.from_phone_digits) || String(row.from_phone || '').trim() || '');
+    const borderColor = isOutbound ? 'rgba(14,165,233,.28)' : 'rgba(16,185,129,.18)';
+    const bgColor = isLight
+      ? (isOutbound ? 'linear-gradient(180deg, rgba(224,242,254,.95) 0%, rgba(240,249,255,.95) 100%)' : 'linear-gradient(180deg, rgba(236,253,245,.95) 0%, rgba(240,253,250,.95) 100%)')
+      : (isOutbound ? 'rgba(14,165,233,.08)' : 'rgba(16,185,129,.05)');
+    const titleColor = isLight ? (isOutbound ? '#0369a1' : '#047857') : (isOutbound ? '#7dd3fc' : '#d1fae5');
+    const metaColor = isLight ? '#64748b' : 'var(--inactive-color)';
+    const textColor = isLight ? '#0f172a' : 'var(--content-title-color)';
+    const shadow = isLight ? 'box-shadow:0 6px 16px rgba(15,23,42,.05);' : '';
+    const alignStyle = isOutbound ? 'margin-left:18px;' : 'margin-right:18px;';
+    const originLabel = isOutbound ? 'saída' : (fromPhone || 'sem número');
+    const previewCards = renderAtWhatsappPreviewCards(row);
+    const choiceButtons = renderAtWhatsappChoiceButtons(row);
     return `
-      <div style="padding:10px 12px;border:1px solid rgba(16,185,129,.18);border-radius:10px;background:rgba(16,185,129,.05);">
+      <div style="padding:10px 12px;border:1px solid ${borderColor};border-radius:10px;background:${bgColor};${alignStyle}${shadow}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px;">
-          <strong style="font-size:12px;color:#d1fae5;">${profileName}</strong>
-          <span style="font-size:11px;color:var(--inactive-color);">${when}</span>
+          <strong style="font-size:12px;color:${titleColor};">${profileName}</strong>
+          <span style="font-size:11px;color:${metaColor};">${when}</span>
         </div>
-        <div style="font-size:11px;color:var(--inactive-color);margin-bottom:6px;">${fromPhone || 'sem número'} · ${messageType}</div>
-        <div style="font-size:13px;color:var(--content-title-color);white-space:pre-wrap;">${text}</div>
+        <div style="font-size:11px;color:${metaColor};margin-bottom:6px;">${originLabel} · ${messageType}</div>
+        <div style="font-size:13px;color:${textColor};white-space:pre-wrap;">${text}</div>
+        ${previewCards}
+        ${choiceButtons}
       </div>`;
   }).join('');
+
+  atWhatsappMessagesList.scrollTop = atWhatsappMessagesList.scrollHeight;
+
+  atWhatsappMessagesList.querySelectorAll('[data-at-wa-chat-msg]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      sendAtWhatsappChatbotPrompt(btn.getAttribute('data-at-wa-chat-msg') || '');
+    });
+  });
+  atWhatsappMessagesList.querySelectorAll('[data-at-wa-chat-action]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      handleAtWhatsappConversationAction(btn.getAttribute('data-at-wa-chat-action') || '');
+    });
+  });
 }
 
 function selecionarAtWhatsappConversation(phone, { syncField = true, silent = false } = {}) {
@@ -8736,10 +8926,43 @@ if (atWhatsappReplyInput) {
 }
 
 if (atWhatsappReplyBtn) {
-  atWhatsappReplyBtn.addEventListener('click', () => {
+  atWhatsappReplyBtn.addEventListener('click', async () => {
     syncAtWhatsappReplyBoxState();
-    if (!atWhatsappSelectedPhone || !String(atWhatsappReplyInput?.value || '').trim()) return;
-    setAtWhatsappReplyStatus('O campo de resposta já está pronto. No próximo passo eu ligo este botão ao envio real pelo WhatsApp.', false);
+    const phone = atWhatsappSelectedPhone;
+    const text = String(atWhatsappReplyInput?.value || '').trim();
+    if (!phone || !text) return;
+
+    atWhatsappReplyBtn.disabled = true;
+    setAtWhatsappReplyStatus('Enviando resposta...', false);
+
+    try {
+      const resp = await fetch('/api/sac/whatsapp/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          phone,
+          text,
+          mode: 'manual'
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) {
+        throw new Error(data.error || 'Falha ao enviar resposta.');
+      }
+
+      if (atWhatsappReplyInput) atWhatsappReplyInput.value = '';
+      setAtWhatsappReplyStatus('Resposta enviada com sucesso.', false);
+      syncAtWhatsappReplyBoxState();
+      await carregarAtWhatsappConversations({ silent: true });
+      await carregarAtWhatsappMessages({ phone, silent: true });
+    } catch (err) {
+      console.error('[SAC/WhatsApp] erro ao enviar resposta manual', err);
+      setAtWhatsappReplyStatus(err?.message || 'Erro ao enviar resposta do WhatsApp.', true);
+      syncAtWhatsappReplyBoxState();
+    } finally {
+      if (atWhatsappReplyBtn) atWhatsappReplyBtn.disabled = false;
+    }
   });
 }
 
@@ -43699,12 +43922,12 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
   };
 
   const cores = {
-    'aguardando aprovação da requisição': { bg: '#9333ea', bgLight: '#f3e8ff', text: '#581c87', icon: 'fa-clock' },
-    'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
-    'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
-    'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
-    'analise de cadastro': { bg: '#0ea5e9', bgLight: '#e0f2fe', text: '#0c4a6e', icon: 'fa-magnifying-glass' },
-    'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' }
+    'aguardando aprovação da requisição': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-clock' },
+    'solicitado revisão': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-wrench' },
+    'aguardando cotação': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-hourglass-half' },
+    'cotado aguardando escolha': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-clipboard-check' },
+    'analise de cadastro': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-magnifying-glass' },
+    'aguardando compra preparação': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-list-check' }
   };
 
   const titulos = {
@@ -43726,9 +43949,9 @@ function renderizarKanbanPrimeiraFaseRapida(kanbanContainer, lista, filtroStatus
 
   const coresSegundaFase = {
     'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
-    'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
-    'recebido': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-box-open' },
-    'concluído': { bg: '#22c55e', bgLight: '#dcfce7', text: '#166534', icon: 'fa-circle-check' }
+    'faturada pelo fornecedor': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-file-invoice-dollar' },
+    'recebido': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-box-open' },
+    'concluído': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-circle-check' }
   };
 
   const titulosSegundaFase = {
@@ -44603,19 +44826,20 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
     // Renderiza colunas do kanban
     kanbanContainer.innerHTML = Object.keys(statusColunas).map((status, idx) => {
       const itens = statusColunas[status];
+      const paletaKanbanAzul = { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af' };
       const cores = {
-        'aguardando aprovação da requisição': { bg: '#9333ea', bgLight: '#f3e8ff', text: '#581c87', icon: 'fa-clock' },
-        'aguardando cotação': { bg: '#fbbf24', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-hourglass-half' },
-        'cotado aguardando escolha': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-clipboard-check' },
-        'analise de cadastro': { bg: '#0ea5e9', bgLight: '#e0f2fe', text: '#0c4a6e', icon: 'fa-magnifying-glass' },
-        'solicitado revisão': { bg: '#f59e0b', bgLight: '#fed7aa', text: '#9a3412', icon: 'fa-wrench' },
-        'aguardando compra preparação': { bg: '#10b981', bgLight: '#d1fae5', text: '#065f46', icon: 'fa-list-check' },
-        'compra realizada': { bg: '#3b82f6', bgLight: '#dbeafe', text: '#1e40af', icon: 'fa-check-circle' },
-        'faturada pelo fornecedor': { bg: '#f59e0b', bgLight: '#fef3c7', text: '#92400e', icon: 'fa-file-invoice-dollar' },
-        'recebido': { bg: '#8b5cf6', bgLight: '#ede9fe', text: '#5b21b6', icon: 'fa-box-open' },
-        'concluído': { bg: '#22c55e', bgLight: '#dcfce7', text: '#166534', icon: 'fa-circle-check' }
+        'aguardando aprovação da requisição': { ...paletaKanbanAzul, icon: 'fa-clock' },
+        'aguardando cotação': { ...paletaKanbanAzul, icon: 'fa-hourglass-half' },
+        'cotado aguardando escolha': { ...paletaKanbanAzul, icon: 'fa-clipboard-check' },
+        'analise de cadastro': { ...paletaKanbanAzul, icon: 'fa-magnifying-glass' },
+        'solicitado revisão': { ...paletaKanbanAzul, icon: 'fa-wrench' },
+        'aguardando compra preparação': { ...paletaKanbanAzul, icon: 'fa-list-check' },
+        'compra realizada': { ...paletaKanbanAzul, icon: 'fa-check-circle' },
+        'faturada pelo fornecedor': { ...paletaKanbanAzul, icon: 'fa-file-invoice-dollar' },
+        'recebido': { ...paletaKanbanAzul, icon: 'fa-box-open' },
+        'concluído': { ...paletaKanbanAzul, icon: 'fa-circle-check' }
       };
-      const cor = cores[status] || { bg: '#6b7280', bgLight: '#f3f4f6', text: '#374151', icon: 'fa-circle' };
+      const cor = cores[status] || { ...paletaKanbanAzul, icon: 'fa-circle' };
       
       // Define título personalizado para colunas específicas
       const titulosPersonalizados = {
@@ -44628,52 +44852,11 @@ async function loadMinhasSolicitacoes(filtroStatus = null) {
       };
       const tituloExibir = titulosPersonalizados[status] || (status.charAt(0).toUpperCase() + status.slice(1));
       
-      // Define grupos de kanbans com características especiais
-      const kanbanAcaoRequisitante = ['cotado aguardando escolha', 'solicitado revisão']; // Ações do requisitante
-      const kanbanOperacaoAprovador = ['aguardando aprovação da requisição']; // Aprovador precisa aprovar
-      const kanbanOperacaoComprador = ['aguardando cotação', 'analise de cadastro', 'aguardando compra preparação']; // Operações do comprador
-      const kanbanAcaoRecebimento = ['compra realizada', 'faturada pelo fornecedor']; // Ações do recebimento
-      const kanbanSetoresLiberacao = ['recebido']; // Setores precisam liberar
-      
-      const ehAcaoRequisitante = kanbanAcaoRequisitante.includes(status);
-      const ehOperacaoAprovador = kanbanOperacaoAprovador.includes(status);
-      const ehOperacaoComprador = kanbanOperacaoComprador.includes(status);
-      const ehAcaoRecebimento = kanbanAcaoRecebimento.includes(status);
-      const ehSetoresLiberacao = kanbanSetoresLiberacao.includes(status);
-      
-      // Define badge e estilo especial para cada grupo
-      let badgeIdentificacao = '';
-      let estilosExtras = '';
-      let bordaEspecial = '';
-      
-      if (ehAcaoRequisitante) {
-        // Kanbans onde o requisitante precisa tomar ação
-        badgeIdentificacao = '';
-        estilosExtras = 'background:linear-gradient(135deg,#fef2f2 0%,#ffffff 100%);';
-        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #dc2626;`;
-      } else if (ehOperacaoAprovador) {
-        // Kanban onde o aprovador precisa aprovar
-        badgeIdentificacao = '';
-        estilosExtras = 'background:linear-gradient(135deg,#eff6ff 0%,#ffffff 100%);';
-        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #2563eb;`;
-      } else if (ehOperacaoComprador) {
-        // Kanbans onde o comprador realiza operações (cotação, pedido)
-        badgeIdentificacao = '';
-        estilosExtras = 'background:linear-gradient(135deg,#f0fdf4 0%,#ffffff 100%);';
-        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #059669;`;
-      } else if (ehAcaoRecebimento) {
-        // Kanbans onde o recebimento precisa agir
-        badgeIdentificacao = '';
-        estilosExtras = 'background:linear-gradient(135deg,#fffbeb 0%,#ffffff 100%);';
-        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #d97706;`;
-      } else if (ehSetoresLiberacao) {
-        // Kanban onde setores precisam liberar
-        badgeIdentificacao = '';
-        estilosExtras = 'background:linear-gradient(135deg,#faf5ff 0%,#ffffff 100%);';
-        bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid #7c3aed;`;
-      } else {
-        bordaEspecial = 'border:1px solid #e5e7eb;';
-      }
+      // Mantém o visual azul padrão que aparece na abertura da tela, sem trocar
+      // para bordas diferentes depois que o carregamento completo termina.
+      const badgeIdentificacao = '';
+      const estilosExtras = 'background:linear-gradient(135deg,#f8fafc 0%,#ffffff 100%);';
+      const bordaEspecial = `border:2px solid ${cor.bg};border-top:4px solid ${cor.bg};`;
       
       // Status que devem ser agrupados por número do pedido Omie (cNumero)
       const statusAgrupados = ['compra realizada', 'faturada pelo fornecedor', 'recebido', 'concluído'];
@@ -53898,6 +54081,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Aplica tema localmente
     aplicarTema(novoTema);
+
+    // Re-renderiza itens do WhatsApp para aplicar cores inline corretas
+    if (typeof renderAtWhatsappConversationRows === 'function' && typeof atWhatsappConversationRows !== 'undefined') {
+      try { renderAtWhatsappConversationRows(atWhatsappConversationRows); } catch (_) {}
+    }
+
+    // Re-renderiza kanban de solicitações para aplicar cores do tema
+    if (typeof window._loadKanbanSolicitacoesTab === 'function') {
+      try { window._loadKanbanSolicitacoesTab.force = true; window._loadKanbanSolicitacoesTab(); } catch (_) {}
+    }
     
     // Salva no servidor
     await salvarTemaNoServidor(novoTema);
