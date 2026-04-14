@@ -1170,12 +1170,18 @@
 
 	    function buildPortalAiFollowUpChoices(text) {
 	      if (!shouldShowPortalAiFollowUps(text)) return [];
-	      return [
+	      const t = normalizePortalAiText(text);
+	      const choices = [
 	        { label: 'Me envie o manual', message: 'Me envie o manual completo desse equipamento' },
 	        { label: 'Me envie a parte do manual', message: 'Me envie a parte do manual que fala disso' },
-	        { label: 'Me envie uma imagem', message: 'Me envie uma imagem da parte do manual que fala disso' },
-	        { label: 'Continuar nessa conversa', action: 'continue_context' }
+	        { label: 'Me envie uma imagem', message: 'Me envie uma imagem da parte do manual que fala disso' }
 	      ];
+	      if (t.includes('pagina') || t.includes('página') || t.includes('fonte')) {
+	        choices.push({ label: 'Qual a página disso?', message: 'Qual a página do manual que fala disso?' });
+	      } else {
+	        choices.push({ label: 'Continuar nessa conversa', action: 'continue_context' });
+	      }
+	      return choices.slice(0, 4);
 	    }
 
 	    function handlePortalAiConversationAction(action) {

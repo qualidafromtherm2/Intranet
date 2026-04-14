@@ -11013,5 +11013,179 @@ table.tabela td.num {
 /* Badge contador de itens (verde #10b981 — mantém cor; só texto branco já está ok) */
 
 /* ================================================================
+   KANBAN DE SOLICITAÇÕES — Modo escuro (melhor contraste)
+   ================================================================ */
+
+/* Colunas — fundo mais distinguível */
+:root:not(.light-mode) #kanbanSolicBoard > div > div {
+  background: #141a27 !important;
+  border-color: #1e293b !important;
+}
+
+/* Headers de coluna — fundo levemente mais claro */
+:root:not(.light-mode) #kanbanSolicBoard > div > div > div:first-child {
+  border-bottom-width: 2px !important;
+}
+
+/* Cards SEP — melhor destaque */
+:root:not(.light-mode) .kanban-sep-card {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+:root:not(.light-mode) .kanban-sep-card:hover {
+  background: #253347 !important;
+}
+
+/* Texto "Nenhum" nos cards vazios */
+:root:not(.light-mode) #kanbanSolicBoard div[style*="color:#374151"] {
+  color: #4b5563 !important;
+}
+
+/* Tooltip */
+:root:not(.light-mode) div[style*="background:#1c1c1c"][style*="position:fixed"] {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+:root:not(.light-mode) div[style*="background:#1c1c1c"][style*="position:fixed"] div[style*="border-bottom:1px solid #222"] {
+  border-color: #334155 !important;
+}
+
+/* Modal de edição SEP */
+:root:not(.light-mode) #modalEdicaoSep > div {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+}
+:root:not(.light-mode) #modalEdicaoSep > div > div[style*="background:#171717"] {
+  background: #141a27 !important;
+  border-color: #334155 !important;
+}
+:root:not(.light-mode) #modalEdicaoSep div[style*="border-top:1px solid #222"],
+:root:not(.light-mode) #modalEdicaoSep div[style*="border-top:1px solid #2a2a2a"] {
+  border-color: #334155 !important;
+}
+:root:not(.light-mode) #modalEdicaoSep input.sep-edit-qty {
+  background: #141a27 !important;
+  border-color: #475569 !important;
+}
+
+/* ================================================================
+   KANBAN DE SOLICITAÇÕES — Modo claro
+   ================================================================ */
+
+/* Board container */
+.light-mode #kanbanSolicBoard > div > div {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Coluna headers — manter cores de cada coluna, mas fundo claro */
+.light-mode #kanbanSolicBoard > div > div > div:first-child {
+  background: #f8fafc !important;
+}
+
+/* Cards SEP */
+.light-mode .kanban-sep-card {
+  background: #f9fafb !important;
+  border-color: #e2e8f0 !important;
+}
+.light-mode .kanban-sep-card:hover {
+  border-color: #94a3b8 !important;
+}
+
+/* Card — nome SEP (amarelo ok no escuro, precisa escurecer no claro) */
+.light-mode .kanban-sep-card span[style*="color:#f59e0b"],
+.light-mode .kanban-sep-card span[style*="color: #f59e0b"] {
+  color: #b45309 !important;
+}
+
+/* Card — nome do usuário */
+.light-mode .kanban-sep-card span[style*="color:#d1d5db"],
+.light-mode .kanban-sep-card span[style*="color: #d1d5db"] {
+  color: #374151 !important;
+}
+
+/* Card — data e ícones */
+.light-mode .kanban-sep-card span[style*="color:#9ca3af"],
+.light-mode .kanban-sep-card span[style*="color: #9ca3af"] {
+  color: #6b7280 !important;
+}
+.light-mode .kanban-sep-card i[style*="color:#6b7280"] {
+  color: #9ca3af !important;
+}
+
+/* Card — hint "clique para editar" */
+.light-mode .kanban-sep-card span[style*="color:#4b5563"] {
+  color: #9ca3af !important;
+}
+
+/* Card — link "No carrinho" */
+.light-mode .kanban-sep-card span[style*="color:#6b7280"][style*="font-style:italic"] {
+  color: #6b7280 !important;
+}
+
+/* Cards vazios "Nenhum" */
+.light-mode #kanbanSolicBoard div[style*="color:#374151"] {
+  color: #9ca3af !important;
+}
+
+/* Status text */
+.light-mode #kanbanSolicStatus {
+  color: #64748b !important;
+}
+
+/* Tooltip hover */
+.light-mode div[style*="background:#1c1c1c"][style*="position:fixed"] {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 8px 32px rgba(15,23,42,.12) !important;
+}
+.light-mode div[style*="background:#1c1c1c"][style*="position:fixed"] div[style*="color:#f59e0b"] {
+  color: #b45309 !important;
+}
+.light-mode div[style*="background:#1c1c1c"][style*="position:fixed"] div[style*="color:#d1d5db"] {
+  color: #374151 !important;
+}
+.light-mode div[style*="background:#1c1c1c"][style*="position:fixed"] div[style*="color:#f0f0f0"] {
+  color: #0f172a !important;
+}
+.light-mode div[style*="background:#1c1c1c"][style*="position:fixed"] div[style*="border-bottom:1px solid #222"] {
+  border-color: #e5e7eb !important;
+}
+
+/* Modal de edição SEP */
+.light-mode #modalEdicaoSep > div {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+.light-mode #modalEdicaoSep > div > div[style*="background:#171717"] {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+.light-mode #modalEdicaoSep span[style*="color:#f0f0f0"] {
+  color: #0f172a !important;
+}
+.light-mode #modalEdicaoSep div[style*="border-top:1px solid #222"],
+.light-mode #modalEdicaoSep div[style*="border-top:1px solid #2a2a2a"] {
+  border-color: #e5e7eb !important;
+}
+.light-mode #modalEdicaoSep div[style*="color:#f59e0b"] {
+  color: #b45309 !important;
+}
+.light-mode #modalEdicaoSep div[style*="color:#d1d5db"] {
+  color: #374151 !important;
+}
+.light-mode #modalEdicaoSep div[style*="color:#9ca3af"] {
+  color: #6b7280 !important;
+}
+.light-mode #modalEdicaoSep input.sep-edit-qty {
+  background: #f9fafb !important;
+  border-color: #d1d5db !important;
+  color: #0f172a !important;
+}
+.light-mode #modalEdicaoSep button#btnModalEdicaoSepFechar {
+  color: #6b7280 !important;
+}
+
+/* ================================================================
    FIM DO BLOCO DE MODO ESCURO/CLARO
    ================================================================ */

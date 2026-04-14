@@ -31,6 +31,10 @@ const WONCA_TRACK_URL = (process.env.WONCA_TRACK_URL || 'https://api-labs.wonca.
 const TRACKINGMORE_API_KEY = process.env.TRACKINGMORE_API_KEY || process.env.TRACKINGMORE_TOKEN || '';
 const TRACKINGMORE_URL = (process.env.TRACKINGMORE_URL || 'https://api.trackingmore.com/v2/trackings/realtime').replace(/\/$/, '');
 const WHATSAPP_WEBHOOK_VERIFY_TOKEN = String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.META_WHATSAPP_VERIFY_TOKEN || 'fromtherm-sac-wa-teste-2026').trim();
+const WHATSAPP_CLOUD_ACCESS_TOKEN = String(process.env.WHATSAPP_CLOUD_ACCESS_TOKEN || process.env.META_WHATSAPP_ACCESS_TOKEN || '').trim();
+const WHATSAPP_GRAPH_API_VERSION = String(process.env.WHATSAPP_GRAPH_API_VERSION || 'v25.0').trim() || 'v25.0';
+const WHATSAPP_CHATBOT_AUTOREPLY_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WHATSAPP_CHATBOT_AUTOREPLY_ENABLED || '1').trim());
+const WHATSAPP_CHATBOT_MODEL = String(process.env.WHATSAPP_CHATBOT_MODEL || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
 const AT_SERIE_SHEETS_PUB_KEY = '2PACX-1vTBZcTPkowyN_dViQlzWd4noEgssByJR3f6YPtnR234sYIT5gTFI5PZXw3ZdPUOWAlxp_RDMo_I8JFm';
 const AT_SERIE_SHEETS = ['PRODUÇÃO 1 - ESCOPO', 'PRODUÇÃO 2 - F/ ESCOPO'];
 const AT_SERIE_PUBHTML_URL = `https://docs.google.com/spreadsheets/d/e/${AT_SERIE_SHEETS_PUB_KEY}/pubhtml`;
@@ -213,6 +217,549 @@ function sanitizeIdentificacao(codigo) {
 
 function normalizePhoneDigits(value) {
   return String(value || '').replace(/\D/g, '');
+}
+
+function buildWhatsappPhoneCandidates(value) {
+  const digits = normalizePhoneDigits(value);
+  const out = new Set();
+  if (!digits) return [];
+
+  out.add(digits);
+
+  if (digits.startsWith('55')) {
+    if (digits.length === 12) {
+      out.add(`${digits.slice(0, 4)}9${digits.slice(4)}`);
+    }
+    if (digits.length === 13 && digits[4] === '9') {
+      out.add(`${digits.slice(0, 4)}${digits.slice(5)}`);
+    }
+  } else {
+    if (digits.length === 10) out.add(`55${digits}`);
+    if (digits.length === 11) {
+      out.add(`55${digits}`);
+      if (digits[2] === '9') out.add(`55${digits.slice(0, 2)}${digits.slice(3)}`);
+    }
+  }
+
+  return Array.from(out);
+}
+
+function sanitizeWhatsappMediaFileName(label, fallbackExt = 'pdf') {
+  const base = String(label || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+  const normalized = base || `manual_fromtherm.${fallbackExt}`;
+  if (/\.[a-z0-9]{2,5}$/i.test(normalized)) return normalized;
+  return `${normalized}.${fallbackExt}`;
+}
+
+function whatsappUserRequestedImage(text) {
+  const t = normalizeText(text).toLowerCase();
+  if (!t) return false;
+  return t.includes('foto') || t.includes('imagem') || t.includes('print');
+}
+
+function whatsappUserRequestedMedia(text) {
+  const t = normalizeText(text).toLowerCase();
+  if (!t) return false;
+  const verboEnvio = /(manda|mande|envia|envie|mostrar|mostra|abrir|abre|ver)/.test(t);
+  return (
+    whatsappUserRequestedImage(text) ||
+    t.includes('pagina') ||
+    t.includes('pdf') ||
+    ((t.includes('manual') || t.includes('link') || t.includes('pdf')) && verboEnvio) ||
+    (verboEnvio &&
+      (t.includes('manual') || t.includes('foto') || t.includes('imagem') || t.includes('pagina')))
+  );
+}
+
+async function enviarMensagemWhatsappPayload({ phoneNumberId, toPhone, payloadBuilder }) {
+  if (!WHATSAPP_CLOUD_ACCESS_TOKEN) {
+    throw new Error('WHATSAPP_CLOUD_ACCESS_TOKEN não configurado.');
+  }
+  if (!phoneNumberId) {
+    throw new Error('Phone Number ID não encontrado para esta conversa.');
+  }
+
+  const candidates = buildWhatsappPhoneCandidates(toPhone);
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    const body = payloadBuilder(candidate);
+    const resp = await fetchWithTimeout(
+      `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(String(phoneNumberId))}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      },
+      15000
+    );
+
+    const payload = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      if (!payload.__meta) payload.__meta = {};
+      payload.__meta.sent_to = candidate;
+      payload.__meta.request_body = body;
+      return payload;
+    }
+
+    lastError = payload?.error?.message || payload?.error?.error_user_msg || `Falha ao enviar WhatsApp (${resp.status})`;
+  }
+
+  throw new Error(lastError || 'Falha ao enviar mensagem do WhatsApp.');
+}
+
+async function insertWhatsappMessageRecord({
+  waMessageId = null,
+  phone = null,
+  profileName = null,
+  messageType = 'text',
+  messageText = null,
+  phoneNumberId = null,
+  displayPhoneNumber = null,
+  payload = {},
+  direction = 'inbound'
+}) {
+  const phoneDigits = normalizePhoneDigits(phone);
+  await pool.query(
+    `INSERT INTO sac.whatsapp_webhook_messages (
+       wa_message_id,
+       from_phone,
+       from_phone_digits,
+       profile_name,
+       message_type,
+       message_text,
+       phone_number_id,
+       display_phone_number,
+       payload_json,
+       direction
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (wa_message_id) DO UPDATE
+       SET message_text = EXCLUDED.message_text,
+           profile_name = COALESCE(EXCLUDED.profile_name, sac.whatsapp_webhook_messages.profile_name),
+           payload_json = EXCLUDED.payload_json,
+           direction = EXCLUDED.direction`,
+    [
+      waMessageId,
+      phone || null,
+      phoneDigits || null,
+      profileName || null,
+      messageType || null,
+      messageText || null,
+      phoneNumberId || null,
+      displayPhoneNumber || null,
+      payload || {},
+      direction === 'outbound' ? 'outbound' : 'inbound'
+    ]
+  );
+}
+
+async function obterContextoWhatsappPorTelefone(phone) {
+  const phoneDigits = normalizePhoneDigits(phone);
+  const candidates = Array.from(new Set([
+    phoneDigits,
+    phoneDigits.startsWith('55') ? phoneDigits.slice(2) : `55${phoneDigits}`
+  ].filter(Boolean)));
+
+  if (!candidates.length) return null;
+
+  const { rows } = await pool.query(
+    `SELECT from_phone, from_phone_digits, profile_name, phone_number_id, display_phone_number
+       FROM sac.whatsapp_webhook_messages
+      WHERE from_phone_digits = ANY($1::text[])
+        AND COALESCE(phone_number_id, '') <> ''
+      ORDER BY received_at DESC, id DESC
+      LIMIT 1`,
+    [candidates]
+  );
+  return rows[0] || null;
+}
+
+async function listarHistoricoWhatsapp(phone, limit = 12) {
+  const phoneDigits = normalizePhoneDigits(phone);
+  const candidates = Array.from(new Set([
+    phoneDigits,
+    phoneDigits.startsWith('55') ? phoneDigits.slice(2) : `55${phoneDigits}`
+  ].filter(Boolean)));
+
+  if (!candidates.length) return [];
+
+  const { rows } = await pool.query(
+    `SELECT profile_name, message_text, direction, received_at
+       FROM sac.whatsapp_webhook_messages
+      WHERE from_phone_digits = ANY($1::text[])
+      ORDER BY received_at DESC, id DESC
+      LIMIT $2`,
+    [candidates, Math.max(1, Math.min(Number(limit) || 12, 30))]
+  );
+  return rows.reverse();
+}
+
+async function enviarMensagemWhatsappTexto({ phoneNumberId, toPhone, text }) {
+  const texto = String(text || '').trim();
+  if (!texto) {
+    throw new Error('Mensagem vazia.');
+  }
+
+  return enviarMensagemWhatsappPayload({
+    phoneNumberId,
+    toPhone,
+    payloadBuilder: (candidate) => ({
+      messaging_product: 'whatsapp',
+      to: candidate,
+      type: 'text',
+      text: { body: texto }
+    })
+  });
+}
+
+async function enviarMensagemWhatsappImagem({ phoneNumberId, toPhone, imageUrl, caption = '' }) {
+  const link = String(imageUrl || '').trim();
+  if (!link) throw new Error('URL da imagem não informada.');
+
+  return enviarMensagemWhatsappPayload({
+    phoneNumberId,
+    toPhone,
+    payloadBuilder: (candidate) => ({
+      messaging_product: 'whatsapp',
+      to: candidate,
+      type: 'image',
+      image: {
+        link,
+        ...(String(caption || '').trim() ? { caption: String(caption || '').trim().slice(0, 1024) } : {})
+      }
+    })
+  });
+}
+
+async function enviarMensagemWhatsappDocumento({ phoneNumberId, toPhone, documentUrl, caption = '', filename = '' }) {
+  const link = String(documentUrl || '').trim();
+  if (!link) throw new Error('URL do documento não informada.');
+
+  return enviarMensagemWhatsappPayload({
+    phoneNumberId,
+    toPhone,
+    payloadBuilder: (candidate) => ({
+      messaging_product: 'whatsapp',
+      to: candidate,
+      type: 'document',
+      document: {
+        link,
+        ...(String(caption || '').trim() ? { caption: String(caption || '').trim().slice(0, 1024) } : {}),
+        ...(String(filename || '').trim() ? { filename: String(filename || '').trim().slice(0, 240) } : {})
+      }
+    })
+  });
+}
+
+/**
+ * Envia mensagem interativa com botões de resposta rápida (máx. 3).
+ * buttons: [{ id: 'btn_1', title: 'Texto do botão' }, ...]
+ */
+async function enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone, bodyText, buttons = [] }) {
+  const texto = String(bodyText || '').trim();
+  if (!texto) throw new Error('Texto do corpo vazio.');
+  const btns = (Array.isArray(buttons) ? buttons : [])
+    .slice(0, 3)
+    .map((b, i) => ({
+      type: 'reply',
+      reply: {
+        id: String(b.id || `btn_${i}`).slice(0, 256),
+        title: String(b.title || '').trim().slice(0, 20)
+      }
+    }))
+    .filter(b => b.reply.title);
+  if (!btns.length) {
+    return enviarMensagemWhatsappTexto({ phoneNumberId, toPhone, text: texto });
+  }
+  return enviarMensagemWhatsappPayload({
+    phoneNumberId,
+    toPhone,
+    payloadBuilder: (candidate) => ({
+      messaging_product: 'whatsapp',
+      to: candidate,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: texto },
+        action: { buttons: btns }
+      }
+    })
+  });
+}
+
+async function gerarRespostaAutomaticaWhatsapp({ phone = '', profileName = '', userMessage = '', historyRows = [] }) {
+  const phoneDigits = normalizePhoneDigits(phone);
+  const userLabel = String(profileName || '').trim() || phoneDigits || 'Tecnico WhatsApp';
+  const sanitizedMessages = (Array.isArray(historyRows) ? historyRows : [])
+    .slice(-25)
+    .map((row) => ({
+      role: row?.direction === 'outbound' ? 'assistant' : 'user',
+      content: String(row?.message_text || '').trim().slice(0, 2000)
+    }))
+    .filter((row) => row.content);
+
+  if (!sanitizedMessages.length && String(userMessage || '').trim()) {
+    sanitizedMessages.push({
+      role: 'user',
+      content: String(userMessage || '').trim().slice(0, 2000)
+    });
+  }
+
+  const resp = await fetchWithTimeout(
+    `http://localhost:${process.env.PORT || 5001}/api/ai/manual-chat`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: phoneDigits ? `whatsapp_${phoneDigits}` : undefined,
+        source: 'manual_tecnico_portal_at',
+        chatbotUser: userLabel,
+        chatbotToken: phoneDigits || userLabel,
+        messages: sanitizedMessages
+      })
+    },
+    30000
+  );
+
+  const payload = await resp.json().catch(() => ({}));
+  const content = String(payload?.content || payload?.error || '').trim();
+  const manualPreviews = Array.isArray(payload?.manualPreviews) ? payload.manualPreviews : [];
+
+  if (!resp.ok) {
+    throw new Error(content || `Falha ao consultar manual-chat (${resp.status})`);
+  }
+  if (!content) {
+    throw new Error('O manual-chat não retornou conteúdo.');
+  }
+  return {
+    content,
+    manualPreviews
+  };
+}
+
+/**
+ * Decide quais botões de follow-up enviar ao usuário no WhatsApp.
+ * Retorna array de { id, title } (máx. 3, títulos <= 20 chars).
+ * Retorna [] se não for necessário enviar botões.
+ */
+function gerarBotoesFollowUpWhatsapp(resposta, pergunta, manualPreviews = []) {
+  const respostaNorm = String(resposta || '').toLowerCase();
+  const perguntaNorm = String(pergunta || '').toLowerCase();
+
+  // Não envia botões se a resposta é de erro ou muito curta
+  if (respostaNorm.length < 60) return [];
+  if (/não encontrei|não consegui|erro|falha|não configurado/i.test(respostaNorm) && respostaNorm.length < 200) return [];
+
+  // Não envia botões se o usuário já pediu mídia (manual/imagem/documento)
+  if (/me envie|envie o manual|envie a imagem|envie uma imagem|envie o documento/i.test(perguntaNorm)) return [];
+
+  const botoes = [];
+
+  // Botão de imagem se tiver fonte/página referenciada
+  if (/fonte:|página|pagina/i.test(respostaNorm) && manualPreviews.length) {
+    botoes.push({ id: 'btn_imagem', title: 'Enviar imagem' });
+  }
+
+  // Botão do manual se tiver previews disponíveis
+  if (manualPreviews.length && botoes.length < 3) {
+    botoes.push({ id: 'btn_manual', title: 'Enviar o manual' });
+  }
+
+  // Botão para dúvida sobre outro modelo (se já respondeu sobre um)
+  if (botoes.length < 3) {
+    botoes.push({ id: 'btn_outro', title: 'Outro modelo' });
+  }
+
+  return botoes.slice(0, 3);
+}
+
+async function enviarRespostaWhatsappComMidia({
+  phoneDigits,
+  profileName = 'Chatbot Fromtherm',
+  phoneNumberId,
+  displayPhoneNumber,
+  requestText = '',
+  replyData
+}) {
+  const content = String(
+    typeof replyData === 'string'
+      ? replyData
+      : replyData?.content
+  ).trim();
+  const manualPreviews = Array.isArray(replyData?.manualPreviews) ? replyData.manualPreviews : [];
+
+  if (!content) {
+    throw new Error('Resposta do chatbot vazia.');
+  }
+
+  const sendPayload = await enviarMensagemWhatsappTexto({
+    phoneNumberId,
+    toPhone: phoneDigits,
+    text: content
+  });
+
+  const outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+  await insertWhatsappMessageRecord({
+    waMessageId: outboundMessageId,
+    phone: phoneDigits,
+    profileName,
+    messageType: 'text',
+    messageText: content,
+    phoneNumberId,
+    displayPhoneNumber,
+    payload: {
+      ...sendPayload,
+      manualPreviews
+    },
+    direction: 'outbound'
+  });
+
+  const requestedMedia = whatsappUserRequestedMedia(requestText);
+  if (!requestedMedia || !manualPreviews.length) {
+    // Envia botões de follow-up se for uma resposta de manual
+    try {
+      const botoes = gerarBotoesFollowUpWhatsapp(content, requestText, manualPreviews);
+      if (botoes.length) {
+        await enviarMensagemWhatsappComBotoes({
+          phoneNumberId,
+          toPhone: phoneDigits,
+          bodyText: 'Posso ajudar com mais alguma coisa?',
+          buttons: botoes
+        });
+      }
+    } catch (btnErr) {
+      console.warn('[SAC/WhatsApp] falha ao enviar botões follow-up:', btnErr?.message || btnErr);
+    }
+
+    return {
+      outboundMessageId,
+      sendPayload,
+      mediaPayloads: []
+    };
+  }
+
+  const selectedPreview = manualPreviews[0] || null;
+  const mediaPayloads = [];
+  const requestedImage = whatsappUserRequestedImage(requestText);
+
+  if (requestedImage && selectedPreview?.imageUrl) {
+    const imagePayload = await enviarMensagemWhatsappImagem({
+      phoneNumberId,
+      toPhone: phoneDigits,
+      imageUrl: selectedPreview.imageUrl,
+      caption: `${selectedPreview.manual || 'Manual'}${selectedPreview.page ? ` - página ${selectedPreview.page}` : ''}`
+    });
+    const imageMessageId = String(imagePayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: imageMessageId,
+      phone: phoneDigits,
+      profileName,
+      messageType: 'image',
+      messageText: `${selectedPreview.manual || 'Imagem do manual'}${selectedPreview.page ? ` - página ${selectedPreview.page}` : ''}`,
+      phoneNumberId,
+      displayPhoneNumber,
+      payload: imagePayload,
+      direction: 'outbound'
+    });
+    mediaPayloads.push(imagePayload);
+    return { outboundMessageId, sendPayload, mediaPayloads };
+  }
+
+  const documentUrl = String(selectedPreview?.openUrl || selectedPreview?.sourceUrl || '').trim();
+  if (documentUrl) {
+    try {
+      const documentPayload = await enviarMensagemWhatsappDocumento({
+        phoneNumberId,
+        toPhone: phoneDigits,
+        documentUrl,
+        caption: `${selectedPreview.manual || 'Manual Fromtherm'}${selectedPreview.page ? ` - página ${selectedPreview.page}` : ''}`,
+        filename: sanitizeWhatsappMediaFileName(selectedPreview.manual || 'manual_fromtherm', 'pdf')
+      });
+      const documentMessageId = String(documentPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({
+        waMessageId: documentMessageId,
+        phone: phoneDigits,
+        profileName,
+        messageType: 'document',
+        messageText: `${selectedPreview.manual || 'Manual Fromtherm'}${selectedPreview.page ? ` - página ${selectedPreview.page}` : ''}`,
+        phoneNumberId,
+        displayPhoneNumber,
+        payload: documentPayload,
+        direction: 'outbound'
+      });
+      mediaPayloads.push(documentPayload);
+      return { outboundMessageId, sendPayload, mediaPayloads };
+    } catch (documentErr) {
+      const fallbackLinkPayload = await enviarMensagemWhatsappTexto({
+        phoneNumberId,
+        toPhone: phoneDigits,
+        text: `Link do manual: ${documentUrl}`
+      });
+      const fallbackMessageId = String(fallbackLinkPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({
+        waMessageId: fallbackMessageId,
+        phone: phoneDigits,
+        profileName,
+        messageType: 'text',
+        messageText: `Link do manual: ${documentUrl}`,
+        phoneNumberId,
+        displayPhoneNumber,
+        payload: fallbackLinkPayload,
+        direction: 'outbound'
+      });
+      mediaPayloads.push(fallbackLinkPayload);
+      return { outboundMessageId, sendPayload, mediaPayloads, mediaFallback: documentErr?.message || null };
+    }
+  }
+
+  return {
+    outboundMessageId,
+    sendPayload,
+    mediaPayloads
+  };
+}
+
+async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, phoneNumberId, displayPhoneNumber }) {
+  if (!WHATSAPP_CHATBOT_AUTOREPLY_ENABLED) return;
+  const phoneDigits = normalizePhoneDigits(phone);
+  const userText = String(messageText || '').trim();
+  if (!phoneDigits || !userText) return;
+
+  const historyRows = await listarHistoricoWhatsapp(phoneDigits, 10);
+  const replyData = await gerarRespostaAutomaticaWhatsapp({
+    phone: phoneDigits,
+    profileName,
+    userMessage: userText,
+    historyRows
+  });
+  const sendResult = await enviarRespostaWhatsappComMidia({
+    phoneDigits,
+    profileName: 'Chatbot Fromtherm',
+    phoneNumberId,
+    displayPhoneNumber,
+    requestText: userText,
+    replyData
+  });
+
+  console.log(
+    '[SAC/WhatsApp] resposta automática enviada:',
+    JSON.stringify({
+      from_phone_number_id: phoneNumberId,
+      to_phone_requested: phoneDigits,
+      to_phone_sent: sendResult?.sendPayload?.__meta?.sent_to || null,
+      outbound_message_id: sendResult?.outboundMessageId || null,
+      media_messages: Array.isArray(sendResult?.mediaPayloads) ? sendResult.mediaPayloads.length : 0
+    })
+  );
 }
 
 async function getStoredStatus(codigo) {
@@ -596,6 +1143,7 @@ async function ensureSchema() {
       from_phone           TEXT,
       from_phone_digits    TEXT,
       profile_name         TEXT,
+      direction            TEXT NOT NULL DEFAULT 'inbound',
       message_type         TEXT,
       message_text         TEXT,
       phone_number_id      TEXT,
@@ -603,6 +1151,9 @@ async function ensureSchema() {
       payload_json         JSONB NOT NULL DEFAULT '{}'::jsonb,
       received_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE sac.whatsapp_webhook_messages
+      ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'inbound';
 
     CREATE INDEX IF NOT EXISTS whatsapp_webhook_messages_phone_idx
       ON sac.whatsapp_webhook_messages(from_phone_digits, received_at DESC);
@@ -3317,6 +3868,7 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
   const body = req.body || {};
   const entries = Array.isArray(body.entry) ? body.entry : [];
   const receivedPhones = new Set();
+  const newInboundMessages = [];
 
   try {
     for (const entry of entries) {
@@ -3339,31 +3891,40 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
           const fromPhone = String(message?.from || '').trim() || null;
           const fromPhoneDigits = normalizePhoneDigits(fromPhone);
           const messageType = String(message?.type || '').trim() || null;
-          const textBody = String(message?.text?.body || '').trim() || null;
+          // Suporta texto normal e clique em botão interativo
+          const textBody = String(
+            message?.text?.body
+            || message?.interactive?.button_reply?.title
+            || message?.interactive?.list_reply?.title
+            || ''
+          ).trim() || null;
           const profileName = profileNameByWaId.get(String(message?.from || '').trim()) || null;
           if (fromPhoneDigits) receivedPhones.add(fromPhoneDigits);
 
-          await pool.query(
+          const insertResult = await pool.query(
             `INSERT INTO sac.whatsapp_webhook_messages (
                wa_message_id,
                from_phone,
                from_phone_digits,
                profile_name,
+               direction,
                message_type,
                message_text,
                phone_number_id,
                display_phone_number,
-               payload_json
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                payload_json
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
              ON CONFLICT (wa_message_id) DO UPDATE
                SET message_text = EXCLUDED.message_text,
                    profile_name = COALESCE(EXCLUDED.profile_name, sac.whatsapp_webhook_messages.profile_name),
-                   payload_json = EXCLUDED.payload_json`,
+                   payload_json = EXCLUDED.payload_json
+             RETURNING ((xmax = 0) AND (wa_message_id IS NOT NULL)) AS inserted`,
             [
               waMessageId,
               fromPhone,
               fromPhoneDigits || null,
               profileName,
+              'inbound',
               messageType,
               textBody,
               String(metadata?.phone_number_id || '').trim() || null,
@@ -3371,6 +3932,16 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
               message || {}
             ]
           );
+
+          if (insertResult.rows[0]?.inserted && fromPhoneDigits && textBody) {
+            newInboundMessages.push({
+              phone: fromPhoneDigits,
+              profileName,
+              messageText: textBody,
+              phoneNumberId: String(metadata?.phone_number_id || '').trim() || null,
+              displayPhoneNumber: String(metadata?.display_phone_number || '').trim() || null
+            });
+          }
         }
       }
     }
@@ -3387,6 +3958,26 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
           });
         }
       } catch (_) {}
+    }
+
+    if (newInboundMessages.length) {
+      const sse = req.app?.get('sseBroadcast');
+      Promise.resolve().then(async () => {
+        for (const inbound of newInboundMessages) {
+          try {
+            await processarRespostaAutomaticaWhatsapp(inbound);
+            if (typeof sse === 'function') {
+              sse({
+                type: 'whatsapp_message_received',
+                at: Date.now(),
+                phones: [inbound.phone]
+              });
+            }
+          } catch (autoReplyErr) {
+            console.error('[SAC/WhatsApp] falha na resposta automática:', autoReplyErr?.message || autoReplyErr);
+          }
+        }
+      });
     }
 
     return res.status(200).json({ ok: true });
@@ -3407,6 +3998,7 @@ router.get('/whatsapp/conversations', async (req, res) => {
                 from_phone,
                 from_phone_digits,
                 profile_name,
+                direction,
                 message_type,
                 message_text,
                 received_at,
@@ -3421,6 +4013,7 @@ router.get('/whatsapp/conversations', async (req, res) => {
        SELECT from_phone,
               from_phone_digits,
               profile_name,
+              direction AS last_direction,
               message_type AS last_message_type,
               message_text AS last_message_text,
               received_at AS last_received_at,
@@ -3438,6 +4031,95 @@ router.get('/whatsapp/conversations', async (req, res) => {
   }
 });
 
+router.post('/whatsapp/reply', express.json({ limit: '30kb' }), async (req, res) => {
+  const phoneDigits = normalizePhoneDigits(req.body?.phone);
+  const text = String(req.body?.text || '').trim();
+  const mode = String(req.body?.mode || 'manual').trim().toLowerCase();
+
+  if (!phoneDigits) {
+    return res.status(400).json({ ok: false, error: 'Telefone da conversa é obrigatório.' });
+  }
+  if (!text) {
+    return res.status(400).json({ ok: false, error: 'Texto da resposta é obrigatório.' });
+  }
+
+  try {
+    const context = await obterContextoWhatsappPorTelefone(phoneDigits);
+    if (!context?.phone_number_id) {
+      return res.status(404).json({ ok: false, error: 'Phone Number ID não encontrado para esta conversa.' });
+    }
+
+    let sendPayload = null;
+    let outboundMessageId = null;
+
+    if (mode === 'chatbot') {
+      const historyRows = await listarHistoricoWhatsapp(phoneDigits, 12);
+      const replyData = await gerarRespostaAutomaticaWhatsapp({
+        phone: phoneDigits,
+        profileName: context.profile_name || '',
+        userMessage: text,
+        historyRows
+      });
+      const sendResult = await enviarRespostaWhatsappComMidia({
+        phoneDigits,
+        profileName: 'Chatbot Fromtherm',
+        phoneNumberId: context.phone_number_id,
+        displayPhoneNumber: context.display_phone_number || null,
+        requestText: text,
+        replyData
+      });
+      sendPayload = sendResult?.sendPayload || null;
+      outboundMessageId = sendResult?.outboundMessageId || null;
+    } else {
+      sendPayload = await enviarMensagemWhatsappTexto({
+        phoneNumberId: context.phone_number_id,
+        toPhone: phoneDigits,
+        text
+      });
+
+      outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({
+        waMessageId: outboundMessageId,
+        phone: phoneDigits,
+        profileName: 'Atendente Fromtherm',
+        messageType: 'text',
+        messageText: text,
+        phoneNumberId: context.phone_number_id,
+        displayPhoneNumber: context.display_phone_number || null,
+        payload: sendPayload,
+        direction: 'outbound'
+      });
+    }
+
+    console.log(
+      '[SAC/WhatsApp] resposta manual enviada:',
+      JSON.stringify({
+        from_phone_number_id: context.phone_number_id,
+        to_phone_requested: phoneDigits,
+        to_phone_sent: sendPayload?.__meta?.sent_to || null,
+        outbound_message_id: outboundMessageId,
+        mode
+      })
+    );
+
+    try {
+      const sse = req.app?.get('sseBroadcast');
+      if (typeof sse === 'function') {
+        sse({
+          type: 'whatsapp_message_received',
+          at: Date.now(),
+          phones: [phoneDigits]
+        });
+      }
+    } catch (_) {}
+
+    return res.json({ ok: true, phone: phoneDigits, mode });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao responder conversa:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao enviar resposta do WhatsApp.' });
+  }
+});
+
 router.get('/whatsapp/messages', async (req, res) => {
   const phoneDigits = normalizePhoneDigits(req.query.phone);
 
@@ -3450,11 +4132,11 @@ router.get('/whatsapp/messages', async (req, res) => {
       ].filter(Boolean)));
 
       ({ rows } = await pool.query(
-        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
-                message_text, phone_number_id, display_phone_number, received_at
+        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, direction, message_type,
+                message_text, phone_number_id, display_phone_number, payload_json, received_at
            FROM (
-             SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
-                    message_text, phone_number_id, display_phone_number, received_at
+             SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, direction, message_type,
+                    message_text, phone_number_id, display_phone_number, payload_json, received_at
                FROM sac.whatsapp_webhook_messages
               WHERE from_phone_digits = ANY($1::text[])
               ORDER BY received_at DESC, id DESC
@@ -3465,8 +4147,8 @@ router.get('/whatsapp/messages', async (req, res) => {
       ));
     } else {
       ({ rows } = await pool.query(
-        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, message_type,
-                message_text, phone_number_id, display_phone_number, received_at
+        `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, direction, message_type,
+                message_text, phone_number_id, display_phone_number, payload_json, received_at
            FROM sac.whatsapp_webhook_messages
           ORDER BY received_at DESC, id DESC
           LIMIT 20`

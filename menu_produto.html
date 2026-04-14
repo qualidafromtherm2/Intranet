@@ -2363,7 +2363,7 @@
                     </div>
                   </div>
                   <a href="https://crm.datacrazy.io/login" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:white;text-decoration:none;">
-                    <img src="https://crm.datacrazy.io/_next/static/media/datacrazy.6026d362.svg" alt="DataCrazy" style="width:22px;height:22px;object-fit:contain;display:block;">
+                    <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/LOGO-DATACRAZY%20(1).png" alt="DataCrazy" style="width:22px;height:22px;object-fit:contain;display:block;">
                     <span>DataCrazy</span>
                   </a>
                   <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
@@ -2387,19 +2387,61 @@
                 }
                 #atWhatsappInboxPanel {
                   position: sticky;
-                  top: 12px;
+                  top: 28px;
                   align-self: start;
+                  display: flex;
+                  flex-direction: column;
                   min-width: 0;
-                  border: 1px solid #374151;
+                  margin-top: 14px;
+                  max-height: calc(100vh - 120px);
+                  overflow: hidden;
+                  border: 1px solid #2c425c;
                   border-radius: 16px;
-                  background: rgba(15, 23, 42, .38);
+                  background: linear-gradient(180deg, rgba(15, 23, 42, .96) 0%, rgba(17, 24, 39, .94) 100%);
                   padding: 12px;
-                  box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+                  box-shadow: 0 18px 36px rgba(0, 0, 0, .32);
+                }
+                html.light-mode #atWhatsappInboxPanel {
+                  border-color: rgba(15, 23, 42, .14);
+                  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                  box-shadow: 0 14px 34px rgba(15, 23, 42, .10);
+                }
+                #atWhatsappInboxCount {
+                  color: #e0f2fe !important;
+                  background: rgba(14,165,233,.16) !important;
+                  border: 1px solid rgba(56,189,248,.34) !important;
+                }
+                html.light-mode #atWhatsappInboxCount {
+                  color: #0369a1 !important;
+                  background: rgba(224,242,254,.95) !important;
+                  border-color: rgba(56,189,248,.28) !important;
+                }
+                #atWhatsappInboxStatus,
+                #atWhatsappMessagesStatus,
+                #atWhatsappReplyStatus,
+                #atWhatsappConversationSubtitle {
+                  color: #94a3b8 !important;
+                }
+                html.light-mode #atWhatsappInboxStatus,
+                html.light-mode #atWhatsappMessagesStatus,
+                html.light-mode #atWhatsappReplyStatus,
+                html.light-mode #atWhatsappConversationSubtitle {
+                  color: #64748b !important;
+                }
+                #atWhatsappConversationTitle {
+                  color: #f8fafc !important;
+                }
+                html.light-mode #atWhatsappConversationTitle {
+                  color: #0f172a !important;
+                }
+                #atWhatsappInboxListView {
+                  min-height: 0;
                 }
                 #atWhatsappInboxList {
                   display: flex;
                   flex-direction: column;
                   gap: 8px;
+                  min-height: 0;
                   max-height: calc(100vh - 220px);
                   overflow: auto;
                 }
@@ -2407,39 +2449,259 @@
                   display: none;
                   flex-direction: column;
                   gap: 10px;
+                  min-height: 0;
                 }
                 #atWhatsappReplyBox {
                   border-top: 1px solid rgba(255,255,255,.08);
                   padding-top: 10px;
                   margin-top: 2px;
-                }
-                #atWhatsappConversationMessages {
-                  display: flex;
-                  flex-direction: column;
-                  gap: 8px;
-                  max-height: calc(100vh - 250px);
-                  overflow: auto;
+                  flex-shrink: 0;
                 }
                 .at-wa-conversation-item {
                   width: 100%;
                   text-align: left;
-                  border: 1px solid rgba(255, 255, 255, .08);
+                  border: 1px solid rgba(56, 189, 248, .18);
                   border-radius: 14px;
-                  background: rgba(255, 255, 255, .03);
-                  color: var(--content-title-color);
+                  background: rgba(15, 23, 42, .56);
+                  color: #e5e7eb;
                   padding: 10px 12px;
                   cursor: pointer;
                   transition: border-color .2s ease, background .2s ease, transform .2s ease;
                 }
+                html.light-mode .at-wa-conversation-item {
+                  border-color: rgba(15, 23, 42, .12);
+                  background: #ffffff;
+                  color: #0f172a;
+                  box-shadow: 0 4px 12px rgba(15, 23, 42, .05);
+                }
                 .at-wa-conversation-item:hover {
-                  border-color: rgba(14, 165, 233, .35);
-                  background: rgba(14, 165, 233, .08);
+                  border-color: rgba(56, 189, 248, .38);
+                  background: rgba(14, 165, 233, .10);
                   transform: translateY(-1px);
                 }
+                html.light-mode .at-wa-conversation-item:hover {
+                  background: rgba(240, 249, 255, 1);
+                  box-shadow: 0 8px 18px rgba(14, 165, 233, .10);
+                }
                 .at-wa-conversation-item.active {
-                  border-color: rgba(16, 185, 129, .45);
-                  background: rgba(16, 185, 129, .12);
-                  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .18);
+                  border-color: rgba(16, 185, 129, .48);
+                  background: linear-gradient(180deg, rgba(6, 95, 70, .28) 0%, rgba(15, 118, 110, .20) 100%);
+                  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .20);
+                }
+                html.light-mode .at-wa-conversation-item.active {
+                  background: linear-gradient(180deg, rgba(220,252,231,.96) 0%, rgba(236,253,245,.96) 100%);
+                  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .22), 0 10px 20px rgba(16, 185, 129, .08);
+                }
+                #atWhatsappMessagesList {
+                  display: flex;
+                  flex-direction: column;
+                  gap: 8px;
+                  min-height: 0;
+                  flex: 1;
+                  overflow: auto;
+                  padding-right: 2px;
+                }
+                .at-wa-empty-state {
+                  padding: 10px 12px;
+                  border: 1px dashed rgba(255,255,255,.12);
+                  border-radius: 10px;
+                  color: var(--inactive-color);
+                  font-size: 12px;
+                }
+                html.light-mode .at-wa-empty-state {
+                  border-color: rgba(15,23,42,.14);
+                  background: rgba(255,255,255,.76);
+                  color: #475569;
+                }
+                .at-wa-message-card {
+                  padding: 10px 12px;
+                  border-radius: 12px;
+                  border: 1px solid rgba(255,255,255,.08);
+                  background: rgba(255,255,255,.03);
+                }
+                .at-wa-message-card.outbound {
+                  margin-left: 18px;
+                  border-color: rgba(14,165,233,.28);
+                  background: rgba(14,165,233,.08);
+                }
+                .at-wa-message-card.inbound {
+                  margin-right: 18px;
+                  border-color: rgba(16,185,129,.18);
+                  background: rgba(16,185,129,.05);
+                }
+                html.light-mode .at-wa-message-card {
+                  border-color: rgba(15,23,42,.12);
+                  background: rgba(255,255,255,.88);
+                  box-shadow: 0 6px 16px rgba(15,23,42,.05);
+                }
+                html.light-mode .at-wa-message-card.outbound {
+                  border-color: rgba(14,165,233,.26);
+                  background: linear-gradient(180deg, rgba(224,242,254,.95) 0%, rgba(240,249,255,.95) 100%);
+                }
+                html.light-mode .at-wa-message-card.inbound {
+                  border-color: rgba(16,185,129,.22);
+                  background: linear-gradient(180deg, rgba(236,253,245,.95) 0%, rgba(240,253,250,.95) 100%);
+                }
+                .at-wa-message-title {
+                  font-size: 12px;
+                  font-weight: 700;
+                }
+                .at-wa-message-card.outbound .at-wa-message-title {
+                  color: #7dd3fc;
+                }
+                .at-wa-message-card.inbound .at-wa-message-title {
+                  color: #d1fae5;
+                }
+                html.light-mode .at-wa-message-card.outbound .at-wa-message-title {
+                  color: #0369a1;
+                }
+                html.light-mode .at-wa-message-card.inbound .at-wa-message-title {
+                  color: #047857;
+                }
+                .at-wa-message-meta {
+                  font-size: 11px;
+                  color: var(--inactive-color);
+                  margin-bottom: 6px;
+                }
+                html.light-mode .at-wa-message-meta {
+                  color: #64748b;
+                }
+                .at-wa-message-text {
+                  font-size: 13px;
+                  color: var(--content-title-color);
+                  white-space: pre-wrap;
+                }
+                html.light-mode .at-wa-message-text {
+                  color: #0f172a;
+                }
+                .at-wa-preview-card {
+                  padding: 10px;
+                  border: 1px solid rgba(255,255,255,.08);
+                  border-radius: 10px;
+                  background: rgba(255,255,255,.03);
+                }
+                html.light-mode .at-wa-preview-card {
+                  border-color: rgba(15,23,42,.12);
+                  background: rgba(255,255,255,.82);
+                }
+                .at-wa-preview-title {
+                  font-size: 12px;
+                  font-weight: 700;
+                  color: #e5e7eb;
+                }
+                html.light-mode .at-wa-preview-title {
+                  color: #0f172a;
+                }
+                .at-wa-preview-subtitle {
+                  font-size: 11px;
+                  color: var(--inactive-color);
+                  margin-top: 2px;
+                }
+                html.light-mode .at-wa-preview-subtitle {
+                  color: #64748b;
+                }
+                .at-wa-preview-link {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+                  padding: 6px 10px;
+                  border-radius: 999px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  text-decoration: none;
+                }
+                .at-wa-preview-link.manual {
+                  border: 1px solid rgba(14,165,233,.28);
+                  background: rgba(14,165,233,.12);
+                  color: #bae6fd;
+                }
+                .at-wa-preview-link.image {
+                  border: 1px solid rgba(16,185,129,.28);
+                  background: rgba(16,185,129,.12);
+                  color: #d1fae5;
+                }
+                html.light-mode .at-wa-preview-link.manual {
+                  color: #075985;
+                  background: rgba(14,165,233,.14);
+                }
+                html.light-mode .at-wa-preview-link.image {
+                  color: #065f46;
+                  background: rgba(16,185,129,.14);
+                }
+                .at-wa-choice-btn {
+                  padding: 6px 10px;
+                  border-radius: 999px;
+                  border: 1px solid rgba(125,211,252,.24);
+                  background: rgba(14,165,233,.12);
+                  color: #dbeafe;
+                  font-size: 11px;
+                  font-weight: 600;
+                  cursor: pointer;
+                }
+                html.light-mode .at-wa-choice-btn {
+                  border-color: rgba(14,165,233,.24);
+                  background: rgba(224,242,254,.95);
+                  color: #075985;
+                }
+                html.light-mode #atWhatsappConversationBackBtn {
+                  border-color: rgba(15,23,42,.14);
+                  background: rgba(255,255,255,.82);
+                  color: #0f172a;
+                }
+                html.light-mode #atWhatsappReplyInput {
+                  border-color: rgba(15,23,42,.14);
+                  background: rgba(255,255,255,.92);
+                  color: #0f172a;
+                }
+                /* --- Light-mode fixes: WhatsApp panel static elements --- */
+                html.light-mode #atWhatsappInboxListView > div:first-child > strong {
+                  color: #0f172a !important;
+                }
+                html.light-mode #atWhatsappConversationCount {
+                  color: #047857 !important;
+                  background: rgba(16,185,129,.12) !important;
+                  border-color: rgba(16,185,129,.28) !important;
+                }
+                html.light-mode #atWhatsappReplyBox {
+                  border-top-color: rgba(15,23,42,.12);
+                }
+                /* --- Light-mode fixes: conversation item inner inline-styled elements --- */
+                html.light-mode .at-wa-conversation-item div[style*="font-weight:700"] {
+                  color: #0f172a !important;
+                }
+                html.light-mode .at-wa-conversation-item div[style*="font-size:11px"],
+                html.light-mode .at-wa-conversation-item span[style*="font-size:11px"] {
+                  color: #64748b !important;
+                }
+                html.light-mode .at-wa-conversation-item span[style*="font-size:10px"] {
+                  color: #047857 !important;
+                  background: rgba(16,185,129,.12) !important;
+                }
+                html.light-mode .at-wa-conversation-item > div[style*="font-size:12px"] {
+                  color: #334155 !important;
+                }
+                /* --- Light-mode fixes: atendimento form elements --- */
+                html.light-mode #atSerieSelecionadaBox {
+                  border-color: rgba(14,165,233,.22);
+                  background: rgba(224,242,254,.60);
+                }
+                html.light-mode #atSerieSelecionadaBox > div:first-child {
+                  color: #0369a1 !important;
+                }
+                html.light-mode .at-form-plat-btn {
+                  border-color: #d1d5db !important;
+                  background: #ffffff !important;
+                  color: #374151 !important;
+                }
+                html.light-mode .at-form-plat-btn:hover,
+                html.light-mode .at-form-plat-btn.at-plat-active {
+                  border-color: #0ea5e9 !important;
+                  color: #0369a1 !important;
+                  background: rgba(224,242,254,.60) !important;
+                }
+                html.light-mode #atAnexoBtn {
+                  border-color: #d1d5db;
+                  color: #374151;
                 }
                 @media (max-width: 1180px) {
                   #atWhatsappWorkspace {
@@ -2447,6 +2709,7 @@
                   }
                   #atWhatsappInboxPanel {
                     position: static;
+                    max-height: none;
                   }
                   #atWhatsappInboxList {
                     max-height: 320px;
@@ -2585,7 +2848,7 @@
                     </button>
                     <button type="button" class="at-form-plat-btn" data-plat="DataCrazy"
                       style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
-                      <i class="fa-solid fa-database" style="font-size:18px;"></i>DataCrazy
+                      <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/LOGO-DATACRAZY%20(1).png" alt="DataCrazy" style="width:18px;height:18px;object-fit:contain;display:block;">DataCrazy
                     </button>
                   </div>
                   <input type="hidden" id="atPlataformaAtendimento">
@@ -2651,7 +2914,7 @@
                     <div id="atWhatsappConversationSubtitle" style="font-size:12px;color:var(--inactive-color);margin-top:2px;">Selecione uma conversa.</div>
                   </div>
                   <div id="atWhatsappMessagesStatus" style="font-size:12px;color:var(--inactive-color);">Consultando mensagens recebidas...</div>
-                  <div id="atWhatsappMessagesList" style="display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 250px);overflow:auto;"></div>
+                  <div id="atWhatsappMessagesList"></div>
                   <div id="atWhatsappReplyBox">
                     <div id="atWhatsappReplyStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Campo de resposta pronto para integrar o envio.</div>
                     <textarea id="atWhatsappReplyInput" rows="3" placeholder="Digite a resposta para este contato..." style="width:100%;border:1px solid #374151;border-radius:10px;background:rgba(255,255,255,.04);color:var(--content-title-color);padding:10px 12px;resize:vertical;"></textarea>
@@ -3079,7 +3342,7 @@
                   </button>
                   <button type="button" class="at-mencao-plat-btn" data-plat="DataCrazy"
                     style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;transition:all .2s;">
-                    <i class="fa-solid fa-database" style="font-size:18px;"></i>DataCrazy
+                    <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/LOGO-DATACRAZY%20(1).png" alt="DataCrazy" style="width:18px;height:18px;object-fit:contain;display:block;">DataCrazy
                   </button>
                 </div>
                 <input type="hidden" id="atMencaoPlataforma">
@@ -4806,6 +5069,12 @@
                 transition: box-shadow .2s;
               }
               .at-card-item:hover { box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+              html.light-mode .at-card-item {
+                background: #ffffff;
+                border-color: #dbe3ee;
+                box-shadow: 0 6px 18px rgba(15,23,42,.06);
+              }
+              html.light-mode .at-card-item:hover { box-shadow: 0 10px 24px rgba(15,23,42,.10); }
               .at-ci-header {
                 display: flex;
                 align-items: center;
@@ -4814,6 +5083,7 @@
                 border-bottom: 1px solid var(--border-color, #374151);
                 flex-wrap: wrap;
               }
+              html.light-mode .at-ci-header { border-bottom-color: #dbe3ee; }
               .at-ci-badge {
                 background: #0ea5e9;
                 color: #fff;
@@ -4828,6 +5098,10 @@
                 background: rgba(255,255,255,.07);
                 border-radius: 6px;
                 padding: 1px 7px;
+              }
+              html.light-mode .at-ci-tipo {
+                background: #eef2ff;
+                color: #334155;
               }
               .at-ci-edit-btn {
                 margin-left: auto;
@@ -4849,7 +5123,9 @@
                 padding: 6px 11px;
                 border-bottom: 1px solid var(--border-color, #374151);
               }
+              html.light-mode .at-ci-field { border-bottom-color: #dbe3ee; }
               .at-ci-field:nth-child(odd) { border-right: 1px solid var(--border-color, #374151); }
+              html.light-mode .at-ci-field:nth-child(odd) { border-right-color: #dbe3ee; }
               .at-ci-field-lbl {
                 font-size: 9px;
                 color: var(--inactive-color);
@@ -4857,6 +5133,9 @@
                 letter-spacing: .05em;
                 margin-bottom: 2px;
               }
+              html.light-mode .at-ci-field-lbl,
+              html.light-mode .at-ci-desc-lbl,
+              html.light-mode .at-ci-date { color: #64748b; }
               .at-ci-field-val {
                 font-size: 12px;
                 color: var(--content-title-color);
@@ -4865,6 +5144,11 @@
                 text-overflow: ellipsis;
                 min-height: 16px;
               }
+              html.light-mode .at-ci-field-val,
+              html.light-mode .at-ci-desc-val,
+              html.light-mode .at-ci-reclam-item,
+              html.light-mode .at-ci-fech-item,
+              html.light-mode .at-ci-fech-val { color: #0f172a; }
               .at-ci-input {
                 width: 100%;
                 box-sizing: border-box;
@@ -4935,11 +5219,16 @@
                 margin-right: 4px;
                 font-weight: 600;
               }
+              html.light-mode .at-ci-reclam-id {
+                background: #dbeafe;
+                color: #1d4ed8;
+              }
               /* seção fechamento */
               .at-ci-fech-wrapper {
                 border-top: 1px solid rgba(16,185,129,.2);
                 margin: 4px 0 0;
               }
+              html.light-mode .at-ci-fech-wrapper { border-top-color: rgba(16,185,129,.18); }
               .at-ci-fech-toggle {
                 display: flex;
                 align-items: center;

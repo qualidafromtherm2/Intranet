@@ -233,6 +233,8 @@ const MANUAL_CHAT_PROMPT = `Você responde perguntas técnicas sobre bombas de c
 Regras obrigatórias:
 - Use apenas as informações presentes nos trechos.
 - Não invente, não complete com conhecimento externo e não chute.
+- MODELO OBRIGATÓRIO: Se o usuário fizer uma pergunta técnica sem mencionar o modelo do equipamento (ex: FTI-185, FTI-240, FTI-75 Br, etc.) e não houver modelo no contexto da conversa anterior, sua PRIMEIRA resposta deve ser pedir o modelo. Exemplo: "Para que eu possa te ajudar com precisão, qual é o modelo do seu equipamento Fromtherm? (ex: FTI-185, FTI-240, etc.)". Não tente responder sem saber o modelo.
+- PERSISTÊNCIA DO MODELO: Quando o usuário já mencionou um modelo anteriormente na conversa (incluindo modelos informados no contexto), continue usando esse mesmo modelo para todas as perguntas seguintes até que ele mencione outro modelo explicitamente.
 - Quando o usuário citar um modelo específico, priorize estritamente esse modelo. Se os trechos não confirmarem o modelo exato, diga isso.
 - Quando o manual do modelo exato não aparecer, mas houver trecho claramente aplicável da mesma família do equipamento, você pode responder com base nessa família, deixando isso explícito.
 - Se o usuário informar apenas número de OS, atendimento ou outro identificador operacional que não seja modelo/número de série, explique que isso não basta para consultar manual e peça o modelo ou número de série.
@@ -1034,12 +1036,13 @@ function perguntaPedeImagemManual(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return false;
 
+  const verboEnvio = /(manda|mande|envia|envie|mostrar|mostra)/.test(t);
   const pedidoDireto =
     t.includes('foto') ||
     t.includes('imagem') ||
     t.includes('print') ||
     t.includes('screenshot') ||
-    ((t.includes('mostrar') || t.includes('mostra') || t.includes('manda') || t.includes('envia')) &&
+    (verboEnvio &&
       (t.includes('foto') || t.includes('imagem') || t.includes('print')));
 
   return pedidoDireto;
@@ -1051,6 +1054,8 @@ function perguntaPedeLinkManual(pergunta) {
 
   if (perguntaPedeImagemManual(pergunta)) return false;
 
+  const verboEnvio = /(manda|mande|envia|envie|mostrar|mostra|abrir|abre|ver)/.test(t);
+
   const pediuPagina =
     t.includes('pagina') ||
     t.includes('pag ') ||
@@ -1060,7 +1065,7 @@ function perguntaPedeLinkManual(pergunta) {
 
   const pediuLinkManual =
     (t.includes('link') && (t.includes('manual') || t.includes('pagina') || t.includes('pdf'))) ||
-    ((t.includes('mostrar') || t.includes('mostra') || t.includes('manda') || t.includes('envia') || t.includes('abrir') || t.includes('abre') || t.includes('ver')) &&
+    (verboEnvio &&
       (t.includes('manual') || t.includes('pagina') || t.includes('pdf')));
 
   return pediuPagina || pediuLinkManual;
@@ -1070,18 +1075,25 @@ function perguntaPedeManualCompleto(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return false;
 
+  const verboEnvio = /(manda|mande|envia|envie|mostrar|mostra|abrir|abre)/.test(t);
+
   return (
+    /\bqual (e|é)?\s*o?\s*manual\b/.test(t) ||
+    /\bqual manual\b/.test(t) ||
+    /\bmanual do modelo\b/.test(t) ||
+    /\bmanual da\b/.test(t) ||
     /\bmanual completo\b/.test(t) ||
     /\bmanual inteiro\b/.test(t) ||
     /\bpdf do manual\b/.test(t) ||
-    ((t.includes('manual') || t.includes('pdf')) &&
-      (t.includes('manda') || t.includes('envia') || t.includes('mostra') || t.includes('abrir') || t.includes('abre')))
+    ((t.includes('manual') || t.includes('pdf')) && verboEnvio)
   );
 }
 
 function perguntaPedeTrechoManual(pergunta) {
   const t = normalizarTextoBusca(pergunta);
   if (!t) return false;
+
+  const verboEnvio = /(manda|mande|envia|envie|mostra|mostrar)/.test(t);
 
   return (
     /\btrecho\b/.test(t) ||
@@ -1091,7 +1103,7 @@ function perguntaPedeTrechoManual(pergunta) {
     /\bfala isso\b/.test(t) ||
     /\bfala disso\b/.test(t) ||
     /\btexto do manual\b/.test(t) ||
-    (((t.includes('manda') || t.includes('envia') || t.includes('mostra')) && (t.includes('parte') || t.includes('trecho'))) ||
+    ((verboEnvio && (t.includes('parte') || t.includes('trecho'))) ||
       (t.includes('manual') && (t.includes('parte') || t.includes('trecho'))))
   );
 }
@@ -2354,8 +2366,48 @@ async function buscarTrechosManuaisFts(perguntaNorm, limit, manualIds = []) {
 async function buscarTrechosManuaisLike(tokens, limit, manualIds = []) {
   if (!Array.isArray(tokens) || !tokens.length) return [];
 
-  const likes = tokens.map((token) => `%${token}%`);
-  const params = [...likes];
+  const tokenPairs = tokens
+    .map((token) => {
+      const normal = normalizarTextoManualBusca(token);
+      const compacto = compactarTextoManual(token);
+      if (!normal && !compacto) return null;
+      return {
+        normal: normal ? `%${normal}%` : null,
+        compacto: compacto ? `%${compacto}%` : null
+      };
+    })
+    .filter(Boolean);
+
+  if (!tokenPairs.length) return [];
+
+  const params = [];
+  const condicoes = [];
+  const scoreParts = [];
+
+  tokenPairs.forEach((pair) => {
+    const subConds = [];
+
+    if (pair.normal) {
+      params.push(pair.normal);
+      const idx = params.length;
+      subConds.push(`COALESCE(m.nome_arquivo_normalizado, '') LIKE $${idx}`);
+      subConds.push(`COALESCE(c.texto_normalizado, '') LIKE $${idx}`);
+      scoreParts.push(`CASE WHEN COALESCE(m.nome_arquivo_normalizado, '') LIKE $${idx} OR COALESCE(c.texto_normalizado, '') LIKE $${idx} THEN 1 ELSE 0 END`);
+    }
+
+    if (pair.compacto) {
+      params.push(pair.compacto);
+      const idx = params.length;
+      subConds.push(`regexp_replace(COALESCE(m.nome_arquivo_normalizado, ''), '[^a-z0-9]+', '', 'gi') LIKE $${idx}`);
+      subConds.push(`regexp_replace(COALESCE(c.texto_normalizado, ''), '[^a-z0-9]+', '', 'gi') LIKE $${idx}`);
+      scoreParts.push(`CASE WHEN regexp_replace(COALESCE(m.nome_arquivo_normalizado, ''), '[^a-z0-9]+', '', 'gi') LIKE $${idx} OR regexp_replace(COALESCE(c.texto_normalizado, ''), '[^a-z0-9]+', '', 'gi') LIKE $${idx} THEN 1.25 ELSE 0 END`);
+    }
+
+    if (subConds.length) {
+      condicoes.push(`(${subConds.join(' OR ')})`);
+    }
+  });
+
   let filtroManual = '';
 
   if (Array.isArray(manualIds) && manualIds.length) {
@@ -2363,12 +2415,7 @@ async function buscarTrechosManuaisLike(tokens, limit, manualIds = []) {
     filtroManual = ` AND c.manual_id = ANY($${params.length}::bigint[])`;
   }
 
-  const condicoes = likes
-    .map((_, idx) => `(COALESCE(m.nome_arquivo_normalizado, '') LIKE $${idx + 1} OR COALESCE(c.texto_normalizado, '') LIKE $${idx + 1})`)
-    .join(' OR ');
-  const scoreExpr = likes
-    .map((_, idx) => `CASE WHEN COALESCE(m.nome_arquivo_normalizado, '') LIKE $${idx + 1} OR COALESCE(c.texto_normalizado, '') LIKE $${idx + 1} THEN 1 ELSE 0 END`)
-    .join(' + ');
+  const scoreExpr = scoreParts.length ? scoreParts.join(' + ') : '0';
 
   params.push(Math.max(1, Number(limit || MANUAL_MAX_CHUNKS)));
 
@@ -2389,7 +2436,7 @@ async function buscarTrechosManuaisLike(tokens, limit, manualIds = []) {
       ON m.id = c.manual_id
     WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
       ${filtroManual}
-      AND (${condicoes})
+      AND ${condicoes.length ? `(${condicoes.join(' OR ')})` : 'TRUE'}
     ORDER BY score DESC, c.manual_id ASC, c.chunk_ordem ASC
     LIMIT $${params.length}
     `,

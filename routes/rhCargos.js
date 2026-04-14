@@ -183,6 +183,7 @@ function normalizeColaboradorPayload(body = {}) {
   return {
     user_id: toInt(body.user_id),
     email: body.email == null ? null : String(body.email).trim() || null,
+    data_nascimento: body.data_nascimento || null,
     funcao_id: toInt(body.funcao_id),
     setor_id: toInt(body.setor_id),
     cargo_id: toInt(body.cargo_id),
@@ -229,6 +230,7 @@ router.get('/colaboradores/:userId', async (req, res) => {
          u.id,
          u.username,
          u.email,
+         u.data_nascimento,
          up.funcao_id,
          up.sector_id AS setor_id,
          f.name AS funcao,
@@ -289,9 +291,10 @@ router.post('/colaboradores/salvar', async (req, res) => {
     await client.query(
       `UPDATE public.auth_user
           SET email = $1,
+              data_nascimento = $2,
               updated_at = NOW()
-        WHERE id = $2`,
-      [data.email, data.user_id]
+        WHERE id = $3`,
+      [data.email, data.data_nascimento, data.user_id]
     );
 
     await client.query(

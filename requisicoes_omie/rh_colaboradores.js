@@ -202,6 +202,7 @@ function setBasicUserFields(pane, row) {
   val('#rhColabId', pane).value = row?.id || '';
   val('#rhColabUsuario', pane).value = row?.username || '';
   val('#rhColabEmail', pane).value = row?.email || '';
+  val('#rhColabDataNascimento', pane).value = row?.data_nascimento ? row.data_nascimento.slice(0, 10) : '';
 
   const funcaoId = normalizeId(row?.funcao_id);
   const setorId = normalizeId(row?.setor_id);
@@ -277,6 +278,7 @@ async function salvarCadastroRh(pane) {
   const payload = {
     user_id: userId,
     email: val('#rhColabEmail', pane).value.trim(),
+    data_nascimento: val('#rhColabDataNascimento', pane).value || null,
     funcao_id: normalizeId(val('#rhColabFuncao', pane).value),
     setor_id: normalizeId(val('#rhColabSetor', pane).value),
     cargo_id: normalizeId(val('#rhColabCargo', pane).value),
@@ -510,9 +512,13 @@ function ensurePane(root) {
             <input id="rhColabUsuario" type="text" readonly>
           </div>
 
-          <div class="rh-colab-span2">
+          <div>
             <label for="rhColabEmail">E-mail</label>
             <input id="rhColabEmail" type="email" placeholder="ex.: joao.silva@empresa.com.br">
+          </div>
+          <div>
+            <label for="rhColabDataNascimento">Data de nascimento</label>
+            <input id="rhColabDataNascimento" type="date">
           </div>
 
           <div>
