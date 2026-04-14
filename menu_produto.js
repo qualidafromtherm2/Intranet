@@ -8723,7 +8723,16 @@ function renderAtWhatsappMessages(rows = []) {
     return;
   }
 
-  atWhatsappMessagesList.innerHTML = rows.map((row) => {
+  // Encontrar o índice da última mensagem outbound do chatbot para só mostrar botões nela
+  let lastChatbotOutboundIdx = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (String(rows[i].direction || '').trim() === 'outbound' && /chatbot/i.test(String(rows[i].profile_name || '').trim())) {
+      lastChatbotOutboundIdx = i;
+      break;
+    }
+  }
+
+  atWhatsappMessagesList.innerHTML = rows.map((row, idx) => {
     const isOutbound = String(row.direction || '').trim() === 'outbound';
     const profileName = escapeAtHtml(String(row.profile_name || '').trim() || (isOutbound ? 'Atendimento' : 'Contato'));
     const messageType = escapeAtHtml(String(row.message_type || '').trim() || 'message');
@@ -8741,7 +8750,7 @@ function renderAtWhatsappMessages(rows = []) {
     const alignStyle = isOutbound ? 'margin-left:18px;' : 'margin-right:18px;';
     const originLabel = isOutbound ? 'saída' : (fromPhone || 'sem número');
     const previewCards = renderAtWhatsappPreviewCards(row);
-    const choiceButtons = renderAtWhatsappChoiceButtons(row);
+    const choiceButtons = idx === lastChatbotOutboundIdx ? renderAtWhatsappChoiceButtons(row) : '';
     return `
       <div style="padding:10px 12px;border:1px solid ${borderColor};border-radius:10px;background:${bgColor};${alignStyle}${shadow}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px;">
