@@ -40,7 +40,7 @@ const app = express();
 // Flag de debug para chat (silencia logs em produção por padrão)
 const CHAT_DEBUG = process.env.CHAT_DEBUG === '1' || process.env.NODE_ENV === 'development';
 // ===== Ingestão inicial de OPs (Omie → Postgres) ============================
-const OP_REGS_PER_PAGE = 200; // ajuste fino: 100~500 (Omie aceita até 500)
+const OP_REGS_PER_PAGE = 100;
 
 // ==== SSE (Server-Sent Events) para avisar o front ao vivo ==================
 const sseClients = new Set();
@@ -56,6 +56,7 @@ const GOOGLE_CALENDAR_SCOPES = [
 ];
 const GOOGLE_CALENDAR_TOKEN_SAFETY_MS = 60 * 1000;
 const callOmieDedup = require('./utils/callOmieDedup');
+const { MAX_OMIE_PAGE_SIZE, clampOmiePageSize } = require('./utils/omiePolicy');
 // Helper para registrar histórico de modificações de produto
 const { registrarModificacao } = require('./utils/auditoria');
 const LOCAIS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
@@ -1271,7 +1272,7 @@ registro = omie.ConsultarEstrutura({
 });
 
     } else {
-      const r = omie.ListarEstruturas({ nPagina:1, nRegPorPagina:200 });
+      const r = omie.ListarEstruturas({ nPagina:1, nRegPorPagina:MAX_OMIE_PAGE_SIZE });
       registro = (r?.produtosEncontrados || []).find(p=>{
         const i=p.ident||{};
         return (cod_produto && i.codProduto===cod_produto)
@@ -7190,21 +7191,15 @@ app.get('/api/compras/parcelas', async (req, res) => {
       app_secret: OMIE_APP_SECRET,
       param: [{
         pagina: 1,
-        registros_por_pagina: 200
+        registros_por_pagina: MAX_OMIE_PAGE_SIZE
       }]
     };
-    
-    const resp = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(omiePayload)
-    });
-    
-    if (!resp.ok) {
-      throw new Error(`Erro na API Omie: ${resp.status}`);
-    }
-    
-    const data = await resp.json();
+
+    const data = await callOmieDedup(
+      'https://app.omie.com.br/api/v1/geral/parcelas/',
+      omiePayload,
+      { waitMs: 5000 }
+    );
     
     console.log('[API /api/compras/parcelas] Resposta da Omie:', JSON.stringify(data).substring(0, 500));
     
@@ -7243,7 +7238,7 @@ async function syncCategoriasCompraOmie() {
         app_secret: OMIE_APP_SECRET,
         param: [{
           pagina,
-          registros_por_pagina: 500
+          registros_por_pagina: MAX_OMIE_PAGE_SIZE
         }]
       })
     });
@@ -7326,7 +7321,7 @@ async function syncListarCategoriasOmie() {
         app_secret: OMIE_APP_SECRET,
         param: [{
           pagina,
-          registros_por_pagina: 500
+          registros_por_pagina: MAX_OMIE_PAGE_SIZE
         }]
       })
     });
@@ -8796,21 +8791,19 @@ app.get('/api/compras/parcelas', async (req, res) => {
   try {
     console.log('[API /api/compras/parcelas] Buscando parcelas da Omie...');
     
-    const response = await fetch('https://app.omie.com.br/api/v1/geral/parcelas/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const data = await callOmieDedup(
+      'https://app.omie.com.br/api/v1/geral/parcelas/',
+      {
         call: 'ListarParcelas',
         app_key: OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param: [{
           pagina: 1,
-          registros_por_pagina: 200
+          registros_por_pagina: MAX_OMIE_PAGE_SIZE
         }]
-      })
-    });
-    
-    const data = await response.json();
+      },
+      { waitMs: 5000 }
+    );
     
     if (data.faultstring) {
       throw new Error(data.faultstring);
@@ -12568,7 +12561,7 @@ app.get('/api/armazem/locais', async (req, res) => {
       call: 'ListarLocaisEstoque',
       app_key: OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET,
-      param: [{ nPagina: 1, nRegPorPagina: 200 }]
+      param: [{ nPagina: 1, nRegPorPagina: MAX_OMIE_PAGE_SIZE }]
     };
 
     const primeira = await callOmieDedup('https://app.omie.com.br/api/v1/estoque/local/', payload, { waitMs: 3500 });
@@ -12578,7 +12571,7 @@ app.get('/api/armazem/locais', async (req, res) => {
     for (let pagina = 2; pagina <= totalPaginas; pagina += 1) {
       const extra = await callOmieDedup(
         'https://app.omie.com.br/api/v1/estoque/local/',
-        { ...payload, param: [{ nPagina: pagina, nRegPorPagina: 200 }] },
+        { ...payload, param: [{ nPagina: pagina, nRegPorPagina: MAX_OMIE_PAGE_SIZE }] },
         { waitMs: 3500 }
       );
       if (Array.isArray(extra?.locaisEncontrados)) {
@@ -13462,7 +13455,7 @@ app.post('/api/admin/sync/almoxarifado', express.json(), async (req, res) => {
   const dataInput   = String(req.body?.data || new Date().toLocaleDateString('pt-BR')); // dd/mm/aaaa
   const tmo         = Number(req.query.timeout || 60000);
   const retryCount  = Number(req.query.retry || 2);
-  const perPage     = 200;
+  const perPage     = MAX_OMIE_PAGE_SIZE;
 
   const brToISO = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s) ? s.split('/').reverse().join('-') : s;
   const dataBR  = /^\d{4}-\d{2}-\d{2}$/.test(dataInput) ? dataInput.split('-').reverse().join('/') : dataInput;
@@ -14693,14 +14686,15 @@ app.post('/api/omie/pedido', express.json(), async (req, res) => {
   }, null, 2));
   console.log('[pedido] chaves Omie →', OMIE_APP_KEY, OMIE_APP_SECRET ? 'OK' : 'MISSING');
   try {
-    const data = await omieCall(
+    const data = await callOmieDedup(
       'https://app.omie.com.br/api/v1/produtos/pedido/',
       {
         call:       'ConsultarPedido',
         app_key:    OMIE_APP_KEY,
         app_secret: OMIE_APP_SECRET,
         param:      req.body.param
-      }
+      },
+      { waitMs: 5000 }
     );
     console.log('[ConsultarPedido][proxy] resposta OMIE →', JSON.stringify({
       source,
@@ -15151,14 +15145,15 @@ app.post(
   app.post('/api/omie/produtos', async (req, res) => {
 
     try {
-      const data = await omieCall(
+      const data = await callOmieDedup(
         'https://app.omie.com.br/api/v1/geral/produtos/',
         {
           call:       req.body.call,
           app_key:    OMIE_APP_KEY,
           app_secret: OMIE_APP_SECRET,
           param:      req.body.param
-        }
+        },
+        { waitMs: 5000 }
       );
       res.json(data);
     } catch (err) {
@@ -17157,7 +17152,7 @@ ensureOverlayTable()
 
 
 // ====== COMERCIAL: Importador de Pedidos (OMIE → Postgres) ======
-const PV_REGS_PER_PAGE = 200;
+const PV_REGS_PER_PAGE = 100;
 
 async function omiePedidosListarPagina(pagina, filtros = {}) {
   const payload = {
@@ -20614,9 +20609,11 @@ async function syncRecebimentosNFeOmie(filtros = {}) {
     const nRegistrosPorPaginaInformado = Number(
       filtros.nRegistrosPorPagina || filtros.n_registros_por_pagina || 0
     );
-    const nRegistrosPorPagina = Number.isFinite(nRegistrosPorPaginaInformado) && nRegistrosPorPaginaInformado > 0
-      ? Math.floor(nRegistrosPorPaginaInformado)
-      : (preferirAlteracaoPorPadrao ? 500 : 100);
+    const nRegistrosPorPagina = clampOmiePageSize(
+      Number.isFinite(nRegistrosPorPaginaInformado) && nRegistrosPorPaginaInformado > 0
+        ? Math.floor(nRegistrosPorPaginaInformado)
+        : MAX_OMIE_PAGE_SIZE
+    );
 
     if ((filtros.data_inicial || filtros.dtEmissaoDe || filtros.dt_emissao_de) && !dataInicialOmie) {
       throw new Error('Data inicial inválida. Use DD/MM/YYYY ou YYYY-MM-DD.');
@@ -24211,19 +24208,18 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
 const _omieImageQueue = (() => {
   const DELAY_MS = 370; // um pouco acima de 333ms para margem de segurança
   let _lastCall = 0;
-  let _pending = 0;
+  let _chain = Promise.resolve();
 
   return async function enqueue(fn) {
-    _pending++;
-    const now = Date.now();
-    const wait = Math.max(0, _lastCall + DELAY_MS - now);
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    _lastCall = Date.now();
-    try {
-      return await fn();
-    } finally {
-      _pending--;
-    }
+    const run = _chain.catch(() => {}).then(async () => {
+      const now = Date.now();
+      const wait = Math.max(0, _lastCall + DELAY_MS - now);
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      _lastCall = Date.now();
+      return fn();
+    });
+    _chain = run.then(() => undefined, () => undefined);
+    return run;
   };
 })();
 
@@ -24232,28 +24228,16 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
   try {
     const codigoProduto = req.params.codigo_produto;
 
-    const omieData = await _omieImageQueue(async () => {
-      const omieBody = {
+    const omieData = await _omieImageQueue(async () => callOmieDedup(
+      'https://app.omie.com.br/api/v1/geral/produtos/',
+      {
         call: 'ConsultarProduto',
         app_key: process.env.OMIE_APP_KEY,
         app_secret: process.env.OMIE_APP_SECRET,
-        param: [{ codigo_produto: parseInt(codigoProduto) }]
-      };
-
-      const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(omieBody)
-      });
-
-      if (!omieResp.ok) {
-        const err = new Error(`HTTP_${omieResp.status}`);
-        err.httpStatus = omieResp.status;
-        throw err;
-      }
-
-      return omieResp.json();
-    });
+        param: [{ codigo_produto: parseInt(codigoProduto, 10) }]
+      },
+      { waitMs: 8000 }
+    ));
 
     // Verifica se houve erro na resposta da Omie
     if (omieData.faultstring || omieData.faultcode) {
@@ -24282,7 +24266,8 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
       res.json({ ok: true, url_imagem: null });
     }
   } catch (err) {
-    if (err.httpStatus === 429) {
+    const msg = String(err?.message || '');
+    if (err.httpStatus === 429 || /HTTP_429/.test(msg) || /HTTP 429/.test(msg)) {
       console.warn(`[Imagem Fresca] Rate limit Omie para produto ${req.params.codigo_produto} — retornando sem imagem`);
       return res.json({ ok: true, url_imagem: null });
     }
@@ -31169,7 +31154,7 @@ app.post('/api/admin/sync/pcp/estruturas', express.json(), async (req, res) => {
   try {
     const timeout = Number(req.query.timeout || 60000);
     const retry   = Number(req.query.retry || 2);
-    const perPage = Number(req.query.perPage || 200);
+    const perPage = clampOmiePageSize(Number(req.query.perPage || MAX_OMIE_PAGE_SIZE), MAX_OMIE_PAGE_SIZE);
     const sleepMs = Number(req.query.sleepMs || 150);
 
     let pagina = 1, nTotPaginas = 1;

@@ -9,6 +9,7 @@ const {
   OMIE_APP_KEY,
   OMIE_APP_SECRET
 } = require('../config.server');
+const { clampOmiePageSize, clampOmiePayloadPagination } = require('../utils/omiePolicy');
 const router = express.Router();
 const OMIE_URL = 'https://app.omie.com.br/api/v1/estoque/consulta/';
 
@@ -19,12 +20,12 @@ router.post('/pagina', async (req, res) => {
   try {
     const { call, param } = req.body;         // pega só o necessário
 
-    const payload = {
+    const payload = clampOmiePayloadPagination({
       call,
       param,
       app_key   : OMIE_APP_KEY,
       app_secret: OMIE_APP_SECRET
-    };
+    });
 
     const { data } = await axiosPostWithRetry(
       OMIE_URL,
@@ -55,13 +56,14 @@ router.post('/posicao', async (req, res) => {
       cExibeTodos          = 'S',
       codigo_local_estoque = 0
     } = req.body.param?.[0] || {};
+    const pageSize = clampOmiePageSize(nRegPorPagina, 50);
 
     /* página 1 */
     const firstPayload = {
       call: 'ListarPosEstoque',
       param: [{
         nPagina: 1,
-        nRegPorPagina,
+        nRegPorPagina: pageSize,
         dDataPosicao,
         cExibeTodos,
         codigo_local_estoque
@@ -85,7 +87,7 @@ router.post('/posicao', async (req, res) => {
         ...firstPayload,
         param: [{
           nPagina: pg,
-          nRegPorPagina,
+          nRegPorPagina: pageSize,
           dDataPosicao,
           cExibeTodos,
           codigo_local_estoque

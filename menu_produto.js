@@ -35660,8 +35660,8 @@ async function atualizarImagensExpiradasEmLote() {
   }));
   
   // Configuração de processamento em lotes
-  const TAMANHO_LOTE = 10; // Processa 10 imagens por vez
-  const DELAY_ENTRE_LOTES = 500; // 500ms entre cada lote
+  const TAMANHO_LOTE = 2; // Processa menos imagens por vez para reduzir rajadas na Omie
+  const DELAY_ENTRE_LOTES = 1500; // Mais respiro entre lotes
   
   let totalSucesso = 0;
   let totalFalhas = 0;
@@ -47262,7 +47262,7 @@ async function searchProdutosQuery(query, limit = 30) {
           call:       'ListarProdutosResumido',
           app_key:    OMIE_APP_KEY,
           app_secret: OMIE_APP_SECRET,
-          param: [{ pagina: 1, registros_por_pagina: 500, filtrar_apenas_descricao: '' }]
+          param: [{ pagina: 1, registros_por_pagina: 100, filtrar_apenas_descricao: '' }]
         })
       });
       if (res.ok) {
