@@ -1483,15 +1483,17 @@ const bcrypt = require('bcrypt');
 const INACTIVE_HASH = '$2b$10$ltPcvabuKvEU6Uj1FBUmi.ME4YjVq/dhGh4Z3PpEyNlphjjXCDkTG';   // ← seu HASH_INATIVO aqui
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const CHAT_FILE  = path.join(__dirname, 'data', 'chat.json');
+let _cfgServer;
+try { _cfgServer = require('./config.server'); } catch (_) { _cfgServer = {}; }
 const {
-  OMIE_APP_KEY,
-  OMIE_APP_SECRET,
-  GITHUB_TOKEN,
-  GITHUB_OWNER,
-  GITHUB_REPO,
-  GITHUB_BRANCH,
-  GITHUB_PATH
-} = require('./config.server');
+  OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || '3917057082939',
+  OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '11e503358e3ae0bee91053faa1323629',
+  GITHUB_TOKEN    = process.env.GITHUB_TOKEN,
+  GITHUB_OWNER    = process.env.GITHUB_OWNER   || 'qualidafromtherm2',
+  GITHUB_REPO     = process.env.GITHUB_REPO    || 'Foto-fromtherm',
+  GITHUB_BRANCH   = process.env.GITHUB_BRANCH  || 'main',
+  GITHUB_PATH     = process.env.GITHUB_PATH    || 'imagens'
+} = _cfgServer;
 const KANBAN_FILE = path.join(__dirname, 'data', 'kanban.json');
 
 const ETAPA_TO_STATUS = {
