@@ -200,6 +200,18 @@
     Colaboradores RH
    </a>
 
+   <a href="#"
+     id="btn-rh-controle-ferias"
+     class="menu-link"
+     data-nav-key="side:rh:controle-ferias"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="Controle de férias"
+     data-nav-selector="#btn-rh-controle-ferias">
+    <i class="fa-solid fa-umbrella-beach" style="margin-right:8px;"></i>
+    Controle de férias
+   </a>
+
   </div>
 </div>
 
@@ -374,6 +386,18 @@
        data-nav-selector="#menu-produto-recebido">
       <i class="fa-solid fa-box-open" style="margin-right:8px;"></i>
       Produtos recebidos
+    </a>
+
+    <a href="#"
+       id="menu-compras-contas-utilizadas"
+       class="menu-link"
+       data-nav-key="side:compras:contas-utilizadas"
+       data-nav-parent="side:compras"
+       data-nav-pos="side"
+       data-nav-label="Contas utilizadas"
+       data-nav-selector="#menu-compras-contas-utilizadas">
+      <i class="fa-solid fa-building-columns" style="margin-right:8px;"></i>
+      Contas utilizadas
     </a>
 
     <a href="#"
@@ -1862,6 +1886,57 @@
           </div>
         </div>
 
+        <div id="comprasContasUtilizadasPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:20px;gap:12px;">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;">
+                    <i class="fa-solid fa-building-columns" style="color:#0ea5e9;font-size:24px;"></i>
+                    <span>Contas utilizadas</span>
+                  </div>
+                  <div id="comprasContasUtilizadasCount" style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">0 contas</div>
+                </div>
+                <button id="comprasContasUtilizadasRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:10px 20px;border-radius:8px;display:flex;align-items:center;gap:8px;font-weight:500;border:none;cursor:pointer;transition:all 0.2s;">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Recarregar</span>
+                </button>
+              </div>
+
+              <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px;">
+                <div style="flex:1 1 320px;min-width:260px;position:relative;">
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#64748b;font-size:14px;"></i>
+                  <input id="comprasContasUtilizadasSearch" type="search" placeholder="Pesquisar descrição, banco, conta, gerente..." style="width:100%;padding:12px 14px 12px 40px;border:1px solid #cbd5e1;border-radius:10px;background:#ffffff;color:#0f172a;font-size:14px;outline:none;">
+                </div>
+              </div>
+
+              <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
+                <div style="overflow:auto;max-height:calc(100vh - 250px);">
+                  <table style="width:max(100%,1300px);border-collapse:separate;border-spacing:0;font-size:14px;">
+                    <thead>
+                      <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Descrição</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Banco</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Agência</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Conta</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Tipo</th>
+                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Saldo Inicial</th>
+                        <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Limite</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Observação</th>
+                      </tr>
+                    </thead>
+                    <tbody id="comprasContasUtilizadasTbody">
+                      <tr>
+                        <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">Abra o menu para carregar as contas utilizadas.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Configurações de Compras: Departamentos e Categorias -->
         <div id="comprasConfiguracoesPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -1893,15 +1968,15 @@
 
         <!-- Painel Recebimento: solicitações com status "compra realizada" -->
         <div id="recebimentoPane" class="tab-pane" style="display:none;">
-          <div class="content-wrapper">
-            <div class="content-section" style="margin-top:0;">
+          <div class="content-wrapper" style="height:calc(100vh - 150px);overflow:hidden;">
+            <div class="content-section" style="margin-top:0;height:100%;display:flex;flex-direction:column;min-height:0;">
               <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:20px;">
                 <div style="display:flex;align-items:center;gap:12px;">
                   <div class="content-section-title" style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;">
                     <i class="fa-solid fa-truck-ramp-box" style="color:#f59e0b;font-size:24px;"></i>
                     <span>Recebimento de Compras</span>
                   </div>
-                  <div id="recebimentoCount" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">0 itens</div>
+                  <div id="recebimentoCount" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600;">0 pedidos</div>
                 </div>
                 <button id="recebimentoRefreshBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;padding:10px 20px;border-radius:8px;display:flex;align-items:center;gap:8px;font-weight:500;border:none;cursor:pointer;transition:all 0.2s;">
                   <i class="fa-solid fa-rotate"></i>
@@ -1922,13 +1997,12 @@
                 </button>
               </div>
 
-              <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;">
-                <div style="overflow:auto;max-height:calc(100vh - 260px);">
-                  <table style="width:100%;border-collapse:separate;border-spacing:0;font-size:14px;">
+              <div style="background:white;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;max-width:100%;flex:1;min-height:0;display:flex;">
+                <div style="overflow:auto;max-width:100%;width:100%;height:100%;min-height:0;padding-bottom:8px;">
+                  <table style="width:max(100%,1450px);border-collapse:separate;border-spacing:0;font-size:14px;">
                     <thead>
                       <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;min-width:220px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Produto</th>
-                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Nº Pedido</th>
+                        <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;min-width:260px;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Nº Pedido</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Etapa_NF</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Solicitante</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Previsão</th>
@@ -1937,14 +2011,11 @@
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);width:150px;max-width:150px;">Observação</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Criado em</th>
                         <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Vlr.</th>
-                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Ações</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);min-width:220px;">Ações</th>
                       </tr>
                       <tr style="background:#e2e8f0;">
                         <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
-                          <input id="recebimentoFilterProduto" type="text" placeholder="Filtrar produto" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
-                        </th>
-                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
-                          <input id="recebimentoFilterPedido" type="text" placeholder="Filtrar pedido" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
+                          <input id="recebimentoFilterPedido" type="text" placeholder="Filtrar pedido / produto" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
                         </th>
                         <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
                           <input id="recebimentoFilterEtapa" type="text" placeholder="Filtrar etapa" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
@@ -1970,14 +2041,14 @@
                         <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
                           <input id="recebimentoFilterValor" type="text" placeholder="Filtrar valor" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
                         </th>
-                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;">
+                        <th style="padding:10px 12px;position:sticky;top:50px;z-index:25;background:#e2e8f0;border-bottom:1px solid #cbd5e1;min-width:130px;">
                           <input id="recebimentoFilterAcoes" type="text" placeholder="Filtrar NF" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;background:#fff;color:#0f172a;">
                         </th>
                       </tr>
                     </thead>
                     <tbody id="recebimentoTbody">
                       <tr>
-                        <td colspan="11" style="text-align:center;padding:40px;color:#94a3b8;">
+                        <td colspan="10" style="text-align:center;padding:40px;color:#94a3b8;">
                           <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
                           <div>Carregando dados...</div>
                         </td>
@@ -2214,28 +2285,45 @@
                     <i class="fa-solid fa-book-open" style="color:#2563eb;"></i>
                     Manuais da Qualidade
                   </div>
-                  <div style="color:var(--inactive-color);font-size:13px;">Arquivos da pasta <strong>Manuais principais</strong> no Supabase.</div>
                 </div>
 
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">
-                  <button id="qualidadeManuaisPrincipaisBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;">
-                    <i class="fa-solid fa-folder-open"></i>
-                    <span>Principais manuais</span>
-                  </button>
-                  <button id="qualidadeManuaisRecarregarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:#334155;color:#fff;">
-                    <i class="fa-solid fa-rotate-right"></i>
-                    <span>Recarregar</span>
-                  </button>
-                  <div id="qualidadeManuaisMeta" style="font-size:12px;color:var(--inactive-color);"></div>
+                <!-- Cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:18px;">
+                  <!-- Card: Manuais Principais -->
+                  <div id="qualidadeManuaisPrincipaisBtn" style="cursor:pointer;padding:24px;border:1px solid var(--border-color);border-radius:14px;background:var(--content-bg);box-shadow:0 4px 16px rgba(15,23,42,.06);transition:transform .15s,box-shadow .15s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(37,99,235,.15)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(15,23,42,.06)'">
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                      <div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#dbeafe 0%,#bfdbfe 100%);color:#1d4ed8;font-size:20px;flex:0 0 auto;">
+                        <i class="fa-solid fa-folder-open"></i>
+                      </div>
+                      <div style="font-weight:700;font-size:16px;color:var(--content-color);">Manuais Principais</div>
+                    </div>
+                    <div style="font-size:13px;color:var(--inactive-color);line-height:1.5;">Arquivos da pasta <strong>Manuais principais</strong> no Supabase.</div>
+                  </div>
+                  <!-- Card: Manuais de Produtos -->
+                  <div id="qualidadeManuaisProdutosBtn" style="cursor:pointer;padding:24px;border:1px solid var(--border-color);border-radius:14px;background:var(--content-bg);box-shadow:0 4px 16px rgba(15,23,42,.06);transition:transform .15s,box-shadow .15s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(34,197,94,.15)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(15,23,42,.06)'">
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                      <div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#dcfce7 0%,#bbf7d0 100%);color:#16a34a;font-size:20px;flex:0 0 auto;">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                      </div>
+                      <div style="font-weight:700;font-size:16px;color:var(--content-color);">Manuais de Produtos</div>
+                    </div>
+                    <div style="font-size:13px;color:var(--inactive-color);line-height:1.5;">Manuais de instrução anexados aos produtos do catálogo.</div>
+                  </div>
                 </div>
+
+                <div id="qualidadeManuaisMeta" style="font-size:12px;color:var(--inactive-color);margin-top:12px;"></div>
 
                 <div id="qualidadeManuaisListaWrap" style="display:none;margin-top:16px;">
                   <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
                       <div style="display:flex;align-items:center;gap:8px;">
                         <i class="fa-solid fa-folder-tree" style="color:#2563eb;"></i>
-                        <div style="font-weight:600;">Pasta: Manuais principais</div>
+                        <div id="qualidadeManuaisTituloPasta" style="font-weight:600;">Pasta: Manuais principais</div>
                       </div>
+                      <button id="qualidadeManuaisRecarregarBtn" class="content-button" type="button" style="display:inline-flex;align-items:center;gap:6px;background:#334155;color:#fff;font-size:12px;padding:6px 14px;">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span>Recarregar</span>
+                      </button>
                     </div>
                     <div id="qualidadeManuaisLista" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;"></div>
                   </div>
@@ -2760,6 +2848,11 @@
 
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px;">
                 <div class="form-field">
+                  <label for="atData">Data</label>
+                  <input id="atData" type="date" style="width:100%;" />
+                </div>
+
+                <div class="form-field">
                   <label for="atTelefone">Telefone</label>
                   <input id="atTelefone" type="text" placeholder="(00) 00000-0000" style="width:100%;" />
                 </div>
@@ -3175,6 +3268,10 @@
                   <i class="fa-solid fa-ticket"></i> Atendimento
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Data</label>
+                    <input type="date" id="atEmData" class="at-em-input">
+                  </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tipo de atendimento</label>
                     <select id="atEmTipo" class="at-em-input">
@@ -9611,7 +9708,13 @@ function attachDropZone(ul) {
   const tbodyProdutoRecebido = document.getElementById('produtoRecebidoTbody');
   const countBadgeProdutoRecebido = document.getElementById('produtoRecebidoCount');
   const menuProdutoRecebido = document.getElementById('menu-produto-recebido');
+  const btnRecarregarContasUtilizadas = document.getElementById('comprasContasUtilizadasRefreshBtn');
+  const tbodyContasUtilizadas = document.getElementById('comprasContasUtilizadasTbody');
+  const countBadgeContasUtilizadas = document.getElementById('comprasContasUtilizadasCount');
+  const menuContasUtilizadas = document.getElementById('menu-compras-contas-utilizadas');
+  const searchContasUtilizadas = document.getElementById('comprasContasUtilizadasSearch');
   const bloqueiosConsultaNfe = new Map();
+  let contasUtilizadasCache = [];
 
   const configPainelRecebimento = {
     key: 'recebimento',
@@ -9688,6 +9791,156 @@ function attachDropZone(ul) {
     const numeroTxt = String(numero || '').trim();
     if (dddTxt && numeroTxt) return `(${dddTxt}) ${numeroTxt}`;
     return numeroTxt || '-';
+  };
+
+  const normalizarTextoBuscaConta = (valor) => String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+  const renderizarContasUtilizadas = (lista = []) => {
+    if (!tbodyContasUtilizadas) return;
+
+    const contas = Array.isArray(lista) ? lista : [];
+    if (countBadgeContasUtilizadas) {
+      countBadgeContasUtilizadas.textContent = `${contas.length} conta${contas.length === 1 ? '' : 's'}`;
+    }
+
+    if (!contas.length) {
+      tbodyContasUtilizadas.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center;padding:32px 16px;color:#64748b;">
+            <i class="fa-solid fa-building-columns" style="font-size:22px;margin-bottom:10px;display:block;color:#94a3b8;"></i>
+            Nenhuma conta encontrada com os filtros atuais.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbodyContasUtilizadas.innerHTML = contas.map((conta) => {
+      const descricao = escaparHtml(conta?.descricao || '-');
+      const banco = escaparHtml(conta?.banco_nome || conta?.codigo_banco || '-');
+      const agencia = escaparHtml(conta?.codigo_agencia || '-');
+      const numeroConta = escaparHtml(conta?.numero_conta_corrente || '-');
+      const tipo = escaparHtml(conta?.tipo_descricao || conta?.tipo_conta_corrente || conta?.tipo || '-');
+      const saldo = escaparHtml(formatarMoeda(conta?.saldo_inicial || 0));
+      const limite = escaparHtml(formatarMoeda(conta?.valor_limite || 0));
+      const observacao = escaparHtml(conta?.observacao || '-');
+
+      return `
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">
+            <div class="conta-utilizada-descricao" style="font-weight:700;">${descricao}</div>
+            <div class="conta-utilizada-codigo" style="font-size:11px;margin-top:4px;">Cod. ${escaparHtml(String(conta?.nCodCC || '-'))}</div>
+          </td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${banco}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${agencia}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${numeroConta}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${tipo}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#047857;white-space:nowrap;">${saldo}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#1d4ed8;white-space:nowrap;">${limite}</td>
+          <td class="conta-utilizada-observacao conta-utilizada-observacao-editavel" data-ncodcc="${escaparHtml(String(conta?.nCodCC || ''))}" title="Clique para editar a observação" style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;max-width:320px;word-break:break-word;cursor:pointer;">${observacao}</td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  const editarObservacaoContaUtilizada = async (conta) => {
+    if (!conta || !Number(conta?.nCodCC || 0)) return;
+
+    const observacaoAtual = String(conta?.observacao || '');
+    const novaObservacao = window.prompt('Editar observação da conta:', observacaoAtual);
+    if (novaObservacao === null || novaObservacao === observacaoAtual) return;
+
+    try {
+      const resp = await fetch('/api/compras/contas-utilizadas/observacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          nCodCC: Number(conta.nCodCC),
+          observacao: novaObservacao
+        })
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        throw new Error(data?.error || `Falha ao atualizar observação (HTTP ${resp.status})`);
+      }
+
+      contasUtilizadasCache = contasUtilizadasCache.map((item) => (
+        Number(item?.nCodCC || 0) === Number(conta.nCodCC)
+          ? { ...item, observacao: novaObservacao }
+          : item
+      ));
+
+      aplicarFiltroContasUtilizadas();
+    } catch (err) {
+      alert(`Erro ao atualizar observação: ${err?.message || 'erro desconhecido'}`);
+    }
+  };
+
+  const aplicarFiltroContasUtilizadas = () => {
+    const termo = normalizarTextoBuscaConta(searchContasUtilizadas?.value || '');
+    if (!termo) {
+      renderizarContasUtilizadas(contasUtilizadasCache);
+      return;
+    }
+
+    const filtradas = contasUtilizadasCache.filter((conta) => {
+      const texto = normalizarTextoBuscaConta([
+        conta?.descricao,
+        conta?.codigo_banco,
+        conta?.codigo_agencia,
+        conta?.numero_conta_corrente,
+        conta?.tipo_conta_corrente,
+        conta?.nome_gerente,
+        conta?.observacao,
+        conta?.nCodCC
+      ].filter(Boolean).join(' '));
+      return texto.includes(termo);
+    });
+
+    renderizarContasUtilizadas(filtradas);
+  };
+
+  const carregarContasUtilizadas = async (forceReload = false) => {
+    if (!tbodyContasUtilizadas) return;
+
+    tbodyContasUtilizadas.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align:center;padding:40px;color:#94a3b8;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:10px;"></i>
+          <div>Carregando contas utilizadas...</div>
+        </td>
+      </tr>
+    `;
+
+    if (btnRecarregarContasUtilizadas) btnRecarregarContasUtilizadas.disabled = true;
+
+    try {
+      const resp = await fetch(`/api/compras/contas-utilizadas${forceReload ? `?t=${Date.now()}` : ''}`, { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) {
+        throw new Error(data?.error || `Falha ao carregar contas (HTTP ${resp.status})`);
+      }
+
+      contasUtilizadasCache = Array.isArray(data?.contas) ? data.contas : [];
+      aplicarFiltroContasUtilizadas();
+    } catch (err) {
+      tbodyContasUtilizadas.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center;padding:32px 16px;color:#b91c1c;">
+            Erro ao carregar contas utilizadas: ${escaparHtml(err?.message || 'Erro desconhecido')}
+          </td>
+        </tr>
+      `;
+      if (countBadgeContasUtilizadas) countBadgeContasUtilizadas.textContent = '0 contas';
+    } finally {
+      if (btnRecarregarContasUtilizadas) btnRecarregarContasUtilizadas.disabled = false;
+    }
   };
 
   const escaparHtml = (valor) => String(valor ?? '')
@@ -10015,8 +10268,113 @@ function attachDropZone(ul) {
       return formatarQuantidade(numero);
     };
 
-    const itensHtml = xmlItens.length
-      ? xmlItens.map((item) => {
+    const normalizarTextoComparacaoItens = (valor) => String(valor ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+    const tokenizarTextoComparacaoItens = (valor) => {
+      const ignorar = new Set(['de','da','do','das','dos','e','em','com','para','por','a','o','as','os','un','und','kg','mts','mt','mm','cm','mg','ml','g','l','pc','cpr','caps','cap','gen']);
+      return [...new Set(
+        normalizarTextoComparacaoItens(valor)
+          .split(/\s+/)
+          .filter((token) => token && !ignorar.has(token) && token.length > 1)
+      )];
+    };
+
+    const itensNfComparacao = xmlItens.length
+      ? xmlItens.map((item, idx) => ({
+          idx: item.idx || idx + 1,
+          codigo: item.codigo || '-',
+          descricao: item.descricao || '-',
+          qtd: item.qtd,
+          un: item.un || '-',
+          vlrUnit: item.vlrUnit,
+          vlrItem: item.vlrItem
+        }))
+      : itens.map((item, idx) => {
+          const cab = item?.itensCabec || {};
+          const ajustes = item?.itensAjustes || {};
+          return {
+            idx: idx + 1,
+            codigo: cab.cCodigoProduto || '-',
+            descricao: cab.cDescricaoProduto || '-',
+            qtd: cab.nQtdeNFe,
+            un: cab.cUnidadeNfe || ajustes.cUnidade || '-',
+            vlrUnit: cab.nPrecoUnit,
+            vlrItem: cab.vTotalItem
+          };
+        });
+
+    const calcularScoreComparacaoItens = (itemNf, itemPedido) => {
+      const codigoNf = normalizarTextoComparacaoItens(itemNf?.codigo || '').replace(/\s+/g, '');
+      const codigoPedido = normalizarTextoComparacaoItens(itemPedido?.produto_codigo || '').replace(/\s+/g, '');
+      const descNf = String(itemNf?.descricao || '');
+      const descPedido = String(itemPedido?.produto_descricao || '');
+      const descNfNorm = normalizarTextoComparacaoItens(descNf);
+      const descPedidoNorm = normalizarTextoComparacaoItens(descPedido);
+      let score = 0;
+
+      if (codigoNf && codigoPedido && (codigoNf === codigoPedido || codigoNf.includes(codigoPedido) || codigoPedido.includes(codigoNf))) {
+        score += 150;
+      }
+
+      if (descNfNorm && descPedidoNorm) {
+        if (descNfNorm === descPedidoNorm) score += 300;
+        else if (descNfNorm.includes(descPedidoNorm) || descPedidoNorm.includes(descNfNorm)) score += 120;
+      }
+
+      const tokensNf = tokenizarTextoComparacaoItens(descNf);
+      const tokensPedido = new Set(tokenizarTextoComparacaoItens(descPedido));
+      tokensNf.forEach((token) => {
+        if (tokensPedido.has(token)) score += 30 + token.length;
+      });
+
+      return score;
+    };
+
+    const ordenarItensPedidoPorComparacao = (listaPedido, listaNf) => {
+      if (!Array.isArray(listaPedido) || !listaPedido.length || !Array.isArray(listaNf) || !listaNf.length) {
+        return Array.isArray(listaPedido) ? listaPedido : [];
+      }
+
+      const usados = new Set();
+      const ordenados = [];
+
+      listaNf.forEach((itemNf) => {
+        let melhorIdx = -1;
+        let melhorScore = -1;
+
+        listaPedido.forEach((itemPedido, idx) => {
+          if (usados.has(idx)) return;
+          const scoreAtual = calcularScoreComparacaoItens(itemNf, itemPedido);
+          if (scoreAtual > melhorScore) {
+            melhorScore = scoreAtual;
+            melhorIdx = idx;
+          }
+        });
+
+        if (melhorIdx >= 0) {
+          usados.add(melhorIdx);
+          ordenados.push(listaPedido[melhorIdx]);
+        }
+      });
+
+      listaPedido.forEach((itemPedido, idx) => {
+        if (!usados.has(idx)) ordenados.push(itemPedido);
+      });
+
+      return ordenados;
+    };
+
+    const itensPedidoOrdenados = ordenarItensPedidoPorComparacao(itensPedido, itensNfComparacao);
+    const totalItensNf = itensNfComparacao.reduce((acc, item) => acc + (numeroFlex(item?.vlrItem) || 0), 0);
+    const totalItensPedido = itensPedidoOrdenados.reduce((acc, item) => acc + (numeroFlex(item?.valor_item) || 0), 0);
+
+    const itensHtml = itensNfComparacao.length
+      ? `${itensNfComparacao.map((item) => {
           return `
             <tr>
               <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${item.idx}</td>
@@ -10028,27 +10386,15 @@ function attachDropZone(ul) {
               <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarMoedaFlex(item.vlrItem))}</td>
             </tr>
           `;
-        }).join('')
-      : itens.length
-        ? itens.map((item, idx) => {
-            const cab = item?.itensCabec || {};
-            const ajustes = item?.itensAjustes || {};
-            return `
-              <tr>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${idx + 1}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;font-family:monospace;color:#e2e8f0;">${escaparHtml(cab.cCodigoProduto || '-')}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(cab.cDescricaoProduto || '-')}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarQuantidade(cab.nQtdeNFe)}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;color:#e2e8f0;">${escaparHtml(cab.cUnidadeNfe || ajustes.cUnidade || '-')}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarMoeda(cab.nPrecoUnit)}</td>
-                <td style="padding:8px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${formatarMoeda(cab.vTotalItem)}</td>
-              </tr>
-            `;
-          }).join('')
-        : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#cbd5e1;">Nenhum item retornado.</td></tr>`;
+        }).join('')}
+        <tr style="background:#0b1220;">
+          <td colspan="6" style="padding:9px 8px;border-top:2px solid #334155;text-align:right;font-weight:700;color:#93c5fd;">Total</td>
+          <td style="padding:9px 8px;border-top:2px solid #334155;text-align:right;font-weight:700;color:#f8fafc;">${escaparHtml(formatarMoedaFlex(totalItensNf))}</td>
+        </tr>`
+      : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#cbd5e1;">Nenhum item retornado.</td></tr>`;
 
-    const itensPedidoHtml = itensPedido.length
-      ? itensPedido.map((item, idx) => `
+    const itensPedidoHtml = itensPedidoOrdenados.length
+      ? `${itensPedidoOrdenados.map((item, idx) => `
           <tr>
             <td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#0f172a;">${idx + 1}</td>
             <td style="padding:8px;border-bottom:1px solid #e2e8f0;font-family:monospace;color:#0f172a;">${escaparHtml(item.produto_codigo || '-')}</td>
@@ -10058,7 +10404,11 @@ function attachDropZone(ul) {
             <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">-</td>
             <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#0f172a;">${formatarMoeda(item.valor_item)}</td>
           </tr>
-        `).join('')
+        `).join('')}
+        <tr style="background:#dcfce7;">
+          <td colspan="6" style="padding:9px 8px;border-top:2px solid #86efac;text-align:right;font-weight:700;color:#166534;">Total</td>
+          <td style="padding:9px 8px;border-top:2px solid #86efac;text-align:right;font-weight:700;color:#0f172a;">${formatarMoeda(totalItensPedido)}</td>
+        </tr>`
       : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Sem itens do pedido para comparação.</td></tr>`;
 
     const parcelas = Array.isArray(xmlPagamento.parcelas) ? xmlPagamento.parcelas : [];
@@ -10177,6 +10527,68 @@ function attachDropZone(ul) {
 
     return `
       ${blocoAcaoVinculo}
+      ${opcoes.ocultarComparacao ? '' : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:12px;">
+        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Comparação com itens do pedido</div>
+        <div style="overflow:auto;max-height:300px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+            <colgroup>
+              <col style="width:6%;">
+              <col style="width:18%;">
+              <col style="width:30%;">
+              <col style="width:10%;">
+              <col style="width:10%;">
+              <col style="width:13%;">
+              <col style="width:13%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#dcfce7;">
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">#</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Código</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Descrição</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Qtd</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Unid.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Preço Unit.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Total Item</th>
+              </tr>
+            </thead>
+            <tbody>${itensPedidoHtml}</tbody>
+          </table>
+        </div>
+        <div style="display:grid;grid-template-columns:95px 1fr;gap:6px;font-size:12px;margin-top:10px;color:#0f172a;">
+          <div style="font-weight:700;">Criado em</div><div>${escaparHtml(pedidoCriadoEm)}</div>
+          <div style="font-weight:700;">Observação</div><div style="word-break:break-word;">${escaparHtml(pedidoObservacao)}</div>
+        </div>
+      </div>`}
+
+      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:10px;">
+        <div style="font-weight:700;color:#f8fafc;margin-bottom:8px;">Itens da NF-e</div>
+        <div style="overflow:auto;max-height:300px;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;color:#e2e8f0;">
+            <colgroup>
+              <col style="width:6%;">
+              <col style="width:18%;">
+              <col style="width:30%;">
+              <col style="width:10%;">
+              <col style="width:10%;">
+              <col style="width:13%;">
+              <col style="width:13%;">
+            </colgroup>
+            <thead>
+              <tr style="background:#111827;">
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">#</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Código</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Descrição</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Qtd</th>
+                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Unid.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Unit.</th>
+                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Item</th>
+              </tr>
+            </thead>
+            <tbody>${itensHtml}</tbody>
+          </table>
+        </div>
+      </div>
+
       <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
           <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Dados da NF-e</div>
@@ -10188,22 +10600,22 @@ function attachDropZone(ul) {
           <div><strong style="color:#93c5fd;">Etapa:</strong> ${renderizarBadgeEtapa(cabec.cEtapa, etapaInfo)}</div>
         </div>
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Emitente</div>
+          <div><strong style="color:#93c5fd;">Nome:</strong> ${escaparHtml(xmlEmitente.nome || cabec.cRazaoSocial || cabec.cNome || '-')}</div>
+          <div><strong style="color:#93c5fd;">CNPJ:</strong> ${escaparHtml(xmlEmitente.cnpj || cabec.cCNPJ_CPF || '-')}</div>
+          <div><strong style="color:#93c5fd;">Município:</strong> ${escaparHtml(xmlEmitente.municipio || '-')}</div>
+          <div><strong style="color:#93c5fd;">UF:</strong> ${escaparHtml(xmlEmitente.uf || '-')}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
           <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Totais</div>
           <div><strong style="color:#93c5fd;">Valor NF:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorNf || cabec.nValorNFe || totais.vTotalNFe))}</div>
           <div><strong style="color:#93c5fd;">Valor Produtos:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorProdutos || totais.vTotalProdutos))}</div>
           <div><strong style="color:#93c5fd;">ICMS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.icms))}</div>
           <div><strong style="color:#93c5fd;">PIS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.pis))}</div>
           <div><strong style="color:#93c5fd;">COFINS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.cofins))}</div>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
-        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
-          <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Emitente</div>
-          <div><strong style="color:#93c5fd;">Nome:</strong> ${escaparHtml(xmlEmitente.nome || cabec.cRazaoSocial || cabec.cNome || '-')}</div>
-          <div><strong style="color:#93c5fd;">CNPJ:</strong> ${escaparHtml(xmlEmitente.cnpj || cabec.cCNPJ_CPF || '-')}</div>
-          <div><strong style="color:#93c5fd;">Município:</strong> ${escaparHtml(xmlEmitente.municipio || '-')}</div>
-          <div><strong style="color:#93c5fd;">UF:</strong> ${escaparHtml(xmlEmitente.uf || '-')}</div>
         </div>
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
           <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Protocolo/SEFAZ</div>
@@ -10246,68 +10658,6 @@ function attachDropZone(ul) {
           </table>
         </div>
       </div>
-
-      <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:10px;">
-        <div style="font-weight:700;color:#f8fafc;margin-bottom:8px;">Itens da NF-e</div>
-        <div style="overflow:auto;max-height:300px;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;color:#e2e8f0;">
-            <colgroup>
-              <col style="width:6%;">
-              <col style="width:18%;">
-              <col style="width:30%;">
-              <col style="width:10%;">
-              <col style="width:10%;">
-              <col style="width:13%;">
-              <col style="width:13%;">
-            </colgroup>
-            <thead>
-              <tr style="background:#111827;">
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">#</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Código</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Descrição</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Qtd</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #1e293b;color:#e2e8f0;">Unid.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Unit.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #1e293b;color:#e2e8f0;">Vlr Item</th>
-              </tr>
-            </thead>
-            <tbody>${itensHtml}</tbody>
-          </table>
-        </div>
-      </div>
-
-      ${opcoes.ocultarComparacao ? '' : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;margin-bottom:12px;">
-        <div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Comparação com itens do pedido</div>
-        <div style="overflow:auto;max-height:300px;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
-            <colgroup>
-              <col style="width:6%;">
-              <col style="width:18%;">
-              <col style="width:30%;">
-              <col style="width:10%;">
-              <col style="width:10%;">
-              <col style="width:13%;">
-              <col style="width:13%;">
-            </colgroup>
-            <thead>
-              <tr style="background:#dcfce7;">
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">#</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Código</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Descrição</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Qtd</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #e2e8f0;color:#0f172a;">Unid.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Preço Unit.</th>
-                <th style="padding:8px;text-align:right;border-bottom:1px solid #e2e8f0;color:#0f172a;">Total Item</th>
-              </tr>
-            </thead>
-            <tbody>${itensPedidoHtml}</tbody>
-          </table>
-        </div>
-        <div style="display:grid;grid-template-columns:95px 1fr;gap:6px;font-size:12px;margin-top:10px;color:#0f172a;">
-          <div style="font-weight:700;">Criado em</div><div>${escaparHtml(pedidoCriadoEm)}</div>
-          <div style="font-weight:700;">Observação</div><div style="word-break:break-word;">${escaparHtml(pedidoObservacao)}</div>
-        </div>
-      </div>`}
     `;
   };
 
@@ -10538,96 +10888,28 @@ function attachDropZone(ul) {
             return;
           }
 
-          const textoOriginal = btnVincular.innerHTML;
-          btnVincular.disabled = true;
-          btnVincular.style.opacity = '0.7';
-          btnVincular.style.cursor = 'not-allowed';
-          btnVincular.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando prévia...</span>';
-
           statusVinculo.style.display = 'block';
           statusVinculo.style.color = '#1e3a8a';
-          statusVinculo.innerHTML = '<i class="fa-solid fa-clock" style="margin-right:6px;"></i>Consultando prévia de associação...';
+          statusVinculo.innerHTML = '<i class="fa-solid fa-up-right-from-square" style="margin-right:6px;"></i>Abrindo modal profissional de vinculação...';
 
-          try {
-            const respostaPreview = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido/preview', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                numero_nfe: numeroNfeTexto,
-                chave_nfe: String(chaveNfe || '').trim(),
-                numero_pedido: numeroPedido,
-                n_cod_ped: Number(pedidoContexto?.n_cod_ped || 0) || null
-              })
+          if (window.abrirModalAssociarPedidoNfeComContexto) {
+            await window.abrirModalAssociarPedidoNfeComContexto({
+              numero_nfe: numeroNfeTexto,
+              numero_pedido: numeroPedido,
+              chave_nfe: String(chaveNfe || '').trim(),
+              n_cod_ped: Number(pedidoContexto?.n_cod_ped || 0) || null,
+              itens: Array.isArray(pedidoContexto?.itens) ? pedidoContexto.itens : []
             });
-
-            const payloadPreview = await respostaPreview.json().catch(() => ({}));
-            if (!respostaPreview.ok || payloadPreview?.ok === false) {
-              throw new Error(payloadPreview?.error || `Erro HTTP ${respostaPreview.status}`);
-            }
-
-            const prev = payloadPreview?.preview || {};
-            const itensNfTotal = Number(prev?.itens_nf_total || 0);
-            const itensPedidoTotal = Number(prev?.itens_pedido_total || 0);
-            const itensMatchTotal = Number(prev?.itens_match_total || 0);
-            const itensSemMatchTotal = Number(prev?.itens_sem_match_total || 0);
-
-            statusVinculo.style.color = itensSemMatchTotal > 0 ? '#92400e' : '#166534';
-            statusVinculo.innerHTML = `
-              <i class="fa-solid ${itensSemMatchTotal > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'}" style="margin-right:6px;"></i>
-              Prévia: ${itensMatchTotal} item(ns) com match, ${itensSemMatchTotal} sem match (NF: ${itensNfTotal}, Pedido: ${itensPedidoTotal}).
-            `;
-
-            const confirmar = window.confirm(
-              `Prévia da vinculação\n\n` +
-              `NF-e: ${numeroNfeTexto || '-'}\n` +
-              `Pedido: ${numeroPedido}\n` +
-              `Itens NF: ${itensNfTotal}\n` +
-              `Itens Pedido: ${itensPedidoTotal}\n` +
-              `Com match: ${itensMatchTotal}\n` +
-              `Sem match: ${itensSemMatchTotal}\n\n` +
-              `Deseja continuar com a vinculação?`
-            );
-            if (!confirmar) {
-              statusVinculo.style.color = '#334155';
-              statusVinculo.innerHTML = '<i class="fa-solid fa-ban" style="margin-right:6px;"></i>Vinculação cancelada pelo usuário após visualizar a prévia.';
-              return;
-            }
-
-            btnVincular.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Vinculando...</span>';
-            statusVinculo.style.color = '#1e3a8a';
-            statusVinculo.innerHTML = '<i class="fa-solid fa-clock" style="margin-right:6px;"></i>Enviando associação para a Omie...';
-
-            const respostaAssoc = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                numero_nfe: numeroNfeTexto,
-                chave_nfe: String(chaveNfe || '').trim(),
-                numero_pedido: numeroPedido,
-                n_cod_ped: Number(pedidoContexto?.n_cod_ped || 0) || null
-              })
-            });
-
-            const payloadAssoc = await respostaAssoc.json().catch(() => ({}));
-            if (!respostaAssoc.ok || payloadAssoc?.ok === false) {
-              throw new Error(payloadAssoc?.error || `Erro HTTP ${respostaAssoc.status}`);
-            }
-
-            statusVinculo.style.color = '#166534';
-            statusVinculo.innerHTML = `<i class="fa-solid fa-circle-check" style="margin-right:6px;"></i>${escaparHtml(payloadAssoc?.message || 'Associação concluída com sucesso.')}`;
-
-            setTimeout(() => {
-              abrirModalNfeOmieDetalhes(chaveNfe, numeroNfeTexto, pedidoContexto);
-            }, 700);
-          } catch (erroAssoc) {
-            statusVinculo.style.color = '#9f1239';
-            statusVinculo.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${escaparHtml(erroAssoc?.message || 'Falha ao vincular NF-e ao pedido.')}`;
-          } finally {
-            btnVincular.disabled = false;
-            btnVincular.style.opacity = '1';
-            btnVincular.style.cursor = 'pointer';
-            btnVincular.innerHTML = textoOriginal;
+            return;
           }
+
+          if (window.abrirModalAssociarPedidoNfe) {
+            window.abrirModalAssociarPedidoNfe();
+            return;
+          }
+
+          statusVinculo.style.color = '#9f1239';
+          statusVinculo.innerHTML = '<i class="fa-solid fa-circle-xmark" style="margin-right:6px;"></i>Não foi possível abrir o modal de vinculação.';
         });
       }
     } catch (error) {
@@ -11193,6 +11475,43 @@ function attachDropZone(ul) {
 
   // O menu de recebimento principal e controlado pelo script central
   registrarListenerMenu(configPainelProdutoRecebido);
+
+  if (btnRecarregarContasUtilizadas && !btnRecarregarContasUtilizadas.dataset.listenerAdded) {
+    btnRecarregarContasUtilizadas.dataset.listenerAdded = 'true';
+    btnRecarregarContasUtilizadas.addEventListener('click', () => carregarContasUtilizadas(true));
+  }
+
+  if (searchContasUtilizadas && !searchContasUtilizadas.dataset.listenerAdded) {
+    searchContasUtilizadas.dataset.listenerAdded = 'true';
+    searchContasUtilizadas.addEventListener('input', aplicarFiltroContasUtilizadas);
+  }
+
+  if (menuContasUtilizadas && !menuContasUtilizadas.dataset.listenerAdded) {
+    menuContasUtilizadas.dataset.listenerAdded = 'true';
+    menuContasUtilizadas.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      const painel = document.getElementById('comprasContasUtilizadasPane');
+      if (painel) painel.style.display = 'block';
+      document.querySelectorAll('.menu-link').forEach(link => link.classList.remove('is-active'));
+      menuContasUtilizadas.classList.add('is-active');
+      carregarContasUtilizadas();
+    });
+  }
+
+  if (tbodyContasUtilizadas && !tbodyContasUtilizadas.dataset.listenerAdded) {
+    tbodyContasUtilizadas.dataset.listenerAdded = 'true';
+    tbodyContasUtilizadas.addEventListener('click', (event) => {
+      const celula = event.target.closest('.conta-utilizada-observacao-editavel');
+      if (!celula) return;
+
+      const nCodCC = Number(celula.dataset.ncodcc || 0);
+      const conta = contasUtilizadasCache.find((item) => Number(item?.nCodCC || 0) === nCodCC);
+      if (!conta) return;
+
+      editarObservacaoContaUtilizada(conta);
+    });
+  }
 })();
 </script>
 
@@ -11532,13 +11851,6 @@ function attachDropZone(ul) {
       </button>
     </div>
   </div>
-</div>
-
-<!-- Links publicos exigidos para verificacao do Google OAuth branding -->
-<div style="position:fixed;right:12px;bottom:10px;z-index:10020;background:rgba(6,12,24,.92);border:1px solid rgba(148,163,184,.35);border-radius:10px;padding:8px 10px;display:flex;gap:10px;align-items:center;font-size:12px;backdrop-filter:blur(6px);">
-  <a href="/politica-de-privacidade" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;text-decoration:underline;">Politica de Privacidade</a>
-  <span style="color:#64748b;">|</span>
-  <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;text-decoration:underline;">Termos de Uso</a>
 </div>
 
 <!-- =====================================================================
@@ -12223,6 +12535,7 @@ function attachDropZone(ul) {
     os: ['menu-sac-at'],
     sac_envio: ['menu-sac-solicitacao-envio'],
     compras: ['cart-icon', 'menu-produto-recebido'],
+    compras_contas: ['menu-compras-contas-utilizadas'],
     compras_config: ['menu-compras-configuracoes'],
     produto_recebido: ['menu-produto-recebido'],
     sincronizacao: ['menu-sincronizar-produtos'],

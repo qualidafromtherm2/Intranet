@@ -952,6 +952,73 @@ function calcularScoreModeloNoTexto(texto, modelos, { exact = 0, compact = 0, fa
   return total;
 }
 
+function normalizarCodigoProdutoManual(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+}
+
+function obterBasesBuscaProdutoPorModelo(modelo = {}) {
+  const prefixo = String(modelo?.prefixo || '').toUpperCase().trim();
+  const numero = String(modelo?.numero || '').trim();
+  if (!prefixo || !numero) return [];
+
+  const variantesPrefixo = prefixo === 'FTI'
+    ? ['FTI', 'FT']
+    : prefixo === 'FT'
+      ? ['FT', 'FTI']
+      : [prefixo];
+
+  return Array.from(new Set(variantesPrefixo.map((item) => `${item}${numero}`)));
+}
+
+function produtoCombinaComModelo(produto = {}, modelo = {}) {
+  const codigoNorm = normalizarCodigoProdutoManual(produto?.codigo);
+  if (!codigoNorm) return false;
+
+  const bases = obterBasesBuscaProdutoPorModelo(modelo);
+  if (!bases.length || !bases.some((base) => codigoNorm.startsWith(base))) return false;
+
+  const complementoNorm = normalizarCodigoProdutoManual(modelo?.complemento || '');
+  if (complementoNorm) {
+    if (complementoNorm === 'BR') return codigoNorm.includes('BR');
+    return codigoNorm.includes(complementoNorm);
+  }
+
+  if (codigoNorm.includes('BR')) return false;
+  return true;
+}
+
+async function resolverProdutosRelacionadosPorModelos(modelos = []) {
+  if (!dbPool || !Array.isArray(modelos) || !modelos.length) return [];
+
+  const bases = Array.from(new Set(
+    modelos.flatMap((modelo) => obterBasesBuscaProdutoPorModelo(modelo)).filter(Boolean)
+  ));
+  if (!bases.length) return [];
+
+  const { rows } = await dbPool.query(
+    `
+    SELECT codigo_produto::text AS codigo_produto, codigo, descricao
+    FROM public.produtos_omie
+    WHERE regexp_replace(upper(COALESCE(codigo, '')), '[^A-Z0-9]+', '', 'g') LIKE ANY($1::text[])
+    ORDER BY codigo
+    `,
+    [bases.map((base) => `${base}%`)]
+  );
+
+  const vistos = new Set();
+  return (Array.isArray(rows) ? rows : []).filter((produto) => {
+    const chave = String(produto?.codigo_produto || '').trim();
+    if (!chave || vistos.has(chave)) return false;
+    if (!modelos.some((modelo) => produtoCombinaComModelo(produto, modelo))) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
+
 function perguntaPedeManualBombaCalor(pergunta) {
   const raw = String(pergunta || '').trim();
   const t = normalizarTextoBusca(raw);
@@ -2295,23 +2362,38 @@ async function montarPreviewsManuais(trechos, limit = MANUAL_PREVIEW_LIMIT, perg
 async function listarManuaisPrioritariosPorModelo(modelos) {
   if (!dbPool || !Array.isArray(modelos) || !modelos.length) return [];
 
+  const produtosRelacionados = await resolverProdutosRelacionadosPorModelos(modelos);
+  const codigosProdutoRelacionados = new Set(
+    produtosRelacionados.map((item) => String(item?.codigo_produto || '').trim()).filter(Boolean)
+  );
+
   const resultado = await dbPool.query(
     `
-    SELECT id, nome_arquivo, COALESCE(nome_arquivo_normalizado, nome_arquivo, '') AS nome_arquivo_normalizado
+    SELECT id, nome_arquivo, COALESCE(nome_arquivo_normalizado, nome_arquivo, '') AS nome_arquivo_normalizado, produtos
     FROM "Chatbot".manuais_instrucao
     WHERE COALESCE(status_indexacao, 'pendente') = 'indexado'
     `
   );
 
   return (Array.isArray(resultado.rows) ? resultado.rows : [])
-    .map((manual) => ({
-      ...manual,
-      score_modelo: calcularScoreModeloNoTexto(manual?.nome_arquivo_normalizado, modelos, {
+    .map((manual) => {
+      const produtosManual = (Array.isArray(manual?.produtos) ? manual.produtos : [])
+        .map((item) => String(item?.codigo_produto || item || '').trim())
+        .filter(Boolean);
+
+      const qtdRelacionados = produtosManual.filter((codigoProduto) => codigosProdutoRelacionados.has(codigoProduto)).length;
+      const bonusProdutos = qtdRelacionados > 0 ? 2200 + (qtdRelacionados * 180) : 0;
+      const bonusNome = calcularScoreModeloNoTexto(manual?.nome_arquivo_normalizado, modelos, {
         exact: 800,
         compact: 950,
         familiaNumero: 250
-      })
-    }))
+      });
+
+      return {
+        ...manual,
+        score_modelo: bonusProdutos + bonusNome
+      };
+    })
     .filter((manual) => Number(manual.score_modelo || 0) > 0)
     .sort((a, b) => {
       if (Number(b.score_modelo || 0) !== Number(a.score_modelo || 0)) {

@@ -6,6 +6,7 @@
 async function omieCall(url, body, options = {}) {
   const bodyMasked = (() => {
     const p = JSON.parse(JSON.stringify(body || {}));
+    if (p?.app_key) p.app_key = String(p.app_key).slice(0,2) + '***' + String(p.app_key).slice(-2);
     if (p?.app_secret) p.app_secret = String(p.app_secret).slice(0,2) + '***' + String(p.app_secret).slice(-2);
     return p;
   })();

@@ -1171,6 +1171,7 @@ router.post('/at', async (req, res) => {
 
   const payload = {
     tipo: String(body.tipo || '').trim() || null,
+    data: body.data ? (() => { const d = new Date(body.data); return isNaN(d.getTime()) ? new Date() : d; })() : new Date(),
     nomeRevendaCliente: String(body.nome_revenda_cliente || '').trim() || null,
     numeroTelefone: String(body.numero_telefone || '').trim() || null,
     cpfCnpj: String(body.cpf_cnpj || '').trim() || null,
@@ -1232,6 +1233,7 @@ router.post('/at', async (req, res) => {
       const result = await client.query(
         `INSERT INTO sac.at (
            tipo,
+           data,
            nome_revenda_cliente,
            numero_telefone,
            cpf_cnpj,
@@ -1249,10 +1251,11 @@ router.post('/at', async (req, res) => {
            tag_problema,
            plataforma_atendimento,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          RETURNING id, data`,
         [
           payload.tipo,
+          payload.data,
           payload.nomeRevendaCliente,
           payload.numeroTelefone,
           payload.cpfCnpj,
@@ -1285,6 +1288,7 @@ router.post('/at', async (req, res) => {
       const result = await client.query(
         `INSERT INTO sac.at (
            tipo,
+           data,
            nome_revenda_cliente,
            numero_telefone,
            cpf_cnpj,
@@ -1302,10 +1306,11 @@ router.post('/at', async (req, res) => {
            tag_problema,
            plataforma_atendimento,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          RETURNING id, data`,
         [
           payload.tipo,
+          payload.data,
           payload.nomeRevendaCliente,
           payload.numeroTelefone,
           payload.cpfCnpj,
@@ -1472,6 +1477,15 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
 
   const setClauses = [];
   const colValues  = [];
+
+  // Campo data tratado separadamente (TIMESTAMP, não TEXT)
+  if (Object.prototype.hasOwnProperty.call(req.body, 'data') && req.body.data) {
+    const d = new Date(req.body.data);
+    if (!isNaN(d.getTime())) {
+      setClauses.push(`data = $${setClauses.length + 1}`);
+      colValues.push(d);
+    }
+  }
 
   for (const [campo, coluna] of Object.entries(FIELD_MAP)) {
     if (Object.prototype.hasOwnProperty.call(req.body, campo)) {
@@ -3938,6 +3952,7 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
               phone: fromPhoneDigits,
               profileName,
               messageText: textBody,
+              buttonReplyId: String(message?.interactive?.button_reply?.id || '').trim() || null,
               phoneNumberId: String(metadata?.phone_number_id || '').trim() || null,
               displayPhoneNumber: String(metadata?.display_phone_number || '').trim() || null
             });
@@ -3965,6 +3980,23 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
       Promise.resolve().then(async () => {
         for (const inbound of newInboundMessages) {
           try {
+            // Intercepta clique do botão "Marcar como lidas" da notificação diária
+            if (inbound.buttonReplyId && inbound.buttonReplyId.startsWith('sgf_marcar_lidas_')) {
+              const uid = Number(inbound.buttonReplyId.replace('sgf_marcar_lidas_', ''));
+              if (uid > 0) {
+                await pool.query(
+                  'UPDATE public.chat_messages SET is_read = true, updated_at = NOW() WHERE to_user_id = $1 AND is_read = false',
+                  [uid]
+                );
+                await enviarMensagemWhatsappTexto({
+                  phoneNumberId: inbound.phoneNumberId,
+                  toPhone: inbound.phone,
+                  text: '✅ Mensagens marcadas como lidas no SGF.'
+                });
+                console.log('[Notif] Mensagens marcadas como lidas para user_id:', uid);
+              }
+              continue;
+            }
             await processarRespostaAutomaticaWhatsapp(inbound);
             if (typeof sse === 'function') {
               sse({

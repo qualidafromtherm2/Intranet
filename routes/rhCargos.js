@@ -182,8 +182,12 @@ function normalizeColaboradorPayload(body = {}) {
   };
   return {
     user_id: toInt(body.user_id),
+    nome_completo: body.nome_completo == null ? null : String(body.nome_completo).trim() || null,
     email: body.email == null ? null : String(body.email).trim() || null,
     data_nascimento: body.data_nascimento || null,
+    telefone_contato: body.telefone_contato == null ? null : String(body.telefone_contato).trim() || null,
+    receber_notificacao: body.receber_notificacao === true,
+    tipo_contrato: ['CLT','PJ','Temporario','Terceiro'].includes(body.tipo_contrato) ? body.tipo_contrato : null,
     funcao_id: toInt(body.funcao_id),
     setor_id: toInt(body.setor_id),
     cargo_id: toInt(body.cargo_id),
@@ -229,8 +233,13 @@ router.get('/colaboradores/:userId', async (req, res) => {
       `SELECT
          u.id,
          u.username,
+         u.nome_completo,
          u.email,
          u.data_nascimento,
+         u.telefone_contato,
+         u.receber_notificacao,
+         u.tipo_contrato,
+         u.ultimo_acesso,
          up.funcao_id,
          up.sector_id AS setor_id,
          f.name AS funcao,
@@ -290,11 +299,15 @@ router.post('/colaboradores/salvar', async (req, res) => {
 
     await client.query(
       `UPDATE public.auth_user
-          SET email = $1,
-              data_nascimento = $2,
+          SET nome_completo = $1,
+              email = $2,
+              data_nascimento = $3,
+              telefone_contato = $4,
+              receber_notificacao = $5,
+              tipo_contrato = $6,
               updated_at = NOW()
-        WHERE id = $3`,
-      [data.email, data.data_nascimento, data.user_id]
+        WHERE id = $7`,
+      [data.nome_completo, data.email, data.data_nascimento, data.telefone_contato, data.receber_notificacao, data.tipo_contrato, data.user_id]
     );
 
     await client.query(
@@ -407,7 +420,11 @@ router.post('/colaboradores/salvar', async (req, res) => {
       `SELECT
          u.id,
          u.username,
+         u.nome_completo,
          u.email,
+         u.telefone_contato,
+         u.receber_notificacao,
+         u.ultimo_acesso,
          up.funcao_id,
          up.sector_id AS setor_id,
          f.name AS funcao,
@@ -612,6 +629,470 @@ router.delete('/colaboradores/anexos/:anexoId', async (req, res) => {
   } catch (err) {
     console.error('[DELETE /api/rh/colaboradores/anexos/:anexoId] erro:', err?.message || err);
     return res.status(500).json({ error: 'Erro ao remover anexo do colaborador' });
+  }
+});
+
+/* ============================
+   EPI — Tamanhos do funcionário
+   ============================ */
+
+router.get('/funcionarios/epi/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, tam_camiseta, tam_calca, tam_sapato, created_at, updated_at
+         FROM funcionarios.epi
+        WHERE user_id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    return res.json(rows[0] || { user_id: userId, tam_camiseta: '', tam_calca: '', tam_sapato: '' });
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/epi/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao buscar EPI do funcionário' });
+  }
+});
+
+router.post('/funcionarios/epi/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const tam_camiseta = String(req.body?.tam_camiseta || '').trim();
+  const tam_calca = String(req.body?.tam_calca || '').trim();
+  const tam_sapato = String(req.body?.tam_sapato || '').trim();
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.epi (user_id, tam_camiseta, tam_calca, tam_sapato)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id)
+       DO UPDATE SET tam_camiseta = EXCLUDED.tam_camiseta,
+                     tam_calca    = EXCLUDED.tam_calca,
+                     tam_sapato   = EXCLUDED.tam_sapato,
+                     updated_at   = NOW()
+       RETURNING *`,
+      [userId, tam_camiseta, tam_calca, tam_sapato]
+    );
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/epi/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao salvar EPI do funcionário' });
+  }
+});
+
+/* ============================
+   EPI — Entregas (histórico)
+   ============================ */
+
+router.get('/funcionarios/epi-entregas/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, item, tamanho, data_entrega, observacao, registrado_por, created_at
+         FROM funcionarios.epi_entrega
+        WHERE user_id = $1
+        ORDER BY data_entrega DESC, id DESC`,
+      [userId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/epi-entregas/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar entregas de EPI' });
+  }
+});
+
+router.post('/funcionarios/epi-entregas/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const item = String(req.body?.item || '').trim();
+  const tamanho = String(req.body?.tamanho || '').trim();
+  const data_entrega = req.body?.data_entrega || null;
+  const observacao = String(req.body?.observacao || '').trim() || null;
+  const registrado_por = String(req.body?.registrado_por || '').trim() || null;
+
+  if (!item) {
+    return res.status(400).json({ error: 'Campo "item" é obrigatório' });
+  }
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.epi_entrega (user_id, item, tamanho, data_entrega, observacao, registrado_por)
+       VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, $6)
+       RETURNING *`,
+      [userId, item, tamanho, data_entrega, observacao, registrado_por]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/epi-entregas/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao registrar entrega de EPI' });
+  }
+});
+
+router.delete('/funcionarios/epi-entregas/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rowCount } = await dbQuery(
+      'DELETE FROM funcionarios.epi_entrega WHERE id = $1',
+      [id]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Entrega não encontrada' });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/rh/funcionarios/epi-entregas/:id] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao excluir entrega de EPI' });
+  }
+});
+
+/* ============================
+   Conversas — Histórico
+   ============================ */
+
+router.get('/funcionarios/conversas/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, tema, descricao, registrado_por, created_at
+         FROM funcionarios.conversas
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC`,
+      [userId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/conversas/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar conversas' });
+  }
+});
+
+router.post('/funcionarios/conversas/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const tema = String(req.body?.tema || '').trim();
+  const descricao = String(req.body?.descricao || '').trim() || null;
+  const registrado_por = String(req.body?.registrado_por || '').trim() || null;
+
+  if (!tema) {
+    return res.status(400).json({ error: 'Campo "tema" é obrigatório' });
+  }
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.conversas (user_id, tema, descricao, registrado_por)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [userId, tema, descricao, registrado_por]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/conversas/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao registrar conversa' });
+  }
+});
+
+router.delete('/funcionarios/conversas/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rowCount } = await dbQuery(
+      'DELETE FROM funcionarios.conversas WHERE id = $1',
+      [id]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Conversa não encontrada' });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/rh/funcionarios/conversas/:id] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao excluir conversa' });
+  }
+});
+
+/* ============================
+   Painel geral — Controle de Férias
+   ============================ */
+
+router.get('/funcionarios/ferias-painel', async (_req, res) => {
+  try {
+    const { rows } = await dbQuery(`
+      SELECT
+        u.id,
+        u.username,
+        u.nome_completo,
+        u.tipo_contrato,
+        f.data_admissao,
+        f.data_limite_ferias,
+        COALESCE(r.total_dias, 0) AS total_dias_gozados,
+        COALESCE(r.qtd_registros, 0) AS qtd_registros
+      FROM public.auth_user u
+      LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+      LEFT JOIN funcionarios.ferias f ON f.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT SUM(fr.dias) AS total_dias, COUNT(*) AS qtd_registros
+        FROM funcionarios.ferias_registros fr
+        WHERE fr.user_id = u.id
+      ) r ON true
+      ORDER BY u.username
+    `);
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/ferias-painel] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar painel de férias' });
+  }
+});
+
+/* ============================
+   Férias — Dados e anexos
+   ============================ */
+
+router.get('/funcionarios/ferias/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, data_admissao, data_limite_ferias, ferias_vencidas, created_at, updated_at
+         FROM funcionarios.ferias
+        WHERE user_id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    return res.json(rows[0] || { user_id: userId, data_admissao: null, data_limite_ferias: null, ferias_vencidas: false });
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/ferias/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao buscar dados de férias' });
+  }
+});
+
+router.post('/funcionarios/ferias/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const data_admissao = req.body?.data_admissao || null;
+  const data_limite_ferias = req.body?.data_limite_ferias || null;
+  const ferias_vencidas = req.body?.ferias_vencidas === true;
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.ferias (user_id, data_admissao, data_limite_ferias, ferias_vencidas)
+       VALUES ($1, $2::date, $3::date, $4)
+       ON CONFLICT (user_id)
+       DO UPDATE SET data_admissao       = EXCLUDED.data_admissao,
+                     data_limite_ferias   = EXCLUDED.data_limite_ferias,
+                     ferias_vencidas      = EXCLUDED.ferias_vencidas,
+                     updated_at          = NOW()
+       RETURNING *`,
+      [userId, data_admissao, data_limite_ferias, ferias_vencidas]
+    );
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/ferias/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao salvar dados de férias' });
+  }
+});
+
+/* Anexos de férias */
+
+router.get('/funcionarios/ferias-anexos/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, nome_arquivo, url_arquivo, path_arquivo, enviado_por, created_at
+         FROM funcionarios.ferias_anexos
+        WHERE user_id = $1
+        ORDER BY created_at DESC, id DESC`,
+      [userId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/ferias-anexos/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar anexos de férias' });
+  }
+});
+
+router.post('/funcionarios/ferias-anexos/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const nomeArquivo = String(req.body?.nome_arquivo || '').trim();
+  const urlArquivo = String(req.body?.url_arquivo || '').trim();
+  const pathArquivo = String(req.body?.path_arquivo || '').trim();
+  const enviadoPor = String(req.body?.enviado_por || '').trim() || null;
+
+  if (!nomeArquivo || !urlArquivo || !pathArquivo) {
+    return res.status(400).json({ error: 'nome_arquivo, url_arquivo e path_arquivo são obrigatórios' });
+  }
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.ferias_anexos (user_id, nome_arquivo, url_arquivo, path_arquivo, enviado_por)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [userId, nomeArquivo, urlArquivo, pathArquivo, enviadoPor]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/ferias-anexos/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao salvar anexo de férias' });
+  }
+});
+
+router.delete('/funcionarios/ferias-anexos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rowCount } = await dbQuery(
+      'DELETE FROM funcionarios.ferias_anexos WHERE id = $1',
+      [id]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Anexo não encontrado' });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/rh/funcionarios/ferias-anexos/:id] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao excluir anexo de férias' });
+  }
+});
+
+/* ============================
+   Pasta do funcionário no Supabase
+   ============================ */
+
+router.post('/funcionarios/criar-pasta/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase não configurado' });
+    }
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Cria arquivo placeholder para garantir que a pasta existe
+    const folderPath = `${userId}/.keep`;
+    const { error } = await supabase.storage
+      .from('Funcionarios')
+      .upload(folderPath, Buffer.from(''), { contentType: 'text/plain', upsert: true });
+
+    if (error && !error.message?.includes('already exists')) {
+      console.error('[criar-pasta] erro:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.json({ ok: true, path: `${userId}/` });
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/criar-pasta/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao criar pasta do funcionário' });
+  }
+});
+
+/* ============================
+   Férias — Registros de gozo de férias
+   ============================ */
+
+router.get('/funcionarios/ferias-registros/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rows } = await dbQuery(
+      `SELECT id, user_id, data_inicio, data_fim, dias, registrado_por, created_at
+         FROM funcionarios.ferias_registros
+        WHERE user_id = $1
+        ORDER BY data_inicio DESC, id DESC`,
+      [userId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/funcionarios/ferias-registros/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar registros de férias' });
+  }
+});
+
+router.post('/funcionarios/ferias-registros/:userId', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const dataInicio = req.body?.data_inicio;
+  const dataFim = req.body?.data_fim;
+  if (!dataInicio || !dataFim) {
+    return res.status(400).json({ error: 'data_inicio e data_fim são obrigatórios' });
+  }
+
+  const d1 = new Date(dataInicio + 'T00:00:00');
+  const d2 = new Date(dataFim + 'T00:00:00');
+  if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 < d1) {
+    return res.status(400).json({ error: 'Datas inválidas (fim deve ser >= início)' });
+  }
+  const dias = Math.round((d2 - d1) / 86400000) + 1;
+  const registradoPor = String(req.body?.registrado_por || '').trim() || null;
+
+  try {
+    const { rows } = await dbQuery(
+      `INSERT INTO funcionarios.ferias_registros (user_id, data_inicio, data_fim, dias, registrado_por)
+       VALUES ($1, $2::date, $3::date, $4, $5)
+       RETURNING *`,
+      [userId, dataInicio, dataFim, dias, registradoPor]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('[POST /api/rh/funcionarios/ferias-registros/:userId] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao registrar férias' });
+  }
+});
+
+router.delete('/funcionarios/ferias-registros/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const { rowCount } = await dbQuery(
+      'DELETE FROM funcionarios.ferias_registros WHERE id = $1',
+      [id]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Registro não encontrado' });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[DELETE /api/rh/funcionarios/ferias-registros/:id] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao excluir registro de férias' });
   }
 });
 

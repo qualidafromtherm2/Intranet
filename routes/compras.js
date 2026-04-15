@@ -28,6 +28,71 @@ module.exports = (pool) => {
     return texto.slice(0, 8);
   };
 
+  const obterNomeBancoConta = (codigoBanco, descricaoConta = '') => {
+    const codigo = String(codigoBanco || '').trim().toUpperCase();
+    const descricao = String(descricaoConta || '').trim();
+    const mapa = {
+      '001': 'Banco do Brasil',
+      '085': 'Transpocred',
+      '136': 'Unicred',
+      '260': 'Nubank',
+      '323': 'Mercado Pago',
+      '341': 'Itaú Unibanco',
+      '450': 'Omie.CASH',
+      '630': 'Omie.CASH Boletos',
+      '971': 'Redecard',
+      '985': 'Cartão pré-pago',
+      '986': 'Cartão de crédito',
+      '999': 'Conta interna',
+      'ADC': 'Adiantamento de Cliente',
+      'ADF': 'Adiantamento ao Fornecedor'
+    };
+
+    return mapa[codigo] || descricao || (codigo ? `Banco ${codigo}` : 'Não informado');
+  };
+
+  const obterTipoContaDescricao = (tipoConta) => {
+    const tipo = String(tipoConta || '').trim().toUpperCase();
+    const mapa = {
+      'CC': 'Conta Corrente',
+      'CA': 'Conta Aplicação',
+      'CX': 'Caixa',
+      'CG': 'Conta Garantida',
+      'CR': 'Cartão',
+      'AD': 'Adiantamento',
+      'AC': 'Adquirente'
+    };
+    return mapa[tipo] || (tipo || 'Não informado');
+  };
+
+  const sanitizarPayloadAlteracaoContaCorrente = (contaAtual = {}, observacao = '') => {
+    const payload = {
+      ...contaAtual,
+      nCodCC: Number(contaAtual?.nCodCC || 0) || null,
+      observacao: String(observacao ?? '')
+    };
+
+    [
+      'cCodStatus', 'cDesStatus', 'codigo', 'codigo_integracao',
+      'banco_nome', 'tipo_descricao'
+    ].forEach((campo) => delete payload[campo]);
+
+    const tipoConta = String(payload?.tipo_conta_corrente || payload?.tipo || '').trim().toUpperCase();
+    const pdvEnviar = String(payload?.pdv_enviar || 'N').trim().toUpperCase();
+    const podeUsarCamposPdv = tipoConta === 'AC' && pdvEnviar === 'S';
+
+    if (!podeUsarCamposPdv) {
+      [
+        'pdv_enviar', 'pdv_sincr_analitica', 'pdv_dias_venc', 'pdv_num_parcelas',
+        'pdv_tipo_tef', 'pdv_cod_adm', 'pdv_limite_pacelas', 'pdv_taxa_loja',
+        'pdv_taxa_adm', 'pdv_categoria', 'pdv_bandeira', 'cTipoCartao',
+        'cEstabelecimento', 'cCnpjInstFinanc'
+      ].forEach((campo) => delete payload[campo]);
+    }
+
+    return payload;
+  };
+
   const montarPayloadRecebimentoLocal = async (client, chaveNfe) => {
     const recebResult = await client.query(
       `SELECT
@@ -517,14 +582,16 @@ module.exports = (pool) => {
         ),
         recebimentos_base AS (
           -- NF-es recebidas para cruzar com os pedidos
-          SELECT DISTINCT
+          SELECT
             NULLIF(BTRIM(r.n_id_fornecedor::text), '') AS id_fornecedor_omie,
             NULLIF(BTRIM(r.c_numero_nfe), '') AS numero_nfe,
             NULLIF(BTRIM(r.c_chave_nfe), '') AS chave_nfe,
-            r.d_emissao_nfe::date AS d_emissao_nfe
+            r.d_emissao_nfe::date AS d_emissao_nfe,
+            COALESCE(MAX(r.n_valor_nfe), 0)           AS valor_nfe
           FROM logistica.recebimentos_nfe_omie r
           WHERE r.n_id_fornecedor IS NOT NULL
             AND NULLIF(BTRIM(r.c_numero_nfe), '') IS NOT NULL
+          GROUP BY 1, 2, 3, 4
         )
         SELECT
           po.n_cod_ped,
@@ -597,8 +664,11 @@ module.exports = (pool) => {
           -- Busca NF-es do fornecedor para exibir link clicável
           SELECT
             STRING_AGG(DISTINCT rb.numero_nfe, ', ') AS lista_numeros_nfe,
-            JSONB_AGG(JSONB_BUILD_OBJECT('numero_nfe', rb.numero_nfe, 'chave_nfe', rb.chave_nfe))
-              FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
+            JSONB_AGG(JSONB_BUILD_OBJECT(
+              'numero_nfe', rb.numero_nfe,
+              'chave_nfe', rb.chave_nfe,
+              'valor_nfe', rb.valor_nfe
+            )) FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
           FROM recebimentos_base rb
           WHERE rb.id_fornecedor_omie = NULLIF(BTRIM(po.n_cod_for::text), '')
             AND (po.d_inc_data IS NULL
@@ -621,20 +691,129 @@ module.exports = (pool) => {
     }
   });
 
+  router.get('/contas-utilizadas', async (req, res) => {
+    try {
+      const appKey = process.env.OMIE_APP_KEY;
+      const appSecret = process.env.OMIE_APP_SECRET;
+
+      if (!appKey || !appSecret) {
+        return res.status(500).json({ ok: false, error: 'Credenciais da Omie não configuradas no servidor.' });
+      }
+
+      const contas = [];
+      let pagina = 1;
+      let totalPaginas = 1;
+
+      do {
+        const resposta = await omieCall('https://app.omie.com.br/api/v1/geral/contacorrente/', {
+          call: 'ListarContasCorrentes',
+          param: [{
+            pagina,
+            registros_por_pagina: 100,
+            apenas_importado_api: 'N'
+          }],
+          app_key: appKey,
+          app_secret: appSecret
+        });
+
+        if (Array.isArray(resposta?.ListarContasCorrentes)) {
+          contas.push(...resposta.ListarContasCorrentes);
+        }
+
+        totalPaginas = Math.max(1, Number(resposta?.total_de_paginas || 1) || 1);
+        pagina += 1;
+      } while (pagina <= totalPaginas);
+
+      const contasNormalizadas = contas
+        .filter((conta) => String(conta?.inativo || 'N').trim() === 'N')
+        .map((conta) => ({
+          ...conta,
+          banco_nome: obterNomeBancoConta(conta?.codigo_banco, conta?.descricao),
+          tipo_descricao: obterTipoContaDescricao(conta?.tipo_conta_corrente || conta?.tipo)
+        }))
+        .sort((a, b) => String(a?.descricao || '').localeCompare(String(b?.descricao || ''), 'pt-BR', { sensitivity: 'base' }));
+
+      return res.json({
+        ok: true,
+        total: contasNormalizadas.length,
+        contas: contasNormalizadas
+      });
+    } catch (e) {
+      console.error('[GET /api/compras/contas-utilizadas] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  router.post('/contas-utilizadas/observacao', async (req, res) => {
+    try {
+      const appKey = process.env.OMIE_APP_KEY;
+      const appSecret = process.env.OMIE_APP_SECRET;
+      const nCodCC = Number(req.body?.nCodCC || 0);
+      const observacao = String(req.body?.observacao ?? '');
+
+      if (!appKey || !appSecret) {
+        return res.status(500).json({ ok: false, error: 'Credenciais da Omie não configuradas no servidor.' });
+      }
+
+      if (!Number.isFinite(nCodCC) || nCodCC <= 0) {
+        return res.status(400).json({ ok: false, error: 'nCodCC inválido para alteração.' });
+      }
+
+      const endpoint = 'https://app.omie.com.br/api/v1/geral/contacorrente/';
+      const contaAtual = await omieCall(endpoint, {
+        call: 'ConsultarContaCorrente',
+        param: [{ nCodCC }],
+        app_key: appKey,
+        app_secret: appSecret
+      });
+
+      if (!contaAtual || !Number(contaAtual?.nCodCC || 0)) {
+        return res.status(404).json({ ok: false, error: 'Conta corrente não encontrada na Omie.' });
+      }
+
+      const payloadAlteracao = sanitizarPayloadAlteracaoContaCorrente({
+        ...contaAtual,
+        nCodCC
+      }, observacao);
+
+      const retorno = await omieCall(endpoint, {
+        call: 'AlterarContaCorrente',
+        param: [payloadAlteracao],
+        app_key: appKey,
+        app_secret: appSecret
+      });
+
+      return res.json({
+        ok: true,
+        message: retorno?.cDesStatus || 'Observação atualizada com sucesso.',
+        conta: {
+          ...payloadAlteracao,
+          banco_nome: obterNomeBancoConta(payloadAlteracao?.codigo_banco, payloadAlteracao?.descricao),
+          tipo_descricao: obterTipoContaDescricao(payloadAlteracao?.tipo_conta_corrente || payloadAlteracao?.tipo)
+        }
+      });
+    } catch (e) {
+      console.error('[POST /api/compras/contas-utilizadas/observacao] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
   // Pedidos já recebidos (Etapa_NF = 50 ou 60, inativo = false)
   router.get('/pedidos-recebidos', async (req, res) => {
     const client = await pool.connect();
     try {
       const { rows } = await client.query(`
         WITH recebimentos_base AS (
-          SELECT DISTINCT
+          SELECT
             NULLIF(BTRIM(r.n_id_fornecedor::text), '') AS id_fornecedor_omie,
             NULLIF(BTRIM(r.c_numero_nfe), '')           AS numero_nfe,
             NULLIF(BTRIM(r.c_chave_nfe), '')            AS chave_nfe,
-            r.d_emissao_nfe::date                       AS d_emissao_nfe
+            r.d_emissao_nfe::date                       AS d_emissao_nfe,
+            COALESCE(MAX(r.n_valor_nfe), 0)             AS valor_nfe
           FROM logistica.recebimentos_nfe_omie r
           WHERE r.n_id_fornecedor IS NOT NULL
             AND NULLIF(BTRIM(r.c_numero_nfe), '') IS NOT NULL
+          GROUP BY 1, 2, 3, 4
         )
         SELECT
           po.n_cod_ped,
@@ -688,8 +867,11 @@ module.exports = (pool) => {
           -- Busca NF-e vinculada para obter a chave e exibir link clicável
           SELECT
             STRING_AGG(DISTINCT rb.numero_nfe, ', ') AS lista_numeros_nfe,
-            JSONB_AGG(JSONB_BUILD_OBJECT('numero_nfe', rb.numero_nfe, 'chave_nfe', rb.chave_nfe))
-              FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
+            JSONB_AGG(JSONB_BUILD_OBJECT(
+              'numero_nfe', rb.numero_nfe,
+              'chave_nfe', rb.chave_nfe,
+              'valor_nfe', rb.valor_nfe
+            )) FILTER (WHERE rb.chave_nfe IS NOT NULL) AS lista_nfes
           FROM recebimentos_base rb
           WHERE NULLIF(BTRIM(po."NFe vinculada"), '') IS NOT NULL
             AND rb.numero_nfe = NULLIF(BTRIM(po."NFe vinculada"), '')
