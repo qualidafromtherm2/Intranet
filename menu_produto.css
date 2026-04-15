@@ -186,7 +186,8 @@ body {
   justify-content: center;
   align-items: center;
   flex-direction: column;
-  padding: 2em;
+  padding: 0;
+  margin: 0;
   width: 100%;
   height: 100vh;
 }
@@ -354,15 +355,16 @@ body.light-mode {
 
 .app {
   background-color: var(--theme-bg-color);
-  max-width: 98%;
-  max-height: 860px;
-  height: 90vh;
+  max-width: 100%;
+  max-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
   width: 100%;
-  border-radius: 14px;
+  border-radius: 0;
+  border: 1px solid var(--border-color);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   font-size: 15px;
@@ -10611,6 +10613,101 @@ table.tabela td.num {
   background: #0f172a !important;
   color: #e2e8f0 !important;
   border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #recebimentoTbody td.recebimento-coluna-texto,
+:root:not(.light-mode) #recebimentoTbody .recebimento-coluna-texto,
+:root:not(.light-mode) #recebimentoTbody .recebimento-fornecedor-nome,
+:root:not(.light-mode) #recebimentoTbody .recebimento-observacao-texto {
+  color: #e5e7eb !important;
+}
+
+:root:not(.light-mode) #recebimentoTbody .recebimento-detalhes-inline summary {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #recebimentoTbody .recebimento-detalhes-inline summary i {
+  color: #93c5fd !important;
+}
+
+:root:not(.light-mode) #recebimentoPane div[style*="background:white"],
+:root:not(.light-mode) #recebimentoPane div[style*="background: white"] {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+}
+
+:root:not(.light-mode) #recebimentoPane table,
+:root:not(.light-mode) #recebimentoTbody tr,
+:root:not(.light-mode) #recebimentoTbody td {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #recebimentoPane thead tr:nth-child(2),
+:root:not(.light-mode) #recebimentoPane thead tr:nth-child(2) th {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #recebimentoTbody .recebimento-popover-itens {
+  background: #111827 !important;
+  border-color: #334155 !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45) !important;
+}
+
+:root:not(.light-mode) #recebimentoTbody .recebimento-popover-itens > div > div {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #comprasContasUtilizadasPane div[style*="background:white"],
+:root:not(.light-mode) #comprasContasUtilizadasPane div[style*="background: white"] {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+}
+
+:root:not(.light-mode) #comprasContasUtilizadasPane table,
+:root:not(.light-mode) #comprasContasUtilizadasPane tbody tr,
+:root:not(.light-mode) #comprasContasUtilizadasPane td {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+  border-color: #334155 !important;
+}
+
+:root:not(.light-mode) #comprasContasUtilizadasPane input {
+  background: #0f172a !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+#comprasContasUtilizadasPane .conta-utilizada-descricao {
+  color: #0f172a;
+}
+
+#comprasContasUtilizadasPane .conta-utilizada-codigo {
+  color: #64748b;
+}
+
+#comprasContasUtilizadasPane .conta-utilizada-observacao {
+  color: #334155;
+}
+
+#comprasContasUtilizadasPane .conta-utilizada-observacao-editavel:hover {
+  background: rgba(14, 165, 233, 0.08) !important;
+}
+
+:root:not(.light-mode) #comprasContasUtilizadasPane .conta-utilizada-descricao,
+:root:not(.light-mode) #comprasContasUtilizadasPane .conta-utilizada-codigo,
+:root:not(.light-mode) #comprasContasUtilizadasPane .conta-utilizada-observacao {
+  color: #e5e7eb !important;
+}
+
+:root:not(.light-mode) #comprasContasUtilizadasPane .conta-utilizada-observacao-editavel:hover {
+  background: rgba(59, 130, 246, 0.18) !important;
 }
 
 /* Inputs de atividades */

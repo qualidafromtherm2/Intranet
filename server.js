@@ -10420,7 +10420,10 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
     
-    const bucketName = 'compras-anexos';
+    // Permite especificar o bucket via body; padrão: 'compras-anexos'
+    const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios'];
+    const requestedBucket = String(req.body.bucket || '').trim();
+    const bucketName = ALLOWED_BUCKETS.includes(requestedBucket) ? requestedBucket : 'compras-anexos';
     const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
     
     // Verifica se o bucket existe, se não existir, cria
@@ -10483,6 +10486,201 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
   } catch (err) {
     console.error('[upload/supabase]', err);
     res.status(500).json({ error: String(err) });
+  }
+});
+
+// ── Manuais de produto (CRUD via Supabase Storage + coluna JSONB manuais) ──
+const uploadManual = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+async function detalharProdutosManuais(listaProdutos = []) {
+  const codigosProduto = (Array.isArray(listaProdutos) ? listaProdutos : [])
+    .map(item => String(item?.codigo_produto || item || '').trim())
+    .filter(Boolean);
+
+  if (!codigosProduto.length) return [];
+
+  const { rows } = await pool.query(
+    `SELECT codigo_produto::text AS codigo_produto, codigo, descricao
+       FROM public.produtos_omie
+      WHERE codigo_produto::text = ANY($1::text[])`,
+    [codigosProduto]
+  );
+
+  const mapa = new Map(
+    rows.map(r => [String(r.codigo_produto), {
+      codigo_produto: String(r.codigo_produto || ''),
+      codigo: String(r.codigo || r.codigo_produto || ''),
+      descricao: String(r.descricao || '')
+    }])
+  );
+
+  return codigosProduto.map(cp => mapa.get(cp) || ({
+    codigo_produto: cp,
+    codigo: cp,
+    descricao: ''
+  }));
+}
+
+// GET /api/produtos/manuais/todos — lista manuais da tabela "Chatbot".manuais_instrucao
+app.get('/api/produtos/manuais/todos', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome_arquivo, caminho_manual, paginas, status_indexacao, created_at, produtos
+         FROM "Chatbot".manuais_instrucao
+        ORDER BY nome_arquivo`
+    );
+    const lista = await Promise.all(rows.map(async (r) => ({
+      id: r.id,
+      nome: r.nome_arquivo,
+      url: r.caminho_manual,
+      paginas: r.paginas,
+      status: r.status_indexacao,
+      criado_em: r.created_at,
+      produtos: await detalharProdutosManuais(r.produtos)
+    })));
+    res.json({ ok: true, manuais: lista, total: lista.length });
+  } catch (err) {
+    console.error('[Manuais] GET todos erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// POST /api/manuais-chatbot/:id/produtos — vincula produto a um manual
+app.post('/api/manuais-chatbot/:id/produtos', async (req, res) => {
+  try {
+    const manualId = Number(req.params.id);
+    const codigoProduto = String(req.body?.codigo_produto || '').trim();
+    if (!manualId || !codigoProduto) return res.status(400).json({ error: 'manual id e codigo_produto obrigatórios' });
+
+    // Busca array atual
+    const { rows } = await pool.query('SELECT produtos FROM "Chatbot".manuais_instrucao WHERE id = $1', [manualId]);
+    if (!rows.length) return res.status(404).json({ error: 'Manual não encontrado' });
+    const lista = Array.isArray(rows[0].produtos) ? rows[0].produtos : [];
+
+    // Evita duplicata
+    if (lista.includes(codigoProduto)) {
+      return res.json({ ok: true, produtos: await detalharProdutosManuais(lista), msg: 'Produto já vinculado' });
+    }
+
+    lista.push(codigoProduto);
+    await pool.query('UPDATE "Chatbot".manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
+    res.json({ ok: true, produtos: await detalharProdutosManuais(lista) });
+  } catch (err) {
+    console.error('[Manuais] POST produto erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// DELETE /api/manuais-chatbot/:id/produtos/:codigoProduto — desvincula produto
+app.delete('/api/manuais-chatbot/:id/produtos/:codigoProduto', async (req, res) => {
+  try {
+    const manualId = Number(req.params.id);
+    const codigoProduto = String(req.params.codigoProduto || '').trim();
+    if (!manualId || !codigoProduto) return res.status(400).json({ error: 'Parâmetros inválidos' });
+
+    const { rows } = await pool.query('SELECT produtos FROM "Chatbot".manuais_instrucao WHERE id = $1', [manualId]);
+    if (!rows.length) return res.status(404).json({ error: 'Manual não encontrado' });
+    let lista = Array.isArray(rows[0].produtos) ? rows[0].produtos : [];
+    lista = lista.filter(c => c !== codigoProduto);
+
+    await pool.query('UPDATE "Chatbot".manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
+    res.json({ ok: true, produtos: lista });
+  } catch (err) {
+    console.error('[Manuais] DELETE produto erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// GET /api/produtos/:codigo/manuais  — lista manuais anexados
+app.get('/api/produtos/:codigo/manuais', async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ error: 'Código do produto obrigatório' });
+    const { rows } = await pool.query('SELECT manuais FROM public.produtos_omie WHERE codigo = $1 LIMIT 1', [codigo]);
+    const manuais = Array.isArray(rows[0]?.manuais) ? rows[0].manuais : [];
+    res.json({ ok: true, manuais });
+  } catch (err) {
+    console.error('[Manuais] GET erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// POST /api/produtos/:codigo/manuais  — upload e anexa um manual
+app.post('/api/produtos/:codigo/manuais', uploadManual.single('arquivo'), async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    const nome = String(req.body.nome || '').trim();
+    if (!codigo) return res.status(400).json({ error: 'Código do produto obrigatório' });
+    if (!nome) return res.status(400).json({ error: 'Nome do manual obrigatório' });
+    if (!req.file) return res.status(400).json({ error: 'Arquivo não enviado' });
+
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE;
+    if (!supabaseUrl || !supabaseKey) return res.status(500).json({ error: 'Supabase não configurado' });
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const bucketName = 'produtos';
+    const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = `manuais/${codigo}/${Date.now()}_${safeName}`;
+
+    const { error: upErr } = await supabase.storage.from(bucketName).upload(filePath, req.file.buffer, {
+      contentType: req.file.mimetype || 'application/pdf',
+      upsert: false
+    });
+    if (upErr) {
+      console.error('[Manuais] upload erro:', upErr);
+      return res.status(500).json({ error: upErr.message });
+    }
+
+    const { data: pubData } = supabase.storage.from(bucketName).getPublicUrl(filePath);
+    const url = pubData?.publicUrl || '';
+
+    await pool.query(
+      `UPDATE public.produtos_omie
+          SET manuais = COALESCE(manuais, '[]'::jsonb) || $1::jsonb
+        WHERE codigo = $2`,
+      [JSON.stringify([{ nome, url, path: filePath, anexado_em: new Date().toISOString() }]), codigo]
+    );
+
+    console.log('[Manuais] anexado:', { codigo, nome, url });
+    res.json({ ok: true, nome, url });
+  } catch (err) {
+    console.error('[Manuais] POST erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// DELETE /api/produtos/:codigo/manuais/:index  — remove manual pelo índice
+app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
+  try {
+    const codigo = String(req.params.codigo || '').trim();
+    const index = parseInt(req.params.index);
+    if (!codigo || isNaN(index) || index < 0) return res.status(400).json({ error: 'Parâmetros inválidos' });
+
+    const { rows } = await pool.query('SELECT manuais FROM public.produtos_omie WHERE codigo = $1 LIMIT 1', [codigo]);
+    const manuais = Array.isArray(rows[0]?.manuais) ? [...rows[0].manuais] : [];
+    if (index >= manuais.length) return res.status(404).json({ error: 'Manual não encontrado' });
+
+    const removido = manuais.splice(index, 1)[0];
+
+    // Remove do Supabase Storage
+    if (removido?.path) {
+      try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
+        await supabase.storage.from('produtos').remove([removido.path]);
+      } catch (storageErr) {
+        console.warn('[Manuais] falha ao remover do storage:', storageErr.message);
+      }
+    }
+
+    await pool.query('UPDATE public.produtos_omie SET manuais = $1::jsonb WHERE codigo = $2', [JSON.stringify(manuais), codigo]);
+    console.log('[Manuais] removido:', { codigo, index, nome: removido?.nome });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Manuais] DELETE erro:', err);
+    res.status(500).json({ error: String(err.message || err) });
   }
 });
 
@@ -27565,6 +27763,85 @@ async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada, chaveNfe
   return recebimentoCompleto;
 }
 
+function normalizarTextoAssociacaoNfePedido(valor) {
+  return String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function tokenizarTextoAssociacaoNfePedido(valor) {
+  const ignorar = new Set([
+    'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com', 'para', 'por', 'a', 'o', 'as', 'os',
+    'un', 'und', 'kg', 'mts', 'mt', 'mm', 'cm', 'mg', 'ml', 'g', 'l', 'pc', 'peca', 'pecas',
+    'cpr', 'cprs', 'caps', 'cap', 'gen', 'gas', 'fluido', 'refrigerante'
+  ]);
+
+  return [...new Set(
+    normalizarTextoAssociacaoNfePedido(valor)
+      .split(/\s+/)
+      .filter((token) => token && !ignorar.has(token) && token.length > 1)
+  )];
+}
+
+function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
+  const itensCabec = itemReceb?.itensCabec || {};
+  const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
+  const codigoPedidoBruto = String(itemPedido?.c_produto || '').trim();
+  const descricaoRecBruta = String(itensCabec?.cDescricaoProduto || '').trim();
+  const descricaoPedidoBruta = String(itemPedido?.c_descricao || '').trim();
+
+  const codigoRec = normalizarTextoAssociacaoNfePedido(codigoRecBruto).replace(/\s+/g, '');
+  const codigoPedido = normalizarTextoAssociacaoNfePedido(codigoPedidoBruto).replace(/\s+/g, '');
+  const descricaoRec = normalizarTextoAssociacaoNfePedido(descricaoRecBruta);
+  const descricaoPedido = normalizarTextoAssociacaoNfePedido(descricaoPedidoBruta);
+
+  let score = 0;
+
+  if (codigoRec && codigoPedido) {
+    if (codigoRec === codigoPedido) score += 1000;
+    else if (codigoRec.includes(codigoPedido) || codigoPedido.includes(codigoRec)) score += 180;
+  }
+
+  if (descricaoRec && descricaoPedido) {
+    if (descricaoRec === descricaoPedido) score += 800;
+    else if (descricaoRec.includes(descricaoPedido) || descricaoPedido.includes(descricaoRec)) score += 140;
+  }
+
+  const tokensRec = tokenizarTextoAssociacaoNfePedido(descricaoRecBruta);
+  const tokensPedido = tokenizarTextoAssociacaoNfePedido(descricaoPedidoBruta);
+  const tokensPedidoSet = new Set(tokensPedido);
+
+  let coincidencias = 0;
+  let pesoCoincidencias = 0;
+  tokensRec.forEach((token) => {
+    if (tokensPedidoSet.has(token)) {
+      coincidencias += 1;
+      pesoCoincidencias += token.length;
+    }
+  });
+
+  score += coincidencias * 35;
+  score += pesoCoincidencias * 2;
+
+  const qtdRec = Number(itensCabec?.nQtdeNFe);
+  const qtdPedido = Number(itemPedido?.n_qtde);
+  if (Number.isFinite(qtdRec) && Number.isFinite(qtdPedido)) {
+    const diferenca = Math.abs(qtdRec - qtdPedido);
+    if (diferenca < 0.0001) {
+      score += 60;
+    } else if (Math.min(qtdRec, qtdPedido) > 0) {
+      const proporcao = Math.max(qtdRec, qtdPedido) / Math.min(qtdRec, qtdPedido);
+      if (proporcao <= 1.25) score += 18;
+      else if (proporcao <= 2) score += 8;
+    }
+  }
+
+  return score;
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
@@ -27641,6 +27918,34 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     }
   }
 
+  const itensPedidoUsados = new Set();
+  const obterChaveUsoItemPedido = (itemPedido) => {
+    const nCodItem = Number(itemPedido?.n_cod_item || 0);
+    if (Number.isFinite(nCodItem) && nCodItem > 0) return `cod_item:${nCodItem}`;
+    return `ref:${String(itemPedido?.c_produto || '').trim()}|${String(itemPedido?.c_descricao || '').trim()}`;
+  };
+  const itemPedidoDisponivel = (itemPedido) => !itensPedidoUsados.has(obterChaveUsoItemPedido(itemPedido));
+  const reservarItemPedido = (itemPedido) => {
+    if (itemPedido) itensPedidoUsados.add(obterChaveUsoItemPedido(itemPedido));
+    return itemPedido;
+  };
+  const escolherMelhorCandidatoPedido = (itemReceb, candidatos = []) => {
+    let melhorItem = null;
+    let melhorScore = -1;
+
+    candidatos
+      .filter(itemPedidoDisponivel)
+      .forEach((candidato) => {
+        const scoreAtual = calcularScoreAssociacaoNfePedido(itemReceb, candidato);
+        if (scoreAtual > melhorScore) {
+          melhorScore = scoreAtual;
+          melhorItem = candidato;
+        }
+      });
+
+    return { item: melhorItem, score: melhorScore };
+  };
+
   const previewItens = [];
 
   const itensRecebimentoEditar = itensReceb.map((item, idx) => {
@@ -27651,31 +27956,50 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
     let itemPedidoVinculo = null;
     let criterioMatch = null;
+    let scoreMatch = 0;
 
     if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
       const candidatos = mapaPorIdProduto.get(nIdProdutoRec);
-      if (Array.isArray(candidatos) && candidatos.length === 1) {
-        itemPedidoVinculo = candidatos[0];
+      const { item: melhorPorId, score } = escolherMelhorCandidatoPedido(item, candidatos);
+      if (melhorPorId) {
+        itemPedidoVinculo = reservarItemPedido(melhorPorId);
         criterioMatch = 'id_produto';
+        scoreMatch = Math.max(score, 1200);
       }
     }
 
     if (!itemPedidoVinculo && codigoProdutoRec && mapaPorCodigoProduto.has(codigoProdutoRec)) {
       const candidatos = mapaPorCodigoProduto.get(codigoProdutoRec);
-      if (Array.isArray(candidatos) && candidatos.length === 1) {
-        itemPedidoVinculo = candidatos[0];
+      const { item: melhorPorCodigo, score } = escolherMelhorCandidatoPedido(item, candidatos);
+      if (melhorPorCodigo) {
+        itemPedidoVinculo = reservarItemPedido(melhorPorCodigo);
         criterioMatch = 'codigo_produto';
+        scoreMatch = Math.max(score, 1000);
       }
     }
 
-    if (!itemPedidoVinculo && itensPedido.length === 1) {
-      itemPedidoVinculo = itensPedido[0];
-      criterioMatch = 'fallback_item_unico_pedido';
+    if (!itemPedidoVinculo) {
+      const { item: melhorSimilaridade, score } = escolherMelhorCandidatoPedido(item, itensPedido);
+      if (melhorSimilaridade && score >= 35) {
+        itemPedidoVinculo = reservarItemPedido(melhorSimilaridade);
+        criterioMatch = 'descricao_similar';
+        scoreMatch = score;
+      }
     }
 
-    if (!itemPedidoVinculo && itensPedido.length === itensReceb.length && itensPedidoOrdenados[idx]) {
-      itemPedidoVinculo = itensPedidoOrdenados[idx];
-      criterioMatch = 'fallback_sequencia';
+    if (!itemPedidoVinculo && itensPedido.length === 1 && itemPedidoDisponivel(itensPedido[0])) {
+      itemPedidoVinculo = reservarItemPedido(itensPedido[0]);
+      criterioMatch = 'fallback_item_unico_pedido';
+      scoreMatch = 5;
+    }
+
+    if (!itemPedidoVinculo && itensPedido.length === itensReceb.length) {
+      const candidatoSequencia = itensPedidoOrdenados.find(itemPedidoDisponivel);
+      if (candidatoSequencia) {
+        itemPedidoVinculo = reservarItemPedido(candidatoSequencia);
+        criterioMatch = 'fallback_sequencia';
+        scoreMatch = 1;
+      }
     }
 
     const itensIde = {
@@ -27702,7 +28026,8 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
       pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
       pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
-      criterio_match: criterioMatch
+      criterio_match: criterioMatch,
+      score_match: scoreMatch
     });
 
     return { itensIde };
@@ -30940,6 +31265,9 @@ app.listen(PORT, HOST, () => {
   iniciarAutoSyncComprasGoogleSheets();
   iniciarAutoSyncWebhooksOmie();
   iniciarCronAgendamento();
+  // Notificação diária WhatsApp (08:00)
+  const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');
+  iniciarCronNotificacaoDiaria();
 });
 
 // DEBUG: sanity check do webhook (GET simples)

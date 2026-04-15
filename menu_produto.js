@@ -2024,6 +2024,7 @@ import { initListarProdutosUI } from './requisicoes_omie/ListarProdutos.js';
 import { initDadosColaboradoresUI } from './requisicoes_omie/dados_colaboradores.js';
 import { initRhConfiguracaoCargosUI } from './requisicoes_omie/configuracao_cargos.js';
 import { initRhColaboradoresUI } from './requisicoes_omie/rh_colaboradores.js';
+import { initRhControleFeriasUI } from './requisicoes_omie/rh_controle_ferias.js';
 import { initAnexosUI } from './requisicoes_omie/anexos.js';
 import { initKanban } from './kanban/kanban.js';
 let lastKanbanTab = 'comercial';   // lembra a sub-aba atual
@@ -6043,12 +6044,353 @@ async function carregarQualidadeManuaisPrincipais({ force = false } = {}) {
 
 qualidadeManuaisPrincipaisBtn?.addEventListener('click', (e) => {
   e.preventDefault();
+  const titulo = document.getElementById('qualidadeManuaisTituloPasta');
+  if (titulo) titulo.textContent = 'Pasta: Manuais principais';
   carregarQualidadeManuaisPrincipais();
+});
+
+// ── Card: Manuais de Produtos ──
+const qualidadeManuaisProdutosBtn = document.getElementById('qualidadeManuaisProdutosBtn');
+let qualidadeManuaisProdutosCarregando = false;
+
+async function carregarManuaisDeProdutos() {
+  if (qualidadeManuaisProdutosCarregando) return;
+  qualidadeManuaisProdutosCarregando = true;
+  const titulo = document.getElementById('qualidadeManuaisTituloPasta');
+  if (titulo) titulo.textContent = 'Manuais de Produtos';
+  try {
+    if (qualidadeManuaisMeta) qualidadeManuaisMeta.textContent = 'Carregando manuais de produtos...';
+    if (qualidadeManuaisListaWrap) qualidadeManuaisListaWrap.style.display = 'block';
+    if (qualidadeManuaisLista) {
+      qualidadeManuaisLista.innerHTML = `
+        <div style="grid-column:1 / -1;padding:18px;border:1px dashed var(--border-color);border-radius:12px;color:var(--inactive-color);text-align:center;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Carregando manuais de produtos...
+        </div>`;
+    }
+    const resp = await fetch(`${API_BASE}/api/produtos/manuais/todos`, { credentials: 'include' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const manuais = Array.isArray(data?.manuais) ? data.manuais : [];
+    if (qualidadeManuaisMeta) qualidadeManuaisMeta.textContent = `Total de manuais: ${manuais.length}`;
+    if (!manuais.length) {
+      qualidadeManuaisLista.innerHTML = `
+        <div style="grid-column:1 / -1;padding:18px;border:1px dashed var(--border-color);border-radius:12px;color:var(--inactive-color);text-align:center;">
+          Nenhum manual de produto cadastrado.
+        </div>`;
+      return;
+    }
+    qualidadeManuaisLista.innerHTML = manuais.map(m => {
+      const mid = m.id;
+      const nome = qualidadeManuaisEscapeHtml(m.nome || 'Manual');
+      const url = qualidadeManuaisEscapeHtml(m.url || '#');
+      const paginas = m.paginas ? `${m.paginas} página(s)` : '';
+      const status = m.status === 'indexado' ? '✓ Indexado' : m.status === 'erro' ? '✗ Erro' : m.status || '';
+      const statusCor = m.status === 'indexado' ? '#16a34a' : m.status === 'erro' ? '#dc2626' : '#6b7280';
+      const produtosArr = Array.isArray(m.produtos) ? m.produtos : [];
+      const produtosBadges = produtosArr.map(item => {
+        const codigoInterno = qualidadeManuaisEscapeHtml(item?.codigo_produto || item || '');
+        const codigoExibicao = qualidadeManuaisEscapeHtml(item?.codigo || item?.codigo_produto || item || '');
+        const descricaoProduto = qualidadeManuaisEscapeHtml(item?.descricao || '');
+        return `<span class="manual-produto-badge" data-manual-id="${mid}" data-codigo="${codigoInterno}" title="${descricaoProduto}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:#e0e7ff;color:#3730a3;font-size:11px;font-weight:600;">
+          ${codigoExibicao}
+          <button onclick="removerProdutoDoManual(${mid},'${codigoInterno}')" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:12px;padding:0 2px;" title="Remover">&times;</button>
+        </span>`;
+      }).join('');
+      return `
+        <article style="display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--border-color);border-radius:14px;background:var(--content-bg);box-shadow:0 10px 24px rgba(15,23,42,.08);">
+          <div style="display:flex;align-items:flex-start;gap:12px;">
+            <div style="width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);color:#d97706;flex:0 0 auto;">
+              <i class="fa-solid fa-file-pdf" style="font-size:18px;"></i>
+            </div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-weight:700;color:var(--content-color);line-height:1.4;word-break:break-word;">${nome}</div>
+              <div style="margin-top:4px;font-size:11px;color:var(--inactive-color);display:flex;flex-wrap:wrap;gap:8px;">
+                ${paginas ? `<span>${paginas}</span>` : ''}
+                <span style="color:${statusCor};font-weight:600;">${qualidadeManuaisEscapeHtml(status)}</span>
+              </div>
+            </div>
+          </div>
+          <!-- Produtos vinculados -->
+          <div id="manual-produtos-${mid}" style="display:flex;flex-wrap:wrap;gap:6px;min-height:20px;">
+            ${produtosBadges || '<span style="font-size:11px;color:var(--inactive-color);">Nenhum produto vinculado</span>'}
+          </div>
+          <!-- Busca de produto -->
+          <div style="position:relative;">
+            <input type="text" id="manual-busca-${mid}" placeholder="Pesquisar produto (código ou descrição)..." autocomplete="off"
+              style="width:100%;padding:7px 10px;border:1px solid #475569;border-radius:8px;font-size:12px;background:#1f2937;color:#f8fafc;box-sizing:border-box;"
+              oninput="buscarProdutoParaManual(${mid}, this.value)" />
+            <div id="manual-busca-resultados-${mid}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;max-height:200px;overflow-y:auto;background:#1f2937;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 28px rgba(0,0,0,.35);margin-top:4px;"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <a href="${url}" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:white;font-size:12px;text-decoration:none;font-weight:600;">
+              <i class="fa-solid fa-up-right-from-square"></i> Abrir manual
+            </a>
+          </div>
+        </article>`;
+    }).join('');
+  } catch (err) {
+    console.error('[QUALIDADE] Erro ao carregar manuais de produtos:', err);
+    if (qualidadeManuaisMeta) qualidadeManuaisMeta.textContent = 'Erro ao carregar manuais de produtos.';
+    if (qualidadeManuaisLista) {
+      qualidadeManuaisLista.innerHTML = `
+        <div style="grid-column:1 / -1;padding:18px;border:1px dashed #fca5a5;border-radius:12px;color:#b91c1c;text-align:center;background:rgba(254,242,242,.9);">
+          Erro ao carregar os manuais de produtos.
+        </div>`;
+    }
+  } finally {
+    qualidadeManuaisProdutosCarregando = false;
+  }
+}
+
+qualidadeManuaisProdutosBtn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  carregarManuaisDeProdutos();
 });
 
 qualidadeManuaisRecarregarBtn?.addEventListener('click', (e) => {
   e.preventDefault();
-  carregarQualidadeManuaisPrincipais({ force: true });
+  // Recarrega conforme o título ativo
+  const titulo = document.getElementById('qualidadeManuaisTituloPasta');
+  if (titulo && titulo.textContent.includes('Produtos')) {
+    carregarManuaisDeProdutos();
+  } else {
+    carregarQualidadeManuaisPrincipais({ force: true });
+  }
+});
+
+// ── Busca e vínculo de produtos aos manuais ──
+let _buscaManualTimer = null;
+window._manualBuscaResultados = window._manualBuscaResultados || {};
+window._manualBuscaSelecionados = window._manualBuscaSelecionados || {};
+window._manualBuscaModoSelecao = window._manualBuscaModoSelecao || {};
+window._manualBuscaPressTimers = window._manualBuscaPressTimers || {};
+window._manualBuscaIgnorarClickAte = window._manualBuscaIgnorarClickAte || {};
+window._manualBuscaEnviando = window._manualBuscaEnviando || {};
+
+function renderBuscaProdutosManual(manualId) {
+  const container = document.getElementById(`manual-busca-resultados-${manualId}`);
+  if (!container) return;
+
+  const produtos = Array.isArray(window._manualBuscaResultados?.[manualId]) ? window._manualBuscaResultados[manualId] : [];
+  const selecionados = new Set(window._manualBuscaSelecionados?.[manualId] || []);
+  const emSelecao = !!window._manualBuscaModoSelecao?.[manualId];
+
+  if (!produtos.length) {
+    container.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--inactive-color);text-align:center;">Nenhum produto encontrado</div>';
+    container.style.display = 'block';
+    return;
+  }
+
+  const qtdSelecionados = selecionados.size;
+  const enviando = !!window._manualBuscaEnviando?.[manualId];
+  const tituloAcao = enviando
+    ? 'Enviando...'
+    : emSelecao
+      ? (qtdSelecionados > 0 ? `${qtdSelecionados} selecionado(s)` : 'Selecione os itens abaixo')
+      : `Todos os ${produtos.length} resultados`;
+
+  const topoHtml = `
+    <div onclick="vincularTodosProdutosAoManual(${manualId})" style="position:sticky;top:0;z-index:5;padding:9px 12px;cursor:${enviando ? 'wait' : 'pointer'};font-size:12px;border-bottom:1px solid #475569;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#fff;font-weight:700;box-shadow:0 4px 10px rgba(0,0,0,.18);" onmouseover="if(!${enviando ? 'true' : 'false'}) this.style.filter='brightness(1.08)'" onmouseout="this.style.filter='none'">
+      <i class="fa-solid ${enviando ? 'fa-spinner fa-spin' : (emSelecao ? 'fa-check-double' : 'fa-layer-group')}"></i>
+      <span>${enviando ? 'Enviando itens selecionados...' : tituloAcao}</span>
+    </div>`;
+
+  const itensHtml = produtos.map(p => {
+    const codigoProduto = qualidadeManuaisEscapeHtml(p.codigo_produto);
+    const marcado = selecionados.has(String(p.codigo_produto || ''));
+    const bg = marcado ? '#1e3a8a' : '#1f2937';
+    const borda = marcado ? '#60a5fa' : '#334155';
+    return `
+      <div
+        onclick="clicarResultadoProdutoManual(event, ${manualId}, '${codigoProduto}')"
+        onmousedown="iniciarPressaoProdutoManual(${manualId}, '${codigoProduto}')"
+        onmouseup="cancelarPressaoProdutoManual(${manualId})"
+        onmouseleave="cancelarPressaoProdutoManual(${manualId})"
+        ontouchstart="iniciarPressaoProdutoManual(${manualId}, '${codigoProduto}')"
+        ontouchend="cancelarPressaoProdutoManual(${manualId})"
+        style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid ${borda};display:flex;flex-direction:column;gap:2px;background:${bg};position:relative;">
+        ${marcado ? '<span style="position:absolute;right:8px;top:8px;color:#93c5fd;"><i class="fa-solid fa-check-circle"></i></span>' : ''}
+        <span style="font-weight:600;color:#f8fafc;">${qualidadeManuaisEscapeHtml(p.codigo)}</span>
+        <span style="color:#cbd5e1;font-size:11px;">${qualidadeManuaisEscapeHtml(p.descricao)}</span>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = topoHtml + itensHtml;
+  container.style.display = 'block';
+}
+
+window.buscarProdutoParaManual = function(manualId, termo) {
+  clearTimeout(_buscaManualTimer);
+  const container = document.getElementById(`manual-busca-resultados-${manualId}`);
+  if (!container) return;
+  const q = (termo || '').trim();
+  if (q.length < 2) {
+    container.style.display = 'none';
+    window._manualBuscaModoSelecao[manualId] = false;
+    window._manualBuscaSelecionados[manualId] = [];
+    return;
+  }
+  _buscaManualTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/api/produtos/search?q=${encodeURIComponent(q)}&limit=10`, { credentials: 'include' });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const produtos = Array.isArray(data?.produtos) ? data.produtos : [];
+      window._manualBuscaResultados[manualId] = produtos;
+      window._manualBuscaModoSelecao[manualId] = false;
+      window._manualBuscaSelecionados[manualId] = [];
+      renderBuscaProdutosManual(manualId);
+    } catch (err) {
+      console.error('[Manuais] Erro busca produto:', err);
+    }
+  }, 300);
+};
+
+window.iniciarPressaoProdutoManual = function(manualId, codigoProduto) {
+  cancelarPressaoProdutoManual(manualId);
+  window._manualBuscaPressTimers[manualId] = setTimeout(() => {
+    window._manualBuscaModoSelecao[manualId] = true;
+    const selecionados = new Set(window._manualBuscaSelecionados?.[manualId] || []);
+    selecionados.add(String(codigoProduto || ''));
+    window._manualBuscaSelecionados[manualId] = Array.from(selecionados);
+    window._manualBuscaIgnorarClickAte[manualId] = Date.now() + 700;
+    renderBuscaProdutosManual(manualId);
+  }, 450);
+};
+
+window.cancelarPressaoProdutoManual = function(manualId) {
+  if (window._manualBuscaPressTimers?.[manualId]) {
+    clearTimeout(window._manualBuscaPressTimers[manualId]);
+    delete window._manualBuscaPressTimers[manualId];
+  }
+};
+
+window.clicarResultadoProdutoManual = function(event, manualId, codigoProduto) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (Date.now() < (window._manualBuscaIgnorarClickAte?.[manualId] || 0)) return;
+
+  if (window._manualBuscaModoSelecao?.[manualId]) {
+    const selecionados = new Set(window._manualBuscaSelecionados?.[manualId] || []);
+    const chave = String(codigoProduto || '');
+    if (selecionados.has(chave)) selecionados.delete(chave);
+    else selecionados.add(chave);
+    window._manualBuscaSelecionados[manualId] = Array.from(selecionados);
+    if (selecionados.size === 0) window._manualBuscaModoSelecao[manualId] = false;
+    renderBuscaProdutosManual(manualId);
+    return;
+  }
+
+  vincularProdutoAoManual(manualId, codigoProduto);
+};
+
+window.vincularProdutoAoManual = async function(manualId, codigoProduto) {
+  try {
+    const resp = await fetch(`${API_BASE}/api/manuais-chatbot/${manualId}/produtos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ codigo_produto: codigoProduto })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao vincular');
+    const input = document.getElementById(`manual-busca-${manualId}`);
+    const resultados = document.getElementById(`manual-busca-resultados-${manualId}`);
+    if (input) input.value = '';
+    if (resultados) resultados.style.display = 'none';
+    window._manualBuscaModoSelecao[manualId] = false;
+    window._manualBuscaSelecionados[manualId] = [];
+    atualizarBadgesProdutosManual(manualId, data.produtos);
+  } catch (err) {
+    alert(err.message || 'Erro ao vincular produto.');
+  }
+};
+
+window.vincularTodosProdutosAoManual = async function(manualId) {
+  const produtos = Array.isArray(window._manualBuscaResultados?.[manualId]) ? window._manualBuscaResultados[manualId] : [];
+  if (!produtos.length || window._manualBuscaEnviando?.[manualId]) return;
+
+  const selecionados = new Set(window._manualBuscaSelecionados?.[manualId] || []);
+  const usarSelecionados = !!window._manualBuscaModoSelecao?.[manualId] && selecionados.size > 0;
+  const listaEnvio = usarSelecionados
+    ? produtos.filter(p => selecionados.has(String(p.codigo_produto || '')))
+    : produtos;
+
+  if (!listaEnvio.length) return;
+
+  try {
+    window._manualBuscaEnviando[manualId] = true;
+    renderBuscaProdutosManual(manualId);
+    let produtosAtualizados = [];
+    for (const p of listaEnvio) {
+      const codigoProduto = String(p.codigo_produto || '').trim();
+      if (!codigoProduto) continue;
+      const resp = await fetch(`${API_BASE}/api/manuais-chatbot/${manualId}/produtos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ codigo_produto: codigoProduto })
+      });
+      const data = await resp.json();
+      if (resp.ok && data.ok) {
+        produtosAtualizados = Array.isArray(data.produtos) ? data.produtos : produtosAtualizados;
+      }
+    }
+    const input = document.getElementById(`manual-busca-${manualId}`);
+    const resultados = document.getElementById(`manual-busca-resultados-${manualId}`);
+    if (input) input.value = '';
+    if (resultados) resultados.style.display = 'none';
+    window._manualBuscaModoSelecao[manualId] = false;
+    window._manualBuscaSelecionados[manualId] = [];
+    atualizarBadgesProdutosManual(manualId, produtosAtualizados);
+  } catch (err) {
+    alert(err.message || 'Erro ao vincular os produtos selecionados.');
+  } finally {
+    window._manualBuscaEnviando[manualId] = false;
+  }
+};
+
+window.removerProdutoDoManual = async function(manualId, codigoProduto) {
+  if (!confirm(`Remover produto ${codigoProduto} deste manual?`)) return;
+  try {
+    const resp = await fetch(`${API_BASE}/api/manuais-chatbot/${manualId}/produtos/${encodeURIComponent(codigoProduto)}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao remover');
+    atualizarBadgesProdutosManual(manualId, data.produtos);
+  } catch (err) {
+    alert(err.message || 'Erro ao remover produto.');
+  }
+};
+
+function atualizarBadgesProdutosManual(manualId, produtos) {
+  const container = document.getElementById(`manual-produtos-${manualId}`);
+  if (!container) return;
+  const lista = Array.isArray(produtos) ? produtos : [];
+  if (!lista.length) {
+    container.innerHTML = '<span style="font-size:11px;color:var(--inactive-color);">Nenhum produto vinculado</span>';
+    return;
+  }
+  container.innerHTML = lista.map(item => {
+    const codigoInterno = qualidadeManuaisEscapeHtml(item?.codigo_produto || item || '');
+    const codigoExibicao = qualidadeManuaisEscapeHtml(item?.codigo || item?.codigo_produto || item || '');
+    const descricaoProduto = qualidadeManuaisEscapeHtml(item?.descricao || '');
+    return `<span class="manual-produto-badge" title="${descricaoProduto}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:#e0e7ff;color:#3730a3;font-size:11px;font-weight:600;">
+      ${codigoExibicao}
+      <button onclick="removerProdutoDoManual(${manualId},'${codigoInterno}')" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:12px;padding:0 2px;" title="Remover">&times;</button>
+    </span>`;
+  }).join('');
+}
+
+// Fecha dropdowns de busca ao clicar fora
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[id^="manual-busca-"]')) {
+    document.querySelectorAll('[id^="manual-busca-resultados-"]').forEach(el => el.style.display = 'none');
+  }
 });
 
 function obterCodigoProdutoQualidadeAtual() {
@@ -6896,6 +7238,7 @@ if (sacAtMenuLink) {
     e.preventDefault();
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     sacAtMenuLink.classList.add('is-active');
+    if (atDataInput && !atDataInput.value) atDataInput.value = new Date().toISOString().slice(0, 10);
     showMainTab('sacAtPane');
   });
 }
@@ -8044,6 +8387,8 @@ const atNumeroInput = document.getElementById('atNumero');
 const atRuaInput = document.getElementById('atRua');
 const atAgendarComInput = document.getElementById('atAgendarCom');
 const atDescricaoInput = document.getElementById('atDescricao');
+const atDataInput = document.getElementById('atData');
+if (atDataInput) atDataInput.value = new Date().toISOString().slice(0, 10);
 const atEnviarBtn = document.getElementById('atEnviarBtn');
 const atModeloInput = document.getElementById('atModelo');
 const atTagProblemaInput = document.getElementById('atTagProblema');
@@ -11035,6 +11380,7 @@ function _abrirAtEditModal(id) {
   setV('atEmCidade',    row.cidade);
   setV('atEmTag',       row.tag_problema);
   setV('atEmPlataforma',row.plataforma_atendimento);
+  setV('atEmData',      row.data ? String(row.data).slice(0, 10) : '');
   setV('atEmAtendimentoInicial', row.atendimento_inicial);
 
   const tipoSel = document.getElementById('atEmTipo');
@@ -11107,6 +11453,7 @@ async function _salvarAtEditModal() {
     plataforma_atendimento: gV('atEmPlataforma'),
     descreva_reclamacao:    gV('atEmReclamacao'),
     atendimento_inicial:    gV('atEmAtendimentoInicial'),
+    data:                   gV('atEmData') || null,
   };
   const fechPayload = {
     tag_problema:                gV('atEmFechTag'),
@@ -11594,6 +11941,7 @@ if (atEnviarBtn) {
         tipo: atTipoAtendimentoInput?.value?.trim() || null,
         nome_revenda_cliente: atNomeRevendaClienteInput?.value?.trim() || null,
         numero_telefone: atTelefoneInput?.value?.trim() || null,
+        data: atDataInput?.value || null,
         cpf_cnpj: atCpfCnpjInput?.value?.trim() || null,
         cep: atCepInput?.value?.trim() || null,
         bairro: atBairroInput?.value?.trim() || null,
@@ -11666,6 +12014,7 @@ if (atEnviarBtn) {
       if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
       if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
       if (atTelefoneInput) atTelefoneInput.value = '';
+      if (atDataInput) atDataInput.value = new Date().toISOString().slice(0, 10);
       if (atCpfCnpjInput) atCpfCnpjInput.value = '';
       if (atCepInput) atCepInput.value = '';
       if (atBairroInput) atBairroInput.value = '';
@@ -19764,6 +20113,7 @@ document.getElementById('produtoTabs').style.display = 'none';
   initDadosColaboradoresUI();
   initRhConfiguracaoCargosUI();
   initRhColaboradoresUI();
+  initRhControleFeriasUI();
   initAnexosUI();
 });  // <--- aqui fecha o DOMContentLoaded
 
@@ -35315,6 +35665,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         display:flex;
         flex-direction:column;
       " 
+      onclick="abrirModalEditarProduto('${escapeHtml(produto.codigo)}')"
       onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)';this.style.transform='translateY(-2px)'"
       onmouseout="this.style.boxShadow='none';this.style.transform='translateY(0)'">
         
@@ -35358,141 +35709,30 @@ function renderizarCatalogoOmie(produtos, options = {}) {
             ` : ''}
           </div>
           
-          <!-- Linha com Editar, Quantidade, Prazo e Carrinho -->
-          <div style="margin-top:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;">
-            <!-- Botão Editar -->
+          <!-- Botão Ações -->
+          <div style="margin-top:auto;display:flex;gap:6px;align-items:stretch;">
             <button 
-              onclick="abrirModalEditarProduto('${produto.codigo}')" 
-              title="Editar produto"
-              style="
-                width:32px;
-                background:#fef3c7;
-                color:#d97706;
-                border:1px solid #fbbf24;
-                padding:6px;
-                border-radius:4px;
-                cursor:pointer;
-                font-size:14px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                flex-shrink:0;
-              "
-              onmouseover="this.style.background='#fde68a'"
-              onmouseout="this.style.background='#fef3c7'">
-              <i class="fa-solid fa-pencil"></i>
-            </button>
-
-            <!-- Botão Últimas Compras -->
-            <button 
-              onclick="event.stopPropagation();abrirModalUltimasCompras('${produto.codigo_produto}', '${escapeHtml(produto.codigo)}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}')"
-              title="Últimas compras"
-              style="
-                width:32px;
-                background:#ede9fe;
-                color:#7c3aed;
-                border:1px solid #c4b5fd;
-                padding:6px;
-                border-radius:4px;
-                cursor:pointer;
-                font-size:14px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                flex-shrink:0;
-              "
-              onmouseover="this.style.background='#ddd6fe'"
-              onmouseout="this.style.background='#ede9fe'">
-              <i class="fa-solid fa-receipt"></i>
-            </button>
-
-            <!-- Campo Quantidade -->
-            <input 
-              type="number" 
-              id="catalogo-qtd-${produto.codigo}" 
-              min="1" 
-              value="1" 
-              title="Quantidade"
-              placeholder="Qtd"
-              style="width:50px;padding:6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;text-align:center;"
-            />
-            
-            <!-- Botão Adicionar ao Carrinho -->
-            <button 
-              onclick="selecionarProdutoCatalogo('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', event)"
-              title="Adicionar ao carrinho"
+              onclick="event.stopPropagation();abrirModalAcoesProduto('${produto.codigo}', '${produto.codigo_produto}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', '${escapeHtml((produto.unidade || 'UN').replace(/'/g, "\\'"))}')"
+              title="Ações do produto"
               style="
                 flex:1;
-                min-width:32px;
-                background:linear-gradient(135deg,#10b981 0%,#059669 100%);
+                background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);
                 color:white;
                 border:none;
-                padding:6px;
-                border-radius:4px;
+                padding:8px;
+                border-radius:6px;
                 cursor:pointer;
-                font-size:16px;
+                font-size:13px;
+                font-weight:600;
                 display:flex;
                 align-items:center;
                 justify-content:center;
+                gap:6px;
               "
               onmouseover="this.style.transform='scale(1.02)'"
               onmouseout="this.style.transform='scale(1)'">
-              <i class="fa-solid fa-cart-plus"></i>
+              <i class="fa-solid fa-ellipsis"></i> Ações
             </button>
-
-            <!-- Botão Adicionar à Separação -->
-            <button
-              onclick="event.stopPropagation();abrirModalSeparacaoQtd('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}', '${escapeHtml((produto.unidade || 'UN').replace(/'/g, "\\'"))}')"
-              title="Adicionar à separação"
-              style="
-                flex-shrink:0;
-                background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);
-                color:#1a1200;
-                border:none;
-                padding:6px 9px;
-                border-radius:4px;
-                cursor:pointer;
-                font-size:15px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-              "
-              onmouseover="this.style.transform='scale(1.02)'"
-              onmouseout="this.style.transform='scale(1)'">
-              <i class="fa-solid fa-clipboard-plus"></i>
-            </button>
-
-            <!-- Botão Movimentar Estoque -->
-            <button 
-              onclick="abrirModalMovimentacao('${produto.codigo}', '${escapeHtml(produto.descricao.replace(/'/g, "\\'"))}')"
-              title="Movimentar estoque"
-              style="
-                flex-shrink:0;
-                background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);
-                color:white;
-                border:none;
-                padding:6px 10px;
-                border-radius:4px;
-                cursor:pointer;
-                font-size:16px;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-              "
-              onmouseover="this.style.transform='scale(1.02)'"
-              onmouseout="this.style.transform='scale(1)'">
-              <i class="fa-solid fa-arrows-rotate"></i>
-            </button>
-          </div>
-          
-          <!-- Campo Prazo (inicialmente oculto, linha separada abaixo) -->
-          <div id="catalogo-prazo-container-${produto.codigo}" style="display:none;margin-top:6px;">
-            <input 
-              type="date" 
-              id="catalogo-prazo-${produto.codigo}" 
-              placeholder="Prazo de entrega"
-              style="width:100%;padding:6px;border:1px solid #10b981;border-radius:4px;font-size:10px;background:#f0fdf4;"
-            />
           </div>
         </div>
       </div>
@@ -35637,6 +35877,190 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     const inp = el('sepQtyInput'); if (inp) inp.value = 1;
     ov.style.display = 'flex';
     try { inp?.focus({ preventScroll: true }); } catch {}
+  };
+})();
+
+// ── Modal de Ações do Produto ──────────────────────────────────────────────
+(function initModalAcoesProduto() {
+  // Cria overlay do modal
+  const ov = document.createElement('div');
+  ov.id = 'modalAcoesProdutoOverlay';
+  ov.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);align-items:center;justify-content:center;';
+  ov.innerHTML = `
+    <div id="modalAcoesProdutoBox" style="background:#fff;border-radius:12px;width:420px;max-width:92vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fadeInScale .2s ease;">
+      <!-- Cabeçalho -->
+      <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div id="modalAcoesTitulo" style="font-size:15px;font-weight:700;color:#1f2937;"></div>
+          <div id="modalAcoesDescricao" style="font-size:11px;color:#6b7280;margin-top:2px;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        </div>
+        <button id="modalAcoesFechar" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px;" title="Fechar">&times;</button>
+      </div>
+      <!-- Conteúdo: Botões de ação -->
+      <div id="modalAcoesBotoes" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;gap:8px;">
+          <input type="number" id="modalAcoesQtd" min="1" value="1" style="width:70px;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;text-align:center;" />
+          <button id="modalAcoesBtnCarrinho" style="flex:1;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho
+          </button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <button id="modalAcoesBtnEditar" style="background:#fef3c7;color:#d97706;border:1px solid #fbbf24;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-pencil"></i> Editar
+          </button>
+          <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-receipt"></i> Últimas Compras
+          </button>
+          <button id="modalAcoesBtnSeparacao" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#1a1200;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-clipboard-list"></i> Separação
+          </button>
+          <button id="modalAcoesBtnMovimentar" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-arrows-rotate"></i> Movimentar
+          </button>
+        </div>
+        <button id="modalAcoesBtnManual" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <i class="fa-solid fa-book"></i> Manual de Instrução
+        </button>
+      </div>
+      <!-- Conteúdo: Tela de Manuais (oculta por padrão) -->
+      <div id="modalAcoesManuais" style="display:none;padding:16px 20px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <button id="modalManuaisVoltar" style="background:none;border:none;font-size:16px;color:#3b82f6;cursor:pointer;padding:4px;" title="Voltar"><i class="fa-solid fa-arrow-left"></i></button>
+          <span style="font-size:14px;font-weight:700;color:#1f2937;"><i class="fa-solid fa-book" style="margin-right:6px;color:#0ea5e9;"></i>Manuais de Instrução</span>
+        </div>
+        <!-- Lista de manuais existentes -->
+        <div id="modalManuaisLista" style="margin-bottom:14px;"></div>
+        <!-- Formulário de upload -->
+        <div style="border:1px dashed #d1d5db;border-radius:8px;padding:14px;background:#f9fafb;">
+          <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:8px;"><i class="fa-solid fa-plus" style="margin-right:4px;color:#10b981;"></i>Anexar novo manual</div>
+          <input type="text" id="modalManualNome" placeholder="Nome do manual (ex: Manual FTI-125)" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-bottom:8px;box-sizing:border-box;" />
+          <input type="file" id="modalManualArquivo" accept=".pdf,.doc,.docx" style="width:100%;font-size:11px;margin-bottom:10px;" />
+          <button id="modalManualBtnEnviar" style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-upload"></i> Enviar Manual
+          </button>
+          <div id="modalManualStatus" style="margin-top:8px;font-size:11px;color:#6b7280;text-align:center;"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  let _ctx = {};
+
+  function fechar() { ov.style.display = 'none'; _ctx = {}; }
+
+  function mostrarBotoes() {
+    document.getElementById('modalAcoesBotoes').style.display = 'flex';
+    document.getElementById('modalAcoesManuais').style.display = 'none';
+  }
+
+  function mostrarManuais() {
+    document.getElementById('modalAcoesBotoes').style.display = 'none';
+    document.getElementById('modalAcoesManuais').style.display = 'block';
+    carregarManuaisProduto(_ctx.codigo);
+  }
+
+  async function carregarManuaisProduto(codigo) {
+    const lista = document.getElementById('modalManuaisLista');
+    lista.innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:11px;padding:10px;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+    try {
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(codigo) + '/manuais', { credentials: 'include' });
+      const data = await resp.json();
+      const manuais = Array.isArray(data.manuais) ? data.manuais : [];
+      if (!manuais.length) {
+        lista.innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:11px;padding:10px;border:1px solid #e5e7eb;border-radius:6px;">Nenhum manual anexado</div>';
+        return;
+      }
+      lista.innerHTML = manuais.map((m, i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px;">
+          <i class="fa-solid fa-file-pdf" style="color:#ef4444;font-size:18px;flex-shrink:0;"></i>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.nome || 'Manual')}</div>
+            <a href="${escapeHtml(m.url)}" target="_blank" style="font-size:10px;color:#3b82f6;text-decoration:underline;">Abrir manual</a>
+          </div>
+          <button onclick="removerManualProduto('${escapeHtml(codigo)}', ${i})" title="Remover" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:4px;"><i class="fa-solid fa-trash-can"></i></button>
+        </div>
+      `).join('');
+    } catch (err) {
+      lista.innerHTML = '<div style="color:#ef4444;font-size:11px;text-align:center;">Erro ao carregar manuais</div>';
+    }
+  }
+
+  async function enviarManual() {
+    const nome = document.getElementById('modalManualNome').value.trim();
+    const arquivo = document.getElementById('modalManualArquivo').files[0];
+    const status = document.getElementById('modalManualStatus');
+    if (!nome) { status.textContent = 'Informe o nome do manual.'; status.style.color = '#ef4444'; return; }
+    if (!arquivo) { status.textContent = 'Selecione um arquivo.'; status.style.color = '#ef4444'; return; }
+    status.textContent = 'Enviando...'; status.style.color = '#6b7280';
+    try {
+      const fd = new FormData();
+      fd.append('nome', nome);
+      fd.append('arquivo', arquivo);
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(_ctx.codigo) + '/manuais', {
+        method: 'POST',
+        credentials: 'include',
+        body: fd
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro ao enviar');
+      status.textContent = 'Manual anexado com sucesso!'; status.style.color = '#10b981';
+      document.getElementById('modalManualNome').value = '';
+      document.getElementById('modalManualArquivo').value = '';
+      carregarManuaisProduto(_ctx.codigo);
+    } catch (err) {
+      status.textContent = err.message || 'Erro ao enviar manual.'; status.style.color = '#ef4444';
+    }
+  }
+
+  window.removerManualProduto = async function(codigo, index) {
+    if (!confirm('Remover este manual?')) return;
+    try {
+      const resp = await fetch('/api/produtos/' + encodeURIComponent(codigo) + '/manuais/' + index, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Erro');
+      carregarManuaisProduto(codigo);
+    } catch (err) {
+      alert(err.message || 'Erro ao remover manual.');
+    }
+  };
+
+  // Event listeners
+  ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
+  document.getElementById('modalAcoesFechar').addEventListener('click', fechar);
+  document.getElementById('modalAcoesBtnManual').addEventListener('click', mostrarManuais);
+  document.getElementById('modalManuaisVoltar').addEventListener('click', mostrarBotoes);
+  document.getElementById('modalManualBtnEnviar').addEventListener('click', enviarManual);
+
+  document.getElementById('modalAcoesBtnEditar').addEventListener('click', () => { const c = _ctx.codigo; fechar(); abrirModalEditarProduto(c); });
+  document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
+  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => { const {codigo, descricao, unidade} = _ctx; fechar(); abrirModalSeparacaoQtd(codigo, descricao, unidade); });
+  document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => { const {codigo, descricao} = _ctx; fechar(); abrirModalMovimentacao(codigo, descricao); });
+  document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
+    const qtd = parseInt(document.getElementById('modalAcoesQtd').value) || 1;
+    const {codigo, descricao} = _ctx;
+    // Cria input temporário para compatibilidade
+    const tempInput = document.createElement('input');
+    tempInput.id = 'catalogo-qtd-' + codigo;
+    tempInput.value = qtd;
+    tempInput.style.display = 'none';
+    document.body.appendChild(tempInput);
+    selecionarProdutoCatalogo(codigo, descricao);
+    tempInput.remove();
+    fechar();
+  });
+
+  window.abrirModalAcoesProduto = function(codigo, codigoProduto, descricao, unidade) {
+    _ctx = { codigo, codigo_produto: codigoProduto, descricao, unidade };
+    document.getElementById('modalAcoesTitulo').textContent = codigo;
+    document.getElementById('modalAcoesDescricao').textContent = descricao;
+    document.getElementById('modalAcoesQtd').value = 1;
+    document.getElementById('modalManualStatus').textContent = '';
+    mostrarBotoes();
+    ov.style.display = 'flex';
   };
 })();
 
@@ -38154,10 +38578,97 @@ function obterTextoAcoesRecebimento(item) {
   return item?.fornecedor_lista_numeros_nfe || '';
 }
 
+function obterChavePedidoRecebimento(item) {
+  const chavePrincipal = item?.n_cod_ped || item?.cnumero;
+  if (chavePrincipal !== null && chavePrincipal !== undefined && String(chavePrincipal).trim()) {
+    return String(chavePrincipal).trim();
+  }
+
+  return [
+    item?.fornecedor_cnpj_cpf || 'sem-cnpj',
+    item?.d_inc_data || 'sem-data',
+    item?.produto_codigo || 'sem-produto'
+  ].join('|');
+}
+
+function listarItensPedidoRecebimento(itemOuChave) {
+  const state = obterEstadoRecebimentoCompras();
+  const chave = typeof itemOuChave === 'string'
+    ? String(itemOuChave)
+    : obterChavePedidoRecebimento(itemOuChave);
+
+  return state.rows.filter((row) => obterChavePedidoRecebimento(row) === chave);
+}
+
+function montarContextoPedidoRecebimento(itemOuChave) {
+  const itensPedido = listarItensPedidoRecebimento(itemOuChave);
+  const base = itensPedido[0] || (typeof itemOuChave === 'object' && itemOuChave ? itemOuChave : {});
+  const observacoes = [...new Set(
+    itensPedido
+      .map((row) => String(row?.observacao || '').trim())
+      .filter(Boolean)
+  )];
+
+  return {
+    cnumero: base?.cnumero || '',
+    n_cod_ped: base?.n_cod_ped || '',
+    observacao: observacoes.join(' | ') || base?.observacao || '',
+    d_inc_data: base?.d_inc_data || '',
+    itens: itensPedido.map((row) => ({
+      produto_codigo: row?.produto_codigo || '',
+      produto_descricao: row?.produto_descricao || '',
+      quantidade: row?.quantidade || '',
+      unidade: row?.unidade || '',
+      valor_item: row?.valor_item || row?.valor_total_pedido || ''
+    }))
+  };
+}
+
+window.obterContextoPedidoRecebimento = montarContextoPedidoRecebimento;
+
+function agruparRecebimentoPorPedido(lista) {
+  const mapa = new Map();
+
+  lista.forEach((item) => {
+    const chavePedido = obterChavePedidoRecebimento(item);
+    if (!mapa.has(chavePedido)) {
+      mapa.set(chavePedido, {
+        ...item,
+        __pedidoKey: chavePedido,
+        __pedidoItens: []
+      });
+    }
+
+    mapa.get(chavePedido).__pedidoItens.push(item);
+  });
+
+  return Array.from(mapa.values()).map((grupo) => {
+    const observacoes = [...new Set(
+      grupo.__pedidoItens
+        .map((row) => String(row?.observacao || '').trim())
+        .filter(Boolean)
+    )];
+
+    const mapaNfs = new Map();
+    grupo.__pedidoItens.forEach((row) => {
+      obterNfsRecebimento(row).forEach((nf) => {
+        const chaveNf = [nf?.chave_nfe || '', nf?.numero_nfe || ''].join('|');
+        if (!mapaNfs.has(chaveNf)) mapaNfs.set(chaveNf, nf);
+      });
+    });
+
+    return {
+      ...grupo,
+      observacao: observacoes.join(' | ') || grupo.observacao || '',
+      fornecedor_lista_nfes: Array.from(mapaNfs.values())
+    };
+  });
+}
+
 function montarIndiceRecebimento(item) {
   const campos = {
     produto: `${item?.produto_codigo || ''} ${item?.produto_descricao || ''} ${item?.quantidade || ''} ${item?.unidade || ''}`,
-    pedido: `${item?.cnumero || ''} ${item?.n_cod_ped || ''}`,
+    pedido: `${item?.cnumero || ''} ${item?.n_cod_ped || ''} ${item?.produto_codigo || ''} ${item?.produto_descricao || ''}`,
     etapa: `${item?.etapa_nf || ''} ${item?.etapa_nf_descricao || ''}`,
     solicitante: item?.solicitante || '',
     previsao: formatarDataRecebimento(item?.previsao_chegada),
@@ -38198,13 +38709,13 @@ function atualizarResumoFiltrosRecebimento(filtros, filtrados, total) {
   ].filter(Boolean).length;
 
   if (!ativos) {
-    resumo.textContent = `Sem filtros ativos | ${filtrados} item(ns)`;
+    resumo.textContent = `Sem filtros ativos | ${filtrados} pedido(s)`;
     resumo.style.background = '#eff6ff';
     resumo.style.color = '#1d4ed8';
     return;
   }
 
-  resumo.textContent = `${ativos} filtro(s) ativo(s) | ${filtrados} de ${total} item(ns)`;
+  resumo.textContent = `${ativos} filtro(s) ativo(s) | ${filtrados} de ${total} pedido(s)`;
   resumo.style.background = '#fff7ed';
   resumo.style.color = '#c2410c';
 }
@@ -38221,16 +38732,22 @@ function renderAcoesRecebimento(item) {
   return listaNfs.map((nf) => {
     const numero = escapeHtml(String(nf?.numero_nfe || '-'));
     const chave = escapeHtml(String(nf?.chave_nfe || ''));
+    const pedidoKey = escapeHtml(obterChavePedidoRecebimento(item));
+    const valorNf = formatarValorRecebimento(
+      nf?.valor_nfe ?? nf?.valor_total ?? nf?.valor ?? null
+    );
+    const valorNfTexto = escapeHtml(valorNf && valorNf !== '-' ? valorNf : 'sem valor');
     return `
       <button
         type="button"
         data-chave="${chave}"
         data-num="${numero}"
-        onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes&&this.dataset.chave)window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,null,{ocultarComparacao:true});"
-        style="display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #bae6fd;border-radius:999px;background:#f0f9ff;color:#0369a1;font-size:11px;font-weight:700;cursor:pointer;"
+        data-pedidokey="${pedidoKey}"
+        onclick="event.stopPropagation();if(window.abrirModalNfeOmieDetalhes&&this.dataset.chave){const contexto=window.obterContextoPedidoRecebimento?window.obterContextoPedidoRecebimento(this.dataset.pedidokey):{};window.abrirModalNfeOmieDetalhes(this.dataset.chave,this.dataset.num,contexto);}"
+        style="display:inline-flex;align-items:center;justify-content:flex-start;gap:6px;padding:7px 10px;border:1px solid #bae6fd;border-radius:999px;background:#f0f9ff;color:#0369a1;font-size:11px;font-weight:700;cursor:pointer;max-width:100%;width:100%;text-align:left;white-space:nowrap;"
       >
         <i class="fa-solid fa-file-invoice"></i>
-        <span>NF ${numero}</span>
+        <span>NF ${numero} - ${valorNfTexto}</span>
       </button>
     `;
   }).join('');
@@ -38241,31 +38758,28 @@ function renderRecebimentoTabela(listaFiltrada, totalOriginal) {
   const countBadge = document.getElementById('recebimentoCount');
   if (!tbody) return;
 
+  const grupos = agruparRecebimentoPorPedido(listaFiltrada);
+
   if (countBadge) {
-    countBadge.textContent = totalOriginal === listaFiltrada.length
-      ? `${totalOriginal} itens`
-      : `${listaFiltrada.length} de ${totalOriginal} itens`;
+    countBadge.textContent = totalOriginal === grupos.length
+      ? `${totalOriginal} pedidos`
+      : `${grupos.length} de ${totalOriginal} pedidos`;
   }
 
-  if (!listaFiltrada.length) {
+  if (!grupos.length) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="11" style="text-align:center;padding:32px 16px;color:#64748b;">
+        <td colspan="10" style="text-align:center;padding:32px 16px;color:#64748b;">
           <i class="fa-solid fa-filter-circle-xmark" style="font-size:22px;margin-bottom:10px;display:block;color:#94a3b8;"></i>
-          Nenhum item encontrado com os filtros atuais.
+          Nenhum pedido encontrado com os filtros atuais.
         </td>
       </tr>
     `;
     return;
   }
 
-  tbody.innerHTML = listaFiltrada.map((item) => {
-    const produtoCodigo = escapeHtml(item?.produto_codigo || '-');
-    const produtoDescricao = escapeHtml(item?.produto_descricao || '-');
-    const quantidade = item?.quantidade ? formatarQuantidadeExibicao(item.quantidade) : '-';
-    const unidade = escapeHtml(item?.unidade || '');
+  tbody.innerHTML = grupos.map((item) => {
     const pedidoNumero = escapeHtml(String(item?.cnumero || item?.n_cod_ped || '-'));
-    const pedidoInterno = item?.n_cod_ped ? `<div style="font-size:11px;color:#64748b;margin-top:4px;">ID Omie: ${escapeHtml(String(item.n_cod_ped))}</div>` : '';
     const etapaCor = item?.etapa_nf_cor || '#f59e0b';
     const etapaTexto = escapeHtml(item?.etapa_nf_descricao || item?.etapa_nf || '-');
     const solicitante = escapeHtml(item?.solicitante || '-');
@@ -38273,43 +38787,82 @@ function renderRecebimentoTabela(listaFiltrada, totalOriginal) {
     const responsavel = escapeHtml(item?.resp_inspecao_recebimento || '-');
     const fornecedorNome = escapeHtml(obterFornecedorRecebimento(item));
     const fornecedorComplemento = obterFornecedorComplementoRecebimento(item);
-    const observacao = escapeHtml(item?.observacao || '-');
+    const observacaoCompleta = escapeHtml(item?.observacao || '-');
     const criadoEm = escapeHtml(formatarDataRecebimento(item?.d_inc_data));
     const valor = escapeHtml(formatarValorRecebimento(item?.valor_total_pedido));
+    const itensDoPedido = listarItensPedidoRecebimento(item.__pedidoKey);
+    const itensVisiveis = Array.isArray(item.__pedidoItens) && item.__pedidoItens.length ? item.__pedidoItens : itensDoPedido;
+    const totalItensPedido = itensDoPedido.length || itensVisiveis.length || 0;
+    const produtosHtml = itensVisiveis.map((produto) => {
+      const produtoCodigo = escapeHtml(produto?.produto_codigo || '-');
+      const produtoDescricao = escapeHtml(produto?.produto_descricao || '-');
+      const quantidade = produto?.quantidade ? formatarQuantidadeExibicao(produto.quantidade) : '-';
+      const unidade = escapeHtml(produto?.unidade || '');
+
+      return `
+        <div style="padding:8px 10px;border-radius:8px;background:#fff;border:1px solid #dbeafe;">
+          <div style="font-weight:700;color:#1e3a8a;">${produtoCodigo}</div>
+          <div style="font-size:12px;color:#475569;margin-top:4px;line-height:1.45;">${produtoDescricao}</div>
+          <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>${escapeHtml(String(quantidade))}${unidade ? ` ${unidade}` : ''}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+    const notaFiltroItens = itensVisiveis.length && totalItensPedido > itensVisiveis.length
+      ? `<div style="font-size:11px;color:#64748b;margin:0 0 8px;">Mostrando ${itensVisiveis.length} item(ns) filtrado(s) deste pedido.</div>`
+      : '';
+    const botaoVerItens = totalItensPedido
+      ? `
+        <details class="recebimento-detalhes-inline" style="display:inline-block;position:relative;">
+          <summary style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;border:1px solid #cbd5e1;list-style:none;">
+            <i class="fa-solid fa-eye" style="color:#64748b;"></i>
+            <span>Ver</span>
+          </summary>
+          <div class="recebimento-popover-itens" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30;width:min(420px,70vw);padding:10px;border-radius:12px;background:#f8fafc;border:1px solid #cbd5e1;box-shadow:0 12px 28px rgba(15,23,42,.16);">
+            ${notaFiltroItens}
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              ${produtosHtml}
+            </div>
+          </div>
+        </details>
+      `
+      : '';
 
     return `
       <tr style="border-bottom:1px solid #e2e8f0;">
-        <td style="padding:14px 16px;vertical-align:top;min-width:220px;border-bottom:1px solid #e2e8f0;">
-          <div style="font-weight:700;color:#0f172a;">${produtoCodigo}</div>
-          <div style="font-size:12px;color:#475569;margin-top:4px;line-height:1.45;">${produtoDescricao}</div>
-          <div style="display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 8px;border-radius:999px;background:#f8fafc;color:#334155;font-size:11px;font-weight:700;">
-            <i class="fa-solid fa-boxes-stacked" style="color:#64748b;"></i>
-            <span>${escapeHtml(String(quantidade))}${unidade ? ` ${unidade}` : ''}</span>
+        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;min-width:260px;">
+          <div style="font-weight:700;color:#1d4ed8;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>${pedidoNumero}</span>
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;">
+              <i class="fa-solid fa-boxes-stacked"></i>
+              <span>${totalItensPedido}</span>
+            </span>
+            ${botaoVerItens}
           </div>
-        </td>
-        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">
-          <div style="font-weight:700;color:#1d4ed8;">${pedidoNumero}</div>
-          ${pedidoInterno}
         </td>
         <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">
           <span style="display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:${escapeHtml(etapaCor)}18;color:${escapeHtml(etapaCor)};font-size:11px;font-weight:700;border:1px solid ${escapeHtml(etapaCor)}40;">
             ${etapaTexto}
           </span>
         </td>
-        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${solicitante}</td>
-        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${previsao}</td>
-        <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${responsavel}</td>
+        <td class="recebimento-coluna-texto" style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${solicitante}</td>
+        <td class="recebimento-coluna-texto" style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${previsao}</td>
+        <td class="recebimento-coluna-texto" style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${responsavel}</td>
         <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;min-width:230px;">
-          <div style="font-weight:700;color:#0f172a;">${fornecedorNome}</div>
-          ${fornecedorComplemento ? `<div style="font-size:11px;color:#64748b;line-height:1.45;margin-top:4px;">${escapeHtml(fornecedorComplemento)}</div>` : ''}
+          <div class="recebimento-fornecedor-nome" style="font-weight:700;color:#0f172a;">${fornecedorNome}</div>
+          ${fornecedorComplemento ? `<div class="recebimento-coluna-texto" style="font-size:11px;color:#64748b;line-height:1.45;margin-top:4px;">${escapeHtml(fornecedorComplemento)}</div>` : ''}
         </td>
         <td style="padding:14px 16px;vertical-align:top;max-width:220px;border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:12px;color:#334155;line-height:1.45;white-space:normal;word-break:break-word;">${observacao}</div>
+          <div class="recebimento-observacao-texto" title="${observacaoCompleta}" style="font-size:12px;color:#334155;line-height:1.45;word-break:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis;cursor:help;max-width:220px;">
+            ${observacaoCompleta}
+          </div>
         </td>
         <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;">${criadoEm}</td>
         <td style="padding:14px 16px;vertical-align:top;text-align:right;border-bottom:1px solid #e2e8f0;font-weight:700;color:#047857;white-space:nowrap;">${valor}</td>
-        <td style="padding:14px 16px;vertical-align:top;text-align:center;border-bottom:1px solid #e2e8f0;">
-          <div style="display:flex;justify-content:center;flex-wrap:wrap;gap:6px;">
+        <td style="padding:14px 16px;vertical-align:top;text-align:center;border-bottom:1px solid #e2e8f0;min-width:220px;">
+          <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px;">
             ${renderAcoesRecebimento(item)}
           </div>
         </td>
@@ -38330,8 +38883,11 @@ function aplicarFiltrosRecebimento() {
     });
   });
 
-  renderRecebimentoTabela(listaFiltrada, state.rows.length);
-  atualizarResumoFiltrosRecebimento(filtros, listaFiltrada.length, state.rows.length);
+  const totalPedidos = agruparRecebimentoPorPedido(state.rows).length;
+  const pedidosFiltrados = agruparRecebimentoPorPedido(listaFiltrada).length;
+
+  renderRecebimentoTabela(listaFiltrada, totalPedidos);
+  atualizarResumoFiltrosRecebimento(filtros, pedidosFiltrados, totalPedidos);
 }
 
 function vincularFiltrosRecebimento() {
@@ -38381,7 +38937,7 @@ async function loadComprasRecebimento(forceReload = false) {
   }
 
   if (btnRecarregar) btnRecarregar.disabled = true;
-  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--inactive-color);">Carregando recebimentos...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--inactive-color);">Carregando recebimentos...</td></tr>';
 
   try {
     const resp = await fetch('/api/compras/solicitacoes-recebimento', { credentials: 'include' });
@@ -38401,7 +38957,7 @@ async function loadComprasRecebimento(forceReload = false) {
   } catch (err) {
     console.error('[recebimento] carregar', err);
     state.rows = [];
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:24px;color:#b91c1c;">Erro ao carregar os dados de recebimento.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:#b91c1c;">Erro ao carregar os dados de recebimento.</td></tr>';
     atualizarResumoFiltrosRecebimento({ global: '', produto: '', pedido: '', etapa: '', solicitante: '', previsao: '', responsavel: '', fornecedor: '', observacao: '', criadoEm: '', valor: '', acoes: '' }, 0, 0);
   } finally {
     if (btnRecarregar) btnRecarregar.disabled = false;
@@ -42535,6 +43091,32 @@ function limparEtapaPedidoModalAssociarNfe() {
   if (window.__associarNfePreviewAtual) {
     window.__associarNfePreviewAtual = null;
   }
+  if (window.__associarNfeContextoAtual) {
+    window.__associarNfeContextoAtual = null;
+  }
+}
+
+function obterUnidadePedidoPreviewAssociacao(item) {
+  const unidadeDireta = String(item?.pedido_unidade || '').trim();
+  if (unidadeDireta) return unidadeDireta;
+
+  const itensContexto = Array.isArray(window.__associarNfeContextoAtual?.itens)
+    ? window.__associarNfeContextoAtual.itens
+    : [];
+
+  if (!itensContexto.length) return '-';
+
+  const codigoPedido = normalizarTextoRecebimento(item?.pedido_codigo_produto || '');
+  const descricaoPedido = normalizarTextoRecebimento(item?.pedido_descricao_produto || '');
+
+  const encontrado = itensContexto.find((ctx) => {
+    const codigoCtx = normalizarTextoRecebimento(ctx?.produto_codigo || '');
+    const descricaoCtx = normalizarTextoRecebimento(ctx?.produto_descricao || '');
+    return (codigoPedido && codigoCtx === codigoPedido)
+      || (descricaoPedido && descricaoCtx === descricaoPedido);
+  });
+
+  return String(encontrado?.unidade || '-').trim() || '-';
 }
 
 function renderPreviewAssociacaoPedidoNfe(preview) {
@@ -42542,24 +43124,68 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
   if (!previewWrap || !previewConteudo) return;
 
-  const itens = Array.isArray(preview?.itens) ? preview.itens : [];
+  const itens = (Array.isArray(preview?.itens) ? [...preview.itens] : []).sort((a, b) => {
+    const aEncontrou = a?.pedido_item_encontrado ? 1 : 0;
+    const bEncontrou = b?.pedido_item_encontrado ? 1 : 0;
+    if (aEncontrou !== bEncontrou) return bEncontrou - aEncontrou;
+    const scoreA = Number(a?.score_match || 0);
+    const scoreB = Number(b?.score_match || 0);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    return Number(a?.n_sequencia || 0) - Number(b?.n_sequencia || 0);
+  });
+  const compararQuantidadePreview = (item) => {
+    const nfQtd = Number(item?.nf_qtde);
+    const pedidoQtd = Number(item?.pedido_qtde);
+    if (Number.isFinite(nfQtd) && Number.isFinite(pedidoQtd)) {
+      return Math.abs(nfQtd - pedidoQtd) > 0.0001;
+    }
+    return String(item?.nf_qtde ?? '').trim() !== String(item?.pedido_qtde ?? '').trim();
+  };
+  const compararUnidadePreview = (item, unidadePedido) => {
+    const nfUnidade = normalizarTextoRecebimento(item?.nf_unidade || '');
+    const pedidoUnidade = normalizarTextoRecebimento(unidadePedido || '');
+    if (!nfUnidade && !pedidoUnidade) return false;
+    return nfUnidade !== pedidoUnidade;
+  };
+
+  const divergenciasValor = itens.filter((item) => {
+    const nfValor = Number(item?.nf_valor_total || 0);
+    const pedidoValor = Number(item?.pedido_valor_total || 0);
+    return Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
+  }).length;
+  const divergenciasQtdUnid = itens.filter((item) => {
+    const unidadePedido = obterUnidadePedidoPreviewAssociacao(item);
+    return compararQuantidadePreview(item) || compararUnidadePreview(item, unidadePedido);
+  }).length;
+
+  const totalValorNfPreview = itens.reduce((acc, item) => acc + (Number(item?.nf_valor_total || 0) || 0), 0);
+  const totalValorPedidoPreview = itens.reduce((acc, item) => acc + (Number(item?.pedido_valor_total || 0) || 0), 0);
+
   const resumoHtml = `
-    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px;">
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:#64748b;">NF-e</div>
         <div style="font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(String(preview?.numero_nfe || '-'))}</div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:#64748b;">Pedido</div>
         <div style="font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(String(preview?.c_numero_pedido || preview?.n_cod_ped || '-'))}</div>
       </div>
-      <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:8px;">
+      <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:#166534;">Itens com match</div>
         <div style="font-size:13px;font-weight:700;color:#166534;">${Number(preview?.itens_match_total || 0)}</div>
       </div>
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:8px;">
-        <div style="font-size:11px;color:#991b1b;">Itens sem match</div>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px;">
+        <div style="font-size:11px;color:#991b1b;">Sem match</div>
         <div style="font-size:13px;font-weight:700;color:#991b1b;">${Number(preview?.itens_sem_match_total || 0)}</div>
+      </div>
+      <div style="background:${divergenciasValor > 0 ? '#fef2f2' : '#eff6ff'};border:1px solid ${divergenciasValor > 0 ? '#fecaca' : '#bfdbfe'};border-radius:10px;padding:10px;">
+        <div style="font-size:11px;color:${divergenciasValor > 0 ? '#991b1b' : '#1d4ed8'};">Divergências de valor</div>
+        <div style="font-size:13px;font-weight:700;color:${divergenciasValor > 0 ? '#991b1b' : '#1d4ed8'};">${divergenciasValor}</div>
+      </div>
+      <div style="background:${divergenciasQtdUnid > 0 ? '#fef2f2' : '#eff6ff'};border:1px solid ${divergenciasQtdUnid > 0 ? '#fecaca' : '#bfdbfe'};border-radius:10px;padding:10px;">
+        <div style="font-size:11px;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">Qtd/Unid. divergentes</div>
+        <div style="font-size:13px;font-weight:700;color:${divergenciasQtdUnid > 0 ? '#991b1b' : '#1d4ed8'};">${divergenciasQtdUnid}</div>
       </div>
     </div>
   `;
@@ -42569,35 +43195,74 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
         const encontrou = !!item?.pedido_item_encontrado;
         const criterio = item?.criterio_match === 'id_produto'
           ? 'ID produto'
-          : (item?.criterio_match === 'codigo_produto' ? 'Código produto' : 'Sem match');
+          : item?.criterio_match === 'codigo_produto'
+            ? 'Código produto'
+            : item?.criterio_match === 'fallback_item_unico_pedido'
+              ? 'Item único do pedido'
+              : (encontrou ? 'Match identificado' : 'Sem match');
+        const nfValor = Number(item?.nf_valor_total || 0);
+        const pedidoValor = Number(item?.pedido_valor_total || 0);
+        const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
+        const unidadePedido = obterUnidadePedidoPreviewAssociacao(item);
+        const divergiuQtd = compararQuantidadePreview(item);
+        const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
+        const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
+        const qtdNf = item?.nf_qtde ?? '-';
+        const qtdPedido = item?.pedido_qtde ?? '-';
+        const corQtd = divergiuQtd ? '#b91c1c' : '#0f172a';
+        const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
+        const corUnid = divergiuUnidade ? '#b91c1c' : '#0f172a';
+        const bgUnid = divergiuUnidade ? '#fee2e2' : 'transparent';
+
         return `
-          <tr style="border-bottom:1px solid #e2e8f0;background:${encontrou ? '#f8fafc' : '#fff7ed'};">
-            <td style="padding:6px 8px;font-size:11px;color:#0f172a;text-align:center;">${Number(item?.n_sequencia || 0) || '-'}</td>
-            <td style="padding:6px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.nf_codigo_produto || '-'))}</td>
-            <td style="padding:6px 8px;font-size:11px;color:#0f172a;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(String(item?.nf_descricao_produto || '-'))}">${escapeHtml(String(item?.nf_descricao_produto || '-'))}</td>
-            <td style="padding:6px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</td>
-            <td style="padding:6px 8px;font-size:11px;color:#0f172a;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</td>
-            <td style="padding:6px 8px;font-size:11px;text-align:center;color:${encontrou ? '#166534' : '#9a3412'};font-weight:700;">${escapeHtml(criterio)}</td>
+          <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};">
+            <td style="padding:7px 8px;font-size:11px;color:#0f172a;text-align:center;">${Number(item?.n_sequencia || 0) || '-'}</td>
+            <td style="padding:7px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.nf_codigo_produto || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:220px;line-height:1.35;" title="${escapeHtml(String(item?.nf_descricao_produto || '-'))}">${escapeHtml(String(item?.nf_descricao_produto || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;font-weight:${divergiuQtd ? '700' : '400'};">${escapeHtml(String(qtdNf))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(item?.nf_unidade || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(item?.nf_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:220px;line-height:1.35;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;font-weight:${divergiuQtd ? '700' : '400'};">${escapeHtml(String(qtdPedido))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(unidadePedido || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(item?.pedido_valor_total))}</td>
+            <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
         `;
       }).join('')
-    : '<tr><td colspan="6" style="padding:8px;font-size:11px;color:#64748b;text-align:center;">Sem itens para pré-visualização.</td></tr>';
+    : '<tr><td colspan="12" style="padding:10px;font-size:11px;color:#64748b;text-align:center;">Sem itens para pré-visualização.</td></tr>';
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
-    <div style="max-height:210px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;">
-      <table style="width:100%;border-collapse:collapse;">
+    ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? '<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido. Os campos divergentes estão destacados em vermelho.</div>' : ''}
+    <div style="max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
+      <table style="width:100%;border-collapse:collapse;min-width:1220px;">
         <thead>
           <tr style="position:sticky;top:0;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:center;">Seq</th>
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Código NF</th>
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Descrição NF</th>
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Código Pedido</th>
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:left;">Descrição Pedido</th>
-            <th style="padding:6px 8px;font-size:11px;color:#334155;text-align:center;">Match</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:center;">Seq</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:left;">Código NF</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:left;">Descrição NF</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:right;">Qtd NF</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:center;">Unid. NF</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:right;border-right:3px solid #cbd5e1;">Valor NF</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:left;">Código Pedido</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:left;">Descrição Pedido</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:right;">Qtd Pedido</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:center;">Unid. Pedido</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:right;">Valor Pedido</th>
+            <th style="padding:7px 8px;font-size:11px;color:#334155;text-align:center;">Match</th>
           </tr>
         </thead>
-        <tbody>${linhasHtml}</tbody>
+        <tbody>${linhasHtml}
+          <tr style="background:#eef2ff;border-top:2px solid #cbd5e1;">
+            <td colspan="5" style="padding:8px;font-size:11px;font-weight:700;color:#1e3a8a;text-align:right;">Total</td>
+            <td style="padding:8px;font-size:11px;font-weight:700;color:#1e3a8a;text-align:right;border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(totalValorNfPreview))}</td>
+            <td colspan="4" style="padding:8px;font-size:11px;font-weight:700;color:#166534;text-align:right;">Total</td>
+            <td style="padding:8px;font-size:11px;font-weight:700;color:#166534;text-align:right;">${escapeHtml(formatarValorRecebimento(totalValorPedidoPreview))}</td>
+            <td style="padding:8px;font-size:11px;color:#334155;text-align:center;">&nbsp;</td>
+          </tr>
+        </tbody>
       </table>
     </div>
   `;
@@ -42632,13 +43297,17 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
   setStatusModalAssociarPedidoNfe('Gerando prévia dos itens da NF-e e do pedido...', 'info');
 
   try {
+    const contextoAtual = window.__associarNfeContextoAtual || {};
+
     const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         numero_nfe: numeroNfe,
-        numero_pedido: numeroPedido
+        chave_nfe: String(contextoAtual?.chave_nfe || '').trim(),
+        numero_pedido: numeroPedido,
+        n_cod_ped: Number(contextoAtual?.n_cod_ped || 0) || null
       })
     });
 
@@ -42760,22 +43429,23 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     return;
   }
 
-  const confirmar = window.confirm(`Confirma associar a NF-e ${numeroNfe} ao pedido ${numeroPedido} na Omie após revisar a prévia?`);
-  if (!confirmar) return;
-
   const textoOriginal = btnAssociar.innerHTML;
   btnAssociar.disabled = true;
   btnAssociar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
   setStatusModalAssociarPedidoNfe('Associando NF-e ao pedido na Omie...', 'info');
 
   try {
+    const contextoAtual = window.__associarNfeContextoAtual || {};
+
     const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
         numero_nfe: numeroNfe,
-        numero_pedido: numeroPedido
+        chave_nfe: String(contextoAtual?.chave_nfe || '').trim(),
+        numero_pedido: numeroPedido,
+        n_cod_ped: Number(contextoAtual?.n_cod_ped || 0) || null
       })
     });
 
@@ -42788,6 +43458,13 @@ async function confirmarAssociacaoPedidoNfeOmie() {
       data?.message || `NF-e ${numeroNfe} associada com sucesso ao pedido ${numeroPedido}.`,
       'sucesso'
     );
+
+    if (typeof loadComprasRecebimento === 'function') {
+      loadComprasRecebimento(true).catch(() => {});
+    }
+    if (window.atualizarListaNfesOmie) {
+      atualizarListaNfesOmie().catch(() => {});
+    }
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao associar NF-e ao pedido.', 'erro');
   } finally {
@@ -42805,13 +43482,13 @@ function criarModalAssociarPedidoNfeSeNecessario() {
   modal.style.position = 'fixed';
   modal.style.inset = '0';
   modal.style.background = 'rgba(15, 23, 42, 0.68)';
-  modal.style.zIndex = '10040';
+  modal.style.zIndex = '100120';
   modal.style.alignItems = 'center';
   modal.style.justifyContent = 'center';
   modal.style.padding = '18px';
 
   modal.innerHTML = `
-    <div style="width:min(560px,100%);background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;">
+    <div style="width:min(1180px,100%);max-height:92vh;background:#ffffff;border-radius:12px;box-shadow:0 20px 50px rgba(2,6,23,.35);border:1px solid #d1d5db;overflow:hidden;display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
         <strong style="font-size:15px;color:#0f172a;display:flex;align-items:center;gap:8px;">
           <i class="fa-solid fa-link" style="color:#0369a1;"></i>
@@ -42822,7 +43499,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
         </button>
       </div>
 
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;overflow:auto;">
         <div style="display:flex;flex-direction:column;gap:6px;">
           <label for="modalAssociarNfeNumeroInput" style="font-size:12px;color:#334155;font-weight:700;">Número da NF-e</label>
           <div style="display:flex;gap:8px;">
@@ -42850,7 +43527,7 @@ function criarModalAssociarPedidoNfeSeNecessario() {
         </div>
 
         <div id="modalAssociarPedidoNfePreviewWrap" style="display:none;">
-          <div style="font-size:12px;color:#334155;font-weight:700;margin-bottom:6px;">Prévia de associação (NF-e x Pedido)</div>
+          <div style="font-size:12px;color:#334155;font-weight:700;margin-bottom:6px;">Comparação detalhada da vinculação (NF-e x Pedido)</div>
           <div id="modalAssociarPedidoNfePreviewConteudo"></div>
         </div>
 
@@ -42910,7 +43587,34 @@ function abrirModalAssociarPedidoNfe() {
   inputNfe?.focus();
 }
 
+async function abrirModalAssociarPedidoNfeComContexto(contexto = {}) {
+  abrirModalAssociarPedidoNfe();
+
+  const inputNfe = document.getElementById('modalAssociarNfeNumeroInput');
+  const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
+  const blocoPedido = document.getElementById('modalAssociarPedidoNfeBlocoPedido');
+  const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+
+  window.__associarNfeContextoAtual = {
+    chave_nfe: String(contexto?.chave_nfe || '').trim(),
+    n_cod_ped: contexto?.n_cod_ped || null,
+    itens: Array.isArray(contexto?.itens) ? contexto.itens : []
+  };
+
+  if (inputNfe) inputNfe.value = String(contexto?.numero_nfe || '').trim();
+  if (pedidoInput) pedidoInput.value = String(contexto?.numero_pedido || '').trim();
+  if (blocoPedido) blocoPedido.style.display = 'block';
+  if (btnAssociar) btnAssociar.disabled = true;
+
+  setStatusModalAssociarPedidoNfe('Prévia profissional carregando para revisão da vinculação...', 'info');
+
+  if (String(contexto?.numero_nfe || '').trim() && String(contexto?.numero_pedido || '').trim()) {
+    await previsualizarAssociacaoPedidoNfeOmie();
+  }
+}
+
 window.abrirModalAssociarPedidoNfe = abrirModalAssociarPedidoNfe;
+window.abrirModalAssociarPedidoNfeComContexto = abrirModalAssociarPedidoNfeComContexto;
 
 async function precarregarLinksNfeLista(linhas = []) {
   const cache = obterMapaLinksNfeLista();
