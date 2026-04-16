@@ -7285,6 +7285,122 @@ const chatbotMonitorExplorerToggleBtn = document.getElementById('chatbotMonitorE
 const chatbotMonitorExplorerSection = document.getElementById('chatbotMonitorExplorerSection');
 
 let chatbotMonitorCache = null;
+
+// ─── Configuração do Chatbot ──────────────────────────────────────────────────
+const chatbotConfigMenuLink = document.getElementById('menu-chatbot-config');
+const chatbotConfigPane = document.getElementById('chatbotConfigPane');
+const chatbotConfigAviso = document.getElementById('chatbotConfigAviso');
+const chatbotConfigTbody = document.getElementById('chatbotConfigTbody');
+
+function setChatbotConfigAviso(msg, tipo = 'info') {
+  if (!chatbotConfigAviso) return;
+  if (!msg) { chatbotConfigAviso.style.display = 'none'; return; }
+  const cores = {
+    info:    { bg: 'rgba(8,145,178,0.12)', color: '#0e7490', border: 'rgba(8,145,178,0.22)' },
+    success: { bg: 'rgba(34,197,94,0.12)',  color: '#15803d', border: 'rgba(34,197,94,0.22)' },
+    error:   { bg: 'rgba(239,68,68,0.12)',  color: '#b91c1c', border: 'rgba(239,68,68,0.22)' }
+  };
+  const c = cores[tipo] || cores.info;
+  Object.assign(chatbotConfigAviso.style, { display: 'block', background: c.bg, color: c.color, border: `1px solid ${c.border}` });
+  chatbotConfigAviso.textContent = msg;
+}
+
+function renderChatbotConfigTabela(rows) {
+  if (!chatbotConfigTbody) return;
+  if (!rows.length) {
+    chatbotConfigTbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:32px;color:var(--inactive-color);">Nenhum registro encontrado.</td></tr>';
+    return;
+  }
+  chatbotConfigTbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td style="padding:12px 16px;">${escapeHtml(row.acao)}</td>
+      <td style="padding:12px 16px;">
+        <input type="text" value="${escapeHtml(row.programacao)}"
+          style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid rgba(148,163,184,0.3);background:rgba(15,23,42,0.06);color:var(--theme-color);font-size:13px;text-align:center;"
+          data-config-id="${row.id}" data-config-field="programacao"
+          placeholder="HH:MM">
+      </td>
+      <td style="text-align:center;padding:12px 16px;">
+        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" ${row.ativo === 'S' ? 'checked' : ''}
+            data-config-id="${row.id}" data-config-field="ativo"
+            style="width:18px;height:18px;cursor:pointer;">
+          <span style="font-size:13px;font-weight:600;color:${row.ativo === 'S' ? '#15803d' : '#b91c1c'};"
+            id="chatbotConfigAtivoLabel_${row.id}">
+            ${row.ativo === 'S' ? 'Sim' : 'Não'}
+          </span>
+        </label>
+      </td>
+    </tr>
+  `).join('');
+
+  // Eventos de salvar ao mudar
+  chatbotConfigTbody.querySelectorAll('input[data-config-id]').forEach((input) => {
+    const id = input.dataset.configId;
+    const field = input.dataset.configField;
+
+    if (field === 'ativo') {
+      input.addEventListener('change', async () => {
+        const novoAtivo = input.checked ? 'S' : 'N';
+        const label = document.getElementById(`chatbotConfigAtivoLabel_${id}`);
+        if (label) {
+          label.textContent = novoAtivo === 'S' ? 'Sim' : 'Não';
+          label.style.color = novoAtivo === 'S' ? '#15803d' : '#b91c1c';
+        }
+        await salvarChatbotConfig(id, { ativo: novoAtivo });
+      });
+    } else {
+      input.addEventListener('blur', async () => {
+        await salvarChatbotConfig(id, { programacao: input.value.trim(), ativo: rows.find(r => String(r.id) === id)?.ativo || 'S' });
+      });
+    }
+  });
+}
+
+async function salvarChatbotConfig(id, payload) {
+  try {
+    const resp = await fetch(`/api/ai/cron-config/${id}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+    setChatbotConfigAviso('Configuração salva com sucesso.', 'success');
+    setTimeout(() => setChatbotConfigAviso(''), 3000);
+  } catch (err) {
+    setChatbotConfigAviso(`Erro ao salvar: ${err.message}`, 'error');
+  }
+}
+
+async function carregarChatbotConfig() {
+  if (chatbotConfigTbody) {
+    chatbotConfigTbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:32px;color:var(--inactive-color);"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</td></tr>';
+  }
+  setChatbotConfigAviso('');
+  try {
+    const resp = await fetch('/api/ai/cron-config', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+    renderChatbotConfigTabela(data.data || []);
+  } catch (err) {
+    setChatbotConfigAviso(`Erro ao carregar configurações: ${err.message}`, 'error');
+    if (chatbotConfigTbody) chatbotConfigTbody.innerHTML = '';
+  }
+}
+
+if (chatbotConfigMenuLink) {
+  chatbotConfigMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    chatbotConfigMenuLink.classList.add('is-active');
+    document.querySelectorAll('.tab-pane').forEach(p => { p.style.display = 'none'; });
+    if (chatbotConfigPane) chatbotConfigPane.style.display = '';
+    carregarChatbotConfig();
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 let chatbotMonitorCacheAt = 0;
 let chatbotMonitorPendingPromise = null;
 
@@ -43215,7 +43331,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
         const bgUnid = divergiuUnidade ? '#fee2e2' : 'transparent';
 
         return `
-          <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};">
+          <tr style="border-bottom:1px solid #e2e8f0;background:${!encontrou ? '#fff7ed' : (temDivergencia ? '#fff7f7' : '#f8fafc')};" data-seq="${Number(item?.n_sequencia || 0)}">
             <td style="padding:7px 8px;font-size:11px;color:#0f172a;text-align:center;">${Number(item?.n_sequencia || 0) || '-'}</td>
             <td style="padding:7px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.nf_codigo_produto || '-'))}</td>
             <td style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:220px;line-height:1.35;" title="${escapeHtml(String(item?.nf_descricao_produto || '-'))}">${escapeHtml(String(item?.nf_descricao_produto || '-'))}</td>
@@ -43224,8 +43340,16 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(item?.nf_valor_total))}</td>
             <td style="padding:7px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</td>
             <td style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:220px;line-height:1.35;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</td>
-            <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;font-weight:${divergiuQtd ? '700' : '400'};">${escapeHtml(String(qtdPedido))}</td>
-            <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(unidadePedido || '-'))}</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
+              (divergiuQtd || divergiuUnidade)
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${Number(item?.n_sequencia || 0)}" value="${escapeHtml(String(qtdPedido))}" style="width:60px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade para associação">`
+                : escapeHtml(String(qtdPedido))
+            }</td>
+            <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
+              (divergiuQtd || divergiuUnidade)
+                ? `<input type="text" class="assoc-override-unid" data-seq="${Number(item?.n_sequencia || 0)}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
+                : escapeHtml(String(unidadePedido || '-'))
+            }</td>
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(item?.pedido_valor_total))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:center;color:${temDivergencia ? '#b91c1c' : (encontrou ? '#166534' : '#9a3412')};font-weight:700;">${escapeHtml(criterio)}</td>
           </tr>
@@ -43235,7 +43359,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
-    ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? '<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido. Os campos divergentes estão destacados em vermelho.</div>' : ''}
+    ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
     <div style="max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table style="width:100%;border-collapse:collapse;min-width:1220px;">
         <thead>
@@ -43437,6 +43561,24 @@ async function confirmarAssociacaoPedidoNfeOmie() {
   try {
     const contextoAtual = window.__associarNfeContextoAtual || {};
 
+    // Coleta overrides de Qtd/Unid editados pelo usuário na prévia
+    const itensOverride = [];
+    const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
+    if (previewConteudo) {
+      previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach(input => {
+        const seq = Number(input.dataset.seq || 0);
+        if (!seq) return;
+        let entry = itensOverride.find(e => e.n_sequencia === seq);
+        if (!entry) { entry = { n_sequencia: seq }; itensOverride.push(entry); }
+        if (input.classList.contains('assoc-override-qtd')) {
+          entry.nQtde = parseFloat(String(input.value || '').replace(',', '.')) || null;
+        }
+        if (input.classList.contains('assoc-override-unid')) {
+          entry.cUnidade = String(input.value || '').trim().toUpperCase() || null;
+        }
+      });
+    }
+
     const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -43445,7 +43587,8 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         numero_nfe: numeroNfe,
         chave_nfe: String(contextoAtual?.chave_nfe || '').trim(),
         numero_pedido: numeroPedido,
-        n_cod_ped: Number(contextoAtual?.n_cod_ped || 0) || null
+        n_cod_ped: Number(contextoAtual?.n_cod_ped || 0) || null,
+        itens_override: itensOverride.length > 0 ? itensOverride : undefined
       })
     });
 
@@ -48259,10 +48402,12 @@ function aplicarVisibilidadeMenuChatbotAdmin() {
   const wrapper = document.getElementById('chatbotSideWrapper');
   const title = wrapper?.querySelector('.side-title');
   const link = document.getElementById('menu-chatbot-monitor');
+  const linkConfig = document.getElementById('menu-chatbot-config');
   const pane = document.getElementById('chatbotMonitorPane');
+  const paneConfig = document.getElementById('chatbotConfigPane');
   const isAdmin = !!window.__sessionUser && usuarioEhAdminSistema();
 
-  [title, link].forEach((el) => {
+  [title, link, linkConfig].forEach((el) => {
     if (el) el.classList.toggle('perm-hidden', !isAdmin);
   });
 
@@ -48271,6 +48416,9 @@ function aplicarVisibilidadeMenuChatbotAdmin() {
   }
 
   if (!isAdmin && pane && pane.style.display !== 'none') {
+    showMainTab('paginaInicio');
+  }
+  if (!isAdmin && paneConfig && paneConfig.style.display !== 'none') {
     showMainTab('paginaInicio');
   }
 }

@@ -433,6 +433,17 @@
       <i class="fa-solid fa-robot" style="margin-right:8px;"></i>
       Monitoramento
     </a>
+    <a href="#"
+       id="menu-chatbot-config"
+       class="menu-link"
+       data-nav-key="side:chatbot:config"
+       data-nav-parent="side:chatbot"
+       data-nav-pos="side"
+       data-nav-label="Configuração do Chatbot"
+       data-nav-selector="#menu-chatbot-config">
+      <i class="fa-solid fa-sliders" style="margin-right:8px;"></i>
+      Configuração
+    </a>
   </div>
 </div>
 
@@ -1923,6 +1934,8 @@
                         <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Saldo Inicial</th>
                         <th style="padding:14px 16px;text-align:right;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Limite</th>
                         <th style="padding:14px 16px;text-align:left;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Observação</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Fechamento</th>
+                        <th style="padding:14px 16px;text-align:center;font-weight:600;white-space:nowrap;border-bottom:2px solid #0ea5e9;position:sticky;top:0;z-index:30;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);">Melhor Data</th>
                       </tr>
                     </thead>
                     <tbody id="comprasContasUtilizadasTbody">
@@ -1994,6 +2007,10 @@
                 </div>
                 <button id="recebimentoClearFiltersBtn" type="button" class="content-button" style="background:#e2e8f0;color:#0f172a;padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;">
                   Limpar filtros
+                </button>
+                <button id="recebimentoLocalizarNfeBtn" type="button" class="content-button" style="background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);color:white;padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:7px;">
+                  <i class="fa-solid fa-magnifying-glass-dollar"></i>
+                  Localizar NF-e
                 </button>
               </div>
 
@@ -5932,6 +5949,42 @@
 	        </div>
 	      </div>
 
+      <!-- Painel Configuração do Chatbot -->
+      <div id="chatbotConfigPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-sliders" style="color:#06b6d4;"></i>
+                <span>Configuração do Chatbot</span>
+              </h3>
+              <div class="content-text">Gerencie as ações automáticas do chatbot: programação de envio e ativação.</div>
+            </div>
+          </div>
+
+          <div id="chatbotConfigAviso" style="display:none;margin-top:16px;padding:14px 16px;border-radius:12px;font-size:13px;font-weight:600;"></div>
+
+          <div class="content-section" style="margin-top:20px;">
+            <div style="overflow-x:auto;">
+              <table class="tabela padrao" style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:12px 16px;">Ação</th>
+                    <th style="text-align:left;padding:12px 16px;">Programação</th>
+                    <th style="text-align:center;padding:12px 16px;">Ativação</th>
+                  </tr>
+                </thead>
+                <tbody id="chatbotConfigTbody">
+                  <tr>
+                    <td colspan="3" style="text-align:center;padding:32px;color:var(--inactive-color);">Carregando...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Painel Sincronização de Produtos -->
       <div id="sincronizacaoProdutosPane" class="tab-pane" style="display:none;">
         <div class="content-wrapper">
@@ -9810,7 +9863,7 @@ function attachDropZone(ul) {
     if (!contas.length) {
       tbodyContasUtilizadas.innerHTML = `
         <tr>
-          <td colspan="8" style="text-align:center;padding:32px 16px;color:#64748b;">
+          <td colspan="10" style="text-align:center;padding:32px 16px;color:#64748b;">
             <i class="fa-solid fa-building-columns" style="font-size:22px;margin-bottom:10px;display:block;color:#94a3b8;"></i>
             Nenhuma conta encontrada com os filtros atuais.
           </td>
@@ -9842,6 +9895,12 @@ function attachDropZone(ul) {
           <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#047857;white-space:nowrap;">${saldo}</td>
           <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;color:#1d4ed8;white-space:nowrap;">${limite}</td>
           <td class="conta-utilizada-observacao conta-utilizada-observacao-editavel" data-ncodcc="${escaparHtml(String(conta?.nCodCC || ''))}" title="Clique para editar a observação" style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;max-width:320px;word-break:break-word;cursor:pointer;">${observacao}</td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:center;">
+            <input type="text" inputmode="numeric" maxlength="2" pattern="[0-9]*" class="conta-fechamento-input" data-ncodcc="${escaparHtml(String(conta?.nCodCC || ''))}" value="${escaparHtml(String(conta?.fechamento_conta ?? ''))}" placeholder="DD" style="width:42px;text-align:center;padding:4px 6px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:14px;font-weight:600;" />
+          </td>
+          <td style="padding:14px 16px;vertical-align:top;border-bottom:1px solid #e2e8f0;text-align:center;">
+            <input type="text" inputmode="numeric" maxlength="2" pattern="[0-9]*" class="conta-melhordata-input" data-ncodcc="${escaparHtml(String(conta?.nCodCC || ''))}" value="${escaparHtml(String(conta?.melhor_data ?? ''))}" placeholder="DD" style="width:42px;text-align:center;padding:4px 6px;border:1px solid #475569;border-radius:6px;background:#1e293b;color:#e2e8f0;font-size:14px;font-weight:600;" />
+          </td>
         </tr>
       `;
     }).join('');
@@ -11511,6 +11570,57 @@ function attachDropZone(ul) {
 
       editarObservacaoContaUtilizada(conta);
     });
+
+    // Listener para salvar fechamento_conta ao sair do input
+    tbodyContasUtilizadas.addEventListener('change', async (event) => {
+      const inputFech = event.target.closest('.conta-fechamento-input');
+      const inputMelhor = event.target.closest('.conta-melhordata-input');
+      const input = inputFech || inputMelhor;
+      if (!input) return;
+
+      input.value = input.value.replace(/\D/g, '').slice(0, 2);
+
+      const nCodCC = Number(input.dataset.ncodcc || 0);
+      if (!nCodCC) return;
+
+      const valor = input.value.trim();
+      const dia = valor === '' ? null : Number(valor);
+      if (dia !== null && (dia < 1 || dia > 31)) {
+        alert('Dia deve ser entre 1 e 31.');
+        const contaOriginal = contasUtilizadasCache.find(c => Number(c?.nCodCC || 0) === nCodCC);
+        input.value = inputFech ? (contaOriginal?.fechamento_conta ?? '') : (contaOriginal?.melhor_data ?? '');
+        return;
+      }
+
+      const campo = inputFech ? 'fechamento_conta' : 'melhor_data';
+      const rota = inputFech ? '/api/compras/contas-utilizadas/fechamento' : '/api/compras/contas-utilizadas/melhor-data';
+
+      try {
+        const resp = await fetch(rota, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ nCodCC, [campo]: valor === '' ? '' : dia })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data?.ok) throw new Error(data?.error || 'Erro ao salvar');
+
+        contasUtilizadasCache = contasUtilizadasCache.map(c =>
+          Number(c?.nCodCC || 0) === nCodCC ? { ...c, [campo]: dia } : c
+        );
+        input.style.borderColor = '#22c55e';
+        setTimeout(() => { input.style.borderColor = '#475569'; }, 1200);
+      } catch (err) {
+        alert('Erro ao salvar: ' + (err?.message || 'desconhecido'));
+      }
+    });
+
+    // Bloquear caracteres não numéricos nos inputs
+    tbodyContasUtilizadas.addEventListener('input', (event) => {
+      const input = event.target.closest('.conta-fechamento-input, .conta-melhordata-input');
+      if (!input) return;
+      input.value = input.value.replace(/\D/g, '').slice(0, 2);
+    });
   }
 })();
 </script>
@@ -11549,6 +11659,530 @@ function attachDropZone(ul) {
       window.fecharModalNfeOmieDetalhes();
     }
   });
+})();
+</script>
+
+<!-- Modal: Localizar NF-e por número -->
+<div id="modalLocalizarNfe" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.68);z-index:100002;backdrop-filter:blur(3px);opacity:0;transition:opacity 0.18s;">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%) scale(0.9);transition:transform 0.18s;background:#ffffff;border-radius:14px;box-shadow:0 24px 70px rgba(15,23,42,0.35);width:min(860px, 94vw);max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;background:linear-gradient(135deg,#4c1d95 0%,#6d28d9 100%);border-bottom:3px solid #8b5cf6;color:#f8fafc;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <i class="fa-solid fa-magnifying-glass-dollar" style="font-size:20px;color:#c4b5fd;"></i>
+        <h3 style="margin:0;font-size:18px;font-weight:700;">Localizar NF-e</h3>
+      </div>
+      <button type="button" id="modalLocalizarNfeFechBtn" style="background:transparent;border:none;color:#f8fafc;font-size:24px;cursor:pointer;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div style="border-bottom:1px solid #e2e8f0;background:#faf5ff;">
+      <div style="display:flex;border-bottom:1px solid #ede9fe;padding:0 18px;">
+        <button id="locNfeTabNfe" type="button" style="padding:10px 16px;font-size:13px;font-weight:700;border:none;border-bottom:3px solid #7c3aed;background:transparent;cursor:pointer;color:#7c3aed;transition:all 0.15s;">
+          <i class="fa-solid fa-file-invoice" style="margin-right:6px;"></i>Por NF-e
+        </button>
+        <button id="locNfeTabPedido" type="button" style="padding:10px 16px;font-size:13px;font-weight:600;border:none;border-bottom:3px solid transparent;background:transparent;cursor:pointer;color:#64748b;transition:all 0.15s;">
+          <i class="fa-solid fa-cart-shopping" style="margin-right:6px;"></i>Por Nº do Pedido
+        </button>
+      </div>
+      <div id="locNfeInputArea" style="display:flex;gap:8px;align-items:center;padding:12px 18px;">
+        <div style="position:relative;flex:1;">
+          <i class="fa-solid fa-hashtag" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#7c3aed;font-size:14px;"></i>
+          <input id="modalLocalizarNfeInput" type="text" placeholder="Número da NF-e (ex: 784 ou 000000784)..." autocomplete="off"
+            style="width:100%;padding:11px 12px 11px 36px;border:2px solid #ddd6fe;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:white;color:#0f172a;"/>
+        </div>
+        <button id="modalLocalizarNfeBuscarBtn" type="button"
+          style="background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);color:white;border:none;border-radius:8px;padding:11px 20px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:7px;">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          Buscar
+        </button>
+      </div>
+      <div id="locPedidoInputArea" style="display:none;gap:8px;align-items:center;padding:12px 18px;">
+        <div style="position:relative;flex:1;">
+          <i class="fa-solid fa-cart-shopping" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#7c3aed;font-size:14px;"></i>
+          <input id="modalLocalizarPedidoInput" type="text" placeholder="Número do pedido de compra (ex: 2589)..." autocomplete="off"
+            style="width:100%;padding:11px 12px 11px 36px;border:2px solid #ddd6fe;border-radius:8px;font-size:14px;outline:none;box-sizing:border-box;background:white;color:#0f172a;"/>
+        </div>
+        <button id="modalLocalizarPedidoBuscarBtn" type="button"
+          style="background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);color:white;border:none;border-radius:8px;padding:11px 20px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:7px;">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          Buscar
+        </button>
+      </div>
+    </div>
+    <div id="modalLocalizarNfeConteudo" style="padding:16px;overflow:auto;flex:1;background:#f8fafc;">
+      <div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:24px 0;gap:8px;">
+        <i class="fa-solid fa-file-invoice"></i>
+        <span>Digite o número da NF-e e clique em Buscar.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  /* ──────────────────────────────────────
+     Modal Localizar NF-e / Por Pedido
+  ────────────────────────────────────── */
+  const modal        = document.getElementById('modalLocalizarNfe');
+  const inputNfe     = document.getElementById('modalLocalizarNfeInput');
+  const btnBuscar    = document.getElementById('modalLocalizarNfeBuscarBtn');
+  const inputPedido  = document.getElementById('modalLocalizarPedidoInput');
+  const btnBuscarPed = document.getElementById('modalLocalizarPedidoBuscarBtn');
+  const btnFechar    = document.getElementById('modalLocalizarNfeFechBtn');
+  const conteudo     = document.getElementById('modalLocalizarNfeConteudo');
+  const tabNfe       = document.getElementById('locNfeTabNfe');
+  const tabPedido    = document.getElementById('locNfeTabPedido');
+  const areaNfe      = document.getElementById('locNfeInputArea');
+  const areaPedido   = document.getElementById('locPedidoInputArea');
+
+  if (!modal) return;
+
+  let tabAtiva = 'nfe';
+  // Guarda o último contexto de NF-e encontrado (para usar ao associar via tab Pedido)
+  let ultimaNfeCtx = { nfe: {}, itens: [] };
+
+  const ativarTab = (tab) => {
+    tabAtiva = tab;
+    if (tab === 'nfe') {
+      tabNfe.style.borderBottomColor    = '#7c3aed'; tabNfe.style.color    = '#7c3aed';
+      tabPedido.style.borderBottomColor = 'transparent'; tabPedido.style.color = '#64748b';
+      areaNfe.style.display    = 'flex';
+      areaPedido.style.display = 'none';
+      conteudo.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:24px 0;gap:8px;"><i class="fa-solid fa-file-invoice"></i><span>Digite o número da NF-e e clique em Buscar.</span></div>';
+    } else {
+      tabPedido.style.borderBottomColor = '#7c3aed'; tabPedido.style.color = '#7c3aed';
+      tabNfe.style.borderBottomColor    = 'transparent'; tabNfe.style.color = '#64748b';
+      areaPedido.style.display = 'flex';
+      areaNfe.style.display    = 'none';
+      conteudo.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:13px;padding:24px 0;gap:8px;"><i class="fa-solid fa-cart-shopping"></i><span>Digite o número do pedido e clique em Buscar.</span></div>';
+    }
+  };
+
+  tabNfe    && tabNfe.addEventListener('click',    () => ativarTab('nfe'));
+  tabPedido && tabPedido.addEventListener('click', () => ativarTab('pedido'));
+
+  const abrirModal = () => {
+    modal.style.display = 'block';
+    setTimeout(() => {
+      modal.style.opacity = '1';
+      const inner = modal.querySelector('div > div');
+      if (inner) inner.style.transform = 'translate(-50%, -50%) scale(1)';
+      if (tabAtiva === 'nfe' && inputNfe) inputNfe.focus();
+      else if (tabAtiva === 'pedido' && inputPedido) inputPedido.focus();
+    }, 10);
+  };
+
+  const fecharModal = () => {
+    modal.style.opacity = '0';
+    const inner = modal.querySelector('div > div');
+    if (inner) inner.style.transform = 'translate(-50%, -50%) scale(0.9)';
+    setTimeout(() => { modal.style.display = 'none'; }, 180);
+  };
+
+  window.abrirModalLocalizarNfe = abrirModal;
+  window.fecharModalLocalizarNfe = fecharModal;
+
+  btnFechar && btnFechar.addEventListener('click', fecharModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'block') fecharModal();
+  });
+
+  // ── Utilitários ──────────────────────────────────────────────
+  const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtMoeda = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) : '-'; };
+  const fmtQtd   = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4}) : '-'; };
+
+  // ── Score local determinístico ────────────────────────────────
+  // Retorna 0-100. Usado para ordenar automaticamente sem depender da IA.
+
+  // Stemmer PT-BR básico: remove sufixos plurais/verbais para melhorar casamento
+  const _stemPT = (t) => {
+    if (t.length <= 4) return t;
+    if (t.endsWith('oes') || t.endsWith('ens')) return t.slice(0, -2);
+    if (t.endsWith('as') || t.endsWith('os') || t.endsWith('es')) return t.slice(0, -1);
+    return t.length > 7 ? t.slice(0, 6) : t;
+  };
+
+  // Tokeniza texto e adiciona stems automaticamente p/ melhorar casamento
+  const tokenizar = (s) => {
+    const raw = String(s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/)
+      .filter(t => t.length > 1);
+    const result = [];
+    raw.forEach(t => {
+      if (!result.includes(t)) result.push(t);
+      const st = _stemPT(t);
+      if (st !== t && !result.includes(st)) result.push(st);
+    });
+    return result;
+  };
+
+  const calcularScoreLocal = (itensNfe, itensPed, fornecedorNfe, fornecedorPed) => {
+    if (!itensNfe.length && !itensPed.length) return 0;
+
+    let melhorDesc = 0;
+    let melhorQtd  = 0;
+    let melhorVal  = 0;
+
+    // Para cada item da NF-e, procura o item do pedido com maior match
+    itensNfe.forEach(nfeItem => {
+      const tokNfe    = tokenizar(nfeItem.descricao);
+      if (!tokNfe.length) return;
+      const qtdNfe    = Math.abs(Number(nfeItem.qtd) || 0);
+      const totalNfe  = Number(nfeItem.vlr_item) || 0;   // valor total da linha NF-e
+
+      let bestForThisItem = { desc: 0, qtd: 0, val: 0 };
+      itensPed.forEach(pedItem => {
+        const tokPed = tokenizar(pedItem.produto_descricao);
+        if (!tokPed.length) return;
+
+        // Jaccard real: interseção / união — impede que descrições curtas
+        // (ex: "GAS GLP") ganhem 100% só por estarem contidas na NF-e
+        const setNfe  = new Set(tokNfe);
+        const setAll  = new Set([...tokNfe, ...tokPed]);
+        const inter   = tokPed.filter(t => setNfe.has(t)).length;
+        const dScore  = setAll.size > 0 ? Math.round((inter / setAll.size) * 100) : 0;
+
+        // Score de quantidade
+        const qtdPed = Math.abs(Number(pedItem.quantidade) || 0);
+        const qScore = (qtdNfe > 0 && qtdPed > 0)
+          ? Math.max(0, Math.round(100 - Math.abs(qtdNfe - qtdPed) / Math.max(qtdNfe, qtdPed) * 100))
+          : 50;
+
+        // Score de VALOR TOTAL (muito mais confiável que unitário — evita o problema
+        // de "1 pacote com 4 peças" vs "4 peças individuais")
+        const totalPed = Number(pedItem.valor_item) || 0;
+        let tScore;
+        if (totalNfe > 0 && totalPed > 0) {
+          tScore = Math.max(0, Math.round(100 - Math.abs(totalNfe - totalPed) / Math.max(totalNfe, totalPed) * 100));
+        } else if (totalNfe > 0 && totalPed === 0) {
+          tScore = 0;   // pedido sem valor vs NF-e com valor → penaliza
+        } else {
+          tScore = 50;  // não temos valor para comparar → neutro
+        }
+
+        const combinado = dScore * 0.40 + tScore * 0.35 + qScore * 0.20;
+        const bestComb  = bestForThisItem.desc * 0.40 + bestForThisItem.val * 0.35 + bestForThisItem.qtd * 0.20;
+        if (combinado > bestComb) {
+          bestForThisItem = { desc: dScore, qtd: qScore, val: tScore };
+        }
+      });
+      if (bestForThisItem.desc > melhorDesc) melhorDesc = bestForThisItem.desc;
+      if (bestForThisItem.qtd > melhorQtd)  melhorQtd  = bestForThisItem.qtd;
+      if (bestForThisItem.val > melhorVal)  melhorVal  = bestForThisItem.val;
+    });
+
+    // Score de número de itens: NF-e com 1 item deve preferir pedido com 1 item.
+    // Pedido com 13 itens vs NF-e com 1 item → penaliza fortemente.
+    const nItensNfe = itensNfe.length;
+    const nItensPed = itensPed.length;
+    const nScore = (nItensNfe > 0 && nItensPed > 0)
+      ? Math.max(0, Math.round(100 - Math.abs(nItensNfe - nItensPed) / Math.max(nItensNfe, nItensPed) * 100))
+      : 50;
+
+    // Score de fornecedor — usa Jaccard também
+    let fScore = 0;
+    if (fornecedorNfe && fornecedorPed) {
+      const tNfe   = tokenizar(fornecedorNfe);
+      const tPed   = tokenizar(fornecedorPed);
+      const setAll = new Set([...tNfe, ...tPed]);
+      const inter  = tNfe.filter(t => tokenizar(fornecedorPed).includes(t)).length;
+      fScore = setAll.size > 0 ? Math.round((inter / setAll.size) * 100) : 0;
+    }
+
+    // Pesos: descrição 35%, valor total 30%, nº itens 20%, qtd 10%, fornecedor 5%
+    return Math.round(melhorDesc * 0.35 + melhorVal * 0.30 + nScore * 0.20 + melhorQtd * 0.10 + fScore * 0.05);
+  };
+
+  const scoreBadgeLocal = (s) => {
+    const cor = s >= 70 ? '#15803d' : s >= 40 ? '#c2410c' : '#64748b';
+    const bg  = s >= 70 ? '#f0fdf4' : s >= 40 ? '#fff7ed' : '#f8fafc';
+    const bdr = s >= 70 ? '#86efac' : s >= 40 ? '#fed7aa' : '#e2e8f0';
+    const txt = s >= 70 ? 'Alta' : s >= 40 ? 'Média' : 'Baixa';
+    return `<span style="background:${bg};color:${cor};border:1px solid ${bdr};border-radius:6px;padding:2px 9px;font-size:11px;font-weight:700;" title="Score local de correspondência">${txt} ${s}%</span>`;
+  };
+
+  const renderEtapaBadge = (etapa, recebido, cancelada) => {
+    const c = String(etapa || '').trim();
+    if (String(cancelada || '').toUpperCase() === 'S')
+      return '<span style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Cancelada</span>';
+    if (String(recebido || '').toUpperCase() === 'S') {
+      if (c === '80') return '<span style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Concluída</span>';
+      return '<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Recebida (etapa '+esc(c||'-')+')</span>';
+    }
+    return '<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">Faturada (etapa '+esc(c||'-')+')</span>';
+  };
+
+  // ── Card de pedido reutilizável ───────────────────────────────
+  const renderPedidoCard = (ped, chaveNfe, numeroNfe, badgeExtra, justEl) => {
+    badgeExtra = badgeExtra || '';
+    justEl     = justEl     || '';
+    return `<div class="localizar-nfe-pedido-card"
+      data-n-cod-ped="${esc(ped.n_cod_ped)}"
+      data-cnumero="${esc(ped.cnumero)}"
+      data-chave-nfe="${esc(chaveNfe)}"
+      data-numero-nfe="${esc(numeroNfe)}"
+      data-itens="${esc(JSON.stringify(ped.itens || []))}"
+      style="border:2px solid #ddd6fe;border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;background:white;transition:border-color 0.15s,box-shadow 0.15s;"
+      onmouseover="this.style.borderColor='#7c3aed';this.style.boxShadow='0 4px 16px rgba(124,58,237,0.15)';"
+      onmouseout="this.style.borderColor='#ddd6fe';this.style.boxShadow='';">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="background:linear-gradient(135deg,#7c3aed,#6d28d9);color:white;border-radius:6px;padding:3px 10px;font-size:13px;font-weight:700;">Pedido ${esc(ped.cnumero||ped.n_cod_ped)}</span>
+          <span style="font-size:12px;color:#475569;">${esc(ped.d_inc_data||'-')}</span>
+          ${badgeExtra}
+        </div>
+        <span style="font-size:12px;color:#64748b;font-style:italic;">${esc(ped.fornecedor||'-')}</span>
+      </div>
+      ${ped.itens && ped.itens.length ? `<div style="font-size:12px;color:#334155;">${ped.itens.slice(0,5).map(item=>`<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;"><span style="color:#7c3aed;font-family:monospace;min-width:80px;font-size:11px;">${esc(item.produto_codigo||'-')}</span><span style="flex:1;">${esc(item.produto_descricao||'-')}</span><span style="color:#475569;white-space:nowrap;font-size:11px;">${esc(fmtQtd(item.quantidade))} ${esc(item.unidade||'')}</span><span style="color:#059669;white-space:nowrap;font-size:11px;font-weight:600;">${esc(fmtMoeda(item.valor_item))}</span></div>`).join('')}${ped.itens.length>5?`<div style="color:#94a3b8;font-size:11px;padding-top:4px;">+${ped.itens.length-5} item(s) a mais...</div>`:''}</div>` : '<div style="font-size:12px;color:#94a3b8;font-style:italic;">Sem itens cadastrados</div>'}
+      ${justEl}
+      ${ped.observacao?`<div style="margin-top:8px;font-size:11px;color:#64748b;"><strong>Obs:</strong> ${esc(ped.observacao)}</div>`:''}
+    </div>`;
+  };
+
+  const attachCardListeners = () => {
+    conteudo.querySelectorAll('.localizar-nfe-pedido-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const nCodPed  = Number(card.dataset.nCodPed) || null;
+        const cnumero  = card.dataset.cnumero  || '';
+        const chaveNfe = card.dataset.chaveNfe || '';
+        const numeroNfe= card.dataset.numeroNfe|| '';
+        let itensCard = [];
+        try { itensCard = JSON.parse(card.dataset.itens || '[]'); } catch (_) {}
+        fecharModal();
+        if (window.abrirModalAssociarPedidoNfeComContexto) {
+          window.abrirModalAssociarPedidoNfeComContexto({
+            numero_nfe: numeroNfe, numero_pedido: cnumero,
+            chave_nfe: chaveNfe, n_cod_ped: nCodPed, itens: itensCard
+          });
+        }
+      });
+    });
+  };
+
+  // ── Busca por NF-e ───────────────────────────────────────────
+  const buscarNfe = async () => {
+    const num = String(inputNfe ? inputNfe.value : '').trim();
+    if (!num) {
+      conteudo.innerHTML = '<div style="padding:10px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:8px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>Informe o número da NF-e.</div>';
+      return;
+    }
+    conteudo.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;padding:8px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#7c3aed;"></i><span>Buscando NF-e...</span></div>';
+    if (btnBuscar) { btnBuscar.disabled = true; btnBuscar.style.opacity = '0.7'; }
+
+    try {
+      const resp    = await fetch(`/api/compras/localizar-nfe-por-numero?numero=${encodeURIComponent(num)}`);
+      const payload = await resp.json().catch(() => ({}));
+
+      if (!resp.ok || !payload.ok) {
+        conteudo.innerHTML = `<div style="padding:10px;background:#fff1f2;border:1px solid #fecaca;color:#9f1239;border-radius:8px;font-size:13px;"><i class="fa-solid fa-circle-xmark" style="margin-right:6px;"></i>${esc(payload.error||'Erro ao buscar NF-e.')}</div>`;
+        return;
+      }
+
+      const nfe     = payload.nfe || {};
+      const itens   = Array.isArray(payload.itens) ? payload.itens : [];
+      const pedidos = Array.isArray(payload.pedidos_sugeridos) ? payload.pedidos_sugeridos : [];
+
+      // Guarda contexto para uso no tab Pedido
+      ultimaNfeCtx = { nfe, itens };
+
+      const jaVinculado  = itens.some(i => i.n_id_pedido && Number(i.n_id_pedido) > 0);
+      const totalItens   = itens.reduce((acc, i) => acc + (Number(i.vlr_item) || 0), 0);
+      const statusHtml   = renderEtapaBadge(nfe.c_etapa, nfe.c_recebido, nfe.c_cancelada);
+
+      const cabecHtml = `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+        <div style="font-size:14px;font-weight:700;color:#f8fafc;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span><i class="fa-solid fa-file-invoice-dollar" style="color:#c4b5fd;margin-right:7px;"></i>NF-e nº ${esc(nfe.c_numero_nfe||num)}</span>
+          ${statusHtml}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;font-size:12px;color:#e2e8f0;">
+          <div><strong style="color:#93c5fd;">Fornecedor:</strong> ${esc(nfe.c_nome_fornecedor||'-')}</div>
+          <div><strong style="color:#93c5fd;">CNPJ/CPF:</strong> ${esc(nfe.c_cnpj_cpf_fornecedor||'-')}</div>
+          <div><strong style="color:#93c5fd;">Emissão:</strong> ${esc(nfe.d_emissao_nfe||'-')}</div>
+          <div><strong style="color:#93c5fd;">Recebimento:</strong> ${esc(nfe.d_rec||'-')}</div>
+          <div><strong style="color:#93c5fd;">Série:</strong> ${esc(nfe.c_serie_nfe||'-')}</div>
+          <div><strong style="color:#93c5fd;">Valor NF:</strong> ${esc(fmtMoeda(nfe.n_valor_nfe))}</div>
+        </div>
+        ${itens.length ? `<div style="margin-top:10px;"><div style="font-size:12px;font-weight:700;color:#c4b5fd;margin-bottom:6px;">Itens da NF-e (${itens.length})</div><div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:480px;"><thead><tr style="background:#111827;"><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Código</th><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Descrição</th><th style="padding:6px 8px;text-align:right;color:#94a3b8;font-weight:600;">Qtd</th><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Un</th><th style="padding:6px 8px;text-align:right;color:#94a3b8;font-weight:600;">Vlr Item</th><th style="padding:6px 8px;text-align:center;color:#94a3b8;font-weight:600;">Pedido</th></tr></thead><tbody>${itens.map(i=>`<tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px;color:#e2e8f0;font-family:monospace;">${esc(i.codigo||'-')}</td><td style="padding:5px 8px;color:#e2e8f0;">${esc(i.descricao||'-')}</td><td style="padding:5px 8px;text-align:right;color:#e2e8f0;">${esc(fmtQtd(i.qtd))}</td><td style="padding:5px 8px;color:#e2e8f0;">${esc(i.unidade||'-')}</td><td style="padding:5px 8px;text-align:right;color:#e2e8f0;">${esc(fmtMoeda(i.vlr_item))}</td><td style="padding:5px 8px;text-align:center;">${i.n_id_pedido&&Number(i.n_id_pedido)>0?'<span style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">Vinculado</span>':'<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:4px;padding:1px 6px;font-size:10px;">Sem vínculo</span>'}</td></tr>`).join('')}<tr style="background:#0b1220;"><td colspan="4" style="padding:7px 8px;text-align:right;font-weight:700;color:#93c5fd;border-top:2px solid #334155;font-size:11px;">Total</td><td style="padding:7px 8px;text-align:right;font-weight:700;color:#f8fafc;border-top:2px solid #334155;">${esc(fmtMoeda(totalItens))}</td><td style="border-top:2px solid #334155;"></td></tr></tbody></table></div></div>`
+          : `<div style="margin-top:10px;background:#1e1b4b;border:1px solid #4338ca;border-radius:7px;padding:9px 13px;font-size:12px;color:#a5b4fc;display:flex;align-items:center;gap:7px;">⚠️ <span>NF-e sem itens cadastrados no sistema — sugestões baseadas apenas no <strong>valor total da NF-e</strong>.</span></div>`}
+      </div>`;
+
+      let pedidosHtml = '';
+      if (pedidos.length > 0) {
+        // Calcula score local e ordena antes de renderizar
+        const pedidosComScore = pedidos.map(ped => ({
+          ...ped,
+          _score: calcularScoreLocal(itens, ped.itens || [], nfe.c_nome_fornecedor || '', ped.fornecedor || '')
+        })).sort((a, b) => b._score - a._score);
+
+        pedidosHtml = `<div style="margin-bottom:8px;">
+          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i class="fa-solid fa-cart-shopping" style="color:#7c3aed;"></i>
+              Pedidos sugeridos (${pedidos.length})
+              <span style="font-size:11px;font-weight:400;color:#64748b;">— ordenado por relevância · clique para associar</span>
+            </div>
+            <button id="locNfeBtnRanquear" type="button"
+              style="background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"
+              title="Usar IA para refinar a classificação">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> Refinar com IA
+            </button>
+          </div>
+          <div id="locNfePedidosLista">
+            ${pedidosComScore.map(ped => renderPedidoCard(ped, nfe.c_chave_nfe, nfe.c_numero_nfe||num, scoreBadgeLocal(ped._score))).join('')}
+          </div>
+        </div>`;
+      } else if (jaVinculado) {
+        pedidosHtml = '<div style="padding:10px;background:#f0fdf4;border:1px solid #86efac;color:#15803d;border-radius:8px;font-size:13px;"><i class="fa-solid fa-circle-check" style="margin-right:6px;"></i>Esta NF-e já possui pedido(s) vinculado(s).</div>';
+      } else {
+        pedidosHtml = '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;border-radius:8px;font-size:13px;"><i class="fa-solid fa-info-circle" style="margin-right:6px;"></i>Nenhum pedido de compra correspondente localizado.</div>';
+      }
+
+      conteudo.innerHTML = cabecHtml + pedidosHtml;
+      attachCardListeners();
+
+      const btnRanquear = document.getElementById('locNfeBtnRanquear');
+      if (btnRanquear && pedidos.length > 0) {
+        btnRanquear.addEventListener('click', () => ranquearComIA(nfe, itens, pedidos));
+      }
+
+    } catch (err) {
+      conteudo.innerHTML = `<div style="padding:10px;background:#fff1f2;border:1px solid #fecaca;color:#9f1239;border-radius:8px;font-size:13px;"><i class="fa-solid fa-circle-xmark" style="margin-right:6px;"></i>${esc(err?.message||'Falha ao buscar NF-e.')}</div>`;
+    } finally {
+      if (btnBuscar) { btnBuscar.disabled = false; btnBuscar.style.opacity = '1'; }
+    }
+  };
+
+  // ── Busca por número de pedido ───────────────────────────────
+  const buscarPedido = async () => {
+    const num = String(inputPedido ? inputPedido.value : '').trim();
+    if (!num) {
+      conteudo.innerHTML = '<div style="padding:10px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:8px;font-size:13px;"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>Informe o número do pedido.</div>';
+      return;
+    }
+    conteudo.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:#475569;font-size:13px;padding:8px 0;"><i class="fa-solid fa-spinner fa-spin" style="color:#7c3aed;"></i><span>Buscando pedido...</span></div>';
+    if (btnBuscarPed) { btnBuscarPed.disabled = true; btnBuscarPed.style.opacity = '0.7'; }
+
+    try {
+      const resp    = await fetch(`/api/compras/buscar-pedido-compra?numero=${encodeURIComponent(num)}`);
+      const payload = await resp.json().catch(() => ({}));
+
+      if (!resp.ok || !payload.ok) {
+        conteudo.innerHTML = `<div style="padding:10px;background:#fff1f2;border:1px solid #fecaca;color:#9f1239;border-radius:8px;font-size:13px;"><i class="fa-solid fa-circle-xmark" style="margin-right:6px;"></i>${esc(payload.error||'Pedido não encontrado.')}</div>`;
+        return;
+      }
+
+      const ped = payload.pedido || {};
+      // Usa contexto de NF-e se o usuário já buscou uma anteriormente na aba NF-e
+      const chaveCtx  = ultimaNfeCtx.nfe.c_chave_nfe  || '';
+      const numeroCtx = ultimaNfeCtx.nfe.c_numero_nfe  || '';
+
+      const aviso = numeroCtx
+        ? `<div style="padding:8px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;margin-bottom:10px;font-size:12px;color:#15803d;display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-circle-check"></i><span>Pedido encontrado! Clique para associar à NF-e <strong>${esc(numeroCtx)}</strong>.</span></div>`
+        : `<div style="padding:8px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;margin-bottom:10px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-triangle-exclamation"></i><span>Busque primeiro uma NF-e na aba <strong>Por NF-e</strong> para associar com contexto completo.</span></div>`;
+
+      conteudo.innerHTML = aviso + renderPedidoCard(ped, chaveCtx, numeroCtx);
+      attachCardListeners();
+
+    } catch (err) {
+      conteudo.innerHTML = `<div style="padding:10px;background:#fff1f2;border:1px solid #fecaca;color:#9f1239;border-radius:8px;font-size:13px;"><i class="fa-solid fa-circle-xmark" style="margin-right:6px;"></i>${esc(err?.message||'Falha ao buscar pedido.')}</div>`;
+    } finally {
+      if (btnBuscarPed) { btnBuscarPed.disabled = false; btnBuscarPed.style.opacity = '1'; }
+    }
+  };
+
+  // ── Classificar com IA ───────────────────────────────────────
+  const ranquearComIA = async (nfe, itens, pedidos) => {
+    const btnRanquear = document.getElementById('locNfeBtnRanquear');
+    const lista       = document.getElementById('locNfePedidosLista');
+    if (!lista) return;
+
+    if (btnRanquear) {
+      btnRanquear.disabled = true;
+      btnRanquear.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analisando...';
+      btnRanquear.style.opacity = '0.7';
+    }
+
+    try {
+      const resp    = await fetch('/api/compras/ranking-pedidos-nfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nfe, itens_nfe: itens, pedidos })
+      });
+      const payload = await resp.json().catch(() => ({}));
+
+      if (!resp.ok || !payload.ok || !Array.isArray(payload.ranking)) {
+        const aviso = document.createElement('div');
+        aviso.style.cssText = 'padding:8px 12px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;border-radius:8px;font-size:12px;margin-bottom:8px;';
+        aviso.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>IA indisponível: ${esc(payload.error||'erro desconhecido')}.`;
+        lista.prepend(aviso);
+        if (btnRanquear) { btnRanquear.disabled = false; btnRanquear.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Classificar com IA'; btnRanquear.style.opacity = '1'; }
+        return;
+      }
+
+      const rankMap = {};
+      payload.ranking.forEach(r => { rankMap[String(r.n_cod_ped)] = r; });
+
+      // Ordena: score IA primário + score local como tiebreaker
+      const ordenados = [...pedidos].sort((a, b) => {
+        const sa = rankMap[String(a.n_cod_ped)]?.score ?? 0;
+        const sb = rankMap[String(b.n_cod_ped)]?.score ?? 0;
+        if (sb !== sa) return sb - sa;
+        // tiebreaker: score local
+        const la = calcularScoreLocal(itens, a.itens||[], nfe.c_nome_fornecedor||'', a.fornecedor||'');
+        const lb = calcularScoreLocal(itens, b.itens||[], nfe.c_nome_fornecedor||'', b.fornecedor||'');
+        return lb - la;
+      });
+
+      const scoreBadge = (sIA, sLocal) => {
+        const cor = sIA >= 80 ? '#15803d' : sIA >= 50 ? '#c2410c' : '#64748b';
+        const bg  = sIA >= 80 ? '#f0fdf4' : sIA >= 50 ? '#fff7ed' : '#f8fafc';
+        const bdr = sIA >= 80 ? '#86efac' : sIA >= 50 ? '#fed7aa' : '#e2e8f0';
+        return `<span style="background:${bg};color:${cor};border:1px solid ${bdr};border-radius:6px;padding:2px 9px;font-size:11px;font-weight:700;" title="Score IA / Score local">IA: ${sIA}% · Local: ${sLocal}%</span>`;
+      };
+
+      lista.innerHTML = ordenados.map(ped => {
+        const rank   = rankMap[String(ped.n_cod_ped)] || {};
+        const scoreIA = rank.score ?? null;
+        const sLocal  = calcularScoreLocal(itens, ped.itens||[], nfe.c_nome_fornecedor||'', ped.fornecedor||'');
+        const just    = rank.justificativa || '';
+        const badge   = scoreIA !== null ? scoreBadge(scoreIA, sLocal) : scoreBadgeLocal(sLocal);
+        const justEl  = just ? `<div style="margin-top:7px;font-size:11px;color:#4c1d95;background:#f5f3ff;border-radius:6px;padding:5px 9px;"><i class="fa-solid fa-robot" style="margin-right:4px;color:#7c3aed;"></i><strong>IA:</strong> ${esc(just)}</div>` : '';
+        return renderPedidoCard(ped, nfe.c_chave_nfe||'', nfe.c_numero_nfe||'', badge, justEl);
+      }).join('');
+
+      attachCardListeners();
+
+      if (btnRanquear) {
+        btnRanquear.innerHTML = '<i class="fa-solid fa-check"></i> Classificado';
+        btnRanquear.style.background = 'linear-gradient(135deg,#059669 0%,#047857 100%)';
+        btnRanquear.disabled = true;
+        btnRanquear.style.opacity = '0.85';
+      }
+
+    } catch (err) {
+      if (btnRanquear) { btnRanquear.disabled = false; btnRanquear.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Classificar com IA'; btnRanquear.style.opacity = '1'; }
+      console.error('[LocNfe] Erro ao ranquear:', err);
+    }
+  };
+
+  btnBuscar    && btnBuscar.addEventListener('click', buscarNfe);
+  inputNfe     && inputNfe.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarNfe(); });
+  btnBuscarPed && btnBuscarPed.addEventListener('click', buscarPedido);
+  inputPedido  && inputPedido.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarPedido(); });
+
+  // Botão na tela principal de recebimento
+  const btnAbrir = document.getElementById('recebimentoLocalizarNfeBtn');
+  if (btnAbrir) {
+    btnAbrir.addEventListener('click', () => {
+      if (inputNfe)    inputNfe.value    = '';
+      if (inputPedido) inputPedido.value = '';
+      ultimaNfeCtx = { nfe: {}, itens: [] };
+      ativarTab('nfe');
+      abrirModal();
+    });
+  }
 })();
 </script>
 

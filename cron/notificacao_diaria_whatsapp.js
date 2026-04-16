@@ -152,12 +152,18 @@ async function executarNotificacaoDiaria() {
 
   console.log(TAG, `Processando ${users.length} usuário(s)...`);
   const hoje = new Date().toISOString().slice(0, 10);
+  const telefonesNotificados = new Set();
 
   for (const user of users) {
     try {
       const phone = toWhatsappPhone(user.telefone_contato);
       if (!phone) {
         console.log(TAG, `Telefone inválido para ${user.username}: ${user.telefone_contato}`);
+        continue;
+      }
+
+      if (telefonesNotificados.has(phone)) {
+        console.log(TAG, `Telefone ${phone} já notificado — pulando ${user.username}.`);
         continue;
       }
 
@@ -240,6 +246,7 @@ async function executarNotificacaoDiaria() {
         );
       }
 
+      telefonesNotificados.add(phone);
       console.log(TAG, `✓ Notificação enviada para ${user.username} (${phone})`);
     } catch (err) {
       console.error(TAG, `✗ Erro ao enviar para ${user.username}:`, err?.message || err);
@@ -253,16 +260,47 @@ async function executarNotificacaoDiaria() {
 
 let _lastRunDate = null;
 
+async function jaRodouHoje(hoje) {
+  try {
+    const { rows } = await dbQuery(
+      `SELECT valor FROM public.cron_control WHERE chave = 'notif_whatsapp_ultima_execucao'`
+    );
+    return rows[0]?.valor === hoje;
+  } catch {
+    // Tabela pode não existir — usar fallback em memória
+    return false;
+  }
+}
+
+async function marcarRodouHoje(hoje) {
+  try {
+    await dbQuery(
+      `INSERT INTO public.cron_control (chave, valor)
+       VALUES ('notif_whatsapp_ultima_execucao', $1)
+       ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor`,
+      [hoje]
+    );
+  } catch {
+    // Silencia: fallback em memória já garante a sessão atual
+  }
+}
+
 function verificarHorarioNotificacao() {
   const now = new Date();
   const hoje = now.toISOString().slice(0, 10);
   const hora = now.getHours();
   const minuto = now.getMinutes();
 
-  // Executa às 08:00 (janela até 08:04) se ainda não rodou hoje
-  if (hora === 8 && minuto < 5 && _lastRunDate !== hoje) {
-    _lastRunDate = hoje;
-    executarNotificacaoDiaria().catch((err) => {
+  // Executa às 05:00 (janela até 05:04) se ainda não rodou hoje
+  if (hora === 5 && minuto < 5 && _lastRunDate !== hoje) {
+    _lastRunDate = hoje; // guarda em memória imediatamente para evitar duplo disparo
+    jaRodouHoje(hoje).then((jaRodou) => {
+      if (jaRodou) {
+        console.log(TAG, `Notificação já enviada hoje (${hoje}) — ignorando.`);
+        return;
+      }
+      return marcarRodouHoje(hoje).then(() => executarNotificacaoDiaria());
+    }).catch((err) => {
       console.error(TAG, 'Erro na notificação diária:', err?.message || err);
     });
   }
