@@ -5379,6 +5379,44 @@ router.get('/monitor/details', async (req, res) => {
   }
 });
 
+// ─── GET /api/ai/cron-config ──────────────────────────────────────────────────
+router.get('/cron-config', async (req, res) => {
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT id, acao, programacao, ativo FROM "Chatbot".cron_configuracao ORDER BY id`
+    );
+    return res.json({ ok: true, data: rows });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: 'Erro ao carregar configurações.' });
+  }
+});
+
+// ─── PUT /api/ai/cron-config/:id ─────────────────────────────────────────────
+router.put('/cron-config/:id', express.json({ limit: '10kb' }), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+  const programacao = String(req.body?.programacao ?? '').trim().slice(0, 50) || null;
+  const ativo = String(req.body?.ativo ?? '').trim().toUpperCase();
+  if (!['S', 'N'].includes(ativo)) {
+    return res.status(400).json({ ok: false, error: 'Campo ativo deve ser S ou N.' });
+  }
+
+  const fields = [];
+  const values = [];
+  if (programacao !== null) { values.push(programacao); fields.push(`programacao = $${values.length}`); }
+  values.push(ativo); fields.push(`ativo = $${values.length}`);
+  values.push(id);
+
+  const { rowCount } = await dbPool.query(
+    `UPDATE "Chatbot".cron_configuracao SET ${fields.join(', ')} WHERE id = $${values.length}`,
+    values
+  ).catch(() => ({ rowCount: 0 }));
+
+  if (!rowCount) return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
+  return res.json({ ok: true });
+});
+
 // ─── POST /api/ai/report ──────────────────────────────────────────────────────
 router.post('/report', express.json({ limit: '30kb' }), async (req, res) => {
   const question = String(req.body?.question || '').trim().slice(0, 1200);

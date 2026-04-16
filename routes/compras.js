@@ -733,6 +733,72 @@ module.exports = (pool) => {
         }))
         .sort((a, b) => String(a?.descricao || '').localeCompare(String(b?.descricao || ''), 'pt-BR', { sensitivity: 'base' }));
 
+      // Gravar/atualizar contas no banco (compras.contas_omie)
+      try {
+        const client = await pool.connect();
+        try {
+          for (const conta of contasNormalizadas) {
+            const nCodCC = Number(conta?.nCodCC || 0);
+            if (!nCodCC) continue;
+            await client.query(`
+              INSERT INTO compras.contas_omie
+                (n_cod_cc, descricao, banco_nome, codigo_banco, codigo_agencia, numero_conta_corrente, tipo, tipo_descricao, saldo_inicial, valor_limite, observacao, inativo, atualizado_em)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+              ON CONFLICT (n_cod_cc) DO UPDATE SET
+                descricao = EXCLUDED.descricao,
+                banco_nome = EXCLUDED.banco_nome,
+                codigo_banco = EXCLUDED.codigo_banco,
+                codigo_agencia = EXCLUDED.codigo_agencia,
+                numero_conta_corrente = EXCLUDED.numero_conta_corrente,
+                tipo = EXCLUDED.tipo,
+                tipo_descricao = EXCLUDED.tipo_descricao,
+                saldo_inicial = EXCLUDED.saldo_inicial,
+                valor_limite = EXCLUDED.valor_limite,
+                observacao = EXCLUDED.observacao,
+                inativo = EXCLUDED.inativo,
+                atualizado_em = NOW()
+            `, [
+              nCodCC,
+              conta.descricao || null,
+              conta.banco_nome || null,
+              conta.codigo_banco || null,
+              conta.codigo_agencia || null,
+              conta.numero_conta_corrente || null,
+              conta.tipo_conta_corrente || conta.tipo || null,
+              conta.tipo_descricao || null,
+              Number(conta.saldo_inicial || 0),
+              Number(conta.valor_limite || 0),
+              conta.observacao || null,
+              conta.inativo || 'N'
+            ]);
+          }
+        } finally {
+          client.release();
+        }
+      } catch (errDb) {
+        console.warn('[GET /api/compras/contas-utilizadas] Erro ao gravar contas no banco:', errDb?.message);
+      }
+
+      // Mesclar fechamento_conta do banco nas contas retornadas
+      try {
+        const clientFech = await pool.connect();
+        try {
+          const { rows: fechRows } = await clientFech.query('SELECT n_cod_cc, fechamento_conta, melhor_data FROM compras.contas_omie WHERE fechamento_conta IS NOT NULL OR melhor_data IS NOT NULL');
+          const fechMap = new Map(fechRows.map(r => [String(r.n_cod_cc), r]));
+          for (const conta of contasNormalizadas) {
+            const row = fechMap.get(String(conta?.nCodCC || ''));
+            if (row) {
+              if (row.fechamento_conta != null) conta.fechamento_conta = row.fechamento_conta;
+              if (row.melhor_data != null) conta.melhor_data = row.melhor_data;
+            }
+          }
+        } finally {
+          clientFech.release();
+        }
+      } catch (errFech) {
+        console.warn('[GET /api/compras/contas-utilizadas] Erro ao ler fechamento_conta:', errFech?.message);
+      }
+
       return res.json({
         ok: true,
         total: contasNormalizadas.length,
@@ -740,6 +806,58 @@ module.exports = (pool) => {
       });
     } catch (e) {
       console.error('[GET /api/compras/contas-utilizadas] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  router.post('/contas-utilizadas/fechamento', async (req, res) => {
+    try {
+      const nCodCC = Number(req.body?.nCodCC || 0);
+      const fechamento = req.body?.fechamento_conta;
+
+      if (!Number.isFinite(nCodCC) || nCodCC <= 0) {
+        return res.status(400).json({ ok: false, error: 'nCodCC inválido.' });
+      }
+
+      const dia = fechamento === '' || fechamento == null ? null : Number(fechamento);
+      if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 31)) {
+        return res.status(400).json({ ok: false, error: 'Dia de fechamento deve ser entre 1 e 31.' });
+      }
+
+      await pool.query(
+        'UPDATE compras.contas_omie SET fechamento_conta = $1, atualizado_em = NOW() WHERE n_cod_cc = $2',
+        [dia, nCodCC]
+      );
+
+      return res.json({ ok: true, message: 'Fechamento atualizado.' });
+    } catch (e) {
+      console.error('[POST /api/compras/contas-utilizadas/fechamento] erro:', e);
+      return res.status(500).json({ ok: false, error: e.message || String(e) });
+    }
+  });
+
+  router.post('/contas-utilizadas/melhor-data', async (req, res) => {
+    try {
+      const nCodCC = Number(req.body?.nCodCC || 0);
+      const melhorData = req.body?.melhor_data;
+
+      if (!Number.isFinite(nCodCC) || nCodCC <= 0) {
+        return res.status(400).json({ ok: false, error: 'nCodCC inválido.' });
+      }
+
+      const dia = melhorData === '' || melhorData == null ? null : Number(melhorData);
+      if (dia !== null && (!Number.isInteger(dia) || dia < 1 || dia > 31)) {
+        return res.status(400).json({ ok: false, error: 'Dia deve ser entre 1 e 31.' });
+      }
+
+      await pool.query(
+        'UPDATE compras.contas_omie SET melhor_data = $1, atualizado_em = NOW() WHERE n_cod_cc = $2',
+        [dia, nCodCC]
+      );
+
+      return res.json({ ok: true, message: 'Melhor data atualizada.' });
+    } catch (e) {
+      console.error('[POST /api/compras/contas-utilizadas/melhor-data] erro:', e);
       return res.status(500).json({ ok: false, error: e.message || String(e) });
     }
   });

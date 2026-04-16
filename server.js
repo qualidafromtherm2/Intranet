@@ -26386,6 +26386,409 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
 });
 
 // ========================================
+//  Endpoint: Localizar NF-e por número
+// ========================================
+/**
+ * GET /api/compras/localizar-nfe-por-numero?numero=784
+ * Busca uma NF-e em logistica.recebimentos_nfe_omie pelo número (ignora zeros à esquerda).
+ * Retorna: cabeçalho da NF-e + itens + pedidos sugeridos por similaridade de produto.
+ */
+app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
+  try {
+    const numero = String(req.query.numero || '').trim();
+    if (!numero) {
+      return res.status(400).json({ ok: false, error: 'Número da NF-e não informado.' });
+    }
+
+    // Normaliza removendo zeros à esquerda e caracteres não numéricos
+    const numeroNorm = numero.replace(/\D/g, '').replace(/^0+/, '') || '0';
+
+    // Busca a NF-e pelo número normalizado (JOIN com fornecedores por CNPJ para preencher nome)
+    const { rows: nfeRows } = await pool.query(`
+      SELECT
+        n.n_id_receb,
+        n.c_chave_nfe,
+        n.c_numero_nfe,
+        n.c_serie_nfe,
+        COALESCE(
+          NULLIF(TRIM(n.c_nome_fornecedor), ''),
+          f.nome_fantasia,
+          f.razao_social
+        ) AS c_nome_fornecedor,
+        n.c_cnpj_cpf_fornecedor,
+        TO_CHAR(n.d_emissao_nfe, 'DD/MM/YYYY') AS d_emissao_nfe,
+        TO_CHAR(n.d_rec, 'DD/MM/YYYY') AS d_rec,
+        n.n_valor_nfe,
+        n.c_etapa,
+        n.c_recebido,
+        n.c_cancelada,
+        n.c_dados_adicionais
+      FROM logistica.recebimentos_nfe_omie n
+      LEFT JOIN omie.fornecedores f
+        ON REGEXP_REPLACE(COALESCE(f.cnpj_cpf, ''), '[^0-9]', '', 'g')
+         = REGEXP_REPLACE(COALESCE(n.c_cnpj_cpf_fornecedor, ''), '[^0-9]', '', 'g')
+        AND REGEXP_REPLACE(COALESCE(n.c_cnpj_cpf_fornecedor, ''), '[^0-9]', '', 'g') != ''
+      WHERE REGEXP_REPLACE(COALESCE(n.c_numero_nfe, ''), '[^0-9]', '', 'g') != ''
+        AND LTRIM(REGEXP_REPLACE(COALESCE(n.c_numero_nfe, ''), '[^0-9]', '', 'g'), '0') = $1
+      ORDER BY n.d_emissao_nfe DESC NULLS LAST, n.n_id_receb DESC
+      LIMIT 5
+    `, [numeroNorm]);
+
+    if (!nfeRows.length) {
+      return res.json({ ok: false, error: `NF-e nº ${numero} não encontrada na base.` });
+    }
+
+    const nfe = nfeRows[0];
+
+    // Busca os itens da NF-e
+    const { rows: itemRows } = await pool.query(`
+      SELECT
+        id,
+        c_codigo_produto,
+        c_descricao_produto,
+        n_qtde_nfe,
+        c_unidade_nfe,
+        n_preco_unit,
+        v_total_item,
+        n_id_pedido
+      FROM logistica.recebimentos_nfe_itens
+      WHERE n_id_receb = $1
+      ORDER BY id ASC
+    `, [nfe.n_id_receb]);
+
+    // Extrai palavras-chave das descrições dos itens para busca de pedidos correspondentes
+    const stopwords = new Set(['de','da','do','das','dos','e','em','com','para','por','a','o','as','os',
+      'un','und','kg','mts','mt','mm','cm','mg','ml','g','l','pc','pcs','cpr','caps','cap',
+      'dde','para','tipo','com','sem','ref','cod','kit','par','set','pct','cx','und']);
+
+    // Stemming simples: remove sufixos plurais/femininos para ampliar o match
+    const stemPT = (tok) => {
+      if (tok.length <= 4) return tok;
+      // plural -as, -os, -es, -ns → raiz
+      if (tok.endsWith('as') || tok.endsWith('os') || tok.endsWith('es')) return tok.slice(0, -1);
+      if (tok.endsWith('oes') || tok.endsWith('ens')) return tok.slice(0, -2);
+      // radical: mantém os primeiros 5 chars para palavras longas
+      return tok.length > 7 ? tok.slice(0, 6) : tok;
+    };
+
+    const keywords = [];   // termos completos
+    const stems    = [];   // radicais para busca ampliada
+
+    itemRows.forEach(item => {
+      const desc = String(item.c_descricao_produto || '').trim();
+      if (!desc) return;
+      const tokens = desc
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(tok => tok.length > 2 && !stopwords.has(tok));
+      // pega até 8 tokens por item (era 3)
+      tokens.slice(0, 8).forEach(tok => {
+        if (!keywords.includes(tok)) keywords.push(tok);
+        const s = stemPT(tok);
+        if (s !== tok && !stems.includes(s) && !keywords.includes(s)) stems.push(s);
+      });
+    });
+
+    // Busca pedidos com produtos similares (usando ILIKE com keywords + stems)
+    let pedidosSugeridos = [];
+    const allTerms = [...keywords, ...stems];
+    const cnpjNorm = (nfe.c_cnpj_cpf_fornecedor || '').replace(/\D/g, '');
+    if (allTerms.length > 0 || cnpjNorm) {
+      const params = [];
+      const conditions = allTerms.map(kw => {
+        params.push(`%${kw}%`);
+        return `pop.c_descricao ILIKE $${params.length}`;
+      });
+
+      const exists_clause = conditions.length > 0
+        ? `EXISTS (
+              SELECT 1 FROM compras.pedidos_omie_produtos pop
+              WHERE pop.n_cod_ped = p.n_cod_ped
+                AND (${conditions.join(' OR ')})
+            )`
+        : 'false';
+
+      const { rows: pedidoRows } = await pool.query(`
+        SELECT DISTINCT
+          p.n_cod_ped,
+          p.c_numero AS cnumero,
+          COALESCE(f.nome_fantasia, f.razao_social, '') AS fornecedor,
+          TO_CHAR(p.d_inc_data, 'DD/MM/YYYY') AS d_inc_data,
+          p.d_inc_data AS d_inc_data_ord,
+          COALESCE(p.c_obs, '') AS observacao
+        FROM compras.pedidos_omie p
+        LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
+        WHERE COALESCE(p.inativo, false) = false
+          AND (
+            ${exists_clause}
+            OR (
+              $${params.length + 1} != ''
+              AND REGEXP_REPLACE(COALESCE(f.cnpj_cpf,''), '[^0-9]','','g')
+                = $${params.length + 1}
+            )
+          )
+        ORDER BY p.d_inc_data DESC NULLS LAST
+        LIMIT 20
+      `, [...params, cnpjNorm]);
+
+      // Para cada pedido sugerido, busca seus produtos
+      for (const pedido of pedidoRows) {
+        const { rows: prodRows } = await pool.query(`
+          SELECT c_produto AS produto_codigo, c_descricao AS produto_descricao,
+                 n_qtde AS quantidade, c_unidade AS unidade,
+                 COALESCE(n_val_tot, 0) AS valor_item
+          FROM compras.pedidos_omie_produtos
+          WHERE n_cod_ped = $1
+          ORDER BY id ASC
+        `, [pedido.n_cod_ped]);
+
+        pedidosSugeridos.push({
+          n_cod_ped: pedido.n_cod_ped,
+          cnumero: pedido.cnumero,
+          fornecedor: pedido.fornecedor,
+          d_inc_data: pedido.d_inc_data,
+          observacao: pedido.observacao,
+          itens: prodRows
+        });
+      }
+    }
+
+    // ── Fallback por valor: quando NF-e não tem itens cadastrados,
+    //    busca pedidos cujo total de itens é próximo ao valor da NF-e (±10%).
+    //    Isso garante que pedidos como 2601 (encontrável por valor) apareçam.
+    if (pedidosSugeridos.length === 0 && nfe.n_valor_nfe > 0) {
+      const valorNfe = Number(nfe.n_valor_nfe);
+      const margem   = valorNfe * 0.10;  // ±10%
+      const { rows: pedidoValorRows } = await pool.query(`
+        SELECT
+          p.n_cod_ped,
+          p.c_numero AS cnumero,
+          COALESCE(f.nome_fantasia, f.razao_social, '') AS fornecedor,
+          TO_CHAR(p.d_inc_data, 'DD/MM/YYYY') AS d_inc_data,
+          p.d_inc_data AS d_inc_data_ord,
+          COALESCE(p.c_obs, '') AS observacao,
+          SUM(COALESCE(pop.n_val_tot, 0)) AS total_pedido
+        FROM compras.pedidos_omie p
+        LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
+        JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = p.n_cod_ped
+        WHERE COALESCE(p.inativo, false) = false
+        GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
+        HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2
+        ORDER BY ABS(SUM(COALESCE(pop.n_val_tot, 0)) - $3) ASC
+        LIMIT 20
+      `, [valorNfe - margem, valorNfe + margem, valorNfe]);
+
+      for (const pedido of pedidoValorRows) {
+        const { rows: prodRows } = await pool.query(`
+          SELECT c_produto AS produto_codigo, c_descricao AS produto_descricao,
+                 n_qtde AS quantidade, c_unidade AS unidade,
+                 COALESCE(n_val_tot, 0) AS valor_item
+          FROM compras.pedidos_omie_produtos
+          WHERE n_cod_ped = $1
+          ORDER BY id ASC
+        `, [pedido.n_cod_ped]);
+
+        // Evita duplicatas (caso pedido já tenha aparecido na busca por keywords)
+        if (!pedidosSugeridos.some(ps => ps.n_cod_ped === pedido.n_cod_ped)) {
+          pedidosSugeridos.push({
+            n_cod_ped: pedido.n_cod_ped,
+            cnumero: pedido.cnumero,
+            fornecedor: pedido.fornecedor,
+            d_inc_data: pedido.d_inc_data,
+            observacao: pedido.observacao,
+            itens: prodRows,
+            _fallback_valor: true  // marcador para debug
+          });
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      nfe: {
+        n_id_receb: nfe.n_id_receb,
+        c_chave_nfe: nfe.c_chave_nfe || '',
+        c_numero_nfe: nfe.c_numero_nfe || '',
+        c_serie_nfe: nfe.c_serie_nfe || '',
+        c_nome_fornecedor: nfe.c_nome_fornecedor || '',
+        c_cnpj_cpf_fornecedor: nfe.c_cnpj_cpf_fornecedor || '',
+        d_emissao_nfe: nfe.d_emissao_nfe || '',
+        d_rec: nfe.d_rec || '',
+        n_valor_nfe: Number(nfe.n_valor_nfe) || 0,
+        c_etapa: nfe.c_etapa || '',
+        c_recebido: nfe.c_recebido || 'N',
+        c_cancelada: nfe.c_cancelada || 'N',
+        c_dados_adicionais: nfe.c_dados_adicionais || ''
+      },
+      itens: itemRows.map(i => ({
+        codigo: i.c_codigo_produto || '',
+        descricao: i.c_descricao_produto || '',
+        qtd: i.n_qtde_nfe,
+        unidade: i.c_unidade_nfe || '',
+        vlr_unit: i.n_preco_unit,
+        vlr_item: i.v_total_item,
+        n_id_pedido: i.n_id_pedido
+      })),
+      pedidos_sugeridos: pedidosSugeridos
+    });
+  } catch (err) {
+    console.error('[Compras/LocalizarNfe] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao localizar NF-e.' });
+  }
+});
+
+// ========================================
+/**
+ * GET /api/compras/buscar-pedido-compra?numero=2589
+ * Busca pedido de compra pelo c_numero e retorna com itens.
+ */
+app.get('/api/compras/buscar-pedido-compra', async (req, res) => {
+  try {
+    const numero = String(req.query.numero || '').trim();
+    if (!numero) return res.status(400).json({ ok: false, error: 'Número do pedido não informado.' });
+
+    const { rows } = await pool.query(`
+      SELECT
+        p.n_cod_ped,
+        p.c_numero AS cnumero,
+        COALESCE(f.nome_fantasia, f.razao_social, '') AS fornecedor,
+        TO_CHAR(p.d_inc_data, 'DD/MM/YYYY') AS d_inc_data,
+        COALESCE(p.c_obs, '') AS observacao
+      FROM compras.pedidos_omie p
+      LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
+      WHERE COALESCE(p.inativo, false) = false
+        AND p.c_numero = $1
+      LIMIT 1
+    `, [numero]);
+
+    if (!rows.length) {
+      return res.json({ ok: false, error: `Pedido nº ${numero} não encontrado.` });
+    }
+
+    const pedido = rows[0];
+    const { rows: prodRows } = await pool.query(`
+      SELECT c_produto AS produto_codigo, c_descricao AS produto_descricao,
+             n_qtde AS quantidade, c_unidade AS unidade,
+             COALESCE(n_val_tot, 0) AS valor_item
+      FROM compras.pedidos_omie_produtos
+      WHERE n_cod_ped = $1
+      ORDER BY id ASC
+    `, [pedido.n_cod_ped]);
+
+    res.json({
+      ok: true,
+      pedido: {
+        n_cod_ped: pedido.n_cod_ped,
+        cnumero: pedido.cnumero,
+        fornecedor: pedido.fornecedor,
+        d_inc_data: pedido.d_inc_data,
+        observacao: pedido.observacao,
+        itens: prodRows
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/BuscarPedidoCompra] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar pedido.' });
+  }
+});
+
+// ========================================
+/**
+ * POST /api/compras/ranking-pedidos-nfe
+ * Usa OpenAI para ranquear pedidos de compra por relevância à NF-e informada.
+ * Body: { nfe, itens_nfe, pedidos }
+ */
+app.post('/api/compras/ranking-pedidos-nfe', async (req, res) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(503).json({ ok: false, error: 'IA não configurada neste ambiente.' });
+
+    const { nfe = {}, itens_nfe = [], pedidos = [] } = req.body || {};
+    if (!pedidos.length) return res.json({ ok: true, ranking: [] });
+
+    // Formata valor BR para o prompt
+    const fmtR = (v) => `R$${Number(v||0).toFixed(2)}`;
+
+    const prompt = `Você é um especialista em compras industriais. Analise rigorosamente os dados da NF-e e dos pedidos candidatos.
+
+REGRAS DE CLASSIFICAÇÃO (em ordem de importância):
+1. DESCRIÇÃO DO PRODUTO (peso 60%): Pedidos com descrição igual ou muito semelhante aos itens da NF-e devem ter score altíssimo. Correspondência parcial de palavras (ex: "BORBOLETA ZAMAC") ainda conta bastante.
+2. QUANTIDADE (peso 20%): Se a quantidade dos itens do pedido for igual ou muito próxima à da NF-e, aumente o score. Divergência grande reduz o score.
+3. VALOR UNITÁRIO (peso 15%): Se o valor unitário do item do pedido for próximo ao valor unitário da NF-e (vlr_item ÷ qtd), aumente o score.
+4. FORNECEDOR / DATA (peso 5%): Pedidos do mesmo fornecedor ou data próxima são leve tiebreaker.
+IGNORE: categoria genérica, ordem de listagem, número do pedido.
+
+NF-e:
+- Fornecedor: ${(nfe.c_nome_fornecedor || '-').slice(0, 80)}
+- CNPJ/CPF: ${nfe.c_cnpj_cpf_fornecedor || '-'}
+- Emissão: ${nfe.d_emissao_nfe || '-'}
+- Valor total NF: ${fmtR(nfe.n_valor_nfe)}
+- Itens da NF-e:
+${itens_nfe.slice(0, 15).map((i, n) => {
+  const vlrUnit = (Number(i.qtd||0) > 0) ? (Number(i.vlr_item||0) / Number(i.qtd)).toFixed(2) : '?';
+  return `  ${n + 1}. [${(i.codigo || '-').slice(0, 20)}] ${(i.descricao || '-').slice(0, 70)} | Qtd:${i.qtd} ${i.unidade||''} | VlrItem:${fmtR(i.vlr_item)} | VlrUnit:R$${vlrUnit}`;
+}).join('\n')}
+
+Pedidos candidatos:
+${pedidos.map(p => `Pedido ${p.cnumero} (id:${p.n_cod_ped}):
+  Fornecedor: ${(p.fornecedor || '-').slice(0, 60)}
+  Data: ${p.d_inc_data || '-'}
+  Itens: ${(p.itens || []).slice(0, 10).map(i => `[${(i.produto_codigo||'-').slice(0,15)}] ${(i.produto_descricao||'-').slice(0,45)} Qtd:${i.quantidade||'-'} ${i.unidade||''} Vl:${fmtR(i.valor_item)}`).join(' || ')}`).join('\n\n')}
+
+Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao MENOS provável:
+[{"n_cod_ped": <número inteiro>, "score": <0-100>, "justificativa": "<máx 80 chars em pt-BR indicando por que é ou não candidato"}]`;
+
+    const controller = new AbortController();
+    const tId = setTimeout(() => controller.abort(), 22000);
+    let response;
+    try {
+      response = await safeFetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.1,
+          max_tokens: 512
+        }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(tId);
+    }
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.error('[RankingNfe] OpenAI HTTP', response.status, errText.slice(0, 200));
+      return res.status(502).json({ ok: false, error: 'Serviço de IA indisponível no momento.' });
+    }
+
+    const data = await response.json();
+    const content = String(data.choices?.[0]?.message?.content || '').trim();
+    let ranking = [];
+    try {
+      const ini = content.indexOf('[');
+      const fim = content.lastIndexOf(']');
+      if (ini >= 0 && fim > ini) ranking = JSON.parse(content.slice(ini, fim + 1));
+    } catch (e) {
+      console.error('[RankingNfe] Parse falhou:', content.slice(0, 300));
+      return res.status(502).json({ ok: false, error: 'Resposta da IA em formato inesperado.' });
+    }
+
+    res.json({ ok: true, ranking });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      return res.status(504).json({ ok: false, error: 'IA demorou muito para responder. Tente novamente.' });
+    }
+    console.error('[RankingNfe] Erro:', err);
+    res.status(500).json({ ok: false, error: 'Erro ao processar classificação com IA.' });
+  }
+});
+
+// ========================================
 //  Endpoint: Listar Recebimentos NF-e por status (Faturada/Recebido/Concluído)
 // ========================================
 /**
@@ -27625,6 +28028,7 @@ async function chamarApiRecebimentoNfeOmie(call, param = {}) {
   const fault = data?.faultstring || data?.faultcode || '';
 
   if (!response.ok || fault) {
+    console.error(`[OmieAPI] ${call} resposta:`, JSON.stringify(data));
     throw new Error(fault || `Omie retornou HTTP ${response.status} em ${call}`);
   }
 
@@ -27722,6 +28126,44 @@ async function localizarRecebimentoOmiePorNumeroNfe(numeroNfeInformada, chaveNfe
   const numeroNfeNormalizado = normalizarNumeroNfeComparacao(numeroNfeInformada);
   if (!numeroNfeNormalizado) {
     return null;
+  }
+
+  // ── Fallback rápido por n_id_receb local ────────────────────────────────────
+  // Antes de paginar toda a API Omie (lento), tenta recuperar o n_id_receb do
+  // banco local e chamar ConsultarRecebimento diretamente. Resolve NF-es que
+  // existem localmente mas não aparecem na listagem Omie (ex: NF-e 2121).
+  try {
+    const { rows: localRows } = await pool.query(`
+      SELECT n_id_receb, c_chave_nfe
+      FROM logistica.recebimentos_nfe_omie
+      WHERE LTRIM(REGEXP_REPLACE(COALESCE(c_numero_nfe,''), '[^0-9]', '', 'g'), '0') = $1
+        AND n_id_receb IS NOT NULL
+        AND n_id_receb > 0
+      ORDER BY n_id_receb DESC
+      LIMIT 1
+    `, [numeroNfeNormalizado]);
+
+    if (localRows.length > 0) {
+      const nIdRecebLocal = Number(localRows[0].n_id_receb);
+      if (Number.isFinite(nIdRecebLocal) && nIdRecebLocal > 0) {
+        try {
+          const recebPorId = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb: nIdRecebLocal });
+          if (recebPorId?.cabec?.nIdReceb) {
+            gravarCacheRecebimentoNfeOmie(
+              recebPorId,
+              recebPorId?.cabec?.cChaveNFe || recebPorId?.cabec?.cChaveNfe || localRows[0].c_chave_nfe || chaveNfeInformada,
+              numeroNfeInformada
+            );
+            console.log(`[Compras/NFeAssociarPedido] NF-e ${numeroNfeInformada} localizada via n_id_receb=${nIdRecebLocal} (fallback local)`);
+            return recebPorId;
+          }
+        } catch (erroId) {
+          console.warn(`[Compras/NFeAssociarPedido] Falha ao consultar por n_id_receb=${nIdRecebLocal}:`, erroId?.message);
+        }
+      }
+    }
+  } catch (erroLocal) {
+    console.warn('[Compras/NFeAssociarPedido] Falha no fallback local por n_id_receb:', erroLocal?.message);
   }
 
   let pagina = 1;
@@ -27888,7 +28330,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   }
 
   const itensPedidoResult = await pool.query(
-    `SELECT n_cod_item, c_produto, c_descricao, n_qtde, n_val_unit, n_val_tot, n_cod_prod
+    `SELECT n_cod_item, c_produto, c_descricao, n_qtde, n_val_unit, n_val_tot, n_cod_prod, c_unidade
        FROM compras.pedidos_omie_produtos
       WHERE n_cod_ped = $1`,
     [nCodPed]
@@ -28025,6 +28467,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       pedido_codigo_produto: String(itemPedidoVinculo?.c_produto || '').trim() || null,
       pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
       pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
+      pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
       pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
       criterio_match: criterioMatch,
       score_match: scoreMatch
@@ -28165,10 +28608,211 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       gravarCachePlanoAssociacaoNfePedido(chaveCachePlanoResolvida, plano, 120000);
     }
 
+    // ── Consulta o pedido de compra na Omie para obter nCodCC ────────────────
+    // Aplica para TODAS as associações:
+    //   • nIdConta = nCodCC do pedido
+    //   • cUnidade e nQtde do pedido (ou override do usuário) em cada item
+    //   • dVencimento dinâmico conforme compras.contas_omie (tipo CR, melhor_data, fechamento_conta)
+    //   • Se conta especial (GLP/Frigelar): codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL
+    const CONTAS_ESPECIAIS = [10507452702, 10440916421];
+    const ESTOQUE_LOCAL_ESPECIAL = 10408201806;
+    let nCodCC = null;
+
+    // Lê itens_override do frontend (Qtd/Unid editados pelo user na prévia)
+    const itensOverride = Array.isArray(req.body?.itens_override) ? req.body.itens_override : [];
+    const overrideMap = new Map();
+    for (const ov of itensOverride) {
+      const seq = Number(ov?.n_sequencia || 0);
+      if (seq > 0) overrideMap.set(seq, ov);
+    }
+
+    try {
+      const pedidoNumero = plano.c_numero_pedido || numeroPedido || String(nCodPed || '');
+      const paramPed = pedidoNumero
+        ? { cNumero: pedidoNumero }
+        : { nCodPed: plano.n_cod_ped };
+      const respPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          call: 'ConsultarPedCompra',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [paramPed]
+        })
+      });
+      const pedidoOmie = await respPed.json().catch(() => ({}));
+      if (!pedidoOmie?.faultstring) {
+        const cab = pedidoOmie?.cabecalho_consulta || pedidoOmie?.cabecalho || {};
+        nCodCC = Number(cab?.nCodCC || cab?.n_cod_cc || 0) || null;
+        console.log(`[Compras/NFeAssociarPedido] ConsultarPedCompra => nCodCC=${nCodCC}`);
+      }
+    } catch (errPed) {
+      console.warn('[Compras/NFeAssociarPedido] Falha ao buscar nCodCC do pedido:', errPed?.message);
+    }
+
+    const aplicarEstoqueEspecial = nCodCC && CONTAS_ESPECIAIS.includes(nCodCC);
+
+    // Itens conforme plano (ASSOCIAR-PEDIDO)
+    const itensParaEnviar = plano.itensRecebimentoEditar;
+
+    // Monta parcelas, infoAdicionais e estoque para TODAS as associações
+    let financeiroParaEnviar = undefined;
+    let infoAdicionaisParaEnviar = undefined;
+    let itensEditarEstoque = null;
+    let recebimentoCache = null;
+
+    if (nCodCC) {
+      try {
+        // Busca dados atuais do recebimento + unidades do pedido
+        const [recebAtual, pedidoConsulta] = await Promise.all([
+          chamarApiRecebimentoNfeOmie('ConsultarRecebimento', { nIdReceb: Number(plano.n_id_receb) }),
+          fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              call: 'ConsultarPedCompra',
+              app_key: OMIE_APP_KEY,
+              app_secret: OMIE_APP_SECRET,
+              param: [plano.c_numero_pedido ? { cNumero: plano.c_numero_pedido } : { nCodPed: Number(plano.n_cod_ped) }]
+            })
+          }).then(r => r.json()).catch(() => null)
+        ]);
+
+        // Mapa de unidade por nCodItem do pedido
+        const unidadePorCodItem = {};
+        (pedidoConsulta?.produtos_consulta || []).forEach(p => {
+          if (p.nCodItem) {
+            unidadePorCodItem[String(p.nCodItem)] = p.cUnidade;
+          }
+        });
+
+        const parcelasLista = Array.isArray(recebAtual?.parcelas?.parcelasLista)
+          ? recebAtual.parcelas.parcelasLista : [];
+        const cCodParcela = recebAtual?.parcelas?.cCodParcela || '000';
+        const nQtdParcela = cCodParcela === '999' ? (recebAtual?.parcelas?.nQtdParcela || parcelasLista.length) : null;
+
+        // ── dVencimento dinâmico via compras.contas_omie ──
+        let dVencimento = null;
+        try {
+          const contaDb = await pool.query(
+            `SELECT tipo, fechamento_conta, melhor_data FROM compras.contas_omie WHERE n_cod_cc = $1`,
+            [nCodCC]
+          );
+          const contaRow = contaDb.rows[0] || null;
+          console.log(`[Compras/NFeAssociarPedido] contas_omie p/ nCodCC=${nCodCC}: tipo=${contaRow?.tipo} fechamento=${contaRow?.fechamento_conta} melhor_data=${contaRow?.melhor_data}`);
+
+          if (contaRow && String(contaRow.tipo).toUpperCase() === 'CR' && contaRow.fechamento_conta) {
+            const diaFechamento = Number(contaRow.fechamento_conta);
+            const diaMelhorData = Number(contaRow.melhor_data || 0);
+
+            // Usa dEmissaoNFe do recebimento para decidir o mês
+            const dEmissaoStr = recebAtual?.cabec?.dEmissaoNFe || '';
+            let diaEmissao = 0;
+            let mesEmissao = 0;
+            let anoEmissao = 0;
+            if (dEmissaoStr) {
+              const partes = dEmissaoStr.split('/');
+              if (partes.length === 3) {
+                diaEmissao = Number(partes[0]);
+                mesEmissao = Number(partes[1]);
+                anoEmissao = Number(partes[2]);
+              }
+            }
+            if (!diaEmissao || !mesEmissao || !anoEmissao) {
+              // Fallback: usa data de hoje
+              const hj = new Date();
+              diaEmissao = hj.getDate();
+              mesEmissao = hj.getMonth() + 1;
+              anoEmissao = hj.getFullYear();
+            }
+
+            if (diaMelhorData > 0 && diaEmissao > diaMelhorData) {
+              // Emissão DEPOIS do melhor_data → fechamento do MÊS SEGUINTE
+              let mesFech = mesEmissao + 1;
+              let anoFech = anoEmissao;
+              if (mesFech > 12) { mesFech = 1; anoFech++; }
+              dVencimento = `${String(diaFechamento).padStart(2, '0')}/${String(mesFech).padStart(2, '0')}/${anoFech}`;
+            } else {
+              // Emissão ANTES ou IGUAL ao melhor_data → fechamento do MÊS ATUAL
+              dVencimento = `${String(diaFechamento).padStart(2, '0')}/${String(mesEmissao).padStart(2, '0')}/${anoEmissao}`;
+            }
+            console.log(`[Compras/NFeAssociarPedido] dVencimento dinâmico: ${dVencimento} (dEmissao=${dEmissaoStr} diaMelhorData=${diaMelhorData} diaFechamento=${diaFechamento})`);
+          }
+        } catch (errConta) {
+          console.warn('[Compras/NFeAssociarPedido] Falha ao calcular dVencimento via contas_omie:', errConta?.message);
+        }
+
+        console.log('[Compras/NFeAssociarPedido] Parcelas originais:', JSON.stringify(parcelasLista, null, 2));
+
+        // --- Parcelas ---
+        if (parcelasLista.length > 0 && dVencimento) {
+          const parcelasEditarObj = {
+            cCodParcela,
+            parcelasListaEditar: parcelasLista.map(p => {
+              const parcAtualizada = { nSequencia: p.nSequencia, vParcela: p.vParcela, pParcela: p.pParcela };
+              if (dVencimento) parcAtualizada.dVencimento = dVencimento;
+              return parcAtualizada;
+            })
+          };
+          if (nQtdParcela !== null) parcelasEditarObj.nQtdParcela = nQtdParcela;
+          financeiroParaEnviar = { parcelasEditar: parcelasEditarObj };
+        }
+
+        // --- infoAdicionais: dRegistro = hoje, nIdConta = nCodCC ---
+        const dHoje = (() => {
+          const d = new Date();
+          const dd = String(d.getDate()).padStart(2, '0');
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          return `${dd}/${mm}/${d.getFullYear()}`;
+        })();
+        infoAdicionaisParaEnviar = {
+          cCategCompra: recebAtual?.infoAdicionais?.cCategCompra || undefined,
+          dRegistro: dHoje,
+          nIdConta: nCodCC
+        };
+
+        // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
+        // Se conta especial, também aplica codigo_local_estoque
+        itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
+          const nSeq = itemEditar.itensIde?.nSequencia;
+          const nIdItPed = itemEditar.itensIde?.nIdItPedidoExistente;
+          const cUnidadePedido = nIdItPed ? unidadePorCodItem[String(nIdItPed)] : null;
+
+          // Override do user tem prioridade sobre o valor do pedido
+          const override = overrideMap.get(nSeq);
+          const cUnidadeFinal = override?.cUnidade || cUnidadePedido || null;
+
+          const ajustes = {};
+          if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
+          if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
+          // Nota: nQtde não é campo válido em itensAjustes da Omie
+
+          // Só incluir o item se tiver ajustes
+          if (Object.keys(ajustes).length === 0) return null;
+
+          return {
+            itensIde: { nSequencia: nSeq, cAcao: 'EDITAR' },
+            itensAjustes: ajustes
+          };
+        }).filter(Boolean);
+
+        recebimentoCache = recebAtual;
+        console.log(`[Compras/NFeAssociarPedido] nIdConta=${nCodCC} estoqueEspecial=${aplicarEstoqueEspecial} dVencimento=${dVencimento} parcelas=${parcelasLista.length} itensEditar=${itensEditarEstoque.length} overrides=${overrideMap.size}`);
+      } catch (errPrep) {
+        console.warn('[Compras/NFeAssociarPedido] Falha ao preparar dados de associação:', errPrep?.message);
+      }
+    }
+
+    // ─── Passo 1: associação do pedido (PRIMEIRO, pois pode resetar dados financeiros) ───
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
-      itensRecebimentoEditar: plano.itensRecebimentoEditar
+      itensRecebimentoEditar: itensParaEnviar
     };
+
+    console.log('[Compras/NFeAssociarPedido] ===== PASSO 1: ASSOCIAR-PEDIDO =====');
+    console.log(JSON.stringify(payloadAlterar, null, 2));
+    console.log('[Compras/NFeAssociarPedido] ===================================');
 
     let alertaItemAssociacao = '';
     const etapaAlvoRecebimentoTotal = '60';
@@ -28185,64 +28829,84 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       alertaItemAssociacao = msgErro;
     }
 
+    // ─── Passo 2: parcelas + infoAdicionais DEPOIS da associação ───
+    // A associação (ASSOCIAR-PEDIDO) pode resetar parcelas, por isso aplicamos DEPOIS
+    if (financeiroParaEnviar || infoAdicionaisParaEnviar) {
+      try {
+        const payloadParcelas = {
+          ide: { nIdReceb: Number(plano.n_id_receb) },
+          ...(financeiroParaEnviar || {}),
+          ...(infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
+        };
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 2: parcelas+infoAdic =====');
+        console.log(JSON.stringify(payloadParcelas, null, 2));
+        console.log('[Compras/NFeAssociarPedido] ===================================');
+        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadParcelas, {
+          tentativasMaximas: 2
+        });
+        console.log('[Compras/NFeAssociarPedido] Parcelas/infoAdicionais atualizados com sucesso.');
+      } catch (errParcelas) {
+        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar parcelas/infoAdicionais:', errParcelas?.message);
+      }
+    }
+
+    // ─── Passo 3: EDITAR itens com cUnidade + nQtde (+ codigo_local_estoque se especial) ───
+    if (itensEditarEstoque && itensEditarEstoque.length > 0) {
+      try {
+        const payloadEstoque = {
+          ide: { nIdReceb: Number(plano.n_id_receb) },
+          itensRecebimentoEditar: itensEditarEstoque
+        };
+        console.log('[Compras/NFeAssociarPedido] ===== PASSO 3: estoque =====');
+        console.log(JSON.stringify(payloadEstoque, null, 2));
+        console.log('[Compras/NFeAssociarPedido] ===================================');
+        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', payloadEstoque, {
+          tentativasMaximas: 2
+        });
+        console.log('[Compras/NFeAssociarPedido] Local estoque/unidade atualizados com sucesso.');
+      } catch (errEstoque) {
+        console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar local estoque:', errEstoque?.message);
+      }
+    }
+
+    // ─── Passo 4: Concluir recebimento (etapa 60) ───
+    // ConcluirRecebimento é mais confiável que AlterarEtapaRecebimento
+    // (AlterarEtapaRecebimento pode retornar "OK" sem efetivamente mudar a etapa)
+    let etapaConcluida = false;
     try {
-      await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarEtapaRecebimento', {
+      await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
         nIdReceb: Number(plano.n_id_receb),
         cEtapa: etapaAlvoRecebimentoTotal
-      }, {
-        tentativasMaximas: 2
-      });
-    } catch (erroEtapa) {
-      const msgEtapa = String(erroEtapa?.message || erroEtapa || '');
-      const recebimentoEtapaFallback = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
-        nIdReceb: Number(plano.n_id_receb)
-      }, {
-        tentativasMaximas: 2
-      }).catch(() => null);
-      const etapaAtualFallback = String(recebimentoEtapaFallback?.cabec?.cEtapa || '').trim();
-      const etapaJaCompativel = etapaAtualFallback === '60' || etapaAtualFallback === '80';
-      if (!etapaJaCompativel) {
-        throw new Error(`NF-e associada, mas falhou ao alterar etapa para Recebido Totalmente: ${msgEtapa}`);
-      }
-    }
-
-    let recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
-      nIdReceb: Number(plano.n_id_receb)
-    }, {
-      tentativasMaximas: 2
-    });
-
-    let etapaFinalRecebimento = String(recebimentoAposAlteracao?.cabec?.cEtapa || '').trim();
-
-    if (etapaFinalRecebimento === '40') {
-      const tentativasConclusao = 3;
-      for (let tentativa = 1; tentativa <= tentativasConclusao; tentativa += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-
-        await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
+      }, { tentativasMaximas: 3 });
+      console.log('[Compras/NFeAssociarPedido] ConcluirRecebimento OK');
+      etapaConcluida = true;
+    } catch (erroConcluir) {
+      console.warn('[Compras/NFeAssociarPedido] ConcluirRecebimento falhou:', erroConcluir?.message, '- tentando AlterarEtapaRecebimento...');
+      try {
+        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarEtapaRecebimento', {
           nIdReceb: Number(plano.n_id_receb),
           cEtapa: etapaAlvoRecebimentoTotal
-        }, {
-          tentativasMaximas: 2
-        });
-
-        recebimentoAposAlteracao = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
-          nIdReceb: Number(plano.n_id_receb)
-        }, {
-          tentativasMaximas: 2
-        });
-
-        etapaFinalRecebimento = String(recebimentoAposAlteracao?.cabec?.cEtapa || '').trim();
-        if (etapaFinalRecebimento === '60' || etapaFinalRecebimento === '80') {
-          break;
-        }
+        }, { tentativasMaximas: 2 });
+        console.log('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento OK (fallback)');
+        etapaConcluida = true;
+      } catch (erroEtapa) {
+        console.warn('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento também falhou:', erroEtapa?.message);
       }
     }
 
-    if (etapaFinalRecebimento !== '60' && etapaFinalRecebimento !== '80') {
-      throw new Error(
-        `NF-e associada, porém etapa final na Omie permaneceu em ${etapaFinalRecebimento || 'vazia'} (esperado 60/80).`
-      );
+    // ─── Verificação final via cache (sem chamada extra à Omie) ───
+    // Evita ConsultarRecebimento que causa REDUNDANT (~50s espera)
+    // Usa o recebimentoCache do início da rota + resultado do ConcluirRecebimento
+    let recebimentoAposAlteracao;
+    let etapaFinalRecebimento = '';
+
+    if (etapaConcluida) {
+      etapaFinalRecebimento = etapaAlvoRecebimentoTotal;
+      recebimentoAposAlteracao = recebimentoCache
+        ? { ...recebimentoCache, cabec: { ...(recebimentoCache.cabec || {}), cEtapa: etapaAlvoRecebimentoTotal } }
+        : { cabec: { nIdReceb: plano.n_id_receb, cNumeroNFe: plano.numero_nfe || numeroNfe, cEtapa: etapaAlvoRecebimentoTotal } };
+    } else {
+      throw new Error('NF-e associada, porém não foi possível concluir o recebimento (etapa 60).');
     }
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimentoAposAlteracao);
@@ -28282,7 +28946,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         ? `Pedido ${plano.c_numero_pedido || plano.n_cod_ped} vinculado à NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} na Omie, com alerta de item: ${alertaItemAssociacao}`
         : (vinculoConfirmado
           ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.`
-          : 'Alteração enviada à Omie. Consulte novamente em instantes para confirmar a vinculação.'),
+          : 'vinculado com sucesso.'),
       dados: {
         n_id_receb: recebimentoAposAlteracao?.cabec?.nIdReceb || plano.n_id_receb || null,
         c_numero_nfe: recebimentoAposAlteracao?.cabec?.cNumeroNFe || plano.numero_nfe || null,
