@@ -566,6 +566,37 @@ function detectarIntencaoCompra(texto) {
 }
 
 /**
+ * Busca categorias de compra via API e apresenta menu numerado,
+ * ou redireciona para digitação livre em caso de falha.
+ */
+async function buscarEApresentarCategorias(state) {
+  try {
+    const resp = await fetchWithTimeout(
+      `http://localhost:${process.env.PORT || 5001}/api/compras/categorias`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      10000
+    );
+    const data = await resp.json().catch(() => ({}));
+    const cats = Array.isArray(data?.categorias) ? data.categorias : [];
+    if (cats.length) {
+      state.data.categoriasLista = cats;
+      state.step = 'CATEGORIA';
+      let lista = '📂 *Categoria da compra:*\n\n';
+      cats.forEach((c, i) => {
+        lista += `*${i + 1}* - ${c.descricao}\n`;
+      });
+      lista += '\nDigite o *número* da categoria:';
+      return { content: lista };
+    }
+  } catch (err) {
+    console.warn('[WhatsApp/Compras] erro ao buscar categorias:', err?.message);
+  }
+  // Fallback: digitação livre
+  state.step = 'CATEGORIA_LIVRE';
+  return { content: '📂 Digite o nome da *categoria* da compra:' };
+}
+
+/**
  * Processa o fluxo de compras passo-a-passo.
  * Retorna { content } se o fluxo gerou resposta, ou null se não está em fluxo.
  */
@@ -740,19 +771,60 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
       }
       state.data.departamento = depts[escolha - 1];
       delete state.data.departamentosLista;
-      state.step = 'OBSERVACAO';
-      return { content: '📝 Alguma *observação*? (ou digite *pular*)' };
+      // Avança para categoria
+      return await buscarEApresentarCategorias(state);
     }
 
     /* ---- Passo 4b: Departamento livre ---- */
     case 'DEPARTAMENTO_LIVRE': {
       if (msg.length < 2) return { content: 'Digite o nome do departamento:' };
       state.data.departamento = msg;
+      // Avança para categoria
+      return await buscarEApresentarCategorias(state);
+    }
+
+    /* ---- Passo 5: Categoria (lista) ---- */
+    case 'CATEGORIA': {
+      const cats = state.data.categoriasLista || [];
+      const escolha = parseInt(msg, 10);
+      if (isNaN(escolha) || escolha < 1 || escolha > cats.length) {
+        return { content: `Digite um número de *1* a *${cats.length}*:` };
+      }
+      const catEscolhida = cats[escolha - 1];
+      state.data.categoria_compra_codigo = catEscolhida.codigo;
+      state.data.categoria_compra_nome = catEscolhida.descricao;
+      delete state.data.categoriasLista;
+      state.step = 'ANEXO';
+      return {
+        content:
+          '📎 Deseja anexar um *link* de referência (URL de produto, orçamento, etc.)?\n\n' +
+          'Envie o link ou digite *pular* para continuar sem anexo.'
+      };
+    }
+
+    /* ---- Passo 5b: Categoria livre (fallback) ---- */
+    case 'CATEGORIA_LIVRE': {
+      if (msg.length < 2) return { content: 'Digite o nome da categoria:' };
+      state.data.categoria_compra_nome = msg;
+      state.step = 'ANEXO';
+      return {
+        content:
+          '📎 Deseja anexar um *link* de referência (URL de produto, orçamento, etc.)?\n\n' +
+          'Envie o link ou digite *pular* para continuar sem anexo.'
+      };
+    }
+
+    /* ---- Passo 6: Anexo (link/URL) ---- */
+    case 'ANEXO': {
+      if (!/^pular$/i.test(msg)) {
+        // Aceita URL ou texto livre como link de referência
+        state.data.link = msg;
+      }
       state.step = 'OBSERVACAO';
       return { content: '📝 Alguma *observação*? (ou digite *pular*)' };
     }
 
-    /* ---- Passo 5: Observação ---- */
+    /* ---- Passo 7: Observação ---- */
     case 'OBSERVACAO': {
       if (!/^pular$/i.test(msg)) {
         state.data.observacao = msg;
@@ -765,6 +837,8 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
       resumo += `• *Produto:* ${d.produto_descricao}\n`;
       resumo += `• *Quantidade:* ${d.quantidade}\n`;
       resumo += `• *Departamento:* ${d.departamento}\n`;
+      if (d.categoria_compra_nome) resumo += `• *Categoria:* ${d.categoria_compra_nome}\n`;
+      if (d.link) resumo += `• *Link/Anexo:* ${d.link}\n`;
       if (d.observacao) resumo += `• *Obs:* ${d.observacao}\n`;
       resumo += `• *Solicitante:* ${d.solicitante}\n`;
       resumo += '\n*Confirmar solicitação?*\n\n1️⃣ Confirmar\n2️⃣ Cancelar';
@@ -796,8 +870,11 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
                 quantidade: d.quantidade,
                 departamento: d.departamento,
                 centro_custo: d.departamento,
+                categoria_compra_codigo: d.categoria_compra_codigo || '2.14.94',
+                categoria_compra_nome: d.categoria_compra_nome || 'Outros Materiais',
                 objetivo_compra: d.observacao || 'Solicitação via WhatsApp',
                 retorno_cotacao: 'Sim',
+                link: d.link || null,
                 solicitante: d.solicitante
               })
             },
@@ -819,8 +896,10 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
                   departamento: d.departamento,
                   centro_custo: d.departamento,
                   codigo_produto_omie: d.codigo_produto_omie || '',
+                  categoria_compra: d.categoria_compra_codigo || '',
                   observacao: d.observacao || 'Solicitação via WhatsApp'
                 }],
+                link: d.link || null,
                 solicitante: d.solicitante
               })
             },
