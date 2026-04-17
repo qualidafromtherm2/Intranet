@@ -496,6 +496,32 @@ async function enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone, bodyTex
   });
 }
 
+/**
+ * Verifica se o telefone pertence a um colaborador interno (cadastrado em auth_user.telefone_contato).
+ * Se sim, o chatbot WhatsApp usa o assistente completo (/api/ai/chat) em vez do manual-only.
+ */
+async function verificarContatoInterno(phoneDigits) {
+  if (!phoneDigits) return { isInternal: false, userId: null, username: null };
+  try {
+    const candidates = buildWhatsappPhoneCandidates(phoneDigits);
+    if (!candidates.length) return { isInternal: false, userId: null, username: null };
+    const { rows } = await pool.query(
+      `SELECT id, username
+         FROM public.auth_user
+        WHERE REGEXP_REPLACE(COALESCE(telefone_contato, ''), '\\D', '', 'g') = ANY($1::text[])
+          AND is_active = true
+        LIMIT 1`,
+      [candidates]
+    );
+    if (rows.length) {
+      return { isInternal: true, userId: rows[0].id, username: rows[0].username };
+    }
+  } catch (err) {
+    console.warn('[WhatsApp] falha ao verificar contato interno:', err?.message || err);
+  }
+  return { isInternal: false, userId: null, username: null };
+}
+
 async function gerarRespostaAutomaticaWhatsapp({ phone = '', profileName = '', userMessage = '', historyRows = [] }) {
   const phoneDigits = normalizePhoneDigits(phone);
   const userLabel = String(profileName || '').trim() || phoneDigits || 'Tecnico WhatsApp';
@@ -514,15 +540,28 @@ async function gerarRespostaAutomaticaWhatsapp({ phone = '', profileName = '', u
     });
   }
 
+  // Roteamento interno/externo: se o telefone está cadastrado em auth_user, usa assistente completo
+  const contatoInfo = await verificarContatoInterno(phoneDigits);
+  const modo = contatoInfo.isInternal ? 'interno' : 'externo';
+  const endpoint = contatoInfo.isInternal
+    ? `http://localhost:${process.env.PORT || 5001}/api/ai/chat`
+    : `http://localhost:${process.env.PORT || 5001}/api/ai/manual-chat`;
+  const source = contatoInfo.isInternal ? 'whatsapp_interno' : 'manual_tecnico_portal_at';
+  const chatbotUser = contatoInfo.isInternal && contatoInfo.username
+    ? contatoInfo.username
+    : userLabel;
+
+  console.log(`[WhatsApp] roteamento: modo=${modo}, phone=${phoneDigits}, user=${chatbotUser}, endpoint=${contatoInfo.isInternal ? '/api/ai/chat' : '/api/ai/manual-chat'}`);
+
   const resp = await fetchWithTimeout(
-    `http://localhost:${process.env.PORT || 5001}/api/ai/manual-chat`,
+    endpoint,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         conversationId: phoneDigits ? `whatsapp_${phoneDigits}` : undefined,
-        source: 'manual_tecnico_portal_at',
-        chatbotUser: userLabel,
+        source,
+        chatbotUser,
         chatbotToken: phoneDigits || userLabel,
         messages: sanitizedMessages
       })
@@ -535,14 +574,15 @@ async function gerarRespostaAutomaticaWhatsapp({ phone = '', profileName = '', u
   const manualPreviews = Array.isArray(payload?.manualPreviews) ? payload.manualPreviews : [];
 
   if (!resp.ok) {
-    throw new Error(content || `Falha ao consultar manual-chat (${resp.status})`);
+    throw new Error(content || `Falha ao consultar ${contatoInfo.isInternal ? 'chat' : 'manual-chat'} (${resp.status})`);
   }
   if (!content) {
-    throw new Error('O manual-chat não retornou conteúdo.');
+    throw new Error(`O ${contatoInfo.isInternal ? 'chat' : 'manual-chat'} não retornou conteúdo.`);
   }
   return {
     content,
-    manualPreviews
+    manualPreviews,
+    modo
   };
 }
 
@@ -751,8 +791,9 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
   });
 
   console.log(
-    '[SAC/WhatsApp] resposta automática enviada:',
+    '[WhatsApp] resposta automática enviada:',
     JSON.stringify({
+      mode: replyData?.modo || 'externo',
       from_phone_number_id: phoneNumberId,
       to_phone_requested: phoneDigits,
       to_phone_sent: sendResult?.sendPayload?.__meta?.sent_to || null,
