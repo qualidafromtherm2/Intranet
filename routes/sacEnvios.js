@@ -1213,6 +1213,176 @@ async function enviarRespostaWhatsappComMidia({
   };
 }
 
+/* ========================================================================
+ *  CONSULTA DE PRODUTO VIA WHATSAPP (info, estoque, imagem)
+ * ======================================================================== */
+
+/**
+ * Busca produto por código ou termo, com estoque e imagem.
+ * Retorna { texto, imageUrl } ou null se não encontrou.
+ */
+async function consultarProdutoDB(termoBusca) {
+  const termo = String(termoBusca || '').trim();
+  if (termo.length < 2) return null;
+
+  try {
+    // 1. Buscar produto — prioriza código exato, senão busca por descrição
+    let produto = null;
+    const { rows: exato } = await pool.query(
+      `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
+              ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
+              valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
+              obs_internas, tipo_compra
+       FROM public.produtos_omie
+       WHERE UPPER(codigo) = UPPER($1)
+       LIMIT 1`,
+      [termo]
+    );
+    if (exato.length) {
+      produto = exato[0];
+    } else {
+      // Busca parcial por código ou descrição
+      const { rows: parcial } = await pool.query(
+        `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
+                ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
+                valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
+                obs_internas, tipo_compra
+         FROM public.produtos_omie
+         WHERE codigo ILIKE $1 OR descricao ILIKE $1
+         ORDER BY CASE WHEN codigo ILIKE $1 THEN 0 ELSE 1 END, descricao ASC
+         LIMIT 1`,
+        [`%${termo}%`]
+      );
+      if (parcial.length) produto = parcial[0];
+    }
+
+    if (!produto) return null;
+
+    // 2. Buscar estoque por local
+    const { rows: estoqueRows } = await pool.query(
+      `SELECT e.local_codigo, e.saldo, e.fisico, e.reservado, e.pendente,
+              COALESCE(l.nome, e.local_nome, e.local_codigo) AS local_nome
+       FROM logistica.estoque_atual e
+       LEFT JOIN public.omie_locais_estoque l ON l.local_codigo = e.local_codigo
+       WHERE e.omie_prod_id = $1 AND e.saldo > 0
+       ORDER BY l.nome ASC`,
+      [produto.codigo_produto]
+    );
+
+    // 3. Buscar imagem
+    const { rows: imgRows } = await pool.query(
+      `SELECT url_imagem FROM public.produtos_omie_imagens
+       WHERE codigo_produto = $1 AND ativo = true AND url_imagem IS NOT NULL AND url_imagem != ''
+       ORDER BY pos ASC LIMIT 1`,
+      [String(produto.codigo_produto)]
+    );
+    const imageUrl = imgRows.length ? imgRows[0].url_imagem : null;
+
+    // 4. Montar texto formatado
+    let texto = `📦 *${produto.codigo}* — ${produto.descricao}\n\n`;
+
+    // Características
+    const detalhes = [];
+    if (produto.descr_detalhada) detalhes.push(`📝 ${produto.descr_detalhada}`);
+    if (produto.unidade) detalhes.push(`📏 Unidade: ${produto.unidade}`);
+    if (produto.marca) detalhes.push(`🏷️ Marca: ${produto.marca}`);
+    if (produto.modelo) detalhes.push(`🔧 Modelo: ${produto.modelo}`);
+    if (produto.descricao_familia) detalhes.push(`📂 Família: ${produto.descricao_familia}`);
+    if (produto.ncm && produto.ncm !== '0000.00.00') detalhes.push(`📋 NCM: ${produto.ncm}`);
+    if (produto.ean) detalhes.push(`🔢 EAN: ${produto.ean}`);
+    const pesoB = parseFloat(produto.peso_bruto || 0);
+    const pesoL = parseFloat(produto.peso_liq || 0);
+    if (pesoB > 0 || pesoL > 0) {
+      const pesos = [];
+      if (pesoB > 0) pesos.push(`Bruto: ${pesoB} kg`);
+      if (pesoL > 0) pesos.push(`Líquido: ${pesoL} kg`);
+      detalhes.push(`⚖️ Peso: ${pesos.join(' | ')}`);
+    }
+    const alt = parseFloat(produto.altura || 0);
+    const larg = parseFloat(produto.largura || 0);
+    const prof = parseFloat(produto.profundidade || 0);
+    if (alt > 0 || larg > 0 || prof > 0) {
+      detalhes.push(`📐 Dimensões: ${alt} x ${larg} x ${prof} (A×L×P)`);
+    }
+    if (detalhes.length) texto += detalhes.join('\n') + '\n\n';
+
+    // Estoque
+    if (estoqueRows.length) {
+      texto += '📊 *Estoque atual:*\n';
+      let totalGeral = 0;
+      for (const e of estoqueRows) {
+        const saldo = parseFloat(e.saldo || 0);
+        totalGeral += saldo;
+        const reservado = parseFloat(e.reservado || 0);
+        texto += `  • ${e.local_nome}: *${saldo}* un.`;
+        if (reservado > 0) texto += ` (${reservado} reserv.)`;
+        texto += '\n';
+      }
+      if (estoqueRows.length > 1) {
+        texto += `  📍 *Total geral: ${totalGeral} un.*\n`;
+      }
+    } else {
+      texto += '📊 Estoque: _sem saldo em estoque_\n';
+    }
+
+    // Imagem disponível?
+    if (imageUrl) {
+      texto += '\n📷 _Imagem disponível. Responda *"ver foto"* para recebê-la._';
+    }
+
+    return { texto, imageUrl, produto };
+  } catch (err) {
+    console.error('[WhatsApp/Produto] erro ao consultar produto:', err?.message || err);
+    return null;
+  }
+}
+
+// Cache temporário para último produto consultado por telefone (para "ver foto")
+const ultimoProdutoConsultado = new Map(); // key: phoneDigits, value: { imageUrl, codigo, updatedAt }
+const PRODUTO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+
+function limparCacheProdutos() {
+  const agora = Date.now();
+  for (const [phone, info] of ultimoProdutoConsultado) {
+    if (agora - info.updatedAt > PRODUTO_CACHE_TTL_MS) ultimoProdutoConsultado.delete(phone);
+  }
+}
+setInterval(limparCacheProdutos, 5 * 60 * 1000);
+
+/**
+ * Detecta se o user quer ver a foto do último produto consultado.
+ */
+function detectarPedidoFotoProduto(texto) {
+  if (!texto) return false;
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return /\b(ver foto|enviar? foto|mostrar? foto|enviar? imagem|ver imagem|mostrar? imagem|foto do produto|imagem do produto)\b/i.test(t);
+}
+
+/**
+ * Detecta intenção de consulta de produto e extrai o termo de busca.
+ * Retorna o termo ou null.
+ */
+function detectarConsultaProduto(texto) {
+  if (!texto) return null;
+  const t = texto.trim();
+  // Padrão 1: "consultar produto X", "buscar produto X", "verificar produto X"
+  const m1 = t.match(/\b(?:consultar?|buscar?|pesquisar?|verificar?)\s+(?:o\s+)?produto\s+[:\-]?\s*(.+)/i);
+  if (m1) return m1[1].trim().replace(/\?$/, '');
+  // Padrão 2: "informação/info/dados do produto X", "estoque do produto X"
+  const m2 = t.match(/\b(?:info(?:rma[çc][aã]o)?|dados?|estoque)\s+(?:do|de|sobre)\s+(?:o\s+)?produto\s+[:\-]?\s*(.+)/i);
+  if (m2) return m2[1].trim().replace(/\?$/, '');
+  // Padrão 3: "produto X" ou "código X" no início
+  const m3 = t.match(/^(?:produto|c[oó]digo|cod\.?)\s+[:\-]?\s*(.{2,})/i);
+  if (m3) return m3[1].trim().replace(/\?$/, '');
+  // Padrão 4: "qual o estoque de X", "estoque de X", "estoque do X"
+  const m4 = t.match(/\b(?:qual\s+(?:o\s+)?)?estoque\s+(?:de|do|d[oa])\s+(.+)/i);
+  if (m4) return m4[1].trim().replace(/\?$/, '');
+  // Padrão 5: "tem X em estoque", "tem X no estoque"
+  const m5 = t.match(/\btem\s+(.+?)\s+(?:em|no)\s+estoque/i);
+  if (m5) return m5[1].trim().replace(/\?$/, '');
+  return null;
+}
+
 async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, phoneNumberId, displayPhoneNumber }) {
   if (!WHATSAPP_CHATBOT_AUTOREPLY_ENABLED) return;
   const phoneDigits = normalizePhoneDigits(phone);
@@ -1255,6 +1425,106 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         outbound_message_id: outboundMessageId
       }));
       return;
+    }
+  }
+
+  // Consulta de produto: "ver foto" do último consultado ou busca nova
+  if (contatoInfo.isInternal) {
+    // Pedido de foto do último produto consultado
+    if (detectarPedidoFotoProduto(userText)) {
+      const cache = ultimoProdutoConsultado.get(phoneDigits);
+      if (cache?.imageUrl) {
+        try {
+          const imgPayload = await enviarMensagemWhatsappImagem({
+            phoneNumberId,
+            toPhone: phoneDigits,
+            imageUrl: cache.imageUrl,
+            caption: `📷 Foto: ${cache.codigo}`
+          });
+          const imgMsgId = String(imgPayload?.messages?.[0]?.id || '').trim() || null;
+          await insertWhatsappMessageRecord({
+            waMessageId: imgMsgId,
+            phone: phoneDigits,
+            profileName: 'Chatbot Fromtherm',
+            messageType: 'image',
+            messageText: `Foto do produto ${cache.codigo}`,
+            phoneNumberId,
+            displayPhoneNumber,
+            payload: imgPayload,
+            direction: 'outbound'
+          });
+          console.log('[WhatsApp] foto produto enviada:', cache.codigo);
+          return;
+        } catch (imgErr) {
+          console.warn('[WhatsApp] falha ao enviar foto do produto:', imgErr?.message);
+          const fallback = await enviarMensagemWhatsappTexto({
+            phoneNumberId,
+            toPhone: phoneDigits,
+            text: `⚠️ Não consegui enviar a foto. Acesse o link:\n${cache.imageUrl}`
+          });
+          await insertWhatsappMessageRecord({
+            waMessageId: String(fallback?.messages?.[0]?.id || '').trim() || null,
+            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+            messageType: 'text', messageText: `Link foto: ${cache.imageUrl}`,
+            phoneNumberId, displayPhoneNumber, payload: fallback, direction: 'outbound'
+          });
+          return;
+        }
+      } else {
+        const noImg = await enviarMensagemWhatsappTexto({
+          phoneNumberId,
+          toPhone: phoneDigits,
+          text: '📷 Nenhum produto consultado recentemente ou o produto não possui imagem.\nConsulte um produto primeiro: _"produto CODIGO"_ ou _"consultar produto NOME"_'
+        });
+        await insertWhatsappMessageRecord({
+          waMessageId: String(noImg?.messages?.[0]?.id || '').trim() || null,
+          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+          messageType: 'text', messageText: 'Nenhuma foto disponível',
+          phoneNumberId, displayPhoneNumber, payload: noImg, direction: 'outbound'
+        });
+        return;
+      }
+    }
+
+    // Consulta de produto por código/nome
+    const termoProduto = detectarConsultaProduto(userText);
+    if (termoProduto) {
+      const resultado = await consultarProdutoDB(termoProduto);
+      if (resultado) {
+        // Armazena no cache para "ver foto"
+        if (resultado.imageUrl) {
+          ultimoProdutoConsultado.set(phoneDigits, {
+            imageUrl: resultado.imageUrl,
+            codigo: resultado.produto.codigo,
+            updatedAt: Date.now()
+          });
+        }
+        const sendPayload = await enviarMensagemWhatsappTexto({
+          phoneNumberId,
+          toPhone: phoneDigits,
+          text: resultado.texto
+        });
+        const outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({
+          waMessageId: outboundMessageId,
+          phone: phoneDigits,
+          profileName: 'Chatbot Fromtherm',
+          messageType: 'text',
+          messageText: resultado.texto,
+          phoneNumberId,
+          displayPhoneNumber,
+          payload: sendPayload,
+          direction: 'outbound'
+        });
+        console.log('[WhatsApp] consulta produto enviada:', JSON.stringify({
+          mode: 'produto',
+          codigo: resultado.produto.codigo,
+          tem_imagem: !!resultado.imageUrl,
+          to_phone: phoneDigits
+        }));
+        return;
+      }
+      // Se não encontrou, deixa a IA responder normalmente
     }
   }
 
