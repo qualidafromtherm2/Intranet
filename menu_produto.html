@@ -10274,12 +10274,39 @@ function attachDropZone(ul) {
     const cabec = dados?.cabec || {};
     const totais = dados?.totais || {};
     const itens = Array.isArray(dados?.itensRecebimento) ? dados.itensRecebimento : [];
+    const recebParcelas = dados?.parcelas || {};
+    const infoCadastro = dados?.infoCadastro || {};
     const xmlIde = resumoXml?.ide || {};
     const xmlTotais = resumoXml?.totais || {};
     const xmlEmitente = resumoXml?.emitente || {};
     const xmlProtocolo = resumoXml?.protocolo || {};
     const xmlPagamento = resumoXml?.pagamento || {};
     const xmlItens = Array.isArray(resumoXml?.itens) ? resumoXml.itens : [];
+
+    // Extrair UF do código IBGE nos 2 primeiros dígitos da chave NF-e
+    const extrairUfDaChave = (chave) => {
+      const ibgeUfMap = {
+        '11':'RO','12':'AC','13':'AM','14':'RR','15':'PA','16':'AP','17':'TO',
+        '21':'MA','22':'PI','23':'CE','24':'RN','25':'PB','26':'PE','27':'AL','28':'SE','29':'BA',
+        '31':'MG','32':'ES','33':'RJ','35':'SP',
+        '41':'PR','42':'SC','43':'RS',
+        '50':'MS','51':'MT','52':'GO','53':'DF'
+      };
+      const cod = String(chave || '').replace(/\D/g, '').substring(0, 2);
+      return ibgeUfMap[cod] || '';
+    };
+
+    // Descrever condição de parcela Omie (cCodParcela)
+    const descreverCondicaoParcela = (cod) => {
+      const c = String(cod || '').trim();
+      if (!c) return '';
+      if (c === 'A00' || c === '000') return 'À vista';
+      const match = c.match(/^A(\d+)$/i);
+      if (match) return `A prazo ${match[1]} dias`;
+      const matchDd = c.match(/^(\d+)$/);
+      if (matchDd) return `${matchDd[1]} dias`;
+      return c;
+    };
     const itensPedido = Array.isArray(pedidoContexto?.itens) ? pedidoContexto.itens : [];
     const pedidoCriadoEm = (() => {
       const val = pedidoContexto?.d_inc_data;
@@ -10470,7 +10497,13 @@ function attachDropZone(ul) {
         </tr>`
       : `<tr><td colspan="7" style="padding:12px;text-align:center;color:#334155;">Sem itens do pedido para comparação.</td></tr>`;
 
-    const parcelas = Array.isArray(xmlPagamento.parcelas) ? xmlPagamento.parcelas : [];
+    const parcelasReceb = Array.isArray(recebParcelas?.parcelasLista) ? recebParcelas.parcelasLista.map((p, idx) => ({
+      idx: idx + 1,
+      numero: String(p.nSequencia || idx + 1),
+      vencimento: p.dVencimento || '-',
+      valor: p.vParcela
+    })) : [];
+    const parcelas = (Array.isArray(xmlPagamento.parcelas) && xmlPagamento.parcelas.length) ? xmlPagamento.parcelas : parcelasReceb;
     const emissaoExibicao = formatarDataBr(xmlIde.emissao || cabec.dEmissaoNFe || '-', true);
     const recebidoEmExibicao = formatarDataBr(xmlProtocolo.recebidoEm || '-', true);
     const descreverIndicadorPagamento = (codigo) => {
@@ -10480,7 +10513,7 @@ function attachDropZone(ul) {
         '2': 'Outros'
       };
       const c = String(codigo || '').trim();
-      if (!c) return '-';
+      if (!c) return '';
       return mapa[c] ? `${mapa[c]} (${c})` : `Código ${c}`;
     };
 
@@ -10563,7 +10596,7 @@ function attachDropZone(ul) {
             <td style="padding:7px;border-bottom:1px solid #1e293b;text-align:right;color:#e2e8f0;">${escaparHtml(formatarMoedaFlex(parcela.valor))}</td>
           </tr>
         `).join('')
-      : '<tr><td colspan="4" style="padding:10px;text-align:center;color:#cbd5e1;">Sem parcelas no XML.</td></tr>';
+      : '<tr><td colspan="4" style="padding:10px;text-align:center;color:#cbd5e1;">Sem parcelas disponíveis.</td></tr>';
 
     const blocoAcaoVinculo = numeroPedidoContexto
       ? `
@@ -10654,8 +10687,8 @@ function attachDropZone(ul) {
           <div><strong style="color:#93c5fd;">Número:</strong> ${escaparHtml(xmlIde.numero || cabec.cNumeroNFe || '-')}</div>
           <div><strong style="color:#93c5fd;">Série:</strong> ${escaparHtml(xmlIde.serie || cabec.cSerieNFe || '-')}</div>
           <div><strong style="color:#93c5fd;">Emissão:</strong> ${escaparHtml(emissaoExibicao)}</div>
-          <div><strong style="color:#93c5fd;">Modelo:</strong> ${escaparHtml(xmlIde.modelo || '-')}</div>
-          <div><strong style="color:#93c5fd;">Natureza:</strong> ${escaparHtml(xmlIde.natureza || '-')}</div>
+          <div><strong style="color:#93c5fd;">Modelo:</strong> ${escaparHtml(xmlIde.modelo || cabec.cModeloNFe || '-')}</div>
+          <div><strong style="color:#93c5fd;">Natureza:</strong> ${escaparHtml(xmlIde.natureza || cabec.cNaturezaOperacao || '-')}</div>
           <div><strong style="color:#93c5fd;">Etapa:</strong> ${renderizarBadgeEtapa(cabec.cEtapa, etapaInfo)}</div>
         </div>
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
@@ -10663,7 +10696,7 @@ function attachDropZone(ul) {
           <div><strong style="color:#93c5fd;">Nome:</strong> ${escaparHtml(xmlEmitente.nome || cabec.cRazaoSocial || cabec.cNome || '-')}</div>
           <div><strong style="color:#93c5fd;">CNPJ:</strong> ${escaparHtml(xmlEmitente.cnpj || cabec.cCNPJ_CPF || '-')}</div>
           <div><strong style="color:#93c5fd;">Município:</strong> ${escaparHtml(xmlEmitente.municipio || '-')}</div>
-          <div><strong style="color:#93c5fd;">UF:</strong> ${escaparHtml(xmlEmitente.uf || '-')}</div>
+          <div><strong style="color:#93c5fd;">UF:</strong> ${escaparHtml(xmlEmitente.uf || extrairUfDaChave(cabec.cChaveNFe) || '-')}</div>
         </div>
       </div>
 
@@ -10672,29 +10705,29 @@ function attachDropZone(ul) {
           <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Totais</div>
           <div><strong style="color:#93c5fd;">Valor NF:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorNf || cabec.nValorNFe || totais.vTotalNFe))}</div>
           <div><strong style="color:#93c5fd;">Valor Produtos:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.valorProdutos || totais.vTotalProdutos))}</div>
-          <div><strong style="color:#93c5fd;">ICMS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.icms))}</div>
-          <div><strong style="color:#93c5fd;">PIS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.pis))}</div>
-          <div><strong style="color:#93c5fd;">COFINS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.cofins))}</div>
+          <div><strong style="color:#93c5fd;">ICMS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.icms || totais.vICMS))}</div>
+          <div><strong style="color:#93c5fd;">PIS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.pis || totais.vTotalPIS))}</div>
+          <div><strong style="color:#93c5fd;">COFINS:</strong> ${escaparHtml(formatarMoedaFlex(xmlTotais.cofins || totais.vTotalCOFINS))}</div>
         </div>
         <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
           <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:6px;">Protocolo/SEFAZ</div>
-          <div><strong style="color:#93c5fd;">Chave:</strong> ${escaparHtml(xmlProtocolo.chave || '-')}</div>
+          <div><strong style="color:#93c5fd;">Chave:</strong> ${escaparHtml(xmlProtocolo.chave || cabec.cChaveNFe || '-')}</div>
           <div><strong style="color:#93c5fd;">Protocolo:</strong> ${escaparHtml(xmlProtocolo.protocolo || '-')}</div>
-          <div><strong style="color:#93c5fd;">Status:</strong> ${escaparHtml(xmlProtocolo.status || '-')}</div>
-          <div><strong style="color:#93c5fd;">Motivo:</strong> ${escaparHtml(xmlProtocolo.motivo || '-')}</div>
-          <div><strong style="color:#93c5fd;">Recebido em:</strong> ${escaparHtml(recebidoEmExibicao)}</div>
+          <div><strong style="color:#93c5fd;">Status:</strong> ${escaparHtml(xmlProtocolo.status || (infoCadastro.cFaturado === 'S' ? 'Autorizada' : infoCadastro.cCancelada === 'S' ? 'Cancelada' : '') || '-')}</div>
+          <div><strong style="color:#93c5fd;">Motivo:</strong> ${escaparHtml(xmlProtocolo.motivo || (infoCadastro.cFaturado === 'S' ? 'Autorizado o uso da NF-e' : '') || '-')}</div>
+          <div><strong style="color:#93c5fd;">Recebido em:</strong> ${escaparHtml(recebidoEmExibicao || (infoCadastro.dFat ? formatarDataBr(infoCadastro.dFat) + (infoCadastro.hFat ? ' ' + infoCadastro.hFat : '') : '') || '-')}</div>
         </div>
       </div>
 
       <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px;margin-bottom:10px;">
         <div style="font-size:13px;font-weight:700;color:#f8fafc;margin-bottom:8px;">Cobrança e Pagamento</div>
         <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:12px;color:#e2e8f0;margin-bottom:8px;">
-          <div><strong style="color:#93c5fd;">Fatura:</strong> ${escaparHtml(xmlPagamento.faturaNumero || '-')}</div>
-          <div><strong style="color:#93c5fd;">Valor Original:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorOriginal))}</div>
-          <div><strong style="color:#93c5fd;">Valor Líquido:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorLiquido))}</div>
-          <div><strong style="color:#93c5fd;">Condição:</strong> ${escaparHtml(descreverIndicadorPagamento(xmlPagamento.indicadorPagamento))}</div>
+          <div><strong style="color:#93c5fd;">Fatura:</strong> ${escaparHtml(xmlPagamento.faturaNumero || cabec.cNumeroNFe || '-')}</div>
+          <div><strong style="color:#93c5fd;">Valor Original:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorOriginal || cabec.nValorNFe))}</div>
+          <div><strong style="color:#93c5fd;">Valor Líquido:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorLiquido || cabec.nValorNFe))}</div>
+          <div><strong style="color:#93c5fd;">Condição:</strong> ${escaparHtml(descreverIndicadorPagamento(xmlPagamento.indicadorPagamento) || descreverCondicaoParcela(recebParcelas.cCodParcela) || '-')}</div>
           <div><strong style="color:#93c5fd;">Tipo Pagamento:</strong> ${escaparHtml(descreverTipoPagamento(xmlPagamento.tipoPagamento))}</div>
-          <div><strong style="color:#93c5fd;">Valor Pago:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorPago))}</div>
+          <div><strong style="color:#93c5fd;">Valor Pago:</strong> ${escaparHtml(formatarMoedaFlex(xmlPagamento.valorPago || cabec.nValorNFe))}</div>
           <div><strong style="color:#93c5fd;">Integração Cartão:</strong> ${escaparHtml(descreverIntegracaoCartao(xmlPagamento.integracaoCartao))}</div>
           <div><strong style="color:#93c5fd;">CNPJ Credenciadora:</strong> ${escaparHtml(xmlPagamento.cnpjCredenciadora || '-')}</div>
           <div><strong style="color:#93c5fd;">Bandeira:</strong> ${escaparHtml(descreverBandeiraCartao(xmlPagamento.bandeiraCartao))}</div>
@@ -10748,8 +10781,8 @@ function attachDropZone(ul) {
     const chaveNfeTexto = String(chaveNfe || '').trim();
     const chaveNfeDigitos = chaveNfeTexto.replace(/\D/g, '');
     if (chaveNfeDigitos) {
-      const hrefDownload = `/api/omie/nfe/xml-download?chave_nfe=${encodeURIComponent(chaveNfeDigitos)}&numero_nfe=${encodeURIComponent(String(numeroNfe || '').trim())}`;
-      modalSubtitulo.innerHTML = `Chave: <a href="${hrefDownload}" title="Baixar XML da NF-e" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
+      const hrefConsultaSefaz = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=${encodeURIComponent(chaveNfeDigitos)}`;
+      modalSubtitulo.innerHTML = `Chave: <a href="${hrefConsultaSefaz}" target="_blank" rel="noopener noreferrer" title="Consultar NF-e no portal da SEFAZ" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
     } else {
       modalSubtitulo.textContent = 'Chave: -';
     }
@@ -10896,13 +10929,15 @@ function attachDropZone(ul) {
       const dadosConsulta = payload?.data || {};
       if (chaveNfeDigitos) {
         const cPdf = String(dadosConsulta?.dfe_docs?.cPdf || '').trim();
-        const hrefSubtitulo = cPdf || `/api/omie/nfe/xml-download?chave_nfe=${encodeURIComponent(chaveNfeDigitos)}&numero_nfe=${encodeURIComponent(String(numeroNfe || '').trim())}`;
-        const titleSubtitulo = cPdf ? 'Abrir PDF da NF-e' : 'Baixar XML da NF-e';
-        const targetSubtitulo = cPdf ? ' target="_blank" rel="noopener noreferrer"' : '';
+        const hrefSefaz = `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=&nfe=${encodeURIComponent(chaveNfeDigitos)}`;
+        const hrefSubtitulo = cPdf || hrefSefaz;
+        const titleSubtitulo = cPdf ? 'Abrir PDF da NF-e' : 'Consultar NF-e no portal da SEFAZ';
+        const targetSubtitulo = ' target="_blank" rel="noopener noreferrer"';
         modalSubtitulo.innerHTML = `Chave: <a href="${escaparHtml(hrefSubtitulo)}"${targetSubtitulo} title="${titleSubtitulo}" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
       }
 
       let resumoXml = null;
+      let cPdfFromXml = '';
       try {
         const respXml = await fetch('/api/omie/nfe/xml', {
           method: 'POST',
@@ -10914,10 +10949,21 @@ function attachDropZone(ul) {
           })
         });
         const payloadXml = await respXml.json().catch(() => ({}));
-        if (respXml.ok && payloadXml?.ok && payloadXml?.cXml) {
-          resumoXml = extrairResumoXmlNfe(payloadXml.cXml);
+        if (respXml.ok && payloadXml?.ok) {
+          if (payloadXml.cXml) {
+            resumoXml = extrairResumoXmlNfe(payloadXml.cXml);
+          }
+          cPdfFromXml = String(payloadXml.cPdf || '').trim();
         }
       } catch (_errXml) {
+      }
+
+      // Atualiza link da Chave com PDF se disponível (vindo da consulta ou do ObterNfe)
+      if (chaveNfeDigitos && cPdfFromXml && modalSubtitulo) {
+        const cPdfAtual = String(dadosConsulta?.dfe_docs?.cPdf || '').trim();
+        if (!cPdfAtual) {
+          modalSubtitulo.innerHTML = `Chave: <a href="${escaparHtml(cPdfFromXml)}" target="_blank" rel="noopener noreferrer" title="Abrir PDF da NF-e" style="color:#93c5fd;text-decoration:underline;font-weight:700;">${escaparHtml(chaveNfeTexto)}</a>`;
+        }
       }
 
       const etapaInfo = payload?.etapa_info || null;

@@ -27802,29 +27802,53 @@ async function obterXmlNfeViaOmie({ nIdNF, nNF, chaveNfe, cModelo = '55' } = {})
       param: [paramConsulta]
     });
 
-    if (!consultaResp.ok || consultaResp.fault) {
-      return {
-        ok: false,
-        error: consultaResp.fault || `Erro HTTP ${consultaResp.status} ao consultar NF`,
-        fonte: 'ConsultarNF'
-      };
+    if (consultaResp.ok && !consultaResp.fault) {
+      const nIdDetectado = Number(
+        consultaResp.data?.compl?.nIdNF
+        || consultaResp.data?.compl?.nIdNf
+        || consultaResp.data?.nIdNF
+        || consultaResp.data?.nIdNfe
+      );
+      if (Number.isFinite(nIdDetectado) && nIdDetectado > 0) {
+        nIdParaConsulta = nIdDetectado;
+      }
     }
 
-    const nIdDetectado = Number(
-      consultaResp.data?.compl?.nIdNF
-      || consultaResp.data?.compl?.nIdNf
-      || consultaResp.data?.nIdNF
-      || consultaResp.data?.nIdNfe
-    );
+    // Fallback: ListarNFe via /produtos/nfe/ (aceita cChaveNFe)
+    if (!nIdParaConsulta && chaveLimpa) {
+      try {
+        const listarNfeResp = await callOmie('https://app.omie.com.br/api/v1/produtos/nfe/', {
+          call: 'ListarNFe',
+          app_key: OMIE_APP_KEY,
+          app_secret: OMIE_APP_SECRET,
+          param: [{ nPagina: 1, nRegPorPagina: 1, cChaveNFe: chaveLimpa }]
+        });
+        if (listarNfeResp.ok && !listarNfeResp.fault) {
+          const listagem = Array.isArray(listarNfeResp.data?.listagemNfe)
+            ? listarNfeResp.data.listagemNfe
+            : [];
+          const encontrado = listagem.find((item) => {
+            const chaveItem = String(item?.cChaveNFe || '').replace(/\D/g, '');
+            return chaveItem === chaveLimpa;
+          }) || listagem[0];
+          const nIdListado = Number(encontrado?.nIdNFe || 0);
+          if (Number.isFinite(nIdListado) && nIdListado > 0) {
+            nIdParaConsulta = nIdListado;
+            console.log(`[obterXmlNfeViaOmie] nIdNFe=${nIdListado} encontrado via ListarNFe (fallback)`);
+          }
+        }
+      } catch (_errListar) {
+        console.warn('[obterXmlNfeViaOmie] ListarNFe fallback falhou:', _errListar?.message);
+      }
+    }
 
-    if (!Number.isFinite(nIdDetectado) || nIdDetectado <= 0) {
+    if (!nIdParaConsulta) {
       return {
         ok: false,
-        error: 'ConsultarNF não retornou nIdNF válido',
-        fonte: 'ConsultarNF'
+        error: 'Não foi possível localizar nIdNF via ConsultarNF nem ListarNFe',
+        fonte: 'ConsultarNF+ListarNFe'
       };
     }
-    nIdParaConsulta = nIdDetectado;
   }
 
   if (!nIdParaConsulta) {
@@ -27903,7 +27927,9 @@ async function obterXmlNfeViaOmie({ nIdNF, nNF, chaveNfe, cModelo = '55' } = {})
     fonte: 'ObterNfe',
     nIdNF: nIdParaConsulta,
     nChave: String(chaveLimpa || ''),
-    cXml
+    cXml,
+    cPdf: String(obterResp.data?.cPdf || '').trim() || null,
+    cLinkPortal: String(obterResp.data?.cLinkPortal || '').trim() || null
   };
 }
 
@@ -29085,7 +29111,9 @@ app.post('/api/omie/nfe/xml', express.json(), async (req, res) => {
       fonte: resultado.fonte,
       nIdNF: resultado.nIdNF || nIdNF || null,
       nChave: resultado.nChave || null,
-      cXml: resultado.cXml
+      cXml: resultado.cXml,
+      cPdf: resultado.cPdf || null,
+      cLinkPortal: resultado.cLinkPortal || null
     });
   } catch (err) {
     console.error('[omie/nfe/xml] erro →', err);

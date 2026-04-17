@@ -1158,6 +1158,70 @@ module.exports = (pool) => {
         client.release();
       }
 
+      // Se o cache local não tem totais detalhados, parcelas, infoCadastro ou unidades nos itens,
+      // enriquecer com ConsultarRecebimento da Omie
+      if (retorno?.cabec?.nIdReceb && source === 'sql-cache') {
+        const faltamTotais = !retorno.totais?.vICMS && !retorno.totais?.vTotalPIS;
+        const faltamParcelas = !retorno.parcelas;
+        const faltamInfoCad = !retorno.infoCadastro?.dFat;
+        const itensCache = Array.isArray(retorno.itensRecebimento) ? retorno.itensRecebimento : [];
+        const faltamUnidItens = itensCache.some((it) => !it?.itensCabec?.cUnidadeNfe);
+        if (faltamTotais || faltamParcelas || faltamInfoCad || faltamUnidItens) {
+          try {
+            const appKeyEnrich = process.env.OMIE_APP_KEY;
+            const appSecretEnrich = process.env.OMIE_APP_SECRET;
+            if (appKeyEnrich && appSecretEnrich) {
+              const dadosOmie = await omieCall('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
+                call: 'ConsultarRecebimento',
+                param: [{ cChaveNfe: chaveNfe }],
+                app_key: appKeyEnrich,
+                app_secret: appSecretEnrich
+              }, { retryRedundant: false });
+              if (dadosOmie?.cabec?.nIdReceb) {
+                if (faltamTotais && dadosOmie.totais) retorno.totais = dadosOmie.totais;
+                if (faltamParcelas && dadosOmie.parcelas) retorno.parcelas = dadosOmie.parcelas;
+                if (faltamInfoCad && dadosOmie.infoCadastro) retorno.infoCadastro = dadosOmie.infoCadastro;
+                // Enriquecer itens: preservar código/descrição do cache local, completar unidade e EAN da Omie
+                const itensOmie = Array.isArray(dadosOmie.itensRecebimento) ? dadosOmie.itensRecebimento : [];
+                if (itensOmie.length && faltamUnidItens) {
+                  const mapaOmie = new Map();
+                  itensOmie.forEach((it) => {
+                    const seq = Number(it?.itensCabec?.nSequencia || 0);
+                    if (seq > 0) mapaOmie.set(seq, it);
+                  });
+                  retorno.itensRecebimento = itensCache.map((itemCache, idx) => {
+                    const seqCache = Number(itemCache?.itensCabec?.nSequencia || idx + 1);
+                    const itemOmie = mapaOmie.get(seqCache) || itensOmie[idx];
+                    if (!itemOmie) return itemCache;
+                    const cabCache = itemCache?.itensCabec || {};
+                    const cabOmie = itemOmie?.itensCabec || {};
+                    const ajCache = itemCache?.itensAjustes || {};
+                    const ajOmie = itemOmie?.itensAjustes || {};
+                    return {
+                      ...itemCache,
+                      itensCabec: {
+                        ...cabCache,
+                        cCodigoProduto: cabCache.cCodigoProduto || cabOmie.cCodigoProduto || null,
+                        cDescricaoProduto: cabCache.cDescricaoProduto || cabOmie.cDescricaoProduto || null,
+                        cUnidadeNfe: cabCache.cUnidadeNfe || cabOmie.cUnidadeNfe || null,
+                        cEAN: cabCache.cEAN || cabOmie.cEAN || null,
+                        cNCM: cabCache.cNCM || cabOmie.cNCM || null
+                      },
+                      itensAjustes: {
+                        ...ajCache,
+                        cUnidade: ajCache.cUnidade || ajOmie.cUnidade || null
+                      }
+                    };
+                  });
+                }
+              }
+            }
+          } catch (_errEnrich) {
+            console.warn('[GET /api/compras/nfe-xml-detalhes] aviso ao enriquecer sql-cache:', _errEnrich?.message);
+          }
+        }
+      }
+
       if (!retorno?.cabec?.nIdReceb) {
         const appKey = process.env.OMIE_APP_KEY;
         const appSecret = process.env.OMIE_APP_SECRET;
