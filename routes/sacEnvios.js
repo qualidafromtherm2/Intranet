@@ -440,6 +440,35 @@ async function enviarMensagemWhatsappImagem({ phoneNumberId, toPhone, imageUrl, 
   });
 }
 
+/**
+ * Envia indicador de digitação ("digitando...") + marca mensagem como lida.
+ * Requer o message_id da mensagem recebida do webhook.
+ */
+async function enviarTypingIndicator({ phoneNumberId, messageId }) {
+  if (!WHATSAPP_CLOUD_ACCESS_TOKEN || !phoneNumberId || !messageId) return;
+  try {
+    await fetchWithTimeout(
+      `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(String(phoneNumberId))}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          status: 'read',
+          message_id: messageId,
+          typing_indicator: { type: 'text' }
+        })
+      },
+      10000
+    );
+  } catch (err) {
+    console.warn('[WhatsApp] falha ao enviar typing indicator:', err?.message);
+  }
+}
+
 async function enviarMensagemWhatsappDocumento({ phoneNumberId, toPhone, documentUrl, caption = '', filename = '' }) {
   const link = String(documentUrl || '').trim();
   if (!link) throw new Error('URL do documento não informada.');
@@ -1219,15 +1248,15 @@ async function enviarRespostaWhatsappComMidia({
 
 /**
  * Busca produto por código ou termo, com estoque e imagem.
- * Retorna { texto, imageUrl } ou null se não encontrou.
+ * Retorna { texto, imageUrl, produto } (detalhe único) ou
+ * { tipo: 'lista', texto, produtos, total } (múltiplos resultados) ou null.
  */
 async function consultarProdutoDB(termoBusca) {
   const termo = String(termoBusca || '').trim();
   if (termo.length < 2) return null;
 
   try {
-    // 1. Buscar produto — prioriza código exato, senão busca por descrição
-    let produto = null;
+    // 1. Buscar produto — prioriza código exato
     const { rows: exato } = await pool.query(
       `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
               ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
@@ -1238,27 +1267,59 @@ async function consultarProdutoDB(termoBusca) {
        LIMIT 1`,
       [termo]
     );
+
+    // Código exato encontrado → retorna detalhe completo
     if (exato.length) {
-      produto = exato[0];
-    } else {
-      // Busca parcial por código ou descrição
-      const { rows: parcial } = await pool.query(
+      return await montarDetalheProduto(exato[0]);
+    }
+
+    // 2. Busca parcial por código ou descrição — pega até 50 para contar total
+    const { rows: parcial } = await pool.query(
+      `SELECT codigo_produto, codigo, descricao
+       FROM public.produtos_omie
+       WHERE codigo ILIKE $1 OR descricao ILIKE $1
+       ORDER BY CASE WHEN codigo ILIKE $1 THEN 0 ELSE 1 END, descricao ASC
+       LIMIT 50`,
+      [`%${termo}%`]
+    );
+
+    if (!parcial.length) return null;
+
+    // Se apenas 1 resultado, retorna detalhe completo
+    if (parcial.length === 1) {
+      // Busca dados completos do produto
+      const { rows: full } = await pool.query(
         `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
                 ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
                 valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
                 obs_internas, tipo_compra
          FROM public.produtos_omie
-         WHERE codigo ILIKE $1 OR descricao ILIKE $1
-         ORDER BY CASE WHEN codigo ILIKE $1 THEN 0 ELSE 1 END, descricao ASC
+         WHERE codigo_produto = $1
          LIMIT 1`,
-        [`%${termo}%`]
+        [parcial[0].codigo_produto]
       );
-      if (parcial.length) produto = parcial[0];
+      if (full.length) return await montarDetalheProduto(full[0]);
+      return null;
     }
 
-    if (!produto) return null;
+    // Múltiplos resultados → retorna lista paginável
+    return {
+      tipo: 'lista',
+      produtos: parcial,
+      total: parcial.length
+    };
+  } catch (err) {
+    console.error('[WhatsApp/Produto] erro ao consultar produto:', err?.message || err);
+    return null;
+  }
+}
 
-    // 2. Buscar estoque por local
+/**
+ * Monta o texto formatado com detalhes completos de um produto único (estoque + imagem).
+ */
+async function montarDetalheProduto(produto) {
+  try {
+    // Buscar estoque por local
     const { rows: estoqueRows } = await pool.query(
       `SELECT e.local_codigo, e.saldo, e.fisico, e.reservado, e.pendente,
               COALESCE(l.nome, e.local_nome, e.local_codigo) AS local_nome
@@ -1269,7 +1330,7 @@ async function consultarProdutoDB(termoBusca) {
       [produto.codigo_produto]
     );
 
-    // 3. Buscar imagem
+    // Buscar imagem
     const { rows: imgRows } = await pool.query(
       `SELECT url_imagem FROM public.produtos_omie_imagens
        WHERE codigo_produto = $1 AND ativo = true AND url_imagem IS NOT NULL AND url_imagem != ''
@@ -1278,7 +1339,7 @@ async function consultarProdutoDB(termoBusca) {
     );
     const imageUrl = imgRows.length ? imgRows[0].url_imagem : null;
 
-    // 4. Montar texto formatado
+    // Montar texto formatado
     let texto = `📦 *${produto.codigo}* — ${produto.descricao}\n\n`;
 
     // Características
@@ -1332,19 +1393,44 @@ async function consultarProdutoDB(termoBusca) {
 
     return { texto, imageUrl, produto };
   } catch (err) {
-    console.error('[WhatsApp/Produto] erro ao consultar produto:', err?.message || err);
+    console.error('[WhatsApp/Produto] erro ao montar detalhe:', err?.message || err);
     return null;
   }
+}
+
+/**
+ * Formata uma página de resultados da lista de produtos.
+ */
+function formatarListaProdutos(produtos, offset, total) {
+  const PAGE_SIZE = 10;
+  const pagina = produtos.slice(offset, offset + PAGE_SIZE);
+  const fim = Math.min(offset + PAGE_SIZE, total);
+
+  let texto = `🔍 Encontrei *${total}* produto(s). Mostrando *${offset + 1}-${fim}*:\n\n`;
+  pagina.forEach((p, i) => {
+    texto += `*${offset + i + 1}.* \`${p.codigo}\` — ${p.descricao}\n`;
+  });
+  texto += '\n📌 Responda com o *número* do produto para ver detalhes completos.';
+  if (fim < total) {
+    texto += '\n➡️ Responda *"ver mais"* para ver os próximos.';
+  }
+  return texto;
 }
 
 // Cache temporário para último produto consultado por telefone (para "ver foto")
 const ultimoProdutoConsultado = new Map(); // key: phoneDigits, value: { imageUrl, codigo, updatedAt }
 const PRODUTO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 
+// Cache de busca de produtos para paginação (para "ver mais" e seleção por número)
+const ultimaBuscaProdutos = new Map(); // key: phoneDigits, value: { termo, produtos, offset, updatedAt }
+
 function limparCacheProdutos() {
   const agora = Date.now();
   for (const [phone, info] of ultimoProdutoConsultado) {
     if (agora - info.updatedAt > PRODUTO_CACHE_TTL_MS) ultimoProdutoConsultado.delete(phone);
+  }
+  for (const [phone, info] of ultimaBuscaProdutos) {
+    if (agora - info.updatedAt > PRODUTO_CACHE_TTL_MS) ultimaBuscaProdutos.delete(phone);
   }
 }
 setInterval(limparCacheProdutos, 5 * 60 * 1000);
@@ -1356,6 +1442,30 @@ function detectarPedidoFotoProduto(texto) {
   if (!texto) return false;
   const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   return /\b(ver foto|enviar? foto|mostrar? foto|enviar? imagem|ver imagem|mostrar? imagem|foto do produto|imagem do produto)\b/i.test(t);
+}
+
+/**
+ * Detecta se o user quer ver mais resultados da busca de produtos.
+ */
+function detectarPedidoVerMais(texto) {
+  if (!texto) return false;
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return /\b(ver mais|mostrar mais|mais produtos|proxim[oa]s?|proxima lista|listar mais|continuar lista)\b/i.test(t);
+}
+
+/**
+ * Detecta seleção de produto por número (ex: "1", "3", "produto 2", "#5").
+ * Retorna o número ou null.
+ */
+function detectarSelecaoProdutoLista(texto) {
+  if (!texto) return null;
+  const t = texto.trim();
+  const m = t.match(/^(?:#|produto\s*)?(\d{1,2})$/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1 && n <= 50) return n;
+  }
+  return null;
 }
 
 /**
@@ -1383,11 +1493,16 @@ function detectarConsultaProduto(texto) {
   return null;
 }
 
-async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, phoneNumberId, displayPhoneNumber }) {
+async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, waMessageId, phoneNumberId, displayPhoneNumber }) {
   if (!WHATSAPP_CHATBOT_AUTOREPLY_ENABLED) return;
   const phoneDigits = normalizePhoneDigits(phone);
   const userText = String(messageText || '').trim();
   if (!phoneDigits || !userText) return;
+
+  // Envia indicador de "digitando..." + marca como lida
+  if (waMessageId && phoneNumberId) {
+    enviarTypingIndicator({ phoneNumberId, messageId: waMessageId }).catch(() => {});
+  }
 
   // Verificar contato interno para fluxo de compras
   const contatoInfo = await verificarContatoInterno(phoneDigits);
@@ -1428,7 +1543,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     }
   }
 
-  // Consulta de produto: "ver foto" do último consultado ou busca nova
+  // Consulta de produto: "ver foto", "ver mais", seleção por número, ou busca nova
   if (contatoInfo.isInternal) {
     // Pedido de foto do último produto consultado
     if (detectarPedidoFotoProduto(userText)) {
@@ -1486,12 +1601,107 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       }
     }
 
+    // "Ver mais" — paginação da última busca de produtos
+    if (detectarPedidoVerMais(userText)) {
+      const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
+      if (buscaCache?.produtos?.length) {
+        const PAGE_SIZE = 10;
+        const novoOffset = buscaCache.offset + PAGE_SIZE;
+        if (novoOffset >= buscaCache.produtos.length) {
+          const msg = await enviarMensagemWhatsappTexto({
+            phoneNumberId, toPhone: phoneDigits,
+            text: '📋 Não há mais produtos para mostrar nesta busca.\nFaça uma nova consulta: _"produto NOME"_ ou _"consultar produto CODIGO"_'
+          });
+          await insertWhatsappMessageRecord({
+            waMessageId: String(msg?.messages?.[0]?.id || '').trim() || null,
+            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+            messageType: 'text', messageText: 'Fim da lista de produtos',
+            phoneNumberId, displayPhoneNumber, payload: msg, direction: 'outbound'
+          });
+          return;
+        }
+        buscaCache.offset = novoOffset;
+        buscaCache.updatedAt = Date.now();
+        const textoLista = formatarListaProdutos(buscaCache.produtos, novoOffset, buscaCache.produtos.length);
+        const msg = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: textoLista });
+        await insertWhatsappMessageRecord({
+          waMessageId: String(msg?.messages?.[0]?.id || '').trim() || null,
+          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+          messageType: 'text', messageText: textoLista,
+          phoneNumberId, displayPhoneNumber, payload: msg, direction: 'outbound'
+        });
+        console.log('[WhatsApp] ver mais produtos:', JSON.stringify({ offset: novoOffset, total: buscaCache.produtos.length, to_phone: phoneDigits }));
+        return;
+      }
+    }
+
+    // Seleção de produto por número da lista
+    const numSelecionado = detectarSelecaoProdutoLista(userText);
+    if (numSelecionado !== null) {
+      const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
+      if (buscaCache?.produtos?.length && numSelecionado <= buscaCache.produtos.length) {
+        const prodSelecionado = buscaCache.produtos[numSelecionado - 1];
+        // Busca dados completos do produto selecionado
+        const { rows: full } = await pool.query(
+          `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
+                  ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
+                  valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
+                  obs_internas, tipo_compra
+           FROM public.produtos_omie
+           WHERE codigo_produto = $1
+           LIMIT 1`,
+          [prodSelecionado.codigo_produto]
+        );
+        if (full.length) {
+          const detalhe = await montarDetalheProduto(full[0]);
+          if (detalhe) {
+            if (detalhe.imageUrl) {
+              ultimoProdutoConsultado.set(phoneDigits, {
+                imageUrl: detalhe.imageUrl,
+                codigo: detalhe.produto.codigo,
+                updatedAt: Date.now()
+              });
+            }
+            const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: detalhe.texto });
+            await insertWhatsappMessageRecord({
+              waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
+              phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+              messageType: 'text', messageText: detalhe.texto,
+              phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+            });
+            console.log('[WhatsApp] detalhe produto selecionado:', JSON.stringify({ num: numSelecionado, codigo: full[0].codigo, to_phone: phoneDigits }));
+            return;
+          }
+        }
+      }
+    }
+
     // Consulta de produto por código/nome
     const termoProduto = detectarConsultaProduto(userText);
     if (termoProduto) {
       const resultado = await consultarProdutoDB(termoProduto);
       if (resultado) {
-        // Armazena no cache para "ver foto"
+        // Resultado é lista de múltiplos produtos
+        if (resultado.tipo === 'lista') {
+          ultimaBuscaProdutos.set(phoneDigits, {
+            termo: termoProduto,
+            produtos: resultado.produtos,
+            offset: 0,
+            updatedAt: Date.now()
+          });
+          const textoLista = formatarListaProdutos(resultado.produtos, 0, resultado.total);
+          const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: textoLista });
+          await insertWhatsappMessageRecord({
+            waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
+            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+            messageType: 'text', messageText: textoLista,
+            phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+          });
+          console.log('[WhatsApp] lista produtos enviada:', JSON.stringify({ termo: termoProduto, total: resultado.total, to_phone: phoneDigits }));
+          return;
+        }
+
+        // Resultado é produto único com detalhes
         if (resultado.imageUrl) {
           ultimoProdutoConsultado.set(phoneDigits, {
             imageUrl: resultado.imageUrl,
@@ -4747,6 +4957,7 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
               phone: fromPhoneDigits,
               profileName,
               messageText: textBody,
+              waMessageId,
               buttonReplyId: String(message?.interactive?.button_reply?.id || '').trim() || null,
               phoneNumberId: String(metadata?.phone_number_id || '').trim() || null,
               displayPhoneNumber: String(metadata?.display_phone_number || '').trim() || null
