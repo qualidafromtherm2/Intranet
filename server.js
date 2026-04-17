@@ -21744,8 +21744,8 @@ app.post('/api/compras/solicitacao', express.json(), async (req, res) => {
     const compraRealizada = compra_realizada === true;
     const notaFiscalGlobal = String(n_nota_fiscal || '').trim();
     
-    // Obtém usuário da sessão
-    const solicitante = req.session?.user?.username || req.session?.user?.id || 'sistema';
+    // Obtém usuário da sessão (fallback para body.solicitante — usado pelo chatbot WhatsApp)
+    const solicitante = req.session?.user?.username || req.session?.user?.id || req.body?.solicitante || 'sistema';
     
     console.log('[Compras-Solicitacao] Recebido:', {
       totalItens: itens?.length,

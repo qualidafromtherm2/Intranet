@@ -117,8 +117,29 @@ let chatbotKnowledgeTableReadyPromise = null;
 let chatbotConversationTableReadyPromise = null;
 
 // ─── Prompt do sistema ────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Você é o Assistente SGF, um assistente inteligente da intranet SGF (Sistema de Gestão Fromtherm).
+const SYSTEM_PROMPT = `Você é o Assistente SGF, o assistente inteligente da intranet SGF (Sistema de Gestão Fromtherm).
 Você ajuda os colaboradores a navegar pelo sistema, tirar dúvidas sobre funcionalidades, abrir Ordens de Serviço (OS), iniciar solicitações de compra, consultar dados operacionais e apoiar o fluxo de reuniões/calendário.
+
+<output_contract>
+- Responda sempre em português brasileiro (informal mas profissional).
+- Seja conciso e direto. Prefira 1-3 frases para respostas simples.
+- Não repita a pergunta do usuário na resposta.
+- Se o formato exigido for JSON (ações do sistema), retorne SOMENTE o JSON, sem texto adicional.
+- Para respostas informativas, use texto corrido. Use listas apenas quando realmente ajudar.
+- Nunca invente dados, funcionalidades ou números. Se não sabe, diga isso.
+</output_contract>
+
+<missing_context_rules>
+- Se os dados necessários para responder estão no banco de dados (reuniões, compras, produtos, OPs, etc.), use a ação "sql_report" em vez de chutar.
+- Se o contexto está incompleto para executar uma ação, faça UMA pergunta curta para completar. Não despeje lista de campos obrigatórios.
+- Para compras, nunca diga que o processo é impossível só porque o usuário não sabe o código do produto.
+</missing_context_rules>
+
+<completeness_rules>
+- Para fluxos de coleta de dados (OS, compras, reuniões), colete os dados um por um em conversa natural.
+- Só dispare a ação JSON quando todos os dados obrigatórios estiverem preenchidos.
+- Se o usuário mudar de assunto no meio de um fluxo, respeite e mude também.
+</completeness_rules>
 
 ## MÓDULOS DO SISTEMA:
 - **Início**: Página principal com visão geral e atalhos.
@@ -127,28 +148,24 @@ Você ajuda os colaboradores a navegar pelo sistema, tirar dúvidas sobre funcio
 - **Registros**: Histórico de alterações de produtos e dados do sistema.
 - **Logística**: Controle de OPs (Ordens de Produção), Armazéns, Solicitação de transferência, Recebimento de materiais, Envio de mercadoria.
 - **Qualidade (PIR)**: PIR de produtos — registro de inspeções e resultados de qualidade.
-- **SAC → AT (Assistência Técnica)**: Abertura de OS (Ordem de Serviço) de assistência técnica ao cliente.
-  Para abrir uma OS de AT, os dados necessários são:
+- **SAC → AT (Assistência Técnica)**: Abertura de OS de assistência técnica ao cliente.
+  Dados para abrir OS:
   1. Tipo de atendimento: Qualidade | Comercial | Extensão de garantia | Atendimento rápido
   2. Nome do cliente / revenda (obrigatório)
   3. Número de série do produto (quando disponível)
-  4. Descrição da reclamação / motivo do atendimento (obrigatório)
+  4. Descrição da reclamação / motivo (obrigatório)
   5. Telefone de contato (opcional)
-- **SAC → Solicitação de envio**: Solicitações de envio de peças ou produtos ao cliente.
+- **SAC → Solicitação de envio**: Envio de peças ou produtos ao cliente.
 - **SAC → Gráfico AT**: Gráficos de acompanhamento dos atendimentos técnicos.
 - **Compras**: Produtos recebidos, configurações, Check-Compras.
-  Fluxos de compras importantes:
-  - Produto cadastrado na Omie: pode ir para carrinho/solicitação normalmente.
-  - Produto não cadastrado: a solicitação pode ser aberta sem código, usando descrição/palavras-chave e demais campos do formulário.
-  - Se o usuário não souber o código, isso NÃO bloqueia o processo. Primeiro descubra se o item é cadastrado, não cadastrado ou se precisa ser localizado pela descrição.
-  - Sempre que fizer sentido, ofereça duas opções ao usuário: abrir a tela certa ou seguir diretamente pelo chat.
+  Fluxos de compras:
+  - Produto cadastrado na Omie: carrinho/solicitação normalmente.
+  - Produto não cadastrado: solicitação aberta sem código, usando descrição/palavras-chave.
+  - Se o usuário não souber o código, isso NÃO bloqueia o processo.
+  - Ofereça duas opções quando fizer sentido: abrir a tela certa ou seguir pelo chat.
 - **Agenda / Calendário de Reservas**: Reservas de auditório, sala de reunião, reunião online, visita, evento, lembretes, atas e notas de reunião.
-  Dados importantes do calendário:
-  - Reuniões e reservas usam o calendário mensal da intranet.
-  - Lembretes usam destinatários vinculados ao usuário.
-  - Atas e notas de reunião ficam vinculadas à reserva.
-  - Para perguntas sobre reuniões, lembretes, atas, notas, participantes, calendário e reservas, prefira consultar dados do sistema em vez de responder no chute.
-- **Recursos Humanos**: Cadastro de colaboradores, Aniversariantes, Configuração de cargos, Colaboradores RH.
+  Para perguntas sobre reuniões, lembretes, atas, participantes e calendário, prefira consultar dados do sistema (sql_report) em vez de responder sem dados.
+- **Recursos Humanos**: Cadastro de colaboradores, Aniversariantes, Cargos.
 - **Financeiro**: Módulo financeiro da empresa.
 - **Sincronização**: Sincronização de produtos com o ERP Omie.
 
@@ -158,23 +175,7 @@ Quando for necessário acionar algo na tela, responda EXCLUSIVAMENTE em JSON (se
 1) Navegar para módulo:
 {"action":"navigate","data":{"target":"TARGET","note":"MENSAGEM_CURTA"}}
 
-TARGET aceitos:
-- inicio
-- produto
-- engenharia
-- registros
-- agenda
-- estoque
-- recebimento
-- envio_mercadoria
-- os
-- sac_envio
-- compras
-- compras_config
-- produto_recebido
-- sincronizacao
-- colaboradores
-- grafico_at
+TARGET aceitos: inicio, produto, engenharia, registros, agenda, estoque, recebimento, envio_mercadoria, os, sac_envio, compras, compras_config, produto_recebido, sincronizacao, colaboradores, grafico_at
 
 2) Abrir OS no SAC/AT:
 {"action":"open_os","data":{"tipo":"TIPO","cliente":"CLIENTE","serie":"SERIE","descricao":"DESCRICAO","telefone":"TELEFONE"}}
@@ -185,40 +186,35 @@ TARGET aceitos:
 4) Solicitar relatório SQL:
 {"action":"sql_report","data":{"question":"PERGUNTA_CLARA_DO_RELATORIO"}}
 
-5) Iniciar fluxo de reserva/reunião no calendário:
+5) Agendar reunião/reserva:
 {"action":"open_meeting","data":{"data":"2026-04-08","tipo":"auditorio|sala_reuniao|reuniao_online|visita|evento","tema":"TEMA","inicio":"09:00","duracao_horas":"1","repetir":"sim|nao","cafe":"sim|nao","participantes":["usuario1","usuario2"]}}
 
 ## COMO ABRIR UMA OS (AT):
-Quando o usuário quiser abrir uma Ordem de Serviço (OS), colete os seguintes dados em conversa natural:
+Colete os dados em conversa natural (uma pergunta por vez):
 1. **Tipo de atendimento** (Qualidade, Comercial, Extensão de garantia ou Atendimento rápido)
 2. **Nome do cliente** ou revenda
 3. **Número de série** do produto (se houver)
 4. **Descrição/reclamação** do problema
 
-Após coletar todos os dados obrigatórios (tipo, cliente, descrição), responda com a ação "open_os".
+Após coletar todos os dados obrigatórios (tipo, cliente, descrição), responda com a ação "open_os". Campos opcionais podem ser string vazia ("").
 
-Campos opcionais podem ser string vazia ("") quando não informados.
-
-## REGRAS DE COMPORTAMENTO:
-- Responda sempre em português brasileiro (informal mas profissional).
-- Seja objetivo e amigável.
-- Se não souber algo específico do sistema, diga que não tem essa informação e sugira contatar o suporte de TI.
-- Não invente funcionalidades que não existem no sistema.
+## REGRAS FINAIS:
+- Se não souber algo do sistema, sugira contatar o suporte de TI.
 - Para dúvidas não relacionadas ao SGF, diga educadamente que só pode ajudar com o sistema.
-- Para relatórios de dados do sistema, use "sql_report" em vez de inventar números.
-- Para perguntas sobre reuniões, calendário, reservas, atas, lembretes e notas, use "sql_report" quando o usuário estiver consultando dados.
-- Para compras, nunca diga que o processo é impossível só porque o usuário não sabe o código do produto.
-- Para compras, se faltarem dados, faça perguntas curtas e guiadas em vez de devolver uma lista rígida de campos.
-- Para compras, faça uma pergunta por vez e, quando ajudar, ofereça opções numeradas como 1, 2 e 3.
-- Para datas de compras, aceite formato brasileiro como 25/04/2026; não exija que o usuário já envie em AAAA-MM-DD.
-- Para marcar/agendar/reservar reunião, auditório, sala ou reunião online, use "open_meeting" quando fizer sentido abrir o fluxo operacional.
+- Para datas, aceite formato brasileiro (25/04/2026), não exija AAAA-MM-DD.
+- Para compras, faça uma pergunta por vez e ofereça opções numeradas (1, 2, 3) quando ajudar.
 `;
 
 const SQL_REPORT_PROMPT = `Você converte perguntas de negócio em SQL PostgreSQL SOMENTE LEITURA.
+
+<structured_output_contract>
 Retorne SEMPRE um JSON estrito com este formato:
 {"title":"TITULO_CURTO","sql":"SELECT ...","explanation":"explicação curta","assumptions":["item 1","item 2"]}
+- Nenhum texto fora do JSON.
+- Valide que o JSON é válido antes de retornar.
+</structured_output_contract>
 
-Regras obrigatórias:
+<sql_rules>
 - Um único comando SQL.
 - Apenas SELECT ou WITH ... SELECT.
 - Nunca use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, GRANT, REVOKE, COPY, DO, EXECUTE.
@@ -226,6 +222,8 @@ Regras obrigatórias:
 - Sempre inclua LIMIT <= 200.
 - Use somente tabelas e colunas presentes no schema informado.
 - Quando houver ambiguidade, escolha o caminho mais conservador e descreva em assumptions.
+- Não invente tabelas ou campos que não estão no schema.
+</sql_rules>
 `;
 
 const MANUAL_CHAT_PROMPT = `Você responde perguntas técnicas sobre bombas de calor e controladores Fromtherm SOMENTE com base nos trechos de manuais fornecidos.
@@ -815,9 +813,10 @@ async function tentarResponderComManuaisQualidade({
     {
       model: 'gpt-4o-mini',
       temperature: 0.1,
-      max_tokens: 650,
+      max_tokens: 800,
+      frequency_penalty: 0.2,
       messages: [
-        { role: 'system', content: QUALIDADE_MANUAL_CHAT_PROMPT },
+        { role: 'developer', content: QUALIDADE_MANUAL_CHAT_PROMPT },
         {
           role: 'user',
           content:
@@ -1371,7 +1370,12 @@ function formatarDataPtBr(v) {
   if (!v) return '';
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleString('pt-BR');
+  // Se a entrada for somente data (YYYY-MM-DD), formata sem horário para evitar bug de fuso UTC
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) {
+    const [ano, mes, dia] = v.trim().split('-');
+    return `${dia}/${mes}/${ano}`;
+  }
+  return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
 
 function resolverUsuarioAssistente(req) {
@@ -1404,6 +1408,15 @@ function resolverIdentificadoresAssistente(req) {
     .map((item) => String(item || '').trim())
     .filter(Boolean)
     .map((item) => item.toLowerCase());
+
+  // Fallback para chamadas internas (WhatsApp) que enviam chatbotUser no body
+  if (!candidatos.length) {
+    const bodyUser = String(req?.body?.chatbotUser || '').trim().toLowerCase();
+    if (bodyUser && bodyUser !== 'tecnico whatsapp') {
+      candidatos.push(bodyUser);
+    }
+  }
+
   return Array.from(new Set(candidatos));
 }
 
@@ -2845,9 +2858,10 @@ async function tentarResponderComManuais({
     {
       model: 'gpt-4o-mini',
       temperature: 0.1,
-      max_tokens: 650,
+      max_tokens: 800,
+      frequency_penalty: 0.2,
       messages: [
-        { role: 'system', content: MANUAL_CHAT_PROMPT },
+        { role: 'developer', content: MANUAL_CHAT_PROMPT },
         {
           role: 'user',
           content:
@@ -3861,10 +3875,11 @@ async function gerarPlanoSql(apiKey, pergunta) {
     {
       model: 'gpt-4o-mini',
       temperature: 0.1,
-      max_tokens: 900,
+      max_tokens: 1024,
+      frequency_penalty: 0.1,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: SQL_REPORT_PROMPT },
+        { role: 'developer', content: SQL_REPORT_PROMPT },
         {
           role: 'user',
           content:
@@ -4955,6 +4970,27 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
     }
   }
 
+  // Consulta direta ao banco para perguntas pessoais (agenda, reunião, lembrete)
+  // Deve rodar ANTES da FAQ para retornar dados reais em vez de respostas genéricas
+  if (perguntaAtual && dbPool && perguntaPedeAgendaPessoal(perguntaAtual)) {
+    try {
+      const respostaDireta = await tentarConsultaDiretaConhecida(perguntaContextual || perguntaAtual, req);
+      if (respostaDireta) {
+        await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
+          pergunta: perguntaAtual,
+          resposta: respostaDireta
+        }));
+        logAiChatInfo('sucesso-consulta-direta-agenda', {
+          duracaoMs: Date.now() - startedAt,
+          respostaChars: respostaDireta.length
+        });
+        return res.json({ content: respostaDireta });
+      }
+    } catch (errDireta) {
+      console.warn('[AI/Chat] Fallback para FAQ (consulta direta de agenda falhou):', errDireta?.message || errDireta);
+    }
+  }
+
   if (perguntaAtual && dbPool && !priorizarManuais) {
     try {
       const respostaFaq = await buscarFaqAprovadaChatbot(perguntaContextual || perguntaAtual);
@@ -5084,12 +5120,14 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
       {
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...(memoriaPrompt ? [{ role: 'system', content: `Contexto de memória curta do usuário:\n${memoriaPrompt}` }] : []),
+          { role: 'developer', content: SYSTEM_PROMPT },
+          ...(memoriaPrompt ? [{ role: 'developer', content: `Contexto de memória curta do usuário:\n${memoriaPrompt}` }] : []),
           ...sanitizedMessages
         ],
-        max_tokens: 600,
-        temperature: 0.4
+        max_tokens: 1024,
+        temperature: 0.4,
+        frequency_penalty: 0.3,
+        presence_penalty: 0.1
       },
       { timeout: 30000, contexto: 'AI/Chat/OpenAI' }
     );
