@@ -551,8 +551,18 @@ setInterval(limparFluxosExpirados, 5 * 60 * 1000);
 
 function detectarIntencaoCompra(texto) {
   if (!texto) return false;
-  const t = texto.toLowerCase().trim();
-  return /\b(quero comprar|preciso comprar|solicitar compra|requisição de compra|fazer compra|nova compra|abrir compra|comprar material|compra de material|iniciar compra)\b/i.test(t);
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  // Padrão 1: verbo + "compra(r)" — cobre "realizar compra", "fazer compra", "quero comprar", etc.
+  if (/\b(quero|preciso|vou|gostaria\s+de|necessito|posso)\s+(comprar|fazer\s+(uma\s+)?compra|realizar\s+(uma\s+)?compra)/i.test(t)) return true;
+  // Padrão 2: ação + "compra/requisição/solicitação"
+  if (/\b(solicitar|fazer|realizar|iniciar|abrir|pedir|criar|registrar|lancar)\s+(uma\s+)?(compra|requisicao|solicitacao)\b/i.test(t)) return true;
+  // Padrão 3: imperativo — "realize/faça/abra uma compra"
+  if (/\b(realize|faca|abra|inicie|peca|crie)\s+(uma\s+)?(compra|requisicao|solicitacao)\b/i.test(t)) return true;
+  // Padrão 4: "nova compra", "compra de material", "comprar material"
+  if (/\b(nova\s+compra|compra\s+de\s+material|comprar\s+material|comprar\s+produto)\b/i.test(t)) return true;
+  // Padrão 5: frases diretas — "então realize/faça uma compra"
+  if (/\bentao\b.*\b(compra|comprar)\b/i.test(t)) return true;
+  return false;
 }
 
 /**
