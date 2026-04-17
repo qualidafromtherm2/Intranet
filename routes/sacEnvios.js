@@ -572,18 +572,23 @@ function detectarIntencaoCompra(texto) {
 async function buscarEApresentarCategorias(state) {
   try {
     const resp = await fetchWithTimeout(
-      `http://localhost:${process.env.PORT || 5001}/api/compras/categorias`,
+      `http://localhost:${process.env.PORT || 5001}/api/compras/departamentos-categorias`,
       { method: 'GET', headers: { 'Content-Type': 'application/json' } },
       10000
     );
     const data = await resp.json().catch(() => ({}));
-    const cats = Array.isArray(data?.categorias) ? data.categorias : [];
+    const departamentos = Array.isArray(data?.departamentos) ? data.departamentos : [];
+    // Filtra pelo departamento escolhido (por id ou nome)
+    const deptId = state.data.departamentoId;
+    const deptNome = state.data.departamento;
+    const dept = departamentos.find(d => d.id === deptId) || departamentos.find(d => d.nome === deptNome);
+    const cats = dept?.categorias || [];
     if (cats.length) {
-      state.data.categoriasLista = cats;
+      state.data.categoriasLista = cats.map(c => ({ id: c.id, nome: c.nome }));
       state.step = 'CATEGORIA';
       let lista = '📂 *Categoria da compra:*\n\n';
       cats.forEach((c, i) => {
-        lista += `*${i + 1}* - ${c.descricao}\n`;
+        lista += `*${i + 1}* - ${c.nome}\n`;
       });
       lista += '\nDigite o *número* da categoria:';
       return { content: lista };
@@ -745,7 +750,7 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
         const data = await resp.json().catch(() => ({}));
         const depts = Array.isArray(data?.departamentos) ? data.departamentos : [];
         if (depts.length) {
-          state.data.departamentosLista = depts.map(d => d.nome);
+          state.data.departamentosLista = depts.map(d => ({ id: d.id, nome: d.nome }));
           state.step = 'DEPARTAMENTO';
           let lista = '🏢 *Departamento solicitante:*\n\n';
           depts.forEach((d, i) => {
@@ -769,7 +774,9 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
       if (isNaN(escolha) || escolha < 1 || escolha > depts.length) {
         return { content: `Digite um número de *1* a *${depts.length}*:` };
       }
-      state.data.departamento = depts[escolha - 1];
+      const deptEscolhido = depts[escolha - 1];
+      state.data.departamento = deptEscolhido.nome;
+      state.data.departamentoId = deptEscolhido.id;
       delete state.data.departamentosLista;
       // Avança para categoria
       return await buscarEApresentarCategorias(state);
@@ -791,8 +798,7 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
         return { content: `Digite um número de *1* a *${cats.length}*:` };
       }
       const catEscolhida = cats[escolha - 1];
-      state.data.categoria_compra_codigo = catEscolhida.codigo;
-      state.data.categoria_compra_nome = catEscolhida.descricao;
+      state.data.categoria_compra_nome = catEscolhida.nome;
       delete state.data.categoriasLista;
       state.step = 'ANEXO';
       return {
