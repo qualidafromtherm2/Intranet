@@ -504,14 +504,22 @@ async function verificarContatoInterno(phoneDigits) {
   if (!phoneDigits) return { isInternal: false, userId: null, username: null };
   try {
     const candidates = buildWhatsappPhoneCandidates(phoneDigits);
-    if (!candidates.length) return { isInternal: false, userId: null, username: null };
+    // Adiciona variantes sem código de país (55) pois auth_user pode armazenar sem o prefixo
+    const extras = new Set(candidates);
+    for (const c of candidates) {
+      if (c.startsWith('55') && c.length >= 12) {
+        extras.add(c.slice(2)); // sem o 55
+      }
+    }
+    const allCandidates = Array.from(extras);
+    if (!allCandidates.length) return { isInternal: false, userId: null, username: null };
     const { rows } = await pool.query(
       `SELECT id, username
          FROM public.auth_user
         WHERE REGEXP_REPLACE(COALESCE(telefone_contato, ''), '\\D', '', 'g') = ANY($1::text[])
           AND is_active = true
         LIMIT 1`,
-      [candidates]
+      [allCandidates]
     );
     if (rows.length) {
       return { isInternal: true, userId: rows[0].id, username: rows[0].username };
@@ -520,6 +528,323 @@ async function verificarContatoInterno(phoneDigits) {
     console.warn('[WhatsApp] falha ao verificar contato interno:', err?.message || err);
   }
   return { isInternal: false, userId: null, username: null };
+}
+
+/* ========================================================================
+ *  FLUXO DE COMPRAS VIA WHATSAPP (menu numerado interativo)
+ * ======================================================================== */
+
+// Estado do fluxo de compras por telefone (in-memory, expira em 15 min)
+const comprasFlowState = new Map(); // key: phoneDigits, value: { step, data, updatedAt }
+const COMPRAS_FLOW_TTL_MS = 15 * 60 * 1000; // 15 minutos
+
+function limparFluxosExpirados() {
+  const agora = Date.now();
+  for (const [phone, state] of comprasFlowState) {
+    if (agora - state.updatedAt > COMPRAS_FLOW_TTL_MS) {
+      comprasFlowState.delete(phone);
+    }
+  }
+}
+// Limpeza a cada 5 min
+setInterval(limparFluxosExpirados, 5 * 60 * 1000);
+
+function detectarIntencaoCompra(texto) {
+  if (!texto) return false;
+  const t = texto.toLowerCase().trim();
+  return /\b(quero comprar|preciso comprar|solicitar compra|requisição de compra|fazer compra|nova compra|abrir compra|comprar material|compra de material|iniciar compra)\b/i.test(t);
+}
+
+/**
+ * Processa o fluxo de compras passo-a-passo.
+ * Retorna { content } se o fluxo gerou resposta, ou null se não está em fluxo.
+ */
+async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) {
+  const msg = String(userMessage || '').trim();
+  const msgLower = msg.toLowerCase();
+  let state = comprasFlowState.get(phoneDigits);
+
+  // Cancelamento a qualquer momento
+  if (state && /^(cancelar|sair|parar|cancel)$/i.test(msg)) {
+    comprasFlowState.delete(phoneDigits);
+    return { content: '❌ Fluxo de compras cancelado. Pode me perguntar qualquer coisa normalmente.' };
+  }
+
+  // Se não está em fluxo, verifica se é intenção de compra
+  if (!state) {
+    if (!detectarIntencaoCompra(msg)) return null;
+    // Inicia fluxo
+    state = {
+      step: 'CADASTRO_OMIE',
+      data: {
+        solicitante: contatoInfo.username || '',
+        userId: contatoInfo.userId || null
+      },
+      updatedAt: Date.now()
+    };
+    comprasFlowState.set(phoneDigits, state);
+    return {
+      content:
+        '🛒 *Solicitação de Compra*\n\n' +
+        'O produto já está cadastrado na Omie?\n\n' +
+        '1️⃣ Sim\n' +
+        '2️⃣ Não\n' +
+        '3️⃣ Não sei\n\n' +
+        '_(Digite o número ou "cancelar" para sair)_'
+    };
+  }
+
+  // Atualiza timestamp
+  state.updatedAt = Date.now();
+
+  switch (state.step) {
+    /* ---- Passo 1: Produto na Omie? ---- */
+    case 'CADASTRO_OMIE': {
+      if (msg === '1') {
+        state.step = 'BUSCAR_PRODUTO';
+        state.data.tipoCompra = 'omie';
+        return { content: '🔍 Digite o *código ou nome* do produto para buscar no catálogo Omie:' };
+      }
+      if (msg === '2' || msg === '3') {
+        state.step = 'DESCRICAO_PRODUTO';
+        state.data.tipoCompra = 'sem_cadastro';
+        return { content: '📝 Descreva o produto que precisa comprar:' };
+      }
+      return { content: 'Por favor, digite *1*, *2* ou *3*:\n\n1️⃣ Sim (cadastrado na Omie)\n2️⃣ Não\n3️⃣ Não sei' };
+    }
+
+    /* ---- Passo 2a: Buscar produto Omie ---- */
+    case 'BUSCAR_PRODUTO': {
+      if (msg.length < 2) {
+        return { content: 'Digite pelo menos *2 caracteres* para buscar o produto:' };
+      }
+      try {
+        const resp = await fetchWithTimeout(
+          `http://localhost:${process.env.PORT || 5001}/api/produtos/search?q=${encodeURIComponent(msg)}&limit=5`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+          10000
+        );
+        const data = await resp.json().catch(() => ({}));
+        const produtos = Array.isArray(data?.produtos) ? data.produtos : [];
+        if (!produtos.length) {
+          return {
+            content:
+              `Nenhum produto encontrado para "${msg}".\n\n` +
+              'Tente outro termo, ou digite:\n' +
+              '*0* - Cadastrar como produto sem código Omie\n' +
+              '*cancelar* - Sair do fluxo'
+          };
+        }
+        state.data.resultadosBusca = produtos;
+        state.step = 'SELECIONAR_PRODUTO';
+        let lista = '📋 *Produtos encontrados:*\n\n';
+        produtos.forEach((p, i) => {
+          lista += `*${i + 1}* - ${p.codigo} — ${p.descricao}\n`;
+        });
+        lista += '\n*0* - Nenhum destes (cadastrar sem código Omie)\n';
+        lista += '\nDigite o *número* do produto desejado:';
+        return { content: lista };
+      } catch (err) {
+        console.warn('[WhatsApp/Compras] erro ao buscar produtos:', err?.message);
+        return { content: 'Erro ao buscar produtos. Tente novamente ou digite *cancelar*.' };
+      }
+    }
+
+    /* ---- Passo 2b: Selecionar produto da lista ---- */
+    case 'SELECIONAR_PRODUTO': {
+      const escolha = parseInt(msg, 10);
+      const resultados = state.data.resultadosBusca || [];
+      if (msg === '0') {
+        state.step = 'DESCRICAO_PRODUTO';
+        state.data.tipoCompra = 'sem_cadastro';
+        delete state.data.resultadosBusca;
+        return { content: '📝 Descreva o produto que precisa comprar:' };
+      }
+      if (isNaN(escolha) || escolha < 1 || escolha > resultados.length) {
+        return { content: `Digite um número de *1* a *${resultados.length}*, ou *0* para outro produto:` };
+      }
+      const prod = resultados[escolha - 1];
+      state.data.produto_codigo = prod.codigo;
+      state.data.produto_descricao = prod.descricao;
+      state.data.descricao_familia = prod.descricao_familia || '';
+      state.data.codigo_produto_omie = prod.codigo_produto || '';
+      delete state.data.resultadosBusca;
+      state.step = 'QUANTIDADE';
+      return {
+        content:
+          `✅ Produto selecionado: *${prod.codigo}* — ${prod.descricao}\n\n` +
+          'Qual a *quantidade* desejada?'
+      };
+    }
+
+    /* ---- Passo 2c: Descrição produto sem cadastro ---- */
+    case 'DESCRICAO_PRODUTO': {
+      if (msg.length < 3) {
+        return { content: 'Descrição muito curta. Descreva o produto com mais detalhes:' };
+      }
+      state.data.produto_descricao = msg;
+      state.step = 'QUANTIDADE';
+      return { content: 'Qual a *quantidade* desejada?' };
+    }
+
+    /* ---- Passo 3: Quantidade ---- */
+    case 'QUANTIDADE': {
+      const qtd = parseInt(msg, 10);
+      if (isNaN(qtd) || qtd < 1) {
+        return { content: 'Digite uma quantidade válida (número inteiro maior que 0):' };
+      }
+      state.data.quantidade = qtd;
+      // Buscar departamentos
+      try {
+        const resp = await fetchWithTimeout(
+          `http://localhost:${process.env.PORT || 5001}/api/compras/departamentos`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+          10000
+        );
+        const data = await resp.json().catch(() => ({}));
+        const depts = Array.isArray(data?.departamentos) ? data.departamentos : [];
+        if (depts.length) {
+          state.data.departamentosLista = depts.map(d => d.nome);
+          state.step = 'DEPARTAMENTO';
+          let lista = '🏢 *Departamento solicitante:*\n\n';
+          depts.forEach((d, i) => {
+            lista += `*${i + 1}* - ${d.nome}\n`;
+          });
+          lista += '\nDigite o *número* do departamento:';
+          return { content: lista };
+        }
+      } catch (err) {
+        console.warn('[WhatsApp/Compras] erro ao buscar departamentos:', err?.message);
+      }
+      // Fallback: pedir digitação livre
+      state.step = 'DEPARTAMENTO_LIVRE';
+      return { content: '🏢 Digite o nome do *departamento* solicitante:' };
+    }
+
+    /* ---- Passo 4: Departamento (lista) ---- */
+    case 'DEPARTAMENTO': {
+      const depts = state.data.departamentosLista || [];
+      const escolha = parseInt(msg, 10);
+      if (isNaN(escolha) || escolha < 1 || escolha > depts.length) {
+        return { content: `Digite um número de *1* a *${depts.length}*:` };
+      }
+      state.data.departamento = depts[escolha - 1];
+      delete state.data.departamentosLista;
+      state.step = 'OBSERVACAO';
+      return { content: '📝 Alguma *observação*? (ou digite *pular*)' };
+    }
+
+    /* ---- Passo 4b: Departamento livre ---- */
+    case 'DEPARTAMENTO_LIVRE': {
+      if (msg.length < 2) return { content: 'Digite o nome do departamento:' };
+      state.data.departamento = msg;
+      state.step = 'OBSERVACAO';
+      return { content: '📝 Alguma *observação*? (ou digite *pular*)' };
+    }
+
+    /* ---- Passo 5: Observação ---- */
+    case 'OBSERVACAO': {
+      if (!/^pular$/i.test(msg)) {
+        state.data.observacao = msg;
+      }
+      state.step = 'CONFIRMACAO';
+      // Monta resumo
+      const d = state.data;
+      let resumo = '📋 *Resumo da solicitação:*\n\n';
+      if (d.produto_codigo) resumo += `• *Código:* ${d.produto_codigo}\n`;
+      resumo += `• *Produto:* ${d.produto_descricao}\n`;
+      resumo += `• *Quantidade:* ${d.quantidade}\n`;
+      resumo += `• *Departamento:* ${d.departamento}\n`;
+      if (d.observacao) resumo += `• *Obs:* ${d.observacao}\n`;
+      resumo += `• *Solicitante:* ${d.solicitante}\n`;
+      resumo += '\n*Confirmar solicitação?*\n\n1️⃣ Confirmar\n2️⃣ Cancelar';
+      return { content: resumo };
+    }
+
+    /* ---- Passo 6: Confirmação ---- */
+    case 'CONFIRMACAO': {
+      if (msg === '2' || /^(n[aã]o|cancelar)$/i.test(msg)) {
+        comprasFlowState.delete(phoneDigits);
+        return { content: '❌ Solicitação cancelada.' };
+      }
+      if (msg !== '1' && !/^(sim|confirmar|ok)$/i.test(msg)) {
+        return { content: 'Digite *1* para confirmar ou *2* para cancelar:' };
+      }
+      // Criar solicitação via API
+      const d = state.data;
+      try {
+        let resultado;
+        if (d.tipoCompra === 'sem_cadastro') {
+          // Produto sem cadastro Omie
+          const resp = await fetchWithTimeout(
+            `http://localhost:${process.env.PORT || 5001}/api/compras/sem-cadastro`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                produto_descricao: d.produto_descricao,
+                quantidade: d.quantidade,
+                departamento: d.departamento,
+                centro_custo: d.departamento,
+                objetivo_compra: d.observacao || 'Solicitação via WhatsApp',
+                retorno_cotacao: 'Sim',
+                solicitante: d.solicitante
+              })
+            },
+            15000
+          );
+          resultado = await resp.json().catch(() => ({}));
+        } else {
+          // Produto Omie
+          const resp = await fetchWithTimeout(
+            `http://localhost:${process.env.PORT || 5001}/api/compras/solicitacao`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                itens: [{
+                  produto_codigo: d.produto_codigo,
+                  produto_descricao: d.produto_descricao,
+                  quantidade: d.quantidade,
+                  departamento: d.departamento,
+                  centro_custo: d.departamento,
+                  codigo_produto_omie: d.codigo_produto_omie || '',
+                  observacao: d.observacao || 'Solicitação via WhatsApp'
+                }],
+                solicitante: d.solicitante
+              })
+            },
+            15000
+          );
+          resultado = await resp.json().catch(() => ({}));
+        }
+        comprasFlowState.delete(phoneDigits);
+        if (resultado?.ok) {
+          const idCriado = resultado.id || (resultado.ids && resultado.ids[0]) || '';
+          return {
+            content:
+              '✅ *Solicitação criada com sucesso!*\n\n' +
+              (idCriado ? `📌 ID: *${idCriado}*\n` : '') +
+              `Status: *aguardando aprovação*\n\n` +
+              'Você pode acompanhar pelo sistema de compras na intranet.'
+          };
+        } else {
+          return {
+            content: `⚠️ Não foi possível criar a solicitação: ${resultado?.error || 'erro desconhecido'}.\nTente novamente pelo sistema ou digite *iniciar compra*.`
+          };
+        }
+      } catch (err) {
+        console.error('[WhatsApp/Compras] erro ao criar solicitação:', err);
+        comprasFlowState.delete(phoneDigits);
+        return { content: '⚠️ Erro ao processar a solicitação. Tente novamente mais tarde.' };
+      }
+    }
+
+    default: {
+      comprasFlowState.delete(phoneDigits);
+      return null;
+    }
+  }
 }
 
 async function gerarRespostaAutomaticaWhatsapp({ phone = '', profileName = '', userMessage = '', historyRows = [] }) {
@@ -773,6 +1098,45 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
   const phoneDigits = normalizePhoneDigits(phone);
   const userText = String(messageText || '').trim();
   if (!phoneDigits || !userText) return;
+
+  // Verificar contato interno para fluxo de compras
+  const contatoInfo = await verificarContatoInterno(phoneDigits);
+
+  // Fluxo de compras interativo (apenas para contatos internos)
+  if (contatoInfo.isInternal) {
+    const comprasReply = await processarFluxoCompras({
+      phoneDigits,
+      userMessage: userText,
+      contatoInfo
+    });
+    if (comprasReply) {
+      // Envia resposta do fluxo de compras diretamente
+      const sendPayload = await enviarMensagemWhatsappTexto({
+        phoneNumberId,
+        toPhone: phoneDigits,
+        text: comprasReply.content
+      });
+      const outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({
+        waMessageId: outboundMessageId,
+        phone: phoneDigits,
+        profileName: 'Chatbot Fromtherm',
+        messageType: 'text',
+        messageText: comprasReply.content,
+        phoneNumberId,
+        displayPhoneNumber,
+        payload: sendPayload,
+        direction: 'outbound'
+      });
+      console.log('[WhatsApp] resposta fluxo compras enviada:', JSON.stringify({
+        mode: 'compras',
+        from_phone_number_id: phoneNumberId,
+        to_phone: phoneDigits,
+        outbound_message_id: outboundMessageId
+      }));
+      return;
+    }
+  }
 
   const historyRows = await listarHistoricoWhatsapp(phoneDigits, 10);
   const replyData = await gerarRespostaAutomaticaWhatsapp({
