@@ -652,11 +652,35 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
         return { content: '🔍 Digite o *código ou nome* do produto para buscar no catálogo Omie:' };
       }
       if (msg === '2' || msg === '3') {
-        state.step = 'DESCRICAO_PRODUTO';
         state.data.tipoCompra = 'sem_cadastro';
-        return { content: '📝 Descreva o produto que precisa comprar:' };
+        state.step = 'MODELO_COMPRA';
+        return {
+          content:
+            '📦 *Modelo de compra:*\n\n' +
+            '1️⃣ Apenas realizar compra sem retorno de valores ou característica\n' +
+            '2️⃣ Compra com retorno de valores e característica técnica\n' +
+            '3️⃣ Compra já realizada\n' +
+            '4️⃣ Registro rápido de compra\n\n' +
+            'Digite o *número* do modelo:'
+        };
       }
       return { content: 'Por favor, digite *1*, *2* ou *3*:\n\n1️⃣ Sim (cadastrado na Omie)\n2️⃣ Não\n3️⃣ Não sei' };
+    }
+
+    /* ---- Passo 1b: Modelo de compra (apenas sem cadastro) ---- */
+    case 'MODELO_COMPRA': {
+      const modelos = {
+        '1': 'Apenas realizar compra sem retorno de valores ou caracteristica',
+        '2': 'Compra com retorno de valores e caracteristica tecnica',
+        '3': 'Compra ja realizada',
+        '4': 'Registro rapido de compra'
+      };
+      if (!modelos[msg]) {
+        return { content: 'Digite *1*, *2*, *3* ou *4*:' };
+      }
+      state.data.modeloCompra = modelos[msg];
+      state.step = 'DESCRICAO_PRODUTO';
+      return { content: '📝 Descreva o produto que precisa comprar:' };
     }
 
     /* ---- Passo 2a: Buscar produto Omie ---- */
@@ -839,6 +863,7 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
       // Monta resumo
       const d = state.data;
       let resumo = '📋 *Resumo da solicitação:*\n\n';
+      if (d.modeloCompra) resumo += `• *Modelo:* ${d.modeloCompra}\n`;
       if (d.produto_codigo) resumo += `• *Código:* ${d.produto_codigo}\n`;
       resumo += `• *Produto:* ${d.produto_descricao}\n`;
       resumo += `• *Quantidade:* ${d.quantidade}\n`;
@@ -879,7 +904,7 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
                 categoria_compra_codigo: d.categoria_compra_codigo || '2.14.94',
                 categoria_compra_nome: d.categoria_compra_nome || 'Outros Materiais',
                 objetivo_compra: d.observacao || 'Solicitação via WhatsApp',
-                retorno_cotacao: 'Sim',
+                retorno_cotacao: d.modeloCompra || 'Sim',
                 link: d.link || null,
                 solicitante: d.solicitante
               })
