@@ -560,6 +560,39 @@ async function verificarContatoInterno(phoneDigits) {
 }
 
 /* ========================================================================
+ *  MENU PRINCIPAL DO CHATBOT WHATSAPP (contatos internos)
+ * ======================================================================== */
+
+// Estado do menu por telefone — controla qual fluxo está ativo
+const menuInternoState = new Map(); // key: phoneDigits, value: { fluxo, updatedAt }
+// fluxo: null (menu), 'CONSULTA_PRODUTO', 'COMPRAS', 'AGENDA'
+const MENU_STATE_TTL_MS = 30 * 60 * 1000; // 30 min
+
+function limparMenusExpirados() {
+  const agora = Date.now();
+  for (const [phone, state] of menuInternoState) {
+    if (agora - state.updatedAt > MENU_STATE_TTL_MS) menuInternoState.delete(phone);
+  }
+}
+setInterval(limparMenusExpirados, 5 * 60 * 1000);
+
+const MENU_PRINCIPAL_TEXTO =
+  '📋 *Menu Principal — Chatbot Fromtherm*\n\n' +
+  'Escolha uma opção:\n\n' +
+  '1️⃣ Consultar produto\n' +
+  '2️⃣ Realizar compra\n' +
+  '3️⃣ Verificar agenda\n\n' +
+  '_Digite o número da opção desejada._';
+
+const MENU_FINALIZAR_TEXTO =
+  '✅ Assunto finalizado!\n\n' +
+  'Posso ajudar com mais alguma coisa?\n\n' +
+  '1️⃣ Consultar produto\n' +
+  '2️⃣ Realizar compra\n' +
+  '3️⃣ Verificar agenda\n\n' +
+  '_Digite o número da opção ou envie sua dúvida._';
+
+/* ========================================================================
  *  FLUXO DE COMPRAS VIA WHATSAPP (menu numerado interativo)
  * ======================================================================== */
 
@@ -640,9 +673,9 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
   let state = comprasFlowState.get(phoneDigits);
 
   // Cancelamento a qualquer momento
-  if (state && /^(cancelar|sair|parar|cancel)$/i.test(msg)) {
+  if (state && /^(cancelar|parar|cancel)$/i.test(msg)) {
     comprasFlowState.delete(phoneDigits);
-    return { content: '❌ Fluxo de compras cancelado. Pode me perguntar qualquer coisa normalmente.' };
+    return { content: '❌ Fluxo de compras cancelado.' };
   }
 
   // Se não está em fluxo, verifica se é intenção de compra
@@ -1542,264 +1575,220 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     enviarTypingIndicator({ phoneNumberId, messageId: waMessageId }).catch(() => {});
   }
 
-  // Verificar contato interno para fluxo de compras
+  // Verificar contato interno
   const contatoInfo = await verificarContatoInterno(phoneDigits);
 
-  // Fluxo de compras interativo (apenas para contatos internos)
-  if (contatoInfo.isInternal) {
-    const comprasReply = await processarFluxoCompras({
-      phoneDigits,
-      userMessage: userText,
-      contatoInfo
+  // Helper para enviar texto e registrar no banco
+  async function enviarTextoERegistrar(texto, logMode) {
+    const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: texto });
+    const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+      messageType: 'text', messageText: texto,
+      phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
     });
-    if (comprasReply) {
-      // Envia resposta do fluxo de compras diretamente
-      const sendPayload = await enviarMensagemWhatsappTexto({
-        phoneNumberId,
-        toPhone: phoneDigits,
-        text: comprasReply.content
-      });
-      const outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
-      await insertWhatsappMessageRecord({
-        waMessageId: outboundMessageId,
-        phone: phoneDigits,
-        profileName: 'Chatbot Fromtherm',
-        messageType: 'text',
-        messageText: comprasReply.content,
-        phoneNumberId,
-        displayPhoneNumber,
-        payload: sendPayload,
-        direction: 'outbound'
-      });
-      console.log('[WhatsApp] resposta fluxo compras enviada:', JSON.stringify({
-        mode: 'compras',
-        from_phone_number_id: phoneNumberId,
-        to_phone: phoneDigits,
-        outbound_message_id: outboundMessageId
-      }));
-      return;
-    }
+    if (logMode) console.log(`[WhatsApp] ${logMode}:`, JSON.stringify({ to_phone: phoneDigits, outbound_message_id: outMsgId }));
+    return { sendPayload, outMsgId };
   }
 
-  // Consulta de produto: "ver foto", "ver mais", seleção por número, ou busca nova
+  /* ====================================================================
+   *  CONTATOS INTERNOS — SISTEMA DE MENU NUMERADO
+   * ==================================================================== */
   if (contatoInfo.isInternal) {
-    // Pedido de foto do último produto consultado
-    if (detectarPedidoFotoProduto(userText)) {
-      const cache = ultimoProdutoConsultado.get(phoneDigits);
-      if (cache?.imageUrl) {
-        try {
-          const imgPayload = await enviarMensagemWhatsappImagem({
-            phoneNumberId,
-            toPhone: phoneDigits,
-            imageUrl: cache.imageUrl,
-            caption: `📷 Foto: ${cache.codigo}`
-          });
-          const imgMsgId = String(imgPayload?.messages?.[0]?.id || '').trim() || null;
-          await insertWhatsappMessageRecord({
-            waMessageId: imgMsgId,
-            phone: phoneDigits,
-            profileName: 'Chatbot Fromtherm',
-            messageType: 'image',
-            messageText: `Foto do produto ${cache.codigo}`,
-            phoneNumberId,
-            displayPhoneNumber,
-            payload: imgPayload,
-            direction: 'outbound'
-          });
-          console.log('[WhatsApp] foto produto enviada:', cache.codigo);
-          return;
-        } catch (imgErr) {
-          console.warn('[WhatsApp] falha ao enviar foto do produto:', imgErr?.message);
-          const fallback = await enviarMensagemWhatsappTexto({
-            phoneNumberId,
-            toPhone: phoneDigits,
-            text: `⚠️ Não consegui enviar a foto. Acesse o link:\n${cache.imageUrl}`
-          });
-          await insertWhatsappMessageRecord({
-            waMessageId: String(fallback?.messages?.[0]?.id || '').trim() || null,
-            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-            messageType: 'text', messageText: `Link foto: ${cache.imageUrl}`,
-            phoneNumberId, displayPhoneNumber, payload: fallback, direction: 'outbound'
-          });
-          return;
-        }
-      } else {
-        const noImg = await enviarMensagemWhatsappTexto({
-          phoneNumberId,
-          toPhone: phoneDigits,
-          text: '📷 Nenhum produto consultado recentemente ou o produto não possui imagem.\nConsulte um produto primeiro: _"produto CODIGO"_ ou _"consultar produto NOME"_'
-        });
-        await insertWhatsappMessageRecord({
-          waMessageId: String(noImg?.messages?.[0]?.id || '').trim() || null,
-          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-          messageType: 'text', messageText: 'Nenhuma foto disponível',
-          phoneNumberId, displayPhoneNumber, payload: noImg, direction: 'outbound'
-        });
-        return;
-      }
+    let menuState = menuInternoState.get(phoneDigits);
+
+    // "0" ou "finalizar" ou "sair do menu" em qualquer fluxo → finaliza e mostra menu
+    if (menuState?.fluxo && /^(0|finalizar|encerrar|voltar|menu|sair)$/i.test(userText)) {
+      // Limpa fluxos ativos
+      comprasFlowState.delete(phoneDigits);
+      ultimaBuscaProdutos.delete(phoneDigits);
+      ultimoProdutoConsultado.delete(phoneDigits);
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarTextoERegistrar(MENU_FINALIZAR_TEXTO, 'menu finalizar');
+      return;
     }
 
-    // "Ver mais" — paginação da última busca de produtos
-    if (detectarPedidoVerMais(userText)) {
-      const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
-      if (buscaCache?.produtos?.length) {
-        const PAGE_SIZE = 10;
-        const novoOffset = buscaCache.offset + PAGE_SIZE;
-        if (novoOffset >= buscaCache.produtos.length) {
-          const msg = await enviarMensagemWhatsappTexto({
-            phoneNumberId, toPhone: phoneDigits,
-            text: '📋 Não há mais produtos para mostrar nesta busca.\nFaça uma nova consulta: _"produto NOME"_ ou _"consultar produto CODIGO"_'
-          });
-          await insertWhatsappMessageRecord({
-            waMessageId: String(msg?.messages?.[0]?.id || '').trim() || null,
-            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-            messageType: 'text', messageText: 'Fim da lista de produtos',
-            phoneNumberId, displayPhoneNumber, payload: msg, direction: 'outbound'
-          });
-          return;
+    // Se está em fluxo de COMPRAS ativo, roteia para o processador de compras
+    if (menuState?.fluxo === 'COMPRAS') {
+      const comprasReply = await processarFluxoCompras({ phoneDigits, userMessage: userText, contatoInfo });
+      if (comprasReply) {
+        // Verifica se o fluxo terminou (cancelado ou confirmado → comprasFlowState foi deletado)
+        const fluxoAinda = comprasFlowState.has(phoneDigits);
+        let textoFinal = comprasReply.content;
+        if (!fluxoAinda) {
+          // Fluxo terminou — volta ao menu
+          textoFinal += '\n\n' + '━'.repeat(20) + '\n\n' + MENU_FINALIZAR_TEXTO;
+          menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
         }
-        buscaCache.offset = novoOffset;
-        buscaCache.updatedAt = Date.now();
-        const textoLista = formatarListaProdutos(buscaCache.produtos, novoOffset, buscaCache.produtos.length);
-        const msg = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: textoLista });
-        await insertWhatsappMessageRecord({
-          waMessageId: String(msg?.messages?.[0]?.id || '').trim() || null,
-          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-          messageType: 'text', messageText: textoLista,
-          phoneNumberId, displayPhoneNumber, payload: msg, direction: 'outbound'
-        });
-        console.log('[WhatsApp] ver mais produtos:', JSON.stringify({ offset: novoOffset, total: buscaCache.produtos.length, to_phone: phoneDigits }));
+        await enviarTextoERegistrar(textoFinal, 'fluxo compras');
         return;
       }
+      // Se processarFluxoCompras retornou null (não é intenção de compra), volta ao menu
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
     }
 
-    // Seleção de produto por número da lista
-    const numSelecionado = detectarSelecaoProdutoLista(userText);
-    if (numSelecionado !== null) {
-      const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
-      if (buscaCache?.produtos?.length && numSelecionado <= buscaCache.produtos.length) {
-        const prodSelecionado = buscaCache.produtos[numSelecionado - 1];
-        // Busca dados completos do produto selecionado
-        const { rows: full } = await pool.query(
-          `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
-                  ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
-                  valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
-                  obs_internas, tipo_compra
-           FROM public.produtos_omie
-           WHERE codigo_produto = $1
-           LIMIT 1`,
-          [prodSelecionado.codigo_produto]
-        );
-        if (full.length) {
-          const detalhe = await montarDetalheProduto(full[0]);
-          if (detalhe) {
-            if (detalhe.imageUrl) {
-              ultimoProdutoConsultado.set(phoneDigits, {
-                imageUrl: detalhe.imageUrl,
-                codigo: detalhe.produto.codigo,
-                updatedAt: Date.now()
-              });
-            }
-            const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: detalhe.texto });
-            await insertWhatsappMessageRecord({
-              waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
-              phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-              messageType: 'text', messageText: detalhe.texto,
-              phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+    // Se está em fluxo de CONSULTA_PRODUTO, processa comandos de produto
+    if (menuState?.fluxo === 'CONSULTA_PRODUTO') {
+      // Pedido de foto
+      if (detectarPedidoFotoProduto(userText)) {
+        const cache = ultimoProdutoConsultado.get(phoneDigits);
+        if (cache?.imageUrl) {
+          try {
+            const imgPayload = await enviarMensagemWhatsappImagem({
+              phoneNumberId, toPhone: phoneDigits,
+              imageUrl: cache.imageUrl, caption: `📷 Foto: ${cache.codigo}`
             });
-            console.log('[WhatsApp] detalhe produto selecionado:', JSON.stringify({ num: numSelecionado, codigo: full[0].codigo, to_phone: phoneDigits }));
+            const imgMsgId = String(imgPayload?.messages?.[0]?.id || '').trim() || null;
+            await insertWhatsappMessageRecord({
+              waMessageId: imgMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+              messageType: 'image', messageText: `Foto do produto ${cache.codigo}`,
+              phoneNumberId, displayPhoneNumber, payload: imgPayload, direction: 'outbound'
+            });
+            console.log('[WhatsApp] foto produto enviada:', cache.codigo);
             return;
+          } catch (imgErr) {
+            console.warn('[WhatsApp] falha ao enviar foto:', imgErr?.message);
+            await enviarTextoERegistrar(`⚠️ Não consegui enviar a foto. Acesse o link:\n${cache.imageUrl}`, 'foto fallback');
+            return;
+          }
+        } else {
+          await enviarTextoERegistrar('📷 Nenhum produto consultado recentemente ou sem imagem.\nDigite o *código ou nome* do produto para consultar.', 'foto sem cache');
+          return;
+        }
+      }
+
+      // "Ver mais" — paginação
+      if (detectarPedidoVerMais(userText)) {
+        const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
+        if (buscaCache?.produtos?.length) {
+          const PAGE_SIZE = 10;
+          const novoOffset = buscaCache.offset + PAGE_SIZE;
+          if (novoOffset >= buscaCache.produtos.length) {
+            await enviarTextoERegistrar('📋 Não há mais produtos para mostrar.\nDigite outro *código ou nome* para nova busca, ou *0* para voltar ao menu.', 'fim lista');
+            return;
+          }
+          buscaCache.offset = novoOffset;
+          buscaCache.updatedAt = Date.now();
+          const textoLista = formatarListaProdutos(buscaCache.produtos, novoOffset, buscaCache.produtos.length);
+          await enviarTextoERegistrar(textoLista, 'ver mais produtos');
+          return;
+        }
+      }
+
+      // Seleção por número da lista
+      const numSelecionado = detectarSelecaoProdutoLista(userText);
+      if (numSelecionado !== null) {
+        const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
+        if (buscaCache?.produtos?.length && numSelecionado <= buscaCache.produtos.length) {
+          const prodSelecionado = buscaCache.produtos[numSelecionado - 1];
+          const { rows: full } = await pool.query(
+            `SELECT codigo_produto, codigo, descricao, descr_detalhada, unidade, marca, modelo,
+                    ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
+                    valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
+                    obs_internas, tipo_compra
+             FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+            [prodSelecionado.codigo_produto]
+          );
+          if (full.length) {
+            const detalhe = await montarDetalheProduto(full[0]);
+            if (detalhe) {
+              if (detalhe.imageUrl) {
+                ultimoProdutoConsultado.set(phoneDigits, { imageUrl: detalhe.imageUrl, codigo: detalhe.produto.codigo, updatedAt: Date.now() });
+              }
+              const textoDetalhe = detalhe.texto + '\n\n_Digite outro código/nome para nova busca, *"ver foto"* para imagem, ou *0* para voltar ao menu._';
+              await enviarTextoERegistrar(textoDetalhe, 'detalhe produto selecionado');
+              return;
+            }
           }
         }
       }
-    }
 
-    // Consulta de produto por código/nome
-    const termoProduto = detectarConsultaProduto(userText);
-    if (termoProduto) {
-      const resultado = await consultarProdutoDB(termoProduto);
+      // Qualquer outro texto → trata como busca de produto (código ou nome direto)
+      const termoBusca = userText;
+      const resultado = await consultarProdutoDB(termoBusca);
       if (resultado) {
-        // Resultado é lista de múltiplos produtos
         if (resultado.tipo === 'lista') {
-          ultimaBuscaProdutos.set(phoneDigits, {
-            termo: termoProduto,
-            produtos: resultado.produtos,
-            offset: 0,
-            updatedAt: Date.now()
-          });
+          ultimaBuscaProdutos.set(phoneDigits, { termo: termoBusca, produtos: resultado.produtos, offset: 0, updatedAt: Date.now() });
           const textoLista = formatarListaProdutos(resultado.produtos, 0, resultado.total);
-          const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: textoLista });
-          await insertWhatsappMessageRecord({
-            waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
-            phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-            messageType: 'text', messageText: textoLista,
-            phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
-          });
-          console.log('[WhatsApp] lista produtos enviada:', JSON.stringify({ termo: termoProduto, total: resultado.total, to_phone: phoneDigits }));
+          await enviarTextoERegistrar(textoLista, 'lista produtos');
           return;
         }
-
-        // Resultado é produto único com detalhes
+        // Produto único
         if (resultado.imageUrl) {
-          ultimoProdutoConsultado.set(phoneDigits, {
-            imageUrl: resultado.imageUrl,
-            codigo: resultado.produto.codigo,
-            updatedAt: Date.now()
-          });
+          ultimoProdutoConsultado.set(phoneDigits, { imageUrl: resultado.imageUrl, codigo: resultado.produto.codigo, updatedAt: Date.now() });
         }
-        const sendPayload = await enviarMensagemWhatsappTexto({
-          phoneNumberId,
-          toPhone: phoneDigits,
-          text: resultado.texto
-        });
-        const outboundMessageId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
-        await insertWhatsappMessageRecord({
-          waMessageId: outboundMessageId,
-          phone: phoneDigits,
-          profileName: 'Chatbot Fromtherm',
-          messageType: 'text',
-          messageText: resultado.texto,
-          phoneNumberId,
-          displayPhoneNumber,
-          payload: sendPayload,
-          direction: 'outbound'
-        });
-        console.log('[WhatsApp] consulta produto enviada:', JSON.stringify({
-          mode: 'produto',
-          codigo: resultado.produto.codigo,
-          tem_imagem: !!resultado.imageUrl,
-          to_phone: phoneDigits
-        }));
+        const textoDetalhe = resultado.texto + '\n\n_Digite outro código/nome para nova busca, *"ver foto"* para imagem, ou *0* para voltar ao menu._';
+        await enviarTextoERegistrar(textoDetalhe, 'consulta produto');
         return;
       }
-      // Se não encontrou, deixa a IA responder normalmente
+      // Não encontrou — informa e mantém no fluxo
+      await enviarTextoERegistrar(`❌ Nenhum produto encontrado para *"${termoBusca}"*.\n\nDigite outro *código ou nome* para buscar, ou *0* para voltar ao menu.`, 'produto não encontrado');
+      return;
     }
 
-    // Detecta código de produto solto (ex: "07.MP.N.62031" enviado direto)
-    const codigoSolto = detectarCodigoProdutoSolto(userText);
-    if (codigoSolto) {
-      const resultado = await consultarProdutoDB(codigoSolto);
-      if (resultado && !resultado.tipo) {
-        if (resultado.imageUrl) {
-          ultimoProdutoConsultado.set(phoneDigits, {
-            imageUrl: resultado.imageUrl,
-            codigo: resultado.produto.codigo,
-            updatedAt: Date.now()
-          });
-        }
-        const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: resultado.texto });
-        await insertWhatsappMessageRecord({
-          waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
-          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-          messageType: 'text', messageText: resultado.texto,
-          phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
-        });
-        console.log('[WhatsApp] produto por código solto:', JSON.stringify({ codigo: codigoSolto, to_phone: phoneDigits }));
-        return;
-      }
+    // Se está em fluxo de AGENDA
+    if (menuState?.fluxo === 'AGENDA') {
+      // Por enquanto, funcionalidade de agenda não implementada — volta ao menu
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarTextoERegistrar('📅 A funcionalidade de agenda está em desenvolvimento.\n\n' + MENU_PRINCIPAL_TEXTO, 'agenda indisponível');
+      return;
     }
+
+    // === SEM FLUXO ATIVO — processa escolha do menu ou mostra menu ===
+    const escolha = userText.trim();
+
+    // Opção 1 — Consultar produto
+    if (escolha === '1') {
+      menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_PRODUTO', updatedAt: Date.now() });
+      await enviarTextoERegistrar(
+        '🔍 *Consulta de Produto*\n\n' +
+        'Digite o *código* ou *nome* do produto que deseja consultar.\n\n' +
+        '_Exemplo: "07.MP.N.62031" ou "compressor"_\n' +
+        '_Digite *0* a qualquer momento para voltar ao menu._',
+        'menu → consulta produto'
+      );
+      return;
+    }
+
+    // Opção 2 — Realizar compra
+    if (escolha === '2') {
+      menuInternoState.set(phoneDigits, { fluxo: 'COMPRAS', updatedAt: Date.now() });
+      // Inicia o fluxo de compras diretamente no primeiro passo
+      const state = {
+        step: 'CADASTRO_OMIE',
+        data: { solicitante: contatoInfo.username || '', userId: contatoInfo.userId || null },
+        updatedAt: Date.now()
+      };
+      comprasFlowState.set(phoneDigits, state);
+      await enviarTextoERegistrar(
+        '🛒 *Solicitação de Compra*\n\n' +
+        'O produto já está cadastrado na Omie?\n\n' +
+        '1️⃣ Sim\n' +
+        '2️⃣ Não\n' +
+        '3️⃣ Não sei\n\n' +
+        '_(Digite o número ou *0* para voltar ao menu)_',
+        'menu → compras'
+      );
+      return;
+    }
+
+    // Opção 3 — Verificar agenda
+    if (escolha === '3') {
+      menuInternoState.set(phoneDigits, { fluxo: 'AGENDA', updatedAt: Date.now() });
+      await enviarTextoERegistrar('📅 A funcionalidade de agenda está em desenvolvimento.\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → agenda');
+      return;
+    }
+
+    // Qualquer outra mensagem sem fluxo ativo → mostra menu principal
+    const saudacao = contatoInfo.username ? `Olá, *${contatoInfo.username}*! 👋\n\n` : 'Olá! 👋\n\n';
+    menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+    await enviarTextoERegistrar(saudacao + MENU_PRINCIPAL_TEXTO, 'menu principal');
+    return;
   }
 
+  /* ====================================================================
+   *  CONTATOS EXTERNOS — Resposta automática via IA
+   * ==================================================================== */
   const historyRows = await listarHistoricoWhatsapp(phoneDigits, 10);
   const replyData = await gerarRespostaAutomaticaWhatsapp({
     phone: phoneDigits,
