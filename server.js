@@ -5424,6 +5424,62 @@ app.post('/api/omie/op/incluir', express.json(), async (req, res) => {
 
 
 
+// ——— Fila de ConsultarPedido com rate limit (máx 1 req / 2s) ———
+// Evita que múltiplos webhooks simultâneos causem bloqueio 425 na Omie.
+// O webhook responde 200 imediatamente e agenda o ConsultarPedido na fila.
+const _pedidoSyncQueue   = [];   // { codigoPedido, numeroPedido }
+const _pedidoSyncPending = new Set(); // deduplica por codigo_pedido
+let   _pedidoSyncRunning = false;
+
+async function _pedidoSyncWorker() {
+  if (_pedidoSyncRunning) return;
+  _pedidoSyncRunning = true;
+  while (_pedidoSyncQueue.length > 0) {
+    const { codigoPedido, numeroPedido } = _pedidoSyncQueue.shift();
+    const key = String(codigoPedido || numeroPedido || '');
+    _pedidoSyncPending.delete(key);
+    try {
+      const param = codigoPedido
+        ? [{ codigo_pedido: Number(codigoPedido) }]
+        : [{ numero_pedido: String(numeroPedido) }];
+
+      const j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', {
+        call: 'ConsultarPedido',
+        app_key:    process.env.OMIE_APP_KEY,
+        app_secret: process.env.OMIE_APP_SECRET,
+        param
+      }, 20000);
+
+      const ped = Array.isArray(j?.pedido_venda_produto)
+        ? j.pedido_venda_produto
+        : (j?.pedido_venda_produto ? [j.pedido_venda_produto] : []);
+
+      if (ped.length) {
+        await dbQuery('select public.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
+        console.log(`[pedidoSyncQueue] ✓ upsert pedido ${codigoPedido || numeroPedido} (fila restante: ${_pedidoSyncQueue.length})`);
+      }
+    } catch (e) {
+      console.warn(`[pedidoSyncQueue] ⚠️ erro ao consultar pedido ${codigoPedido || numeroPedido}:`, e?.message || e);
+    }
+    // Rate limit: aguarda 2s entre chamadas à Omie
+    if (_pedidoSyncQueue.length > 0) await new Promise(r => setTimeout(r, 2000));
+  }
+  _pedidoSyncRunning = false;
+}
+
+function _pedidoSyncEnqueue(codigoPedido, numeroPedido) {
+  const key = String(codigoPedido || numeroPedido || '');
+  if (!key || _pedidoSyncPending.has(key)) {
+    if (_pedidoSyncPending.has(key))
+      console.log(`[pedidoSyncQueue] pedido ${key} já está na fila — ignorando duplicata`);
+    return;
+  }
+  _pedidoSyncPending.add(key);
+  _pedidoSyncQueue.push({ codigoPedido, numeroPedido });
+  console.log(`[pedidoSyncQueue] enfileirado pedido ${key} (fila: ${_pedidoSyncQueue.length})`);
+  _pedidoSyncWorker(); // inicia worker se não estiver rodando
+}
+
 // ——— Webhook de Pedidos de Venda (OMIE Connect 2.0) ———
 app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
   chkOmieToken,                     // valida ?token=...
@@ -5433,10 +5489,13 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
     const body   = req.body || {};
     const ev     = body.event || body;
 
-    // Campos que podem vir no Connect 2.0:
-    const etapa          = String(ev.etapa || ev.cEtapa || '').trim();   // ex.: "80", "20"…
-    const idPedido       = ev.idPedido || ev.codigo_pedido || ev.codigoPedido;
-    const numeroPedido   = ev.numeroPedido || ev.numero_pedido;
+    // Campos que podem vir no Connect 2.0 (diferentes versões usam nomes diferentes):
+    const etapa          = String(ev.etapa || ev.cEtapa || ev.etapaPedido || '').trim();
+    const idPedido       = ev.idPedido       || ev.codigo_pedido  || ev.codigoPedido
+                        || ev.nCodPed        || ev.nIdPedido      || ev.cod_pedido
+                        || body.nCodPed      || body.nIdPedido    || null;
+    const numeroPedido   = ev.numeroPedido   || ev.numero_pedido  || ev.cNumPed
+                        || ev.numPedido      || body.cNumPed      || null;
     const messageId      = body.messageId || ev.messageId || null;
     const topic          = body.topic || ev.topic || ev.tipo || body.tipo || null;
 
@@ -5475,52 +5534,14 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
         }
       }
 
-      // 2) Busca o pedido completo na OMIE e faz upsert (cabecalho + itens)
-      //    Isso garante que o SQL reflita descontos, valores, itens etc.
-      try {
-        const param = [];
-        if (numeroPedido)       param.push({ numero_pedido: String(numeroPedido) });
-        else if (idPedido)      param.push({ codigo_pedido: Number(idPedido) });
-
-        if (param.length) {
-          const payload = {
-            call: 'ConsultarPedido',
-            app_key:    process.env.OMIE_APP_KEY,
-            app_secret: process.env.OMIE_APP_SECRET,
-            param
-          };
-
-          console.log('[ConsultarPedido][webhook] Iniciando consulta:', JSON.stringify({
-            path: req.path,
-            topic,
-            messageId,
-            numeroPedido: numeroPedido || null,
-            idPedido: idPedido || null
-          }));
-          const j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', payload, 20000);
-          console.log('[ConsultarPedido][webhook] Consulta concluida:', JSON.stringify({
-            path: req.path,
-            topic,
-            messageId,
-            numeroPedido: numeroPedido || null,
-            idPedido: idPedido || null,
-            encontrouPedido: Boolean(j?.pedido_venda_produto)
-          }));
-          // normaliza em lista:
-          const ped = Array.isArray(j?.pedido_venda_produto)
-                        ? j.pedido_venda_produto
-                        : (j?.pedido_venda_produto ? [j.pedido_venda_produto] : []);
-          if (ped.length) {
-            // usa sua função de upsert em lote que já criamos no Postgres:
-            //   SELECT public.pedidos_upsert_from_list($1::jsonb)
-            await dbQuery('select public.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
-            ret.upserted = true;
-          }
-        }
-      } catch (e) {
-        // Não derruba o webhook se a OMIE estiver indisponível;
-        // ao menos a etapa já ficou correta no SQL.
-        ret.upsert_error = String(e?.message || e);
+      // 2) Enfileira ConsultarPedido com rate limit (sem bloquear o webhook)
+      if (!idPedido && !numeroPedido) {
+        console.warn('[webhooks/omie/pedidos] ⚠️ Nenhum identificador de pedido encontrado no payload — itens NÃO serão sincronizados. Body:', JSON.stringify(body).substring(0, 500));
+      } else {
+        // 2) Enfileira ConsultarPedido com rate limit (máx 1 req/2s via _pedidoSyncQueue)
+        //    O webhook responde imediatamente; o upsert completo (cabeçalho+itens) ocorre em background.
+        _pedidoSyncEnqueue(idPedido, numeroPedido);
+        ret.queued = true;
       }
 
       // 3) Notifica a UI (SSE) para recarregar o quadro, se você quiser “ao vivo”
