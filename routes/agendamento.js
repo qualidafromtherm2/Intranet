@@ -6,7 +6,7 @@ const express = require('express');
 
 module.exports = (pool) => {
   const router = express.Router();
-  const TABELAS_PADRAO = ['produtos_omie', 'fornecedores', 'pedidos_compra', 'requisicoes_compra', 'recebimentos_nfe'];
+  const TABELAS_PADRAO = ['produtos_omie', 'fornecedores', 'pedidos_compra', 'requisicoes_compra', 'recebimentos_nfe', 'pedidos_venda'];
 
   async function ensureAgendamentoColumns(client) {
     await client.query(`

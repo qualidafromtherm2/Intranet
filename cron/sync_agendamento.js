@@ -24,8 +24,8 @@ const DATABASE_URL    = process.env.DATABASE_URL    || 'postgresql://intranet_db
 const OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || '4244634488206';
 const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '10d9dde2e4e3bac7e62a2cc01bfba01e';
 
-// Delay entre chamadas Omie (~400ms ≈ 2,5 req/s — limite seguro)
-const DELAY_MS = 400;
+// Delay entre chamadas Omie (~350ms ≈ ~2,8 req/s — limite seguro abaixo de 3 req/s)
+const DELAY_MS = 350;
 // Janela de tolerância: executa se proxima_execucao for até 10 min atrás
 const TOLERANCIA_MS = 10 * 60 * 1000;
 
@@ -547,6 +547,57 @@ async function syncProdutosOmie() {
   return { sincronizados, erros };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SYNC: Pedidos de Venda (pedidos_venda + pedidos_venda_itens)
+// ════════════════════════════════════════════════════════════════════════════
+async function syncPedidosVenda(cfg) {
+  log('── [pedidos_venda] Iniciando...');
+  let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
+
+  const filtro = {};
+  if (cfg.data_inicial) {
+    const d = new Date(cfg.data_inicial);
+    filtro.data_previsao_de = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  }
+
+  while (pagina <= totalPaginas) {
+    let data;
+    try {
+      data = await omiePost('produtos/pedido', 'ListarPedidos', {
+        pagina,
+        registros_por_pagina: 50,
+        ...filtro,
+      });
+    } catch (e) {
+      log(`  [pedidos_venda] Erro na página ${pagina}: ${e.message}`);
+      erros++;
+      break;
+    }
+
+    totalPaginas = Number(data.total_de_paginas || 1);
+    const lista = Array.isArray(data.pedido_venda_produto) ? data.pedido_venda_produto : [];
+    log(`  Página ${pagina}/${totalPaginas} — ${lista.length} pedidos`);
+
+    for (const pedido of lista) {
+      try {
+        await pool.query(
+          'SELECT public.pedido_upsert_from_payload($1::jsonb)',
+          [pedido]
+        );
+        sincronizados++;
+      } catch (e) {
+        log(`  [pedidos_venda] Erro no upsert: ${e.message}`);
+        erros++;
+      }
+    }
+
+    pagina++;
+  }
+
+  log(`── [pedidos_venda] Concluído: ${sincronizados} sincronizados, ${erros} erros`);
+  return { sincronizados, erros };
+}
+
 // ─── Dispatcher de tabelas ────────────────────────────────────────────────────
 async function executarTabela(tabela, cfg) {
   switch (tabela) {
@@ -555,6 +606,7 @@ async function executarTabela(tabela, cfg) {
     case 'pedidos_compra':      return syncPedidosCompra(cfg);
     case 'requisicoes_compra':  return syncRequisicoesCompra(cfg);
     case 'produtos_omie':       return syncProdutosOmie();
+    case 'pedidos_venda':       return syncPedidosVenda(cfg);
     default:
       log(`  Tabela desconhecida: ${tabela} — pulando`);
       return { sincronizados: 0, erros: 0 };
