@@ -1475,21 +1475,59 @@ function detectarSelecaoProdutoLista(texto) {
 function detectarConsultaProduto(texto) {
   if (!texto) return null;
   const t = texto.trim();
+
   // Padrão 1: "consultar produto X", "buscar produto X", "verificar produto X"
-  const m1 = t.match(/\b(?:consultar?|buscar?|pesquisar?|verificar?)\s+(?:o\s+)?produto\s+[:\-]?\s*(.+)/i);
+  // Aceita artigos, typos comuns (ptoduto/priduto/produtoo) e "um/o/esse"
+  const m1 = t.match(/\b(?:consultar?|buscar?|pesquisar?|verificar?)\s+(?:um\s+|o\s+|esse\s+)?p\w{3,7}t[oa]?\s*[,:]?\s*(?:se\s+chama\s*|chamad[oa]\s*|que\s+[eé]\s*|nome\s*[:\-]?\s*)?(.+)/i);
   if (m1) return m1[1].trim().replace(/\?$/, '');
-  // Padrão 2: "informação/info/dados do produto X", "estoque do produto X"
-  const m2 = t.match(/\b(?:info(?:rma[çc][aã]o)?|dados?|estoque)\s+(?:do|de|sobre)\s+(?:o\s+)?produto\s+[:\-]?\s*(.+)/i);
+
+  // Padrão 2: "quero saber do/sobre produto X", "me fala do produto X", "preciso do produto X"
+  const m2 = t.match(/\b(?:quero\s+saber|me\s+fal[ae]|preciso|gostaria\s+de\s+saber)\s+(?:d[oe]|sobre)\s+(?:um\s+|o\s+)?p[ro]+d[uo]t[oa]?\s*[:\-]?\s*(.+)/i);
   if (m2) return m2[1].trim().replace(/\?$/, '');
-  // Padrão 3: "produto X" ou "código X" no início
-  const m3 = t.match(/^(?:produto|c[oó]digo|cod\.?)\s+[:\-]?\s*(.{2,})/i);
+
+  // Padrão 3: "informação/info/dados do produto X", "estoque do produto X"
+  const m3 = t.match(/\b(?:info(?:rma[çc][aã]o)?|dados?|estoque|detalh[ei]s?)\s+(?:do|de|sobre)\s+(?:o\s+)?p[ro]+d[uo]t[oa]?\s*[:\-]?\s*(.+)/i);
   if (m3) return m3[1].trim().replace(/\?$/, '');
-  // Padrão 4: "qual o estoque de X", "estoque de X", "estoque do X"
-  const m4 = t.match(/\b(?:qual\s+(?:o\s+)?)?estoque\s+(?:de|do|d[oa])\s+(.+)/i);
+
+  // Padrão 4: "produto X" ou "código X" no início (flexível com typos)
+  const m4 = t.match(/^(?:p[ro]+d[uo]t[oa]?|c[oó]digo|cod\.?)\s+[:\-]?\s*(.{2,})/i);
   if (m4) return m4[1].trim().replace(/\?$/, '');
-  // Padrão 5: "tem X em estoque", "tem X no estoque"
-  const m5 = t.match(/\btem\s+(.+?)\s+(?:em|no)\s+estoque/i);
+
+  // Padrão 5: "qual o estoque de X", "estoque de X", "estoque do X"
+  const m5 = t.match(/\b(?:qual\s+(?:o\s+)?)?estoque\s+(?:de|do|d[oa])\s+(.+)/i);
   if (m5) return m5[1].trim().replace(/\?$/, '');
+
+  // Padrão 6: "tem X em estoque", "tem X no estoque"
+  const m6 = t.match(/\btem\s+(.+?)\s+(?:em|no)\s+estoque/i);
+  if (m6) return m6[1].trim().replace(/\?$/, '');
+
+  // Padrão 7: "produto" + "se chama/chamado/é" + nome (ex: "o produto se chama contatora")
+  const m7 = t.match(/\bp[ro]+d[uo]t[oa]?\s*[,:]?\s*(?:se\s+chama|chamad[oa]|que\s+[eé]|nome\s*[:\-]?)\s+(.+)/i);
+  if (m7) return m7[1].trim().replace(/\?$/, '');
+
+  // Padrão 8: Variações soltas "quero saber sobre X", "me fala sobre X" (sem "produto")
+  const m8 = t.match(/\b(?:quero\s+saber|me\s+fal[ae])\s+(?:d[oe]|sobre)\s+(?:um\s+|o\s+|a\s+)?(.{3,})/i);
+  if (m8) {
+    const candidato = m8[1].trim().replace(/\?$/, '');
+    // Só aceita se parece nome de produto (não é frase longa de conversa)
+    if (candidato.split(/\s+/).length <= 8) return candidato;
+  }
+
+  return null;
+}
+
+/**
+ * Detecta se o texto é um código de produto solto (ex: "07.MP.N.62031").
+ * Padrão: XX.XX.X.XXXXX ou similar com pontos e letras/números.
+ */
+function detectarCodigoProdutoSolto(texto) {
+  if (!texto) return null;
+  const t = texto.trim();
+  // Código com formato típico: segmentos alfanuméricos separados por ponto ou hífen
+  // Ex: 07.MP.N.62031, 04.MP.I.60604, 01.MP.N.30071
+  if (/^[\w]{1,5}[.\-][\w]{1,5}[.\-][\w]{1,5}(?:[.\-][\w]{1,10})?$/i.test(t)) {
+    return t;
+  }
   return null;
 }
 
@@ -1735,6 +1773,30 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         return;
       }
       // Se não encontrou, deixa a IA responder normalmente
+    }
+
+    // Detecta código de produto solto (ex: "07.MP.N.62031" enviado direto)
+    const codigoSolto = detectarCodigoProdutoSolto(userText);
+    if (codigoSolto) {
+      const resultado = await consultarProdutoDB(codigoSolto);
+      if (resultado && !resultado.tipo) {
+        if (resultado.imageUrl) {
+          ultimoProdutoConsultado.set(phoneDigits, {
+            imageUrl: resultado.imageUrl,
+            codigo: resultado.produto.codigo,
+            updatedAt: Date.now()
+          });
+        }
+        const sendPayload = await enviarMensagemWhatsappTexto({ phoneNumberId, toPhone: phoneDigits, text: resultado.texto });
+        await insertWhatsappMessageRecord({
+          waMessageId: String(sendPayload?.messages?.[0]?.id || '').trim() || null,
+          phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+          messageType: 'text', messageText: resultado.texto,
+          phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+        });
+        console.log('[WhatsApp] produto por código solto:', JSON.stringify({ codigo: codigoSolto, to_phone: phoneDigits }));
+        return;
+      }
     }
   }
 
