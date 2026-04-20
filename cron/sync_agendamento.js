@@ -20,14 +20,28 @@
 const { Pool } = require('pg');
 
 // ─── Credenciais ──────────────────────────────────────────────────────────────
-const DATABASE_URL    = process.env.DATABASE_URL    || 'postgresql://intranet_db_yd0w_user:amLpOKjWzzDRhwcR1NF0eolJzzfCY0ho@dpg-d2d4b0a4d50c7385vm50-a.oregon-postgres.render.com:5432/intranet_db_yd0w?sslmode=require';
-const OMIE_APP_KEY    = process.env.OMIE_APP_KEY    || '4244634488206';
-const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET || '10d9dde2e4e3bac7e62a2cc01bfba01e';
+const DATABASE_URL    = process.env.DATABASE_URL;
+const OMIE_APP_KEY    = process.env.OMIE_APP_KEY;
+const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+
+if (!DATABASE_URL || !OMIE_APP_KEY || !OMIE_APP_SECRET) {
+  console.error('[CronSync] ERRO: variáveis de ambiente DATABASE_URL, OMIE_APP_KEY e OMIE_APP_SECRET são obrigatórias.');
+  process.exit(1);
+}
 
 // Delay entre chamadas Omie (~350ms ≈ ~2,8 req/s — limite seguro abaixo de 3 req/s)
 const DELAY_MS = 350;
 // Janela de tolerância: executa se proxima_execucao for até 10 min atrás
 const TOLERANCIA_MS = 10 * 60 * 1000;
+// Janela de dias para syncs incrementais (busca apenas registros dos últimos N dias)
+const JANELA_DIAS = 3;
+
+/** Retorna data N dias atrás no formato DD/MM/YYYY (usado nos filtros da Omie) */
+function diasAtras(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
 
 // ─── Pool Postgres ────────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -167,17 +181,10 @@ async function syncRecebimentosNFe(cfg) {
   log('── [recebimentos_nfe] Iniciando...');
   let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
 
-  const param = { nPagina: pagina, nRegistrosPorPagina: 100 };
-
-  // Aplica data_inicial se configurado na tela
-  if (cfg.data_inicial) {
-    const d = new Date(cfg.data_inicial);
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const aaaa = d.getFullYear();
-    param.dtAltDe = `${dd}/${mm}/${aaaa}`;
-    log(`  Filtrando alterações a partir de ${param.dtAltDe}`);
-  }
+  // Busca apenas registros alterados nos últimos JANELA_DIAS dias
+  const dataFiltro = diasAtras(JANELA_DIAS);
+  const param = { nPagina: pagina, nRegistrosPorPagina: 100, dtAltDe: dataFiltro };
+  log(`  Filtrando alterações a partir de ${dataFiltro} (últimos ${JANELA_DIAS} dias)`);
 
   while (pagina <= totalPaginas) {
     param.nPagina = pagina;
@@ -393,11 +400,10 @@ async function syncPedidosCompra(cfg) {
   log('── [pedidos_compra] Iniciando...');
   let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
 
-  const filtro = {};
-  if (cfg.data_inicial) {
-    const d = new Date(cfg.data_inicial);
-    filtro.dtAltDe = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-  }
+  // Busca apenas registros alterados nos últimos JANELA_DIAS dias
+  const dataFiltro = diasAtras(JANELA_DIAS);
+  const filtro = { dtAltDe: dataFiltro };
+  log(`  Filtrando alterações a partir de ${dataFiltro} (últimos ${JANELA_DIAS} dias)`);
 
   while (pagina <= totalPaginas) {
     const data = await omiePost('produtos/pedido-compra', 'ListarPedidos', {
@@ -554,11 +560,12 @@ async function syncPedidosVenda(cfg) {
   log('── [pedidos_venda] Iniciando...');
   let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
 
-  const filtro = {};
-  if (cfg.data_inicial) {
-    const d = new Date(cfg.data_inicial);
-    filtro.data_previsao_de = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-  }
+  // Usa janela de 7 dias para pedidos_venda (data_previsao pode ser futura;
+  // 7 dias garante capturar pedidos recentes + todos os futuros já cadastrados)
+  const JANELA_VENDA = 7;
+  const dataFiltro = diasAtras(JANELA_VENDA);
+  const filtro = { data_previsao_de: dataFiltro };
+  log(`  Filtrando pedidos com data_previsao >= ${dataFiltro} (últimos ${JANELA_VENDA} dias)`);
 
   while (pagina <= totalPaginas) {
     let data;
