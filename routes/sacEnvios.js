@@ -526,6 +526,51 @@ async function enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone, bodyTex
 }
 
 /**
+ * Envia mensagem interativa com lista de opções (ideal para 4+ opções).
+ * sections: [{ title: 'Seção', rows: [{ id: 'opt_1', title: 'Opção', description: '...' }] }]
+ * buttonText: texto do botão que abre a lista (máx 20 chars)
+ */
+async function enviarMensagemWhatsappLista({ phoneNumberId, toPhone, headerText, bodyText, footerText, buttonText, sections = [] }) {
+  const body = String(bodyText || '').trim();
+  if (!body) throw new Error('Texto do corpo vazio.');
+  const secs = (Array.isArray(sections) ? sections : [])
+    .map(s => ({
+      title: String(s.title || '').trim().slice(0, 24),
+      rows: (Array.isArray(s.rows) ? s.rows : [])
+        .slice(0, 10)
+        .map(r => ({
+          id: String(r.id || '').slice(0, 200),
+          title: String(r.title || '').trim().slice(0, 24),
+          ...(r.description ? { description: String(r.description).trim().slice(0, 72) } : {})
+        }))
+        .filter(r => r.id && r.title)
+    }))
+    .filter(s => s.rows.length);
+  if (!secs.length) {
+    return enviarMensagemWhatsappTexto({ phoneNumberId, toPhone, text: body });
+  }
+  return enviarMensagemWhatsappPayload({
+    phoneNumberId,
+    toPhone,
+    payloadBuilder: (candidate) => ({
+      messaging_product: 'whatsapp',
+      to: candidate,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        ...(headerText ? { header: { type: 'text', text: String(headerText).trim().slice(0, 60) } } : {}),
+        body: { text: body },
+        ...(footerText ? { footer: { text: String(footerText).trim().slice(0, 60) } } : {}),
+        action: {
+          button: String(buttonText || 'Menu de opções').trim().slice(0, 20),
+          sections: secs
+        }
+      }
+    })
+  });
+}
+
+/**
  * Verifica se o telefone pertence a um colaborador interno (cadastrado em auth_user.telefone_contato).
  * Se sim, o chatbot WhatsApp usa o assistente completo (/api/ai/chat) em vez do manual-only.
  */
@@ -595,30 +640,92 @@ const MENU_FINALIZAR_TEXTO =
   '_Digite o número da opção ou envie sua dúvida._';
 
 /**
- * Consulta a agenda (reuniões) do usuário para hoje e próximos dias.
+ * Consulta a agenda (reuniões) do usuário para hoje e próximos 7 dias.
+ * Suporta reuniões recorrentes (repetir, dias_semana, repetir_todos_meses, datas_excecao).
  */
 async function consultarAgendaUsuario(username) {
   try {
+    // Busca TODAS as reservas do usuário (inclusive recorrentes com data_reserva no passado)
     const { rows } = await pool.query(
       `SELECT ra.tema_reuniao, ra.data_reserva, ra.hora_inicio, ra.hora_fim,
               ra.tipo_espaco, ra.cafe, ra.criado_por, ra.descricao,
-              ra.link_reuniao, ra.visitantes
+              ra.link_reuniao, ra.visitantes,
+              ra.repetir, ra.dias_semana, ra.repetir_todos_meses, ra.datas_excecao
        FROM rh.reservas_participantes rp
        JOIN rh.reservas_ambientes ra ON ra.id = rp.reserva_id
        WHERE rp.username = $1
-         AND ra.data_reserva >= CURRENT_DATE
-       ORDER BY ra.data_reserva, ra.hora_inicio
-       LIMIT 15`,
+       ORDER BY ra.data_reserva, ra.hora_inicio`,
       [username]
     );
     if (!rows.length) {
-      return '📅 *Sua Agenda*\n\nVocê não tem reuniões agendadas para os próximos dias. ✅';
+      return '📅 *Sua Agenda*\n\nVocê não tem reuniões agendadas. ✅';
     }
-    let texto = `📅 *Sua Agenda* — ${rows.length} reunião(ões) próxima(s):\n`;
-    let dataAtual = null;
+
+    // Mapeia dias_semana para JS getDay() — dom=0, seg=1, ..., sab=6
+    const DIA_MAP = { dom: 0, seg: 1, ter: 2, qua: 3, qui: 4, sex: 5, sab: 6 };
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const limite = new Date(hoje);
+    limite.setDate(limite.getDate() + 7); // próximos 7 dias
+
+    // Gera lista de ocorrências futuras
+    const ocorrencias = [];
+
     for (const r of rows) {
-      const data = new Date(r.data_reserva);
-      const dataStr = data.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+      const dataBase = new Date(r.data_reserva);
+      dataBase.setHours(0, 0, 0, 0);
+
+      // Set de datas de exceção (normalizadas para YYYY-MM-DD)
+      const excecoes = new Set();
+      if (Array.isArray(r.datas_excecao)) {
+        for (const d of r.datas_excecao) {
+          const dt = new Date(d);
+          excecoes.add(dt.toISOString().slice(0, 10));
+        }
+      }
+
+      if (r.repetir && Array.isArray(r.dias_semana) && r.dias_semana.length > 0) {
+        // Reunião recorrente — gera ocorrências nos próximos 7 dias
+        const diasAlvo = r.dias_semana.map(d => DIA_MAP[d]).filter(d => d !== undefined);
+        if (!diasAlvo.length) continue;
+
+        const cursor = new Date(hoje);
+        while (cursor < limite) {
+          if (diasAlvo.includes(cursor.getDay()) && cursor >= dataBase) {
+            const dataStr = cursor.toISOString().slice(0, 10);
+            if (!excecoes.has(dataStr)) {
+              ocorrencias.push({ ...r, _dataOcorrencia: new Date(cursor) });
+            }
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      } else {
+        // Reunião única — só mostra se data >= hoje
+        if (dataBase >= hoje && dataBase < limite) {
+          const dataStr = dataBase.toISOString().slice(0, 10);
+          if (!excecoes.has(dataStr)) {
+            ocorrencias.push({ ...r, _dataOcorrencia: new Date(dataBase) });
+          }
+        }
+      }
+    }
+
+    if (!ocorrencias.length) {
+      return '📅 *Sua Agenda*\n\nVocê não tem reuniões nos próximos 7 dias. ✅';
+    }
+
+    // Ordena por data e hora
+    ocorrencias.sort((a, b) => {
+      const diff = a._dataOcorrencia - b._dataOcorrencia;
+      if (diff !== 0) return diff;
+      return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
+    });
+
+    let texto = `📅 *Sua Agenda* — ${ocorrencias.length} reunião(ões) nos próximos 7 dias:\n`;
+    let dataAtual = null;
+    for (const r of ocorrencias) {
+      const dataStr = r._dataOcorrencia.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
       if (dataStr !== dataAtual) {
         dataAtual = dataStr;
         texto += `\n📆 *${dataStr}*\n`;
@@ -750,7 +857,7 @@ async function buscarEApresentarCategorias(state) {
  * Processa o fluxo de compras passo-a-passo.
  * Retorna { content } se o fluxo gerou resposta, ou null se não está em fluxo.
  */
-async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) {
+async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo, buttonReplyId }) {
   const msg = String(userMessage || '').trim();
   const msgLower = msg.toLowerCase();
   let state = comprasFlowState.get(phoneDigits);
@@ -791,12 +898,12 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
   switch (state.step) {
     /* ---- Passo 1: Produto na Omie? ---- */
     case 'CADASTRO_OMIE': {
-      if (msg === '1') {
+      if (msg === '1' || buttonReplyId === 'compra_omie_sim') {
         state.step = 'BUSCAR_PRODUTO';
         state.data.tipoCompra = 'omie';
         return { content: '🔍 Digite o *código ou nome* do produto para buscar no catálogo Omie:' };
       }
-      if (msg === '2' || msg === '3') {
+      if (msg === '2' || msg === '3' || buttonReplyId === 'compra_omie_nao' || buttonReplyId === 'compra_omie_naosei') {
         state.data.tipoCompra = 'sem_cadastro';
         state.step = 'MODELO_COMPRA';
         return {
@@ -809,7 +916,7 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
             'Digite o *número* do modelo:'
         };
       }
-      return { content: 'Por favor, digite *1*, *2* ou *3*:\n\n1️⃣ Sim (cadastrado na Omie)\n2️⃣ Não\n3️⃣ Não sei' };
+      return { content: 'Por favor, escolha uma das opções:\n\n*Sim* — cadastrado na Omie\n*Não*\n*Não sei*' };
     }
 
     /* ---- Passo 1b: Modelo de compra (apenas sem cadastro) ---- */
@@ -1017,18 +1124,18 @@ async function processarFluxoCompras({ phoneDigits, userMessage, contatoInfo }) 
       if (d.link) resumo += `• *Link/Anexo:* ${d.link}\n`;
       if (d.observacao) resumo += `• *Obs:* ${d.observacao}\n`;
       resumo += `• *Solicitante:* ${d.solicitante}\n`;
-      resumo += '\n*Confirmar solicitação?*\n\n1️⃣ Confirmar\n2️⃣ Cancelar';
+      resumo += '\n*Confirmar solicitação?*\n\n✅ Confirmar\n❌ Cancelar';
       return { content: resumo };
     }
 
     /* ---- Passo 6: Confirmação ---- */
     case 'CONFIRMACAO': {
-      if (msg === '2' || /^(n[aã]o|cancelar)$/i.test(msg)) {
+      if (msg === '2' || /^(n[aã]o|cancelar)$/i.test(msg) || buttonReplyId === 'compra_cancelar') {
         comprasFlowState.delete(phoneDigits);
         return { content: '❌ Solicitação cancelada.' };
       }
-      if (msg !== '1' && !/^(sim|confirmar|ok)$/i.test(msg)) {
-        return { content: 'Digite *1* para confirmar ou *2* para cancelar:' };
+      if (msg !== '1' && !/^(sim|confirmar|ok)$/i.test(msg) && buttonReplyId !== 'compra_confirmar') {
+        return { content: 'Digite *confirmar* ou *cancelar*:' };
       }
       // Criar solicitação via API
       const d = state.data;
@@ -1647,7 +1754,7 @@ function detectarCodigoProdutoSolto(texto) {
   return null;
 }
 
-async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, waMessageId, phoneNumberId, displayPhoneNumber }) {
+async function processarRespostaAutomaticaWhatsapp({ phone, profileName, messageText, waMessageId, phoneNumberId, displayPhoneNumber, buttonReplyId, listReplyId }) {
   if (!WHATSAPP_CHATBOT_AUTOREPLY_ENABLED) return;
   const phoneDigits = normalizePhoneDigits(phone);
   const userText = String(messageText || '').trim();
@@ -1674,6 +1781,47 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { sendPayload, outMsgId };
   }
 
+  // Helper para enviar menu principal como lista interativa
+  async function enviarMenuPrincipal(textoIntro, logMode) {
+    const sendPayload = await enviarMensagemWhatsappLista({
+      phoneNumberId, toPhone: phoneDigits,
+      headerText: 'Chatbot Fromtherm',
+      bodyText: textoIntro || 'Como posso ajudar?',
+      footerText: 'Selecione uma opção da lista',
+      buttonText: 'Menu de opções',
+      sections: [{
+        title: 'Opções disponíveis',
+        rows: [
+          { id: 'menu_consultar_produto', title: 'Consultar produto', description: 'Buscar produto por código ou nome' },
+          { id: 'menu_realizar_compra', title: 'Realizar compra', description: 'Solicitar compra de material' },
+          { id: 'menu_verificar_agenda', title: 'Verificar agenda', description: 'Ver reuniões agendadas' },
+          { id: 'menu_verificar_mensagens', title: 'Verificar mensagens', description: 'Ver mensagens não lidas' }
+        ]
+      }]
+    });
+    const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+      messageType: 'interactive', messageText: textoIntro || 'Menu principal',
+      phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+    });
+    if (logMode) console.log(`[WhatsApp] ${logMode}:`, JSON.stringify({ to_phone: phoneDigits }));
+    return { sendPayload, outMsgId };
+  }
+
+  // Helper para enviar menu de finalização (texto + lista)
+  async function enviarMenuFinalizar(textoResultado, logMode) {
+    // Primeiro envia o resultado como texto
+    if (textoResultado) {
+      await enviarTextoERegistrar(textoResultado, logMode);
+    }
+    // Depois envia a lista interativa para próxima ação
+    await enviarMenuPrincipal('✅ Posso ajudar com mais alguma coisa?', logMode ? logMode + ' → menu' : 'finalizar → menu');
+  }
+
+  // Resolve o ID da opção interativa (list ou button) ou texto digitado
+  const interactiveId = listReplyId || buttonReplyId || null;
+
   /* ====================================================================
    *  CONTATOS INTERNOS — SISTEMA DE MENU NUMERADO
    * ==================================================================== */
@@ -1681,29 +1829,29 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     let menuState = menuInternoState.get(phoneDigits);
 
     // "0" ou "finalizar" ou "sair do menu" em qualquer fluxo → finaliza e mostra menu
-    if (menuState?.fluxo && /^(0|finalizar|encerrar|voltar|menu|sair)$/i.test(userText)) {
+    if (menuState?.fluxo && (/^(0|finalizar|encerrar|voltar|menu|sair)$/i.test(userText) || interactiveId === 'menu_voltar')) {
       // Limpa fluxos ativos
       comprasFlowState.delete(phoneDigits);
       ultimaBuscaProdutos.delete(phoneDigits);
       ultimoProdutoConsultado.delete(phoneDigits);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarTextoERegistrar(MENU_FINALIZAR_TEXTO, 'menu finalizar');
+      await enviarMenuPrincipal('✅ Assunto finalizado!\n\nPosso ajudar com mais alguma coisa?', 'menu finalizar');
       return;
     }
 
     // Se está em fluxo de COMPRAS ativo, roteia para o processador de compras
     if (menuState?.fluxo === 'COMPRAS') {
-      const comprasReply = await processarFluxoCompras({ phoneDigits, userMessage: userText, contatoInfo });
+      const comprasReply = await processarFluxoCompras({ phoneDigits, userMessage: userText, contatoInfo, buttonReplyId });
       if (comprasReply) {
         // Verifica se o fluxo terminou (cancelado ou confirmado → comprasFlowState foi deletado)
         const fluxoAinda = comprasFlowState.has(phoneDigits);
-        let textoFinal = comprasReply.content;
         if (!fluxoAinda) {
-          // Fluxo terminou — volta ao menu
-          textoFinal += '\n\n' + '━'.repeat(20) + '\n\n' + MENU_FINALIZAR_TEXTO;
+          // Fluxo terminou — envia resultado + menu
           menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+          await enviarMenuFinalizar(comprasReply.content, 'fluxo compras');
+        } else {
+          await enviarTextoERegistrar(comprasReply.content, 'fluxo compras');
         }
-        await enviarTextoERegistrar(textoFinal, 'fluxo compras');
         return;
       }
       // Se processarFluxoCompras retornou null (não é intenção de compra), volta ao menu
@@ -1813,22 +1961,22 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     if (menuState?.fluxo === 'AGENDA') {
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
       // Não deveria entrar aqui pois agenda é one-shot, mas por segurança volta ao menu
-      await enviarTextoERegistrar(MENU_PRINCIPAL_TEXTO, 'agenda → menu');
+      await enviarMenuPrincipal('Como posso ajudar?', 'agenda → menu');
       return;
     }
 
     // Se está em fluxo de MENSAGENS (one-shot: consulta e volta ao menu)
     if (menuState?.fluxo === 'MENSAGENS') {
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarTextoERegistrar(MENU_PRINCIPAL_TEXTO, 'mensagens → menu');
+      await enviarMenuPrincipal('Como posso ajudar?', 'mensagens → menu');
       return;
     }
 
-    // === SEM FLUXO ATIVO — processa escolha do menu ou mostra menu ===
-    const escolha = userText.trim();
+    // === SEM FLUXO ATIVO — processa escolha do menu interativo ou texto ===
+    const escolha = interactiveId || userText.trim();
 
-    // Opção 1 — Consultar produto
-    if (escolha === '1') {
+    // Opção 1 — Consultar produto (por lista interativa ou texto "1")
+    if (escolha === 'menu_consultar_produto' || escolha === '1') {
       menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_PRODUTO', updatedAt: Date.now() });
       await enviarTextoERegistrar(
         '🔍 *Consulta de Produto*\n\n' +
@@ -1841,7 +1989,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     }
 
     // Opção 2 — Realizar compra
-    if (escolha === '2') {
+    if (escolha === 'menu_realizar_compra' || escolha === '2') {
       menuInternoState.set(phoneDigits, { fluxo: 'COMPRAS', updatedAt: Date.now() });
       // Inicia o fluxo de compras diretamente no primeiro passo
       const state = {
@@ -1850,38 +1998,46 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         updatedAt: Date.now()
       };
       comprasFlowState.set(phoneDigits, state);
-      await enviarTextoERegistrar(
-        '🛒 *Solicitação de Compra*\n\n' +
-        'O produto já está cadastrado na Omie?\n\n' +
-        '1️⃣ Sim\n' +
-        '2️⃣ Não\n' +
-        '3️⃣ Não sei\n\n' +
-        '_(Digite o número ou *0* para voltar ao menu)_',
-        'menu → compras'
-      );
+      // Envia com botões interativos (3 opções = ideal para botões)
+      const sendPayload = await enviarMensagemWhatsappComBotoes({
+        phoneNumberId, toPhone: phoneDigits,
+        bodyText: '🛒 *Solicitação de Compra*\n\nO produto já está cadastrado na Omie?',
+        buttons: [
+          { id: 'compra_omie_sim', title: 'Sim' },
+          { id: 'compra_omie_nao', title: 'Não' },
+          { id: 'compra_omie_naosei', title: 'Não sei' }
+        ]
+      });
+      const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({
+        waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+        messageType: 'interactive', messageText: 'Início fluxo compras',
+        phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+      });
+      console.log('[WhatsApp] menu → compras:', JSON.stringify({ to_phone: phoneDigits }));
       return;
     }
 
     // Opção 3 — Verificar agenda
-    if (escolha === '3') {
+    if (escolha === 'menu_verificar_agenda' || escolha === '3') {
       const textoAgenda = await consultarAgendaUsuario(contatoInfo.username);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarTextoERegistrar(textoAgenda + '\n\n' + '━'.repeat(20) + '\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → agenda');
+      await enviarMenuFinalizar(textoAgenda, 'menu → agenda');
       return;
     }
 
     // Opção 4 — Verificar mensagens
-    if (escolha === '4') {
+    if (escolha === 'menu_verificar_mensagens' || escolha === '4') {
       const textoMensagens = await consultarMensagensNaoLidas(contatoInfo.userId);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarTextoERegistrar(textoMensagens + '\n\n' + '━'.repeat(20) + '\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → mensagens');
+      await enviarMenuFinalizar(textoMensagens, 'menu → mensagens');
       return;
     }
 
     // Qualquer outra mensagem sem fluxo ativo → mostra menu principal
-    const saudacao = contatoInfo.username ? `Olá, *${contatoInfo.username}*! 👋\n\n` : 'Olá! 👋\n\n';
+    const saudacao = contatoInfo.username ? `Olá, *${contatoInfo.username}*! 👋` : 'Olá! 👋';
     menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-    await enviarTextoERegistrar(saudacao + MENU_PRINCIPAL_TEXTO, 'menu principal');
+    await enviarMenuPrincipal(saudacao + '\n\nPara iniciar o seu atendimento, escolha uma das opções da lista 👇', 'menu principal');
     return;
   }
 
@@ -5109,6 +5265,7 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
               messageText: textBody,
               waMessageId,
               buttonReplyId: String(message?.interactive?.button_reply?.id || '').trim() || null,
+              listReplyId: String(message?.interactive?.list_reply?.id || '').trim() || null,
               phoneNumberId: String(metadata?.phone_number_id || '').trim() || null,
               displayPhoneNumber: String(metadata?.display_phone_number || '').trim() || null
             });
