@@ -581,7 +581,8 @@ const MENU_PRINCIPAL_TEXTO =
   'Escolha uma opção:\n\n' +
   '1️⃣ Consultar produto\n' +
   '2️⃣ Realizar compra\n' +
-  '3️⃣ Verificar agenda\n\n' +
+  '3️⃣ Verificar agenda\n' +
+  '4️⃣ Verificar mensagens\n\n' +
   '_Digite o número da opção desejada._';
 
 const MENU_FINALIZAR_TEXTO =
@@ -589,8 +590,90 @@ const MENU_FINALIZAR_TEXTO =
   'Posso ajudar com mais alguma coisa?\n\n' +
   '1️⃣ Consultar produto\n' +
   '2️⃣ Realizar compra\n' +
-  '3️⃣ Verificar agenda\n\n' +
+  '3️⃣ Verificar agenda\n' +
+  '4️⃣ Verificar mensagens\n\n' +
   '_Digite o número da opção ou envie sua dúvida._';
+
+/**
+ * Consulta a agenda (reuniões) do usuário para hoje e próximos dias.
+ */
+async function consultarAgendaUsuario(username) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ra.tema_reuniao, ra.data_reserva, ra.hora_inicio, ra.hora_fim,
+              ra.tipo_espaco, ra.cafe, ra.criado_por, ra.descricao,
+              ra.link_reuniao, ra.visitantes
+       FROM rh.reservas_participantes rp
+       JOIN rh.reservas_ambientes ra ON ra.id = rp.reserva_id
+       WHERE rp.username = $1
+         AND ra.data_reserva >= CURRENT_DATE
+       ORDER BY ra.data_reserva, ra.hora_inicio
+       LIMIT 15`,
+      [username]
+    );
+    if (!rows.length) {
+      return '📅 *Sua Agenda*\n\nVocê não tem reuniões agendadas para os próximos dias. ✅';
+    }
+    let texto = `📅 *Sua Agenda* — ${rows.length} reunião(ões) próxima(s):\n`;
+    let dataAtual = null;
+    for (const r of rows) {
+      const data = new Date(r.data_reserva);
+      const dataStr = data.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+      if (dataStr !== dataAtual) {
+        dataAtual = dataStr;
+        texto += `\n📆 *${dataStr}*\n`;
+      }
+      texto += `  ⏰ ${r.hora_inicio.slice(0,5)} — ${r.hora_fim.slice(0,5)}`;
+      texto += ` | 📍 ${r.tipo_espaco || 'Local não definido'}\n`;
+      texto += `  📌 *${r.tema_reuniao || 'Sem tema'}*\n`;
+      if (r.descricao) texto += `  📝 ${r.descricao}\n`;
+      if (r.criado_por) texto += `  👤 Organizado por: ${r.criado_por}\n`;
+      if (r.visitantes) texto += `  🧑‍💼 Visitantes: ${r.visitantes}\n`;
+      if (r.link_reuniao) texto += `  🔗 Link: ${r.link_reuniao}\n`;
+      if (r.cafe) texto += `  ☕ Café solicitado\n`;
+    }
+    return texto;
+  } catch (err) {
+    console.error('[WhatsApp/Agenda] erro ao consultar agenda:', err?.message || err);
+    return '⚠️ Erro ao consultar sua agenda. Tente novamente mais tarde.';
+  }
+}
+
+/**
+ * Consulta mensagens não lidas do chat interno para o usuário.
+ */
+async function consultarMensagensNaoLidas(userId) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT cm.id, au.username AS remetente, LEFT(cm.message_text, 100) AS msg,
+              cm.created_at
+       FROM public.chat_messages cm
+       JOIN public.auth_user au ON au.id = cm.from_user_id
+       WHERE cm.to_user_id = $1
+         AND cm.is_read = false
+       ORDER BY cm.created_at DESC
+       LIMIT 20`,
+      [userId]
+    );
+    if (!rows.length) {
+      return '💬 *Suas Mensagens*\n\nVocê não tem mensagens não lidas. ✅';
+    }
+    let texto = `💬 *Suas Mensagens* — ${rows.length} não lida(s):\n\n`;
+    for (const m of rows) {
+      const data = new Date(m.created_at);
+      const dataStr = data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      const horaStr = data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const msgResumo = m.msg.length >= 100 ? m.msg + '...' : m.msg;
+      texto += `👤 *${m.remetente}* — ${dataStr} ${horaStr}\n`;
+      texto += `   ${msgResumo}\n\n`;
+    }
+    texto += '_Acesse o chat na intranet para responder._';
+    return texto;
+  } catch (err) {
+    console.error('[WhatsApp/Mensagens] erro ao consultar mensagens:', err?.message || err);
+    return '⚠️ Erro ao consultar suas mensagens. Tente novamente mais tarde.';
+  }
+}
 
 /* ========================================================================
  *  FLUXO DE COMPRAS VIA WHATSAPP (menu numerado interativo)
@@ -1726,11 +1809,18 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       return;
     }
 
-    // Se está em fluxo de AGENDA
+    // Se está em fluxo de AGENDA (one-shot: consulta e volta ao menu)
     if (menuState?.fluxo === 'AGENDA') {
-      // Por enquanto, funcionalidade de agenda não implementada — volta ao menu
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarTextoERegistrar('📅 A funcionalidade de agenda está em desenvolvimento.\n\n' + MENU_PRINCIPAL_TEXTO, 'agenda indisponível');
+      // Não deveria entrar aqui pois agenda é one-shot, mas por segurança volta ao menu
+      await enviarTextoERegistrar(MENU_PRINCIPAL_TEXTO, 'agenda → menu');
+      return;
+    }
+
+    // Se está em fluxo de MENSAGENS (one-shot: consulta e volta ao menu)
+    if (menuState?.fluxo === 'MENSAGENS') {
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarTextoERegistrar(MENU_PRINCIPAL_TEXTO, 'mensagens → menu');
       return;
     }
 
@@ -1774,8 +1864,17 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
 
     // Opção 3 — Verificar agenda
     if (escolha === '3') {
-      menuInternoState.set(phoneDigits, { fluxo: 'AGENDA', updatedAt: Date.now() });
-      await enviarTextoERegistrar('📅 A funcionalidade de agenda está em desenvolvimento.\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → agenda');
+      const textoAgenda = await consultarAgendaUsuario(contatoInfo.username);
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarTextoERegistrar(textoAgenda + '\n\n' + '━'.repeat(20) + '\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → agenda');
+      return;
+    }
+
+    // Opção 4 — Verificar mensagens
+    if (escolha === '4') {
+      const textoMensagens = await consultarMensagensNaoLidas(contatoInfo.userId);
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarTextoERegistrar(textoMensagens + '\n\n' + '━'.repeat(20) + '\n\n' + MENU_PRINCIPAL_TEXTO, 'menu → mensagens');
       return;
     }
 
