@@ -1622,7 +1622,7 @@ async function montarDetalheProduto(produto) {
 
     // Imagem disponível?
     if (imageUrl) {
-      texto += '\n📷 _Imagem disponível. Responda *"ver foto"* para recebê-la._';
+      texto += '\n📷 _Imagem disponível. Clique em *"ver foto"* para recebê-la._';
     }
 
     return { texto, imageUrl, produto };
@@ -1840,6 +1840,144 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { sendPayload, outMsgId };
   }
 
+  // ─── Helpers de Manual de Instrução ────────────────────────────────────────
+
+  /** Busca manuais pelo modelo digitado (match normalizado sem especiais) */
+  async function buscarManuaisPorModelo(modeloDigitado) {
+    const term = modeloDigitado.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (!term || term.length < 2) return [];
+    const { rows } = await pool.query(`
+      SELECT id, nome_arquivo, caminho_manual, paginas
+      FROM "Chatbot".manuais_instrucao
+      WHERE regexp_replace(lower(nome_arquivo), '[^a-z0-9]', '', 'g') ILIKE $1
+         OR regexp_replace(lower(nome_arquivo_normalizado), '[^a-z0-9]', '', 'g') ILIKE $1
+      ORDER BY length(nome_arquivo) ASC
+      LIMIT 8
+    `, [`%${term}%`]);
+    return rows;
+  }
+
+  /** Parseia o sumário de um manual a partir dos chunks de texto */
+  async function parsearSumarioManual(manualId) {
+    const { rows } = await pool.query(`
+      SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+      WHERE manual_id = $1 ORDER BY chunk_ordem
+    `, [manualId]);
+    const fullText = rows.map(r => r.texto).join('\n');
+    const sumIdx = fullText.search(/SUMÁRIO|SUMARIO/i);
+    if (sumIdx === -1) return [];
+    const sumText = fullText.slice(sumIdx, sumIdx + 10000);
+    const entriesMap = new Map();
+    // Padrão 1: separador longo de pontos/espaços ("TÍTULO ......... 04")
+    const p1 = /^\s*(\d+(?:\.\d+)*)\.?\s+([^\n]{3,80}?)[\s.]{8,}(\d+)\s*$/gm;
+    // Padrão 2: sem separador de pontos, só espaço antes do número ("TÍTULO 23")
+    const p2 = /^\s*(\d+(?:\.\d+)*)\.?\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇÜ][^\n]{5,80})\s(\d{2,3})\s*$/gm;
+    for (const pattern of [p1, p2]) {
+      let m;
+      while ((m = pattern.exec(sumText)) !== null) {
+        const [, num, title, page] = m;
+        const cleaned = title.trim().replace(/\s+/g, ' ');
+        if (cleaned.length < 3) continue;
+        const key = num.trim();
+        if (!entriesMap.has(key)) {
+          entriesMap.set(key, { num: key, title: cleaned, page: parseInt(page, 10), depth: key.split('.').length });
+        }
+        if (entriesMap.size > 150) break;
+      }
+    }
+    // Ordena pela hierarquia numérica
+    return [...entriesMap.values()].sort((a, b) => {
+      const aParts = a.num.split('.').map(Number);
+      const bParts = b.num.split('.').map(Number);
+      for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+        const diff = (aParts[i] || 0) - (bParts[i] || 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
+  }
+
+  /** Busca o texto dos chunks de um manual para um intervalo de páginas */
+  async function buscarConteudoSecao(manualId, paginaInicio, paginaFim) {
+    let rows;
+    if (paginaInicio < paginaFim) {
+      const res = await pool.query(`
+        SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+        WHERE manual_id = $1 AND pagina_inicial >= $2 AND pagina_inicial <= $3
+        ORDER BY chunk_ordem LIMIT 12
+      `, [manualId, paginaInicio, paginaFim]);
+      rows = res.rows;
+    } else {
+      // Mesma página: só os 2 primeiros chunks para não misturar seções
+      const res = await pool.query(`
+        SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+        WHERE manual_id = $1 AND pagina_inicial = $2
+        ORDER BY chunk_ordem LIMIT 2
+      `, [manualId, paginaInicio]);
+      rows = res.rows;
+    }
+    if (!rows.length) return null;
+    let conteudo = rows.map(r => r.texto.trim()).join('\n\n');
+    if (conteudo.length > 3000) conteudo = conteudo.slice(0, 3000) + '\n\n_[...continua no manual]_';
+    return conteudo;
+  }
+
+  /** Envia o sumário (ou sub-nível) como Interactive List Message */
+  async function enviarSumarioComoLista(sumario, parentNum, nomeManual) {
+    let filteredItems;
+    if (parentNum === null) {
+      filteredItems = sumario.filter(e => e.depth === 1);
+    } else {
+      const parentDepth = parentNum.split('.').length;
+      filteredItems = sumario.filter(e => e.depth === parentDepth + 1 && e.num.startsWith(parentNum + '.'));
+    }
+    // Monta rows com limite de 24 chars no título (restrição WhatsApp)
+    const rowsData = filteredItems.map(e => {
+      const label = `${e.num}. ${e.title}`;
+      return {
+        id: 'msec_' + e.num.replace(/\./g, '_'),
+        title: label.length > 24 ? label.slice(0, 21) + '...' : label,
+        description: `Página ${e.page}`
+      };
+    });
+    // Sub-nível: adiciona row de voltar ao topo da seção
+    if (parentNum !== null) {
+      rowsData.unshift({ id: 'msec_voltar', title: '⬅ Voltar', description: 'Nível anterior' });
+    } else {
+      // Nível raiz: adiciona opção de sair do manual no final
+      rowsData.push({ id: 'menu_voltar', title: '🏠 Menu principal', description: 'Sair do manual' });
+    }
+    // Divide em seções de max 10 rows (restrição WhatsApp)
+    const sections = [];
+    for (let i = 0; i < rowsData.length; i += 10) {
+      sections.push({
+        title: sections.length === 0 ? (parentNum ? `Seção ${parentNum}` : 'Capítulos') : 'Mais capítulos',
+        rows: rowsData.slice(i, i + 10)
+      });
+    }
+    const parentEntry = parentNum ? sumario.find(e => e.num === parentNum) : null;
+    const bodyText = parentEntry
+      ? `*${parentNum}. ${parentEntry.title}*\n\nEscolha um subcapítulo:`
+      : `*${nomeManual.slice(0, 60)}*\n\nEscolha um capítulo para ler:`;
+    const sendPayload = await enviarMensagemWhatsappLista({
+      phoneNumberId, toPhone: phoneDigits,
+      headerText: '📖 Manual de Instrução',
+      bodyText,
+      footerText: 'Toque no botão para ver o sumário',
+      buttonText: 'Ver sumário',
+      sections
+    });
+    const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+      messageType: 'interactive', messageText: `Sumário manual ${parentNum || 'principal'}`,
+      phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+    });
+    return { sendPayload, outMsgId };
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Helper para enviar menu principal como lista interativa
   async function enviarMenuPrincipal(textoIntro, logMode) {
     const sendPayload = await enviarMensagemWhatsappLista({
@@ -1854,7 +1992,8 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           { id: 'menu_consultar_produto', title: 'Consultar produto', description: 'Buscar produto por código ou nome' },
           { id: 'menu_realizar_compra', title: 'Realizar compra', description: 'Solicitar compra de material' },
           { id: 'menu_verificar_agenda', title: 'Verificar agenda', description: 'Ver reuniões agendadas' },
-          { id: 'menu_verificar_mensagens', title: 'Verificar mensagens', description: 'Ver mensagens não lidas' }
+          { id: 'menu_verificar_mensagens', title: 'Verificar mensagens', description: 'Ver mensagens não lidas' },
+          { id: 'menu_manual_instrucao', title: 'Manual de instrução', description: 'Buscar manual do seu equipamento' }
         ]
       }]
     });
@@ -1935,6 +2074,10 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
               phoneNumberId, displayPhoneNumber, payload: imgPayload, direction: 'outbound'
             });
             console.log('[WhatsApp] foto produto enviada:', cache.codigo);
+            // Botão de voltar após foto
+            const bFotoPayload = await enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone: phoneDigits, bodyText: 'O que deseja fazer?', buttons: [{ id: 'menu_voltar', title: '🏠 Voltar ao menu' }] });
+            const bFotoMsgId = String(bFotoPayload?.messages?.[0]?.id || '').trim() || null;
+            await insertWhatsappMessageRecord({ waMessageId: bFotoMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Botão voltar foto', phoneNumberId, displayPhoneNumber, payload: bFotoPayload, direction: 'outbound' });
             return;
           } catch (imgErr) {
             console.warn('[WhatsApp] falha ao enviar foto:', imgErr?.message);
@@ -2034,6 +2177,154 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       return;
     }
 
+    // Se está em fluxo de MANUAL_INSTRUCAO
+    if (menuState?.fluxo === 'MANUAL_INSTRUCAO') {
+      const step = menuState.step || 'AGUARDA_MODELO';
+
+      // === AGUARDA_MODELO: recebe o modelo digitado pelo usuário ===
+      if (step === 'AGUARDA_MODELO') {
+        const manuais = await buscarManuaisPorModelo(userText);
+        if (manuais.length === 0) {
+          await enviarTextoERegistrar(
+            `❌ Nenhum manual encontrado para *"${userText}"*.\n\nTente outro modelo, ex: _"FTi35"_, _"FT-50"_, _"FTi 115Br"_.`,
+            'manual não encontrado'
+          );
+          return;
+        }
+        // Múltiplos manuais → mostra lista para escolha
+        if (manuais.length > 1) {
+          const rowsM = manuais.slice(0, 9).map(m => ({
+            id: 'msel_' + m.id,
+            title: m.nome_arquivo.slice(0, 24),
+            description: `${m.paginas || '?'} páginas`
+          }));
+          rowsM.push({ id: 'menu_voltar', title: '🏠 Menu principal', description: '' });
+          const mpSend = await enviarMensagemWhatsappLista({
+            phoneNumberId, toPhone: phoneDigits,
+            headerText: '📖 Manuais encontrados',
+            bodyText: `Encontrei *${manuais.length}* manuais para *"${userText}"*.\n\nQual deseja consultar?`,
+            footerText: 'Selecione um manual',
+            buttonText: 'Ver manuais',
+            sections: [{ title: 'Manuais disponíveis', rows: rowsM }]
+          });
+          const mpId = String(mpSend?.messages?.[0]?.id || '').trim() || null;
+          await insertWhatsappMessageRecord({ waMessageId: mpId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Lista de manuais', phoneNumberId, displayPhoneNumber, payload: mpSend, direction: 'outbound' });
+          menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'ESCOLHENDO_MANUAL', manuais, updatedAt: Date.now() });
+          return;
+        }
+        // Um único manual → vai direto ao sumário
+        const manual = manuais[0];
+        const sumario = await parsearSumarioManual(manual.id);
+        if (sumario.length === 0) {
+          await enviarTextoERegistrar(
+            `⚠️ Manual *${manual.nome_arquivo}* encontrado, mas não foi possível extrair o sumário.\n\n🔗 Acesse diretamente:\n${manual.caminho_manual}`,
+            'manual sem sumário'
+          );
+          menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+          return;
+        }
+        menuInternoState.set(phoneDigits, {
+          fluxo: 'MANUAL_INSTRUCAO', step: 'NAVEGANDO_SUMARIO',
+          manualId: manual.id, nomeManual: manual.nome_arquivo,
+          caminho: manual.caminho_manual, sumario, parentNum: null, updatedAt: Date.now()
+        });
+        await enviarSumarioComoLista(sumario, null, manual.nome_arquivo);
+        return;
+      }
+
+      // === ESCOLHENDO_MANUAL: usuário selecionou um manual da lista ===
+      if (step === 'ESCOLHENDO_MANUAL') {
+        const { manuais } = menuState;
+        if (interactiveId?.startsWith('msel_')) {
+          const manualId = parseInt(interactiveId.slice(5), 10);
+          const manual = manuais.find(m => m.id === manualId);
+          if (!manual) { await enviarTextoERegistrar('❓ Seleção inválida.', 'manual sel inválida'); return; }
+          const sumario = await parsearSumarioManual(manual.id);
+          if (sumario.length === 0) {
+            await enviarTextoERegistrar(
+              `⚠️ Sumário não disponível.\n\n🔗 Acesse: ${manual.caminho_manual}`,
+              'manual sem sumário'
+            );
+            menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+            return;
+          }
+          menuInternoState.set(phoneDigits, {
+            fluxo: 'MANUAL_INSTRUCAO', step: 'NAVEGANDO_SUMARIO',
+            manualId: manual.id, nomeManual: manual.nome_arquivo,
+            caminho: manual.caminho_manual, sumario, parentNum: null, updatedAt: Date.now()
+          });
+          await enviarSumarioComoLista(sumario, null, manual.nome_arquivo);
+          return;
+        }
+        // Texto livre: reapresenta aviso
+        await enviarTextoERegistrar('_Use o menu acima para escolher o manual._', 'manual escolha inválida');
+        return;
+      }
+
+      // === NAVEGANDO_SUMARIO: usuário navega capítulos e subcapítulos ===
+      if (step === 'NAVEGANDO_SUMARIO') {
+        const { manualId, nomeManual, caminho, sumario, parentNum } = menuState;
+
+        // Voltar um nível no sumário
+        if (interactiveId === 'msec_voltar') {
+          let newParent = null;
+          if (parentNum) {
+            const parts = parentNum.split('.');
+            newParent = parts.length > 1 ? parts.slice(0, -1).join('.') : null;
+          }
+          menuInternoState.set(phoneDigits, { ...menuState, parentNum: newParent, updatedAt: Date.now() });
+          await enviarSumarioComoLista(sumario, newParent, nomeManual);
+          return;
+        }
+
+        // Seleção de item do sumário
+        if (interactiveId?.startsWith('msec_')) {
+          const numStr = interactiveId.slice(5).replace(/_/g, '.');
+          const entry = sumario.find(e => e.num === numStr);
+          if (!entry) { await enviarTextoERegistrar('❓ Capítulo não encontrado.', 'manual item inválido'); return; }
+
+          // Verifica se tem filhos diretos
+          const hasChildren = sumario.some(e => e.depth === entry.depth + 1 && e.num.startsWith(numStr + '.'));
+          if (hasChildren) {
+            menuInternoState.set(phoneDigits, { ...menuState, parentNum: numStr, updatedAt: Date.now() });
+            await enviarSumarioComoLista(sumario, numStr, nomeManual);
+            return;
+          }
+
+          // Folha → busca conteúdo do manual
+          const entryIdx = sumario.indexOf(entry);
+          const nextEntry = sumario.slice(entryIdx + 1).find(e => e.depth <= entry.depth);
+          const paginaFim = nextEntry ? Math.max(nextEntry.page - 1, entry.page) : entry.page + 4;
+          const conteudo = await buscarConteudoSecao(manualId, entry.page, paginaFim);
+          const tituloFmt = `*${entry.num}. ${entry.title}*`;
+          if (conteudo) {
+            await enviarTextoERegistrar(`📖 ${tituloFmt}\n\n${conteudo}`, 'manual conteúdo seção');
+          } else {
+            await enviarTextoERegistrar(
+              `📖 ${tituloFmt}\n\n_Seção na página ${entry.page} do manual._\n\n🔗 ${caminho}`,
+              'manual sem chunks'
+            );
+          }
+          // Botões de navegação pós-conteúdo
+          const bPayload = await enviarMensagemWhatsappComBotoes({
+            phoneNumberId, toPhone: phoneDigits,
+            bodyText: 'O que deseja fazer?',
+            buttons: [
+              { id: 'msec_voltar', title: '⬅ Voltar ao sumário' },
+              { id: 'menu_voltar', title: '🏠 Menu principal' }
+            ]
+          });
+          const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+          await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Navegação pós-conteúdo manual', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+          return;
+        }
+
+        // Texto livre durante navegação → reapresenta o nível atual
+        await enviarSumarioComoLista(sumario, parentNum, nomeManual);
+        return;
+      }
+    }
+
     // Se está em fluxo de AGENDA (one-shot: consulta e volta ao menu)
     if (menuState?.fluxo === 'AGENDA') {
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
@@ -2058,10 +2349,13 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       await enviarTextoERegistrar(
         '🔍 *Consulta de Produto*\n\n' +
         'Digite o *código* ou *nome* do produto que deseja consultar.\n\n' +
-        '_Exemplo: "07.MP.N.62031" ou "compressor"_\n' +
-        '_Digite *0* a qualquer momento para voltar ao menu._',
+        '_Exemplo: "07.MP.N.62031" ou "compressor"_',
         'menu → consulta produto'
       );
+      // Botão para voltar ao menu
+      const bVoltarPayload = await enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone: phoneDigits, bodyText: 'ou clique abaixo para voltar:', buttons: [{ id: 'menu_voltar', title: '🏠 Voltar ao menu' }] });
+      const bVoltarMsgId = String(bVoltarPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({ waMessageId: bVoltarMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Botão voltar consulta', phoneNumberId, displayPhoneNumber, payload: bVoltarPayload, direction: 'outbound' });
       return;
     }
 
@@ -2108,6 +2402,21 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       const textoMensagens = await consultarMensagensNaoLidas(contatoInfo.userId);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
       await enviarMenuFinalizar(textoMensagens, 'menu → mensagens');
+      return;
+    }
+
+    // Opção 5 — Manual de instrução
+    if (escolha === 'menu_manual_instrucao' || escolha === '5') {
+      menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'AGUARDA_MODELO', updatedAt: Date.now() });
+      await enviarTextoERegistrar(
+        '📖 *Manual de Instrução*\n\n' +
+        'Digite o *modelo* do equipamento para buscar o manual.\n\n' +
+        '_Exemplo: "FTi35", "FT-50"_',
+        'menu → manual instrução'
+      );
+      const bVoltarPayload = await enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone: phoneDigits, bodyText: 'ou clique abaixo para voltar:', buttons: [{ id: 'menu_voltar', title: '🏠 Voltar ao menu' }] });
+      const bVoltarMsgId = String(bVoltarPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({ waMessageId: bVoltarMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Botão voltar manual', phoneNumberId, displayPhoneNumber, payload: bVoltarPayload, direction: 'outbound' });
       return;
     }
 

@@ -5443,12 +5443,25 @@ async function _pedidoSyncWorker() {
         ? [{ codigo_pedido: Number(codigoPedido) }]
         : [{ numero_pedido: String(numeroPedido) }];
 
-      const j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', {
-        call: 'ConsultarPedido',
-        app_key:    process.env.OMIE_APP_KEY,
-        app_secret: process.env.OMIE_APP_SECRET,
-        param
-      }, 20000);
+      // Retry em caso de erro REDUNDANT da Omie (SOAP-ENV:Client-6)
+      let j = null;
+      for (let tentativa = 1; tentativa <= 3; tentativa++) {
+        try {
+          j = await omiePost('https://app.omie.com.br/api/v1/produtos/pedido/', {
+            call: 'ConsultarPedido',
+            app_key:    process.env.OMIE_APP_KEY,
+            app_secret: process.env.OMIE_APP_SECRET,
+            param
+          }, 20000);
+          break;
+        } catch (eRetry) {
+          if (!ehErroRedundanteOmie(eRetry) || tentativa >= 3) throw eRetry;
+          const cooldown = extrairCooldownSegundosOmie(String(eRetry?.message || ''));
+          const espera = (Math.max(2, cooldown) + 5) * 1000;
+          console.warn(`[pedidoSyncQueue] REDUNDANT detectado, aguardando ${Math.round(espera/1000)}s (tentativa ${tentativa}/3)...`);
+          await new Promise(r => setTimeout(r, espera));
+        }
+      }
 
       const ped = Array.isArray(j?.pedido_venda_produto)
         ? j.pedido_venda_produto
@@ -6526,26 +6539,12 @@ app.post(['/webhooks/omie/recebimentos-nfe', '/api/webhooks/omie/recebimentos-nf
 
             console.log(`[webhooks/omie/recebimentos-nfe] Consultando dados completos do recebimento com nIdReceb=${nIdReceb || 'N/A'}...`);
 
-            const response = await fetch('https://app.omie.com.br/api/v1/produtos/recebimentonfe/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                call: 'ConsultarRecebimento',
-                app_key: OMIE_APP_KEY,
-                app_secret: OMIE_APP_SECRET,
-                param: [param]
-              })
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`Omie API HTTP ${response.status}: ${errorText}`);
-            }
-
-            recebimento = await response.json();
-            if (recebimento?.faultstring || recebimento?.faultcode) {
-              throw new Error(recebimento.faultstring || recebimento.faultcode || 'Falha em ConsultarRecebimento');
-            }
+            // Usa wrapper com retry para erros REDUNDANT da Omie (SOAP-ENV:Client-6)
+            recebimento = await chamarApiRecebimentoNfeOmieComRetryRedundant(
+              'ConsultarRecebimento',
+              param,
+              { tentativasMaximas: 3, margemSegundos: 5 }
+            );
 
             // Atualiza no banco - passa cChaveNfe e cDadosAdicionais vindos do webhook como fallback
             await upsertRecebimentoNFe(recebimento, topic, messageId, cChaveNfe, cDadosAdicionaisWebhook, body);

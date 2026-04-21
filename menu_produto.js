@@ -9767,36 +9767,40 @@ function _atRenderCurrent() {
       _at(r.estado)               ||
       _at(r.descreva_reclamacao)  ||
       _at(r.pedido)               ||
+      _at(r.ordem_producao)       ||
       _at(r.modelo)               ||
       _at(r.nota_fiscal)          ||
+      _at(r.data_entrega)         ||
       _at(r.tecnico_nome)
     );
   }
 
-  // Filtro Tipo
-  if (f.tipo === 'EXCLUIR_RAPIDO') {
-    rows = rows.filter(r => String(r.tipo || '').toLowerCase() !== 'atendimento rapido');
-  } else if (f.tipo) {
-    rows = rows.filter(r => String(r.tipo || '').toLowerCase() === f.tipo.toLowerCase());
-  }
+  // Quando há busca de texto livre ativa, ignora todos os filtros avançados
+  if (!q) {
+    // Filtro Tipo
+    if (f.tipo === 'EXCLUIR_RAPIDO') {
+      rows = rows.filter(r => String(r.tipo || '').toLowerCase() !== 'atendimento rapido');
+    } else if (f.tipo) {
+      rows = rows.filter(r => String(r.tipo || '').toLowerCase() === f.tipo.toLowerCase());
+    }
 
-  // Filtro Status OS
-  if (f.status === 'EXCLUIR_FECHADO') {
-    rows = rows.filter(r => String(r.status || '').toLowerCase() !== 'fechado');
-  } else if (f.status) {
-    rows = rows.filter(r => String(r.status || '').toLowerCase() === f.status.toLowerCase());
-  }
+    // Filtro Status OS
+    if (f.status === 'EXCLUIR_FECHADO') {
+      rows = rows.filter(r => String(r.status || '').toLowerCase() !== 'fechado');
+    } else if (f.status) {
+      rows = rows.filter(r => String(r.status || '').toLowerCase() === f.status.toLowerCase());
+    }
 
-  // Filtro Data
-  // Padrão: se nenhuma data-ini foi definida, exibe apenas registros de 2026 em diante
-  const dataPadraoIni = new Date('2026-01-01T00:00:00');
-  if (f.dataIni) {
-    const ini = new Date(f.dataIni + 'T00:00:00');
-    rows = rows.filter(r => r.data && new Date(r.data) >= ini);
-  } else {
-    rows = rows.filter(r => r.data && new Date(r.data) >= dataPadraoIni);
+    // Filtro Data — padrão: apenas registros de 2026 em diante
+    const dataPadraoIni = new Date('2026-01-01T00:00:00');
+    if (f.dataIni) {
+      const ini = new Date(f.dataIni + 'T00:00:00');
+      rows = rows.filter(r => r.data && new Date(r.data) >= ini);
+    } else {
+      rows = rows.filter(r => r.data && new Date(r.data) >= dataPadraoIni);
+    }
   }
-  if (f.dataFim) {
+  if (f.dataFim && !q) {
     const fim = new Date(f.dataFim + 'T23:59:59');
     rows = rows.filter(r => r.data && new Date(r.data) <= fim);
   }
@@ -10049,6 +10053,17 @@ function _renderAtCards(rows) {
         ${primary.atendimento_inicial ? _atCiFieldRO('Atend. inicial', primary.atendimento_inicial) : ''}
         ${primary.motivo_solicitacao  ? _atCiFieldRO('Motivo', primary.motivo_solicitacao) : ''}
       </div>
+      ${(primary.pedido || primary.ordem_producao || primary.nota_fiscal) ? `
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(167,139,250,.2);">
+        <div style="font-size:9px;text-transform:uppercase;color:#a78bfa;font-weight:700;letter-spacing:.06em;margin-bottom:4px;">
+          <i class="fa-solid fa-barcode"></i> Dados da Busca
+        </div>
+        <div class="at-ci-fields">
+          ${primary.pedido          ? _atCiFieldRO('Pedido', primary.pedido) : ''}
+          ${primary.ordem_producao  ? _atCiFieldRO('Ordem Prod.', primary.ordem_producao) : ''}
+          ${primary.nota_fiscal     ? _atCiFieldRO('Nota Fiscal', primary.nota_fiscal) : ''}
+        </div>
+      </div>` : ''}
       <div class="at-ci-desc-area">
         <div class="at-ci-desc-lbl">Reclamação</div>
         ${group.rows.length > 1 && reclamacoes
@@ -11532,6 +11547,12 @@ function _abrirAtEditModal(id) {
   setV('atEmFechObs',        row.fech_obs);
   setV('atEmFechMidias',     row.fech_midias);
 
+  // Dados da Busca (at_busca_selecionada)
+  setV('atEmPedido',         row.pedido);
+  setV('atEmOrdemProducao',  row.ordem_producao);
+  setV('atEmNotaFiscal',     row.nota_fiscal);
+  setV('atEmDataEntrega',    row.data_entrega);
+
   // Reset mensagens
   const emSaved = document.getElementById('atEmSavedMsg');
   const emErr   = document.getElementById('atEmErrMsg');
@@ -12316,10 +12337,21 @@ if (_atViewCardBtn) {
 
 // Filtro de pesquisa
 const _atFiltroEl = document.getElementById('atAtendimentosFiltro');
+const _atFiltroLimparBtn = document.getElementById('atAtendimentosFiltroLimpar');
 if (_atFiltroEl) {
   _atFiltroEl.addEventListener('input', () => {
     clearTimeout(_atFiltroTimer);
+    if (_atFiltroLimparBtn) {
+      _atFiltroLimparBtn.style.display = _atFiltroEl.value ? 'inline-flex' : 'none';
+    }
     _atFiltroTimer = setTimeout(() => _atRenderCurrent(), 200);
+  });
+}
+if (_atFiltroLimparBtn) {
+  _atFiltroLimparBtn.addEventListener('click', () => {
+    if (_atFiltroEl) { _atFiltroEl.value = ''; }
+    _atFiltroLimparBtn.style.display = 'none';
+    _atRenderCurrent();
   });
 }
 

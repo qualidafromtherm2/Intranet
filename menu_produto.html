@@ -3047,7 +3047,11 @@
                   <div style="position:relative;flex:1;min-width:200px;">
                     <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--inactive-color);pointer-events:none;"></i>
                     <input id="atAtendimentosFiltro" type="text" placeholder="Pesquisar atendimentos..."
-                      style="width:100%;padding:7px 10px 7px 32px;background:var(--input-bg,#1e2535);border:1px solid var(--border-color,#374151);border-radius:8px;color:var(--content-title-color);font-size:13px;box-sizing:border-box;">
+                      style="width:100%;padding:7px 30px 7px 32px;background:var(--input-bg,#1e2535);border:1px solid var(--border-color,#374151);border-radius:8px;color:var(--content-title-color);font-size:13px;box-sizing:border-box;">
+                    <button id="atAtendimentosFiltroLimpar" type="button" title="Limpar pesquisa e restaurar filtros"
+                      style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--inactive-color);font-size:14px;padding:2px 4px;line-height:1;">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
                   </div>
                   <div id="atAtendimentosStatus" style="color:var(--inactive-color);font-size:13px;white-space:nowrap;"></div>
 
@@ -3343,6 +3347,30 @@
                     <div id="atEmReclamHistorico" style="display:none;max-height:220px;overflow-y:auto;border:1px solid #374151;border-radius:8px;padding:8px;font-size:12px;margin-bottom:6px;"></div>
                     <label class="at-em-lbl" style="margin-top:2px;">Descreva a reclamação (nova entrada)</label>
                     <textarea id="atEmReclamacao" class="at-em-input" rows="3" style="width:100%;box-sizing:border-box;" placeholder="Texto da reclamação..."></textarea>
+                  </div>
+                </div>
+              </div>
+              <!-- Seção Dados da Busca (at_busca_selecionada) -->
+              <div>
+                <div class="at-em-section-title" style="color:#a78bfa;">
+                  <i class="fa-solid fa-barcode"></i> Dados da Busca
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Pedido</label>
+                    <input type="text" id="atEmPedido" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Ordem de Produção</label>
+                    <input type="text" id="atEmOrdemProducao" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Nota Fiscal</label>
+                    <input type="text" id="atEmNotaFiscal" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                  </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Data de Entrega</label>
+                    <input type="text" id="atEmDataEntrega" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
                   </div>
                 </div>
               </div>
