@@ -1636,7 +1636,7 @@ async function montarDetalheProduto(produto) {
  * Formata uma página de resultados da lista de produtos.
  */
 function formatarListaProdutos(produtos, offset, total) {
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 5;
   const pagina = produtos.slice(offset, offset + PAGE_SIZE);
   const fim = Math.min(offset + PAGE_SIZE, total);
 
@@ -1649,6 +1649,54 @@ function formatarListaProdutos(produtos, offset, total) {
     texto += '\n➡️ Responda *"ver mais"* para ver os próximos.';
   }
   return texto;
+}
+
+/**
+ * Envia lista de produtos como Interactive List Message do WhatsApp.
+ * Rows: até 5 produtos + seção "Navegação" com Ver mais / Voltar ao menu.
+ */
+async function enviarListaProdutosInterativa({ phoneNumberId, toPhone, displayPhoneNumber, produtos, offset }) {
+  const PAGE_SIZE = 5;
+  const pagina = produtos.slice(offset, offset + PAGE_SIZE);
+  const total = produtos.length;
+  const fim = Math.min(offset + PAGE_SIZE, total);
+  const temMais = fim < total;
+
+  // Rows dos produtos
+  const rowsProdutos = pagina.map((p, i) => {
+    const idx = offset + i + 1;
+    const titulo = String(p.codigo || '').slice(0, 24);
+    const descricao = String(p.descricao || '').slice(0, 72);
+    return { id: `produto_sel_${idx}`, title: titulo || `Produto ${idx}`, description: descricao };
+  });
+
+  // Seção de navegação
+  const rowsNav = [];
+  if (temMais) {
+    rowsNav.push({ id: 'produto_ver_mais', title: 'Ver mais ➡️', description: `Próximos resultados (${fim + 1}–${Math.min(fim + PAGE_SIZE, total)})` });
+  }
+  rowsNav.push({ id: 'menu_voltar', title: '🏠 Voltar ao menu', description: 'Encerrar consulta de produtos' });
+
+  const sections = [
+    { title: `Produtos (${offset + 1}–${fim} de ${total})`, rows: rowsProdutos },
+    { title: 'Navegação', rows: rowsNav }
+  ];
+
+  const sendPayload = await enviarMensagemWhatsappLista({
+    phoneNumberId, toPhone,
+    headerText: 'Consulta de Produto',
+    bodyText: `🔍 Encontrei *${total}* produto(s). Selecione para ver detalhes:`,
+    footerText: `Mostrando ${offset + 1}–${fim}`,
+    buttonText: 'Ver produtos',
+    sections
+  });
+  const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+  await insertWhatsappMessageRecord({
+    waMessageId: outMsgId, phone: toPhone, profileName: 'Chatbot Fromtherm',
+    messageType: 'interactive', messageText: `Lista produtos ${offset + 1}-${fim} de ${total}`,
+    phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+  });
+  return { sendPayload, outMsgId };
 }
 
 // Cache temporário para último produto consultado por telefone (para "ver foto")
@@ -1871,8 +1919,8 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
 
     // Se está em fluxo de CONSULTA_PRODUTO, processa comandos de produto
     if (menuState?.fluxo === 'CONSULTA_PRODUTO') {
-      // Pedido de foto
-      if (detectarPedidoFotoProduto(userText)) {
+      // Pedido de foto (texto ou botão interativo)
+      if (buttonReplyId === 'produto_ver_foto' || detectarPedidoFotoProduto(userText)) {
         const cache = ultimoProdutoConsultado.get(phoneDigits);
         if (cache?.imageUrl) {
           try {
@@ -1899,26 +1947,30 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         }
       }
 
-      // "Ver mais" — paginação
-      if (detectarPedidoVerMais(userText)) {
+      // "Ver mais" — paginação (texto ou botão interativo)
+      if (interactiveId === 'produto_ver_mais' || detectarPedidoVerMais(userText)) {
         const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
         if (buscaCache?.produtos?.length) {
-          const PAGE_SIZE = 10;
+          const PAGE_SIZE = 5;
           const novoOffset = buscaCache.offset + PAGE_SIZE;
           if (novoOffset >= buscaCache.produtos.length) {
-            await enviarTextoERegistrar('📋 Não há mais produtos para mostrar.\nDigite outro *código ou nome* para nova busca, ou *0* para voltar ao menu.', 'fim lista');
+            await enviarTextoERegistrar('📋 Não há mais produtos para mostrar.', 'fim lista');
+            await enviarMenuPrincipal('Posso ajudar com mais alguma coisa?', 'fim lista → menu');
             return;
           }
           buscaCache.offset = novoOffset;
           buscaCache.updatedAt = Date.now();
-          const textoLista = formatarListaProdutos(buscaCache.produtos, novoOffset, buscaCache.produtos.length);
-          await enviarTextoERegistrar(textoLista, 'ver mais produtos');
+          await enviarListaProdutosInterativa({
+            phoneNumberId, toPhone: phoneDigits, displayPhoneNumber,
+            produtos: buscaCache.produtos, offset: novoOffset
+          });
           return;
         }
       }
 
-      // Seleção por número da lista
-      const numSelecionado = detectarSelecaoProdutoLista(userText);
+      // Seleção por ID interativo da lista (produto_sel_X) ou número digitado
+      const selPorId = interactiveId?.startsWith('produto_sel_') ? parseInt(interactiveId.replace('produto_sel_', ''), 10) : null;
+      const numSelecionado = selPorId || detectarSelecaoProdutoLista(userText);
       if (numSelecionado !== null) {
         const buscaCache = ultimaBuscaProdutos.get(phoneDigits);
         if (buscaCache?.produtos?.length && numSelecionado <= buscaCache.produtos.length) {
@@ -1937,8 +1989,15 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
               if (detalhe.imageUrl) {
                 ultimoProdutoConsultado.set(phoneDigits, { imageUrl: detalhe.imageUrl, codigo: detalhe.produto.codigo, updatedAt: Date.now() });
               }
-              const textoDetalhe = detalhe.texto + '\n\n_Digite outro código/nome para nova busca, *"ver foto"* para imagem, ou *0* para voltar ao menu._';
-              await enviarTextoERegistrar(textoDetalhe, 'detalhe produto selecionado');
+              // Envia texto do detalhe
+              await enviarTextoERegistrar(detalhe.texto, 'detalhe produto selecionado');
+              // Envia botões de ação
+              const botoes = [];
+              if (detalhe.imageUrl) botoes.push({ id: 'produto_ver_foto', title: 'Ver foto' });
+              botoes.push({ id: 'menu_voltar', title: 'Voltar ao menu' });
+              const bPayload = await enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone: phoneDigits, bodyText: 'O que deseja fazer?', buttons: botoes });
+              const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+              await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações produto', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
               return;
             }
           }
@@ -1951,20 +2010,27 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       if (resultado) {
         if (resultado.tipo === 'lista') {
           ultimaBuscaProdutos.set(phoneDigits, { termo: termoBusca, produtos: resultado.produtos, offset: 0, updatedAt: Date.now() });
-          const textoLista = formatarListaProdutos(resultado.produtos, 0, resultado.total);
-          await enviarTextoERegistrar(textoLista, 'lista produtos');
+          await enviarListaProdutosInterativa({
+            phoneNumberId, toPhone: phoneDigits, displayPhoneNumber,
+            produtos: resultado.produtos, offset: 0
+          });
           return;
         }
-        // Produto único
+        // Produto único — envia detalhe + botões
         if (resultado.imageUrl) {
           ultimoProdutoConsultado.set(phoneDigits, { imageUrl: resultado.imageUrl, codigo: resultado.produto.codigo, updatedAt: Date.now() });
         }
-        const textoDetalhe = resultado.texto + '\n\n_Digite outro código/nome para nova busca, *"ver foto"* para imagem, ou *0* para voltar ao menu._';
-        await enviarTextoERegistrar(textoDetalhe, 'consulta produto');
+        await enviarTextoERegistrar(resultado.texto, 'consulta produto único');
+        const botoes = [];
+        if (resultado.imageUrl) botoes.push({ id: 'produto_ver_foto', title: 'Ver foto' });
+        botoes.push({ id: 'menu_voltar', title: 'Voltar ao menu' });
+        const bPayload = await enviarMensagemWhatsappComBotoes({ phoneNumberId, toPhone: phoneDigits, bodyText: 'O que deseja fazer?', buttons: botoes });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações produto único', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
         return;
       }
-      // Não encontrou — informa e mantém no fluxo
-      await enviarTextoERegistrar(`❌ Nenhum produto encontrado para *"${termoBusca}"*.\n\nDigite outro *código ou nome* para buscar, ou *0* para voltar ao menu.`, 'produto não encontrado');
+      // Não encontrou
+      await enviarTextoERegistrar(`❌ Nenhum produto encontrado para *"${termoBusca}"*.\n\nDigite outro *código ou nome* para buscar.`, 'produto não encontrado');
       return;
     }
 
