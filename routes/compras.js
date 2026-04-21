@@ -3,6 +3,20 @@ const express = require('express');
 const omieCall = require('../utils/omieCall');
 const router = express.Router();
 
+// Cache server-side para ConsultarRecebimento (evita erro REDUNDANT da Omie)
+// Chave: chave_nfe (44 dígitos) | TTL: 3 minutos
+const _nfeDetalhesCache = new Map();
+const _NFE_CACHE_TTL_MS = 3 * 60 * 1000;
+function _nfeCacheGet(chaveNfe) {
+  const item = _nfeDetalhesCache.get(chaveNfe);
+  if (!item) return null;
+  if (Date.now() > item.expiraEm) { _nfeDetalhesCache.delete(chaveNfe); return null; }
+  return item.data;
+}
+function _nfeCacheSet(chaveNfe, data) {
+  _nfeDetalhesCache.set(chaveNfe, { data, expiraEm: Date.now() + _NFE_CACHE_TTL_MS });
+}
+
 module.exports = (pool) => {
   const normalizarNumeroNfeComparacao = (valor) => {
     const digitos = String(valor || '').replace(/\D/g, '');
@@ -1146,6 +1160,25 @@ module.exports = (pool) => {
       `);
 
       const etapasLegenda = Array.isArray(etapasLegendaQuery.rows) ? etapasLegendaQuery.rows : [];
+
+      // Verifica cache antes de qualquer chamada à Omie
+      const cachedData = _nfeCacheGet(chaveNfe);
+      if (cachedData) {
+        const etapaCodCached = String(cachedData.retorno?.cabec?.cEtapa || '').trim();
+        const etapaInfoCached = etapaCodCached
+          ? (etapasLegenda.find((e) => String(e?.codigo || '').trim() === etapaCodCached) || null)
+          : null;
+        return res.json({
+          ok: true,
+          chave_nfe: chaveNfe,
+          call: 'ConsultarRecebimento',
+          data: cachedData.retorno,
+          source: cachedData.source + '-cache',
+          etapa_info: etapaInfoCached,
+          etapas_legenda: etapasLegenda
+        });
+      }
+
       const client = await pool.connect();
       let retorno = null;
       let source = 'omie';
@@ -1181,6 +1214,7 @@ module.exports = (pool) => {
                 if (faltamTotais && dadosOmie.totais) retorno.totais = dadosOmie.totais;
                 if (faltamParcelas && dadosOmie.parcelas) retorno.parcelas = dadosOmie.parcelas;
                 if (faltamInfoCad && dadosOmie.infoCadastro) retorno.infoCadastro = dadosOmie.infoCadastro;
+                _nfeCacheSet(chaveNfe, { retorno, source });
                 // Enriquecer itens: preservar código/descrição do cache local, completar unidade e EAN da Omie
                 const itensOmie = Array.isArray(dadosOmie.itensRecebimento) ? dadosOmie.itensRecebimento : [];
                 if (itensOmie.length && faltamUnidItens) {
@@ -1282,6 +1316,8 @@ module.exports = (pool) => {
             error: String(fault)
           });
         }
+        // Salva no cache após busca fresca na Omie
+        _nfeCacheSet(chaveNfe, { retorno, source });
       }
 
       try {
