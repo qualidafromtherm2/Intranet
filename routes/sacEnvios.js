@@ -647,7 +647,7 @@ async function consultarAgendaUsuario(username) {
   try {
     // Busca TODAS as reservas do usuário (inclusive recorrentes com data_reserva no passado)
     const { rows } = await pool.query(
-      `SELECT ra.tema_reuniao, ra.data_reserva, ra.hora_inicio, ra.hora_fim,
+      `SELECT ra.id, ra.tema_reuniao, ra.data_reserva, ra.hora_inicio, ra.hora_fim,
               ra.tipo_espaco, ra.cafe, ra.criado_por, ra.descricao,
               ra.link_reuniao, ra.visitantes,
               ra.repetir, ra.dias_semana, ra.repetir_todos_meses, ra.datas_excecao
@@ -715,16 +715,28 @@ async function consultarAgendaUsuario(username) {
       return '📅 *Sua Agenda*\n\nVocê não tem reuniões nos próximos 7 dias. ✅';
     }
 
+    // Deduplica: para o mesmo tema na mesma data, mantém apenas a reunião com maior ID (mais recente)
+    // Isso evita exibir múltiplas versões de uma reunião recorrente que foi recriada sem encerrar a anterior
+    const deduplicado = new Map();
+    for (const oc of ocorrencias) {
+      const chave = `${(oc.tema_reuniao || '').toLowerCase().trim()}__${oc._dataOcorrencia.toISOString().slice(0, 10)}`;
+      const existente = deduplicado.get(chave);
+      if (!existente || Number(oc.id || 0) > Number(existente.id || 0)) {
+        deduplicado.set(chave, oc);
+      }
+    }
+    const ocorrenciasFinais = Array.from(deduplicado.values());
+
     // Ordena por data e hora
-    ocorrencias.sort((a, b) => {
+    ocorrenciasFinais.sort((a, b) => {
       const diff = a._dataOcorrencia - b._dataOcorrencia;
       if (diff !== 0) return diff;
       return (a.hora_inicio || '').localeCompare(b.hora_inicio || '');
     });
 
-    let texto = `📅 *Sua Agenda* — ${ocorrencias.length} reunião(ões) nos próximos 7 dias:\n`;
+    let texto = `📅 *Sua Agenda* — ${ocorrenciasFinais.length} reunião(ões) nos próximos 7 dias:\n`;
     let dataAtual = null;
-    for (const r of ocorrencias) {
+    for (const r of ocorrenciasFinais) {
       const dataStr = r._dataOcorrencia.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
       if (dataStr !== dataAtual) {
         dataAtual = dataStr;
