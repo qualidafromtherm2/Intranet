@@ -626,8 +626,10 @@ const MENU_PRINCIPAL_TEXTO =
   'Escolha uma opção:\n\n' +
   '1️⃣ Consultar produto\n' +
   '2️⃣ Realizar compra\n' +
-  '3️⃣ Verificar agenda\n' +
-  '4️⃣ Verificar mensagens\n\n' +
+  '3️⃣ Consultar venda\n' +
+  '4️⃣ Verificar agenda\n' +
+  '5️⃣ Verificar mensagens\n' +
+  '6️⃣ Manual de instrução\n\n' +
   '_Digite o número da opção desejada._';
 
 const MENU_FINALIZAR_TEXTO =
@@ -635,8 +637,10 @@ const MENU_FINALIZAR_TEXTO =
   'Posso ajudar com mais alguma coisa?\n\n' +
   '1️⃣ Consultar produto\n' +
   '2️⃣ Realizar compra\n' +
-  '3️⃣ Verificar agenda\n' +
-  '4️⃣ Verificar mensagens\n\n' +
+  '3️⃣ Consultar venda\n' +
+  '4️⃣ Verificar agenda\n' +
+  '5️⃣ Verificar mensagens\n' +
+  '6️⃣ Manual de instrução\n\n' +
   '_Digite o número da opção ou envie sua dúvida._';
 
 /**
@@ -2121,6 +2125,71 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { sendPayload, outMsgId };
   }
 
+  /** Consulta pedido de venda por numero_pedido em "Vendas".pedidos_venda + itens */
+  async function consultarVendaPorNumeroPedido(numeroPedido) {
+    const numero = String(numeroPedido || '').trim();
+    if (!numero) return { ok: false, error: 'Número do pedido não informado.' };
+
+    const { rows: pedRows } = await pool.query(`
+      SELECT
+        codigo_pedido,
+        numero_pedido,
+        etapa,
+        data_previsao,
+        valor_total_pedido,
+        codigo_cliente,
+        numero_pedido_cliente,
+        updated_at
+      FROM "Vendas".pedidos_venda
+      WHERE numero_pedido = $1
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1
+    `, [numero]);
+
+    if (!pedRows.length) {
+      return { ok: false, error: `Pedido ${numero} não encontrado em vendas.` };
+    }
+
+    const pedido = pedRows[0];
+    const { rows: itemRows } = await pool.query(`
+      SELECT
+        seq, codigo, descricao, unidade, quantidade, valor_unitario, valor_total
+      FROM "Vendas".pedidos_venda_itens
+      WHERE codigo_pedido = $1
+      ORDER BY seq ASC
+    `, [pedido.codigo_pedido]);
+
+    return { ok: true, pedido, itens: itemRows };
+  }
+
+  /** Consulta NFe/NFSe já recebida por webhook no schema "Vendas" */
+  async function consultarNfeVendaPorNumero(numeroNfe) {
+    const numeroNorm = String(numeroNfe || '').replace(/\D/g, '').replace(/^0+/, '') || '0';
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        tipo_documento,
+        topic_ultimo,
+        status_ultimo,
+        numero_nota,
+        chave_nfe,
+        numero_pedido,
+        valor_total,
+        cnpj_emitente,
+        razao_emitente,
+        data_emissao,
+        updated_at
+      FROM "Vendas".notas_fiscais_omie
+      WHERE regexp_replace(COALESCE(numero_nota, ''), '[^0-9]', '', 'g') <> ''
+        AND LTRIM(regexp_replace(COALESCE(numero_nota, ''), '[^0-9]', '', 'g'), '0') = $1
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1
+    `, [numeroNorm]);
+
+    if (!rows.length) return { ok: false, error: `NFe/NFSe ${numeroNfe} não encontrada na base de vendas.` };
+    return { ok: true, nota: rows[0] };
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   // Helper para enviar menu principal como lista interativa
@@ -2136,6 +2205,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         rows: [
           { id: 'menu_consultar_produto', title: 'Consultar produto', description: 'Buscar produto por código ou nome' },
           { id: 'menu_realizar_compra', title: 'Realizar compra', description: 'Solicitar compra de material' },
+          { id: 'menu_consultar_venda', title: 'Consultar venda', description: 'Consultar pedido e NFe de venda' },
           { id: 'menu_verificar_agenda', title: 'Verificar agenda', description: 'Ver reuniões agendadas' },
           { id: 'menu_verificar_mensagens', title: 'Verificar mensagens', description: 'Ver mensagens não lidas' },
           { id: 'menu_manual_instrucao', title: 'Manual de instrução', description: 'Buscar manual do seu equipamento' }
@@ -2428,6 +2498,158 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       }
     }
 
+    // Se está em fluxo de CONSULTA_VENDA
+    if (menuState?.fluxo === 'CONSULTA_VENDA') {
+      const step = menuState.step || 'ESCOLHENDO_TIPO';
+
+      if (step === 'ESCOLHENDO_TIPO') {
+        if (interactiveId === 'venda_op_pedido' || userText.trim() === '1') {
+          menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'AGUARDANDO_NUMERO_PEDIDO', updatedAt: Date.now() });
+          await enviarTextoERegistrar(
+            '🧾 *Consultar pedido de venda*\n\nEnvie o *número do pedido* (campo numero_pedido).',
+            'vendas pedir número pedido'
+          );
+          return;
+        }
+
+        if (interactiveId === 'venda_op_nfe' || userText.trim() === '2') {
+          menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'AGUARDANDO_NUMERO_NFE', updatedAt: Date.now() });
+          await enviarTextoERegistrar(
+            '🧾 *Consultar NFe/NFSe de venda*\n\nEnvie o *número da nota*.',
+            'vendas pedir número nfe'
+          );
+          return;
+        }
+
+        const bPayload = await enviarMensagemWhatsappComBotoes({
+          phoneNumberId, toPhone: phoneDigits,
+          bodyText: 'Escolha a consulta de vendas:',
+          buttons: [
+            { id: 'venda_op_pedido', title: 'Consultar pedido' },
+            { id: 'venda_op_nfe', title: 'Consultar NFe' },
+            { id: 'menu_voltar', title: 'Menu principal' }
+          ]
+        });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Submenu consultar venda', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+        return;
+      }
+
+      if (step === 'AGUARDANDO_NUMERO_PEDIDO') {
+        if (interactiveId === 'venda_op_nfe') {
+          menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'AGUARDANDO_NUMERO_NFE', updatedAt: Date.now() });
+          await enviarTextoERegistrar('Envie o *número da NFe/NFSe* para consulta.', 'vendas troca para nfe');
+          return;
+        }
+
+        const numero = String(userText || '').trim();
+        if (!numero) {
+          await enviarTextoERegistrar('Informe o número do pedido para consultar.', 'vendas pedido vazio');
+          return;
+        }
+
+        try {
+          const consulta = await consultarVendaPorNumeroPedido(numero);
+          if (!consulta.ok) {
+            await enviarTextoERegistrar(`❌ ${consulta.error}`, 'vendas pedido não encontrado');
+          } else {
+            const p = consulta.pedido;
+            const itens = Array.isArray(consulta.itens) ? consulta.itens : [];
+            const itensFmt = itens.slice(0, 12).map(i => {
+              const qtd = i.quantidade != null ? Number(i.quantidade) : 0;
+              const total = i.valor_total != null ? Number(i.valor_total).toFixed(2) : '0.00';
+              return `• ${i.seq || '-'} - ${i.codigo || '-'} - ${i.descricao || 'Sem descrição'} | ${qtd} ${i.unidade || ''} | R$ ${total}`;
+            }).join('\n');
+
+            const totalPedido = p.valor_total_pedido != null ? Number(p.valor_total_pedido).toFixed(2) : '0.00';
+            const dataPrev = p.data_previsao ? new Date(p.data_previsao).toLocaleDateString('pt-BR') : '-';
+            const msg =
+              `✅ *Pedido de venda ${p.numero_pedido || numero}*\n` +
+              `Código: ${p.codigo_pedido || '-'}\n` +
+              `Etapa: ${p.etapa || '-'}\n` +
+              `Cliente: ${p.codigo_cliente || '-'}\n` +
+              `Pedido cliente: ${p.numero_pedido_cliente || '-'}\n` +
+              `Previsão: ${dataPrev}\n` +
+              `Total: R$ ${totalPedido}\n\n` +
+              `*Itens (${itens.length}):*\n` +
+              (itensFmt || 'Sem itens cadastrados.') +
+              (itens.length > 12 ? '\n... (lista truncada)' : '');
+
+            await enviarTextoERegistrar(msg, 'vendas pedido consultado');
+          }
+        } catch (err) {
+          await enviarTextoERegistrar(`⚠️ Erro ao consultar pedido: ${err.message || err}`, 'vendas erro consulta pedido');
+        }
+
+        const bPayload = await enviarMensagemWhatsappComBotoes({
+          phoneNumberId, toPhone: phoneDigits,
+          bodyText: 'Deseja fazer outra consulta de vendas?',
+          buttons: [
+            { id: 'venda_op_pedido', title: 'Consultar pedido' },
+            { id: 'venda_op_nfe', title: 'Consultar NFe' },
+            { id: 'menu_voltar', title: 'Menu principal' }
+          ]
+        });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações pós consulta pedido venda', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+        menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'ESCOLHENDO_TIPO', updatedAt: Date.now() });
+        return;
+      }
+
+      if (step === 'AGUARDANDO_NUMERO_NFE') {
+        if (interactiveId === 'venda_op_pedido') {
+          menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'AGUARDANDO_NUMERO_PEDIDO', updatedAt: Date.now() });
+          await enviarTextoERegistrar('Envie o *número do pedido* para consulta.', 'vendas troca para pedido');
+          return;
+        }
+
+        const numeroNfe = String(userText || '').trim();
+        if (!numeroNfe) {
+          await enviarTextoERegistrar('Informe o número da NFe/NFSe para consultar.', 'vendas nfe vazio');
+          return;
+        }
+
+        try {
+          const consulta = await consultarNfeVendaPorNumero(numeroNfe);
+          if (!consulta.ok) {
+            await enviarTextoERegistrar(`❌ ${consulta.error}\n\nSe o webhook ainda não recebeu essa nota, ela pode não estar na base.`, 'vendas nfe não encontrada');
+          } else {
+            const n = consulta.nota;
+            const valor = n.valor_total != null ? Number(n.valor_total).toFixed(2) : '0.00';
+            const dataEmissao = n.data_emissao ? new Date(n.data_emissao).toLocaleDateString('pt-BR') : '-';
+            await enviarTextoERegistrar(
+              `✅ *${n.tipo_documento || 'NF'} ${n.numero_nota || numeroNfe}*\n` +
+              `Status: ${n.status_ultimo || '-'}\n` +
+              `Evento: ${n.topic_ultimo || '-'}\n` +
+              `Pedido vinculado: ${n.numero_pedido || '-'}\n` +
+              `Emitente: ${n.razao_emitente || '-'}\n` +
+              `CNPJ: ${n.cnpj_emitente || '-'}\n` +
+              `Emissão: ${dataEmissao}\n` +
+              `Valor: R$ ${valor}\n` +
+              `Chave: ${n.chave_nfe || '-'}`,
+              'vendas nfe consultada'
+            );
+          }
+        } catch (err) {
+          await enviarTextoERegistrar(`⚠️ Erro ao consultar NFe: ${err.message || err}`, 'vendas erro consulta nfe');
+        }
+
+        const bPayload = await enviarMensagemWhatsappComBotoes({
+          phoneNumberId, toPhone: phoneDigits,
+          bodyText: 'Deseja fazer outra consulta de vendas?',
+          buttons: [
+            { id: 'venda_op_pedido', title: 'Consultar pedido' },
+            { id: 'venda_op_nfe', title: 'Consultar NFe' },
+            { id: 'menu_voltar', title: 'Menu principal' }
+          ]
+        });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações pós consulta nfe venda', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+        menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'ESCOLHENDO_TIPO', updatedAt: Date.now() });
+        return;
+      }
+    }
+
     // Se está em fluxo de AGENDA (one-shot: consulta e volta ao menu)
     if (menuState?.fluxo === 'AGENDA') {
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
@@ -2492,24 +2714,41 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       return;
     }
 
-    // Opção 3 — Verificar agenda
-    if (escolha === 'menu_verificar_agenda' || escolha === '3') {
+    // Opção 3 — Consultar venda (pedido ou NFe)
+    if (escolha === 'menu_consultar_venda' || escolha === '3') {
+      menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'ESCOLHENDO_TIPO', updatedAt: Date.now() });
+      const bPayload = await enviarMensagemWhatsappComBotoes({
+        phoneNumberId, toPhone: phoneDigits,
+        bodyText: '🧾 *Consultar venda*\n\nEscolha uma opção:',
+        buttons: [
+          { id: 'venda_op_pedido', title: 'Consultar pedido' },
+          { id: 'venda_op_nfe', title: 'Consultar NFe' },
+          { id: 'menu_voltar', title: 'Menu principal' }
+        ]
+      });
+      const outMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+      await insertWhatsappMessageRecord({ waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Submenu consultar venda', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+      return;
+    }
+
+    // Opção 4 — Verificar agenda
+    if (escolha === 'menu_verificar_agenda' || escolha === '4' || escolha === '3') {
       const textoAgenda = await consultarAgendaUsuario(contatoInfo.username);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
       await enviarMenuFinalizar(textoAgenda, 'menu → agenda');
       return;
     }
 
-    // Opção 4 — Verificar mensagens
-    if (escolha === 'menu_verificar_mensagens' || escolha === '4') {
+    // Opção 5 — Verificar mensagens
+    if (escolha === 'menu_verificar_mensagens' || escolha === '5' || escolha === '4') {
       const textoMensagens = await consultarMensagensNaoLidas(contatoInfo.userId);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
       await enviarMenuFinalizar(textoMensagens, 'menu → mensagens');
       return;
     }
 
-    // Opção 5 — Manual de instrução → mostra lista de todos os manuais imediatamente
-    if (escolha === 'menu_manual_instrucao' || escolha === '5') {
+    // Opção 6 — Manual de instrução → mostra lista de todos os manuais imediatamente
+    if (escolha === 'menu_manual_instrucao' || escolha === '6' || escolha === '5') {
       menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'ESCOLHENDO_MANUAL', updatedAt: Date.now() });
       await enviarListaTodosManuais();
       return;

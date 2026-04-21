@@ -588,7 +588,7 @@ async function syncPedidosVenda(cfg) {
     for (const pedido of lista) {
       try {
         await pool.query(
-          'SELECT public.pedido_upsert_from_payload($1::jsonb)',
+          'SELECT "Vendas".pedido_upsert_from_payload($1::jsonb)',
           [pedido]
         );
         sincronizados++;

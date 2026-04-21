@@ -135,9 +135,9 @@ async function main() {
   // Pedidos no banco sem itens, excluindo cancelados (etapa 70) e teste (12345)
   const { rows: pendentes } = await pool.query(`
     SELECT p.codigo_pedido, p.numero_pedido
-    FROM public.pedidos_venda p
+    FROM "Vendas".pedidos_venda p
     WHERE NOT EXISTS (
-      SELECT 1 FROM public.pedidos_venda_itens i
+      SELECT 1 FROM "Vendas".pedidos_venda_itens i
       WHERE i.codigo_pedido = p.codigo_pedido
     )
     AND (p.etapa IS NULL OR p.etapa NOT IN ('70', 'CANCELADO'))
@@ -184,7 +184,7 @@ async function main() {
       }
 
       await pool.query(
-        'SELECT public.pedidos_upsert_from_list($1::jsonb)',
+        'SELECT "Vendas".pedidos_upsert_from_list($1::jsonb)',
         [{ pedido_venda_produto: ped }]
       );
 
@@ -202,9 +202,9 @@ async function main() {
   // Verificação final
   const { rows: [final] } = await pool.query(`
     SELECT COUNT(*) AS sem_itens
-    FROM public.pedidos_venda p
+    FROM "Vendas".pedidos_venda p
     WHERE NOT EXISTS (
-      SELECT 1 FROM public.pedidos_venda_itens i WHERE i.codigo_pedido = p.codigo_pedido
+      SELECT 1 FROM "Vendas".pedidos_venda_itens i WHERE i.codigo_pedido = p.codigo_pedido
     )
   `);
   log(`Pedidos ainda sem itens após sync: ${final.sem_itens}`);

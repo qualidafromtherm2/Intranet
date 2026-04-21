@@ -5468,7 +5468,7 @@ async function _pedidoSyncWorker() {
         : (j?.pedido_venda_produto ? [j.pedido_venda_produto] : []);
 
       if (ped.length) {
-        await dbQuery('select public.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
+        await dbQuery('select "Vendas".pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
         console.log(`[pedidoSyncQueue] ✓ upsert pedido ${codigoPedido || numeroPedido} (fila restante: ${_pedidoSyncQueue.length})`);
       }
     } catch (e) {
@@ -5529,7 +5529,7 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
       if (usarDb && (idPedido || numeroPedido) && etapa) {
         if (idPedido) {
           const r = await pool.query(
-            `UPDATE public.pedidos_venda
+            `UPDATE "Vendas".pedidos_venda
                SET etapa = $1, updated_at = now()
              WHERE codigo_pedido = $2`,
             [etapa, idPedido]
@@ -5538,7 +5538,7 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
         }
         if (!ret.updated && numeroPedido) {
           const r = await pool.query(
-            `UPDATE public.pedidos_venda
+            `UPDATE "Vendas".pedidos_venda
                SET etapa = $1, updated_at = now()
              WHERE numero_pedido = $2`,
             [etapa, String(numeroPedido)]
@@ -6678,6 +6678,96 @@ app.post([
     } catch (err) {
       console.error('[webhooks/omie/notas-entrada] erro:', err);
       return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    }
+  }
+);
+
+// ============================================================================
+// WEBHOOK - Notas de Vendas (NFe/NFSe)
+// Topics aceitos:
+// NFe.NotaAutorizada, NFe.NotaCancelada, NFe.NotaDevolucaoAutorizada,
+// NFSe.NotaAutorizada, NFSe.NotaCancelada, NFSe.NotaSubstituida
+// ============================================================================
+app.post([
+    '/webhooks/omie/notas-vendas',
+    '/api/webhooks/omie/notas-vendas',
+    '/webhooks/omie/notas-vendas/',
+    '/api/webhooks/omie/notas-vendas/',
+  ],
+  chkOmieToken,
+  express.json(),
+  async (req, res) => {
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const topic = extrairTopicOmie(body);
+    const messageId = String(body.messageId || body.message_id || '').trim() || null;
+    const author = String(body.author || body?.event?.author || body?.evento?.author || '').trim() || null;
+
+    if (!topic) {
+      return res.status(200).json({ ok: true, msg: 'validacao recebida (sem topic)' });
+    }
+
+    if (!isNotaVendaTopic(topic)) {
+      return res.status(200).json({ ok: true, msg: 'topic ignorado por este endpoint', topic });
+    }
+
+    const tipoDocumento = inferTipoDocumentoNotaVenda(topic);
+    const statusUltimo = inferStatusNotaVendaFromTopic(topic);
+    const parsed = extractNotaVendaFields(body);
+
+    const identidade = parsed.chaveNfe
+      ? `chave:${parsed.chaveNfe}`
+      : (parsed.numeroNota ? `${tipoDocumento}:${parsed.numeroNota}` : `evt:${topic}:${messageId || Date.now()}`);
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await upsertNotaFiscalVendaEstado(client, {
+        identidade,
+        tipoDocumento,
+        topicUltimo: topic,
+        statusUltimo,
+        numeroNota: parsed.numeroNota,
+        chaveNfe: parsed.chaveNfe,
+        numeroPedido: parsed.numeroPedido,
+        valorTotal: parsed.valorTotal,
+        cnpjEmitente: parsed.cnpjEmitente,
+        razaoEmitente: parsed.razaoEmitente,
+        dataEmissao: parsed.dataEmissao,
+        messageId,
+        author,
+        payload: body,
+      });
+
+      await registrarEventoNotaFiscalVenda(client, {
+        identidade,
+        tipoDocumento,
+        topic,
+        status: statusUltimo,
+        numeroNota: parsed.numeroNota,
+        chaveNfe: parsed.chaveNfe,
+        numeroPedido: parsed.numeroPedido,
+        messageId,
+        author,
+        payload: body,
+        processadoComSucesso: true,
+      });
+
+      await client.query('COMMIT');
+
+      return res.status(200).json({
+        ok: true,
+        topic,
+        tipo_documento: tipoDocumento,
+        status: statusUltimo,
+        numero_nota: parsed.numeroNota || null,
+      });
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      console.error('[webhooks/omie/notas-vendas] erro:', err);
+      return res.status(500).json({ ok: false, error: String(err?.message || err) });
+    } finally {
+      try { client.release(); } catch (_) {}
     }
   }
 );
@@ -12901,6 +12991,279 @@ function pickLocalFromPayload(body) {
 
 const OMIE_REQUEST_DELAY_MS = 350; // 3 req/s (aprox)
 let _notasEntradaOmieTablesReady = false;
+let _vendasNotasOmieTablesReady = false;
+
+const TOPICOS_OMIE_NOTAS_VENDAS = new Set([
+  'NFe.NotaAutorizada',
+  'NFe.NotaCancelada',
+  'NFe.NotaDevolucaoAutorizada',
+  'NFSe.NotaAutorizada',
+  'NFSe.NotaCancelada',
+  'NFSe.NotaSubstituida',
+]);
+
+function extrairTopicOmie(body = {}) {
+  return String(
+    body.topic
+    || body.topico
+    || body?.event?.topic
+    || body?.event?.topico
+    || body?.evento?.topic
+    || body?.evento?.topico
+    || body?.payload?.topic
+    || body?.data?.topic
+    || ''
+  ).trim();
+}
+
+function isNotaVendaTopic(topic = '') {
+  return TOPICOS_OMIE_NOTAS_VENDAS.has(String(topic || '').trim());
+}
+
+function inferTipoDocumentoNotaVenda(topic = '') {
+  if (/^NFSe\./i.test(String(topic || ''))) return 'NFSe';
+  if (/^NFe\./i.test(String(topic || ''))) return 'NFe';
+  return 'NF';
+}
+
+function inferStatusNotaVendaFromTopic(topic = '') {
+  const t = String(topic || '').toLowerCase();
+  if (t.includes('cancelada')) return 'Cancelada';
+  if (t.includes('substituida')) return 'Substituida';
+  if (t.includes('devolucaoautorizada')) return 'DevolucaoAutorizada';
+  if (t.includes('autorizada')) return 'Autorizada';
+  return 'Desconhecida';
+}
+
+function pickField(obj, paths = []) {
+  for (const path of paths) {
+    const parts = path.split('.');
+    let cur = obj;
+    let found = true;
+    for (const p of parts) {
+      if (!cur || typeof cur !== 'object' || !(p in cur)) {
+        found = false;
+        break;
+      }
+      cur = cur[p];
+    }
+    if (found && cur !== null && cur !== undefined && String(cur).trim() !== '') {
+      return cur;
+    }
+  }
+  return null;
+}
+
+function extractNotaVendaFields(body = {}) {
+  const event =
+    (body.event && typeof body.event === 'object' ? body.event : null)
+    || (body.evento && typeof body.evento === 'object' ? body.evento : null)
+    || body;
+
+  const cab =
+    (event.cabecalho && typeof event.cabecalho === 'object' ? event.cabecalho : null)
+    || (event.cabec && typeof event.cabec === 'object' ? event.cabec : null)
+    || (body.cabecalho && typeof body.cabecalho === 'object' ? body.cabecalho : null)
+    || (body.cabec && typeof body.cabec === 'object' ? body.cabec : null)
+    || {};
+
+  const numeroNota = pickField({ body, event, cab }, [
+    'event.numero_nota', 'event.numeroNota', 'event.cNumeroNFe', 'event.cNumeroNFSe',
+    'cab.cNumeroNFe', 'cab.cNumeroNFSe', 'body.numero_nota', 'body.numeroNota'
+  ]);
+  const chaveNfe = pickField({ body, event, cab }, [
+    'event.cChaveNFe', 'event.cChaveNfe', 'cab.cChaveNFe', 'cab.cChaveNfe',
+    'body.cChaveNFe', 'body.cChaveNfe', 'body.chave_nfe'
+  ]);
+  const numeroPedido = pickField({ body, event, cab }, [
+    'event.numero_pedido', 'event.numeroPedido', 'event.cNumeroPedido',
+    'cab.numero_pedido', 'cab.numeroPedido', 'cab.cNumeroPedido',
+    'body.numero_pedido', 'body.numeroPedido'
+  ]);
+  const cnpjEmitente = pickField({ body, event, cab }, [
+    'event.cnpj_emitente', 'event.cCNPJ', 'event.cnpj',
+    'cab.cCNPJ', 'cab.cnpj', 'body.cnpj_emitente', 'body.cnpj'
+  ]);
+  const razaoEmitente = pickField({ body, event, cab }, [
+    'event.razao_emitente', 'event.cRazaoSocial', 'event.nome_emitente',
+    'cab.cRazaoSocial', 'cab.nome_emitente', 'body.razao_emitente', 'body.nome_emitente'
+  ]);
+  const valorRaw = pickField({ body, event, cab }, [
+    'event.valor_total', 'event.nValorTotal', 'event.nValorNota',
+    'cab.nValorTotal', 'cab.nValorNota', 'body.valor_total'
+  ]);
+  const valorTotal = valorRaw !== null ? Number(String(valorRaw).replace(',', '.')) : null;
+  const dataEmissao = pickField({ body, event, cab }, [
+    'event.data_emissao', 'event.dEmissao', 'event.dEmi',
+    'cab.dEmissao', 'cab.data_emissao', 'body.data_emissao'
+  ]);
+
+  return {
+    event,
+    numeroNota: numeroNota ? String(numeroNota).trim() : null,
+    chaveNfe: chaveNfe ? String(chaveNfe).trim() : null,
+    numeroPedido: numeroPedido ? String(numeroPedido).trim() : null,
+    cnpjEmitente: cnpjEmitente ? String(cnpjEmitente).trim() : null,
+    razaoEmitente: razaoEmitente ? String(razaoEmitente).trim() : null,
+    valorTotal: Number.isFinite(valorTotal) ? valorTotal : null,
+    dataEmissao: dataEmissao ? String(dataEmissao).trim() : null,
+  };
+}
+
+async function ensureVendasNotasOmieTables(client) {
+  if (_vendasNotasOmieTablesReady) return;
+
+  await client.query(`
+    CREATE SCHEMA IF NOT EXISTS "Vendas";
+
+    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie (
+      id BIGSERIAL PRIMARY KEY,
+      identidade TEXT NOT NULL UNIQUE,
+      tipo_documento VARCHAR(10) NOT NULL,
+      topic_ultimo VARCHAR(100) NOT NULL,
+      status_ultimo VARCHAR(40) NOT NULL,
+      numero_nota VARCHAR(40),
+      chave_nfe VARCHAR(60),
+      numero_pedido VARCHAR(40),
+      valor_total NUMERIC(18,2),
+      cnpj_emitente VARCHAR(20),
+      razao_emitente VARCHAR(200),
+      data_emissao VARCHAR(40),
+      message_id_ultimo VARCHAR(120),
+      author_ultimo VARCHAR(120),
+      payload_ultimo JSONB,
+      ativa BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_numero ON "Vendas".notas_fiscais_omie(numero_nota);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_chave ON "Vendas".notas_fiscais_omie(chave_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_pedido ON "Vendas".notas_fiscais_omie(numero_pedido);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_topic ON "Vendas".notas_fiscais_omie(topic_ultimo);
+
+    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie_eventos (
+      id BIGSERIAL PRIMARY KEY,
+      identidade TEXT,
+      tipo_documento VARCHAR(10),
+      topic VARCHAR(100) NOT NULL,
+      status VARCHAR(40),
+      numero_nota VARCHAR(40),
+      chave_nfe VARCHAR(60),
+      numero_pedido VARCHAR(40),
+      message_id VARCHAR(120),
+      author VARCHAR(120),
+      payload JSONB,
+      recebido_em TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+      processado_com_sucesso BOOLEAN,
+      erro TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_topic ON "Vendas".notas_fiscais_omie_eventos(topic);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_numero ON "Vendas".notas_fiscais_omie_eventos(numero_nota);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_chave ON "Vendas".notas_fiscais_omie_eventos(chave_nfe);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_fiscais_omie_eventos_message_topic
+      ON "Vendas".notas_fiscais_omie_eventos(message_id, topic)
+      WHERE message_id IS NOT NULL;
+  `);
+
+  _vendasNotasOmieTablesReady = true;
+}
+
+async function upsertNotaFiscalVendaEstado(client, dados = {}) {
+  await ensureVendasNotasOmieTables(client);
+
+  const identidade = String(dados.identidade || '').trim();
+  if (!identidade) return { ok: false, reason: 'missing_identidade' };
+
+  const ativa = !['Cancelada'].includes(String(dados.statusUltimo || ''));
+  await client.query(`
+    INSERT INTO "Vendas".notas_fiscais_omie (
+      identidade, tipo_documento, topic_ultimo, status_ultimo,
+      numero_nota, chave_nfe, numero_pedido, valor_total,
+      cnpj_emitente, razao_emitente, data_emissao,
+      message_id_ultimo, author_ultimo, payload_ultimo,
+      ativa, updated_at
+    ) VALUES (
+      $1,$2,$3,$4,
+      $5,$6,$7,$8,
+      $9,$10,$11,
+      $12,$13,$14,
+      $15,NOW()
+    )
+    ON CONFLICT (identidade)
+    DO UPDATE SET
+      tipo_documento = COALESCE(EXCLUDED.tipo_documento, "Vendas".notas_fiscais_omie.tipo_documento),
+      topic_ultimo = EXCLUDED.topic_ultimo,
+      status_ultimo = EXCLUDED.status_ultimo,
+      numero_nota = COALESCE(EXCLUDED.numero_nota, "Vendas".notas_fiscais_omie.numero_nota),
+      chave_nfe = COALESCE(EXCLUDED.chave_nfe, "Vendas".notas_fiscais_omie.chave_nfe),
+      numero_pedido = COALESCE(EXCLUDED.numero_pedido, "Vendas".notas_fiscais_omie.numero_pedido),
+      valor_total = COALESCE(EXCLUDED.valor_total, "Vendas".notas_fiscais_omie.valor_total),
+      cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
+      razao_emitente = COALESCE(EXCLUDED.razao_emitente, "Vendas".notas_fiscais_omie.razao_emitente),
+      data_emissao = COALESCE(EXCLUDED.data_emissao, "Vendas".notas_fiscais_omie.data_emissao),
+      message_id_ultimo = COALESCE(EXCLUDED.message_id_ultimo, "Vendas".notas_fiscais_omie.message_id_ultimo),
+      author_ultimo = COALESCE(EXCLUDED.author_ultimo, "Vendas".notas_fiscais_omie.author_ultimo),
+      payload_ultimo = COALESCE(EXCLUDED.payload_ultimo, "Vendas".notas_fiscais_omie.payload_ultimo),
+      ativa = EXCLUDED.ativa,
+      updated_at = NOW();
+  `, [
+    identidade,
+    dados.tipoDocumento || 'NF',
+    dados.topicUltimo || '',
+    dados.statusUltimo || 'Desconhecida',
+    dados.numeroNota || null,
+    dados.chaveNfe || null,
+    dados.numeroPedido || null,
+    dados.valorTotal || null,
+    dados.cnpjEmitente || null,
+    dados.razaoEmitente || null,
+    dados.dataEmissao || null,
+    dados.messageId || null,
+    dados.author || null,
+    (dados.payload && typeof dados.payload === 'object') ? dados.payload : null,
+    ativa,
+  ]);
+
+  return { ok: true, identidade };
+}
+
+async function registrarEventoNotaFiscalVenda(client, dados = {}) {
+  await ensureVendasNotasOmieTables(client);
+  const topic = String(dados.topic || '').trim();
+  if (!topic) return { ok: false, reason: 'missing_topic' };
+
+  await client.query(`
+    INSERT INTO "Vendas".notas_fiscais_omie_eventos (
+      identidade, tipo_documento, topic, status,
+      numero_nota, chave_nfe, numero_pedido,
+      message_id, author, payload,
+      recebido_em, processado_com_sucesso, erro
+    ) VALUES (
+      $1,$2,$3,$4,
+      $5,$6,$7,
+      $8,$9,$10,
+      NOW(),$11,$12
+    )
+    ON CONFLICT DO NOTHING
+  `, [
+    dados.identidade || null,
+    dados.tipoDocumento || null,
+    topic,
+    dados.status || null,
+    dados.numeroNota || null,
+    dados.chaveNfe || null,
+    dados.numeroPedido || null,
+    dados.messageId || null,
+    dados.author || null,
+    (dados.payload && typeof dados.payload === 'object') ? dados.payload : null,
+    (typeof dados.processadoComSucesso === 'boolean') ? dados.processadoComSucesso : null,
+    dados.erro ? String(dados.erro) : null,
+  ]);
+
+  return { ok: true };
+}
 
 function isRecebimentoProdutoTopic(topic = '') {
   return /^RecebimentoProduto\./i.test(String(topic || ''));
@@ -17410,8 +17773,8 @@ app.get('/api/comercial/pedidos/kanban', async (req, res) => {
           p.codigo_cliente,
           p.data_previsao,
           to_char(p.data_previsao, 'DD/MM/YYYY') AS data_previsao_br
-        FROM public.pedidos_venda_itens i
-        JOIN public.pedidos_venda p
+        FROM "Vendas".pedidos_venda_itens i
+        JOIN "Vendas".pedidos_venda p
           ON p.codigo_pedido = i.codigo_pedido
         WHERE p.etapa = '80'
         ORDER BY
@@ -17522,7 +17885,7 @@ app.post('/api/comercial/pedidos/importar', express.json(), async (req, res) => 
       const arr = Array.isArray(lote.pedido_venda_produto) ? lote.pedido_venda_produto : [];
 
       for (const pedido of arr) {
-        await pool.query('select public.pedido_upsert_from_payload($1::jsonb)', [pedido]);
+        await pool.query('select "Vendas".pedido_upsert_from_payload($1::jsonb)', [pedido]);
         importados++;
       }
     }
@@ -17698,7 +18061,7 @@ app.post('/webhooks/omie/pedidos', chkOmieToken, express.json(), async (req, res
 
     // grava no Postgres (funções que já criamos no SQL)
     if (usarDb) {
-      await dbQuery('select public.pedido_upsert_from_payload($1::jsonb)', [pedObj]);
+      await dbQuery('select "Vendas".pedido_upsert_from_payload($1::jsonb)', [pedObj]);
       await dbQuery('select public.pedido_itens_upsert_from_payload($1::jsonb)', [pedObj]);
       return res.json({ ok:true, mode:'postgres', codigo_pedido: pedObj?.cabecalho?.codigo_pedido });
     }
@@ -17732,7 +18095,7 @@ app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (re
     const body = req.body || {};
     const wrapper = body.pedido_venda_produto ? body : { pedido_venda_produto: [body] };
 
-    const r = await pool.query('SELECT public.pedidos_upsert_from_list($1::jsonb) AS n;', [wrapper]);
+    const r = await pool.query('SELECT "Vendas".pedidos_upsert_from_list($1::jsonb) AS n;', [wrapper]);
     const n = r.rows?.[0]?.n ?? 0;
 
     // responda rápido para não estourar timeout do Omie
