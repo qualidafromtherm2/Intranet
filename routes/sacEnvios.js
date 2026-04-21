@@ -1997,6 +1997,62 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return conteudo;
   }
 
+  /** Busca resposta para uma dúvida textual nos chunks de um manual */
+  async function buscarRespostaManualPorDuvida(manualId, duvida) {
+    const stopwords = new Set(['de', 'da', 'do', 'das', 'dos', 'a', 'o', 'e', 'em', 'para', 'por', 'com', 'sem', 'no', 'na', 'nos', 'nas', 'um', 'uma', 'que']);
+    const normalizar = (txt) => String(txt || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    const duvidaNorm = normalizar(duvida).trim();
+    if (!duvidaNorm) return [];
+
+    const tokens = [...new Set(
+      duvidaNorm
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 3 && !stopwords.has(t))
+    )].slice(0, 8);
+
+    const { rows } = await pool.query(`
+      SELECT texto, pagina_inicial, chunk_ordem
+      FROM "Chatbot".manuais_instrucao_chunks
+      WHERE manual_id = $1
+      ORDER BY chunk_ordem
+      LIMIT 800
+    `, [manualId]);
+
+    const scored = rows.map(r => {
+      const txt = String(r.texto || '');
+      const txtNorm = normalizar(txt);
+      let score = 0;
+
+      if (txtNorm.includes(duvidaNorm)) score += 10;
+      for (const tk of tokens) {
+        if (txtNorm.includes(tk)) score += 2;
+      }
+      // Bônus para chunks que têm dois ou mais termos da dúvida
+      const termosBatidos = tokens.filter(tk => txtNorm.includes(tk)).length;
+      if (termosBatidos >= 2) score += 3;
+
+      return {
+        pagina: r.pagina_inicial,
+        texto: txt.replace(/\s+/g, ' ').trim(),
+        score
+      };
+    })
+      .filter(r => r.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2)
+      .map(r => ({
+        pagina: r.pagina,
+        texto: r.texto.length > 900 ? r.texto.slice(0, 900) + ' ...' : r.texto
+      }));
+
+    return scored;
+  }
+
   /** Envia o sumário (ou sub-nível) como Interactive List Message */
   async function enviarSumarioComoLista(sumario, parentNum, nomeManual) {
     // Sanitiza texto do PDF (remove chars de controle, normaliza espaços)
@@ -2280,21 +2336,28 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           );
           const manual = manualRows[0];
           if (!manual) { await enviarTextoERegistrar('❓ Manual não encontrado.', 'manual sel inválida'); return; }
-          const sumario = await parsearSumarioManual(manual.id);
-          if (sumario.length === 0) {
-            await enviarTextoERegistrar(
-              `⚠️ Sumário não disponível.\n\n🔗 Acesse: ${manual.caminho_manual}`,
-              'manual sem sumário'
-            );
-            menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-            return;
-          }
           menuInternoState.set(phoneDigits, {
-            fluxo: 'MANUAL_INSTRUCAO', step: 'NAVEGANDO_SUMARIO',
+            fluxo: 'MANUAL_INSTRUCAO', step: 'AGUARDANDO_DUVIDA_MANUAL',
             manualId: manual.id, nomeManual: manual.nome_arquivo,
-            caminho: manual.caminho_manual, sumario, parentNum: null, updatedAt: Date.now()
+            caminho: manual.caminho_manual, updatedAt: Date.now()
           });
-          await enviarSumarioComoLista(sumario, null, manual.nome_arquivo);
+
+          await enviarTextoERegistrar(
+            `📘 *Manual selecionado:* ${manual.nome_arquivo}\n\nAgora me envie sua dúvida sobre este manual.\n\nExemplo: _como configurar a temperatura?_`,
+            'manual aguardando dúvida'
+          );
+
+          const bPayload = await enviarMensagemWhatsappComBotoes({
+            phoneNumberId, toPhone: phoneDigits,
+            bodyText: 'Você pode perguntar em texto ou usar uma ação abaixo:',
+            buttons: [
+              { id: 'manual_perguntar_mais', title: 'Enviar duvida' },
+              { id: 'msel_voltar_lista', title: 'Trocar manual' },
+              { id: 'menu_voltar', title: 'Menu principal' }
+            ]
+          });
+          const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+          await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações manual instrução', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
           return;
         }
         // Texto livre ou qualquer outra coisa → reapresenta a lista
@@ -2302,9 +2365,9 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         return;
       }
 
-      // === NAVEGANDO_SUMARIO: usuário navega capítulos e subcapítulos ===
-      if (step === 'NAVEGANDO_SUMARIO') {
-        const { manualId, nomeManual, caminho, sumario, parentNum } = menuState;
+      // === AGUARDANDO_DUVIDA_MANUAL: usuário envia dúvida em texto ===
+      if (step === 'AGUARDANDO_DUVIDA_MANUAL') {
+        const { manualId, nomeManual, caminho } = menuState;
 
         // Voltar à lista de manuais
         if (interactiveId === 'msel_voltar_lista') {
@@ -2313,62 +2376,54 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           return;
         }
 
-        // Voltar um nível no sumário
-        if (interactiveId === 'msec_voltar') {
-          let newParent = null;
-          if (parentNum) {
-            const parts = parentNum.split('.');
-            newParent = parts.length > 1 ? parts.slice(0, -1).join('.') : null;
-          }
-          menuInternoState.set(phoneDigits, { ...menuState, parentNum: newParent, updatedAt: Date.now() });
-          await enviarSumarioComoLista(sumario, newParent, nomeManual);
+        if (interactiveId === 'manual_perguntar_mais') {
+          await enviarTextoERegistrar(
+            `✍️ Envie sua dúvida sobre o manual *${nomeManual}* em uma única mensagem.`,
+            'manual pedir dúvida novamente'
+          );
           return;
         }
 
-        // Seleção de item do sumário
-        if (interactiveId?.startsWith('msec_')) {
-          const numStr = interactiveId.slice(5).replace(/_/g, '.');
-          const entry = sumario.find(e => e.num === numStr);
-          if (!entry) { await enviarTextoERegistrar('❓ Capítulo não encontrado.', 'manual item inválido'); return; }
-
-          // Verifica se tem filhos diretos
-          const hasChildren = sumario.some(e => e.depth === entry.depth + 1 && e.num.startsWith(numStr + '.'));
-          if (hasChildren) {
-            menuInternoState.set(phoneDigits, { ...menuState, parentNum: numStr, updatedAt: Date.now() });
-            await enviarSumarioComoLista(sumario, numStr, nomeManual);
-            return;
-          }
-
-          // Folha → busca conteúdo do manual
-          const entryIdx = sumario.indexOf(entry);
-          const nextEntry = sumario.slice(entryIdx + 1).find(e => e.depth <= entry.depth);
-          const paginaFim = nextEntry ? Math.max(nextEntry.page - 1, entry.page) : entry.page + 4;
-          const conteudo = await buscarConteudoSecao(manualId, entry.page, paginaFim);
-          const tituloFmt = `*${entry.num}. ${entry.title}*`;
-          if (conteudo) {
-            await enviarTextoERegistrar(`📖 ${tituloFmt}\n\n${conteudo}`, 'manual conteúdo seção');
-          } else {
-            await enviarTextoERegistrar(
-              `📖 ${tituloFmt}\n\n_Seção na página ${entry.page} do manual._\n\n🔗 ${caminho}`,
-              'manual sem chunks'
-            );
-          }
-          // Botões de navegação pós-conteúdo
-          const bPayload = await enviarMensagemWhatsappComBotoes({
-            phoneNumberId, toPhone: phoneDigits,
-            bodyText: 'O que deseja fazer?',
-            buttons: [
-              { id: 'msec_voltar', title: '⬅ Voltar ao sumário' },
-              { id: 'menu_voltar', title: '🏠 Menu principal' }
-            ]
-          });
-          const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
-          await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Navegação pós-conteúdo manual', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+        const duvida = String(userText || '').trim();
+        if (!duvida) {
+          await enviarTextoERegistrar(
+            `✍️ Escreva sua dúvida sobre o manual *${nomeManual}* para eu procurar nos capítulos.`,
+            'manual aguardando texto dúvida'
+          );
+          return;
+        }
+        if (duvida.length < 4) {
+          await enviarTextoERegistrar('❗ Escreva uma dúvida mais completa (pelo menos 4 caracteres).', 'manual dúvida curta');
           return;
         }
 
-        // Texto livre durante navegação → reapresenta o nível atual
-        await enviarSumarioComoLista(sumario, parentNum, nomeManual);
+        const trechos = await buscarRespostaManualPorDuvida(manualId, duvida);
+        if (trechos.length === 0) {
+          await enviarTextoERegistrar(
+            `Não encontrei um trecho exato no manual para: *${duvida}*\n\nTente com outras palavras (ex: "instalacao", "temperatura", "erro").\n\n🔗 ${caminho}`,
+            'manual sem resposta por dúvida'
+          );
+        } else {
+          const blocos = trechos.map((t, idx) =>
+            `*Trecho ${idx + 1} (pag. ${t.pagina ?? '?'})*\n${t.texto}`
+          ).join('\n\n');
+          await enviarTextoERegistrar(
+            `📘 *${nomeManual}*\n\n🔎 *Sua dúvida:* ${duvida}\n\n${blocos}\n\n🔗 ${caminho}`,
+            'manual resposta por dúvida'
+          );
+        }
+
+        const bPayload = await enviarMensagemWhatsappComBotoes({
+          phoneNumberId, toPhone: phoneDigits,
+          bodyText: 'Deseja fazer mais alguma ação neste manual?',
+          buttons: [
+            { id: 'manual_perguntar_mais', title: 'Outra duvida' },
+            { id: 'msel_voltar_lista', title: 'Trocar manual' },
+            { id: 'menu_voltar', title: 'Menu principal' }
+          ]
+        });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações pós-resposta manual', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
         return;
       }
     }
