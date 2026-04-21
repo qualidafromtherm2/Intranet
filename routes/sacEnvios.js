@@ -1853,13 +1853,16 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       await enviarTextoERegistrar('⚠️ Nenhum manual disponível no momento.', 'manual lista vazia');
       return null;
     }
-    // Monta rows (max 24 chars no title — restrição WhatsApp)
-    const allRows = manuais.map(m => ({
-      id: 'msel_' + m.id,
-      title: (m.nome_arquivo_normalizado || m.nome_arquivo).slice(0, 24),
-      description: `${m.paginas || '?'} páginas`
-    }));
-    allRows.push({ id: 'menu_voltar', title: '🏠 Menu principal', description: '' });
+    // Monta rows: title limitado a 24 chars (restrição WhatsApp), nome completo em description
+    const allRows = manuais.map(m => {
+      const fullName = m.nome_arquivo_normalizado || m.nome_arquivo;
+      return {
+        id: 'msel_' + m.id,
+        title: fullName.slice(0, 24),
+        description: `${fullName} · ${m.paginas || '?'}p`.slice(0, 72)
+      };
+    });
+    allRows.push({ id: 'menu_voltar', title: 'Menu principal', description: 'Voltar ao menu' });
     // Divide em seções de 10 (restrição WhatsApp)
     const sections = [];
     for (let i = 0; i < allRows.length; i += 10) {
@@ -1996,6 +1999,12 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
 
   /** Envia o sumário (ou sub-nível) como Interactive List Message */
   async function enviarSumarioComoLista(sumario, parentNum, nomeManual) {
+    // Sanitiza texto do PDF (remove chars de controle, normaliza espaços)
+    const sanitizeWA = (text) => String(text || '')
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
     let filteredItems;
     if (parentNum === null) {
       filteredItems = sumario.filter(e => e.depth === 1);
@@ -2003,47 +2012,54 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       const parentDepth = parentNum.split('.').length;
       filteredItems = sumario.filter(e => e.depth === parentDepth + 1 && e.num.startsWith(parentNum + '.'));
     }
-    // Monta rows com limite de 24 chars no título (restrição WhatsApp)
-    const rowsData = filteredItems.map(e => {
-      const label = `${e.num}. ${e.title}`;
+
+    // Limita a 8 itens de conteúdo (WhatsApp: max 10 rows por lista; nav ocupa 1-2 slots)
+    const MAX_CONTENT = 8;
+    const contentItems = filteredItems.slice(0, MAX_CONTENT);
+    const hasMore = filteredItems.length > MAX_CONTENT;
+
+    const rowsData = contentItems.map(e => {
+      const label = sanitizeWA(`${e.num}. ${e.title}`);
       return {
         id: 'msec_' + e.num.replace(/\./g, '_'),
         title: label.length > 24 ? label.slice(0, 21) + '...' : label,
-        description: `Página ${e.page}`
+        description: `Pagina ${e.page}`
       };
     });
-    // Sub-nível: adiciona row de voltar ao topo da seção
+
+    // Nav buttons (sem emoji para evitar contagem de bytes pelo WhatsApp)
     if (parentNum !== null) {
-      rowsData.unshift({ id: 'msec_voltar', title: '⬅ Voltar', description: 'Nível anterior' });
+      rowsData.unshift({ id: 'msec_voltar', title: '< Voltar', description: 'Nivel anterior' });
     } else {
-      // Nível raiz: opções de navegação
-      rowsData.push({ id: 'msel_voltar_lista', title: '📚 Outros manuais', description: 'Ver lista completa' });
-      rowsData.push({ id: 'menu_voltar', title: '🏠 Menu principal', description: '' });
+      rowsData.push({ id: 'msel_voltar_lista', title: 'Outros manuais', description: 'Ver lista completa' });
+      rowsData.push({ id: 'menu_voltar', title: 'Menu principal', description: 'Voltar ao menu' });
     }
-    // Divide em seções de max 10 rows (restrição WhatsApp)
-    const sections = [];
-    for (let i = 0; i < rowsData.length; i += 10) {
-      sections.push({
-        title: sections.length === 0 ? (parentNum ? `Seção ${parentNum}` : 'Capítulos') : 'Mais capítulos',
-        rows: rowsData.slice(i, i + 10)
-      });
-    }
+
+    // Seção única (mais seguro e dentro do limite de 10 rows do WhatsApp)
+    const sectionTitle = parentNum ? `Secao ${parentNum}` : 'Capitulos';
+    const sections = [{ title: sectionTitle, rows: rowsData.slice(0, 10) }];
+
     const parentEntry = parentNum ? sumario.find(e => e.num === parentNum) : null;
+    const nomeClean = sanitizeWA(nomeManual).slice(0, 60);
+    const parentTitleClean = parentEntry ? sanitizeWA(parentEntry.title) : '';
     const bodyText = parentEntry
-      ? `*${parentNum}. ${parentEntry.title}*\n\nEscolha um subcapítulo:`
-      : `*${nomeManual.slice(0, 60)}*\n\nEscolha um capítulo para ler:`;
+      ? `*${parentNum}. ${parentTitleClean}*\n\nEscolha um subcapitulo:`
+      : `*${nomeClean}*\n\nEscolha um capitulo para ler:${hasMore ? ` (${filteredItems.length} no total)` : ''}`;
+
+    console.log(`[Manual] sumario parseado: ${sumario.length} entries, depth-1: ${filteredItems.length}, exibindo: ${contentItems.length}`);
+
     const sendPayload = await enviarMensagemWhatsappLista({
       phoneNumberId, toPhone: phoneDigits,
-      headerText: '📖 Manual de Instrução',
+      headerText: 'Manual de Instrucao',
       bodyText,
-      footerText: 'Toque no botão para ver o sumário',
-      buttonText: 'Ver sumário',
+      footerText: hasMore ? `Exibindo ${contentItems.length} de ${filteredItems.length} capitulos` : 'Toque para ver o sumario',
+      buttonText: 'Ver sumario',
       sections
     });
     const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
     await insertWhatsappMessageRecord({
       waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
-      messageType: 'interactive', messageText: `Sumário manual ${parentNum || 'principal'}`,
+      messageType: 'interactive', messageText: `Sumario manual ${parentNum || 'principal'}`,
       phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
     });
     return { sendPayload, outMsgId };
