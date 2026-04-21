@@ -5297,8 +5297,8 @@ function chkOmieToken(req, res, next) {
     return next();
   }
   
-  // Se estiver configurado, valida o token
-  const token = req.query.token || req.headers['x-omie-token'];
+  // Se estiver configurado, valida o token (query ou headers usados pela Omie)
+  const token = req.query.token || req.headers['x-omie-token'] || req.headers['x-webhook-token'];
   if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
     console.log('[chkOmieToken] Token inválido ou ausente');
     return res.status(401).json({ ok:false, error:'unauthorized' });
