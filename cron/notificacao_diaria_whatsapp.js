@@ -170,25 +170,69 @@ async function executarNotificacaoDiaria() {
       const partes = [];
 
       // ── 1. Reservas do dia ──────────────────────────────────────────────
-      const { rows: reservas } = await dbQuery(
-        `SELECT ra.tema_reuniao, ra.tipo_espaco, ra.data_reserva,
-                ra.hora_inicio, ra.hora_fim
+      // Busca reuniões únicas do dia E reuniões recorrentes que ocorrem hoje
+      const hojeDate = new Date(hoje + 'T00:00:00');
+      const diaSemanaJS = hojeDate.getDay(); // 0=dom,1=seg,...,6=sab
+      const DIA_MAP = { dom: 0, seg: 1, ter: 2, qua: 3, qui: 4, sex: 5, sab: 6 };
+
+      const { rows: todasReservas } = await dbQuery(
+        `SELECT ra.id, ra.tema_reuniao, ra.tipo_espaco, ra.data_reserva,
+                ra.hora_inicio, ra.hora_fim, ra.repetir, ra.dias_semana, ra.datas_excecao
          FROM rh.reservas_ambientes ra
          JOIN rh.reservas_participantes rp ON rp.reserva_id = ra.id
          WHERE rp.username = $1
-           AND ra.data_reserva = $2::date
+           AND ra.data_reserva <= $2::date
          ORDER BY ra.hora_inicio`,
         [user.username, hoje]
       );
 
+      // Filtra quais ocorrem hoje
+      const reservasHoje = [];
+      for (const r of todasReservas) {
+        const dataBase = new Date(r.data_reserva);
+        dataBase.setHours(0, 0, 0, 0);
+
+        const excecoes = new Set();
+        if (Array.isArray(r.datas_excecao)) {
+          for (const d of r.datas_excecao) {
+            excecoes.add(new Date(d).toISOString().slice(0, 10));
+          }
+        }
+        if (excecoes.has(hoje)) continue;
+
+        if (r.repetir && Array.isArray(r.dias_semana) && r.dias_semana.length > 0) {
+          const diasAlvo = r.dias_semana.map(d => DIA_MAP[d]).filter(d => d !== undefined);
+          if (diasAlvo.includes(diaSemanaJS) && dataBase <= hojeDate) {
+            reservasHoje.push(r);
+          }
+        } else {
+          const dataStr = dataBase.toISOString().slice(0, 10);
+          if (dataStr === hoje) {
+            reservasHoje.push(r);
+          }
+        }
+      }
+
+      // Deduplica: mesmo tema no mesmo dia → mantém maior ID
+      const deduplicadoMap = new Map();
+      for (const r of reservasHoje) {
+        const chave = (r.tema_reuniao || '').toLowerCase().trim();
+        const existente = deduplicadoMap.get(chave);
+        if (!existente || Number(r.id) > Number(existente.id)) {
+          deduplicadoMap.set(chave, r);
+        }
+      }
+      const reservas = Array.from(deduplicadoMap.values())
+        .sort((a, b) => (a.hora_inicio || '').localeCompare(b.hora_inicio || ''));
+
       if (reservas.length) {
-        partes.push('Bom dia, segue agenda do dia:');
+        partes.push('📅 *Bom dia! Sua agenda de hoje:*');
         reservas.forEach((r) => {
           const tema = r.tema_reuniao || 'Sem tema';
           const tipo = r.tipo_espaco || '';
           const hIni = r.hora_inicio ? String(r.hora_inicio).slice(0, 5) : '';
           const hFim = r.hora_fim ? String(r.hora_fim).slice(0, 5) : '';
-          partes.push(`\n📋 *${tema}*\n   Local: ${tipo}\n   Horário: ${hIni} - ${hFim}`);
+          partes.push(`\n📌 *${tema}*\n   📍 ${tipo}\n   ⏰ ${hIni} — ${hFim}`);
         });
       }
 
@@ -228,7 +272,7 @@ async function executarNotificacaoDiaria() {
 
       // Se não teve reservas, abre com bom dia genérico
       if (!reservas.length) {
-        partes.unshift('Bom dia!');
+        partes.unshift('📅 *Bom dia!* Você não tem reuniões agendadas para hoje.');
       }
 
       const mensagemFinal = partes.join('\n');

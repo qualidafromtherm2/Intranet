@@ -742,14 +742,13 @@ async function consultarAgendaUsuario(username) {
         dataAtual = dataStr;
         texto += `\n📆 *${dataStr}*\n`;
       }
-      texto += `  ⏰ ${r.hora_inicio.slice(0,5)} — ${r.hora_fim.slice(0,5)}`;
+      texto += `\n  ⏰ ${r.hora_inicio.slice(0,5)} — ${r.hora_fim.slice(0,5)}`;
       texto += ` | 📍 ${r.tipo_espaco || 'Local não definido'}\n`;
       texto += `  📌 *${r.tema_reuniao || 'Sem tema'}*\n`;
       if (r.descricao) texto += `  📝 ${r.descricao}\n`;
       if (r.criado_por) texto += `  👤 Organizado por: ${r.criado_por}\n`;
       if (r.visitantes) texto += `  🧑‍💼 Visitantes: ${r.visitantes}\n`;
       if (r.link_reuniao) texto += `  🔗 Link: ${r.link_reuniao}\n`;
-      if (r.cafe) texto += `  ☕ Café solicitado\n`;
     }
     return texto;
   } catch (err) {
