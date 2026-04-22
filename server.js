@@ -29082,6 +29082,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     let infoAdicionaisParaEnviar = undefined;
     let itensEditarEstoque = null;
     let recebimentoCache = null;
+    let cCategCompraRegraCfop = '';
+    let ufNfeRegraCfop = '';
+    let cfopCalculado = null;
 
     if (nCodCC) {
       try {
@@ -29193,6 +29196,35 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           nIdConta: nCodCC
         };
 
+        // --- CFOP calculado por regra: UF da NF-e (extraída da chave) + cCategCompra ---
+        try {
+          const chaveNfeReceb = String(
+            recebAtual?.cabec?.cChaveNFe
+            || recebAtual?.cabec?.cChaveNfe
+            || plano?.chave_nfe
+            || chaveNfe
+            || ''
+          ).replace(/\D/g, '');
+          const codigoUfNfe = chaveNfeReceb.length >= 2 ? chaveNfeReceb.slice(0, 2) : '';
+          const ufNfe = codigoUfNfe === '42' ? 'SC' : (codigoUfNfe ? 'OUTRA' : '');
+          const cCategCompraReceb = String(recebAtual?.infoAdicionais?.cCategCompra || '').trim();
+          cCategCompraRegraCfop = cCategCompraReceb;
+          ufNfeRegraCfop = ufNfe;
+          if (ufNfe && cCategCompraReceb) {
+            const dentroEstado = ufNfe === 'SC';
+            if (cCategCompraReceb === '2.01.04') {
+              cfopCalculado = '1.102';
+            } else if (cCategCompraReceb === '2.01.03') {
+              cfopCalculado = dentroEstado ? '1.101' : '2.101';
+            } else {
+              cfopCalculado = dentroEstado ? '1.556' : '2.556';
+            }
+            console.log(`[Compras/NFeAssociarPedido] CFOP calculado: ${cfopCalculado} (UF_NFe=${ufNfe} codUf=${codigoUfNfe} categ=${cCategCompraReceb})`);
+          }
+        } catch (errCfop) {
+          console.warn('[Compras/NFeAssociarPedido] Falha ao calcular CFOP:', errCfop?.message);
+        }
+
         // --- EDITAR cada item: cUnidade + nQtde (do pedido ou override do user) ---
         // Se conta especial, também aplica codigo_local_estoque
         itensEditarEstoque = plano.itensRecebimentoEditar.map(itemEditar => {
@@ -29207,6 +29239,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const ajustes = {};
           if (aplicarEstoqueEspecial) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
+          if (cfopCalculado) ajustes.cCFOPEntrada = cfopCalculado;
           // Nota: nQtde não é campo válido em itensAjustes da Omie
 
           // Só incluir o item se tiver ajustes
@@ -29294,30 +29327,37 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     // ConcluirRecebimento é mais confiável que AlterarEtapaRecebimento
     // (AlterarEtapaRecebimento pode retornar "OK" sem efetivamente mudar a etapa)
     let etapaConcluida = false;
+    let respostaEtapaFinal = null;
     try {
-      await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
+      respostaEtapaFinal = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
         nIdReceb: Number(plano.n_id_receb),
         cEtapa: etapaAlvoRecebimentoTotal
       }, { tentativasMaximas: 3 });
-      console.log('[Compras/NFeAssociarPedido] ConcluirRecebimento OK');
+      console.log('[Compras/NFeAssociarPedido] ConcluirRecebimento OK:', JSON.stringify(respostaEtapaFinal));
       etapaConcluida = true;
     } catch (erroConcluir) {
+      const msgConcluir = String(erroConcluir?.message || '');
+      const erroCfopObrigatorio = /CFOP para o Recebimento/i.test(msgConcluir);
+      if (erroCfopObrigatorio) {
+        throw new Error(
+          `Omie não permitiu concluir: item sem CFOP de entrada. Categoria atual=${cCategCompraRegraCfop || 'N/A'}, UF_NFe=${ufNfeRegraCfop || 'N/A'}, CFOP calculado=${cfopCalculado || 'N/A'}. Ajuste a regra de CFOP para essa categoria antes de associar.`
+        );
+      }
+
       console.warn('[Compras/NFeAssociarPedido] ConcluirRecebimento falhou:', erroConcluir?.message, '- tentando AlterarEtapaRecebimento...');
       try {
-        await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarEtapaRecebimento', {
+        respostaEtapaFinal = await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarEtapaRecebimento', {
           nIdReceb: Number(plano.n_id_receb),
           cEtapa: etapaAlvoRecebimentoTotal
         }, { tentativasMaximas: 2 });
-        console.log('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento OK (fallback)');
+        console.log('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento OK (fallback):', JSON.stringify(respostaEtapaFinal));
         etapaConcluida = true;
       } catch (erroEtapa) {
         console.warn('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento também falhou:', erroEtapa?.message);
       }
     }
 
-    // ─── Verificação final via cache (sem chamada extra à Omie) ───
-    // Evita ConsultarRecebimento que causa REDUNDANT (~50s espera)
-    // Usa o recebimentoCache do início da rota + resultado do ConcluirRecebimento
+    // ─── Confirmação final pelo retorno da própria Omie ───
     let recebimentoAposAlteracao;
     let etapaFinalRecebimento = '';
 
@@ -29366,7 +29406,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       message: alertaItemAssociacao
         ? `Pedido ${plano.c_numero_pedido || plano.n_cod_ped} vinculado à NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} na Omie, com alerta de item: ${alertaItemAssociacao}`
         : (vinculoConfirmado
-          ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.`
+          ? `NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} associada ao pedido ${plano.c_numero_pedido || plano.n_cod_ped} na Omie.${respostaEtapaFinal?.cDescStatus ? ` ${respostaEtapaFinal.cDescStatus}` : ''}`
           : 'vinculado com sucesso.'),
       dados: {
         n_id_receb: recebimentoAposAlteracao?.cabec?.nIdReceb || plano.n_id_receb || null,
@@ -29375,6 +29415,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         c_numero_pedido: plano.c_numero_pedido || null,
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
+        retorno_etapa_omie: respostaEtapaFinal || null,
         pedidos_vinculados: pedidosVinculados,
         alerta_item: alertaItemAssociacao || null
       }
