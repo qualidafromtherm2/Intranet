@@ -2648,9 +2648,20 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       const step = menuState.step || 'ESCOLHENDO_TIPO';
 
       if (interactiveId === 'venda_btn_abrir_pedido') {
-        const urlPedido = String(menuState?.pdfPedidoUrl || '').trim();
+        let urlPedido = String(menuState?.pdfPedidoUrl || '').trim();
         if (!urlPedido) {
-          await enviarTextoERegistrar('⚠️ Link do pedido indisponível para esta consulta. Refaça a busca do pedido.', 'vendas abrir pedido sem link');
+          const retryPedido = await obterPdfPedidoVendaOmie(menuState?.codigoPedido);
+          if (retryPedido.ok && retryPedido.cPdfPed) {
+            urlPedido = retryPedido.cPdfPed;
+            menuInternoState.set(phoneDigits, {
+              ...menuState,
+              pdfPedidoUrl: urlPedido,
+              updatedAt: Date.now()
+            });
+          }
+        }
+        if (!urlPedido) {
+          await enviarTextoERegistrar('⚠️ Link do pedido indisponível no momento. Tente novamente em instantes.', 'vendas abrir pedido sem link');
         } else {
           await enviarTextoERegistrar(`📄 *Abrir pedido*\n${urlPedido}`, 'vendas abrir pedido link');
         }
@@ -2659,9 +2670,28 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       }
 
       if (interactiveId === 'venda_btn_visualizar_nfe') {
-        const urlNfe = String(menuState?.pdfNfeUrl || '').trim();
+        let urlNfe = String(menuState?.pdfNfeUrl || '').trim();
         if (!urlNfe) {
-          await enviarTextoERegistrar('⚠️ PDF da NFe indisponível para este pedido. Verifique se há NFe vinculada.', 'vendas visualizar nfe sem link');
+          let chave = String(menuState?.chaveNfe || '').trim();
+          if (!chave) {
+            const notaPedido = await consultarNfeVendaPorPedido(menuState?.codigoPedido, menuState?.numeroPedido);
+            chave = String(notaPedido?.nota?.chave_nfe || '').trim();
+          }
+          if (chave) {
+            const retryNfe = await obterPdfNfePorChaveOmie(chave);
+            if (retryNfe.ok && retryNfe.cPdf) {
+              urlNfe = retryNfe.cPdf;
+              menuInternoState.set(phoneDigits, {
+                ...menuState,
+                chaveNfe: chave,
+                pdfNfeUrl: urlNfe,
+                updatedAt: Date.now()
+              });
+            }
+          }
+        }
+        if (!urlNfe) {
+          await enviarTextoERegistrar('⚠️ PDF da NFe indisponível no momento para este pedido. Tente novamente em instantes.', 'vendas visualizar nfe sem link');
         } else {
           await enviarTextoERegistrar(`🧾 *Visualizar NFe*\n${urlNfe}`, 'vendas visualizar nfe link');
         }
@@ -2721,8 +2751,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
             await enviarTextoERegistrar(`❌ ${consulta.error}`, 'vendas pedido não encontrado');
           } else {
             const p = consulta.pedido;
-            const totalPedido = p.valor_total_pedido != null ? Number(p.valor_total_pedido).toFixed(2) : '0.00';
-            const dataPrev = p.data_previsao ? new Date(p.data_previsao).toLocaleDateString('pt-BR') : '-';
 
             const pedidoPdf = await obterPdfPedidoVendaOmie(p.codigo_pedido);
             const notaPedido = await consultarNfeVendaPorPedido(p.codigo_pedido, p.numero_pedido);
@@ -2731,15 +2759,8 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
               : { ok: false, error: notaPedido.error };
 
             const resumo =
-              `✅ *Pedido de venda ${p.numero_pedido || numero}*\n` +
-              `Código: ${p.codigo_pedido || '-'}\n` +
-              `Etapa: ${p.etapa || '-'}\n` +
-              `Cliente: ${p.codigo_cliente || '-'}\n` +
-              `Pedido cliente: ${p.numero_pedido_cliente || '-'}\n` +
-              `Previsão: ${dataPrev}\n` +
-              `Total: R$ ${totalPedido}\n\n` +
-              `PDF Pedido: ${pedidoPdf.ok ? 'disponível' : 'indisponível'}\n` +
-              `PDF NFe: ${nfePdf.ok ? 'disponível' : 'indisponível'}`;
+              `✅ *Pedido de venda ${p.numero_pedido || numero} localizado.*\n` +
+              `Escolha a ação abaixo.`;
 
             await enviarTextoERegistrar(resumo, 'vendas pedido consultado com links');
 
@@ -2748,6 +2769,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
               step: 'ESCOLHENDO_TIPO',
               numeroPedido: String(p.numero_pedido || numero),
               codigoPedido: String(p.codigo_pedido || ''),
+              chaveNfe: String(notaPedido?.nota?.chave_nfe || ''),
               pdfPedidoUrl: pedidoPdf.ok ? pedidoPdf.cPdfPed : null,
               pdfNfeUrl: nfePdf.ok ? nfePdf.cPdf : null,
               updatedAt: Date.now()
