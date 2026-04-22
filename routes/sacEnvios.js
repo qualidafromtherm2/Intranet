@@ -3208,6 +3208,31 @@ function isDaceDeclaracaoPdf(textRaw) {
     || normalized.includes('DACE DECLARACAO AUXILIAR DE CONTEUDO ELETRONICA');
 }
 
+// Extrai chave fiscal DCE do PDF para validação e consulta SEFAZ
+function extractDceChaveFromPdf(textRaw) {
+  const text = String(textRaw || '');
+
+  // Formato no PDF: espaçado em grupos de 4 ou com quebras
+  // Ex: 5326 0434 0283 1600 0103 9900 1004 3348 3614 0314 7332
+  const matches = [
+    text.match(/(\d{4}\s+){10}\d{4}(?:\s|$)/),  // Formato com espaços
+    text.match(/chDCe=(\d{44})/i),               // Se houver URL do QR
+    text.match(/CH\s*DCe?[:\s=]+(\d{44})/i),    // Variações
+    text.match(/^(\d{44})$/m),                  // Linha só com 44 dígitos
+  ];
+
+  for (const match of matches) {
+    if (match) {
+      const candidate = (match[1] || match[0]).replace(/\s+/g, '');
+      if (/^\d{44}$/.test(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
 // Extrai e formata o conteúdo da declaração de conteúdo (PDF) no layout DESCRIÇÃO/QTDE
 function extractConteudo(textRaw) {
   const text = String(textRaw || '');
@@ -3397,6 +3422,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS conteudo TEXT;
 
     ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS chave_dce TEXT;
+
+    ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS rastreio_status TEXT;
 
     ALTER TABLE envios.solicitacoes
@@ -3554,6 +3582,17 @@ async function ensureSchema() {
       ON sac.whatsapp_webhook_messages(from_phone_digits, received_at DESC);
     CREATE INDEX IF NOT EXISTS whatsapp_webhook_messages_received_idx
       ON sac.whatsapp_webhook_messages(received_at DESC);
+
+    CREATE TABLE IF NOT EXISTS sac.whatsapp_conversation_read_status (
+      id                BIGSERIAL PRIMARY KEY,
+      from_phone_digits TEXT NOT NULL UNIQUE,
+      last_read_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS whatsapp_read_status_phone_idx
+      ON sac.whatsapp_conversation_read_status(from_phone_digits);
   `);
 }
 
@@ -4014,7 +4053,11 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
 
   const urls = [];
   let identificacao = null;
+  let chaveDce = null;
   const conteudo = extractConteudo(declaracaoParsedText);
+
+  // Extrai chave fiscal DCE para validação e consulta SEFAZ
+  chaveDce = extractDceChaveFromPdf(declaracaoParsedText);
 
   try {
     // Faz upload opcional dos arquivos selecionados
@@ -4055,14 +4098,14 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, created_at, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo`,
-      [usuario, observacao, status, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo]
+      `INSERT INTO envios.solicitacoes (usuario, observacao, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, created_at, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce`,
+      [usuario, observacao, status, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
     );
 
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, conteudo: row.conteudo });
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, conteudo: row.conteudo, chave_dce: row.chave_dce });
   } catch (err) {
     console.error('[SAC] erro ao inserir solicitação:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação.' });
@@ -6435,7 +6478,19 @@ router.get('/whatsapp/conversations', async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `WITH ranked AS (
+      `WITH base AS (
+         SELECT id,
+                from_phone,
+                from_phone_digits,
+                profile_name,
+                direction,
+                message_type,
+                message_text,
+                received_at
+           FROM sac.whatsapp_webhook_messages
+          WHERE COALESCE(from_phone_digits, '') <> ''
+       ),
+       ranked AS (
          SELECT id,
                 from_phone,
                 from_phone_digits,
@@ -6449,20 +6504,32 @@ router.get('/whatsapp/conversations', async (req, res) => {
                   ORDER BY received_at DESC, id DESC
                 ) AS rn,
                 COUNT(*) OVER (PARTITION BY from_phone_digits) AS total_messages
-           FROM sac.whatsapp_webhook_messages
-          WHERE COALESCE(from_phone_digits, '') <> ''
+           FROM base
+       ),
+       inbound_name AS (
+         SELECT DISTINCT ON (from_phone_digits)
+                from_phone_digits,
+                profile_name AS contact_name
+           FROM base
+          WHERE direction = 'inbound'
+            AND COALESCE(NULLIF(TRIM(profile_name), ''), '') <> ''
+          ORDER BY from_phone_digits, received_at DESC, id DESC
        )
-       SELECT from_phone,
-              from_phone_digits,
-              profile_name,
-              direction AS last_direction,
-              message_type AS last_message_type,
-              message_text AS last_message_text,
-              received_at AS last_received_at,
-              total_messages
-         FROM ranked
-        WHERE rn = 1
-        ORDER BY last_received_at DESC
+       SELECT r.from_phone,
+              r.from_phone_digits,
+              r.profile_name,
+              COALESCE(i.contact_name, NULLIF(TRIM(r.profile_name), '')) AS contact_name,
+              r.direction AS last_direction,
+              r.message_type AS last_message_type,
+              r.message_text AS last_message_text,
+              r.received_at AS last_received_at,
+              r.total_messages,
+              COALESCE(rs.last_read_at, (TIMESTAMP '1970-01-01')) AS last_read_at
+         FROM ranked r
+         LEFT JOIN inbound_name i ON i.from_phone_digits = r.from_phone_digits
+         LEFT JOIN sac.whatsapp_conversation_read_status rs ON rs.from_phone_digits = r.from_phone_digits
+        WHERE r.rn = 1
+        ORDER BY r.received_at DESC
         LIMIT $1`,
       [limit]
     );
@@ -6470,6 +6537,28 @@ router.get('/whatsapp/conversations', async (req, res) => {
   } catch (err) {
     console.error('[SAC/WhatsApp] erro ao listar conversas:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao listar conversas do WhatsApp.' });
+  }
+});
+
+router.post('/whatsapp/mark-read', express.json({ limit: '10kb' }), async (req, res) => {
+  const phoneDigits = String(req.body?.phone_digits || '').trim();
+  if (!phoneDigits) {
+    return res.status(400).json({ ok: false, error: 'phone_digits é obrigatório.' });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO sac.whatsapp_conversation_read_status (from_phone_digits, last_read_at, created_at, updated_at)
+       VALUES ($1, NOW(), NOW(), NOW())
+       ON CONFLICT (from_phone_digits) DO UPDATE SET
+         last_read_at = NOW(),
+         updated_at = NOW()`,
+      [phoneDigits]
+    );
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/WhatsApp] erro ao marcar conversa como lida:', err);
+    return res.status(500).json({ ok: false, error: 'Falha ao marcar como lido.' });
   }
 });
 

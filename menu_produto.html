@@ -2447,10 +2447,6 @@
                 </div>
                 <div style="color:var(--inactive-color);font-size:13px;">Abertura de OS</div>
                 <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                  <button id="atOpenAtendimentosBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#1f2937 0%,#111827 100%);color:white;">
-                    <i class="fa-solid fa-table-list"></i>
-                    <span>Atendimentos</span>
-                  </button>
                   <!-- Dropdown Configuração -->
                   <div id="atConfigDropdownWrap" style="position:relative;">
                     <button id="atConfigAlimentacaoBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,#374151 0%,#1f2937 100%);color:#9ca3af;padding:8px 14px;">
@@ -2467,28 +2463,39 @@
                       </button>
                     </div>
                   </div>
-                  <a href="https://crm.datacrazy.io/login" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:white;text-decoration:none;">
-                    <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/LOGO-DATACRAZY%20(1).png" alt="DataCrazy" style="width:22px;height:22px;object-fit:contain;display:block;">
-                    <span>DataCrazy</span>
-                  </a>
-                  <button id="atBackToFormBtn" class="content-button" type="button" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#0f766e 0%,#115e59 100%);color:white;">
-                    <i class="fa-solid fa-arrow-left"></i>
-                    <span>Voltar para AT</span>
+                  <button id="atNewOsBtn" type="button" class="content-button" title="Adicionar nova OS" style="display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:10px;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:white;">
+                    <i class="fa-solid fa-plus"></i>
                   </button>
+                  <button id="atWhatsappTopBtn" type="button" class="content-button" title="Abrir mensagens do WhatsApp" style="position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:10px;background:linear-gradient(135deg,#14532d 0%,#166534 100%);color:white;">
+                    <i class="fa-brands fa-whatsapp" style="font-size:19px;"></i>
+                    <span id="atWhatsappTopBadge" style="position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#0ea5e9;color:#e0f2fe;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;">0</span>
+                  </button>
+                  <a href="https://crm.datacrazy.io/login" target="_blank" rel="noopener noreferrer" class="content-button" title="Abrir DataCrazy" style="display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:10px;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:white;text-decoration:none;">
+                    <img src="https://pxhbginkisinegzupqcy.supabase.co/storage/v1/object/public/produtos/assets/LOGO-DATACRAZY%20(1).png" alt="DataCrazy" style="width:22px;height:22px;object-fit:contain;display:block;">
+                  </a>
 
                 </div>
               </div>
 
+              <div id="atFormModal" role="dialog" aria-modal="true" aria-labelledby="atFormModalTitle">
+              <div id="atFormModalCard">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;">
+                <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+                  <i class="fa-solid fa-plus" style="font-size:16px;color:#38bdf8;"></i>
+                  <strong id="atFormModalTitle" style="font-size:15px;color:#e5e7eb;">Nova OS</strong>
+                </div>
+                <button id="atFormModalClose" type="button" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
               <div id="atFormView">
               <style>
                 #atWhatsappWorkspace {
-                  display: grid;
-                  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-                  gap: 16px;
-                  align-items: start;
+                  display: block;
                 }
                 #atWhatsappWorkspaceMain {
                   min-width: 0;
+                  width: 100%;
                 }
                 #atWhatsappInboxPanel {
                   position: sticky;
@@ -2758,6 +2765,119 @@
                   background: rgba(255,255,255,.92);
                   color: #0f172a;
                 }
+                #atWhatsappModal {
+                  position: fixed;
+                  inset: 0;
+                  z-index: 9999;
+                  display: none;
+                  align-items: center;
+                  justify-content: center;
+                  background: rgba(2, 6, 23, .68);
+                  backdrop-filter: blur(3px);
+                }
+                #atFormModal {
+                  position: fixed;
+                  inset: 0;
+                  z-index: 9998;
+                  display: none;
+                  align-items: center;
+                  justify-content: center;
+                  background: rgba(2, 6, 23, .68);
+                  backdrop-filter: blur(3px);
+                }
+                #atFormModalCard {
+                  width: min(1220px, calc(100vw - 26px));
+                  height: min(860px, calc(100vh - 26px));
+                  border-radius: 16px;
+                  border: 1px solid #2c425c;
+                  background: linear-gradient(180deg, rgba(15, 23, 42, .98) 0%, rgba(17, 24, 39, .96) 100%);
+                  box-shadow: 0 24px 48px rgba(0, 0, 0, .38);
+                  display: flex;
+                  flex-direction: column;
+                  overflow: hidden;
+                }
+                #atFormView {
+                  display: block;
+                  overflow: auto;
+                  padding: 0 14px 14px;
+                }
+                #atWhatsappModalCard {
+                  width: min(1120px, calc(100vw - 26px));
+                  height: min(760px, calc(100vh - 26px));
+                  border-radius: 16px;
+                  border: 1px solid #2c425c;
+                  background: linear-gradient(180deg, rgba(15, 23, 42, .98) 0%, rgba(17, 24, 39, .96) 100%);
+                  box-shadow: 0 24px 48px rgba(0, 0, 0, .38);
+                  display: flex;
+                  flex-direction: column;
+                  overflow: hidden;
+                }
+                #atWhatsappModalBody {
+                  display: grid;
+                  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+                  min-height: 0;
+                  flex: 1;
+                }
+                #atWhatsappModal #atWhatsappInboxPanel {
+                  position: static;
+                  margin-top: 0;
+                  max-height: none;
+                  border: 0;
+                  border-right: 1px solid rgba(255,255,255,.08);
+                  border-radius: 0;
+                  box-shadow: none;
+                  background: transparent;
+                  padding: 12px;
+                }
+                #atWhatsappModal #atWhatsappInboxList {
+                  max-height: none;
+                  flex: 1;
+                }
+                #atWhatsappModal #atWhatsappConversationView {
+                  padding: 12px;
+                }
+                #atWhatsappInboxFilters {
+                  display: flex;
+                  gap: 6px;
+                  margin: 8px 0 10px;
+                }
+                .at-wa-filter-btn {
+                  flex: 1;
+                  border: 1px solid rgba(56,189,248,.25);
+                  background: rgba(14,165,233,.10);
+                  color: #bfdbfe;
+                  border-radius: 999px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  padding: 6px 8px;
+                  cursor: pointer;
+                }
+                .at-wa-filter-btn.active {
+                  border-color: rgba(16,185,129,.4);
+                  background: rgba(16,185,129,.18);
+                  color: #d1fae5;
+                }
+                html.light-mode #atWhatsappModalCard {
+                  border-color: rgba(15,23,42,.14);
+                  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                }
+                html.light-mode #atFormModalCard {
+                  border-color: rgba(15,23,42,.14);
+                  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                }
+                html.light-mode #atWhatsappModal #atWhatsappInboxPanel {
+                  border-right-color: rgba(15,23,42,.10);
+                }
+                html.light-mode .at-wa-filter-btn {
+                  border-color: rgba(56,189,248,.25);
+                  background: rgba(224,242,254,.95);
+                  color: #075985;
+                }
+                html.light-mode .at-wa-filter-btn.active {
+                  border-color: rgba(16,185,129,.3);
+                  background: rgba(220,252,231,.92);
+                  color: #065f46;
+                }
                 /* --- Light-mode fixes: WhatsApp panel static elements --- */
                 html.light-mode #atWhatsappInboxListView > div:first-child > strong {
                   color: #0f172a !important;
@@ -2809,15 +2929,25 @@
                   color: #374151;
                 }
                 @media (max-width: 1180px) {
-                  #atWhatsappWorkspace {
-                    grid-template-columns: 1fr;
-                  }
                   #atWhatsappInboxPanel {
                     position: static;
                     max-height: none;
                   }
                   #atWhatsappInboxList {
                     max-height: 320px;
+                  }
+                  #atWhatsappModalCard {
+                    width: calc(100vw - 12px);
+                    height: calc(100vh - 12px);
+                    border-radius: 12px;
+                  }
+                  #atFormModalCard {
+                    width: calc(100vw - 12px);
+                    height: calc(100vh - 12px);
+                    border-radius: 12px;
+                  }
+                  #atWhatsappModalBody {
+                    grid-template-columns: 1fr;
                   }
                 }
               </style>
@@ -3002,45 +3132,10 @@
                 </button>
               </div>
               </div>
-              <aside id="atWhatsappInboxPanel">
-                <div id="atWhatsappInboxListView">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-                    <strong style="font-size:14px;color:#e5e7eb;">Conversas do WhatsApp</strong>
-                    <span id="atWhatsappInboxCount" style="font-size:11px;color:#7dd3fc;background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.25);padding:2px 8px;border-radius:999px;">0</span>
-                  </div>
-                  <div id="atWhatsappInboxStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:10px;">Consultando conversas...</div>
-                  <div id="atWhatsappInboxList"></div>
-                </div>
-                <div id="atWhatsappConversationView">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                    <button id="atWhatsappConversationBackBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
-                      <i class="fa-solid fa-arrow-left"></i>
-                      <span>Voltar</span>
-                    </button>
-                    <span id="atWhatsappConversationCount" style="font-size:11px;color:#86efac;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.22);padding:2px 8px;border-radius:999px;">0</span>
-                  </div>
-                  <div>
-                    <div id="atWhatsappConversationTitle" style="font-size:14px;font-weight:700;color:#e5e7eb;">Conversa</div>
-                    <div id="atWhatsappConversationSubtitle" style="font-size:12px;color:var(--inactive-color);margin-top:2px;">Selecione uma conversa.</div>
-                  </div>
-                  <div id="atWhatsappMessagesStatus" style="font-size:12px;color:var(--inactive-color);">Consultando mensagens recebidas...</div>
-                  <div id="atWhatsappMessagesList"></div>
-                  <div id="atWhatsappReplyBox">
-                    <div id="atWhatsappReplyStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Campo de resposta pronto para integrar o envio.</div>
-                    <textarea id="atWhatsappReplyInput" rows="3" placeholder="Digite a resposta para este contato..." style="width:100%;border:1px solid #374151;border-radius:10px;background:rgba(255,255,255,.04);color:var(--content-title-color);padding:10px 12px;resize:vertical;"></textarea>
-                    <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-                      <button id="atWhatsappReplyBtn" type="button" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
-                        <i class="fa-solid fa-paper-plane"></i>
-                        <span>Responder</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </aside>
               </div>
               </div>
 
-              <div id="atAtendimentosView" style="display:none;margin-top:12px;">
+              <div id="atAtendimentosView" style="display:flex;flex-direction:column;margin-top:12px;">
 
                 <!-- Toolbar: pesquisa + toggle lista/card -->
                 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;position:sticky;top:0;z-index:50;background:var(--theme-bg-color,#0f172a);padding:8px 0;">
@@ -3242,6 +3337,60 @@
                 </thead>
                 <tbody id="atGrafDetalheTbody"></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal WhatsApp -->
+        <div id="atWhatsappModal" role="dialog" aria-modal="true" aria-labelledby="atWhatsappModalTitle">
+          <div id="atWhatsappModalCard">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08);">
+              <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+                <i class="fa-brands fa-whatsapp" style="font-size:20px;color:#22c55e;"></i>
+                <strong id="atWhatsappModalTitle" style="font-size:15px;color:#e5e7eb;">Mensagens do WhatsApp</strong>
+                <span id="atWhatsappInboxCount" style="font-size:11px;color:#7dd3fc;background:rgba(14,165,233,.12);border:1px solid rgba(14,165,233,.25);padding:2px 8px;border-radius:999px;">0</span>
+              </div>
+              <button id="atWhatsappModalClose" type="button" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div id="atWhatsappModalBody">
+              <aside id="atWhatsappInboxPanel">
+                <div id="atWhatsappInboxListView">
+                  <div id="atWhatsappInboxFilters">
+                    <button id="atWhatsappFilterTodos" type="button" class="at-wa-filter-btn active" data-filter="todos">Todos</button>
+                    <button id="atWhatsappFilterLidos" type="button" class="at-wa-filter-btn" data-filter="lidos">Lidos</button>
+                    <button id="atWhatsappFilterNaoLidos" type="button" class="at-wa-filter-btn" data-filter="nao_lidos">Nao lidos</button>
+                  </div>
+                  <div id="atWhatsappInboxStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:10px;">Consultando conversas...</div>
+                  <div id="atWhatsappInboxList"></div>
+                </div>
+              </aside>
+              <div id="atWhatsappConversationView">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                  <button id="atWhatsappConversationBackBtn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid #374151;background:rgba(255,255,255,.04);color:var(--content-title-color);cursor:pointer;">
+                    <i class="fa-solid fa-arrow-left"></i>
+                    <span>Voltar</span>
+                  </button>
+                  <span id="atWhatsappConversationCount" style="font-size:11px;color:#86efac;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.22);padding:2px 8px;border-radius:999px;">0</span>
+                </div>
+                <div>
+                  <div id="atWhatsappConversationTitle" style="font-size:14px;font-weight:700;color:#e5e7eb;">Conversa</div>
+                  <div id="atWhatsappConversationSubtitle" style="font-size:12px;color:var(--inactive-color);margin-top:2px;">Selecione uma conversa.</div>
+                </div>
+                <div id="atWhatsappMessagesStatus" style="font-size:12px;color:var(--inactive-color);">Consultando mensagens recebidas...</div>
+                <div id="atWhatsappMessagesList"></div>
+                <div id="atWhatsappReplyBox">
+                  <div id="atWhatsappReplyStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Campo de resposta pronto para integrar o envio.</div>
+                  <textarea id="atWhatsappReplyInput" rows="3" placeholder="Digite a resposta para este contato..." style="width:100%;border:1px solid #374151;border-radius:10px;background:rgba(255,255,255,.04);color:var(--content-title-color);padding:10px 12px;resize:vertical;"></textarea>
+                  <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+                    <button id="atWhatsappReplyBtn" type="button" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
+                      <i class="fa-solid fa-paper-plane"></i>
+                      <span>Responder</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

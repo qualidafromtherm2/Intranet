@@ -7234,12 +7234,14 @@ if (sacMenuLink) {
 
 const sacAtMenuLink = document.getElementById('menu-sac-at');
 if (sacAtMenuLink) {
-  sacAtMenuLink.addEventListener('click', (e) => {
+  sacAtMenuLink.addEventListener('click', async (e) => {
     e.preventDefault();
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     sacAtMenuLink.classList.add('is-active');
     if (atDataInput && !atDataInput.value) atDataInput.value = new Date().toISOString().slice(0, 10);
     showMainTab('sacAtPane');
+    abrirTelaAtAtendimentos();
+    await carregarAtAtendimentos();
   });
 }
 
@@ -8515,9 +8517,16 @@ const atAnexoInput = document.getElementById('atAnexoInput');
 const atAnexoPreview = document.getElementById('atAnexoPreview');
 const atWhatsappMessagesStatus = document.getElementById('atWhatsappMessagesStatus');
 const atWhatsappMessagesList = document.getElementById('atWhatsappMessagesList');
-const atWhatsappInboxStatus = document.getElementById('atWhatsappInboxStatus');
 const atWhatsappInboxList = document.getElementById('atWhatsappInboxList');
+const atWhatsappInboxStatus = document.getElementById('atWhatsappInboxStatus');
 const atWhatsappInboxCount = document.getElementById('atWhatsappInboxCount');
+const atWhatsappTopBtn = document.getElementById('atWhatsappTopBtn');
+const atWhatsappTopBadge = document.getElementById('atWhatsappTopBadge');
+const atWhatsappModal = document.getElementById('atWhatsappModal');
+const atWhatsappModalClose = document.getElementById('atWhatsappModalClose');
+const atWhatsappFilterTodosBtn = document.getElementById('atWhatsappFilterTodos');
+const atWhatsappFilterLidosBtn = document.getElementById('atWhatsappFilterLidos');
+const atWhatsappFilterNaoLidosBtn = document.getElementById('atWhatsappFilterNaoLidos');
 const atWhatsappInboxListView = document.getElementById('atWhatsappInboxListView');
 const atWhatsappConversationView = document.getElementById('atWhatsappConversationView');
 const atWhatsappConversationBackBtn = document.getElementById('atWhatsappConversationBackBtn');
@@ -8534,6 +8543,9 @@ let atWhatsappMessagesPollTimer = null;
 let atWhatsappConversationRows = [];
 let atWhatsappSelectedPhone = '';
 let atWhatsappRealtimeBound = false;
+// Mapa de conversas com last_read_at do banco (sincronizado via API)
+const atWhatsappConversationState = new Map(); // { phone_digits -> { last_read_at, ... } }
+let atWhatsappConversationFilter = 'todos';
 
 // -------- Gestão de anexos pendentes (antes de salvar a OS) --------
 let _atAnexosPendentes = []; // Array de File objects
@@ -9100,7 +9112,13 @@ function setAtWhatsappInboxStatus(text = '', isError = false) {
 
 function syncAtWhatsappInboxCount(count = 0) {
   if (!atWhatsappInboxCount) return;
-  atWhatsappInboxCount.textContent = String(Number.isFinite(Number(count)) ? count : 0);
+  const safeCount = Number.isFinite(Number(count)) ? Number(count) : 0;
+  atWhatsappInboxCount.textContent = String(safeCount);
+  atWhatsappInboxCount.style.opacity = safeCount > 0 ? '1' : '.55';
+  if (atWhatsappTopBadge) {
+    atWhatsappTopBadge.textContent = String(safeCount);
+    atWhatsappTopBadge.style.display = safeCount > 0 ? 'flex' : 'none';
+  }
 }
 
 function syncAtWhatsappConversationCount(count = 0) {
@@ -9113,19 +9131,58 @@ function getAtWhatsappConversationMeta(phone) {
   return atWhatsappConversationRows.find((row) => normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone) === phoneDigits) || null;
 }
 
+function isAtWhatsappConversationSeen(row) {
+  const phoneDigits = normalizeAtWhatsappPhone(row?.from_phone_digits || row?.from_phone);
+  if (!phoneDigits) return false;
+  
+  const lastReadAt = new Date(row?.last_read_at || 0).getTime();
+  const lastReceivedAt = new Date(row?.last_received_at || 0).getTime();
+  
+  if (!Number.isFinite(lastReceivedAt) || lastReceivedAt <= 0) return lastReadAt > 0;
+  return lastReadAt >= lastReceivedAt;
+}
+
+function getAtWhatsappFilteredRows() {
+  if (!Array.isArray(atWhatsappConversationRows)) return [];
+  if (atWhatsappConversationFilter === 'lidos') {
+    return atWhatsappConversationRows.filter((row) => isAtWhatsappConversationSeen(row));
+  }
+  if (atWhatsappConversationFilter === 'nao_lidos') {
+    return atWhatsappConversationRows.filter((row) => !isAtWhatsappConversationSeen(row));
+  }
+  return atWhatsappConversationRows;
+}
+
+function syncAtWhatsappFilterButtons() {
+  const map = [
+    [atWhatsappFilterTodosBtn, 'todos'],
+    [atWhatsappFilterLidosBtn, 'lidos'],
+    [atWhatsappFilterNaoLidosBtn, 'nao_lidos']
+  ];
+  map.forEach(([btn, value]) => {
+    if (!btn) return;
+    if (value === atWhatsappConversationFilter) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+}
+
+function getAtWhatsappConversationDisplayName(meta = null) {
+  const phoneLabel = formatAtWhatsappPhoneDisplay(meta?.from_phone_digits || meta?.from_phone);
+  return String(meta?.contact_name || meta?.profile_name || '').trim() || phoneLabel || 'Contato';
+}
+
 function showAtWhatsappInboxListView() {
   if (atWhatsappInboxListView) atWhatsappInboxListView.style.display = 'block';
   if (atWhatsappConversationView) atWhatsappConversationView.style.display = 'none';
+  atWhatsappSelectedPhone = '';
   syncAtWhatsappReplyBoxState();
 }
 
 function showAtWhatsappConversationView(meta = null, messageCount = null) {
-  if (atWhatsappInboxListView) atWhatsappInboxListView.style.display = 'none';
+  if (atWhatsappInboxListView) atWhatsappInboxListView.style.display = 'block';
   if (atWhatsappConversationView) atWhatsappConversationView.style.display = 'flex';
 
-  const profileName = String(meta?.profile_name || '').trim()
-    || formatAtWhatsappPhoneDisplay(meta?.from_phone_digits || meta?.from_phone)
-    || 'Conversa';
+  const profileName = getAtWhatsappConversationDisplayName(meta);
   const subtitle = formatAtWhatsappPhoneDisplay(meta?.from_phone_digits || meta?.from_phone) || 'Sem número';
 
   if (atWhatsappConversationTitle) atWhatsappConversationTitle.textContent = profileName;
@@ -9136,23 +9193,32 @@ function showAtWhatsappConversationView(meta = null, messageCount = null) {
 
 function renderAtWhatsappConversationRows(rows = []) {
   if (!atWhatsappInboxList) return;
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const filteredRows = getAtWhatsappFilteredRows();
   const isLight = isAtWhatsappLightMode();
-  syncAtWhatsappInboxCount(Array.isArray(rows) ? rows.length : 0);
+  const unseenCount = safeRows.reduce((acc, row) => acc + (isAtWhatsappConversationSeen(row) ? 0 : 1), 0);
 
-  if (!Array.isArray(rows) || !rows.length) {
-    atWhatsappInboxList.innerHTML = `<div style="padding:12px;border:1px dashed ${isLight ? 'rgba(15,23,42,.14)' : 'rgba(255,255,255,.12)'};border-radius:12px;color:${isLight ? '#475569' : 'var(--inactive-color)'};background:${isLight ? 'rgba(255,255,255,.76)' : 'transparent'};font-size:12px;">Nenhum número enviou mensagem ao webhook ainda.</div>`;
+  syncAtWhatsappInboxCount(unseenCount);
+  syncAtWhatsappFilterButtons();
+
+  if (!filteredRows.length) {
+    atWhatsappInboxList.innerHTML = `<div style="padding:12px;border:1px dashed ${isLight ? 'rgba(15,23,42,.14)' : 'rgba(255,255,255,.12)'};border-radius:12px;color:${isLight ? '#475569' : 'var(--inactive-color)'};background:${isLight ? 'rgba(255,255,255,.76)' : 'transparent'};font-size:12px;">Nenhuma conversa para este filtro.</div>`;
+    const filtroLabel = atWhatsappConversationFilter === 'lidos'
+      ? 'Lidos'
+      : (atWhatsappConversationFilter === 'nao_lidos' ? 'Nao lidos' : 'Todos');
+    setAtWhatsappInboxStatus(`Filtro: ${filtroLabel} · ${filteredRows.length} conversa(s).`, false);
     return;
   }
 
-  atWhatsappInboxList.innerHTML = rows.map((row) => {
+  atWhatsappInboxList.innerHTML = filteredRows.map((row) => {
     const phoneDigits = normalizeAtWhatsappPhone(row.from_phone_digits || row.from_phone);
-    const profileName = escapeAtHtml(String(row.profile_name || '').trim() || formatAtWhatsappPhoneDisplay(phoneDigits) || 'Contato');
-    const phoneLabel = escapeAtHtml(formatAtWhatsappPhoneDisplay(phoneDigits) || String(row.from_phone || '').trim() || 'Sem número');
+    const profileName = escapeAtHtml(getAtWhatsappConversationDisplayName(row));
+    const phoneLabel = escapeAtHtml(formatAtWhatsappPhoneDisplay(phoneDigits) || String(row.from_phone || '').trim() || 'Sem numero');
     const previewBase = String(row.last_message_text || '').trim() || `[mensagem do tipo ${String(row.last_message_type || 'message').trim() || 'message'}]`;
-    const previewText = escapeAtHtml((String(row.last_direction || '').trim() === 'outbound' ? `Você: ${previewBase}` : previewBase));
+    const previewText = escapeAtHtml((String(row.last_direction || '').trim() === 'outbound' ? `Voce: ${previewBase}` : previewBase));
     const when = escapeAtHtml(formatAtWhatsappConversationTime(row.last_received_at));
-    const total = Number(row.total_messages) || 0;
     const activeClass = phoneDigits && phoneDigits === atWhatsappSelectedPhone ? ' active' : '';
+    const seen = isAtWhatsappConversationSeen(row);
     return `
       <button type="button" class="at-wa-conversation-item${activeClass}" data-phone="${escapeAtHtml(phoneDigits)}">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px;">
@@ -9162,7 +9228,7 @@ function renderAtWhatsappConversationRows(rows = []) {
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
             <span style="font-size:11px;color:${isLight ? '#64748b' : 'var(--inactive-color)'};">${when}</span>
-            <span style="font-size:10px;color:${isLight ? '#047857' : '#d1fae5'};background:${isLight ? 'rgba(16,185,129,.12)' : 'rgba(16,185,129,.14)'};border:1px solid rgba(16,185,129,.22);padding:1px 7px;border-radius:999px;">${total}</span>
+            ${seen ? '' : '<span style="width:8px;height:8px;border-radius:999px;background:#22c55e;display:inline-block;"></span>'}
           </div>
         </div>
         <div style="font-size:12px;color:${isLight ? '#334155' : '#cbd5e1'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${previewText}</div>
@@ -9174,6 +9240,11 @@ function renderAtWhatsappConversationRows(rows = []) {
       selecionarAtWhatsappConversation(btn.getAttribute('data-phone') || '', { syncField: true, silent: false });
     });
   });
+
+  const filtroLabel = atWhatsappConversationFilter === 'lidos'
+    ? 'Lidos'
+    : (atWhatsappConversationFilter === 'nao_lidos' ? 'Nao lidos' : 'Todos');
+  setAtWhatsappInboxStatus(`Filtro: ${filtroLabel} · ${filteredRows.length} conversa(s).`, false);
 }
 
 function renderAtWhatsappMessages(rows = []) {
@@ -9239,12 +9310,25 @@ function renderAtWhatsappMessages(rows = []) {
   });
 }
 
-function selecionarAtWhatsappConversation(phone, { syncField = true, silent = false } = {}) {
+async function selecionarAtWhatsappConversation(phone, { syncField = true, silent = false } = {}) {
   const phoneDigits = normalizeAtWhatsappPhone(phone);
   if (!phoneDigits) return;
   const meta = getAtWhatsappConversationMeta(phoneDigits);
   atWhatsappSelectedPhone = phoneDigits;
   atWhatsappMessagesLastPhone = phoneDigits;
+  
+  try {
+    await fetch('/api/sac/whatsapp/mark-read', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_digits: phoneDigits })
+    });
+  } catch (err) {
+    console.warn('[SAC/WhatsApp] erro ao marcar como lido:', err);
+  }
+  
+  atWhatsappConversationState.set(phoneDigits, { last_read_at: new Date().toISOString() });
 
   if (syncField && atTelefoneInput) {
     atTelefoneInput.value = formatAtWhatsappPhoneDisplay(phoneDigits);
@@ -9298,6 +9382,7 @@ async function carregarAtWhatsappMessages({ phone = null, silent = false } = {})
 }
 
 async function carregarAtWhatsappConversations({ silent = false } = {}) {
+  // Sincronizar estado de leitura com dados do servidor
   if (!silent) setAtWhatsappInboxStatus('Consultando conversas recebidas...', false);
 
   try {
@@ -9309,6 +9394,16 @@ async function carregarAtWhatsappConversations({ silent = false } = {}) {
 
     const rows = Array.isArray(data.conversations) ? data.conversations : [];
     atWhatsappConversationRows = rows;
+    // Sincronizar estado de leitura do servidor com mapa local
+    rows.forEach(row => {
+      const phoneDigits = normalizeAtWhatsappPhone(row?.from_phone_digits || row?.from_phone);
+      if (phoneDigits) {
+        atWhatsappConversationState.set(phoneDigits, {
+          last_read_at: row.last_read_at
+        });
+      }
+    });
+    
     renderAtWhatsappConversationRows(rows);
 
     if (!rows.length) {
@@ -9320,8 +9415,6 @@ async function carregarAtWhatsappConversations({ silent = false } = {}) {
       showAtWhatsappInboxListView();
       return;
     }
-
-    setAtWhatsappInboxStatus(`${rows.length} conversa(s) encontrada(s).`, false);
 
     if (!atWhatsappSelectedPhone) {
       showAtWhatsappInboxListView();
@@ -9350,8 +9443,26 @@ async function carregarAtWhatsappConversations({ silent = false } = {}) {
   }
 }
 
+function setAtWhatsappConversationFilter(filterValue = 'todos') {
+  const allowed = new Set(['todos', 'lidos', 'nao_lidos']);
+  atWhatsappConversationFilter = allowed.has(filterValue) ? filterValue : 'todos';
+  renderAtWhatsappConversationRows(atWhatsappConversationRows);
+}
+
+function openAtWhatsappModal() {
+  if (!atWhatsappModal) return;
+  atWhatsappModal.style.display = 'flex';
+  showAtWhatsappInboxListView();
+  carregarAtWhatsappConversations({ silent: true });
+}
+
+function closeAtWhatsappModal() {
+  if (!atWhatsappModal) return;
+  atWhatsappModal.style.display = 'none';
+}
+
 function bindAtWhatsappRealtimeUpdates() {
-  if (atWhatsappRealtimeBound || !window.EventSource || !atWhatsappInboxList) return;
+  if (atWhatsappRealtimeBound || !window.EventSource || !atWhatsappInboxListView) return;
   atWhatsappRealtimeBound = true;
 
   try {
@@ -9388,7 +9499,46 @@ function bindAtWhatsappRealtimeUpdates() {
 if (atWhatsappConversationBackBtn) {
   atWhatsappConversationBackBtn.addEventListener('click', () => {
     showAtWhatsappInboxListView();
+    renderAtWhatsappConversationRows(atWhatsappConversationRows);
+    renderAtWhatsappMessages([]);
+    setAtWhatsappMessagesStatus('Selecione um contato para abrir a conversa.', false);
   });
+}
+
+if (atWhatsappTopBtn) {
+  atWhatsappTopBtn.addEventListener('click', () => {
+    openAtWhatsappModal();
+  });
+}
+
+if (atWhatsappModalClose) {
+  atWhatsappModalClose.addEventListener('click', () => {
+    closeAtWhatsappModal();
+  });
+}
+
+if (atWhatsappModal) {
+  atWhatsappModal.addEventListener('click', (event) => {
+    if (event.target === atWhatsappModal) closeAtWhatsappModal();
+  });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && atWhatsappModal && atWhatsappModal.style.display === 'flex') {
+    closeAtWhatsappModal();
+  }
+});
+
+if (atWhatsappFilterTodosBtn) {
+  atWhatsappFilterTodosBtn.addEventListener('click', () => setAtWhatsappConversationFilter('todos'));
+}
+
+if (atWhatsappFilterLidosBtn) {
+  atWhatsappFilterLidosBtn.addEventListener('click', () => setAtWhatsappConversationFilter('lidos'));
+}
+
+if (atWhatsappFilterNaoLidosBtn) {
+  atWhatsappFilterNaoLidosBtn.addEventListener('click', () => setAtWhatsappConversationFilter('nao_lidos'));
 }
 
 if (atWhatsappReplyInput) {
@@ -9436,7 +9586,7 @@ if (atWhatsappReplyBtn) {
   });
 }
 
-if (atWhatsappInboxList) {
+if (atWhatsappInboxListView) {
   renderAtWhatsappConversationRows([]);
   showAtWhatsappInboxListView();
   bindAtWhatsappRealtimeUpdates();
@@ -9449,9 +9599,9 @@ if (atWhatsappMessagesList) {
 
 syncAtWhatsappReplyBoxState();
 
-if (!atWhatsappMessagesPollTimer && (atWhatsappMessagesList || atWhatsappInboxList)) {
+if (!atWhatsappMessagesPollTimer && (atWhatsappMessagesList || atWhatsappInboxListView)) {
   atWhatsappMessagesPollTimer = setInterval(() => {
-    if (atWhatsappInboxList) carregarAtWhatsappConversations({ silent: true });
+    if (atWhatsappInboxListView) carregarAtWhatsappConversations({ silent: true });
   }, 15000);
 }
 // ---------------------------------------------------
@@ -9459,10 +9609,11 @@ const atSerieBuscaInput = document.getElementById('atSerieBusca');
 const atSerieBuscaBtn = document.getElementById('atSerieBuscaBtn');
 const atSerieReabrirBtn = document.getElementById('atSerieReabrirBtn');
 const atSerieBuscaStatus = document.getElementById('atSerieBuscaStatus');
+const atFormModal = document.getElementById('atFormModal');
+const atFormModalClose = document.getElementById('atFormModalClose');
 const atFormView = document.getElementById('atFormView');
 const atAtendimentosView = document.getElementById('atAtendimentosView');
-const atOpenAtendimentosBtn = document.getElementById('atOpenAtendimentosBtn');
-const atBackToFormBtn = document.getElementById('atBackToFormBtn');
+const atNewOsBtn = document.getElementById('atNewOsBtn');
 const atAtendimentosStatus = document.getElementById('atAtendimentosStatus');
 const atAtendimentosTbody = document.getElementById('atAtendimentosTbody');
 const atSerieSelecionadaBox = document.getElementById('atSerieSelecionadaBox');
@@ -9522,6 +9673,47 @@ const setAtEnvioStatus = (text, isError = false) => {
   atEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
   atEnvioStatus.textContent = text || '';
 };
+
+function resetAtFormulario() {
+  if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
+  if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
+  if (atTelefoneInput) atTelefoneInput.value = '';
+  if (atDataInput) atDataInput.value = new Date().toISOString().slice(0, 10);
+  if (atCpfCnpjInput) atCpfCnpjInput.value = '';
+  if (atCepInput) atCepInput.value = '';
+  if (atBairroInput) atBairroInput.value = '';
+  if (atCidadeInput) atCidadeInput.value = '';
+  if (atEstadoInput) atEstadoInput.value = '';
+  if (atNumeroInput) atNumeroInput.value = '';
+  if (atRuaInput) atRuaInput.value = '';
+  if (atAgendarComInput) atAgendarComInput.value = '';
+  if (atDescricaoInput) atDescricaoInput.value = '';
+  const motivoReset = document.getElementById('atMotivoSolicitacao'); if (motivoReset) motivoReset.value = '';
+  const iniReset = document.getElementById('atAtendimentoInicial'); if (iniReset) iniReset.value = '';
+  if (atModeloInput) atModeloInput.value = '';
+  if (atTagProblemaInput) atTagProblemaInput.value = '';
+  if (atPlataformaInput) atPlataformaInput.value = '';
+  if (window._atFormResetPlataforma) window._atFormResetPlataforma();
+  const rapidoMotivoReset = document.getElementById('atRapidoMotivo'); if (rapidoMotivoReset) rapidoMotivoReset.value = '';
+  const rapidoAcaoReset = document.getElementById('atRapidoAcao'); if (rapidoAcaoReset) rapidoAcaoReset.value = '';
+  const hist = document.getElementById('atDescricaoHistorico');
+  if (hist) hist.innerHTML = '';
+  atWhatsappMessagesLastPhone = '';
+  atWhatsappSelectedPhone = '';
+  setAtWhatsappMessagesStatus('Consultando mensagens recebidas...', false);
+  renderAtWhatsappMessages([]);
+  carregarAtWhatsappConversations({ silent: true });
+  atIdExistente = null;
+  _atAnexosPendentes = [];
+  _atRenderAnexoChips();
+  aplicarVisibilidadeAtCampos();
+  limparAtSerieSelecionada();
+  setAtEnvioStatus('', false);
+}
+
+function fecharModalAtFormulario() {
+  if (atFormModal) atFormModal.style.display = 'none';
+}
 
 function aplicarVisibilidadeAtCampos() {
   const isRapido = atTipoAtendimentoInput?.value === 'Atendimento rápido';
@@ -11768,10 +11960,8 @@ async function carregarAtAtendimentos() {
 }
 
 function abrirTelaAtAtendimentos() {
-  if (atFormView) atFormView.style.display = 'none';
   if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
-  if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'none';
-  if (atBackToFormBtn) atBackToFormBtn.style.display = 'inline-flex';
+  if (atFormModal) atFormModal.style.display = 'none';
   const pane = document.getElementById('sacAtPane');
   if (pane) {
     pane.classList.add('at-lista-ativa');
@@ -11793,10 +11983,9 @@ function abrirTelaAtAtendimentos() {
 }
 
 function abrirTelaAtFormulario() {
+  if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
   if (atFormView) atFormView.style.display = 'block';
-  if (atAtendimentosView) atAtendimentosView.style.display = 'none';
-  if (atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'inline-flex';
-  if (atBackToFormBtn) atBackToFormBtn.style.display = 'none';
+  if (atFormModal) atFormModal.style.display = 'flex';
   const pane = document.getElementById('sacAtPane');
   if (pane) pane.classList.remove('at-lista-ativa');
 }
@@ -12139,39 +12328,10 @@ if (atEnviarBtn) {
         }).catch(() => null);
       }
 
-      if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
-      if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = '';
-      if (atTelefoneInput) atTelefoneInput.value = '';
-      if (atDataInput) atDataInput.value = new Date().toISOString().slice(0, 10);
-      if (atCpfCnpjInput) atCpfCnpjInput.value = '';
-      if (atCepInput) atCepInput.value = '';
-      if (atBairroInput) atBairroInput.value = '';
-      if (atCidadeInput) atCidadeInput.value = '';
-      if (atEstadoInput) atEstadoInput.value = '';
-      if (atNumeroInput) atNumeroInput.value = '';
-      if (atRuaInput) atRuaInput.value = '';
-      if (atAgendarComInput) atAgendarComInput.value = '';
-      if (atDescricaoInput) atDescricaoInput.value = '';
-      const motivoReset = document.getElementById('atMotivoSolicitacao'); if (motivoReset) motivoReset.value = '';
-      const iniReset = document.getElementById('atAtendimentoInicial'); if (iniReset) iniReset.value = '';;
-      if (atModeloInput) atModeloInput.value = '';
-      if (atTagProblemaInput) atTagProblemaInput.value = '';
-      if (atPlataformaInput) atPlataformaInput.value = '';
-      if (window._atFormResetPlataforma) window._atFormResetPlataforma();
-      const rapidoMotivoReset = document.getElementById('atRapidoMotivo'); if (rapidoMotivoReset) rapidoMotivoReset.value = '';
-      const rapidoAcaoReset   = document.getElementById('atRapidoAcao');   if (rapidoAcaoReset)   rapidoAcaoReset.value   = '';
-      const hist = document.getElementById('atDescricaoHistorico');
-      if (hist) hist.innerHTML = '';
-      atWhatsappMessagesLastPhone = '';
-      atWhatsappSelectedPhone = '';
-      setAtWhatsappMessagesStatus('Consultando mensagens recebidas...', false);
-      renderAtWhatsappMessages([]);
-      carregarAtWhatsappConversations({ silent: true });
-      atIdExistente = null;
-      _atAnexosPendentes = [];
-      _atRenderAnexoChips();
-      aplicarVisibilidadeAtCampos();
-      limparAtSerieSelecionada();
+      resetAtFormulario();
+      fecharModalAtFormulario();
+      abrirTelaAtAtendimentos();
+      await carregarAtAtendimentos();
     } catch (err) {
       console.error('[SAC/AT] erro ao salvar atendimento', err);
       setAtEnvioStatus(err?.message || 'Erro ao salvar atendimento.', true);
@@ -12258,6 +12418,8 @@ if (atSerieModalTbody) {
     if (rowData.ja_existe && rowData.at_data) {
       const d = rowData.at_data;
       atIdExistente = d.id || null;
+      const modalTitle = document.getElementById('atFormModalTitle');
+      if (modalTitle) modalTitle.textContent = 'Registrar nova reclamação';
       if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = d.tipo || '';
       if (atNomeRevendaClienteInput) atNomeRevendaClienteInput.value = d.nome_revenda_cliente || '';
       if (atTelefoneInput) atTelefoneInput.value = d.numero_telefone || '';
@@ -12281,17 +12443,36 @@ if (atSerieModalTbody) {
       carregarHistoricoReclamacao(rowData.ordem_producao || '', rowData.modelo || '');
       setAtSerieBuscaStatus('OS existente carregada. Preencha a nova reclamação e envie.', false);
     } else {
+      const modalTitle = document.getElementById('atFormModalTitle');
+      if (modalTitle) modalTitle.textContent = 'Nova OS';
       setAtSerieBuscaStatus('Item selecionado e preenchido abaixo da pesquisa.', false);
     }
 
     closeAtSerieModal();
+    abrirTelaAtFormulario();
   });
 }
 
-if (atOpenAtendimentosBtn) {
-  atOpenAtendimentosBtn.addEventListener('click', async () => {
-    abrirTelaAtAtendimentos();
-    await carregarAtAtendimentos();
+if (atNewOsBtn) {
+  atNewOsBtn.addEventListener('click', () => {
+    resetAtFormulario();
+    const modalTitle = document.getElementById('atFormModalTitle');
+    if (modalTitle) modalTitle.textContent = 'Nova OS';
+    abrirTelaAtFormulario();
+  });
+}
+
+if (atFormModalClose) {
+  atFormModalClose.addEventListener('click', () => {
+    fecharModalAtFormulario();
+  });
+}
+
+if (atFormModal) {
+  atFormModal.addEventListener('click', (event) => {
+    if (event.target === atFormModal) {
+      fecharModalAtFormulario();
+    }
   });
 }
 
@@ -12408,12 +12589,6 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   });
 });
 
-if (atBackToFormBtn) {
-  atBackToFormBtn.addEventListener('click', () => {
-    abrirTelaAtFormulario();
-  });
-}
-
 // ── Gráficos AT ──────────────────────────────────────────────────────────────
 (function () {
   const _grafView       = document.getElementById('atGraficosView');
@@ -12441,11 +12616,9 @@ if (atBackToFormBtn) {
   };
 
   function abrirTelaAtGraficos() {
-    if (typeof atFormView !== 'undefined' && atFormView) atFormView.style.display = 'none';
+    if (typeof atFormModal !== 'undefined' && atFormModal) atFormModal.style.display = 'none';
     if (typeof atAtendimentosView !== 'undefined' && atAtendimentosView) atAtendimentosView.style.display = 'none';
     if (_grafView) _grafView.style.display = 'block';
-    if (typeof atOpenAtendimentosBtn !== 'undefined' && atOpenAtendimentosBtn) atOpenAtendimentosBtn.style.display = 'none';
-    if (typeof atBackToFormBtn !== 'undefined' && atBackToFormBtn) atBackToFormBtn.style.display = 'none';
     const pane = document.getElementById('sacAtPane');
     if (pane) pane.classList.remove('at-lista-ativa', 'at-modo-tabela');
     _carregarGraf1();
@@ -19877,13 +20050,11 @@ async function salvarLinkRapido() {
     document.getElementById('menu-inicio')?.click();
   });
 
-  /* –– SINO –– */
+  /* –– SINO (WhatsApp AT) –– */
   bell?.addEventListener('click', e => {
     e.preventDefault();
-    // Abre diretamente o Chat
-    if (window.openChat) return window.openChat();
-    // fallback (se ainda não carregou lógica do chat)
-    document.getElementById('chatPane').style.display = 'block';
+    // Abre o modal de WhatsApp do AT
+    openAtWhatsappModal();
   });
 
   /* –– CARRINHO / COMPRAS –– */
