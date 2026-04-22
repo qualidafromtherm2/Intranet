@@ -59,14 +59,16 @@ window.showOnlyInMain = function(element) {
     window.clearMainContainer();
     
     // Mostra SOMENTE o elemento especificado
-    element.style.display = 'block';
+    // Use 'flex' se o elemento é tab-pane (CSS o define com display:flex), caso contrário use 'block'
+    const displayValue = element.classList?.contains('tab-pane') ? 'flex' : 'block';
+    element.style.display = displayValue;
     // Restaura propriedades possivelmente alteradas por outras telas
     element.style.visibility = '';
     element.style.opacity = '';
     element.style.position = '';
     element.style.left = '';
     
-    console.log('[NAV] Mostrando apenas:', element.id || element.className);
+    console.log('[NAV] Mostrando apenas:', element.id || element.className, '(display:', displayValue + ')');
   } catch(e) {
     console.error('[NAV] Erro ao mostrar elemento:', e);
   }
@@ -83,7 +85,9 @@ window.forceShowInicio = function() {
       el.style.display = 'none';
     });
 
-    inicio.style.display = 'block';
+    // Use 'flex' se o elemento é tab-pane (CSS o define com display:flex)
+    const displayValue = inicio.classList?.contains('tab-pane') ? 'flex' : 'block';
+    inicio.style.display = displayValue;
 
     const produtoTabs = document.getElementById('produtoTabs');
     const kanbanTabs = document.getElementById('kanbanTabs');
@@ -2448,7 +2452,9 @@ function showMainTab(tabId) {
   if (!alvo) {
     const fallbackInicio = document.getElementById('paginaInicio');
     if (tabId === 'paginaInicio' && fallbackInicio) {
-      fallbackInicio.style.display = 'block';
+      // Use 'flex' se o elemento é tab-pane (CSS o define com display:flex)
+      const displayValue = fallbackInicio.classList?.contains('tab-pane') ? 'flex' : 'block';
+      fallbackInicio.style.display = displayValue;
     }
     return;
   }
