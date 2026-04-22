@@ -9922,11 +9922,21 @@ function _atCompare(a, b, col, dir) {
   return 0;
 }
 
+function _atNormText(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 /** Lê os filtros avançados do painel; retorna objeto com os valores ativos */
 function _atLerFiltros() {
+  const tipoEl = document.getElementById('atFiltroTipo');
+  const statusEl = document.getElementById('atFiltroStatus');
   return {
-    tipo:     (document.getElementById('atFiltroTipo')?.value   || '').trim(),
-    status:   (document.getElementById('atFiltroStatus')?.value || '').trim(),
+    tipo:     (tipoEl ? tipoEl.value : 'EXCLUIR_RAPIDO').trim(),
+    status:   (statusEl ? statusEl.value : 'EXCLUIR_FECHADO').trim(),
     dataIni:  (document.getElementById('atFiltroDataIni')?.value || '').trim(),
     dataFim:  (document.getElementById('atFiltroDataFim')?.value || '').trim(),
   };
@@ -9977,16 +9987,18 @@ function _atRenderCurrent() {
   if (!q) {
     // Filtro Tipo
     if (f.tipo === 'EXCLUIR_RAPIDO') {
-      rows = rows.filter(r => String(r.tipo || '').toLowerCase() !== 'atendimento rapido');
+      rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
     } else if (f.tipo) {
-      rows = rows.filter(r => String(r.tipo || '').toLowerCase() === f.tipo.toLowerCase());
+      const tipoFiltroNorm = _atNormText(f.tipo);
+      rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
     }
 
     // Filtro Status OS
     if (f.status === 'EXCLUIR_FECHADO') {
-      rows = rows.filter(r => String(r.status || '').toLowerCase() !== 'fechado');
+      rows = rows.filter(r => _atNormText(r.status) !== 'fechado');
     } else if (f.status) {
-      rows = rows.filter(r => String(r.status || '').toLowerCase() === f.status.toLowerCase());
+      const statusFiltroNorm = _atNormText(f.status);
+      rows = rows.filter(r => _atNormText(r.status) === statusFiltroNorm);
     }
 
     // Filtro Data — padrão: apenas registros de 2026 em diante
@@ -10335,10 +10347,16 @@ function _abrirAtOsModal(id, navRows) {
         _at(r.modelo) || _at(r.nota_fiscal) || _at(r.tecnico_nome)
       );
     }
-    if (f.tipo === 'EXCLUIR_RAPIDO') rows = rows.filter(r => String(r.tipo||'').toLowerCase() !== 'atendimento rapido');
-    else if (f.tipo) rows = rows.filter(r => String(r.tipo||'').toLowerCase() === f.tipo.toLowerCase());
-    if (f.status === 'EXCLUIR_FECHADO') rows = rows.filter(r => String(r.status||'').toLowerCase() !== 'fechado');
-    else if (f.status) rows = rows.filter(r => String(r.status||'').toLowerCase() === f.status.toLowerCase());
+    if (f.tipo === 'EXCLUIR_RAPIDO') rows = rows.filter(r => _atNormText(r.tipo) !== 'atendimento rapido');
+    else if (f.tipo) {
+      const tipoFiltroNorm = _atNormText(f.tipo);
+      rows = rows.filter(r => _atNormText(r.tipo) === tipoFiltroNorm);
+    }
+    if (f.status === 'EXCLUIR_FECHADO') rows = rows.filter(r => _atNormText(r.status) !== 'fechado');
+    else if (f.status) {
+      const statusFiltroNorm = _atNormText(f.status);
+      rows = rows.filter(r => _atNormText(r.status) === statusFiltroNorm);
+    }
     if (f.dataIni) { const ini = new Date(f.dataIni+'T00:00:00'); rows = rows.filter(r => r.data && new Date(r.data) >= ini); }
     else { rows = rows.filter(r => r.data && new Date(r.data) >= new Date('2026-01-01T00:00:00')); }
     if (f.dataFim) { const fim = new Date(f.dataFim+'T23:59:59'); rows = rows.filter(r => r.data && new Date(r.data) <= fim); }

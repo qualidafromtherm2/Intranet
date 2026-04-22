@@ -3134,6 +3134,8 @@
               </div>
               </div>
               </div>
+              </div>
+              </div>
 
               <div id="atAtendimentosView" style="display:flex;flex-direction:column;margin-top:12px;">
 
@@ -3255,8 +3257,6 @@
                 <div id="atCardsContainer" style="display:grid;"></div>
               </div>
             </div>
-          </div>
-        </div>
 
         <!-- View Gráficos AT -->
         <div id="atGraficosView" style="display:none;margin-top:12px;">
@@ -5348,9 +5348,10 @@
               /* ── AT Cards Grid ───────────────────────── */
               #atCardsContainer {
                 display: grid;
-                grid-template-columns: repeat(5, 1fr);
-                gap: 12px;
-                padding: 4px 0;
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                gap: 14px;
+                padding: 6px 0;
+                align-items: start;
               }
               .at-card-item {
                 background: var(--card-bg, #1e2535);
@@ -5359,9 +5360,13 @@
                 overflow: hidden;
                 display: flex;
                 flex-direction: column;
-                transition: box-shadow .2s;
+                transition: box-shadow .2s, transform .2s;
+                min-height: 240px;
               }
-              .at-card-item:hover { box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+              .at-card-item:hover {
+                box-shadow: 0 8px 24px rgba(0,0,0,.32);
+                transform: translateY(-1px);
+              }
               html.light-mode .at-card-item {
                 background: #ffffff;
                 border-color: #dbe3ee;
@@ -5371,26 +5376,36 @@
               .at-ci-header {
                 display: flex;
                 align-items: center;
-                gap: 6px;
-                padding: 9px 11px 7px;
+                gap: 8px;
+                padding: 10px 12px 8px;
                 border-bottom: 1px solid var(--border-color, #374151);
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
               }
               html.light-mode .at-ci-header { border-bottom-color: #dbe3ee; }
               .at-ci-badge {
                 background: #0ea5e9;
                 color: #fff;
                 border-radius: 20px;
-                padding: 1px 8px;
-                font-size: 11px;
+                padding: 2px 8px;
+                font-size: 10px;
                 font-weight: 700;
+                letter-spacing: .02em;
+                white-space: nowrap;
               }
-              .at-ci-date { font-size: 10px; color: var(--inactive-color); }
+              .at-ci-date {
+                font-size: 10px;
+                color: var(--inactive-color);
+                white-space: nowrap;
+              }
               .at-ci-tipo {
                 font-size: 10px;
                 background: rgba(255,255,255,.07);
                 border-radius: 6px;
-                padding: 1px 7px;
+                padding: 2px 7px;
+                white-space: nowrap;
+                max-width: 120px;
+                overflow: hidden;
+                text-overflow: ellipsis;
               }
               html.light-mode .at-ci-tipo {
                 background: #eef2ff;
@@ -5413,7 +5428,7 @@
                 grid-template-columns: 1fr 1fr;
               }
               .at-ci-field {
-                padding: 6px 11px;
+                padding: 7px 11px;
                 border-bottom: 1px solid var(--border-color, #374151);
               }
               html.light-mode .at-ci-field { border-bottom-color: #dbe3ee; }
@@ -5432,10 +5447,12 @@
               .at-ci-field-val {
                 font-size: 12px;
                 color: var(--content-title-color);
-                white-space: nowrap;
+                white-space: normal;
+                overflow-wrap: anywhere;
+                line-height: 1.35;
+                min-height: 18px;
+                max-height: 34px;
                 overflow: hidden;
-                text-overflow: ellipsis;
-                min-height: 16px;
               }
               html.light-mode .at-ci-field-val,
               html.light-mode .at-ci-desc-val,
@@ -5454,7 +5471,7 @@
                 display: none;
               }
               .at-ci-desc-area {
-                padding: 7px 11px;
+                padding: 9px 11px 10px;
                 flex: 1;
               }
               .at-ci-desc-lbl {
@@ -5468,8 +5485,9 @@
                 font-size: 11px;
                 color: var(--content-title-color);
                 line-height: 1.45;
-                max-height: 52px;
+                max-height: 74px;
                 overflow: hidden;
+                overflow-wrap: anywhere;
               }
               .at-ci-desc-input {
                 width: 100%;
@@ -5569,9 +5587,14 @@
                 font-size: 11px;
                 display: none;
               }
-              @media (max-width: 1400px) { #atCardsContainer { grid-template-columns: repeat(4,1fr); } }
-              @media (max-width: 1100px) { #atCardsContainer { grid-template-columns: repeat(3,1fr); } }
-              @media (max-width: 750px)  { #atCardsContainer { grid-template-columns: repeat(2,1fr); } }
+              @media (max-width: 1200px) {
+                #atCardsContainer { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+              }
+              @media (max-width: 860px) {
+                #atCardsContainer { grid-template-columns: 1fr; }
+                .at-ci-fields { grid-template-columns: 1fr; }
+                .at-ci-field:nth-child(odd) { border-right: none; }
+              }
 
               /* AT: preview de anexos no formulário */
               .at-anexo-chip {
