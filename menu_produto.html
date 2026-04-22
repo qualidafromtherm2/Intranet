@@ -7764,6 +7764,8 @@
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
+  <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
   <script type="module" src="menu_produto.js?v=20260401g"></script>
   

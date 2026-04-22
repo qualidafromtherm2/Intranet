@@ -20,6 +20,7 @@ const pcpEstruturaRoutes = require('./routes/pcp_estrutura');
 // ——————————————————————————————
 const express = require('express');
 const session       = require('express-session');
+const PgSession     = require('connect-pg-simple')(session);
 const { AsyncLocalStorage } = require('async_hooks');
 const fs  = require('fs');           // todas as funções sync
 const fsp = fs.promises;            // parte assíncrona (equivale a fs/promises)
@@ -101,11 +102,33 @@ app.post('/api/client-log', express.json({ limit: '200kb' }), (req, res) => {
 });
 
 
+// Sessão persistida no Postgres (sobrevive a deploys/restart do processo).
+// Requer a tabela public.session (ver sql/create_session_table.sql).
+const sessionStore = new PgSession({
+  conObject: {
+    connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }
+  },
+  tableName: 'session',
+  createTableIfMissing: true,            // cria automaticamente se não existir
+  pruneSessionInterval: 60 * 60          // limpa expiradas a cada 1h
+});
+
+sessionStore.on('error', (err) => {
+  console.error('[session-store] erro no Postgres session store:', err?.message || err);
+});
+
+if (!process.env.SESSION_SECRET) {
+  console.warn('[session] SESSION_SECRET não definido no ambiente — usando fallback. Defina SESSION_SECRET fixo para preservar sessões entre deploys.');
+}
+
 app.use(session({
+  store: sessionStore,
   name: 'sid',
   secret: process.env.SESSION_SECRET || 'troque-isto-em-producao',
   resave: false,
   saveUninitialized: false,
+  rolling: true,                        // renova expiração a cada request → usuários ativos não expiram
   proxy: true,
   cookie: {
     httpOnly: true,
