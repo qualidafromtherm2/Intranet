@@ -10473,23 +10473,8 @@ function chkToken(req, res, next) {
   next();
 }
 
-// Sessão (cookies) para manter usuário logado
-// 🔐 sessão (cookies) — antes das rotas que usam req.session
-app.set('trust proxy', 1); // necessário atrás de proxy (Render) p/ cookie "secure" funcionar
-
-app.use(require('express-session')({
-  name: 'sid',
-  secret: process.env.SESSION_SECRET || 'troque-isto-em-producao',
-  resave: false,
-  saveUninitialized: false,
-  proxy: true,                           // reconhece X-Forwarded-* do Render
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',                     // funciona bem com navegação normal
-    secure: process.env.NODE_ENV === 'production', // true em prod (HTTPS)
-    maxAge: 7 * 24 * 60 * 60 * 1000      // 7 dias
-  }
-}));
+// Sessão já é configurada no topo do arquivo com Postgres session store.
+// Não duplicar express-session aqui para evitar sobrescrita de store/cookie.
 
 const LOG_FILE = path.join(__dirname, 'data', 'kanban.log');  // ou outro nome
 
