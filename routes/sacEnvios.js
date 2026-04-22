@@ -2190,6 +2190,126 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { ok: true, nota: rows[0] };
   }
 
+  async function consultarNfeVendaPorPedido(codigoPedido, numeroPedido) {
+    const codigo = String(codigoPedido || '').trim();
+    const numero = String(numeroPedido || '').trim();
+    if (!codigo && !numero) return { ok: false, error: 'Pedido sem código/numero para localizar NFe.' };
+
+    const candidatos = [codigo, numero].filter(Boolean);
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        tipo_documento,
+        topic_ultimo,
+        status_ultimo,
+        numero_nota,
+        chave_nfe,
+        numero_pedido,
+        valor_total,
+        cnpj_emitente,
+        razao_emitente,
+        data_emissao,
+        updated_at
+      FROM "Vendas".notas_fiscais_omie
+      WHERE COALESCE(numero_pedido, '') = ANY($1::text[])
+        AND COALESCE(chave_nfe, '') <> ''
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1
+    `, [candidatos]);
+
+    if (!rows.length) {
+      return { ok: false, error: `NFe não encontrada para o pedido ${numero || codigo}.` };
+    }
+    return { ok: true, nota: rows[0] };
+  }
+
+  async function omieCallJson(url, call, param = []) {
+    const appKey = String(process.env.OMIE_APP_KEY || '').trim();
+    const appSecret = String(process.env.OMIE_APP_SECRET || '').trim();
+    if (!appKey || !appSecret) {
+      throw new Error('Credenciais OMIE_APP_KEY/OMIE_APP_SECRET não configuradas.');
+    }
+
+    const resp = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call,
+        app_key: appKey,
+        app_secret: appSecret,
+        param: Array.isArray(param) ? param : [param]
+      })
+    }, 30000);
+
+    const data = await resp.json().catch(() => ({}));
+    const fault = data?.faultstring || data?.faultcode;
+    if (!resp.ok || fault) {
+      throw new Error(String(fault || `Erro HTTP ${resp.status} em ${call}`));
+    }
+    return data;
+  }
+
+  async function obterPdfPedidoVendaOmie(codigoPedido) {
+    const nIdPed = Number(codigoPedido);
+    if (!Number.isFinite(nIdPed) || nIdPed <= 0) {
+      return { ok: false, error: `codigo_pedido inválido: ${codigoPedido}` };
+    }
+    try {
+      const data = await omieCallJson(
+        'https://app.omie.com.br/api/v1/produtos/dfedocs/',
+        'ObterPedVenda',
+        [{ nIdPed }]
+      );
+      const cPdfPed = String(data?.cPdfPed || '').trim();
+      if (!/^https?:\/\//i.test(cPdfPed)) {
+        return { ok: false, error: 'Campo cPdfPed não retornado pela Omie.' };
+      }
+      return { ok: true, cPdfPed };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
+  async function obterPdfNfePorChaveOmie(chaveNfe) {
+    const chave = String(chaveNfe || '').trim();
+    if (!chave) return { ok: false, error: 'Chave NFe não informada.' };
+
+    try {
+      const consulta = await omieCallJson(
+        'https://app.omie.com.br/api/v1/produtos/nfconsultar/',
+        'ConsultarNF',
+        [{ cChaveNFe: chave }]
+      );
+
+      const nIdNF = Number(
+        consulta?.compl?.nIdNF
+        || consulta?.compl?.nIdNf
+        || consulta?.nIdNF
+        || consulta?.nIdNfe
+        || 0
+      );
+
+      if (!Number.isFinite(nIdNF) || nIdNF <= 0) {
+        return { ok: false, error: 'Não foi possível obter nIdNF no ConsultarNF.' };
+      }
+
+      const obterNfe = await omieCallJson(
+        'https://app.omie.com.br/api/v1/produtos/dfedocs/',
+        'ObterNfe',
+        [{ nIdNfe: nIdNF }]
+      );
+
+      const cPdf = String(obterNfe?.cPdf || '').trim();
+      if (!/^https?:\/\//i.test(cPdf)) {
+        return { ok: false, error: 'Campo cPdf não retornado pela Omie.' };
+      }
+
+      return { ok: true, cPdf, nIdNF };
+    } catch (err) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   // Helper para enviar menu principal como lista interativa
@@ -2230,6 +2350,31 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     }
     // Depois envia a lista interativa para próxima ação
     await enviarMenuPrincipal('✅ Posso ajudar com mais alguma coisa?', logMode ? logMode + ' → menu' : 'finalizar → menu');
+  }
+
+  async function enviarBotoesConsultaPedidoVenda(bodyText) {
+    const bPayload = await enviarMensagemWhatsappComBotoes({
+      phoneNumberId,
+      toPhone: phoneDigits,
+      bodyText: bodyText || 'Escolha uma ação para este pedido:',
+      buttons: [
+        { id: 'venda_btn_abrir_pedido', title: 'Abrir pedido' },
+        { id: 'venda_btn_visualizar_nfe', title: 'Visualizar NFe' },
+        { id: 'menu_voltar', title: 'Menu principal' }
+      ]
+    });
+    const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: bMsgId,
+      phone: phoneDigits,
+      profileName: 'Chatbot Fromtherm',
+      messageType: 'interactive',
+      messageText: 'Ações consulta pedido venda',
+      phoneNumberId,
+      displayPhoneNumber,
+      payload: bPayload,
+      direction: 'outbound'
+    });
   }
 
   // Resolve o ID da opção interativa (list ou button) ou texto digitado
@@ -2502,6 +2647,28 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     if (menuState?.fluxo === 'CONSULTA_VENDA') {
       const step = menuState.step || 'ESCOLHENDO_TIPO';
 
+      if (interactiveId === 'venda_btn_abrir_pedido') {
+        const urlPedido = String(menuState?.pdfPedidoUrl || '').trim();
+        if (!urlPedido) {
+          await enviarTextoERegistrar('⚠️ Link do pedido indisponível para esta consulta. Refaça a busca do pedido.', 'vendas abrir pedido sem link');
+        } else {
+          await enviarTextoERegistrar(`📄 *Abrir pedido*\n${urlPedido}`, 'vendas abrir pedido link');
+        }
+        await enviarBotoesConsultaPedidoVenda('Deseja abrir outro documento deste pedido?');
+        return;
+      }
+
+      if (interactiveId === 'venda_btn_visualizar_nfe') {
+        const urlNfe = String(menuState?.pdfNfeUrl || '').trim();
+        if (!urlNfe) {
+          await enviarTextoERegistrar('⚠️ PDF da NFe indisponível para este pedido. Verifique se há NFe vinculada.', 'vendas visualizar nfe sem link');
+        } else {
+          await enviarTextoERegistrar(`🧾 *Visualizar NFe*\n${urlNfe}`, 'vendas visualizar nfe link');
+        }
+        await enviarBotoesConsultaPedidoVenda('Deseja abrir outro documento deste pedido?');
+        return;
+      }
+
       if (step === 'ESCOLHENDO_TIPO') {
         if (interactiveId === 'venda_op_pedido' || userText.trim() === '1') {
           menuInternoState.set(phoneDigits, { fluxo: 'CONSULTA_VENDA', step: 'AGUARDANDO_NUMERO_PEDIDO', updatedAt: Date.now() });
@@ -2554,16 +2721,16 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
             await enviarTextoERegistrar(`❌ ${consulta.error}`, 'vendas pedido não encontrado');
           } else {
             const p = consulta.pedido;
-            const itens = Array.isArray(consulta.itens) ? consulta.itens : [];
-            const itensFmt = itens.slice(0, 12).map(i => {
-              const qtd = i.quantidade != null ? Number(i.quantidade) : 0;
-              const total = i.valor_total != null ? Number(i.valor_total).toFixed(2) : '0.00';
-              return `• ${i.seq || '-'} - ${i.codigo || '-'} - ${i.descricao || 'Sem descrição'} | ${qtd} ${i.unidade || ''} | R$ ${total}`;
-            }).join('\n');
-
             const totalPedido = p.valor_total_pedido != null ? Number(p.valor_total_pedido).toFixed(2) : '0.00';
             const dataPrev = p.data_previsao ? new Date(p.data_previsao).toLocaleDateString('pt-BR') : '-';
-            const msg =
+
+            const pedidoPdf = await obterPdfPedidoVendaOmie(p.codigo_pedido);
+            const notaPedido = await consultarNfeVendaPorPedido(p.codigo_pedido, p.numero_pedido);
+            const nfePdf = notaPedido.ok
+              ? await obterPdfNfePorChaveOmie(notaPedido.nota?.chave_nfe)
+              : { ok: false, error: notaPedido.error };
+
+            const resumo =
               `✅ *Pedido de venda ${p.numero_pedido || numero}*\n` +
               `Código: ${p.codigo_pedido || '-'}\n` +
               `Etapa: ${p.etapa || '-'}\n` +
@@ -2571,11 +2738,23 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
               `Pedido cliente: ${p.numero_pedido_cliente || '-'}\n` +
               `Previsão: ${dataPrev}\n` +
               `Total: R$ ${totalPedido}\n\n` +
-              `*Itens (${itens.length}):*\n` +
-              (itensFmt || 'Sem itens cadastrados.') +
-              (itens.length > 12 ? '\n... (lista truncada)' : '');
+              `PDF Pedido: ${pedidoPdf.ok ? 'disponível' : 'indisponível'}\n` +
+              `PDF NFe: ${nfePdf.ok ? 'disponível' : 'indisponível'}`;
 
-            await enviarTextoERegistrar(msg, 'vendas pedido consultado');
+            await enviarTextoERegistrar(resumo, 'vendas pedido consultado com links');
+
+            menuInternoState.set(phoneDigits, {
+              fluxo: 'CONSULTA_VENDA',
+              step: 'ESCOLHENDO_TIPO',
+              numeroPedido: String(p.numero_pedido || numero),
+              codigoPedido: String(p.codigo_pedido || ''),
+              pdfPedidoUrl: pedidoPdf.ok ? pedidoPdf.cPdfPed : null,
+              pdfNfeUrl: nfePdf.ok ? nfePdf.cPdf : null,
+              updatedAt: Date.now()
+            });
+
+            await enviarBotoesConsultaPedidoVenda('Escolha uma ação para este pedido:');
+            return;
           }
         } catch (err) {
           await enviarTextoERegistrar(`⚠️ Erro ao consultar pedido: ${err.message || err}`, 'vendas erro consulta pedido');

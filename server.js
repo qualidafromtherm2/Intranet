@@ -6703,10 +6703,12 @@ app.post([
     const author = String(body.author || body?.event?.author || body?.evento?.author || '').trim() || null;
 
     if (!topic) {
+      console.log('[webhook/notas-vendas] recebido sem topic — body:', JSON.stringify(body).slice(0, 300));
       return res.status(200).json({ ok: true, msg: 'validacao recebida (sem topic)' });
     }
 
     if (!isNotaVendaTopic(topic)) {
+      console.log('[webhook/notas-vendas] topic ignorado:', topic);
       return res.status(200).json({ ok: true, msg: 'topic ignorado por este endpoint', topic });
     }
 
@@ -6754,6 +6756,8 @@ app.post([
       });
 
       await client.query('COMMIT');
+
+      console.log('[webhook/notas-vendas] gravado:', { topic, identidade, tipoDocumento, statusUltimo, numeroNota: parsed.numeroNota });
 
       return res.status(200).json({
         ok: true,
