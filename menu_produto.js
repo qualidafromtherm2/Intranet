@@ -11987,15 +11987,6 @@ if (sacAttachDeclaracaoBtn && sacFileInputDeclaracao) {
   });
   sacFileInputDeclaracao.addEventListener('change', () => {
     const f = sacFileInputDeclaracao.files?.[0];
-    if (f) {
-      const name = f.name.toLowerCase();
-      if (!name.startsWith('declaracao') && !name.includes('declaracao')) {
-        alert('Selecione o arquivo de DECLARAÇÃO (nome deve começar ou conter "declaracao").');
-        sacFileInputDeclaracao.value = '';
-        sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
-        return;
-      }
-    }
     sacFileInfoDeclaracao.textContent = f ? formatFile(f) : 'Nenhum arquivo.';
   });
 }

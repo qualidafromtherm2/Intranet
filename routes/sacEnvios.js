@@ -2798,7 +2798,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           bodyText: 'Escolha a consulta de vendas:',
           buttons: [
             { id: 'venda_op_pedido', title: 'Consultar pedido' },
-            { id: 'venda_op_nfe', title: 'Consultar NFe' },
             { id: 'menu_voltar', title: 'Menu principal' }
           ]
         });
@@ -2874,7 +2873,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           bodyText: 'Deseja fazer outra consulta de vendas?',
           buttons: [
             { id: 'venda_op_pedido', title: 'Consultar pedido' },
-            { id: 'venda_op_nfe', title: 'Consultar NFe' },
             { id: 'menu_voltar', title: 'Menu principal' }
           ]
         });
@@ -2927,7 +2925,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           bodyText: 'Deseja fazer outra consulta de vendas?',
           buttons: [
             { id: 'venda_op_pedido', title: 'Consultar pedido' },
-            { id: 'venda_op_nfe', title: 'Consultar NFe' },
             { id: 'menu_voltar', title: 'Menu principal' }
           ]
         });
@@ -3010,7 +3007,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         bodyText: '🧾 *Consultar venda*\n\nEscolha uma opção:',
         buttons: [
           { id: 'venda_op_pedido', title: 'Consultar pedido' },
-          { id: 'venda_op_nfe', title: 'Consultar NFe' },
           { id: 'menu_voltar', title: 'Menu principal' }
         ]
       });
@@ -3196,73 +3192,153 @@ function normalizeStatus(statusRaw) {
   return normalized || STATUS_LIST[0];
 }
 
-// Extrai e formata o conteúdo da declaração de conteúdo (PDF)
+function normalizePdfTextForMatch(textRaw) {
+  return String(textRaw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function isDaceDeclaracaoPdf(textRaw) {
+  const normalized = normalizePdfTextForMatch(textRaw);
+  if (!normalized) return false;
+  return normalized.includes('DACE - DECLARACAO AUXILIAR DE CONTEUDO ELETRONICA')
+    || normalized.includes('DACE DECLARACAO AUXILIAR DE CONTEUDO ELETRONICA');
+}
+
+// Extrai e formata o conteúdo da declaração de conteúdo (PDF) no layout DESCRIÇÃO/QTDE
 function extractConteudo(textRaw) {
   const text = String(textRaw || '');
-  const lower = text.toLowerCase();
-  const startKey = 'identificação dos bens';
-  const startKeyAlt = 'identificacao dos bens';
-  let start = lower.indexOf(startKey);
-  if (start === -1) start = lower.indexOf(startKeyAlt);
-  if (start === -1) return null;
-
-  const slice = text.slice(start);
-  const lowerSlice = lower.slice(start);
-  const endMarkers = ['totais', 'peso total', 'declaração', 'declaracao'];
-  let end = slice.length;
-  for (const mark of endMarkers) {
-    const idx = lowerSlice.indexOf(mark);
-    if (idx !== -1 && idx < end) end = idx;
-  }
-
-  let section = slice.slice(0, end);
-  section = section.replace(/Identificação Dos Bens/i, '');
-  section = section.replace(/Item\s*Conteúdo\s*Quant\.?\s*Valor/i, '');
-
-  const lines = section
+  const lines = text
     .split(/\r?\n/)
     .map(l => l.trim())
     .filter(Boolean);
 
   const items = [];
   const seen = new Set();
-  
-  for (const line of lines) {
-    const normalized = line.replace(/\s+/g, ' ').trim();
-    
-    // Ignora headers ou linhas puramente numéricas
-    if (!/[A-Za-z]/.test(normalized)) continue;
-    if (/^í?tem|^conte(ú|u)do|^quant|^valor/i.test(normalized)) continue;
-    if (/(item|ítem).*(conte(ú|u)do)/i.test(normalized)) continue;
-    if (/^totais?/i.test(normalized)) break;
-    if (seen.has(normalized)) continue; // evita duplicar
-    seen.add(normalized);
-    
-    // Extrai apenas conteúdo e quantidade (ignora coluna Item do PDF)
-    // Quantidade deve ser apenas 1 ou 2 dígitos no FINAL da linha
-    
-    // Remove número inicial (coluna Item do PDF) se existir
-    const withoutLeadingNumber = normalized.replace(/^\d+\s+/, '');
-    
-    // Tenta extrair quantidade: apenas 1 ou 2 dígitos no final
-    const match = withoutLeadingNumber.match(/^(.+?)\s+(\d{1,2})\s*$/);
-    
-    if (match) {
-      const conteudo = match[1].trim();
-      const quantidade = match[2];
-      
-      items.push({
-        conteudo: conteudo,
-        quantidade: quantidade
-      });
-    } else {
-      // Se não encontrou quantidade, adiciona com quantidade 1
-      if (withoutLeadingNumber) {
-        items.push({
-          conteudo: withoutLeadingNumber,
-          quantidade: '1'
-        });
+
+  const pushItem = (conteudoRaw, quantidadeRaw) => {
+    const conteudo = String(conteudoRaw || '').replace(/\s+/g, ' ').trim();
+    const quantidade = String(quantidadeRaw || '').trim();
+    if (!conteudo || !/^\d{1,4}$/.test(quantidade)) return;
+
+    const key = `${conteudo.toUpperCase()}::${quantidade}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ conteudo, quantidade });
+  };
+
+  const parseCompactLine = (lineRaw) => {
+    const line = String(lineRaw || '').replace(/\s+/g, ' ').trim();
+    if (!line) return null;
+
+    let workLine = line;
+
+    // Remove índice de item de 1 dígito quando colado no início (ex.: 103MPI... -> 03MPI...)
+    const itemPrefixMatch = workLine.match(/^(\d)(\d{2}[A-Za-z].*)$/);
+    if (itemPrefixMatch) {
+      workLine = itemPrefixMatch[2].trim();
+    }
+
+    // Formato com separação explícita: DESCRIÇÃO QTDE VALOR
+    const spacedWithValue = workLine.match(/^(.+?)\s+(\d{1,4})\s+(\d{1,3},\d{2})$/);
+    if (spacedWithValue) {
+      return { conteudo: spacedWithValue[1], quantidade: spacedWithValue[2] };
+    }
+
+    // Se houver separação por espaço apenas entre descrição e quantidade, usa esse formato.
+    const spaced = workLine.match(/^(.+?)\s+(\d{1,4})$/);
+    if (spaced) {
+      return { conteudo: spaced[1], quantidade: spaced[2] };
+    }
+
+    // Formato compactado no final: "... 32211,00" (descrição termina em 322, qtde=1, valor=1,00)
+    const lastSpace = workLine.lastIndexOf(' ');
+    if (lastSpace > 0) {
+      const descBase = workLine.slice(0, lastSpace).trim();
+      const compactToken = workLine.slice(lastSpace + 1).trim();
+      const compactMatch = compactToken.match(/^(\d+),(\d{2})$/);
+      if (compactMatch && /[A-Za-zÀ-ÿ]/.test(descBase)) {
+        const digits = compactMatch[1];
+        if (digits.length >= 2) {
+          // Heurística do layout DACE: penúltimo dígito é a QTDE e último dígito é parte do valor inteiro.
+          const quantidade = digits.slice(-2, -1);
+          const descTail = digits.slice(0, -2);
+          if (/^\d{1,4}$/.test(quantidade) && Number(quantidade) > 0) {
+            const conteudo = descTail ? `${descBase} ${descTail}` : descBase;
+            return { conteudo, quantidade };
+          }
+        }
       }
+    }
+
+    return null;
+  };
+
+  let inTable = false;
+  let pendingDescription = null;
+
+  for (const rawLine of lines) {
+    const normalizedLine = rawLine.replace(/\s+/g, ' ').trim();
+    const normalizedHeader = normalizePdfTextForMatch(normalizedLine);
+
+    if (!inTable) {
+      if (normalizedHeader.includes('DESCRICAO')) {
+        inTable = true;
+      }
+      continue;
+    }
+
+    if (
+      /^TOTAL\b/i.test(normalizedHeader)
+      || /^TOTAIS\b/i.test(normalizedHeader)
+      || normalizedHeader.includes('PESO TOTAL')
+      || normalizedHeader.includes('VALOR TOTAL')
+      || normalizedHeader.includes('DADOS ADICIONAIS')
+      || normalizedHeader.includes('DECLARACAO AUXILIAR')
+      || normalizedHeader.includes('ASSINATURA')
+    ) {
+      break;
+    }
+
+    if (normalizedHeader === 'DESCRICAO') continue;
+
+    if (/^(QTDE|QUANTIDADE)\b/i.test(normalizedHeader)) {
+      // A quantidade costuma vir na próxima linha no novo modelo DACE.
+      continue;
+    }
+
+    if (/^\d{1,4}$/.test(normalizedLine)) {
+      if (pendingDescription) {
+        pushItem(pendingDescription, normalizedLine);
+        pendingDescription = null;
+      }
+      continue;
+    }
+
+    const line = normalizedLine.replace(/^\d+\s+/, '');
+
+    const compactParsed = parseCompactLine(line);
+    if (compactParsed) {
+      pushItem(compactParsed.conteudo, compactParsed.quantidade);
+      pendingDescription = null;
+      continue;
+    }
+
+    const match = line.match(/^(.+?)\s+(\d{1,4})\s*$/);
+    if (match) {
+      pushItem(match[1], match[2]);
+      pendingDescription = null;
+      continue;
+    }
+
+    // Guarda/concatena descrição até encontrar a quantidade em linha separada.
+    if (pendingDescription) {
+      pendingDescription = `${pendingDescription} ${line}`.replace(/\s+/g, ' ').trim();
+    } else {
+      pendingDescription = line;
     }
   }
 
@@ -3915,9 +3991,30 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   }
 
   const files = Array.isArray(req.files) ? req.files : [];
+  if (files.length !== 2) {
+    return res.status(400).json({ ok: false, error: 'Selecione exatamente 2 arquivos: Etiqueta e Declaração de conteúdo.' });
+  }
+
+  const declaracaoFile = files[1];
+  if (!declaracaoFile || declaracaoFile.mimetype !== 'application/pdf') {
+    return res.status(400).json({ ok: false, error: 'O arquivo de Declaração deve ser um PDF válido.' });
+  }
+
+  let declaracaoParsedText = '';
+  try {
+    const parsed = await pdfParse(declaracaoFile.buffer);
+    declaracaoParsedText = String(parsed?.text || '');
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: 'Não foi possível ler o PDF da Declaração.' });
+  }
+
+  if (!isDaceDeclaracaoPdf(declaracaoParsedText)) {
+    return res.status(400).json({ ok: false, error: 'Arquivo inválido para Declaração. O cabeçalho deve conter "DACE - DECLARAÇÃO AUXILIAR DE CONTEÚDO ELETRONICA".' });
+  }
+
   const urls = [];
   let identificacao = null;
-  let conteudo = null;
+  const conteudo = extractConteudo(declaracaoParsedText);
 
   try {
     // Faz upload opcional dos arquivos selecionados
@@ -3952,15 +4049,6 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
         }
       }
 
-      // Extrai conteúdo da declaração (assumindo segundo arquivo)
-      if (index === 1 && !conteudo && file.mimetype === 'application/pdf') {
-        try {
-          const parsed = await pdfParse(file.buffer);
-          conteudo = extractConteudo(parsed?.text);
-        } catch (err) {
-          console.warn('[SAC] não foi possível extrair conteúdo da declaração:', err?.message || err);
-        }
-      }
     }
 
     const etiquetaUrl = urls[0] || null;
