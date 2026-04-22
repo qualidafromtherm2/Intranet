@@ -3267,6 +3267,12 @@ function extractConteudo(textRaw) {
       workLine = itemPrefixMatch[2].trim();
     }
 
+    // Variação comum no DACE: índice com ponto no começo (ex.: 107.MP... -> 07.MP...)
+    const dottedItemPrefixMatch = workLine.match(/^(\d)(\d{2}\.[A-Za-z].*)$/);
+    if (dottedItemPrefixMatch) {
+      workLine = dottedItemPrefixMatch[2].trim();
+    }
+
     // Formato com separação explícita: DESCRIÇÃO QTDE VALOR
     const spacedWithValue = workLine.match(/^(.+?)\s+(\d{1,4})\s+(\d{1,3},\d{2})$/);
     if (spacedWithValue) {
@@ -3295,6 +3301,22 @@ function extractConteudo(textRaw) {
             const conteudo = descTail ? `${descBase} ${descTail}` : descBase;
             return { conteudo, quantidade };
           }
+        }
+      }
+    }
+
+    // Formato sem espaço entre descrição e bloco final (ex.: ...DRENAGEM11,00)
+    const gluedMatch = workLine.match(/^(.+?)(\d+),(\d{2})$/);
+    if (gluedMatch && /[A-Za-zÀ-ÿ]/.test(gluedMatch[1])) {
+      const descBase = gluedMatch[1].trim();
+      const digits = gluedMatch[2];
+      if (digits.length >= 1) {
+        // Para 1 dígito, usa o próprio dígito; para >=2, mantém heurística existente.
+        const quantidade = digits.length === 1 ? digits : digits.slice(-2, -1);
+        const descTail = digits.length === 1 ? '' : digits.slice(0, -2);
+        if (/^\d{1,4}$/.test(quantidade) && Number(quantidade) > 0) {
+          const conteudo = descTail ? `${descBase} ${descTail}` : descBase;
+          return { conteudo, quantidade };
         }
       }
     }
