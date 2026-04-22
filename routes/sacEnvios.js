@@ -613,6 +613,30 @@ const menuInternoState = new Map(); // key: phoneDigits, value: { fluxo, updated
 // fluxo: null (menu), 'CONSULTA_PRODUTO', 'COMPRAS', 'AGENDA'
 const MENU_STATE_TTL_MS = 30 * 60 * 1000; // 30 min
 
+// Processamento sequencial por telefone para evitar corrida entre webhooks simultâneos.
+const whatsappPhoneProcessingQueue = new Map();
+
+function enqueueWhatsappByPhone(phoneDigits, taskFn) {
+  const key = String(phoneDigits || '').trim();
+  if (!key) return Promise.resolve().then(taskFn);
+
+  const prev = whatsappPhoneProcessingQueue.get(key) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(taskFn)
+    .catch((err) => {
+      console.error('[WhatsApp][queue] erro no processamento:', err?.message || err);
+    })
+    .finally(() => {
+      if (whatsappPhoneProcessingQueue.get(key) === next) {
+        whatsappPhoneProcessingQueue.delete(key);
+      }
+    });
+
+  whatsappPhoneProcessingQueue.set(key, next);
+  return next;
+}
+
 function limparMenusExpirados() {
   const agora = Date.now();
   for (const [phone, state] of menuInternoState) {
@@ -2223,6 +2247,24 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { ok: true, nota: rows[0] };
   }
 
+  let omieConsultaVendaNextAtMs = 0;
+  const OMIE_CONSULTA_INTERVALO_MS = 1200;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function extrairCooldownRedundant(msg) {
+    const m = String(msg || '').match(/aguarde\s*(\d+)\s*segundos?/i);
+    const seg = m ? Number(m[1]) : 0;
+    return Number.isFinite(seg) && seg > 0 ? seg : 1;
+  }
+
+  async function aguardarSlotOmieConsultaVenda() {
+    const agora = Date.now();
+    if (agora < omieConsultaVendaNextAtMs) {
+      await sleep(omieConsultaVendaNextAtMs - agora);
+    }
+    omieConsultaVendaNextAtMs = Date.now() + OMIE_CONSULTA_INTERVALO_MS;
+  }
+
   async function omieCallJson(url, call, param = []) {
     const appKey = String(process.env.OMIE_APP_KEY || '').trim();
     const appSecret = String(process.env.OMIE_APP_SECRET || '').trim();
@@ -2230,23 +2272,37 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       throw new Error('Credenciais OMIE_APP_KEY/OMIE_APP_SECRET não configuradas.');
     }
 
-    const resp = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        call,
-        app_key: appKey,
-        app_secret: appSecret,
-        param: Array.isArray(param) ? param : [param]
-      })
-    }, 30000);
+    const payload = {
+      call,
+      app_key: appKey,
+      app_secret: appSecret,
+      param: Array.isArray(param) ? param : [param]
+    };
 
-    const data = await resp.json().catch(() => ({}));
-    const fault = data?.faultstring || data?.faultcode;
-    if (!resp.ok || fault) {
-      throw new Error(String(fault || `Erro HTTP ${resp.status} em ${call}`));
+    let lastError = null;
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      await aguardarSlotOmieConsultaVenda();
+
+      const resp = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }, 30000);
+
+      const data = await resp.json().catch(() => ({}));
+      const fault = data?.faultstring || data?.faultcode;
+      if (resp.ok && !fault) return data;
+
+      const errMsg = String(fault || `Erro HTTP ${resp.status} em ${call}`);
+      lastError = new Error(errMsg);
+      const ehRedundant = /redundant|consumo redundante/i.test(errMsg);
+      if (!ehRedundant || tentativa >= 3) break;
+
+      const esperaSegundos = extrairCooldownRedundant(errMsg) + 1;
+      await sleep(esperaSegundos * 1000);
     }
-    return data;
+
+    throw lastError || new Error(`Falha ao chamar Omie em ${call}`);
   }
 
   async function obterPdfPedidoVendaOmie(codigoPedido) {
@@ -2648,9 +2704,18 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       const step = menuState.step || 'ESCOLHENDO_TIPO';
 
       if (interactiveId === 'venda_btn_abrir_pedido') {
+        console.log('[WhatsApp][CONSULTA_VENDA] clique Abrir pedido:', JSON.stringify({
+          phone: phoneDigits,
+          codigoPedido: menuState?.codigoPedido || null,
+          numeroPedido: menuState?.numeroPedido || null,
+          temPdfPedidoEmMemoria: Boolean(menuState?.pdfPedidoUrl)
+        }));
         let urlPedido = String(menuState?.pdfPedidoUrl || '').trim();
         if (!urlPedido) {
           const retryPedido = await obterPdfPedidoVendaOmie(menuState?.codigoPedido);
+          if (!retryPedido.ok) {
+            console.log('[WhatsApp][CONSULTA_VENDA] retry ObterPedVenda falhou:', retryPedido.error || 'sem erro');
+          }
           if (retryPedido.ok && retryPedido.cPdfPed) {
             urlPedido = retryPedido.cPdfPed;
             menuInternoState.set(phoneDigits, {
@@ -2663,13 +2728,20 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         if (!urlPedido) {
           await enviarTextoERegistrar('⚠️ Link do pedido indisponível no momento. Tente novamente em instantes.', 'vendas abrir pedido sem link');
         } else {
-          await enviarTextoERegistrar(`📄 *Abrir pedido*\n${urlPedido}`, 'vendas abrir pedido link');
+          await enviarTextoERegistrar(`📄 *Abrir pedido*\nClique aqui para abrir:\n${urlPedido}`, 'vendas abrir pedido link');
         }
         await enviarBotoesConsultaPedidoVenda('Deseja abrir outro documento deste pedido?');
         return;
       }
 
       if (interactiveId === 'venda_btn_visualizar_nfe') {
+        console.log('[WhatsApp][CONSULTA_VENDA] clique Visualizar NFe:', JSON.stringify({
+          phone: phoneDigits,
+          codigoPedido: menuState?.codigoPedido || null,
+          numeroPedido: menuState?.numeroPedido || null,
+          chaveNfe: menuState?.chaveNfe || null,
+          temPdfNfeEmMemoria: Boolean(menuState?.pdfNfeUrl)
+        }));
         let urlNfe = String(menuState?.pdfNfeUrl || '').trim();
         if (!urlNfe) {
           let chave = String(menuState?.chaveNfe || '').trim();
@@ -2679,6 +2751,9 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           }
           if (chave) {
             const retryNfe = await obterPdfNfePorChaveOmie(chave);
+            if (!retryNfe.ok) {
+              console.log('[WhatsApp][CONSULTA_VENDA] retry ObterNfe falhou:', retryNfe.error || 'sem erro');
+            }
             if (retryNfe.ok && retryNfe.cPdf) {
               urlNfe = retryNfe.cPdf;
               menuInternoState.set(phoneDigits, {
@@ -2693,7 +2768,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         if (!urlNfe) {
           await enviarTextoERegistrar('⚠️ PDF da NFe indisponível no momento para este pedido. Tente novamente em instantes.', 'vendas visualizar nfe sem link');
         } else {
-          await enviarTextoERegistrar(`🧾 *Visualizar NFe*\n${urlNfe}`, 'vendas visualizar nfe link');
+          await enviarTextoERegistrar(`🧾 *Visualizar NFe*\nClique aqui para abrir:\n${urlNfe}`, 'vendas visualizar nfe link');
         }
         await enviarBotoesConsultaPedidoVenda('Deseja abrir outro documento deste pedido?');
         return;
@@ -2757,6 +2832,18 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
             const nfePdf = notaPedido.ok
               ? await obterPdfNfePorChaveOmie(notaPedido.nota?.chave_nfe)
               : { ok: false, error: notaPedido.error };
+
+            console.log('[WhatsApp][CONSULTA_VENDA] links consulta pedido:', JSON.stringify({
+              phone: phoneDigits,
+              numeroPedido: p.numero_pedido || numero,
+              codigoPedido: p.codigo_pedido || null,
+              pedidoPdfOk: pedidoPdf.ok,
+              pedidoPdfErro: pedidoPdf.ok ? null : (pedidoPdf.error || null),
+              notaPedidoOk: notaPedido.ok,
+              notaPedidoErro: notaPedido.ok ? null : (notaPedido.error || null),
+              nfePdfOk: nfePdf.ok,
+              nfePdfErro: nfePdf.ok ? null : (nfePdf.error || null)
+            }));
 
             const resumo =
               `✅ *Pedido de venda ${p.numero_pedido || numero} localizado.*\n` +
@@ -6211,8 +6298,8 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
 
     if (newInboundMessages.length) {
       const sse = req.app?.get('sseBroadcast');
-      Promise.resolve().then(async () => {
-        for (const inbound of newInboundMessages) {
+      for (const inbound of newInboundMessages) {
+        enqueueWhatsappByPhone(inbound.phone, async () => {
           try {
             // Intercepta clique do botão "Marcar como lidas" da notificação diária
             if (inbound.buttonReplyId && inbound.buttonReplyId.startsWith('sgf_marcar_lidas_')) {
@@ -6229,8 +6316,9 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
                 });
                 console.log('[Notif] Mensagens marcadas como lidas para user_id:', uid);
               }
-              continue;
+              return;
             }
+
             await processarRespostaAutomaticaWhatsapp(inbound);
             if (typeof sse === 'function') {
               sse({
@@ -6242,8 +6330,8 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
           } catch (autoReplyErr) {
             console.error('[SAC/WhatsApp] falha na resposta automática:', autoReplyErr?.message || autoReplyErr);
           }
-        }
-      });
+        });
+      }
     }
 
     return res.status(200).json({ ok: true });
