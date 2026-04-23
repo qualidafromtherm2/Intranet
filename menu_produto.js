@@ -17023,6 +17023,45 @@ btnCache.addEventListener('click', async e => {
 
 }
 
+const btnProducaoPrimeiraPecaOk = document.getElementById('menu-producao-primeira-peca-ok');
+if (btnProducaoPrimeiraPecaOk) {
+  btnProducaoPrimeiraPecaOk.addEventListener('click', (e) => {
+    e.preventDefault();
+
+    hideKanban?.();
+    hideArmazem?.();
+
+    const prodTabs = document.getElementById('produtoTabs');
+    if (prodTabs) prodTabs.style.display = 'none';
+
+    const kanbanTabs = document.getElementById('kanbanTabs');
+    if (kanbanTabs) kanbanTabs.style.display = 'none';
+
+    const armazemTabs = document.getElementById('armazemTabs');
+    const armazemContent = document.getElementById('armazemContent');
+    if (armazemTabs) armazemTabs.style.display = 'none';
+    if (armazemContent) armazemContent.style.display = 'none';
+
+    const pane = document.getElementById('producaoPrimeiraPecaOkPane');
+    if (pane) {
+      window.showOnlyInMain?.(pane);
+    }
+
+    const mainHeader = document.querySelector('.main-header');
+    if (mainHeader) mainHeader.style.display = 'none';
+
+    document
+      .querySelectorAll('.left-side .side-menu a')
+      .forEach((a) => a.classList.remove('is-active'));
+    btnProducaoPrimeiraPecaOk.classList.add('is-active');
+
+    window.producaoVerificacao?.resetar?.();
+
+    const inputPesquisa = document.getElementById('producaoPrimeiraPecaOkPesquisa');
+    if (inputPesquisa) inputPesquisa.focus();
+  });
+}
+
 // === Definições (Famílias) =================================================
 (function initDefinicoes(){
   const btn = document.getElementById('btn-definicoes');
@@ -43408,17 +43447,94 @@ function setStatusModalAssociarPedidoNfe(mensagem, tipo = 'info') {
   statusEl.textContent = mensagem || '';
 }
 
+async function carregarSeletorCategoriasAssociarNfe(categoriaAtualCodigo, categoriaAtualDescricao) {
+  const picker = document.getElementById('modalAssociarCategoriaPicker');
+  const select = document.getElementById('modalAssociarCategoriaSelect');
+  const descSpan = document.getElementById('modalAssociarCategoriaAtualDesc');
+  if (!picker || !select) return;
+
+  if (descSpan) {
+    descSpan.textContent = categoriaAtualDescricao
+      ? `${categoriaAtualCodigo} – ${categoriaAtualDescricao}`
+      : categoriaAtualCodigo || '(código não informado)';
+  }
+
+  select.innerHTML = '<option value="">-- Carregando... --</option>';
+  picker.style.display = 'flex';
+
+  try {
+    const resp = await fetch('/api/compras/categorias-ativas', { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data?.ok) throw new Error(data?.error || 'Falha ao carregar categorias');
+
+    const categorias = Array.isArray(data.categorias) ? data.categorias : [];
+
+    // Separa categorias-pai (sem categoria_superior ou categoria_superior que não existe como codigo)
+    const codigosExistentes = new Set(categorias.map(c => c.codigo));
+    const pais = categorias.filter(c => !c.categoria_superior || !codigosExistentes.has(c.categoria_superior));
+    const filhas = categorias.filter(c => c.categoria_superior && codigosExistentes.has(c.categoria_superior));
+
+    // Monta mapa pai → filhas
+    const mapaFilhas = {};
+    for (const f of filhas) {
+      const sup = f.categoria_superior;
+      if (!mapaFilhas[sup]) mapaFilhas[sup] = [];
+      mapaFilhas[sup].push(f);
+    }
+
+    select.innerHTML = '<option value="">-- Selecione uma categoria --</option>';
+
+    // Função recursiva para montar optgroup/options em profundidade
+    function montarGrupo(pai) {
+      const filhasDoGrupo = mapaFilhas[pai.codigo] || [];
+      if (filhasDoGrupo.length > 0) {
+        const grp = document.createElement('optgroup');
+        grp.label = `${pai.codigo} – ${pai.descricao || pai.codigo}`;
+        for (const f of filhasDoGrupo) {
+          const opt = document.createElement('option');
+          opt.value = f.codigo;
+          opt.textContent = `${f.codigo} – ${f.descricao || f.codigo}`;
+          grp.appendChild(opt);
+          // Subfilhas (mais de 2 níveis)
+          const subFilhas = mapaFilhas[f.codigo] || [];
+          for (const sf of subFilhas) {
+            const optSub = document.createElement('option');
+            optSub.value = sf.codigo;
+            optSub.textContent = `\u00A0\u00A0${sf.codigo} – ${sf.descricao || sf.codigo}`;
+            grp.appendChild(optSub);
+          }
+        }
+        select.appendChild(grp);
+      } else {
+        // Pai sem filhas: aparece como option normal
+        const opt = document.createElement('option');
+        opt.value = pai.codigo;
+        opt.textContent = `${pai.codigo} – ${pai.descricao || pai.codigo}`;
+        select.appendChild(opt);
+      }
+    }
+
+    for (const pai of pais) {
+      montarGrupo(pai);
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">Erro ao carregar: ${escapeHtml(err?.message || 'desconhecido')}</option>`;
+  }
+}
+
 function limparEtapaPedidoModalAssociarNfe() {
   const blocoPedido = document.getElementById('modalAssociarPedidoNfeBlocoPedido');
   const pedidoInput = document.getElementById('modalAssociarPedidoNumeroInput');
   const previewWrap = document.getElementById('modalAssociarPedidoNfePreviewWrap');
   const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
   const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+  const pickerCategoria = document.getElementById('modalAssociarCategoriaPicker');
   if (blocoPedido) blocoPedido.style.display = 'none';
   if (pedidoInput) pedidoInput.value = '';
   if (previewWrap) previewWrap.style.display = 'none';
   if (previewConteudo) previewConteudo.innerHTML = '';
   if (btnAssociar) btnAssociar.disabled = true;
+  if (pickerCategoria) pickerCategoria.style.display = 'none';
   if (window.__associarNfeRecebimentoAtual) {
     window.__associarNfeRecebimentoAtual = null;
   }
@@ -43722,11 +43838,22 @@ async function localizarNfeParaAssociacaoOmie() {
       ? data.recebimento.pedidos_vinculados.filter(Boolean)
       : [];
 
+    // Exibe picker de categoria se a categoria atual estiver inativa
+    const categoriaInfo = data?.recebimento?.categoria || null;
+    if (categoriaInfo?.inativa) {
+      await carregarSeletorCategoriasAssociarNfe(categoriaInfo.codigo || '', categoriaInfo.descricao || '');
+    } else {
+      const pickerCategoria = document.getElementById('modalAssociarCategoriaPicker');
+      if (pickerCategoria) pickerCategoria.style.display = 'none';
+    }
+
     if (pedidosJaVinculados.length > 0) {
       setStatusModalAssociarPedidoNfe(
         `NF-e ${numeroNfeEncontrada} localizada. Já vinculada aos pedidos: ${pedidosJaVinculados.join(', ')}.`,
         'info'
       );
+    } else if (categoriaInfo?.inativa) {
+      setStatusModalAssociarPedidoNfe(`NF-e ${numeroNfeEncontrada} localizada. Categoria inativa detectada — selecione uma substituta acima.`, 'erro');
     } else {
       setStatusModalAssociarPedidoNfe(`NF-e ${numeroNfeEncontrada} localizada. Informe o pedido para associar.`, 'sucesso');
     }
@@ -43806,7 +43933,11 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         chave_nfe: String(contextoAtual?.chave_nfe || '').trim(),
         numero_pedido: numeroPedido,
         n_cod_ped: Number(contextoAtual?.n_cod_ped || 0) || null,
-        itens_override: itensOverride.length > 0 ? itensOverride : undefined
+        itens_override: itensOverride.length > 0 ? itensOverride : undefined,
+        nova_categoria_compra: (() => {
+          const sel = document.getElementById('modalAssociarCategoriaSelect');
+          return sel?.value?.trim() || undefined;
+        })()
       })
     });
 
@@ -43870,6 +44001,17 @@ function criarModalAssociarPedidoNfeSeNecessario() {
               Localizar
             </button>
           </div>
+        </div>
+
+        <div id="modalAssociarCategoriaPicker" style="display:none;flex-direction:column;gap:8px;">
+          <div style="padding:10px 14px;border:1px solid #fbbf24;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e;line-height:1.5;">
+            <strong>&#9888; Categoria de compra inativa:</strong> <span id="modalAssociarCategoriaAtualDesc"></span>
+            <br>Selecione abaixo uma categoria ativa para substituir antes de associar.
+          </div>
+          <label for="modalAssociarCategoriaSelect" style="font-size:12px;color:#334155;font-weight:700;">Nova categoria de compra</label>
+          <select id="modalAssociarCategoriaSelect" style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;color:#0f172a;max-width:480px;">
+            <option value="">-- Selecione uma categoria --</option>
+          </select>
         </div>
 
         <div id="modalAssociarPedidoNfeBlocoPedido" style="display:none;flex-direction:column;gap:6px;">
@@ -54303,7 +54445,8 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
       'listaRI': 'RI',
       'listaPIR': 'PIR',
       'checkProjTab': 'Check-Proj',
-      'checkComprasTab': 'Check-Compras'
+      'checkComprasTab': 'Check-Compras',
+      'priPcOkTab': '1ª Peça OK'
     };
 
     // Toggle do menu hambúrguer
@@ -54393,6 +54536,11 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
             if (typeof window.checkCompras?.loadCheckCompras === 'function') {
               window.checkCompras.loadCheckCompras();
             }
+          }
+
+          // Trigger especial para 1ª pç ok
+          if (targetId === 'priPcOkTab') {
+            window.priPcOk?.init?.();
           }
 
           // Trigger especial para Anexos: nenhuma ação extra aqui; o script produto_anexo.js já anexa o handler do botão.
@@ -55686,3 +55834,499 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.abrirModalCarrinhoSeparacao = abrir;
 })();
 // ===================== FIM MODAL CARRINHO DE SEPARAÇÃO =====================
+
+// ===================== 1ª PEÇA OK =====================
+window.priPcOk = (() => {
+  let _iniciado = false;
+
+  function _codigoProduto() {
+    return String(
+      window.codigoOmieSelecionado ||
+      document.getElementById('headerCodigoOmie')?.textContent?.trim() ||
+      ''
+    ).trim();
+  }
+
+  function _setStatus(msg, tipo) {
+    // tipo: 'ok' | 'erro' | ''
+    const el = document.getElementById('priPcOkStatus');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; return; }
+    const cor = tipo === 'ok'
+      ? { bg: '#0a2a0a', border: '#22c55e', color: '#4ade80' }
+      : { bg: '#2a0a0a', border: '#ef4444', color: '#fca5a5' };
+    el.style.cssText = `display:block; padding:10px 14px; border-radius:8px; margin-bottom:16px;
+      font-size:13px; background:${cor.bg}; border:1px solid ${cor.border}; color:${cor.color};`;
+    el.textContent = msg;
+  }
+
+  async function carregarHistorico() {
+    const codigo = _codigoProduto();
+    if (!codigo) return;
+    const listaEl = document.getElementById('priPcOkHistoricoLista');
+    const countEl = document.getElementById('priPcOkHistoricoCount');
+    if (!listaEl) return;
+    listaEl.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Carregando...</div>';
+    try {
+      const resp = await fetch(`/api/primeira-pc-ok?codigo_produto=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro');
+      const registros = data.registros || [];
+      if (countEl) countEl.textContent = `(${registros.length})`;
+      if (!registros.length) {
+        listaEl.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;">Nenhum registro ainda.</div>';
+        return;
+      }
+      listaEl.innerHTML = registros.map(r => {
+        const data = r.criado_em ? new Date(r.criado_em).toLocaleString('pt-BR') : '';
+        const thumb = r.arquivo_url ? `<a href="${r.arquivo_url}" target="_blank" rel="noopener">
+          <img src="${r.arquivo_url}" style="max-width:60px;max-height:40px;border-radius:5px;object-fit:cover;border:1px solid var(--border-color);vertical-align:middle;" onerror="this.style.display='none'">
+        </a>` : '';
+        return `<div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:8px;padding:10px 12px;font-size:13px;display:flex;gap:10px;align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-weight:600;color:var(--content-title-color);">${r.o_que_verificar}</div>
+            ${r.especificacao ? `<div style="color:var(--inactive-color);margin-top:2px;">${r.especificacao}</div>` : ''}
+            <div style="font-size:11px;color:var(--inactive-color);margin-top:4px;">
+              <i class="fa-solid fa-user" style="margin-right:3px;"></i>${r.usuario}
+              &nbsp;&nbsp;<i class="fa-solid fa-clock" style="margin-right:3px;"></i>${data}
+            </div>
+          </div>
+          ${thumb}
+        </div>`;
+      }).join('');
+    } catch (e) {
+      listaEl.innerHTML = `<div style="color:#fca5a5;font-size:13px;">Erro: ${e.message}</div>`;
+    }
+  }
+
+  function init() {
+    const form = document.getElementById('priPcOkForm');
+    if (!form) return;
+    // Sempre recarrega a lista ao abrir a aba
+    carregarHistorico();
+
+    if (_iniciado) return;
+    _iniciado = true;
+
+    const inputArquivo = document.getElementById('priPcOkArquivo');
+    const fileText     = document.getElementById('priPcOkFileText');
+    const previewWrap  = document.getElementById('priPcOkPreview');
+    const previewImg   = document.getElementById('priPcOkPreviewImg');
+    const modal        = document.getElementById('priPcOkModal');
+
+    const fecharModal = () => {
+      if (modal) modal.style.display = 'none';
+      _setStatus('', '');
+      form.reset();
+      if (fileText) fileText.textContent = 'Selecionar arquivo';
+      if (previewWrap) previewWrap.style.display = 'none';
+    };
+
+    // Botão Adicionar → abre modal
+    document.getElementById('priPcOkAbrirModalBtn')?.addEventListener('click', () => {
+      _setStatus('', '');
+      if (modal) modal.style.display = 'flex';
+    });
+
+    // Fechar modal
+    document.getElementById('priPcOkModalFechar')?.addEventListener('click', fecharModal);
+    document.getElementById('priPcOkModalCancelar')?.addEventListener('click', fecharModal);
+    modal?.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
+
+    // Preview de imagem ao selecionar arquivo
+    inputArquivo?.addEventListener('change', () => {
+      const file = inputArquivo.files?.[0];
+      if (!file) { fileText.textContent = 'Selecionar arquivo'; previewWrap.style.display = 'none'; return; }
+      fileText.textContent = file.name.length > 28 ? file.name.substring(0, 26) + '…' : file.name;
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = e => { previewImg.src = e.target.result; previewWrap.style.display = 'block'; };
+        reader.readAsDataURL(file);
+      } else {
+        previewWrap.style.display = 'none';
+      }
+    });
+
+    // Submit
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const codigo = _codigoProduto();
+      if (!codigo) { _setStatus('Abra um produto primeiro.', 'erro'); return; }
+
+      const oQueVerificar = document.getElementById('priPcOkOQueVerificar')?.value?.trim() || '';
+      const especificacao  = document.getElementById('priPcOkEspecificacao')?.value?.trim() || '';
+      const arquivo        = inputArquivo?.files?.[0] || null;
+
+      if (!oQueVerificar) { _setStatus('Preencha "O que verificar".', 'erro'); return; }
+
+      const btn = document.getElementById('priPcOkSubmitBtn');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...'; }
+      _setStatus('', '');
+
+      try {
+        const fd = new FormData();
+        fd.append('codigo_produto', codigo);
+        fd.append('o_que_verificar', oQueVerificar);
+        fd.append('especificacao', especificacao);
+        if (arquivo) fd.append('arquivo', arquivo);
+
+        const resp = await fetch('/api/primeira-pc-ok', {
+          method: 'POST',
+          credentials: 'include',
+          body: fd,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+
+        fecharModal();
+        carregarHistorico();
+      } catch (err) {
+        _setStatus('Erro: ' + err.message, 'erro');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-check"></i> OK — Registrar'; }
+      }
+    });
+  }
+
+  return { init, carregarHistorico };
+})();
+// ===================== FIM 1ª PEÇA OK =====================
+
+// ===================== SIDEBAR VERIFICAÇÃO 1ª PEÇA OK =====================
+window.producaoVerificacao = (() => {
+  // Estado interno
+  let _codigoProduto = null;   // ID numérico Omie
+  let _itensState    = [];     // [{ id, o_que_verificar, especificacao, arquivo_url, resultado: 'ok'|'nok'|null }]
+
+  function _el(id) { return document.getElementById(id); }
+
+  function _setStatus(msg, tipo) {
+    const el = _el('producaoPrimeiraPecaOkBuscaStatus');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; return; }
+    const cor = tipo === 'ok'
+      ? { bg: '#0a2a0a', border: '#22c55e', color: '#4ade80' }
+      : { bg: '#2a0a0a', border: '#ef4444', color: '#fca5a5' };
+    el.style.cssText = `display:block;padding:8px 12px;border-radius:8px;font-size:13px;background:${cor.bg};border:1px solid ${cor.border};color:${cor.color};`;
+    el.textContent = msg;
+  }
+
+  function _setRegistroStatus(msg, tipo) {
+    const el = _el('producaoPrimeiraPecaOkRegistroStatus');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; return; }
+    const cor = tipo === 'ok'
+      ? { bg: '#0a2a0a', border: '#22c55e', color: '#4ade80' }
+      : { bg: '#2a0a0a', border: '#ef4444', color: '#fca5a5' };
+    el.style.cssText = `display:block;padding:10px 14px;border-radius:8px;font-size:13px;background:${cor.bg};border:1px solid ${cor.border};color:${cor.color};`;
+    el.textContent = msg;
+  }
+
+  function _renderItens() {
+    const container = _el('producaoPrimeiraPecaOkItens');
+    if (!container) return;
+
+    if (!_itensState.length) {
+      container.innerHTML = '<div style="color:var(--inactive-color);font-size:13px;padding:12px 0;">Nenhum item de verificação cadastrado para este produto.</div>';
+      return;
+    }
+
+    container.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;';
+    container.innerHTML = _itensState.map((item, idx) => {
+      const resultadoColor = item.resultado === 'ok' ? '#22c55e' : item.resultado === 'nok' ? '#ef4444' : 'var(--border-color)';
+      const btnOkStyle  = item.resultado === 'ok'  ? 'background:#16a34a;color:#fff;border:none;' : 'background:transparent;color:#22c55e;border:1px solid #22c55e;';
+      const btnNokStyle = item.resultado === 'nok' ? 'background:#dc2626;color:#fff;border:none;' : 'background:transparent;color:#ef4444;border:1px solid #ef4444;';
+
+      const fotoHtml = item.arquivo_url
+        ? `<div class="vp-foto-wrap" style="overflow:hidden;border-radius:8px 8px 0 0;cursor:pointer;">
+             <img class="vp-foto-img" src="${item.arquivo_url}" data-idx="${idx}" data-expanded="0"
+               style="width:100%;height:84px;object-fit:cover;display:block;transition:height .25s;"
+               onerror="this.closest('.vp-foto-wrap').style.display='none'">
+           </div>`
+        : '';
+
+      return `<div data-vpidx="${idx}" style="background:var(--content-bg);border:2px solid ${resultadoColor};border-radius:10px;overflow:hidden;display:flex;flex-direction:column;">
+        ${fotoHtml}
+        <div style="padding:10px 10px 8px;flex:1;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-weight:700;color:var(--content-title-color);font-size:13px;line-height:1.3;">${item.o_que_verificar}</div>
+          ${item.especificacao ? `<div style="color:var(--inactive-color);font-size:11px;">${item.especificacao}</div>` : ''}
+          <div style="display:flex;gap:6px;margin-top:auto;padding-top:6px;">
+            <button class="vp-btn-ok" data-idx="${idx}" style="flex:1;padding:7px 0;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${btnOkStyle}">OK</button>
+            <button class="vp-btn-nok" data-idx="${idx}" style="flex:1;padding:7px 0;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${btnNokStyle}">NOK</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Toggle expand/colapsar foto ao clicar
+    container.querySelectorAll('.vp-foto-img').forEach(img => {
+      img.addEventListener('click', () => {
+        const expanded = img.dataset.expanded === '1';
+        if (expanded) {
+          img.style.height = '84px';
+          img.style.maxHeight = '';
+          img.style.objectFit = 'cover';
+          img.dataset.expanded = '0';
+        } else {
+          img.style.height = 'auto';
+          img.style.maxHeight = '400px';
+          img.style.objectFit = 'contain';
+          img.dataset.expanded = '1';
+        }
+      });
+    });
+
+    // Delegação de eventos nos botões OK/NOK
+    container.querySelectorAll('.vp-btn-ok').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.dataset.idx, 10);
+        _itensState[i].resultado = _itensState[i].resultado === 'ok' ? null : 'ok';
+        _renderItens();
+        _atualizarSecaoNok();
+      });
+    });
+    container.querySelectorAll('.vp-btn-nok').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.dataset.idx, 10);
+        _itensState[i].resultado = _itensState[i].resultado === 'nok' ? null : 'nok';
+        _renderItens();
+        _atualizarSecaoNok();
+      });
+    });
+  }
+
+  function _atualizarSecaoNok() {
+    const temNok = _itensState.some(i => i.resultado === 'nok');
+    const nokSection = _el('producaoPrimeiraPecaOkNokSection');
+    if (nokSection) nokSection.style.display = temNok ? 'block' : 'none';
+  }
+
+  let _usuariosCarregados = false;
+  async function _carregarUsuarios() {
+    const sel = _el('producaoPrimeiraPecaOkUserLiberacao');
+    if (!sel) return;
+    if (_usuariosCarregados && sel.options.length > 1) return; // já carregado
+    sel.innerHTML = '<option value="">Carregando usuários…</option>';
+
+    const aplicarUsuarios = (rows) => {
+      const usernames = [...new Set(
+        (Array.isArray(rows) ? rows : [])
+          .map(u => String(u?.username || '').trim())
+          .filter(Boolean)
+      )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+      usernames.forEach(username => {
+        const opt = document.createElement('option');
+        opt.value = username;
+        opt.textContent = username;
+        sel.appendChild(opt);
+      });
+
+      return usernames.length;
+    };
+
+    try {
+      let total = 0;
+
+      try {
+        const respAtivos = await fetch('/api/usuarios/ativos', { credentials: 'include' });
+        const dataAtivos = await respAtivos.json();
+        if (respAtivos.ok) {
+          total = aplicarUsuarios(dataAtivos?.usuarios);
+        }
+      } catch (_) {}
+
+      if (!total) {
+        const resp = await fetch('/api/rh/colaboradores/usuarios', { credentials: 'include' });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || 'Falha ao carregar usuários');
+        total = aplicarUsuarios(Array.isArray(data) ? data : data?.usuarios);
+      }
+
+      if (!total) {
+        sel.innerHTML = '<option value="">Nenhum usuário encontrado</option>';
+        return;
+      }
+
+      _usuariosCarregados = true;
+    } catch (err) {
+      console.error('[1aPecaOK] Falha ao carregar usuários liberadores:', err);
+      sel.innerHTML = '<option value="">Erro ao carregar usuários</option>';
+    }
+  }
+
+  async function buscar() {
+    const input = _el('producaoPrimeiraPecaOkPesquisa');
+    const codigo = (input?.value || '').trim();
+    if (!codigo) { _setStatus('Informe um código de produto.', 'erro'); return; }
+
+    const btn = _el('producaoPrimeiraPecaOkBtnBuscar');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    _setStatus('Buscando…', '');
+    _el('producaoPrimeiraPecaOkResultados').style.display = 'none';
+
+    try {
+      const resp = await fetch(`/api/primeira-pc-ok/buscar-por-codigo?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro na busca');
+
+      _codigoProduto = data.codigo_produto;
+      _itensState = (data.itens || []).map(item => ({
+        id: item.id,
+        o_que_verificar: item.o_que_verificar,
+        especificacao: item.especificacao || '',
+        arquivo_url: item.arquivo_url || '',
+        resultado: null,
+      }));
+
+      // Preenche nome do produto
+      const nomeEl = _el('producaoPrimeiraPecaOkNomeProduto');
+      if (nomeEl) {
+        nomeEl.innerHTML = `<span style="color:var(--inactive-color);font-size:12px;">Produto:</span> <strong>${codigo}</strong>${data.descricao ? ` — ${data.descricao}` : ''} <span style="color:var(--inactive-color);font-size:12px;">(ID Omie: ${data.codigo_produto})</span>`;
+      }
+
+      _renderItens();
+      _el('producaoPrimeiraPecaOkNokSection').style.display = 'none';
+      _setRegistroStatus('', '');
+      _el('producaoPrimeiraPecaOkResultados').style.display = 'block';
+      _setStatus('', '');
+      const opInput = _el('producaoPrimeiraPecaOkNumeroOp');
+      if (opInput) opInput.value = '';
+
+      // Pré-carrega usuários para evitar select vazio ao abrir a seção NOK
+      _carregarUsuarios();
+    } catch (err) {
+      _setStatus(err.message, 'erro');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Buscar'; }
+    }
+  }
+
+  async function registrar() {
+    if (!_codigoProduto) { _setRegistroStatus('Busque um produto primeiro.', 'erro'); return; }
+
+    const naoRespondidos = _itensState.filter(i => i.resultado === null);
+    if (naoRespondidos.length > 0) {
+      _setRegistroStatus(`Marque todos os itens como OK ou NOK (${naoRespondidos.length} pendente${naoRespondidos.length > 1 ? 's' : ''}).`, 'erro');
+      return;
+    }
+
+    const temNok = _itensState.some(i => i.resultado === 'nok');
+
+    if (temNok) {
+      // Abre a seção NOK e carrega usuários se ainda não carregou
+      const nokSection = _el('producaoPrimeiraPecaOkNokSection');
+      if (nokSection) nokSection.style.display = 'block';
+      nokSection?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      await _carregarUsuarios();
+      _setRegistroStatus('Preencha os dados de liberação para os itens NOK.', 'erro');
+      return;
+    }
+
+    // Sem NOK — registra direto
+    await _enviarRegistro(false, null, null, null);
+  }
+
+  async function confirmarComNok() {
+    const userLib  = (_el('producaoPrimeiraPecaOkUserLiberacao')?.value || '').trim();
+    const senha    = (_el('producaoPrimeiraPecaOkSenhaLib')?.value || '').trim();
+    const resolucao = (_el('producaoPrimeiraPecaOkResolucao')?.value || '').trim();
+
+    if (!userLib)  { _setRegistroStatus('Selecione o usuário liberador.', 'erro'); return; }
+    if (!senha)    { _setRegistroStatus('Informe a senha do usuário liberador.', 'erro'); return; }
+    if (!resolucao){ _setRegistroStatus('Informe a resolução / justificativa.', 'erro'); return; }
+
+    await _enviarRegistro(true, userLib, senha, resolucao);
+  }
+
+  async function _enviarRegistro(temNok, userLib, senha, resolucao) {
+    const numeroOp = (_el('producaoPrimeiraPecaOkNumeroOp')?.value || '').trim();
+    if (!numeroOp) {
+      _setRegistroStatus('Informe o Número da OP.', 'erro');
+      _el('producaoPrimeiraPecaOkNumeroOp')?.focus();
+      return;
+    }
+
+    const btnReg  = _el('producaoPrimeiraPecaOkBtnRegistrar');
+    const btnConf = _el('producaoPrimeiraPecaOkBtnConfirmar');
+    if (btnReg)  { btnReg.disabled  = true; btnReg.innerHTML  = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando…'; }
+    if (btnConf) { btnConf.disabled = true; btnConf.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando…'; }
+
+    try {
+      const payload = {
+        codigo_produto: _codigoProduto,
+        numero_op: numeroOp,
+        itens: _itensState.map(i => ({ id: i.id, o_que_verificar: i.o_que_verificar, resultado: i.resultado })),
+        tem_nok: temNok,
+        ...(temNok ? { user_liberacao: userLib, senha_liberacao: senha, resolucao } : {}),
+      };
+
+      const resp = await fetch('/api/primeira-pc-ok/registrar-verificacao', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Erro ao registrar');
+
+      _setRegistroStatus('Verificação registrada com sucesso!', 'ok');
+      // Reseta estado
+      _itensState.forEach(i => { i.resultado = null; });
+      _renderItens();
+      _el('producaoPrimeiraPecaOkNokSection').style.display = 'none';
+      if (_el('producaoPrimeiraPecaOkNumeroOp')) _el('producaoPrimeiraPecaOkNumeroOp').value = '';
+      if (_el('producaoPrimeiraPecaOkSenhaLib')) _el('producaoPrimeiraPecaOkSenhaLib').value = '';
+      if (_el('producaoPrimeiraPecaOkResolucao')) _el('producaoPrimeiraPecaOkResolucao').value = '';
+    } catch (err) {
+      _setRegistroStatus('Erro: ' + err.message, 'erro');
+    } finally {
+      if (btnReg)  { btnReg.disabled  = false; btnReg.innerHTML  = '<i class="fa-solid fa-clipboard-check"></i> Registrar verificação'; }
+      if (btnConf) { btnConf.disabled = false; btnConf.innerHTML = '<i class="fa-solid fa-lock-open"></i> Confirmar registro com NOK'; }
+    }
+  }
+
+  function resetar() {
+    _codigoProduto = null;
+    _itensState = [];
+    const res = _el('producaoPrimeiraPecaOkResultados');
+    if (res) res.style.display = 'none';
+    _setStatus('', '');
+    _setRegistroStatus('', '');
+    const nok = _el('producaoPrimeiraPecaOkNokSection');
+    if (nok) nok.style.display = 'none';
+    const opInput = _el('producaoPrimeiraPecaOkNumeroOp');
+    if (opInput) opInput.value = '';
+  }
+
+  function init() {
+    // Buscar ao clicar no botão
+    _el('producaoPrimeiraPecaOkBtnBuscar')?.addEventListener('click', buscar);
+
+    // Buscar ao pressionar Enter no input
+    _el('producaoPrimeiraPecaOkPesquisa')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') buscar();
+    });
+
+    // Botão Registrar
+    _el('producaoPrimeiraPecaOkBtnRegistrar')?.addEventListener('click', registrar);
+
+    // Botão Confirmar NOK
+    _el('producaoPrimeiraPecaOkBtnConfirmar')?.addEventListener('click', confirmarComNok);
+
+    // Fallback extra: ao interagir com o select, tenta carregar novamente
+    const selLiberacao = _el('producaoPrimeiraPecaOkUserLiberacao');
+    selLiberacao?.addEventListener('focus', _carregarUsuarios);
+    selLiberacao?.addEventListener('click', _carregarUsuarios);
+  }
+
+  // Inicializa listeners assim que o módulo é carregado
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  return { buscar, resetar };
+})();
+// ===================== FIM SIDEBAR VERIFICAÇÃO 1ª PEÇA OK =====================

@@ -17148,7 +17148,7 @@ const STATIC_BLOCKLIST_PREFIXES = [
   '/.git', '/.env', '/node_modules', '/scripts/', '/sql/', '/data/',
   '/csv/', '/backend/', '/cron/', '/logs/', '/uploads_internal/',
   '/readme/', '/.github/', '/.vscode/', '/api%20omie/', '/api omie/',
-  '/requisicoes_omie/', '/Site_AT/', '/site_at/',
+  '/Site_AT/', '/site_at/',
 ];
 const STATIC_BLOCKLIST_EXT = /\.(bak|bak\d*|backup|sql|sqlite|db|dump|env|pem|key|pfx|p12|log|sh|ps1|psql|tsv)$/i;
 app.use((req, res, next) => {
@@ -29033,6 +29033,23 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   };
 }
 
+// GET /api/compras/categorias-ativas
+// Retorna categorias ativas (conta_inativa = 'N') da tabela configuracoes."ListarCategorias"
+app.get('/api/compras/categorias-ativas', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT codigo, descricao, categoria_superior, conta_despesa, natureza
+      FROM configuracoes."ListarCategorias"
+      WHERE conta_inativa = 'N'
+      ORDER BY codigo
+    `);
+    return res.json({ ok: true, categorias: rows });
+  } catch (err) {
+    console.error('[Compras/CategoriasAtivas] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao buscar categorias ativas' });
+  }
+});
+
 // POST /api/compras/pedidos-omie/nfe-associar-pedido/consultar
 // Objetivo: localizar NF-e na Omie e exibir contexto antes da associação.
 app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json(), async (req, res) => {
@@ -29050,6 +29067,22 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimento);
 
+    // Verifica se a categoria de compra do recebimento está inativa
+    const cCategCompraConsultar = String(recebimento?.infoAdicionais?.cCategCompra || '').trim();
+    let categoriaInfo = null;
+    if (cCategCompraConsultar) {
+      const catResult = await pool.query(
+        `SELECT descricao, conta_inativa FROM configuracoes."ListarCategorias" WHERE codigo = $1`,
+        [cCategCompraConsultar]
+      ).catch(() => ({ rows: [] }));
+      const catRow = catResult.rows[0] || null;
+      categoriaInfo = {
+        codigo: cCategCompraConsultar,
+        descricao: catRow?.descricao || cCategCompraConsultar,
+        inativa: catRow?.conta_inativa === 'S'
+      };
+    }
+
     return res.json({
       ok: true,
       recebimento: {
@@ -29058,7 +29091,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
         c_chave_nfe: recebimento?.cabec?.cChaveNfe || null,
         c_nome_fornecedor: recebimento?.cabec?.cRazaoSocial || recebimento?.cabec?.cNome || null,
         itens_total: Array.isArray(recebimento?.itensRecebimento) ? recebimento.itensRecebimento.length : 0,
-        pedidos_vinculados: pedidosVinculados
+        pedidos_vinculados: pedidosVinculados,
+        categoria: categoriaInfo
       }
     });
   } catch (err) {
@@ -29118,6 +29152,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const numeroPedido = String(req.body?.numero_pedido || '').trim();
     const chaveNfe = String(req.body?.chave_nfe || '').trim();
     const nCodPed = Number(req.body?.n_cod_ped || 0);
+    // Categoria substituta informada pelo usuário (quando a categoria original está inativa)
+    const novaCategoriaCompra = String(req.body?.nova_categoria_compra || '').trim();
 
     if (!numeroNfe && !chaveNfe) {
       return res.status(400).json({ ok: false, error: 'Parâmetro numero_nfe ou chave_nfe é obrigatório' });
@@ -29301,8 +29337,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           const mm = String(d.getMonth() + 1).padStart(2, '0');
           return `${dd}/${mm}/${d.getFullYear()}`;
         })();
+        // novaCategoriaCompra: substitui a categoria inativa se o usuário selecionou uma nova
+        const categoriaParaInforAdic = novaCategoriaCompra || recebAtual?.infoAdicionais?.cCategCompra || undefined;
         infoAdicionaisParaEnviar = {
-          cCategCompra: recebAtual?.infoAdicionais?.cCategCompra || undefined,
+          cCategCompra: categoriaParaInforAdic,
           dRegistro: dHoje,
           nIdConta: nCodCC
         };
@@ -29318,7 +29356,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           ).replace(/\D/g, '');
           const codigoUfNfe = chaveNfeReceb.length >= 2 ? chaveNfeReceb.slice(0, 2) : '';
           const ufNfe = codigoUfNfe === '42' ? 'SC' : (codigoUfNfe ? 'OUTRA' : '');
-          const cCategCompraReceb = String(recebAtual?.infoAdicionais?.cCategCompra || '').trim();
+          // Usa a nova categoria se o usuário substituiu (categoria inativa), senão usa a do recebimento
+          const cCategCompraReceb = String(novaCategoriaCompra || recebAtual?.infoAdicionais?.cCategCompra || '').trim();
           cCategCompraRegraCfop = cCategCompraReceb;
           ufNfeRegraCfop = ufNfe;
           if (ufNfe && cCategCompraReceb) {
@@ -29444,15 +29483,31 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         nIdReceb: Number(plano.n_id_receb),
         cEtapa: etapaAlvoRecebimentoTotal
       }, { tentativasMaximas: 3 });
+      const codStatusConcluir = String(respostaEtapaFinal?.cCodStatus || '').trim();
+      if (codStatusConcluir && codStatusConcluir !== '0') {
+        throw new Error(`ConcluirRecebimento retornou status ${codStatusConcluir}: ${respostaEtapaFinal?.cDescStatus || 'Sem descrição'}`);
+      }
       console.log('[Compras/NFeAssociarPedido] ConcluirRecebimento OK:', JSON.stringify(respostaEtapaFinal));
       etapaConcluida = true;
     } catch (erroConcluir) {
       const msgConcluir = String(erroConcluir?.message || '');
       const erroCfopObrigatorio = /CFOP para o Recebimento/i.test(msgConcluir);
+      const erroCategoriaInativa = /categoria .*inativad/i.test(msgConcluir);
+      const erroNegocialOmie = /^ERROR:/i.test(msgConcluir)
+        || /ConcluirRecebimento retornou status/i.test(msgConcluir)
+        || /utilize o método ConcluirRecebimento/i.test(msgConcluir);
       if (erroCfopObrigatorio) {
         throw new Error(
           `Omie não permitiu concluir: item sem CFOP de entrada. Categoria atual=${cCategCompraRegraCfop || 'N/A'}, UF_NFe=${ufNfeRegraCfop || 'N/A'}, CFOP calculado=${cfopCalculado || 'N/A'}. Ajuste a regra de CFOP para essa categoria antes de associar.`
         );
+      }
+      if (erroCategoriaInativa) {
+        throw new Error(
+          `Omie não permitiu concluir: categoria de compra inativa (${cCategCompraRegraCfop || 'N/A'}). Mensagem Omie: ${msgConcluir}`
+        );
+      }
+      if (erroNegocialOmie) {
+        throw new Error(`Omie não permitiu concluir o recebimento: ${msgConcluir}`);
       }
 
       console.warn('[Compras/NFeAssociarPedido] ConcluirRecebimento falhou:', erroConcluir?.message, '- tentando AlterarEtapaRecebimento...');
@@ -29461,6 +29516,10 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           nIdReceb: Number(plano.n_id_receb),
           cEtapa: etapaAlvoRecebimentoTotal
         }, { tentativasMaximas: 2 });
+        const codStatusEtapa = String(respostaEtapaFinal?.cCodStatus || '').trim();
+        if (codStatusEtapa && codStatusEtapa !== '0') {
+          throw new Error(`AlterarEtapaRecebimento retornou status ${codStatusEtapa}: ${respostaEtapaFinal?.cDescStatus || 'Sem descrição'}`);
+        }
         console.log('[Compras/NFeAssociarPedido] AlterarEtapaRecebimento OK (fallback):', JSON.stringify(respostaEtapaFinal));
         etapaConcluida = true;
       } catch (erroEtapa) {
