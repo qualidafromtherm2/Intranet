@@ -17138,34 +17138,6 @@ function buildStamp(prefix, req) {
 }
 
 // ────────────────────────────────────────────
-// Link fixo por técnico AT: /at/:id → redireciona para portal com token
-// ────────────────────────────────────────────
-app.get('/at/:id(\\d+)', async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!id || id < 1) return res.redirect('/at-link.html');
-  try {
-    const { rows } = await dbQuery(
-      `SELECT ctid, token FROM sac.controle_tecnicos WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-    if (!rows.length) return res.redirect('/at-link.html');
-    let { ctid, token } = rows[0];
-    if (!token) {
-      const crypto = require('crypto');
-      token = crypto.randomBytes(32).toString('hex');
-      await dbQuery(
-        `UPDATE sac.controle_tecnicos SET token = $1 WHERE ctid = $2`,
-        [token, ctid]
-      );
-    }
-    res.redirect(`/at-link.html?token=${encodeURIComponent(token)}`);
-  } catch (err) {
-    console.error('[AT link fixo] erro:', err.message);
-    res.redirect('/at-link.html');
-  }
-});
-
-// ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
 // 🔒 Bloqueia download de arquivos sensíveis ANTES do express.static.
