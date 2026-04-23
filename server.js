@@ -20775,85 +20775,13 @@ async function syncPedidosCompraOmie(filtros = {}) {
 }
 
 async function atualizarEtapaNFPedidosPorBanco(opcoes = {}) {
-  const manterEtapa80 = opcoes.manterEtapa80 !== false;
-
-  const client = await pool.connect();
-  try {
-    const { rows } = await client.query(`
-      SELECT codigo, descricao, descricao_customizada
-      FROM logistica.etapas_recebimento_nfe
-    `);
-
-    const buscarCodigo = (regex, fallback) => {
-      const item = rows.find((r) => regex.test(`${r.descricao || ''} ${r.descricao_customizada || ''}`));
-      return String(item?.codigo || fallback);
-    };
-
-    const codParcial = buscarCodigo(/recebido\s*parcial/i, '50');
-    const codTotal = buscarCodigo(/recebido\s*total/i, '60');
-    const codConferido = buscarCodigo(/conferid|recebido\s*e\s*conferido/i, '80');
-
-    const condicao80 = manterEtapa80
-      ? `AND COALESCE(BTRIM(p."Etapa_NF"), '') <> $3`
-      : '';
-
-    const params = manterEtapa80
-      ? [codParcial, codTotal, codConferido]
-      : [codParcial, codTotal];
-
-    const updateSql = `
-      WITH base AS (
-        SELECT
-          p.n_cod_ped,
-          COALESCE(BTRIM(p."Etapa_NF"), '') AS etapa_atual,
-          COUNT(*) FILTER (WHERE COALESCE(pp.n_qtde, 0) > 0) AS itens_validos,
-          BOOL_AND(COALESCE(pp.n_qtde_rec, 0) >= COALESCE(pp.n_qtde, 0))
-            FILTER (WHERE COALESCE(pp.n_qtde, 0) > 0) AS all_full,
-          BOOL_OR(COALESCE(pp.n_qtde_rec, 0) > 0) AS any_received
-        FROM compras.pedidos_omie p
-        LEFT JOIN compras.pedidos_omie_produtos pp
-          ON pp.n_cod_ped = p.n_cod_ped
-        WHERE COALESCE(p.inativo, false) = false
-          AND COALESCE(BTRIM(p."Etapa_NF"), '') IN ('', $1, $2)
-          ${condicao80}
-        GROUP BY p.n_cod_ped, p."Etapa_NF"
-      ), calc AS (
-        SELECT
-          n_cod_ped,
-          etapa_atual,
-          CASE
-            WHEN itens_validos > 0 AND all_full THEN $2
-            WHEN any_received THEN $1
-            ELSE ''
-          END AS etapa_nova
-        FROM base
-      )
-      UPDATE compras.pedidos_omie p
-      SET "Etapa_NF" = NULLIF(calc.etapa_nova, ''),
-          updated_at = NOW()
-      FROM calc
-      WHERE p.n_cod_ped = calc.n_cod_ped
-        AND COALESCE(BTRIM(p."Etapa_NF"), '') IS DISTINCT FROM calc.etapa_nova
-    `;
-
-    const resultado = await client.query(updateSql, params);
-
-    return {
-      ok: true,
-      atualizados: resultado.rowCount || 0,
-      codigos: {
-        parcial: codParcial,
-        total: codTotal,
-        conferido: codConferido,
-      },
-      modo: 'sql_local_rapido',
-    };
-  } catch (e) {
-    console.error('[PedidosCompra/EtapaNF] Erro ao atualizar Etapa_NF por SQL:', e);
-    return { ok: false, error: e.message || String(e) };
-  } finally {
-    client.release();
-  }
+  console.log('[PedidosCompra/EtapaNF] Recalculo por SQL desativado: Etapa_NF agora pode ser alterada somente no fluxo de associacao de NFe.');
+  return {
+    ok: true,
+    atualizados: 0,
+    modo: 'desativado_por_regra',
+    detalhe: 'Etapa_NF pode ser alterada apenas na associacao de NFe.',
+  };
 }
 
 // ============================================================================
@@ -29692,18 +29620,76 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       ''
     ).trim();
 
+    let etapaPedidoNf = etapaFinalRecebimento || etapaAlvoRecebimentoTotal;
+    let valorTotalPedido = 0;
+    let valorRecebidoPedido = 0;
+
     if (numeroNfeVinculada) {
       await pool.query(`
         ALTER TABLE compras.pedidos_omie
         ADD COLUMN IF NOT EXISTS "NFe vinculada" TEXT
       `);
 
+      try {
+        const { rows: resumoPedidoRows } = await pool.query(
+          `WITH pedido AS (
+             SELECT p.n_cod_ped,
+                    COALESCE(
+                      NULLIF(p.n_valor, 0),
+                      (
+                        SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
+                        FROM compras.pedidos_omie_produtos pp
+                        WHERE pp.n_cod_ped = p.n_cod_ped
+                      ),
+                      0
+                    )::numeric AS valor_total
+               FROM compras.pedidos_omie p
+              WHERE p.n_cod_ped = $1
+              LIMIT 1
+           ),
+           recebido AS (
+             SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
+               FROM logistica.recebimentos_nfe_itens i
+               JOIN logistica.recebimentos_nfe_omie r
+                 ON r.n_id_receb = i.n_id_receb
+              WHERE i.n_id_pedido = $1
+                AND COALESCE(r.c_cancelada, 'N') <> 'S'
+           )
+           SELECT COALESCE(p.valor_total, 0) AS valor_total,
+                  COALESCE(rc.valor_recebido, 0) AS valor_recebido
+             FROM pedido p
+             CROSS JOIN recebido rc`,
+          [Number(plano.n_cod_ped)]
+        );
+
+        if (resumoPedidoRows.length > 0) {
+          valorTotalPedido = Number(resumoPedidoRows[0].valor_total || 0);
+          valorRecebidoPedido = Number(resumoPedidoRows[0].valor_recebido || 0);
+          const margem = 0.01;
+
+          if (valorTotalPedido > 0 && (valorRecebidoPedido + margem) >= valorTotalPedido) {
+            etapaPedidoNf = '60';
+          } else {
+            etapaPedidoNf = '50';
+          }
+        } else {
+          etapaPedidoNf = '50';
+        }
+
+        console.log(
+          `[Compras/NFeAssociarPedido] Etapa_NF calculada para pedido ${plano.n_cod_ped}: ${etapaPedidoNf} (recebido=${valorRecebidoPedido} total=${valorTotalPedido})`
+        );
+      } catch (errEtapaPedido) {
+        etapaPedidoNf = '50';
+        console.warn('[Compras/NFeAssociarPedido] Falha ao calcular etapa parcial/total do pedido:', errEtapaPedido?.message);
+      }
+
       await pool.query(
         `UPDATE compras.pedidos_omie
             SET "NFe vinculada" = $1,
                 "Etapa_NF" = $2
           WHERE n_cod_ped = $3`,
-        [numeroNfeVinculada, etapaFinalRecebimento || etapaAlvoRecebimentoTotal, plano.n_cod_ped]
+        [numeroNfeVinculada, etapaPedidoNf, plano.n_cod_ped]
       );
     }
 
@@ -29725,6 +29711,9 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         c_numero_pedido: plano.c_numero_pedido || null,
         nfe_vinculada: numeroNfeVinculada || null,
         etapa_nf_omie: etapaFinalRecebimento || null,
+        etapa_nf_pedido: etapaPedidoNf || null,
+        valor_total_pedido: Number.isFinite(valorTotalPedido) ? valorTotalPedido : null,
+        valor_recebido_pedido: Number.isFinite(valorRecebidoPedido) ? valorRecebidoPedido : null,
         retorno_etapa_omie: respostaEtapaFinal || null,
         pedidos_vinculados: pedidosVinculados,
         alerta_item: alertaItemAssociacao || null
@@ -32265,11 +32254,15 @@ function obterTarefasAutoSyncOmie(tabelasSelecionadas, opcoes = {}) {
       nome: 'pedidos_compra',
       fn: async () => {
         const syncPedidos = await syncPedidosCompraOmie({ ...filtrosData });
-        const syncEtapaNf = await atualizarEtapaNFPedidosPorBanco({ manterEtapa80: true });
         return {
-          ok: !!syncPedidos?.ok && !!syncEtapaNf?.ok,
+          ok: !!syncPedidos?.ok,
           pedidos_compra: syncPedidos,
-          etapa_nf: syncEtapaNf,
+          etapa_nf: {
+            ok: true,
+            atualizados: 0,
+            modo: 'nao_executado_no_autosync',
+            detalhe: 'Etapa_NF pode ser alterada apenas na associacao de NFe.',
+          },
         };
       },
     },
