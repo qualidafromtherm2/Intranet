@@ -5821,7 +5821,12 @@ router.put('/at/tecnicos/:id', async (req, res) => {
 
 // ── Portal AT: autenticação por token único por técnico ───────────────────────
 const BCRYPT_ROUNDS = 10;
-const AT_SESSION_SECRET = process.env.AT_SESSION_SECRET || 'at_portal_s3cr3t';
+// 🔒 Falha fechada em prod
+if (!process.env.AT_SESSION_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[sacEnvios] FATAL: AT_SESSION_SECRET ausente em produção.');
+  process.exit(1);
+}
+const AT_SESSION_SECRET = process.env.AT_SESSION_SECRET || 'dev-only-insecure-at-secret';
 
 // Cria/retorna token único do técnico e, se id_at informado, vincula ao fechamento
 // GET /at/tecnico/token?nome=NOME&id_at=ID

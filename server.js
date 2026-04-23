@@ -118,14 +118,21 @@ sessionStore.on('error', (err) => {
   console.error('[session-store] erro no Postgres session store:', err?.message || err);
 });
 
+// 🔐 SESSION_SECRET é obrigatório. Em produção, falhar fechado.
 if (!process.env.SESSION_SECRET) {
-  console.warn('[session] SESSION_SECRET não definido no ambiente — usando fallback. Defina SESSION_SECRET fixo para preservar sessões entre deploys.');
+  if (isProd) {
+    console.error('[session] FATAL: SESSION_SECRET não definido em produção. Abortando.');
+    process.exit(1);
+  } else {
+    console.warn('[session] SESSION_SECRET não definido — usando fallback APENAS em dev. Defina SESSION_SECRET no .env.');
+  }
 }
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-insecure-change-me';
 
 app.use(session({
   store: sessionStore,
   name: 'sid',
-  secret: process.env.SESSION_SECRET || 'troque-isto-em-producao',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   rolling: true,                        // renova expiração a cada request → usuários ativos não expiram
@@ -137,6 +144,68 @@ app.use(session({
     maxAge: 7 * 24 * 60 * 60 * 1000    // 7 dias
   }
 }));
+
+// ──────────────────────────────────────────────────────────────────────────
+// 🛡️ Helmet — headers de segurança (CSP desabilitado p/ não quebrar inline)
+// ──────────────────────────────────────────────────────────────────────────
+try {
+  const helmet = require('helmet');
+  app.use(helmet({
+    contentSecurityPolicy: false,           // a UI usa muito inline; ativar depois
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }));
+} catch (e) {
+  console.warn('[helmet] não carregado:', e.message);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 🚦 Rate-limit no login (anti brute-force)
+// ──────────────────────────────────────────────────────────────────────────
+try {
+  const rateLimit = require('express-rate-limit');
+  const loginLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,   // 5 minutos
+    max: 10,                   // máx 10 tentativas / IP / janela
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { ok: false, error: 'Muitas tentativas de login. Tente novamente em alguns minutos.' },
+  });
+  // aplica nos endpoints sensíveis de autenticação
+  app.use('/api/auth/login', loginLimiter);
+  app.use('/api/auth/first-password', loginLimiter);
+} catch (e) {
+  console.warn('[rate-limit] não carregado:', e.message);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 🔒 Middleware global: exige sessão para /api/* (whitelist mínima).
+//    Pode ser desligado temporariamente com REQUIRE_API_AUTH=0 (NÃO use em prod).
+// ──────────────────────────────────────────────────────────────────────────
+const REQUIRE_API_AUTH = String(process.env.REQUIRE_API_AUTH ?? '1') !== '0';
+const API_PUBLIC_PREFIXES = [
+  '/api/auth/',          // login, status, logout, first-password, tema
+  '/api/client-log',     // log de erros do front (já validado/limitado)
+  '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
+  '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
+  '/api/cep',            // consulta de CEP (proxy público)
+];
+function isApiPublic(pathname) {
+  if (!pathname.startsWith('/api/')) return true;
+  return API_PUBLIC_PREFIXES.some(p => pathname === p || pathname.startsWith(p));
+}
+if (REQUIRE_API_AUTH) {
+  app.use((req, res, next) => {
+    if (req.method === 'OPTIONS') return next();
+    if (!req.path.startsWith('/api/')) return next();
+    if (isApiPublic(req.path)) return next();
+    if (req.session?.user?.id) return next();
+    return res.status(401).json({ ok: false, error: 'Não autenticado' });
+  });
+  console.log('[security] Middleware de auth global em /api/* ATIVO (REQUIRE_API_AUTH=1).');
+} else {
+  console.warn('[security] REQUIRE_API_AUTH=0 — /api/* sem proteção global! USE APENAS EM DEV.');
+}
 
 app.use('/api/nav', require('./routes/nav'));
 app.use('/api/colaboradores', require('./routes/colaboradores'));
@@ -5314,19 +5383,19 @@ function gravarEstoque(obj) {
 
 // valida o token do OMIE presente na query ?token=...
 function chkOmieToken(req, res, next) {
-  // Se OMIE_WEBHOOK_TOKEN não estiver configurado, libera o acesso
+  // 🔒 Falha fechada: se OMIE_WEBHOOK_TOKEN não estiver configurado, NÃO libera.
   if (!process.env.OMIE_WEBHOOK_TOKEN || process.env.OMIE_WEBHOOK_TOKEN === 'null') {
-    console.log('[chkOmieToken] Token não configurado, liberando acesso');
-    return next();
+    console.error('[chkOmieToken] OMIE_WEBHOOK_TOKEN ausente — recusando webhook.');
+    return res.status(503).json({ ok: false, error: 'webhook_token_not_configured' });
   }
-  
-  // Se estiver configurado, valida o token (query ou headers usados pela Omie)
+
+  // valida o token (query ou headers usados pela Omie)
   const token = req.query.token || req.headers['x-omie-token'] || req.headers['x-webhook-token'];
   if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
     console.log('[chkOmieToken] Token inválido ou ausente');
     return res.status(401).json({ ok:false, error:'unauthorized' });
   }
-  
+
   next();
 }
 
@@ -10291,6 +10360,7 @@ app.use('/api/produtos', produtosRouter);
 app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
+app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
 app.use('/api/engenharia', engenhariaRouter);
 app.use('/api/compras', comprasRouter);
 
@@ -13856,9 +13926,12 @@ async function getLocalNome(localCodigo) {
 
 app.post('/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req, res) => {
   try {
-    // 1) token opcional (se OMIE_WEBHOOK_TOKEN estiver setado, passa a exigir)
-    if (OMIE_WEBHOOK_TOKEN) {
-      const token = req.query.token || req.headers['x-omie-token'];
+    // 🔒 token obrigatório (falha fechada)
+    if (!OMIE_WEBHOOK_TOKEN) {
+      return res.status(503).json({ ok:false, error:'webhook_token_not_configured' });
+    }
+    {
+      const token = req.query.token || req.headers['x-omie-token'] || req.headers['x-webhook-token'];
       if (token !== OMIE_WEBHOOK_TOKEN) {
         return res.status(401).json({ ok:false, error:'token inválido' });
       }
@@ -17059,10 +17132,45 @@ function buildStamp(prefix, req) {
 // ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
+// 🔒 Bloqueia download de arquivos sensíveis ANTES do express.static.
+//    (impede que /server.js, /config.server.js, dumps SQL, .bak, .env, etc.
+//    sejam servidos como estático a partir da raiz)
+const STATIC_BLOCKLIST_FILES = new Set([
+  '/server.js', '/config.server.js', '/config.server.example.js',
+  '/Middleware.js', '/cookies.txt', '/package.json', '/package-lock.json',
+  '/ecosystem.config.js', '/render.yaml', '/nodemon.json',
+  '/intranet_db_yd0w_dump.sql', '/atualizar.sql',
+  '/add_anexos_column.js', '/disable_trigger.js', '/fix_trigger.js',
+  '/sync_omie_imagens_estoque.js', '/sync_omie_produtos.js',
+  '/watch_print.js', '/teste_simples.js',
+]);
+const STATIC_BLOCKLIST_PREFIXES = [
+  '/.git', '/.env', '/node_modules', '/scripts/', '/sql/', '/data/',
+  '/csv/', '/backend/', '/cron/', '/logs/', '/uploads_internal/',
+  '/readme/', '/.github/', '/.vscode/', '/api%20omie/', '/api omie/',
+  '/requisicoes_omie/', '/Site_AT/', '/site_at/',
+];
+const STATIC_BLOCKLIST_EXT = /\.(bak|bak\d*|backup|sql|sqlite|db|dump|env|pem|key|pfx|p12|log|sh|ps1|psql|tsv)$/i;
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  let p;
+  try { p = decodeURIComponent(req.path); } catch { p = req.path; }
+  // qualquer dotfile (.env, .git, ...) – também bloqueia /algo/.env
+  if (/\/\.[^/]+/.test(p)) return res.status(404).end();
+  if (STATIC_BLOCKLIST_FILES.has(p)) return res.status(404).end();
+  const lower = p.toLowerCase();
+  if (STATIC_BLOCKLIST_PREFIXES.some(pref => lower.startsWith(pref.toLowerCase()))) {
+    return res.status(404).end();
+  }
+  if (STATIC_BLOCKLIST_EXT.test(lower)) return res.status(404).end();
+  next();
+});
+
 // estáticos unificados (CSS/JS/img) — antes das rotas HTML
 app.use(express.static(path.join(__dirname), {
   etag: false,                 // evita servir HTML por engano via cache
   maxAge: 0,
+  dotfiles: 'deny',            // 🔒 bloqueia .env, .git, etc.
   setHeaders: (res, p) => {
     if (p.endsWith('.webmanifest')) {
       res.setHeader('Content-Type', 'application/manifest+json');
@@ -18098,7 +18206,10 @@ app.post('/api/webhooks/omie/pedidos', chkOmieToken, express.json(),
 
 app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (req, res) => {
   try {
-    const token = req.query.token || req.headers['x-webhook-token'];
+    if (!process.env.OMIE_WEBHOOK_TOKEN) {
+      return res.status(503).json({ ok:false, error:'webhook_token_not_configured' });
+    }
+    const token = req.query.token || req.headers['x-webhook-token'] || req.headers['x-omie-token'];
     if (!token || token !== process.env.OMIE_WEBHOOK_TOKEN) {
       return res.status(401).json({ ok:false, error:'unauthorized' });
     }
