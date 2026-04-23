@@ -218,6 +218,29 @@
 
 
 
+
+<!-- Nova categoria: Produção -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Produção">Produção</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-producao-primeira-peca-ok"
+       class="menu-link"
+       data-nav-key="side:producao:primeira-peca-ok"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="1° pç ok"
+       data-nav-selector="#menu-producao-primeira-peca-ok">
+      <i class="fa-solid fa-check-double" style="margin-right:8px;"></i>
+      1° pç ok
+    </a>
+  </div>
+</div>
+
 <!-- Nova categoria: Logística -->
 <div class="side-wrapper">
   <div class="side-title"
@@ -4341,6 +4364,104 @@
           </div>
         </div>
 
+        <!-- Painel Produção: 1° pç ok -->
+        <div id="producaoPrimeiraPecaOkPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-industry" style="color:#22c55e;"></i>
+                  Produção - 1° pç ok
+                </div>
+              </div>
+
+              <!-- Barra de busca -->
+              <div style="margin-top:12px;max-width:480px;">
+                <label for="producaoPrimeiraPecaOkPesquisa" style="display:block;margin-bottom:6px;color:var(--inactive-color);font-size:13px;">
+                  Pesquisar produto (código)
+                </label>
+                <div style="display:flex;gap:8px;">
+                  <input
+                    id="producaoPrimeiraPecaOkPesquisa"
+                    type="text"
+                    placeholder="Ex: 09.MC.N.10106"
+                    style="flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);"
+                  />
+                  <button id="producaoPrimeiraPecaOkBtnBuscar"
+                    style="padding:10px 16px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                  </button>
+                </div>
+                <div id="producaoPrimeiraPecaOkBuscaStatus" style="display:none;margin-top:8px;font-size:13px;"></div>
+              </div>
+
+              <!-- Área de resultados -->
+              <div id="producaoPrimeiraPecaOkResultados" style="display:none;margin-top:20px;">
+                <!-- Nome do produto -->
+                <div id="producaoPrimeiraPecaOkNomeProduto" style="font-size:14px;font-weight:600;color:var(--content-title-color);margin-bottom:12px;padding:10px 14px;background:var(--content-bg);border:1px solid var(--border-color);border-radius:10px;"></div>
+
+                <!-- Número da OP (obrigatório) -->
+                <div style="margin-bottom:12px;max-width:280px;">
+                  <label for="producaoPrimeiraPecaOkNumeroOp" style="display:block;margin-bottom:4px;color:var(--inactive-color);font-size:12px;">
+                    Número da OP <span style="color:#ef4444;">*</span>
+                  </label>
+                  <input
+                    id="producaoPrimeiraPecaOkNumeroOp"
+                    type="text"
+                    placeholder="Ex: OP-2026-001"
+                    required
+                    style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;box-sizing:border-box;"
+                  />
+                </div>
+
+                <!-- Lista de itens a verificar -->
+                <div id="producaoPrimeiraPecaOkItens" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+                <!-- Botão Registrar -->
+                <div style="margin-top:16px;">
+                  <button id="producaoPrimeiraPecaOkBtnRegistrar"
+                    style="padding:11px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;">
+                    <i class="fa-solid fa-clipboard-check"></i> Registrar verificação
+                  </button>
+                </div>
+
+                <!-- Seção NOK (aparece só quando houver NOK) -->
+                <div id="producaoPrimeiraPecaOkNokSection" style="display:none;margin-top:16px;padding:14px;background:#2a0a0a;border:1px solid #ef4444;border-radius:10px;">
+                  <div style="color:#fca5a5;font-size:13px;font-weight:600;margin-bottom:12px;">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Itens com NOK — informe o responsável pela liberação
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Usuário liberador</label>
+                    <select id="producaoPrimeiraPecaOkUserLiberacao"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;">
+                      <option value="">Selecione o usuário…</option>
+                    </select>
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Senha do usuário liberador</label>
+                    <input id="producaoPrimeiraPecaOkSenhaLib" type="password" autocomplete="off"
+                      placeholder="Senha"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;box-sizing:border-box;" />
+                  </div>
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:12px;color:var(--inactive-color);margin-bottom:4px;">Resolução / Justificativa <span style="color:#ef4444;">*</span></label>
+                    <textarea id="producaoPrimeiraPecaOkResolucao" rows="3" placeholder="Liberei devido:"
+                      style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+                  </div>
+                  <button id="producaoPrimeiraPecaOkBtnConfirmar"
+                    style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;color:#fff;font-size:13px;font-weight:600;cursor:pointer;width:100%;">
+                    <i class="fa-solid fa-lock-open"></i> Confirmar registro com NOK
+                  </button>
+                </div>
+
+                <!-- Status/feedback -->
+                <div id="producaoPrimeiraPecaOkRegistroStatus" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:13px;"></div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Início — aparece primeiro -->
   <div id="paginaInicio" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -6612,6 +6733,19 @@
       <div class="nav-card-title">Check-Compras</div>
     </div>
 
+    <!-- Card: 1° pç ok -->
+    <div class="nav-card" data-target="priPcOkTab"
+         data-nav-key="produto:pri-pc-ok"
+         data-nav-parent="top:produto"
+         data-nav-pos="top"
+         data-nav-label="1° pç ok"
+         data-nav-selector='.nav-card[data-target="priPcOkTab"]'>
+      <div class="nav-card-icon" style="background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);">
+        <i class="fa-solid fa-check-double"></i>
+      </div>
+      <div class="nav-card-title">1° pç ok</div>
+    </div>
+
     <!-- Card: Novo Produto -->
     <div class="nav-card nav-card-action" id="btnNovoProdutoCard">
       <div class="nav-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
@@ -6864,6 +6998,103 @@
 </div>
 
 
+          </div>
+
+          <!-- 1° pç ok: Registro de primeira peça OK por produto -->
+          <!-- 1° pç ok: Registro de primeira peça OK por produto -->
+          <div id="priPcOkTab" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-section" style="background:linear-gradient(135deg,var(--content-bg) 0%,rgba(34,197,94,0.04) 100%);border:1px solid var(--border-color);border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,0.05);">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+                  <div style="width:40px;height:40px;background:linear-gradient(135deg,#22c55e 0%,#15803d 100%);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(34,197,94,0.3);flex-shrink:0;">
+                    <i class="fa-solid fa-check-double" style="color:#fff;font-size:18px;"></i>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <h3 style="margin:0 0 4px 0;color:var(--content-title-color);font-size:19px;font-weight:600;">1ª Peça OK</h3>
+                    <p style="margin:0;color:var(--inactive-color);font-size:13px;">Registros de verificação da 1ª peça OK deste produto.</p>
+                  </div>
+                  <button id="priPcOkAbrirModalBtn" type="button"
+                    style="padding:9px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#22c55e 0%,#15803d 100%);color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 4px 12px rgba(34,197,94,0.25);flex-shrink:0;">
+                    <i class="fa-solid fa-plus"></i> Adicionar
+                  </button>
+                </div>
+
+                <div id="priPcOkStatus" style="display:none;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;"></div>
+
+                <div style="font-size:14px;font-weight:600;color:var(--content-title-color);margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+                  <i class="fa-solid fa-list" style="color:#22c55e;"></i> Registros
+                  <span id="priPcOkHistoricoCount" style="font-size:11px;color:var(--inactive-color);margin-left:4px;"></span>
+                </div>
+                <div id="priPcOkHistoricoLista" style="display:flex;flex-direction:column;gap:8px;">
+                  <div style="color:var(--inactive-color);font-size:13px;">Carregando…</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Modal de adição -->
+            <div id="priPcOkModal"
+              style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9100;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+              <div style="background:var(--content-bg);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid var(--border-color);box-sizing:border-box;">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                  <div style="width:40px;height:40px;background:linear-gradient(135deg,#22c55e 0%,#15803d 100%);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="fa-solid fa-check-double" style="color:#fff;font-size:18px;"></i>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <h3 style="margin:0 0 2px 0;color:var(--content-title-color);font-size:17px;font-weight:600;">1ª Peça OK</h3>
+                    <p style="margin:0;color:var(--inactive-color);font-size:12px;">Registre a verificação da 1ª peça OK deste produto.</p>
+                  </div>
+                  <button id="priPcOkModalFechar" type="button"
+                    style="width:32px;height:32px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--inactive-color);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <form id="priPcOkForm" autocomplete="off">
+                  <div style="margin-bottom:16px;">
+                    <label for="priPcOkOQueVerificar" style="display:block;margin-bottom:6px;color:var(--content-title-color);font-size:13px;font-weight:600;">
+                      O que verificar <span style="color:#ef4444;">*</span>
+                    </label>
+                    <input id="priPcOkOQueVerificar" type="text" required placeholder="Descreva o que foi verificado"
+                      style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:14px;box-sizing:border-box;" />
+                  </div>
+
+                  <div style="margin-bottom:16px;">
+                    <label for="priPcOkEspecificacao" style="display:block;margin-bottom:6px;color:var(--content-title-color);font-size:13px;font-weight:600;">
+                      Especificação
+                    </label>
+                    <textarea id="priPcOkEspecificacao" rows="3" placeholder="Especificação técnica ou observações"
+                      style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);background:var(--search-bg);color:var(--theme-color);font-size:14px;resize:vertical;box-sizing:border-box;"></textarea>
+                  </div>
+
+                  <div style="margin-bottom:20px;">
+                    <label style="display:block;margin-bottom:6px;color:var(--content-title-color);font-size:13px;font-weight:600;">
+                      Anexar imagem / arquivo
+                    </label>
+                    <label id="priPcOkFileLabel"
+                      style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;border:2px dashed var(--border-color);background:var(--content-bg);color:var(--inactive-color);cursor:pointer;font-size:13px;">
+                      <i class="fa-solid fa-paperclip"></i>
+                      <span id="priPcOkFileText">Selecionar arquivo</span>
+                      <input id="priPcOkArquivo" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" />
+                    </label>
+                    <div id="priPcOkPreview" style="margin-top:10px;display:none;">
+                      <img id="priPcOkPreviewImg" src="" alt="preview"
+                        style="max-width:180px;max-height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--border-color);" />
+                    </div>
+                  </div>
+
+                  <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                    <button type="button" id="priPcOkModalCancelar"
+                      style="padding:11px 20px;border:1px solid var(--border-color);border-radius:10px;background:var(--content-bg);color:var(--inactive-color);font-size:14px;cursor:pointer;">
+                      Cancelar
+                    </button>
+                    <button id="priPcOkSubmitBtn" type="submit"
+                      style="padding:11px 28px;background:linear-gradient(135deg,#22c55e 0%,#15803d 100%);border:none;border-radius:10px;color:#fff;font-weight:700;font-size:15px;cursor:pointer;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(34,197,94,0.25);">
+                      <i class="fa-solid fa-check"></i> OK — Registrar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
 
           <!-- Check-Proj: Checklist de Atividades de Engenharia por Produto -->

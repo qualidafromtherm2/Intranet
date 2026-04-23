@@ -43898,6 +43898,17 @@ async function confirmarAssociacaoPedidoNfeOmie() {
     return;
   }
 
+  const pickerCategoria = document.getElementById('modalAssociarCategoriaPicker');
+  const selectCategoria = document.getElementById('modalAssociarCategoriaSelect');
+  const pickerVisivel = pickerCategoria && pickerCategoria.style.display !== 'none';
+  const categoriaSelecionada = String(selectCategoria?.value || '').trim();
+
+  if (pickerVisivel && !categoriaSelecionada) {
+    setStatusModalAssociarPedidoNfe('Selecione uma categoria ativa antes de associar a NF-e ao pedido.', 'erro');
+    selectCategoria?.focus();
+    return;
+  }
+
   const textoOriginal = btnAssociar.innerHTML;
   btnAssociar.disabled = true;
   btnAssociar.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';

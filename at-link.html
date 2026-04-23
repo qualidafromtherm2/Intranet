@@ -1875,10 +1875,10 @@
 	    // ── Init ──
 	    async function init() {
       if (!TOKEN || TOKEN.length < 32) { mostrar('invalidSection'); return; }
-      const sessRaw = sessionStorage.getItem(SESS_KEY);
+      const sessRaw = localStorage.getItem(SESS_KEY);
       if (sessRaw) {
         try {
-          const uRaw = sessionStorage.getItem(SESS_KEY + '_u');
+          const uRaw = localStorage.getItem(SESS_KEY + '_u');
           const u = uRaw ? JSON.parse(uRaw) : {};
           mostrarDash(u);
           carregarAtendimentos();
@@ -1889,12 +1889,13 @@
         const r = await fetch(`${BASE}/api/sac/at/tecnico/status?token=${encodeURIComponent(TOKEN)}`);
         if (r.status === 404) { mostrar('invalidSection'); return; }
         const d = await r.json();
+        const nomeExibido = d.nome || 'Técnico';
         if (d.temSenha) {
-          document.getElementById('loginNome').textContent = d.nome;
+          document.getElementById('loginNome').textContent = nomeExibido;
           mostrar('loginSection');
           setTimeout(() => document.getElementById('senhaLogin').focus(), 80);
         } else {
-          document.getElementById('cadastroNome').textContent = d.nome;
+          document.getElementById('cadastroNome').textContent = nomeExibido;
           mostrar('cadastroSection');
           setTimeout(() => document.getElementById('novaSenha').focus(), 80);
         }
@@ -1916,7 +1917,17 @@
           body: JSON.stringify({ token: TOKEN, senha })
         });
         const d = await r.json();
-        if (!r.ok) { setErro('cadastroErro', d.error || 'Erro.'); btn.disabled = false; btn.textContent = 'Criar senha e entrar'; return; }
+        if (!r.ok) {
+          if (r.status === 409) {
+            // Senha já cadastrada — redireciona para login automaticamente
+            mostrar('loadingSection');
+            await init();
+          } else {
+            setErro('cadastroErro', d.error || 'Erro.');
+            btn.disabled = false; btn.textContent = 'Criar senha e entrar';
+          }
+          return;
+        }
         await _loginComSenha(senha);
       } catch { setErro('cadastroErro', 'Erro de conexão.'); btn.disabled = false; btn.textContent = 'Criar senha e entrar'; }
     }
@@ -1944,8 +1955,8 @@
           setErro(errId, d.error || 'Erro.');
           return;
         }
-        sessionStorage.setItem(SESS_KEY, d.session);
-        sessionStorage.setItem(SESS_KEY + '_u', JSON.stringify({ nome: d.nome, tipo: d.tipo }));
+        localStorage.setItem(SESS_KEY, d.session);
+        localStorage.setItem(SESS_KEY + '_u', JSON.stringify({ nome: d.nome, tipo: d.tipo }));
         mostrarDash(d);
         carregarAtendimentos();
       } catch { setErro('loginErro', 'Erro de conexão.'); }
@@ -1962,10 +1973,11 @@
 	      finalizePortalAiConversation('logout do portal técnico').catch(() => {});
 	      closePortalAiPanel();
 	      resetPortalAiConversation({ showWelcome: false });
-	      sessionStorage.removeItem(SESS_KEY);
-	      sessionStorage.removeItem(SESS_KEY + '_u');
+	      localStorage.removeItem(SESS_KEY);
+	      localStorage.removeItem(SESS_KEY + '_u');
 	      document.getElementById('senhaLogin').value = '';
-	      mostrar('loginSection');
+	      mostrar('loadingSection');
+	      init();
 	    }
 
     // ── Tabela de atendimentos ──

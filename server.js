@@ -17130,6 +17130,34 @@ function buildStamp(prefix, req) {
 }
 
 // ────────────────────────────────────────────
+// Link fixo por técnico AT: /at/:id → redireciona para portal com token
+// ────────────────────────────────────────────
+app.get('/at/:id(\\d+)', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id < 1) return res.redirect('/at-link.html');
+  try {
+    const { rows } = await dbQuery(
+      `SELECT ctid, token FROM sac.controle_tecnicos WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    if (!rows.length) return res.redirect('/at-link.html');
+    let { ctid, token } = rows[0];
+    if (!token) {
+      const crypto = require('crypto');
+      token = crypto.randomBytes(32).toString('hex');
+      await dbQuery(
+        `UPDATE sac.controle_tecnicos SET token = $1 WHERE ctid = $2`,
+        [token, ctid]
+      );
+    }
+    res.redirect(`/at-link.html?token=${encodeURIComponent(token)}`);
+  } catch (err) {
+    console.error('[AT link fixo] erro:', err.message);
+    res.redirect('/at-link.html');
+  }
+});
+
+// ────────────────────────────────────────────
 // 4) Sirva todos os arquivos estáticos (CSS, JS, img) normalmente
 // ────────────────────────────────────────────
 // 🔒 Bloqueia download de arquivos sensíveis ANTES do express.static.
@@ -26946,21 +26974,68 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
 
     const nfe = nfeRows[0];
 
-    // Busca os itens da NF-e
-    const { rows: itemRows } = await pool.query(`
-      SELECT
-        id,
-        c_codigo_produto,
-        c_descricao_produto,
-        n_qtde_nfe,
-        c_unidade_nfe,
-        n_preco_unit,
-        v_total_item,
-        n_id_pedido
-      FROM logistica.recebimentos_nfe_itens
-      WHERE n_id_receb = $1
-      ORDER BY id ASC
-    `, [nfe.n_id_receb]);
+    // Busca os itens da NF-e priorizando a origem original da Omie (evita código/descrição alterados localmente)
+    let itemRows = [];
+    try {
+      const recebOmie = await chamarApiRecebimentoNfeOmie('ConsultarRecebimento', {
+        nIdReceb: Number(nfe.n_id_receb)
+      });
+
+      const itensOmie = Array.isArray(recebOmie?.itensRecebimento)
+        ? recebOmie.itensRecebimento
+        : [];
+
+      itemRows = itensOmie.map((item, idx) => {
+        const cab = item?.itensCabec || {};
+        const adic = item?.itensInfoAdic || {};
+
+        // Preferência: campos originais de item vindos da Omie/NF-e.
+        const codigoOriginal = String(
+          cab?.cCodigoProduto
+          || cab?.cCodProduto
+          || adic?.cCodIntProd
+          || adic?.cCodigoProduto
+          || ''
+        ).trim();
+
+        const descricaoOriginal = String(
+          cab?.cDescricaoProduto
+          || cab?.cDescricao
+          || adic?.cDescricaoProduto
+          || ''
+        ).trim();
+
+        return {
+          id: Number(cab?.nIdItem || cab?.nSequencia || idx + 1),
+          c_codigo_produto: codigoOriginal || null,
+          c_descricao_produto: descricaoOriginal || null,
+          n_qtde_nfe: cab?.nQtdeNFe ?? null,
+          c_unidade_nfe: cab?.cUnidadeNFe || cab?.cUnidadeNfe || null,
+          n_preco_unit: cab?.nPrecoUnit ?? null,
+          v_total_item: cab?.vTotalItem ?? null,
+          n_id_pedido: cab?.nIdPedido || null
+        };
+      });
+    } catch (erroItensOmie) {
+      console.warn('[Compras/LocalizarNfe] Falha ao buscar itens originais da Omie, usando fallback SQL:', erroItensOmie?.message);
+
+      const { rows: itemRowsSql } = await pool.query(`
+        SELECT
+          id,
+          c_codigo_produto,
+          c_descricao_produto,
+          n_qtde_nfe,
+          c_unidade_nfe,
+          n_preco_unit,
+          v_total_item,
+          n_id_pedido
+        FROM logistica.recebimentos_nfe_itens
+        WHERE n_id_receb = $1
+        ORDER BY id ASC
+      `, [nfe.n_id_receb]);
+
+      itemRows = itemRowsSql;
+    }
 
     // Extrai palavras-chave das descrições dos itens para busca de pedidos correspondentes
     const stopwords = new Set(['de','da','do','das','dos','e','em','com','para','por','a','o','as','os',
@@ -27028,6 +27103,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         FROM compras.pedidos_omie p
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         WHERE COALESCE(p.inativo, false) = false
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
           AND (
             ${exists_clause}
             OR (
@@ -27081,6 +27157,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = p.n_cod_ped
         WHERE COALESCE(p.inativo, false) = false
+          AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
         GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
         HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2
         ORDER BY ABS(SUM(COALESCE(pop.n_val_tot, 0)) - $3) ASC
@@ -28924,8 +29001,21 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
 
   const itensRecebimentoEditar = itensReceb.map((item, idx) => {
     const itensCabec = item?.itensCabec || {};
+    const itensInfoAdic = item?.itensInfoAdic || {};
     const nSequencia = Number(itensCabec?.nSequencia || idx + 1);
-    const codigoProdutoRec = String(itensCabec?.cCodigoProduto || '').trim();
+    const codigoProdutoRec = String(
+      itensCabec?.cCodigoProduto
+      || itensCabec?.cCodProduto
+      || itensInfoAdic?.cCodIntProd
+      || itensInfoAdic?.cCodigoProduto
+      || ''
+    ).trim();
+    const descricaoProdutoRec = String(
+      itensCabec?.cDescricaoProduto
+      || itensCabec?.cDescricao
+      || itensInfoAdic?.cDescricaoProduto
+      || ''
+    ).trim();
     const nIdProdutoRec = Number(itensCabec?.nIdProduto);
 
     let itemPedidoVinculo = null;
@@ -28990,7 +29080,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     previewItens.push({
       n_sequencia: itensIde.nSequencia,
       nf_codigo_produto: codigoProdutoRec || null,
-      nf_descricao_produto: String(itensCabec?.cDescricaoProduto || '').trim() || null,
+      nf_descricao_produto: descricaoProdutoRec || null,
       nf_qtde: itensCabec?.nQtdeNFe ?? null,
       nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
       nf_valor_total: itensCabec?.vTotalItem ?? null,
@@ -29068,16 +29158,27 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimento);
 
     // Verifica se a categoria de compra do recebimento está inativa
-    const cCategCompraConsultar = String(recebimento?.infoAdicionais?.cCategCompra || '').trim();
+    const cCategCompraConsultar = String(
+      recebimento?.infoAdicionais?.cCategCompra
+      || recebimento?.cabec?.cCategCompra
+      || recebimento?.cabec?.c_categoria_compra
+      || ''
+    ).trim();
     let categoriaInfo = null;
     if (cCategCompraConsultar) {
+      const codigoSemPontuacao = cCategCompraConsultar.replace(/\./g, '');
       const catResult = await pool.query(
-        `SELECT descricao, conta_inativa FROM configuracoes."ListarCategorias" WHERE codigo = $1`,
-        [cCategCompraConsultar]
+        `SELECT codigo, descricao, conta_inativa
+           FROM configuracoes."ListarCategorias"
+          WHERE codigo = $1
+             OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+          ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+          LIMIT 1`,
+        [cCategCompraConsultar, codigoSemPontuacao]
       ).catch(() => ({ rows: [] }));
       const catRow = catResult.rows[0] || null;
       categoriaInfo = {
-        codigo: cCategCompraConsultar,
+        codigo: catRow?.codigo || cCategCompraConsultar,
         descricao: catRow?.descricao || cCategCompraConsultar,
         inativa: catRow?.conta_inativa === 'S'
       };
@@ -29249,6 +29350,63 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
             })
           }).then(r => r.json()).catch(() => null)
         ]);
+
+        const categoriaAtualReceb = String(
+          recebAtual?.infoAdicionais?.cCategCompra
+          || recebAtual?.cabec?.cCategCompra
+          || recebAtual?.cabec?.c_categoria_compra
+          || ''
+        ).trim();
+
+        if (categoriaAtualReceb) {
+          const categoriaAtualSemPontuacao = categoriaAtualReceb.replace(/\./g, '');
+          const categoriaSubstitutaSemPontuacao = novaCategoriaCompra.replace(/\./g, '');
+          const categoriaAtualDb = await pool.query(
+            `SELECT codigo, descricao, conta_inativa
+               FROM configuracoes."ListarCategorias"
+              WHERE codigo = $1
+                 OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+              ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+              LIMIT 1`,
+            [categoriaAtualReceb, categoriaAtualSemPontuacao]
+          ).catch(() => ({ rows: [] }));
+
+          const categoriaAtualRow = categoriaAtualDb.rows[0] || null;
+          const categoriaAtualInativa = categoriaAtualRow?.conta_inativa === 'S';
+
+          if (categoriaAtualInativa && !novaCategoriaCompra) {
+            return res.status(422).json({
+              ok: false,
+              error_type: 'categoria_inativa',
+              categoria_atual: {
+                codigo: categoriaAtualRow?.codigo || categoriaAtualReceb,
+                descricao: categoriaAtualRow?.descricao || categoriaAtualReceb
+              },
+              error: `Categoria de compra inativa: ${categoriaAtualRow?.codigo || categoriaAtualReceb} - ${categoriaAtualRow?.descricao || categoriaAtualReceb}. Selecione uma categoria ativa antes de associar.`
+            });
+          }
+
+          if (categoriaAtualInativa && novaCategoriaCompra) {
+            const categoriaNovaDb = await pool.query(
+              `SELECT codigo, descricao, conta_inativa
+                 FROM configuracoes."ListarCategorias"
+                WHERE codigo = $1
+                   OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+                ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+                LIMIT 1`,
+              [novaCategoriaCompra, categoriaSubstitutaSemPontuacao]
+            ).catch(() => ({ rows: [] }));
+
+            const categoriaNovaRow = categoriaNovaDb.rows[0] || null;
+            if (!categoriaNovaRow || categoriaNovaRow?.conta_inativa === 'S') {
+              return res.status(422).json({
+                ok: false,
+                error_type: 'categoria_substituta_invalida',
+                error: 'A categoria substituta selecionada é inválida ou está inativa. Escolha uma categoria ativa.'
+              });
+            }
+          }
+        }
 
         // Mapa de unidade por nCodItem do pedido
         const unidadePorCodItem = {};
