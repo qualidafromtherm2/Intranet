@@ -189,6 +189,14 @@ const API_PUBLIC_PREFIXES = [
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
   '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
   '/api/cep',            // consulta de CEP (proxy público)
+  // ── Portal AT (técnicos externos — auth própria via token AT) ──
+  '/api/sac/at/tecnico/status',       // verificar se tem senha
+  '/api/sac/at/tecnico/set-senha',    // criar senha
+  '/api/sac/at/tecnico/login',        // login com senha
+  '/api/sac/at/tecnico/atendimentos', // listar OS
+  '/api/sac/at/tecnico/os-portal/',   // detalhes de uma OS
+  '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
+  '/api/ai/manual-chat',              // chatbot do portal AT
 ];
 function isApiPublic(pathname) {
   if (!pathname.startsWith('/api/')) return true;
@@ -27103,6 +27111,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         FROM compras.pedidos_omie p
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         WHERE COALESCE(p.inativo, false) = false
+          AND p.d_inc_data >= DATE '2026-01-01'
           AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
           AND (
             ${exists_clause}
@@ -27157,6 +27166,7 @@ app.get('/api/compras/localizar-nfe-por-numero', async (req, res) => {
         LEFT JOIN omie.fornecedores f ON f.codigo_cliente_omie = p.n_cod_for
         JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = p.n_cod_ped
         WHERE COALESCE(p.inativo, false) = false
+          AND p.d_inc_data >= DATE '2026-01-01'
           AND COALESCE(BTRIM(p."Etapa_NF"), '') NOT IN ('60', '80')
         GROUP BY p.n_cod_ped, p.c_numero, f.nome_fantasia, f.razao_social, p.d_inc_data, p.c_obs
         HAVING SUM(COALESCE(pop.n_val_tot, 0)) BETWEEN $1 AND $2

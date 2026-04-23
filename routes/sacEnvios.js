@@ -3915,6 +3915,17 @@ router.get('/at/atendimentos', async (_req, res) => {
 router.patch('/at/atendimentos/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  const hasSelectedItem = Object.prototype.hasOwnProperty.call(req.body || {}, 'selected_item');
+  const selectedItemRaw = req.body?.selected_item;
+  const selectedItem = selectedItemRaw ? {
+    pedido: String(selectedItemRaw.pedido || '').trim() || null,
+    ordem_producao: String(selectedItemRaw.ordem_producao || '').trim() || null,
+    modelo: String(selectedItemRaw.modelo || '').trim() || null,
+    cliente: String(selectedItemRaw.cliente || '').trim() || null,
+    nota_fiscal: String(selectedItemRaw.nota_fiscal || '').trim() || null,
+    data_entrega: String(selectedItemRaw.data_entrega || '').trim() || null,
+    teste_tipo_gas: String(selectedItemRaw.teste_tipo_gas || '').trim() || null,
+  } : null;
 
   // mapeamento campo_frontend -> coluna_db
   const FIELD_MAP = {
@@ -3950,7 +3961,7 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     }
   }
 
-  if (!setClauses.length)
+  if (!setClauses.length && !hasSelectedItem)
     return res.status(400).json({ ok: false, error: 'Nenhum campo válido enviado.' });
 
   const usuarioLogado = req.session?.user?.fullName
@@ -3964,16 +3975,58 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
   setClauses.push(`editado_em = NOW()`);
 
   const values = [...colValues, id];
+  const client = await pool.connect();
 
   try {
-    await pool.query(
+    await client.query('BEGIN');
+    await client.query(
       `UPDATE sac.at SET ${setClauses.join(', ')} WHERE id = $${values.length}`,
       values
     );
+
+    if (hasSelectedItem && selectedItem) {
+      const buscaValues = [
+        id,
+        selectedItem.pedido,
+        selectedItem.ordem_producao,
+        selectedItem.modelo,
+        selectedItem.cliente,
+        selectedItem.nota_fiscal,
+        selectedItem.data_entrega,
+        selectedItem.teste_tipo_gas,
+      ];
+
+      const updateBusca = await client.query(
+        `UPDATE sac.at_busca_selecionada
+            SET pedido = $2,
+                ordem_producao = $3,
+                modelo = $4,
+                cliente = $5,
+                nota_fiscal = $6,
+                data_entrega = $7,
+                teste_tipo_gas = $8
+          WHERE id_at = $1`,
+        buscaValues
+      );
+
+      if (updateBusca.rowCount === 0) {
+        await client.query(
+          `INSERT INTO sac.at_busca_selecionada (
+             id_at, pedido, ordem_producao, modelo, cliente, nota_fiscal, data_entrega, teste_tipo_gas
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          buscaValues
+        );
+      }
+    }
+
+    await client.query('COMMIT');
     return res.json({ ok: true, editado_por: usuarioLogado, editado_em: new Date().toISOString() });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     console.error('[SAC/AT] erro ao atualizar atendimento:', err);
     return res.status(500).json({ ok: false, error: 'Falha ao atualizar atendimento.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -5679,7 +5732,7 @@ router.post('/at/tecnicos/geocode', async (req, res) => {
       : `WHERE lat IS NULL`;
     const paramsMissing = uf ? [uf] : [];
     const { rows: missing } = await pool.query(
-      `SELECT ctid, cep, municipio, uf FROM sac.controle_tecnicos ${whereMissing}`,
+      `SELECT id, cep, municipio, uf FROM sac.controle_tecnicos ${whereMissing}`,
       paramsMissing
     );
 
@@ -5690,8 +5743,8 @@ router.post('/at/tecnicos/geocode', async (req, res) => {
         if (!c) c = await geocodeByNominatimBackend(t.municipio, t.uf);
         if (c) {
           await pool.query(
-            `UPDATE sac.controle_tecnicos SET lat = $1, lng = $2 WHERE ctid = $3`,
-            [c.lat, c.lng, t.ctid]
+            `UPDATE sac.controle_tecnicos SET lat = $1, lng = $2 WHERE id = $3`,
+            [c.lat, c.lng, t.id]
           );
         }
       }));
@@ -5836,16 +5889,16 @@ router.get('/at/tecnico/token', async (req, res) => {
   if (!nome) return res.status(400).json({ error: 'nome obrigatório' });
   try {
     const { rows } = await pool.query(
-      `SELECT id, ctid, nome, token FROM sac.controle_tecnicos WHERE nome = $1 LIMIT 1`,
+      `SELECT id, nome, token FROM sac.controle_tecnicos WHERE nome = $1 LIMIT 1`,
       [nome]
     );
     if (!rows.length) return res.status(404).json({ error: 'Técnico não encontrado' });
-    let { id: tecId, ctid, token } = rows[0];
+    let { id: tecId, token } = rows[0];
     if (!token) {
       token = crypto.randomBytes(32).toString('hex');
       await pool.query(
-        `UPDATE sac.controle_tecnicos SET token = $1 WHERE ctid = $2`,
-        [token, ctid]
+        `UPDATE sac.controle_tecnicos SET token = $1 WHERE id = $2`,
+        [token, tecId]
       );
     }
     // Vincula técnico ao fechamento existente (UPDATE); se não existir, cria linha mínima
@@ -5934,15 +5987,15 @@ router.post('/at/tecnico/set-senha', async (req, res) => {
   if (String(senha).length < 6) return res.status(400).json({ error: 'Senha deve ter no mínimo 6 dígitos' });
   try {
     const { rows } = await pool.query(
-      `SELECT ctid, senha FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
+      `SELECT id, senha FROM sac.controle_tecnicos WHERE token = $1 LIMIT 1`,
       [String(token)]
     );
     if (!rows.length) return res.status(404).json({ error: 'Link inválido' });
     if (rows[0].senha) return res.status(409).json({ error: 'Senha já cadastrada. Use o login.' });
     const hash = await bcrypt.hash(String(senha), BCRYPT_ROUNDS);
     await pool.query(
-      `UPDATE sac.controle_tecnicos SET senha = $1 WHERE ctid = $2`,
-      [hash, rows[0].ctid]
+      `UPDATE sac.controle_tecnicos SET senha = $1 WHERE id = $2`,
+      [hash, rows[0].id]
     );
     res.json({ ok: true });
   } catch (err) {
