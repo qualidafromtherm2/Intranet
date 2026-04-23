@@ -11764,10 +11764,10 @@ function _abrirAtEditModal(id) {
   setV('atEmFechMidias',     row.fech_midias);
 
   // Dados da Busca (at_busca_selecionada)
-  setV('atEmPedido',         row.pedido);
-  setV('atEmOrdemProducao',  row.ordem_producao);
-  setV('atEmNotaFiscal',     row.nota_fiscal);
-  setV('atEmDataEntrega',    row.data_entrega);
+  _atSetEditBuscaFieldValue('atEmPedido', row.pedido);
+  _atSetEditBuscaFieldValue('atEmOrdemProducao', row.ordem_producao);
+  _atSetEditBuscaFieldValue('atEmNotaFiscal', row.nota_fiscal);
+  _atSetEditBuscaFieldValue('atEmDataEntrega', row.data_entrega);
 
   // Reset mensagens
   const emSaved = document.getElementById('atEmSavedMsg');
@@ -12096,18 +12096,106 @@ let atSerieLastRows = [];
 let atSerieRenderedRows = [];
 let atSerieSelectedRow = null;
 let atIdExistente = null; // ID do AT já existente ao clicar em linha vermelha
+let atSerieSelectionContext = { mode: 'create', idAt: null };
 const atBuscaSpinner = document.getElementById('atBuscaSpinner');
 
-async function buscarSerieAt() {
-  const termo = atSerieBuscaInput?.value?.trim() || '';
+function setAtSerieSelectionContext(mode = 'create', idAt = null) {
+  atSerieSelectionContext = { mode, idAt: idAt ? String(idAt) : null };
+}
+
+function _atEditBuscaSetFeedback(text, isError = false) {
+  const okEl = document.getElementById('atEmSavedMsg');
+  const errEl = document.getElementById('atEmErrMsg');
+  if (isError) {
+    if (okEl) okEl.style.display = 'none';
+    if (errEl) {
+      errEl.textContent = text || 'Erro ao atualizar Dados da Busca.';
+      errEl.style.display = text ? 'inline' : 'none';
+    }
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+  if (okEl) {
+    okEl.textContent = text || '';
+    okEl.style.display = text ? 'inline' : 'none';
+  }
+}
+
+function _atSetEditBuscaFieldValue(elId, value) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.value = value ?? '';
+  el.dataset.lastBuscaValue = String(value ?? '').trim();
+}
+
+function _atAtualizarBuscaSelecionadaNoCache(idStr, rowData) {
+  const idx = _atAllRows.findIndex(r => String(r.id) === String(idStr));
+  if (idx === -1) return;
+  _atAllRows[idx] = {
+    ..._atAllRows[idx],
+    pedido: String(rowData.pedido || '').trim() || null,
+    ordem_producao: String(rowData.ordem_producao || '').trim() || null,
+    modelo: String(rowData.modelo || '').trim() || _atAllRows[idx].modelo,
+    cliente: String(rowData.cliente || '').trim() || null,
+    nota_fiscal: String(rowData.nota_fiscal || '').trim() || null,
+    data_entrega: String(rowData.data_entrega || '').trim() || null,
+    teste_tipo_gas: String(rowData.teste_tipo_gas || '').trim() || null,
+  };
+}
+
+async function _atAplicarBuscaSelecionadaNoEditModal(rowData) {
+  const id = _atEditModalCurrentId;
+  if (!id || !rowData) return;
+
+  _atEditBuscaSetFeedback('Associando Dados da Busca...', false);
+
+  const payload = {
+    selected_item: {
+      pedido: String(rowData.pedido || '').trim() || null,
+      ordem_producao: String(rowData.ordem_producao || '').trim() || null,
+      modelo: String(rowData.modelo || '').trim() || null,
+      cliente: String(rowData.cliente || '').trim() || null,
+      nota_fiscal: String(rowData.nota_fiscal || '').trim() || null,
+      data_entrega: String(rowData.data_entrega || '').trim() || null,
+      teste_tipo_gas: String(rowData.teste_tipo_gas || '').trim() || null,
+    }
+  };
+
+  const resp = await fetch(`/api/sac/at/atendimentos/${id}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || 'Falha ao associar Dados da Busca.');
+  }
+
+  _atSetEditBuscaFieldValue('atEmPedido', rowData.pedido);
+  _atSetEditBuscaFieldValue('atEmOrdemProducao', rowData.ordem_producao);
+  _atSetEditBuscaFieldValue('atEmNotaFiscal', rowData.nota_fiscal);
+  _atSetEditBuscaFieldValue('atEmDataEntrega', rowData.data_entrega);
+  _atAtualizarBuscaSelecionadaNoCache(String(id), rowData);
+  _atRenderCurrent();
+  _atEditBuscaSetFeedback('Dados da Busca associados com sucesso.', false);
+}
+
+async function buscarSerieAtComTermo(termoBruto, options = {}) {
+  const termo = String(termoBruto || '').trim();
+  const isEditMode = options.contextMode === 'edit';
   if (!termo || termo.length < 2) {
-    setAtSerieBuscaStatus('Digite ao menos 2 caracteres para pesquisar.', true);
+    if (isEditMode) _atEditBuscaSetFeedback('Digite ao menos 2 caracteres para pesquisar.', true);
+    else setAtSerieBuscaStatus('Digite ao menos 2 caracteres para pesquisar.', true);
     return;
   }
 
+  setAtSerieSelectionContext(options.contextMode || 'create', options.idAt || null);
+
   if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = true;
   if (atBuscaSpinner) atBuscaSpinner.style.display = 'block';
-  setAtSerieBuscaStatus('Pesquisando número de série...', false);
+  if (isEditMode) _atEditBuscaSetFeedback('Pesquisando dados...', false);
+  else setAtSerieBuscaStatus('Pesquisando número de série...', false);
 
   try {
     const resp = await fetch(`/api/sac/at/busca-serie?termo=${encodeURIComponent(termo)}`);
@@ -12121,21 +12209,57 @@ async function buscarSerieAt() {
     renderAtSerieRows(rows);
     const isRapido = atTipoAtendimentoInput?.value === 'Atendimento rápido';
     if (rows.length) {
-      setAtSerieBuscaStatus(`${rows.length} registro(s) encontrado(s).`, false);
+      if (isEditMode) _atEditBuscaSetFeedback(`${rows.length} registro(s) encontrado(s). Escolha um item.`, false);
+      else setAtSerieBuscaStatus(`${rows.length} registro(s) encontrado(s).`, false);
       if (atSerieReabrirBtn && !isRapido) atSerieReabrirBtn.style.display = 'inline-flex';
       openAtSerieModal();
     } else {
-      setAtSerieBuscaStatus('Nenhum registro encontrado para este número de série.', false);
+      if (isEditMode) _atEditBuscaSetFeedback('Nenhum registro encontrado para este valor.', true);
+      else setAtSerieBuscaStatus('Nenhum registro encontrado para este número de série.', false);
       if (atSerieReabrirBtn) atSerieReabrirBtn.style.display = 'none';
       closeAtSerieModal();
     }
   } catch (err) {
     console.error('[SAC/AT] erro na busca de serie', err);
-    setAtSerieBuscaStatus(err?.message || 'Erro ao buscar número de série.', true);
+    if (isEditMode) _atEditBuscaSetFeedback(err?.message || 'Erro ao buscar Dados da Busca.', true);
+    else setAtSerieBuscaStatus(err?.message || 'Erro ao buscar número de série.', true);
   } finally {
     if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = false;
     if (atBuscaSpinner) atBuscaSpinner.style.display = 'none';
   }
+}
+
+async function buscarSerieAt() {
+  return buscarSerieAtComTermo(atSerieBuscaInput?.value?.trim() || '', { contextMode: 'create' });
+}
+
+function _atBuscarDadosBuscaEditModal(term) {
+  return buscarSerieAtComTermo(term, { contextMode: 'edit', idAt: _atEditModalCurrentId });
+}
+
+function _atBindBuscaEditField(elId) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+
+  el.addEventListener('focus', () => {
+    el.dataset.lastBuscaValue = String(el.value || '').trim();
+  });
+
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const term = String(el.value || '').trim();
+    if (!term || term === String(el.dataset.lastBuscaValue || '').trim()) return;
+    el.dataset.lastBuscaValue = term;
+    _atBuscarDadosBuscaEditModal(term);
+  });
+
+  el.addEventListener('blur', () => {
+    const term = String(el.value || '').trim();
+    if (!term || term === String(el.dataset.lastBuscaValue || '').trim()) return;
+    el.dataset.lastBuscaValue = term;
+    _atBuscarDadosBuscaEditModal(term);
+  });
 }
 
 async function preencherEnderecoPorCepAt() {
@@ -12421,7 +12545,7 @@ if (atSerieModal) {
 }
 
 if (atSerieModalTbody) {
-  atSerieModalTbody.addEventListener('click', (e) => {
+  atSerieModalTbody.addEventListener('click', async (e) => {
     const nfeLink = e.target.closest('.at-nfe-link');
     if (nfeLink) {
       e.preventDefault();
@@ -12436,6 +12560,20 @@ if (atSerieModalTbody) {
     if (!Number.isFinite(idx) || idx < 0) return;
     const rowData = atSerieRenderedRows[idx];
     if (!rowData) return;
+
+    if (atSerieSelectionContext.mode === 'edit' && _atEditModalCurrentId) {
+      try {
+        await _atAplicarBuscaSelecionadaNoEditModal(rowData);
+        closeAtSerieModal();
+      } catch (err) {
+        console.error('[SAC/AT] erro ao aplicar Dados da Busca no modal de edição', err);
+        _atEditBuscaSetFeedback(err?.message || 'Erro ao associar Dados da Busca.', true);
+      } finally {
+        setAtSerieSelectionContext('create', null);
+      }
+      return;
+    }
+
     preencherAtSerieSelecionada(rowData);
 
     // Se a linha já tem atendimento registrado, preenche todos os campos do formulário
@@ -12476,6 +12614,9 @@ if (atSerieModalTbody) {
     abrirTelaAtFormulario();
   });
 }
+
+_atBindBuscaEditField('atEmPedido');
+_atBindBuscaEditField('atEmOrdemProducao');
 
 if (atNewOsBtn) {
   atNewOsBtn.addEventListener('click', () => {
