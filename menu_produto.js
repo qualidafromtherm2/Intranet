@@ -7257,8 +7257,24 @@ if (sacAtGraficosMenuLink) {
     e.preventDefault();
     document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
     sacAtGraficosMenuLink.classList.add('is-active');
-    showMainTab('sacAtGraficosPane');
-    _iniciarGrafAtPagina();
+
+    // O painel de gráficos está dentro do contêiner de AT, então o pai precisa permanecer visível.
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('grafico');
+    window._iniciarGrafAtPagina?.();
+  });
+}
+
+const vendasGraficosMenuLink = document.getElementById('menu-vendas-graficos');
+if (vendasGraficosMenuLink) {
+  vendasGraficosMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasGraficosMenuLink.classList.add('is-active');
+    // O painel de vendas está dentro do contêiner de AT, então o pai precisa ficar visível.
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas');
+    window._iniciarGrafVendasPagina?.();
   });
 }
 
@@ -11984,6 +12000,7 @@ async function carregarAtAtendimentos() {
 }
 
 function abrirTelaAtAtendimentos() {
+  setSacAtModoVisual('at');
   if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
   if (atFormModal) atFormModal.style.display = 'none';
   const pane = document.getElementById('sacAtPane');
@@ -12007,11 +12024,64 @@ function abrirTelaAtAtendimentos() {
 }
 
 function abrirTelaAtFormulario() {
+  setSacAtModoVisual('at');
   if (atAtendimentosView) atAtendimentosView.style.display = 'flex';
   if (atFormView) atFormView.style.display = 'block';
   if (atFormModal) atFormModal.style.display = 'flex';
   const pane = document.getElementById('sacAtPane');
   if (pane) pane.classList.remove('at-lista-ativa');
+}
+
+function setSacAtModoVisual(mode = 'at') {
+  const sacAtPane = document.getElementById('sacAtPane');
+  const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
+  const vendasGraficosPane = document.getElementById('vendasGraficosPane');
+  const wrapper = sacAtGraficosPane?.parentElement;
+  if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
+
+  if (mode === 'grafico') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === sacAtGraficosPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
+  if (mode === 'vendas') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasGraficosPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
+  Array.from(wrapper.children).forEach((child) => {
+    if (!(child instanceof HTMLElement)) return;
+    if (child === sacAtGraficosPane || child === vendasGraficosPane || child.id === 'atGraficosView') {
+      child.style.display = 'none';
+      return;
+    }
+    if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+      return;
+    }
+    child.style.display = '';
+  });
 }
 
 function mergeAtSerieRows(rows) {
@@ -13193,6 +13263,8 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
 // ── Página standalone "Gráfico AT" ──────────────────────────────────────────
 // Espelha a lógica da IIFE acima mas usa os elementos "#atGrafPg*"
 (function () {
+  let _pg0Instance = null;
+  let _pg01Instance = null;
   let _pg1Instance = null;
   let _pg2Instance = null;
   let _pgMesesSet  = [];
@@ -13231,6 +13303,162 @@ document.querySelectorAll('#atTabelaWrapper thead th[data-col]').forEach(th => {
   function _fmtOs(id) {
     const aa = String(new Date().getFullYear()).slice(-2);
     return `${aa} - ${id}`;
+  }
+
+  // ── Gráfico 0 — modelos com mais OS ────────────────────────────────────
+  async function _carregarPg0() {
+    const status = document.getElementById('atGrafPg0Status');
+    const canvas = document.getElementById('atGrafPg0Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const resp = await fetch('/api/sac/at/graficos/por-modelo-mes?tipo=Qualidade', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      let linhas = data.rows || [];
+      const CORES = ['#f59e0b','#ef4444','#14b8a6','#8b5cf6','#3b82f6','#22c55e','#f97316','#ec4899'];
+
+      if (_pgPeriodo > 0) {
+        const _hoje = new Date();
+        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
+        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
+        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
+        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
+      }
+
+      const totaisPorModelo = {};
+      linhas.forEach(r => {
+        const chave = r.modelo || '(sem modelo)';
+        totaisPorModelo[chave] = (totaisPorModelo[chave] || 0) + r.total;
+      });
+      const topModelos = Object.keys(totaisPorModelo)
+        .sort((a, b) => totaisPorModelo[b] - totaisPorModelo[a])
+        .slice(0, 5);
+      linhas = linhas.filter(r => topModelos.includes(r.modelo || '(sem modelo)'));
+
+      const modelos = [...new Set(linhas.map(r => r.modelo || '(sem modelo)'))];
+      const meses   = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels  = meses.map(_labelMes);
+
+      const datasets = modelos.map((modelo, idx) => ({
+        label: modelo,
+        data: meses.map(mes => {
+          const row = linhas.find(r => (r.modelo || '(sem modelo)') === modelo && r.mes === mes);
+          return row ? row.total : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_pg0Instance) { _pg0Instance.destroy(); _pg0Instance = null; }
+      const ctx = canvas.getContext('2d');
+      _pg0Instance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: {
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} OS`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
+  }
+
+  // ── Gráfico 0.1 — tags de problema com mais OS ─────────────────────────
+  async function _carregarPg01() {
+    const status = document.getElementById('atGrafPg01Status');
+    const canvas = document.getElementById('atGrafPg01Canvas');
+    if (!canvas) return;
+    if (status) { status.style.display = 'block'; status.textContent = 'Carregando...'; status.style.color = ''; }
+
+    try {
+      const resp = await fetch('/api/sac/at/graficos/por-tag-problema-mes', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      let linhas = data.rows || [];
+      const CORES = ['#f472b6','#ec4899','#d946ef','#8b5cf6','#fb7185','#e11d48','#a21caf','#c026d3'];
+
+      if (_pgPeriodo > 0) {
+        const _hoje = new Date();
+        const _mesAtual = `${_hoje.getFullYear()}-${String(_hoje.getMonth()+1).padStart(2,'0')}`;
+        const _dLim = new Date(_hoje.getFullYear(), _hoje.getMonth() - _pgPeriodo, 1);
+        const _limite = `${_dLim.getFullYear()}-${String(_dLim.getMonth()+1).padStart(2,'0')}`;
+        linhas = linhas.filter(r => r.mes >= _limite && r.mes < _mesAtual);
+      }
+
+      const totaisPorTag = {};
+      linhas.forEach(r => {
+        const chave = r.tag_problema || '(sem tag)';
+        totaisPorTag[chave] = (totaisPorTag[chave] || 0) + r.total;
+      });
+      const topTags = Object.keys(totaisPorTag)
+        .sort((a, b) => totaisPorTag[b] - totaisPorTag[a])
+        .slice(0, 5);
+      linhas = linhas.filter(r => topTags.includes(r.tag_problema || '(sem tag)'));
+
+      const tags = [...new Set(linhas.map(r => r.tag_problema || '(sem tag)'))];
+      const meses = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels = meses.map(_labelMes);
+
+      const datasets = tags.map((tag, idx) => ({
+        label: tag,
+        data: meses.map(mes => {
+          const row = linhas.find(r => (r.tag_problema || '(sem tag)') === tag && r.mes === mes);
+          return row ? row.total : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_pg01Instance) { _pg01Instance.destroy(); _pg01Instance = null; }
+      const ctx = canvas.getContext('2d');
+      _pg01Instance = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: {
+              callbacks: {
+                title: (items) => items[0]?.label || '',
+                label: (item) => ` ${item.dataset.label}: ${item.raw} OS`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: { beginAtZero: true, ticks: { color: '#94a3b8', stepSize: 1 }, grid: { color: 'rgba(255,255,255,.07)' } },
+          },
+        },
+      });
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) { status.textContent = err.message || 'Erro.'; status.style.color = '#f87171'; }
+    }
   }
 
   // ── Gráfico 1 — barras por estado ──────────────────────────────────────
@@ -13822,19 +14050,315 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
             b.style.background  = ativo ? 'rgba(79,70,229,.25)' : 'rgba(255,255,255,.04)';
             b.style.color       = ativo ? '#a5b4fc' : '#9ca3af';
           });
+          _carregarPg0();
+          _carregarPg01();
           _carregarPg1();
           _carregarPg2();
         });
       });
 
       const refreshBtn = document.getElementById('atGrafPgRefreshBtn');
-      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg1(); _carregarPg2(); });
+      if (refreshBtn) refreshBtn.addEventListener('click', () => { _carregarPg0(); _carregarPg01(); _carregarPg1(); _carregarPg2(); });
 
       const relatorioBtn = document.getElementById('atGrafPgRelatorioBtn');
       if (relatorioBtn) relatorioBtn.addEventListener('click', _gerarRelatorioGrafAt);
+
+      // ── Botões pizza ───────────────────────────────────────────────────
+      let _pizzaInstance = null;
+      const _pizzaModal  = document.getElementById('atGrafPizzaModal');
+      const _pizzaFechar = document.getElementById('atGrafPizzaFechar');
+      function _fecharPizza() {
+        if (_pizzaModal) _pizzaModal.style.display = 'none';
+        if (_pizzaInstance) { _pizzaInstance.destroy(); _pizzaInstance = null; }
+      }
+      if (_pizzaFechar) _pizzaFechar.addEventListener('click', _fecharPizza);
+      if (_pizzaModal)  _pizzaModal.addEventListener('click', e => { if (e.target === _pizzaModal) _fecharPizza(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') _fecharPizza(); });
+
+      document.querySelectorAll('.at-graf-pizza-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const canvasId = btn.dataset.canvasid;
+          const titulo   = btn.dataset.titulo || 'Distribuição';
+          const srcCanvas = document.getElementById(canvasId);
+          if (!srcCanvas) return;
+          const chart = Chart.getChart(srcCanvas);
+          if (!chart) return;
+
+          // Agrega cada dataset somando todos os valores do período visível
+          const agg = chart.data.datasets.map(ds => {
+            const total = (ds.data || []).reduce((s, v) => s + (Number(v) || 0), 0);
+            const cor   = typeof ds.borderColor === 'string' ? ds.borderColor
+                        : (typeof ds.backgroundColor === 'string' ? ds.backgroundColor : '#94a3b8');
+            return { label: ds.label || '?', total, cor };
+          }).filter(x => x.total > 0).sort((a, b) => b.total - a.total);
+
+          if (!agg.length) return;
+
+          const pizzaTitulo = document.getElementById('atGrafPizzaTitulo');
+          if (pizzaTitulo) pizzaTitulo.textContent = titulo + ' — Período selecionado';
+
+          if (_pizzaInstance) { _pizzaInstance.destroy(); _pizzaInstance = null; }
+          const pizzaCanvas = document.getElementById('atGrafPizzaCanvas');
+          if (!pizzaCanvas) return;
+
+          _pizzaInstance = new Chart(pizzaCanvas.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+              labels: agg.map(x => x.label),
+              datasets: [{
+                data: agg.map(x => x.total),
+                backgroundColor: agg.map(x => x.cor),
+                borderColor: '#1e293b',
+                borderWidth: 2,
+                hoverOffset: 10,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: true, position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
+                tooltip: {
+                  callbacks: {
+                    label: (item) => {
+                      const tot = item.dataset.data.reduce((a, b) => a + b, 0);
+                      const pct = tot ? ((item.raw / tot) * 100).toFixed(1) : 0;
+                      return ` ${item.label}: ${item.raw} OS (${pct}%)`;
+                    },
+                  },
+                },
+              },
+            },
+          });
+          _pizzaModal.style.display = 'flex';
+        });
+      });
     }
+    _carregarPg0();
+    _carregarPg01();
     _carregarPg1();
     _carregarPg2();
+  };
+})();
+
+// ── Gráficos Vendas ─────────────────────────────────────────────────────────
+(function () {
+  let _vendasGraf1Instance = null;
+  let _vendasPizzaInstance = null;
+  let _vendasPeriodo = 3;
+  let _vendasInit = false;
+
+  const MOEDA = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const CORES = ['#38bdf8','#0ea5e9','#06b6d4','#22d3ee','#0284c7','#2563eb','#14b8a6','#22c55e'];
+
+  function _labelMesVenda(yyyymm) {
+    const [y, m] = String(yyyymm || '').split('-');
+    if (!y || !m) return yyyymm || '';
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return `${nomes[parseInt(m, 10) - 1]}/${String(y).slice(-2)}`;
+  }
+
+  function _filtrarPeriodoVendas(linhas) {
+    if (_vendasPeriodo <= 0) return linhas;
+    const hoje = new Date();
+    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+    const limiteDate = new Date(hoje.getFullYear(), hoje.getMonth() - _vendasPeriodo, 1);
+    const limite = `${limiteDate.getFullYear()}-${String(limiteDate.getMonth() + 1).padStart(2, '0')}`;
+    return linhas.filter(r => r.mes >= limite && r.mes < mesAtual);
+  }
+
+  async function _carregarGrafVendas1() {
+    const status = document.getElementById('vendasGraf1Status');
+    const canvas = document.getElementById('vendasGraf1Canvas');
+    if (!canvas) return;
+    if (status) {
+      status.style.display = 'block';
+      status.textContent = 'Carregando...';
+      status.style.color = '';
+    }
+
+    try {
+      const resp = await fetch('/api/sac/vendas/graficos/valor-estado-mes', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      const linhasBase = data.rows || [];
+      let linhas = _filtrarPeriodoVendas(linhasBase);
+
+      // Evita tela em branco quando o período não tem registros.
+      if (!linhas.length && _vendasPeriodo > 0) {
+        linhas = linhasBase;
+        const btnTudo = document.querySelector('.vendas-graf-periodo-btn[data-per="0"]');
+        if (btnTudo) {
+          _vendasPeriodo = 0;
+          document.querySelectorAll('.vendas-graf-periodo-btn').forEach(b => {
+            const ativo = b === btnTudo;
+            b.style.borderColor = ativo ? '#0ea5e9' : '#374151';
+            b.style.background = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+            b.style.color = ativo ? '#7dd3fc' : '#9ca3af';
+          });
+        }
+      }
+
+      if (!linhas.length) {
+        if (_vendasGraf1Instance) { _vendasGraf1Instance.destroy(); _vendasGraf1Instance = null; }
+        if (status) {
+          status.style.display = 'block';
+          status.textContent = 'Sem dados de vendas para exibir.';
+          status.style.color = '#fbbf24';
+        }
+        return;
+      }
+
+      const totais = {};
+      linhas.forEach(r => {
+        const estado = r.estado || 'N/D';
+        totais[estado] = (totais[estado] || 0) + (Number(r.valor_total) || 0);
+      });
+
+      const topEstados = Object.keys(totais)
+        .sort((a, b) => totais[b] - totais[a])
+        .slice(0, 7);
+      linhas = linhas.filter(r => topEstados.includes(r.estado || 'N/D'));
+
+      const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
+      const meses = [...new Set(linhas.map(r => r.mes))].sort();
+      const labels = meses.map(_labelMesVenda);
+
+      const datasets = estados.map((estado, idx) => ({
+        label: estado,
+        data: meses.map(mes => {
+          const row = linhas.find(r => (r.estado || 'N/D') === estado && r.mes === mes);
+          return row ? Number(row.valor_total || 0) : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_vendasGraf1Instance) { _vendasGraf1Instance.destroy(); _vendasGraf1Instance = null; }
+      _vendasGraf1Instance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: {
+              callbacks: {
+                label: (item) => ` ${item.dataset.label}: ${MOEDA.format(Number(item.raw || 0))}`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#94a3b8',
+                callback: (v) => MOEDA.format(Number(v || 0)),
+              },
+              grid: { color: 'rgba(255,255,255,.07)' },
+            },
+          },
+        },
+      });
+
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) {
+        status.textContent = err.message || 'Erro.';
+        status.style.color = '#f87171';
+      }
+    }
+  }
+
+  window._iniciarGrafVendasPagina = function () {
+    if (!_vendasInit) {
+      _vendasInit = true;
+
+      document.querySelectorAll('.vendas-graf-periodo-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _vendasPeriodo = parseInt(btn.dataset.per, 10);
+          document.querySelectorAll('.vendas-graf-periodo-btn').forEach(b => {
+            const ativo = b === btn;
+            b.style.borderColor = ativo ? '#0ea5e9' : '#374151';
+            b.style.background = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+            b.style.color = ativo ? '#7dd3fc' : '#9ca3af';
+          });
+          _carregarGrafVendas1();
+        });
+      });
+
+      const refreshBtn = document.getElementById('vendasGrafRefreshBtn');
+      if (refreshBtn) refreshBtn.addEventListener('click', _carregarGrafVendas1);
+
+      const modal = document.getElementById('vendasGrafPizzaModal');
+      const fechar = document.getElementById('vendasGrafPizzaFechar');
+      const fecharModal = () => {
+        if (modal) modal.style.display = 'none';
+        if (_vendasPizzaInstance) { _vendasPizzaInstance.destroy(); _vendasPizzaInstance = null; }
+      };
+      if (fechar) fechar.addEventListener('click', fecharModal);
+      if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) fecharModal(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharModal(); });
+
+      document.querySelectorAll('.vendas-graf-pizza-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const src = document.getElementById(btn.dataset.canvasid || '');
+          const chart = src ? Chart.getChart(src) : null;
+          if (!chart) return;
+
+          const agg = chart.data.datasets.map(ds => {
+            const total = (ds.data || []).reduce((s, v) => s + (Number(v) || 0), 0);
+            const cor = typeof ds.borderColor === 'string' ? ds.borderColor : '#94a3b8';
+            return { label: ds.label || '?', total, cor };
+          }).filter(x => x.total > 0).sort((a, b) => b.total - a.total);
+
+          if (!agg.length) return;
+          const canvasPizza = document.getElementById('vendasGrafPizzaCanvas');
+          const titulo = document.getElementById('vendasGrafPizzaTitulo');
+          if (!canvasPizza || !modal) return;
+          if (titulo) titulo.textContent = `${btn.dataset.titulo || 'Vendas por estado'} — Período selecionado`;
+
+          if (_vendasPizzaInstance) { _vendasPizzaInstance.destroy(); _vendasPizzaInstance = null; }
+          _vendasPizzaInstance = new Chart(canvasPizza.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+              labels: agg.map(x => x.label),
+              datasets: [{
+                data: agg.map(x => x.total),
+                backgroundColor: agg.map(x => x.cor),
+                borderColor: '#1e293b',
+                borderWidth: 2,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: true, position: 'right', labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
+                tooltip: {
+                  callbacks: {
+                    label: (item) => {
+                      const tot = item.dataset.data.reduce((a, b) => a + b, 0);
+                      const pct = tot ? ((item.raw / tot) * 100).toFixed(1) : 0;
+                      return ` ${item.label}: ${MOEDA.format(Number(item.raw || 0))} (${pct}%)`;
+                    },
+                  },
+                },
+              },
+            },
+          });
+
+          modal.style.display = 'flex';
+        });
+      });
+    }
+
+    _carregarGrafVendas1();
   };
 })();
 
@@ -43920,6 +44444,21 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
       numeroPedido,
       preview: data.preview
     };
+
+    if (window.__associarNfeRecebimentoAtual && data?.preview?.categoria) {
+      window.__associarNfeRecebimentoAtual = {
+        ...window.__associarNfeRecebimentoAtual,
+        categoria: data.preview.categoria
+      };
+    }
+
+    const categoriaInfo = data?.preview?.categoria || window.__associarNfeRecebimentoAtual?.categoria || null;
+    if (categoriaInfo?.inativa) {
+      await carregarSeletorCategoriasAssociarNfe(categoriaInfo.codigo || '', categoriaInfo.descricao || '');
+    } else {
+      const pickerCategoria = document.getElementById('modalAssociarCategoriaPicker');
+      if (pickerCategoria) pickerCategoria.style.display = 'none';
+    }
 
     renderPreviewAssociacaoPedidoNfe(data.preview);
 

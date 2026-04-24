@@ -391,6 +391,28 @@
   </div>
 </div>
 
+<!-- Nova categoria: Vendas -->
+<div class="side-wrapper">
+  <div class="side-title"
+       data-nav-key="side:vendas"
+       data-nav-pos="side"
+       data-nav-label="Vendas">Vendas</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-vendas-graficos"
+       class="menu-link"
+       data-nav-key="side:vendas:graficos"
+       data-nav-parent="side:vendas"
+       data-nav-pos="side"
+       data-nav-label="Gráficos"
+       data-nav-selector="#menu-vendas-graficos">
+      <i class="fa-solid fa-chart-column" style="margin-right:8px;"></i>
+      Gráficos
+    </a>
+  </div>
+</div>
+
 <!-- Nova categoria: Compras -->
 <div class="side-wrapper">
   <div class="side-title"
@@ -4269,11 +4291,44 @@
                 </div>
               </div>
 
+              <!-- Gráfico 0 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
+                <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:12px;display:flex;align-items:center;gap:6px;justify-content:space-between;">
+                  <span style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    Gráfico 0 — Grupos de modelo com mais OS (Qualidade)
+                  </span>
+                  <button class="at-graf-pizza-btn" data-canvasid="atGrafPg0Canvas" data-titulo="Grupos de modelo com mais OS" title="Ver como pizza" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;"><i class="fa-solid fa-chart-pie"></i></button>
+                </div>
+                <div id="atGrafPg0Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:320px;">
+                  <canvas id="atGrafPg0Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Gráfico 0.1 -->
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
+                <div style="font-size:13px;font-weight:700;color:#f472b6;margin-bottom:12px;display:flex;align-items:center;gap:6px;justify-content:space-between;">
+                  <span style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-tags"></i>
+                    Gráfico 0.1 — Tags de problema com mais OS (Qualidade)
+                  </span>
+                  <button class="at-graf-pizza-btn" data-canvasid="atGrafPg01Canvas" data-titulo="Tags de problema com mais OS" title="Ver como pizza" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;"><i class="fa-solid fa-chart-pie"></i></button>
+                </div>
+                <div id="atGrafPg01Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:320px;">
+                  <canvas id="atGrafPg01Canvas"></canvas>
+                </div>
+              </div>
+
               <!-- Gráfico 1 -->
               <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
-                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-map-location-dot"></i>
-                  Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)
+                <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;justify-content:space-between;">
+                  <span style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-map-location-dot"></i>
+                    Gráfico 1 — Atendimentos por Estado / Mês (Qualidade)
+                  </span>
+                  <button class="at-graf-pizza-btn" data-canvasid="atGrafPg1Canvas" data-titulo="Atendimentos por Estado" title="Ver como pizza" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;"><i class="fa-solid fa-chart-pie"></i></button>
                 </div>
                 <div id="atGrafPg1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
                 <div style="position:relative;height:340px;">
@@ -4283,13 +4338,29 @@
 
               <!-- Gráfico 2 -->
               <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:18px;">
-                <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-chart-line"></i>
-                  Gráfico 2 — Picos de Atendimento por Mês
+                <div style="font-size:13px;font-weight:700;color:#34d399;margin-bottom:12px;display:flex;align-items:center;gap:6px;justify-content:space-between;">
+                  <span style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-chart-line"></i>
+                    Gráfico 2 — Picos de Atendimento por Mês
+                  </span>
+                  <button class="at-graf-pizza-btn" data-canvasid="atGrafPg2Canvas" data-titulo="Picos de Atendimento por Mês" title="Ver como pizza" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;"><i class="fa-solid fa-chart-pie"></i></button>
                 </div>
                 <div id="atGrafPg2Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
                 <div style="position:relative;height:280px;">
                   <canvas id="atGrafPg2Canvas"></canvas>
+                </div>
+              </div>
+
+              <!-- Modal Pizza -->
+              <div id="atGrafPizzaModal" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.75);align-items:center;justify-content:center;">
+                <div style="background:#1e293b;border:1px solid #334155;border-radius:16px;padding:24px;width:min(500px,92vw);position:relative;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                    <span id="atGrafPizzaTitulo" style="font-size:14px;font-weight:700;color:#e5e7eb;"></span>
+                    <button id="atGrafPizzaFechar" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;padding:4px 8px;line-height:1;"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                  <div style="position:relative;height:340px;">
+                    <canvas id="atGrafPizzaCanvas"></canvas>
+                  </div>
                 </div>
               </div>
 
@@ -4320,6 +4391,58 @@
                 </div>
               </div>
 
+            </div>
+          </div>
+        </div>
+
+        <!-- Painel Vendas: Gráficos -->
+        <div id="vendasGraficosPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-chart-column" style="color:#38bdf8;"></i>
+                  Gráficos de Vendas
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+                  <div style="display:flex;gap:6px;">
+                    <button class="vendas-graf-periodo-btn" data-per="3" style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.22);color:#7dd3fc;font-size:12px;cursor:pointer;">3 meses</button>
+                    <button class="vendas-graf-periodo-btn" data-per="6" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">6 meses</button>
+                    <button class="vendas-graf-periodo-btn" data-per="12" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">12 meses</button>
+                    <button class="vendas-graf-periodo-btn" data-per="0" style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;">Tudo</button>
+                  </div>
+                  <button id="vendasGrafRefreshBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
+                <div style="font-size:13px;font-weight:700;color:#7dd3fc;margin-bottom:12px;display:flex;align-items:center;gap:6px;justify-content:space-between;">
+                  <span style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-map-location-dot"></i>
+                    Gráfico 1 — Estado com maior valor de vendas por mês
+                  </span>
+                  <button class="vendas-graf-pizza-btn" data-canvasid="vendasGraf1Canvas" data-titulo="Valor de vendas por estado" title="Ver como pizza" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:16px;padding:3px 6px;border-radius:6px;line-height:1;"><i class="fa-solid fa-chart-pie"></i></button>
+                </div>
+                <div id="vendasGraf1Status" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;display:none;">Carregando...</div>
+                <div style="position:relative;height:360px;">
+                  <canvas id="vendasGraf1Canvas"></canvas>
+                </div>
+              </div>
+
+              <div id="vendasGrafPizzaModal" style="display:none;position:fixed;inset:0;z-index:9990;background:rgba(0,0,0,.75);align-items:center;justify-content:center;">
+                <div style="background:#1e293b;border:1px solid #334155;border-radius:16px;padding:24px;width:min(500px,92vw);position:relative;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                    <span id="vendasGrafPizzaTitulo" style="font-size:14px;font-weight:700;color:#e5e7eb;"></span>
+                    <button id="vendasGrafPizzaFechar" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;padding:4px 8px;line-height:1;"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                  <div style="position:relative;height:340px;">
+                    <canvas id="vendasGrafPizzaCanvas"></canvas>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -13659,7 +13782,8 @@ function attachDropZone(ul) {
     produto_recebido: ['menu-produto-recebido'],
     sincronizacao: ['menu-sincronizar-produtos'],
     colaboradores: ['btn-colaboradores'],
-    grafico_at: ['menu-sac-at-graficos']
+    grafico_at: ['menu-sac-at-graficos'],
+    vendas_graficos: ['menu-vendas-graficos']
   };
   const PURCHASE_MODE = {
     OMIE: 'omie',

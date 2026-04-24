@@ -187,6 +187,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/auth/',          // login, status, logout, first-password, tema
   '/api/client-log',     // log de erros do front (já validado/limitado)
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
+  '/api/produtos/webhook',// webhook Omie de produtos (validado por token na rota)
   '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
   '/api/cep',            // consulta de CEP (proxy público)
   // ── Portal AT (técnicos externos — auth própria via token AT) ──
@@ -13157,20 +13158,25 @@ function extractNotaVendaFields(body = {}) {
     || (body.cabec && typeof body.cabec === 'object' ? body.cabec : null)
     || {};
 
+  // Omie Connect 2.0 usa campos snake_case diferentes dos campos clássicos
   const numeroNota = pickField({ body, event, cab }, [
+    'event.numero_nf',    // Connect 2.0
     'event.numero_nota', 'event.numeroNota', 'event.cNumeroNFe', 'event.cNumeroNFSe',
     'cab.cNumeroNFe', 'cab.cNumeroNFSe', 'body.numero_nota', 'body.numeroNota'
   ]);
   const chaveNfe = pickField({ body, event, cab }, [
+    'event.nfe_chave',    // Connect 2.0
     'event.cChaveNFe', 'event.cChaveNfe', 'cab.cChaveNFe', 'cab.cChaveNfe',
     'body.cChaveNFe', 'body.cChaveNfe', 'body.chave_nfe'
   ]);
   const numeroPedido = pickField({ body, event, cab }, [
+    'event.id_pedido',    // Connect 2.0 (ID interno Omie)
     'event.numero_pedido', 'event.numeroPedido', 'event.cNumeroPedido',
     'cab.numero_pedido', 'cab.numeroPedido', 'cab.cNumeroPedido',
     'body.numero_pedido', 'body.numeroPedido'
   ]);
   const cnpjEmitente = pickField({ body, event, cab }, [
+    'event.empresa_cnpj', // Connect 2.0
     'event.cnpj_emitente', 'event.cCNPJ', 'event.cnpj',
     'cab.cCNPJ', 'cab.cnpj', 'body.cnpj_emitente', 'body.cnpj'
   ]);
@@ -13183,10 +13189,16 @@ function extractNotaVendaFields(body = {}) {
     'cab.nValorTotal', 'cab.nValorNota', 'body.valor_total'
   ]);
   const valorTotal = valorRaw !== null ? Number(String(valorRaw).replace(',', '.')) : null;
-  const dataEmissao = pickField({ body, event, cab }, [
+  // Connect 2.0 usa data_emis em formato ISO (ex: "2026-04-22T00:00:00-03:00")
+  const dataEmissaoRaw = pickField({ body, event, cab }, [
+    'event.data_emis',    // Connect 2.0
     'event.data_emissao', 'event.dEmissao', 'event.dEmi',
     'cab.dEmissao', 'cab.data_emissao', 'body.data_emissao'
   ]);
+  // Normaliza para YYYY-MM-DD se vier em formato ISO
+  const dataEmissao = dataEmissaoRaw
+    ? String(dataEmissaoRaw).trim().slice(0, 10)
+    : null;
 
   return {
     event,
@@ -13196,7 +13208,7 @@ function extractNotaVendaFields(body = {}) {
     cnpjEmitente: cnpjEmitente ? String(cnpjEmitente).trim() : null,
     razaoEmitente: razaoEmitente ? String(razaoEmitente).trim() : null,
     valorTotal: Number.isFinite(valorTotal) ? valorTotal : null,
-    dataEmissao: dataEmissao ? String(dataEmissao).trim() : null,
+    dataEmissao: dataEmissao || null,
   };
 }
 
@@ -29028,8 +29040,38 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     itens_nf_total: itensReceb.length,
     itens_match_total: previewItens.filter(item => item.pedido_item_encontrado).length,
     itens_sem_match_total: previewItens.filter(item => !item.pedido_item_encontrado).length,
+    recebimento_omie: recebimento,
     itens_preview: previewItens,
     itensRecebimentoEditar
+  };
+}
+
+async function obterInfoCategoriaRecebimentoOmie(recebimento) {
+  const cCategCompraConsultar = String(
+    recebimento?.infoAdicionais?.cCategCompra
+    || recebimento?.cabec?.cCategCompra
+    || recebimento?.cabec?.c_categoria_compra
+    || ''
+  ).trim();
+
+  if (!cCategCompraConsultar) return null;
+
+  const codigoSemPontuacao = cCategCompraConsultar.replace(/\./g, '');
+  const catResult = await pool.query(
+    `SELECT codigo, descricao, conta_inativa
+       FROM configuracoes."ListarCategorias"
+      WHERE codigo = $1
+         OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+      ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+      LIMIT 1`,
+    [cCategCompraConsultar, codigoSemPontuacao]
+  ).catch(() => ({ rows: [] }));
+
+  const catRow = catResult.rows[0] || null;
+  return {
+    codigo: catRow?.codigo || cCategCompraConsultar,
+    descricao: catRow?.descricao || cCategCompraConsultar,
+    inativa: catRow?.conta_inativa === 'S'
   };
 }
 
@@ -29066,33 +29108,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
     }
 
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimento);
-
-    // Verifica se a categoria de compra do recebimento está inativa
-    const cCategCompraConsultar = String(
-      recebimento?.infoAdicionais?.cCategCompra
-      || recebimento?.cabec?.cCategCompra
-      || recebimento?.cabec?.c_categoria_compra
-      || ''
-    ).trim();
-    let categoriaInfo = null;
-    if (cCategCompraConsultar) {
-      const codigoSemPontuacao = cCategCompraConsultar.replace(/\./g, '');
-      const catResult = await pool.query(
-        `SELECT codigo, descricao, conta_inativa
-           FROM configuracoes."ListarCategorias"
-          WHERE codigo = $1
-             OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
-          ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
-          LIMIT 1`,
-        [cCategCompraConsultar, codigoSemPontuacao]
-      ).catch(() => ({ rows: [] }));
-      const catRow = catResult.rows[0] || null;
-      categoriaInfo = {
-        codigo: catRow?.codigo || cCategCompraConsultar,
-        descricao: catRow?.descricao || cCategCompraConsultar,
-        inativa: catRow?.conta_inativa === 'S'
-      };
-    }
+    const categoriaInfo = await obterInfoCategoriaRecebimentoOmie(recebimento);
 
     return res.json({
       ok: true,
@@ -29135,6 +29151,8 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
     );
     gravarCachePlanoAssociacaoNfePedido(chaveCachePlano, plano, 120000);
 
+    const categoriaInfo = await obterInfoCategoriaRecebimentoOmie(plano?.recebimento_omie);
+
     return res.json({
       ok: true,
       preview: {
@@ -29146,6 +29164,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/preview', express.json()
         itens_pedido_total: plano.itens_pedido_total,
         itens_match_total: plano.itens_match_total,
         itens_sem_match_total: plano.itens_sem_match_total,
+        categoria: categoriaInfo,
         itens: plano.itens_preview
       }
     });

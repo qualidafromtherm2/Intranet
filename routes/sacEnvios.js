@@ -5606,6 +5606,109 @@ router.get('/at/graficos/por-estado-mes', async (req, res) => {  try {
   }
 });
 
+// GET /at/graficos/por-modelo-mes — quantidade de atendimentos por modelo agrupado por mês/ano
+router.get('/at/graficos/por-modelo-mes', async (req, res) => {
+  try {
+    const tipo = String(req.query.tipo || '').trim();
+    const params = [];
+    const whereExtra = tipo ? ` AND LOWER(tipo) = LOWER($1)` : '';
+    if (tipo) params.push(tipo);
+
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(
+          NULLIF(
+            CONCAT(
+              COALESCE(SUBSTRING(TRIM(s.modelo) FROM '^[A-Za-z]+'), ''),
+              CASE
+                WHEN UPPER(TRIM(s.modelo)) ~ 'BR$' THEN 'BR'
+                WHEN UPPER(TRIM(s.modelo)) ~ 'W$'  THEN 'W'
+                ELSE ''
+              END
+            ),
+            ''
+          ),
+          '(sem modelo)'
+        )                                                  AS modelo,
+        TO_CHAR(DATE_TRUNC('month', a.data), 'YYYY-MM')    AS mes,
+        COUNT(*)::int                                      AS total
+      FROM sac.at a
+      LEFT JOIN sac.at_busca_selecionada s ON s.id_at = a.id
+      WHERE a.data IS NOT NULL${whereExtra}
+      GROUP BY 1, 2
+      ORDER BY 2, 1
+    `, params);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos por-modelo-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /at/graficos/por-tag-problema-mes — quantidade de atendimentos por tag_problema agrupada por mês/ano
+router.get('/at/graficos/por-tag-problema-mes', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(NULLIF(TRIM(tag_problema), ''), '(sem tag)') AS tag_problema,
+        TO_CHAR(DATE_TRUNC('month', data), 'YYYY-MM')         AS mes,
+        COUNT(*)::int                                         AS total
+      FROM sac.at
+      WHERE data IS NOT NULL
+        AND LOWER(TRIM(COALESCE(tipo, ''))) != 'atendimento rápido'
+      GROUP BY 1, 2
+      ORDER BY 2, 1
+    `);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[SAC/AT] erro graficos por-tag-problema-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/valor-estado-mes — soma do valor_total_pedido por estado agrupada por mês/ano
+router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      WITH nf_por_pedido AS (
+        SELECT
+          numero_pedido,
+          MAX(
+            CASE
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+                THEN LEFT(TRIM(data_emissao), 10)::date
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
+                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
+              ELSE NULL
+            END
+          ) AS data_emissao_dt
+        FROM "Vendas".notas_fiscais_omie
+        GROUP BY numero_pedido
+      )
+      SELECT
+        COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D')                        AS estado,
+        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM')        AS mes,
+        SUM(COALESCE(p.valor_total_pedido, 0))::numeric(14,2)              AS valor_total
+      FROM "Vendas".pedidos_venda p
+      JOIN nf_por_pedido nf
+        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+      LEFT JOIN omie.fornecedores f
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+      WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
+        AND nf.data_emissao_dt IS NOT NULL
+      GROUP BY 1, 2
+      ORDER BY 2, 1
+    `);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro graficos valor-estado-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // CRUD sac.alimentacao
 router.get('/at/alimentacao', async (req, res) => {
   try {
