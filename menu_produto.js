@@ -7278,6 +7278,43 @@ if (vendasGraficosMenuLink) {
   });
 }
 
+const vendasControleMenuLink = document.getElementById('menu-vendas-controle');
+if (vendasControleMenuLink) {
+  vendasControleMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasControleMenuLink.classList.add('is-active');
+    // O painel de vendas está dentro do contêiner de AT, então o pai precisa ficar visível.
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas-controle');
+    window._iniciarControleVendasPagina?.();
+  });
+}
+
+const vendasKanbanMenuLink = document.getElementById('menu-vendas-kanban');
+if (vendasKanbanMenuLink) {
+  vendasKanbanMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasKanbanMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas-kanban');
+    window._iniciarKanbanVendasPagina?.();
+  });
+}
+
+const vendasMapaMenuLink = document.getElementById('menu-vendas-mapa');
+if (vendasMapaMenuLink) {
+  vendasMapaMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasMapaMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas-mapa');
+    window._iniciarMapaVendasPagina?.();
+  });
+}
+
 // COMPRAS: Configurações de Departamentos e Categorias
 const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
 if (comprasConfigMenuLink) {
@@ -12036,6 +12073,9 @@ function setSacAtModoVisual(mode = 'at') {
   const sacAtPane = document.getElementById('sacAtPane');
   const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
+  const vendasControlePane = document.getElementById('vendasControlePane');
+  const vendasKanbanPane = document.getElementById('vendasKanbanPane');
+  const vendasMapaPane = document.getElementById('vendasMapaPane');
   const wrapper = sacAtGraficosPane?.parentElement;
   if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
 
@@ -12071,9 +12111,57 @@ function setSacAtModoVisual(mode = 'at') {
     return;
   }
 
+  if (mode === 'vendas-controle') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasControlePane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
+  if (mode === 'vendas-kanban') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasKanbanPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
+  if (mode === 'vendas-mapa') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasMapaPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === vendasGraficosPane || child.id === 'atGraficosView') {
+    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasKanbanPane || child === vendasMapaPane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -12129,6 +12217,125 @@ function mergeAtSerieRows(rows) {
     pedido: Array.isArray(row.pedido_list) && row.pedido_list.length ? row.pedido_list.join(' / ') : row.pedido,
   }));
 }
+
+  // === Vendas: Kanban de vendas por etapa =====================================
+  (() => {
+    const board = document.getElementById('vendasKanbanBoard');
+    const status = document.getElementById('vendasKanbanStatus');
+    const refreshBtn = document.getElementById('vendasKanbanRefreshBtn');
+
+    let iniciado = false;
+    let carregando = false;
+
+    const ETAPAS = [
+      'PDV (Em Aprovação)',
+      'Entrega Futura',
+      'Faturar',
+      'Faturado',
+      'Entregue',
+      'Aprovado'
+    ];
+
+    const ETAPA_CORES = {
+      'Proposta': '#64748b',
+      'PDV (Em Aprovação)': '#f59e0b',
+      'Entrega Futura': '#a78bfa',
+      'Faturar': '#fb7185',
+      'Faturado': '#38bdf8',
+      'Entregue': '#22c55e',
+      'Aprovado': '#14b8a6',
+    };
+
+    function esc(v) {
+      return String(v ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function fmtMoeda(v) {
+      return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function fmtData(v) {
+      if (!v) return '-';
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return '-';
+      return d.toLocaleDateString('pt-BR');
+    }
+
+    function renderKanban(colunas = {}) {
+      if (!board) return;
+      board.innerHTML = '';
+
+      ETAPAS.forEach((etapaNome) => {
+        const cor = ETAPA_CORES[etapaNome] || '#64748b';
+        const cards = Array.isArray(colunas[etapaNome]) ? colunas[etapaNome] : [];
+
+        const col = document.createElement('div');
+        col.style.cssText = 'flex:0 0 250px;display:flex;flex-direction:column;background:rgba(255,255,255,.02);border:1px solid #1e293b;border-radius:12px;overflow:hidden;';
+
+        const cardsHtml = cards.length
+          ? cards.map((c) => `
+              <div style="background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;margin:8px;">
+                <div style="font-size:16px;font-weight:800;color:#f59e0b;line-height:1;">${esc(c.numero_pedido || '-')}</div>
+                <div style="margin-top:8px;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between;gap:8px;">
+                  <span>${esc(fmtData(c.created_at))}</span>
+                  <span>${esc(fmtMoeda(c.valor_total_pedido))}</span>
+                </div>
+              </div>
+            `).join('')
+          : '<div style="padding:12px;color:#64748b;font-size:12px;text-align:center;">Nenhum pedido</div>';
+
+        col.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1e293b;background:rgba(2,6,23,.8);">
+            <span style="font-size:13px;font-weight:700;color:${cor};">${esc(etapaNome)}</span>
+            <span style="font-size:11px;font-weight:700;color:#cbd5e1;background:rgba(148,163,184,.15);padding:2px 8px;border-radius:999px;">${cards.length}</span>
+          </div>
+          <div style="max-height:60vh;overflow:auto;">${cardsHtml}</div>
+        `;
+
+        board.appendChild(col);
+      });
+    }
+
+    async function carregarKanban() {
+      if (!board || carregando) return;
+      carregando = true;
+      if (status) {
+        status.style.display = 'block';
+        status.style.color = 'var(--inactive-color)';
+        status.textContent = 'Carregando kanban de vendas...';
+      }
+
+      try {
+        const resp = await fetch('/api/sac/vendas/kanban/pedidos', { credentials: 'include' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar kanban.');
+        renderKanban(data.colunas || {});
+        if (status) status.style.display = 'none';
+      } catch (err) {
+        if (status) {
+          status.style.display = 'block';
+          status.style.color = '#f87171';
+          status.textContent = err.message || 'Erro ao carregar kanban.';
+        }
+        board.innerHTML = '<div style="padding:10px;color:#fca5a5;font-size:12px;">Falha ao carregar dados.</div>';
+      } finally {
+        carregando = false;
+      }
+    }
+
+    window._iniciarKanbanVendasPagina = function () {
+      if (!iniciado) {
+        iniciado = true;
+        if (refreshBtn) refreshBtn.addEventListener('click', carregarKanban);
+      }
+      carregarKanban();
+    };
+  })();
 
 function renderAtSerieRows(rows) {
   if (!atSerieModalTbody) return;
@@ -14144,12 +14351,143 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
 // ── Gráficos Vendas ─────────────────────────────────────────────────────────
 (function () {
   let _vendasGraf1Instance = null;
+  let _vendasGraf2Instance = null;
+  let _vendasGraf3Instance = null;
   let _vendasPizzaInstance = null;
   let _vendasPeriodo = 3;
   let _vendasInit = false;
 
   const MOEDA = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const QTD = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   const CORES = ['#38bdf8','#0ea5e9','#06b6d4','#22d3ee','#0284c7','#2563eb','#14b8a6','#22c55e'];
+  const ETAPAS_ORDEM = ['00', '10', '20', '50', '60', '70', '80', 'Sem etapa'];
+  const ETAPAS_CORES = {
+    '00': '#94a3b8',
+    '10': '#f59e0b',
+    '20': '#a78bfa',
+    '50': '#fb7185',
+    '60': '#38bdf8',
+    '70': '#14b8a6',
+    '80': '#22c55e',
+    'Sem etapa': '#64748b',
+  };
+
+  function _indiceEtapa(etapa) {
+    const idx = ETAPAS_ORDEM.indexOf(String(etapa || 'Sem etapa'));
+    return idx === -1 ? 999 : idx;
+  }
+
+  function _corEtapa(etapa) {
+    return ETAPAS_CORES[String(etapa || 'Sem etapa')] || '#94a3b8';
+  }
+
+  function _limparDetalheGraf1() {
+    const wrap = document.getElementById('vendasGraf1DetalheWrap');
+    const tb = document.getElementById('vendasGraf1DetalheTbody');
+    if (tb) tb.innerHTML = '';
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  function _limparDetalheGraf2() {
+    const wrap = document.getElementById('vendasGraf2DetalheWrap');
+    const tb = document.getElementById('vendasGraf2DetalheTbody');
+    if (tb) tb.innerHTML = '';
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  function _limparDetalheGraf3() {
+    const wrap = document.getElementById('vendasGraf3DetalheWrap');
+    const tb = document.getElementById('vendasGraf3DetalheTbody');
+    if (tb) tb.innerHTML = '';
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  function _renderDetalheCarregando(wrapId, titleId, tbodyId, titulo, colSpan) {
+    const wrap = document.getElementById(wrapId);
+    const head = document.getElementById(titleId);
+    const tb = document.getElementById(tbodyId);
+    if (!wrap || !tb) return;
+    if (head) head.textContent = titulo || 'Carregando...';
+    tb.innerHTML = `
+      <tr>
+        <td colspan="${colSpan}" style="padding:10px 8px;color:#93c5fd;text-align:center;">
+          <i class="fa-solid fa-spinner fa-spin" style="margin-right:6px;"></i>
+          Carregando registros...
+        </td>
+      </tr>
+    `;
+    wrap.style.display = 'block';
+  }
+
+  function _renderDetalheMensagem(wrapId, titleId, tbodyId, titulo, mensagem, colSpan) {
+    const wrap = document.getElementById(wrapId);
+    const head = document.getElementById(titleId);
+    const tb = document.getElementById(tbodyId);
+    if (!wrap || !tb) return;
+    if (head) head.textContent = titulo || 'Detalhe do ponto selecionado';
+    tb.innerHTML = `
+      <tr>
+        <td colspan="${colSpan}" style="padding:10px 8px;color:#94a3b8;text-align:center;">${mensagem}</td>
+      </tr>
+    `;
+    wrap.style.display = 'block';
+  }
+
+  function _renderDetalheGraf1(rows, titulo) {
+    const wrap = document.getElementById('vendasGraf1DetalheWrap');
+    const head = document.getElementById('vendasGraf1DetalheTitulo');
+    const tb = document.getElementById('vendasGraf1DetalheTbody');
+    if (!wrap || !tb) return;
+
+    if (head) head.textContent = titulo || 'Detalhe do ponto selecionado';
+    tb.innerHTML = (rows || []).map((r) => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.estado || 'N/D'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${_labelMesVenda(r.mes || '')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.etapa_descricao || r.etapa || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;white-space:nowrap;">${MOEDA.format(Number(r.valor_total || 0))}</td>
+      </tr>
+    `).join('');
+    wrap.style.display = rows && rows.length ? 'block' : 'none';
+  }
+
+  function _renderDetalheGraf2(rows, titulo) {
+    const wrap = document.getElementById('vendasGraf2DetalheWrap');
+    const head = document.getElementById('vendasGraf2DetalheTitulo');
+    const tb = document.getElementById('vendasGraf2DetalheTbody');
+    if (!wrap || !tb) return;
+
+    if (head) head.textContent = titulo || 'Detalhe do ponto selecionado';
+    tb.innerHTML = (rows || []).map((r) => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.numero_pedido || r.codigo_pedido || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.codigo_item || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.descricao_item || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.cfop || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;white-space:nowrap;">${QTD.format(Number(r.quantidade ?? r.quantidade_total ?? 0))}</td>
+      </tr>
+    `).join('');
+    wrap.style.display = rows && rows.length ? 'block' : 'none';
+  }
+
+  function _renderDetalheGraf3(rows, titulo) {
+    const wrap = document.getElementById('vendasGraf3DetalheWrap');
+    const head = document.getElementById('vendasGraf3DetalheTitulo');
+    const tb = document.getElementById('vendasGraf3DetalheTbody');
+    if (!wrap || !tb) return;
+
+    if (head) head.textContent = titulo || 'Detalhe do ponto selecionado';
+    tb.innerHTML = (rows || []).map((r) => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.numero_pedido || r.codigo_pedido || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.codigo_item || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.descricao_item || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${r.cfop || '-'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;white-space:nowrap;">${MOEDA.format(Number(r.valor_total_item ?? r.valor_total ?? 0))}</td>
+      </tr>
+    `).join('');
+    wrap.style.display = rows && rows.length ? 'block' : 'none';
+  }
 
   function _labelMesVenda(yyyymm) {
     const [y, m] = String(yyyymm || '').split('-');
@@ -14178,6 +14516,7 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     }
 
     try {
+      _limparDetalheGraf1();
       const resp = await fetch('/api/sac/vendas/graficos/valor-estado-mes', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
@@ -14210,25 +14549,300 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         return;
       }
 
-      const totais = {};
-      linhas.forEach(r => {
-        const estado = r.estado || 'N/D';
-        totais[estado] = (totais[estado] || 0) + (Number(r.valor_total) || 0);
-      });
-
-      const topEstados = Object.keys(totais)
-        .sort((a, b) => totais[b] - totais[a])
-        .slice(0, 7);
-      linhas = linhas.filter(r => topEstados.includes(r.estado || 'N/D'));
-
       const estados = [...new Set(linhas.map(r => r.estado || 'N/D'))].sort();
       const meses = [...new Set(linhas.map(r => r.mes))].sort();
+      const etapas = [...new Set(linhas.map(r => String(r.etapa || 'Sem etapa')))]
+        .sort((a, b) => _indiceEtapa(a) - _indiceEtapa(b));
       const labels = meses.map(_labelMesVenda);
 
-      const datasets = estados.map((estado, idx) => ({
-        label: estado,
+      const datasets = [];
+      estados.forEach((estado) => {
+        etapas.forEach((etapa) => {
+          const amostra = linhas.find(r => (r.estado || 'N/D') === estado && String(r.etapa || 'Sem etapa') === etapa);
+          const etapaDescricao = amostra?.etapa_descricao || 'Sem descrição';
+          const cor = _corEtapa(etapa);
+          datasets.push({
+            label: etapaDescricao,
+            estado,
+            etapa,
+            etapa_descricao: etapaDescricao,
+            stack: estado,
+            data: meses.map((mes) => {
+              const row = linhas.find(r =>
+                (r.estado || 'N/D') === estado &&
+                r.mes === mes &&
+                String(r.etapa || 'Sem etapa') === etapa
+              );
+              return row ? Number(row.valor_total || 0) : 0;
+            }),
+            backgroundColor: cor + 'dd',
+            borderColor: cor,
+            borderWidth: 1,
+            borderRadius: 3,
+            borderSkipped: false,
+          });
+        });
+      });
+
+      if (_vendasGraf1Instance) { _vendasGraf1Instance.destroy(); _vendasGraf1Instance = null; }
+      _vendasGraf1Instance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          onClick: (_evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const ds = datasets?.[el.datasetIndex];
+            const estado = ds?.estado || 'N/D';
+            const etapa = ds?.etapa || 'Sem etapa';
+            const etapaDescricao = ds?.etapa_descricao || ds?.label || 'Sem descrição';
+            const mes = meses?.[el.index] || '';
+            if (!mes) return;
+            const detalhe = linhas.filter(r =>
+              (r.estado || 'N/D') === estado &&
+              r.mes === mes &&
+              String(r.etapa || 'Sem etapa') === String(etapa)
+            );
+            _renderDetalheGraf1(detalhe, `Detalhe — ${estado} em ${_labelMesVenda(mes)} (${etapaDescricao})`);
+          },
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'bottom',
+              labels: {
+                color: '#94a3b8',
+                font: { size: 11 },
+                boxWidth: 10,
+                padding: 12,
+                generateLabels: (chart) => {
+                  const base = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                  const unicos = [];
+                  const vistos = new Set();
+                  base.forEach((item) => {
+                    const ds = chart.data.datasets?.[item.datasetIndex];
+                    const chave = ds?.etapa_descricao || item.text;
+                    if (vistos.has(chave)) return;
+                    vistos.add(chave);
+                    unicos.push({
+                      ...item,
+                      text: chave,
+                      fillStyle: ds?.backgroundColor || item.fillStyle,
+                      strokeStyle: ds?.borderColor || item.strokeStyle,
+                      hidden: false,
+                    });
+                  });
+                  return unicos;
+                },
+              },
+              onClick: null,
+            },
+            tooltip: {
+              callbacks: {
+                title: (items) => items?.[0]?.label || '',
+                label: (item) => {
+                  const ds = item.dataset || {};
+                  return ` ${ds.estado || 'N/D'} • ${ds.etapa_descricao || ds.label}: ${MOEDA.format(Number(item.raw || 0))}`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              stacked: false,
+              ticks: { color: '#94a3b8', font: { size: 11 } },
+              grid: { color: 'rgba(255,255,255,.05)' },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              ticks: {
+                color: '#94a3b8',
+                callback: (v) => MOEDA.format(Number(v || 0)),
+              },
+              grid: { color: 'rgba(255,255,255,.07)' },
+            },
+          },
+        },
+      });
+
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) {
+        status.textContent = err.message || 'Erro.';
+        status.style.color = '#f87171';
+      }
+    }
+  }
+
+  async function _carregarGrafVendas2() {
+    const status = document.getElementById('vendasGraf2Status');
+    const canvas = document.getElementById('vendasGraf2Canvas');
+    if (!canvas) return;
+    if (status) {
+      status.style.display = 'block';
+      status.textContent = 'Carregando...';
+      status.style.color = '';
+    }
+
+    try {
+      _limparDetalheGraf2();
+      _limparDetalheGraf3();
+      const resp = await fetch('/api/sac/vendas/graficos/quantidade-familia-mes', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      const linhasBase = data.rows || [];
+      const linhas = _filtrarPeriodoVendas(linhasBase);
+
+      if (!linhas.length) {
+        if (_vendasGraf2Instance) { _vendasGraf2Instance.destroy(); _vendasGraf2Instance = null; }
+        if (status) {
+          status.style.display = 'block';
+          status.textContent = 'Sem dados de quantidade para exibir.';
+          status.style.color = '#fbbf24';
+        }
+        return;
+      }
+
+      const totais = {};
+      linhas.forEach(r => {
+        const familia = r.familia || 'N/D';
+        totais[familia] = (totais[familia] || 0) + (Number(r.quantidade_total) || 0);
+      });
+
+      const topFamilias = Object.keys(totais)
+        .sort((a, b) => totais[b] - totais[a])
+        .slice(0, 8);
+
+      const linhasTop = linhas.filter(r => topFamilias.includes(r.familia || 'N/D'));
+      const familias = [...new Set(linhasTop.map(r => r.familia || 'N/D'))].sort();
+      const meses = [...new Set(linhasTop.map(r => r.mes))].sort();
+      const labels = meses.map(_labelMesVenda);
+
+      const datasets = familias.map((familia, idx) => ({
+        label: familia,
         data: meses.map(mes => {
-          const row = linhas.find(r => (r.estado || 'N/D') === estado && r.mes === mes);
+          const row = linhasTop.find(r => (r.familia || 'N/D') === familia && r.mes === mes);
+          return row ? Number(row.quantidade_total || 0) : 0;
+        }),
+        backgroundColor: CORES[idx % CORES.length] + 'cc',
+        borderColor: CORES[idx % CORES.length],
+        borderWidth: 1,
+        borderRadius: 4,
+      }));
+
+      if (_vendasGraf2Instance) { _vendasGraf2Instance.destroy(); _vendasGraf2Instance = null; }
+      _vendasGraf2Instance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+          onClick: (_evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const familia = datasets?.[el.datasetIndex]?.label || 'N/D';
+            const mes = meses?.[el.index] || '';
+            const titulo = `Itens de ${familia} em ${_labelMesVenda(mes)}`;
+            _renderDetalheCarregando('vendasGraf2DetalheWrap', 'vendasGraf2DetalheTitulo', 'vendasGraf2DetalheTbody', titulo, 5);
+            (async () => {
+              try {
+                const url = `/api/sac/vendas/graficos/quantidade-familia-mes/detalhe?familia=${encodeURIComponent(familia)}&mes=${encodeURIComponent(mes)}`;
+                const respDet = await fetch(url, { credentials: 'include' });
+                const dataDet = await respDet.json().catch(() => ({}));
+                if (!respDet.ok || dataDet.ok === false) throw new Error(dataDet.error || 'Erro ao carregar itens.');
+                const rowsDet = dataDet.rows || [];
+                if (!rowsDet.length) {
+                  _renderDetalheMensagem('vendasGraf2DetalheWrap', 'vendasGraf2DetalheTitulo', 'vendasGraf2DetalheTbody', titulo, 'Nenhum item encontrado para essa barra.', 5);
+                  return;
+                }
+                _renderDetalheGraf2(rowsDet, `${titulo} (${rowsDet.length} itens)`);
+              } catch (e) {
+                _renderDetalheMensagem('vendasGraf2DetalheWrap', 'vendasGraf2DetalheTitulo', 'vendasGraf2DetalheTbody', titulo, 'Erro ao carregar itens.', 5);
+              }
+            })();
+          },
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 10, padding: 12 } },
+            tooltip: {
+              callbacks: {
+                label: (item) => ` ${item.dataset.label}: ${QTD.format(Number(item.raw || 0))}`,
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#94a3b8',
+                callback: (v) => QTD.format(Number(v || 0)),
+              },
+              grid: { color: 'rgba(255,255,255,.07)' },
+            },
+          },
+        },
+      });
+
+      if (status) status.style.display = 'none';
+    } catch (err) {
+      if (status) {
+        status.textContent = err.message || 'Erro.';
+        status.style.color = '#f87171';
+      }
+    }
+  }
+
+  async function _carregarGrafVendas3() {
+    const status = document.getElementById('vendasGraf3Status');
+    const canvas = document.getElementById('vendasGraf3Canvas');
+    if (!canvas) return;
+    if (status) {
+      status.style.display = 'block';
+      status.textContent = 'Carregando...';
+      status.style.color = '';
+    }
+
+    try {
+      _limparDetalheGraf3();
+      const resp = await fetch('/api/sac/vendas/graficos/valor-familia-mes', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar.');
+
+      const linhasBase = data.rows || [];
+      const linhas = _filtrarPeriodoVendas(linhasBase);
+
+      if (!linhas.length) {
+        if (_vendasGraf3Instance) { _vendasGraf3Instance.destroy(); _vendasGraf3Instance = null; }
+        if (status) {
+          status.style.display = 'block';
+          status.textContent = 'Sem dados de valor de itens para exibir.';
+          status.style.color = '#fbbf24';
+        }
+        return;
+      }
+
+      const totais = {};
+      linhas.forEach(r => {
+        const familia = r.familia || 'N/D';
+        totais[familia] = (totais[familia] || 0) + (Number(r.valor_total) || 0);
+      });
+
+      const topFamilias = Object.keys(totais)
+        .sort((a, b) => totais[b] - totais[a])
+        .slice(0, 8);
+
+      const linhasTop = linhas.filter(r => topFamilias.includes(r.familia || 'N/D'));
+      const familias = [...new Set(linhasTop.map(r => r.familia || 'N/D'))].sort();
+      const meses = [...new Set(linhasTop.map(r => r.mes))].sort();
+      const labels = meses.map(_labelMesVenda);
+
+      const datasets = familias.map((familia, idx) => ({
+        label: familia,
+        data: meses.map(mes => {
+          const row = linhasTop.find(r => (r.familia || 'N/D') === familia && r.mes === mes);
           return row ? Number(row.valor_total || 0) : 0;
         }),
         backgroundColor: CORES[idx % CORES.length] + 'cc',
@@ -14237,11 +14851,35 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
         borderRadius: 4,
       }));
 
-      if (_vendasGraf1Instance) { _vendasGraf1Instance.destroy(); _vendasGraf1Instance = null; }
-      _vendasGraf1Instance = new Chart(canvas.getContext('2d'), {
+      if (_vendasGraf3Instance) { _vendasGraf3Instance.destroy(); _vendasGraf3Instance = null; }
+      _vendasGraf3Instance = new Chart(canvas.getContext('2d'), {
         type: 'bar',
         data: { labels, datasets },
         options: {
+          onClick: (_evt, elements) => {
+            if (!elements || !elements.length) return;
+            const el = elements[0];
+            const familia = datasets?.[el.datasetIndex]?.label || 'N/D';
+            const mes = meses?.[el.index] || '';
+            const titulo = `Valor dos itens de ${familia} em ${_labelMesVenda(mes)}`;
+            _renderDetalheCarregando('vendasGraf3DetalheWrap', 'vendasGraf3DetalheTitulo', 'vendasGraf3DetalheTbody', titulo, 5);
+            (async () => {
+              try {
+                const url = `/api/sac/vendas/graficos/valor-familia-mes/detalhe?familia=${encodeURIComponent(familia)}&mes=${encodeURIComponent(mes)}`;
+                const respDet = await fetch(url, { credentials: 'include' });
+                const dataDet = await respDet.json().catch(() => ({}));
+                if (!respDet.ok || dataDet.ok === false) throw new Error(dataDet.error || 'Erro ao carregar itens.');
+                const rowsDet = dataDet.rows || [];
+                if (!rowsDet.length) {
+                  _renderDetalheMensagem('vendasGraf3DetalheWrap', 'vendasGraf3DetalheTitulo', 'vendasGraf3DetalheTbody', titulo, 'Nenhum item encontrado para essa barra.', 5);
+                  return;
+                }
+                _renderDetalheGraf3(rowsDet, `${titulo} (${rowsDet.length} itens)`);
+              } catch (_e) {
+                _renderDetalheMensagem('vendasGraf3DetalheWrap', 'vendasGraf3DetalheTitulo', 'vendasGraf3DetalheTbody', titulo, 'Erro ao carregar itens.', 5);
+              }
+            })();
+          },
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
@@ -14289,11 +14927,17 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
             b.style.color = ativo ? '#7dd3fc' : '#9ca3af';
           });
           _carregarGrafVendas1();
+          _carregarGrafVendas2();
+          _carregarGrafVendas3();
         });
       });
 
       const refreshBtn = document.getElementById('vendasGrafRefreshBtn');
-      if (refreshBtn) refreshBtn.addEventListener('click', _carregarGrafVendas1);
+      if (refreshBtn) refreshBtn.addEventListener('click', () => {
+        _carregarGrafVendas1();
+        _carregarGrafVendas2();
+        _carregarGrafVendas3();
+      });
 
       const modal = document.getElementById('vendasGrafPizzaModal');
       const fechar = document.getElementById('vendasGrafPizzaFechar');
@@ -14359,6 +15003,331 @@ ${pivotHtml('Menções (Pós abertura de OS)', '#4c1d95', data.mencoes)}
     }
 
     _carregarGrafVendas1();
+    _carregarGrafVendas2();
+    _carregarGrafVendas3();
+  };
+})();
+
+// === Vendas: Controle de vendas (tabela + expansão de itens) ===============
+(() => {
+  const tb = document.getElementById('vendasControleTbody');
+  const status = document.getElementById('vendasControleStatus');
+  const refreshBtn = document.getElementById('vendasControleRefreshBtn');
+  const thSort = Array.from(document.querySelectorAll('th[data-vctrl-sort-key]'));
+  const filtroPedido = document.getElementById('vendasCtrlFiltroPedido');
+  const filtroCliente = document.getElementById('vendasCtrlFiltroCliente');
+  const filtroEtapa = document.getElementById('vendasCtrlFiltroEtapa');
+  const filtroDataCriacao = document.getElementById('vendasCtrlFiltroDataCriacao');
+  const filtroOrigem = document.getElementById('vendasCtrlFiltroOrigem');
+  const moeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  let iniciado = false;
+  let carregando = false;
+  let pedidoExpandido = null;
+  let rowsOriginais = [];
+  let sortState = { key: 'pedido', dir: 'desc' };
+
+  function esc(s) {
+    return String(s ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatarData(v) {
+    if (!v) return '-';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  }
+
+  function formatarQuantidade(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '0');
+    return n.toLocaleString('pt-BR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
+  }
+
+  function normalizar(v) {
+    return String(v ?? '').trim().toLowerCase();
+  }
+
+  function toNumberSafe(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function toDateTs(v) {
+    if (!v) return 0;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+  }
+
+  function valorOrdenacao(row, key) {
+    switch (key) {
+      case 'pedido':
+        return toNumberSafe(row.numero_pedido || row.codigo_pedido);
+      case 'cliente':
+        return normalizar(row.cliente_nome);
+      case 'etapa':
+        return normalizar(row.etapa_descricao || row.etapa);
+      case 'created_at':
+        return toDateTs(row.created_at);
+      case 'data_previsao':
+        return toDateTs(row.data_previsao);
+      case 'origem':
+        return normalizar(row.origem_pedido);
+      case 'valor_total':
+        return toNumberSafe(row.valor_total_pedido);
+      default:
+        return '';
+    }
+  }
+
+  function atualizarIndicadorOrdenacao() {
+    thSort.forEach((th) => {
+      const key = th.getAttribute('data-vctrl-sort-key');
+      const base = String(th.textContent || '').replace(/\s*[▲▼]$/, '').trim();
+      if (key === sortState.key) {
+        th.textContent = `${base} ${sortState.dir === 'asc' ? '▲' : '▼'}`;
+        th.style.color = '#bae6fd';
+      } else {
+        th.textContent = base;
+        th.style.color = '#94a3b8';
+      }
+    });
+  }
+
+  function aplicarFiltroOrdenacao() {
+    const fPedido = normalizar(filtroPedido?.value);
+    const fCliente = normalizar(filtroCliente?.value);
+    const fEtapa = normalizar(filtroEtapa?.value);
+    const fDataCriacao = normalizar(filtroDataCriacao?.value);
+    const fOrigem = normalizar(filtroOrigem?.value);
+
+    let rows = Array.isArray(rowsOriginais) ? [...rowsOriginais] : [];
+
+    rows = rows.filter((r) => {
+      const pedidoTxt = normalizar(r.numero_pedido || r.codigo_pedido);
+      const clienteTxt = normalizar(r.cliente_nome);
+      const etapaTxt = normalizar(r.etapa_descricao || r.etapa);
+      const dataCriacaoTxt = normalizar(formatarData(r.created_at));
+      const origemTxt = normalizar(r.origem_pedido);
+
+      if (fPedido && !pedidoTxt.includes(fPedido)) return false;
+      if (fCliente && !clienteTxt.includes(fCliente)) return false;
+      if (fEtapa && !etapaTxt.includes(fEtapa)) return false;
+      if (fDataCriacao && !dataCriacaoTxt.includes(fDataCriacao)) return false;
+      if (fOrigem && !origemTxt.includes(fOrigem)) return false;
+      return true;
+    });
+
+    rows.sort((a, b) => {
+      const va = valorOrdenacao(a, sortState.key);
+      const vb = valorOrdenacao(b, sortState.key);
+
+      let cmp = 0;
+      if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+      else cmp = String(va).localeCompare(String(vb), 'pt-BR', { sensitivity: 'base' });
+
+      if (cmp === 0) {
+        const pa = toNumberSafe(a.numero_pedido || a.codigo_pedido);
+        const pb = toNumberSafe(b.numero_pedido || b.codigo_pedido);
+        cmp = pa - pb;
+      }
+
+      return sortState.dir === 'asc' ? cmp : -cmp;
+    });
+
+    pedidoExpandido = null;
+    atualizarIndicadorOrdenacao();
+    renderPedidos(rows);
+  }
+
+  function renderLoading(msg = 'Carregando...') {
+    if (!tb) return;
+    tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--inactive-color);">${esc(msg)}</td></tr>`;
+  }
+
+  function renderVazio(msg = 'Nenhum pedido encontrado.') {
+    if (!tb) return;
+    tb.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--inactive-color);">${esc(msg)}</td></tr>`;
+  }
+
+  async function carregarItens(codigoPedido) {
+    const resp = await fetch(`/api/sac/vendas/controle/pedido-itens/${encodeURIComponent(codigoPedido)}`, { credentials: 'include' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar itens.');
+    return Array.isArray(data.rows) ? data.rows : [];
+  }
+
+  function montarHtmlItens(rows) {
+    if (!rows.length) {
+      return '<div style="padding:10px;color:#94a3b8;font-size:12px;">Sem itens para este pedido.</div>';
+    }
+
+    const linhas = rows.map((it) => {
+      return `
+        <tr>
+          <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);white-space:nowrap;">${esc(it.codigo || '-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);">${esc(it.descricao || '-')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;white-space:nowrap;">${esc(formatarQuantidade(it.quantidade))}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;white-space:nowrap;">${moeda.format(Number(it.valor_total || 0))}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div style="padding:8px 10px 10px 10px;background:rgba(15,23,42,.45);border-radius:8px;">
+        <div style="font-size:12px;color:#93c5fd;margin:2px 0 8px 0;font-weight:600;">Itens do pedido</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #334155;color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Código</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #334155;color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em;">Descrição</th>
+              <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #334155;color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Quantidade</th>
+              <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #334155;color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;">Valor total</th>
+            </tr>
+          </thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function alternarExpansaoPedido(codigoPedido) {
+    if (!tb) return;
+
+    const trPrincipal = tb.querySelector(`tr[data-pedido-row="${CSS.escape(String(codigoPedido))}"]`);
+    if (!trPrincipal) return;
+
+    const linhaExistente = tb.querySelector(`tr[data-pedido-expand="${CSS.escape(String(codigoPedido))}"]`);
+    if (linhaExistente) {
+      linhaExistente.remove();
+      trPrincipal.style.background = 'transparent';
+      if (pedidoExpandido === String(codigoPedido)) pedidoExpandido = null;
+      return;
+    }
+
+    if (pedidoExpandido) {
+      const anterior = tb.querySelector(`tr[data-pedido-expand="${CSS.escape(String(pedidoExpandido))}"]`);
+      if (anterior) anterior.remove();
+      const trAnterior = tb.querySelector(`tr[data-pedido-row="${CSS.escape(String(pedidoExpandido))}"]`);
+      if (trAnterior) trAnterior.style.background = 'transparent';
+    }
+
+    const trExpand = document.createElement('tr');
+    trExpand.setAttribute('data-pedido-expand', String(codigoPedido));
+    trExpand.innerHTML = '<td colspan="7" style="padding:0 10px 10px 10px;"><div style="padding:10px;color:#94a3b8;font-size:12px;">Carregando itens...</div></td>';
+    trPrincipal.insertAdjacentElement('afterend', trExpand);
+    trPrincipal.style.background = 'rgba(56,189,248,.07)';
+    pedidoExpandido = String(codigoPedido);
+
+    try {
+      const itens = await carregarItens(codigoPedido);
+      trExpand.innerHTML = `<td colspan="7" style="padding:0 10px 10px 10px;">${montarHtmlItens(itens)}</td>`;
+    } catch (err) {
+      trExpand.innerHTML = `<td colspan="7" style="padding:10px;color:#fca5a5;font-size:12px;">${esc(err.message || 'Erro ao carregar itens.')}</td>`;
+    }
+  }
+
+  function renderPedidos(rows) {
+    if (!tb) return;
+    if (!rows.length) {
+      renderVazio();
+      return;
+    }
+
+    tb.innerHTML = rows.map((r) => {
+      const pedidoCodigo = r.codigo_pedido ?? '';
+      const pedidoNumero = r.numero_pedido || r.codigo_pedido || '-';
+      const etapaLabel = r.etapa_descricao || r.etapa || '-';
+      const tituloObs = r.obs_venda ? ` title="${esc(r.obs_venda)}"` : '';
+      return `
+        <tr data-pedido-row="${esc(String(pedidoCodigo))}" data-codigo-pedido="${esc(String(pedidoCodigo))}"${tituloObs}
+            style="cursor:pointer;transition:background .15s ease;"
+            onmouseenter="this.style.background='rgba(148,163,184,.08)'"
+            onmouseleave="if(!this.nextElementSibling || this.nextElementSibling.getAttribute('data-pedido-expand')!==this.getAttribute('data-codigo-pedido')) this.style.background='transparent'">
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;white-space:nowrap;font-weight:600;color:#e2e8f0;">${esc(pedidoNumero)}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;">${esc(r.cliente_nome || 'Sem nome')}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;white-space:nowrap;">${esc(etapaLabel)}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;white-space:nowrap;">${esc(formatarData(r.created_at))}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;white-space:nowrap;">${esc(formatarData(r.data_previsao))}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;">${esc(r.origem_pedido || '-')}</td>
+          <td style="padding:9px 10px;border-bottom:1px solid #334155;text-align:right;white-space:nowrap;font-weight:600;">${moeda.format(Number(r.valor_total_pedido || 0))}</td>
+        </tr>
+      `;
+    }).join('');
+
+    tb.querySelectorAll('tr[data-codigo-pedido]').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const codigoPedido = tr.getAttribute('data-codigo-pedido');
+        if (!codigoPedido) return;
+        alternarExpansaoPedido(codigoPedido);
+      });
+    });
+  }
+
+  async function carregarPedidos() {
+    if (!tb || carregando) return;
+    carregando = true;
+    if (status) {
+      status.textContent = 'Carregando pedidos...';
+      status.style.display = 'block';
+      status.style.color = 'var(--inactive-color)';
+    }
+    renderLoading('Carregando pedidos...');
+
+    try {
+      const resp = await fetch('/api/sac/vendas/controle/pedidos', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar pedidos.');
+      rowsOriginais = Array.isArray(data.rows) ? data.rows : [];
+      aplicarFiltroOrdenacao();
+      if (status) status.style.display = 'none';
+      pedidoExpandido = null;
+    } catch (err) {
+      renderVazio(err.message || 'Erro ao carregar pedidos.');
+      if (status) {
+        status.textContent = err.message || 'Erro ao carregar pedidos.';
+        status.style.color = '#f87171';
+      }
+    } finally {
+      carregando = false;
+    }
+  }
+
+  window._iniciarControleVendasPagina = function () {
+    if (!iniciado) {
+      iniciado = true;
+      if (refreshBtn) refreshBtn.addEventListener('click', carregarPedidos);
+
+      thSort.forEach((th) => {
+        th.addEventListener('click', () => {
+          const key = th.getAttribute('data-vctrl-sort-key');
+          if (!key) return;
+          if (sortState.key === key) {
+            sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortState.key = key;
+            sortState.dir = 'asc';
+          }
+          aplicarFiltroOrdenacao();
+        });
+      });
+
+      [filtroPedido, filtroCliente, filtroEtapa, filtroDataCriacao, filtroOrigem].forEach((input) => {
+        if (!input) return;
+        input.addEventListener('input', aplicarFiltroOrdenacao);
+      });
+
+      atualizarIndicadorOrdenacao();
+    }
+    carregarPedidos();
   };
 })();
 
@@ -25664,6 +26633,10 @@ async function adicionarItemCarrinho(ev) {
   const categoriaPadraoCodigo = '2.14.94';
   if (!categoriaCompra) {
     categoriaCompra = categoriaPadraoCodigo;
+  }
+  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
+  if ((centroCusto || '').toLowerCase() === 'materia prima') {
+    categoriaCompra = '2.01.03';
   }
   
   // Busca codigo_produto da tabela produtos_omie usando o codigo do produto
@@ -37720,6 +38693,11 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       ? `${cat.codigo} - ${cat.descricao}`
       : categoriaCompraTexto || `${categoriaPadraoCodigo} - Outros Materiais`;
   }
+  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
+  if ((centroCustoGlobal || '').toLowerCase() === 'materia prima') {
+    categoriaCompra = '2.01.03';
+    categoriaCompraTexto = '2.01.03 - Matérias-Primas';
+  }
   
   console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
   console.log('[Catálogo] Possui cadastro na Omie:', possuiCadastroOmie);
@@ -37989,6 +38967,10 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   if (!categoriaCompra) {
     categoriaCompra = categoriaPadraoCodigo;
   }
+  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
+  if ((centroCusto || '').toLowerCase() === 'materia prima') {
+    categoriaCompra = '2.01.03';
+  }
   
   console.log('[Catálogo] Descrição (keywords):', descricao);
   console.log('[Catálogo] Itens (keywords):', itensSemCadastro);
@@ -38139,7 +39121,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       departamento: departamento,
       centro_custo: centroCusto,
       categoria_compra_codigo: categoriaCompra,
-      categoria_compra_nome: categoriaCompra === '2.14.94' ? 'Outros Materiais' : '',
+      categoria_compra_nome: categoriaCompra === '2.01.03' ? 'Matérias-Primas' : (categoriaCompra === '2.14.94' ? 'Outros Materiais' : ''),
       objetivo_compra: objetivoCompra,
       retorno_cotacao: retornoCotacao,
       tipo_retorno_solicitado: retornoCotacao,
@@ -49830,7 +50812,345 @@ function exportarEstruturaAtualCSV_BOM(){
       if (btn) btn.disabled = prevDisabled;
     }
   })();
+
 }
+
+  // === Vendas: Mapa do Brasil por estado =====================================
+  (() => {
+    const pane = document.getElementById('vendasMapaPane');
+    const status = document.getElementById('vendasMapaStatus');
+    const mapaEl = document.getElementById('vendasMapaBrasil');
+    const mapaLoading = document.getElementById('vendasMapaLoading');
+    const rankingTbody = document.getElementById('vendasMapaRankingTbody');
+    const mesAtualEl = document.getElementById('vendasMapaMesAtual');
+    const refreshBtn = document.getElementById('vendasMapaRefreshBtn');
+    const timelineBtn = document.getElementById('vendasMapaTimelineBtn');
+    const etapaSelect = document.getElementById('vendasMapaEtapaFiltro');
+    const periodoBtns = Array.from(document.querySelectorAll('.vendas-mapa-periodo-btn'));
+
+    if (!pane || !mapaEl) return;
+
+    const moeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+    let iniciado = false;
+    let carregando = false;
+    let periodoMeses = 3;
+    let ultimoRows = [];
+    let googleChartsPromise = null;
+    let timelineTimer = null;
+    let timelineAtiva = false;
+
+    function esc(v) {
+      return String(v ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function setStatus(msg, tipo = 'info') {
+      if (!status) return;
+      status.style.display = msg ? 'block' : 'none';
+      if (!msg) return;
+      status.textContent = msg;
+      status.style.color = tipo === 'error' ? '#f87171' : (tipo === 'warn' ? '#fbbf24' : 'var(--inactive-color)');
+    }
+
+    function setMapaLoading(loading) {
+      if (!mapaLoading) return;
+      mapaLoading.style.display = loading ? 'flex' : 'none';
+    }
+
+    function aplicarEstadoPeriodoAtivo() {
+      periodoBtns.forEach((btn) => {
+        const ativo = Number.parseInt(btn.dataset.per, 10) === periodoMeses;
+        btn.style.borderColor = ativo ? '#0ea5e9' : '#374151';
+        btn.style.background = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+        btn.style.color = ativo ? '#7dd3fc' : '#9ca3af';
+      });
+    }
+
+    function _labelMes(yyyymm) {
+      const [y, m] = String(yyyymm || '').split('-');
+      if (!y || !m) return String(yyyymm || '');
+      const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      return `${nomes[Math.max(0, Number(m) - 1)]}/${String(y).slice(-2)}`;
+    }
+
+    function setTimelineBtnState(ativa) {
+      if (!timelineBtn) return;
+      timelineBtn.style.borderColor = ativa ? '#22c55e' : '#374151';
+      timelineBtn.style.background = ativa ? 'rgba(34,197,94,.16)' : 'rgba(255,255,255,.04)';
+      timelineBtn.style.color = ativa ? '#86efac' : '#9ca3af';
+      timelineBtn.innerHTML = ativa
+        ? '<i class="fa-solid fa-stopwatch"></i> Parar timeline'
+        : '<i class="fa-solid fa-timeline"></i> Timeline';
+    }
+
+    function setMesAtualMapa(label) {
+      if (!mesAtualEl) return;
+      const txt = String(label || '').trim();
+      mesAtualEl.textContent = `Mês no mapa: ${txt || '-'}`;
+    }
+
+    function pararTimeline() {
+      timelineAtiva = false;
+      if (timelineTimer) {
+        clearInterval(timelineTimer);
+        timelineTimer = null;
+      }
+      setTimelineBtnState(false);
+    }
+
+    function montarFramesTimeline(rowsTimeline = []) {
+      if (!Array.isArray(rowsTimeline) || !rowsTimeline.length) return [];
+      const meses = [...new Set(rowsTimeline.map((r) => String(r.mes || '').trim()).filter(Boolean))].sort();
+      if (!meses.length) return [];
+      const frames = [];
+
+      meses.forEach((mes) => {
+        const blocoMes = rowsTimeline.filter((r) => String(r.mes || '') === mes);
+        const totaisUf = new Map();
+        const totaisUfCliente = new Map();
+        blocoMes.forEach((r) => {
+          const uf = String(r.uf || '').trim().toUpperCase();
+          const cliente = String(r.cliente_nome || 'Cliente não identificado').trim();
+          const valor = Number(r.valor_total || 0);
+          if (!uf || uf === 'N/D' || !Number.isFinite(valor) || valor <= 0) return;
+
+          totaisUf.set(uf, (totaisUf.get(uf) || 0) + valor);
+
+          const porCliente = totaisUfCliente.get(uf) || new Map();
+          porCliente.set(cliente, (porCliente.get(cliente) || 0) + valor);
+          totaisUfCliente.set(uf, porCliente);
+        });
+
+        const rows = Array.from(totaisUf.entries())
+          .map(([uf, valor_total]) => {
+            const porCliente = totaisUfCliente.get(uf) || new Map();
+            let cliente_destaque = 'Cliente não identificado';
+            let cliente_valor = 0;
+            porCliente.forEach((v, nome) => {
+              if (v > cliente_valor) {
+                cliente_valor = v;
+                cliente_destaque = nome;
+              }
+            });
+            return { uf, valor_total, cliente_destaque, cliente_valor };
+          })
+          .sort((a, b) => Number(b.valor_total) - Number(a.valor_total));
+
+        frames.push({ mes, rows });
+      });
+
+      return frames;
+    }
+
+    function renderRanking(rows = []) {
+      if (!rankingTbody) return;
+      if (!rows.length) {
+        rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Sem dados para o filtro atual.</td></tr>';
+        return;
+      }
+      rankingTbody.innerHTML = rows.map((r) => `
+        <tr>
+          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;font-weight:700;">${esc(r.uf || '-')}</td>
+          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;">${esc(r.cliente_destaque || '-')}</td>
+          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;color:#93c5fd;white-space:nowrap;">${moeda.format(Number(r.valor_total || 0))}</td>
+        </tr>
+      `).join('');
+    }
+
+    function carregarGoogleCharts() {
+      if (window.google?.charts?.load && window.google?.visualization?.GeoChart) {
+        return Promise.resolve();
+      }
+      if (googleChartsPromise) return googleChartsPromise;
+
+      googleChartsPromise = new Promise((resolve, reject) => {
+        const concluir = () => {
+          try {
+            window.google.charts.load('current', { packages: ['geochart'] });
+            window.google.charts.setOnLoadCallback(() => resolve());
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        const existente = document.querySelector('script[data-google-charts="1"]');
+        if (existente) {
+          if (window.google?.charts?.load) concluir();
+          else existente.addEventListener('load', concluir, { once: true });
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://www.gstatic.com/charts/loader.js';
+        script.async = true;
+        script.dataset.googleCharts = '1';
+        script.onload = concluir;
+        script.onerror = () => reject(new Error('Falha ao carregar biblioteca do mapa.'));
+        document.head.appendChild(script);
+      });
+
+      return googleChartsPromise;
+    }
+
+    function desenharMapa(rows = []) {
+      if (!rows.length) {
+        mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:13px;">Sem dados para o filtro atual.</div>';
+        return;
+      }
+
+      const dt = new window.google.visualization.DataTable();
+      dt.addColumn('string', 'Estado');
+      dt.addColumn('number', 'Valor');
+      dt.addColumn({ type: 'string', role: 'tooltip' });
+
+      rows.forEach((r) => {
+        const uf = String(r.uf || '').trim().toUpperCase();
+        if (!uf || uf === 'N/D') return;
+        const valor = Number(r.valor_total || 0);
+        const tip = `${uf}\n${r.cliente_destaque || 'Sem cliente'}\n${moeda.format(valor)}`;
+        dt.addRow([`BR-${uf}`, valor, tip]);
+      });
+
+      const chart = new window.google.visualization.GeoChart(mapaEl);
+      chart.draw(dt, {
+        region: 'BR',
+        resolution: 'provinces',
+        legend: { textStyle: { color: '#000000', fontSize: 11, bold: false } },
+        backgroundColor: 'transparent',
+        datalessRegionColor: '#0f172a',
+        defaultColor: '#0f172a',
+        colorAxis: { colors: ['#bfdbfe', '#60a5fa', '#2563eb'] },
+        tooltip: { textStyle: { color: '#111827', fontSize: 12 } },
+      });
+
+      // Forca rótulos do SVG em preto e peso normal para melhor legibilidade.
+      mapaEl.querySelectorAll('svg text').forEach((el) => {
+        el.setAttribute('fill', '#000000');
+        el.setAttribute('font-weight', '400');
+        el.style.fill = '#000000';
+        el.style.fontWeight = '400';
+      });
+    }
+
+    async function carregarMapa() {
+      pararTimeline();
+      setMesAtualMapa('Consolidado');
+      if (carregando) return;
+      carregando = true;
+      setMapaLoading(true);
+      setStatus('Carregando mapa de vendas...');
+      if (rankingTbody) rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Carregando...</td></tr>';
+
+      try {
+        const etapa = (etapaSelect?.value || '').trim();
+        const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}`;
+        const resp = await fetch(url, { credentials: 'include' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar mapa.');
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        ultimoRows = rows;
+        renderRanking(rows);
+
+        await carregarGoogleCharts();
+        desenharMapa(rows);
+        setStatus(rows.length ? '' : 'Sem dados para o filtro atual.', rows.length ? 'info' : 'warn');
+      } catch (err) {
+        setStatus(err.message || 'Erro ao carregar mapa.', 'error');
+        if (mapaEl) {
+          mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#fca5a5;font-size:13px;">Falha ao carregar o mapa.</div>';
+        }
+        renderRanking(ultimoRows);
+      } finally {
+        setMapaLoading(false);
+        carregando = false;
+      }
+    }
+
+    async function iniciarTimeline() {
+      if (timelineAtiva) {
+        pararTimeline();
+        setStatus('Timeline interrompida.', 'warn');
+        return;
+      }
+
+      if (carregando) return;
+      setStatus('Preparando timeline do mapa...');
+
+      try {
+        const etapa = (etapaSelect?.value || '').trim();
+        const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}&timeline=1`;
+        const resp = await fetch(url, { credentials: 'include' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao preparar timeline.');
+
+        const frames = montarFramesTimeline(data.timeline_rows || []);
+        if (!frames.length) {
+          setStatus('Sem dados mensais para o período selecionado.', 'warn');
+          return;
+        }
+
+        await carregarGoogleCharts();
+
+        let idx = 0;
+        timelineAtiva = true;
+        setTimelineBtnState(true);
+
+        const renderFrame = () => {
+          const frame = frames[idx];
+          if (!frame) return;
+          ultimoRows = frame.rows || [];
+          renderRanking(ultimoRows);
+          desenharMapa(ultimoRows);
+          setMesAtualMapa(_labelMes(frame.mes));
+          setStatus(`Timeline: ${_labelMes(frame.mes)} (${idx + 1}/${frames.length})`);
+        };
+
+        renderFrame();
+
+        timelineTimer = setInterval(() => {
+          if (!timelineAtiva) return;
+          idx += 1;
+          if (idx >= frames.length) {
+            pararTimeline();
+            setStatus('Timeline concluída.');
+            return;
+          }
+          renderFrame();
+        }, 2000);
+      } catch (err) {
+        pararTimeline();
+        setStatus(err.message || 'Erro ao executar timeline.', 'error');
+      }
+    }
+
+    window._iniciarMapaVendasPagina = function () {
+      if (!iniciado) {
+        iniciado = true;
+
+        aplicarEstadoPeriodoAtivo();
+        periodoBtns.forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const per = Number.parseInt(btn.dataset.per, 10);
+            if (!Number.isFinite(per)) return;
+            periodoMeses = per;
+            aplicarEstadoPeriodoAtivo();
+            carregarMapa();
+          });
+        });
+
+        if (etapaSelect) etapaSelect.addEventListener('change', carregarMapa);
+        if (refreshBtn) refreshBtn.addEventListener('click', carregarMapa);
+        if (timelineBtn) timelineBtn.addEventListener('click', iniciarTimeline);
+      }
+
+      carregarMapa();
+    };
+  })();
 
 
 // ——— Religa o botão Exportar para usar CSV ———

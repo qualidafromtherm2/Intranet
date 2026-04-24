@@ -5672,6 +5672,251 @@ router.get('/at/graficos/por-tag-problema-mes', async (req, res) => {
 router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
+      WITH pedidos_cfop_ignorado AS (
+        SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, '')) AS codigo_pedido
+        FROM "Vendas".pedidos_venda_itens i
+        WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
+      )
+      SELECT
+        COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D')                        AS estado,
+        TO_CHAR(DATE_TRUNC('month', p.created_at), 'YYYY-MM')              AS mes,
+        COALESCE(NULLIF(TRIM(COALESCE(p.etapa::text, '')), ''), 'Sem etapa') AS etapa,
+        CASE TRIM(COALESCE(p.etapa::text, ''))
+          WHEN '00' THEN 'Proposta'
+          WHEN '10' THEN 'PDV (Em Aprovação)'
+          WHEN '20' THEN 'Entrega Futura'
+          WHEN '50' THEN 'Faturar'
+          WHEN '60' THEN 'Faturado'
+          WHEN '70' THEN 'Entregue'
+          WHEN '80' THEN 'Aprovado'
+          ELSE 'Sem descrição'
+        END                                                                 AS etapa_descricao,
+        SUM(COALESCE(p.valor_total_pedido, 0))::numeric(14,2)              AS valor_total
+      FROM "Vendas".pedidos_venda p
+      LEFT JOIN omie.fornecedores f
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+      WHERE p.created_at IS NOT NULL
+        AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (SELECT codigo_pedido FROM pedidos_cfop_ignorado)
+      GROUP BY 1, 2, 3, 4
+      ORDER BY 2, 3, 1
+    `);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro graficos valor-estado-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/mapa-brasil — mapa por estado (valor_total_pedido), com cliente destaque por UF
+router.get('/vendas/graficos/mapa-brasil', async (req, res) => {
+  try {
+    const periodo = Number.parseInt(String(req.query?.periodo ?? '3'), 10);
+    const periodoMeses = Number.isFinite(periodo) ? Math.max(0, periodo) : 3;
+    const etapaFiltro = String(req.query?.etapa ?? '').trim();
+    const timeline = ['1', 'true', 'yes', 'on'].includes(String(req.query?.timeline ?? '').trim().toLowerCase());
+
+    const params = [periodoMeses, etapaFiltro];
+    const { rows } = await pool.query(`
+      WITH base AS (
+        SELECT
+          COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado_raw,
+          COALESCE(
+            NULLIF(TRIM(f.nome_fantasia), ''),
+            NULLIF(TRIM(p.nome_fantasia), ''),
+            NULLIF(TRIM(p.razao_social), ''),
+            'Cliente não identificado'
+          ) AS cliente_nome,
+          CASE TRIM(COALESCE(p.etapa::text, ''))
+            WHEN '00' THEN 'Proposta'
+            WHEN '10' THEN 'PDV (Em Aprovação)'
+            WHEN '20' THEN 'Entrega Futura'
+            WHEN '50' THEN 'Faturar'
+            WHEN '60' THEN 'Faturado'
+            WHEN '70' THEN 'Entregue'
+            WHEN '80' THEN 'Aprovado'
+            ELSE 'Sem descrição'
+          END AS etapa_descricao,
+          COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
+          p.created_at
+        FROM "Vendas".pedidos_venda p
+        LEFT JOIN omie.fornecedores f
+          ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+        WHERE p.created_at IS NOT NULL
+          AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
+            SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
+            FROM "Vendas".pedidos_venda_itens i
+            WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
+          )
+      ),
+      filtrada AS (
+        SELECT
+          CASE
+            WHEN UPPER(TRIM(estado_raw)) IN ('RO', 'RONDONIA', 'RONDÔNIA') THEN 'RO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AC', 'ACRE') THEN 'AC'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AM', 'AMAZONAS') THEN 'AM'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RR', 'RORAIMA') THEN 'RR'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PA', 'PARA', 'PARÁ') THEN 'PA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AP', 'AMAPA', 'AMAPÁ') THEN 'AP'
+            WHEN UPPER(TRIM(estado_raw)) IN ('TO', 'TOCANTINS') THEN 'TO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MA', 'MARANHAO', 'MARANHÃO') THEN 'MA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PI', 'PIAUI', 'PIAUÍ') THEN 'PI'
+            WHEN UPPER(TRIM(estado_raw)) IN ('CE', 'CEARA', 'CEARÁ') THEN 'CE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RN', 'RIO GRANDE DO NORTE') THEN 'RN'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PB', 'PARAIBA', 'PARAÍBA') THEN 'PB'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PE', 'PERNAMBUCO') THEN 'PE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('AL', 'ALAGOAS') THEN 'AL'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SE', 'SERGIPE') THEN 'SE'
+            WHEN UPPER(TRIM(estado_raw)) IN ('BA', 'BAHIA') THEN 'BA'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MG', 'MINAS GERAIS') THEN 'MG'
+            WHEN UPPER(TRIM(estado_raw)) IN ('ES', 'ESPIRITO SANTO', 'ESPÍRITO SANTO') THEN 'ES'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RJ', 'RIO DE JANEIRO') THEN 'RJ'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SP', 'SAO PAULO', 'SÃO PAULO') THEN 'SP'
+            WHEN UPPER(TRIM(estado_raw)) IN ('PR', 'PARANA', 'PARANÁ') THEN 'PR'
+            WHEN UPPER(TRIM(estado_raw)) IN ('SC', 'SANTA CATARINA') THEN 'SC'
+            WHEN UPPER(TRIM(estado_raw)) IN ('RS', 'RIO GRANDE DO SUL') THEN 'RS'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MS', 'MATO GROSSO DO SUL') THEN 'MS'
+            WHEN UPPER(TRIM(estado_raw)) IN ('MT', 'MATO GROSSO') THEN 'MT'
+            WHEN UPPER(TRIM(estado_raw)) IN ('GO', 'GOIAS', 'GOIÁS') THEN 'GO'
+            WHEN UPPER(TRIM(estado_raw)) IN ('DF', 'DISTRITO FEDERAL') THEN 'DF'
+            ELSE 'N/D'
+          END AS uf,
+          cliente_nome,
+          etapa_descricao,
+          valor_total,
+          created_at
+        FROM base
+        WHERE etapa_descricao IN ('PDV (Em Aprovação)', 'Entrega Futura', 'Faturar', 'Faturado', 'Entregue', 'Aprovado')
+          AND ($1::int <= 0 OR (created_at >= (DATE_TRUNC('month', CURRENT_DATE) - make_interval(months => $1::int)) AND created_at < DATE_TRUNC('month', CURRENT_DATE)))
+          AND ($2::text = '' OR etapa_descricao = $2::text)
+      ),
+      agregado_uf AS (
+        SELECT uf, SUM(valor_total)::numeric(14,2) AS valor_total
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY uf
+      ),
+      cliente_uf AS (
+        SELECT
+          uf,
+          cliente_nome,
+          SUM(valor_total)::numeric(14,2) AS valor_total,
+          ROW_NUMBER() OVER (PARTITION BY uf ORDER BY SUM(valor_total) DESC, cliente_nome) AS rn
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY uf, cliente_nome
+      )
+      SELECT
+        a.uf,
+        a.valor_total,
+        c.cliente_nome AS cliente_destaque,
+        c.valor_total AS cliente_valor
+      FROM agregado_uf a
+      LEFT JOIN cliente_uf c
+        ON c.uf = a.uf AND c.rn = 1
+      ORDER BY a.valor_total DESC, a.uf
+    `, params);
+
+    let timelineRows = [];
+    if (timeline) {
+      const { rows: tRows } = await pool.query(`
+        WITH base AS (
+        SELECT
+          COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado_raw,
+          COALESCE(
+            NULLIF(TRIM(f.nome_fantasia), ''),
+            NULLIF(TRIM(p.nome_fantasia), ''),
+            NULLIF(TRIM(p.razao_social), ''),
+            'Cliente não identificado'
+          ) AS cliente_nome,
+          CASE TRIM(COALESCE(p.etapa::text, ''))
+            WHEN '00' THEN 'Proposta'
+            WHEN '10' THEN 'PDV (Em Aprovação)'
+            WHEN '20' THEN 'Entrega Futura'
+            WHEN '50' THEN 'Faturar'
+            WHEN '60' THEN 'Faturado'
+            WHEN '70' THEN 'Entregue'
+            WHEN '80' THEN 'Aprovado'
+            ELSE 'Sem descrição'
+          END AS etapa_descricao,
+          COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
+          p.created_at
+        FROM "Vendas".pedidos_venda p
+        LEFT JOIN omie.fornecedores f
+          ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+        WHERE p.created_at IS NOT NULL
+            AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
+              SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
+              FROM "Vendas".pedidos_venda_itens i
+              WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
+            )
+        ),
+        filtrada AS (
+          SELECT
+            TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS mes,
+            CASE
+              WHEN UPPER(TRIM(estado_raw)) IN ('RO', 'RONDONIA', 'RONDÔNIA') THEN 'RO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AC', 'ACRE') THEN 'AC'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AM', 'AMAZONAS') THEN 'AM'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RR', 'RORAIMA') THEN 'RR'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PA', 'PARA', 'PARÁ') THEN 'PA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AP', 'AMAPA', 'AMAPÁ') THEN 'AP'
+              WHEN UPPER(TRIM(estado_raw)) IN ('TO', 'TOCANTINS') THEN 'TO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MA', 'MARANHAO', 'MARANHÃO') THEN 'MA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PI', 'PIAUI', 'PIAUÍ') THEN 'PI'
+              WHEN UPPER(TRIM(estado_raw)) IN ('CE', 'CEARA', 'CEARÁ') THEN 'CE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RN', 'RIO GRANDE DO NORTE') THEN 'RN'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PB', 'PARAIBA', 'PARAÍBA') THEN 'PB'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PE', 'PERNAMBUCO') THEN 'PE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('AL', 'ALAGOAS') THEN 'AL'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SE', 'SERGIPE') THEN 'SE'
+              WHEN UPPER(TRIM(estado_raw)) IN ('BA', 'BAHIA') THEN 'BA'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MG', 'MINAS GERAIS') THEN 'MG'
+              WHEN UPPER(TRIM(estado_raw)) IN ('ES', 'ESPIRITO SANTO', 'ESPÍRITO SANTO') THEN 'ES'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RJ', 'RIO DE JANEIRO') THEN 'RJ'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SP', 'SAO PAULO', 'SÃO PAULO') THEN 'SP'
+              WHEN UPPER(TRIM(estado_raw)) IN ('PR', 'PARANA', 'PARANÁ') THEN 'PR'
+              WHEN UPPER(TRIM(estado_raw)) IN ('SC', 'SANTA CATARINA') THEN 'SC'
+              WHEN UPPER(TRIM(estado_raw)) IN ('RS', 'RIO GRANDE DO SUL') THEN 'RS'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MS', 'MATO GROSSO DO SUL') THEN 'MS'
+              WHEN UPPER(TRIM(estado_raw)) IN ('MT', 'MATO GROSSO') THEN 'MT'
+              WHEN UPPER(TRIM(estado_raw)) IN ('GO', 'GOIAS', 'GOIÁS') THEN 'GO'
+              WHEN UPPER(TRIM(estado_raw)) IN ('DF', 'DISTRITO FEDERAL') THEN 'DF'
+              ELSE 'N/D'
+            END AS uf,
+            cliente_nome,
+            etapa_descricao,
+            valor_total,
+            created_at
+          FROM base
+          WHERE etapa_descricao IN ('PDV (Em Aprovação)', 'Entrega Futura', 'Faturar', 'Faturado', 'Entregue', 'Aprovado')
+            AND ($1::int <= 0 OR (created_at >= (DATE_TRUNC('month', CURRENT_DATE) - make_interval(months => $1::int)) AND created_at < DATE_TRUNC('month', CURRENT_DATE)))
+            AND ($2::text = '' OR etapa_descricao = $2::text)
+        )
+        SELECT
+          mes,
+          uf,
+          cliente_nome,
+          SUM(valor_total)::numeric(14,2) AS valor_total
+        FROM filtrada
+        WHERE uf <> 'N/D'
+        GROUP BY mes, uf, cliente_nome
+        ORDER BY mes ASC, uf ASC, valor_total DESC
+      `, params);
+      timelineRows = tRows;
+    }
+
+    return res.json({ ok: true, rows, timeline_rows: timelineRows, periodo_meses: periodoMeses, etapa: etapaFiltro || null });
+  } catch (err) {
+    console.error('[VENDAS] erro mapa-brasil:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/quantidade-familia-mes — soma da quantidade por família de código agrupada por mês/ano
+router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
       WITH nf_por_pedido AS (
         SELECT
           numero_pedido,
@@ -5686,25 +5931,371 @@ router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
           ) AS data_emissao_dt
         FROM "Vendas".notas_fiscais_omie
         GROUP BY numero_pedido
+      ),
+      itens_normalizados AS (
+        SELECT
+          i.codigo_pedido,
+          REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop_digitos,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE 'FTI%' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%BR' THEN 'FTIBR'
+            WHEN COALESCE(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '') = 'FT' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%W' THEN 'FTW'
+            ELSE NULLIF(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '')
+          END AS familia,
+          COALESCE(i.quantidade, 0)::numeric(14,4) AS quantidade
+        FROM "Vendas".pedidos_venda_itens i
       )
       SELECT
-        COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D')                        AS estado,
-        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM')        AS mes,
-        SUM(COALESCE(p.valor_total_pedido, 0))::numeric(14,2)              AS valor_total
-      FROM "Vendas".pedidos_venda p
+        i.familia,
+        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
+        SUM(i.quantidade)::numeric(14,4) AS quantidade_total
+      FROM itens_normalizados i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
       JOIN nf_por_pedido nf
         ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
-      LEFT JOIN omie.fornecedores f
-        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
         AND nf.data_emissao_dt IS NOT NULL
+        AND i.familia IS NOT NULL
+        AND i.cfop_digitos <> '6905'
       GROUP BY 1, 2
       ORDER BY 2, 1
     `);
 
     return res.json({ ok: true, rows });
   } catch (err) {
-    console.error('[VENDAS] erro graficos valor-estado-mes:', err);
+    console.error('[VENDAS] erro graficos quantidade-familia-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/quantidade-familia-mes/detalhe — itens que compõem uma família em um mês
+router.get('/vendas/graficos/quantidade-familia-mes/detalhe', async (req, res) => {
+  try {
+    const familia = String(req.query.familia || '').trim();
+    const mes = String(req.query.mes || '').trim();
+    if (!familia) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro familia é obrigatório.' });
+    }
+    if (!/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido. Use YYYY-MM.' });
+    }
+
+    const { rows } = await pool.query(`
+      WITH nf_por_pedido AS (
+        SELECT
+          numero_pedido,
+          MAX(
+            CASE
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+                THEN LEFT(TRIM(data_emissao), 10)::date
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
+                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
+              ELSE NULL
+            END
+          ) AS data_emissao_dt
+        FROM "Vendas".notas_fiscais_omie
+        GROUP BY numero_pedido
+      ),
+      itens_normalizados AS (
+        SELECT
+          i.codigo_pedido,
+          NULLIF(TRIM(COALESCE(i.codigo, '')), '') AS codigo_item,
+          COALESCE(NULLIF(TRIM(i.descricao), ''), NULLIF(TRIM(i.descricao_produto), ''), '-') AS descricao_item,
+          NULLIF(TRIM(COALESCE(i.cfop, '')), '') AS cfop,
+          REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop_digitos,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE 'FTI%' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%BR' THEN 'FTIBR'
+            WHEN COALESCE(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '') = 'FT' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%W' THEN 'FTW'
+            ELSE NULLIF(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '')
+          END AS familia,
+          COALESCE(i.quantidade, 0)::numeric(14,4) AS quantidade
+        FROM "Vendas".pedidos_venda_itens i
+      )
+      SELECT
+        i.familia,
+        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
+        p.codigo_pedido,
+        NULLIF(TRIM(COALESCE(p.numero_pedido, '')), '') AS numero_pedido,
+        i.codigo_item,
+        i.descricao_item,
+        i.cfop,
+        i.quantidade
+      FROM itens_normalizados i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
+      JOIN nf_por_pedido nf
+        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+      WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
+        AND nf.data_emissao_dt IS NOT NULL
+        AND i.familia IS NOT NULL
+        AND i.cfop_digitos <> '6905'
+        AND i.familia = $1
+        AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2
+      ORDER BY p.codigo_pedido DESC, i.codigo_item ASC NULLS LAST
+    `, [familia, mes]);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro graficos quantidade-familia-mes detalhe:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/valor-familia-mes — soma do valor_total dos itens por família agrupada por mês/ano
+router.get('/vendas/graficos/valor-familia-mes', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      WITH nf_por_pedido AS (
+        SELECT
+          numero_pedido,
+          MAX(
+            CASE
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+                THEN LEFT(TRIM(data_emissao), 10)::date
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
+                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
+              ELSE NULL
+            END
+          ) AS data_emissao_dt
+        FROM "Vendas".notas_fiscais_omie
+        GROUP BY numero_pedido
+      ),
+      itens_normalizados AS (
+        SELECT
+          i.codigo_pedido,
+          REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop_digitos,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE 'FTI%' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%BR' THEN 'FTIBR'
+            WHEN COALESCE(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '') = 'FT' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%W' THEN 'FTW'
+            ELSE NULLIF(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '')
+          END AS familia,
+          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total_item
+        FROM "Vendas".pedidos_venda_itens i
+      )
+      SELECT
+        i.familia,
+        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
+        SUM(i.valor_total_item)::numeric(14,2) AS valor_total
+      FROM itens_normalizados i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
+      JOIN nf_por_pedido nf
+        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+      WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
+        AND nf.data_emissao_dt IS NOT NULL
+        AND i.familia IS NOT NULL
+        AND i.cfop_digitos <> '6905'
+      GROUP BY 1, 2
+      ORDER BY 2, 1
+    `);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro graficos valor-familia-mes:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/graficos/valor-familia-mes/detalhe — itens que compõem o valor de uma família em um mês
+router.get('/vendas/graficos/valor-familia-mes/detalhe', async (req, res) => {
+  try {
+    const familia = String(req.query.familia || '').trim();
+    const mes = String(req.query.mes || '').trim();
+    if (!familia) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro familia é obrigatório.' });
+    }
+    if (!/^\d{4}-\d{2}$/.test(mes)) {
+      return res.status(400).json({ ok: false, error: 'Parâmetro mes inválido. Use YYYY-MM.' });
+    }
+
+    const { rows } = await pool.query(`
+      WITH nf_por_pedido AS (
+        SELECT
+          numero_pedido,
+          MAX(
+            CASE
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+                THEN LEFT(TRIM(data_emissao), 10)::date
+              WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{2}/\\d{2}/\\d{4}$'
+                THEN TO_DATE(TRIM(data_emissao), 'DD/MM/YYYY')
+              ELSE NULL
+            END
+          ) AS data_emissao_dt
+        FROM "Vendas".notas_fiscais_omie
+        GROUP BY numero_pedido
+      ),
+      itens_normalizados AS (
+        SELECT
+          i.codigo_pedido,
+          NULLIF(TRIM(COALESCE(i.codigo, '')), '') AS codigo_item,
+          COALESCE(NULLIF(TRIM(i.descricao), ''), NULLIF(TRIM(i.descricao_produto), ''), '-') AS descricao_item,
+          NULLIF(TRIM(COALESCE(i.cfop, '')), '') AS cfop,
+          REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop_digitos,
+          CASE
+            WHEN UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE 'FTI%' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%BR' THEN 'FTIBR'
+            WHEN COALESCE(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '') = 'FT' AND UPPER(TRIM(COALESCE(i.codigo, ''))) LIKE '%W' THEN 'FTW'
+            ELSE NULLIF(SUBSTRING(UPPER(TRIM(COALESCE(i.codigo, ''))) FROM '^[A-Z]+'), '')
+          END AS familia,
+          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total_item
+        FROM "Vendas".pedidos_venda_itens i
+      )
+      SELECT
+        i.familia,
+        TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
+        p.codigo_pedido,
+        NULLIF(TRIM(COALESCE(p.numero_pedido, '')), '') AS numero_pedido,
+        i.codigo_item,
+        i.descricao_item,
+        i.cfop,
+        i.valor_total_item
+      FROM itens_normalizados i
+      JOIN "Vendas".pedidos_venda p
+        ON p.codigo_pedido = i.codigo_pedido
+      JOIN nf_por_pedido nf
+        ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
+      WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
+        AND nf.data_emissao_dt IS NOT NULL
+        AND i.familia IS NOT NULL
+        AND i.cfop_digitos <> '6905'
+        AND i.familia = $1
+        AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2
+      ORDER BY p.codigo_pedido DESC, i.codigo_item ASC NULLS LAST
+    `, [familia, mes]);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro graficos valor-familia-mes detalhe:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/controle/pedidos — tabela de pedidos de venda com cliente e etapa descrita
+router.get('/vendas/controle/pedidos', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        p.codigo_pedido,
+        NULLIF(TRIM(COALESCE(p.numero_pedido, '')), '')                           AS numero_pedido,
+        NULLIF(TRIM(COALESCE(p.codigo_cliente, '')), '')                          AS codigo_cliente,
+        COALESCE(
+          NULLIF(TRIM(f.nome_fantasia), ''),
+          NULLIF(TRIM(p.nome_fantasia), ''),
+          NULLIF(TRIM(p.razao_social), ''),
+          'Cliente não identificado'
+        )                                                                          AS cliente_nome,
+        NULLIF(TRIM(COALESCE(p.etapa, '')), '')                                   AS etapa,
+        CASE TRIM(COALESCE(p.etapa, ''))
+          WHEN '00' THEN 'Proposta'
+          WHEN '10' THEN 'PDV (Em Aprovação)'
+          WHEN '20' THEN 'Entrega Futura'
+          WHEN '50' THEN 'Faturar'
+          WHEN '60' THEN 'Faturado'
+          WHEN '70' THEN 'Entregue'
+          WHEN '80' THEN 'Aprovado'
+          ELSE 'Sem descrição'
+        END                                                                        AS etapa_descricao,
+        p.created_at::date                                                         AS created_at,
+        p.data_previsao,
+        NULLIF(TRIM(COALESCE(p.origem_pedido, '')), '')                           AS origem_pedido,
+        COALESCE(p.valor_total_pedido, 0)::numeric(14,2)                          AS valor_total_pedido,
+        NULLIF(TRIM(COALESCE(p.obs_venda, '')), '')                               AS obs_venda
+      FROM "Vendas".pedidos_venda p
+      LEFT JOIN omie.fornecedores f
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+      ORDER BY COALESCE(p.dalt, p.dinc, p.data_previsao) DESC NULLS LAST, p.codigo_pedido DESC
+      LIMIT 500
+    `);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro controle pedidos:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/kanban/pedidos — kanban por etapa (descrição) com número do pedido
+router.get('/vendas/kanban/pedidos', async (_req, res) => {
+  try {
+    const etapas = [
+      'PDV (Em Aprovação)',
+      'Entrega Futura',
+      'Faturar',
+      'Faturado',
+      'Entregue',
+      'Aprovado'
+    ];
+
+    const { rows } = await pool.query(`
+      SELECT
+        p.codigo_pedido,
+        COALESCE(
+          NULLIF(TRIM(COALESCE(p.numero_pedido, '')), ''),
+          p.codigo_pedido::text
+        )                                                                    AS numero_pedido,
+        NULLIF(TRIM(COALESCE(p.etapa, '')), '')                              AS etapa,
+        CASE TRIM(COALESCE(p.etapa, ''))
+          WHEN '00' THEN 'Proposta'
+          WHEN '10' THEN 'PDV (Em Aprovação)'
+          WHEN '20' THEN 'Entrega Futura'
+          WHEN '50' THEN 'Faturar'
+          WHEN '60' THEN 'Faturado'
+          WHEN '70' THEN 'Entregue'
+          WHEN '80' THEN 'Aprovado'
+          ELSE 'Sem descrição'
+        END                                                                   AS etapa_descricao,
+        p.created_at,
+        COALESCE(p.valor_total_pedido, 0)::numeric(14,2)                     AS valor_total_pedido
+      FROM "Vendas".pedidos_venda p
+      WHERE TRIM(COALESCE(p.etapa::text, '')) IN ('10', '20', '50', '60', '70', '80')
+      ORDER BY COALESCE(p.created_at, p.dinc, p.dalt) DESC NULLS LAST, p.codigo_pedido DESC
+      LIMIT 1200
+    `);
+
+    const colunas = {};
+    etapas.forEach((nome) => { colunas[nome] = []; });
+
+    rows.forEach((r) => {
+      if (!etapas.includes(r.etapa_descricao)) return;
+      const coluna = r.etapa_descricao;
+      colunas[coluna].push({
+        codigo_pedido: r.codigo_pedido,
+        numero_pedido: r.numero_pedido,
+        etapa: r.etapa,
+        etapa_descricao: r.etapa_descricao,
+        created_at: r.created_at,
+        valor_total_pedido: r.valor_total_pedido,
+      });
+    });
+
+    return res.json({ ok: true, colunas, etapas });
+  } catch (err) {
+    console.error('[VENDAS] erro kanban pedidos:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/controle/pedido-itens/:codigoPedido — itens de um pedido de venda
+router.get('/vendas/controle/pedido-itens/:codigoPedido', async (req, res) => {
+  try {
+    const codigoPedido = String(req.params.codigoPedido || '').trim();
+    if (!codigoPedido || !/^\d+$/.test(codigoPedido)) {
+      return res.status(400).json({ ok: false, error: 'codigoPedido inválido.' });
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        NULLIF(TRIM(COALESCE(i.codigo, '')), '')                                  AS codigo,
+        COALESCE(NULLIF(TRIM(i.descricao), ''), NULLIF(TRIM(i.descricao_produto), ''), '-') AS descricao,
+        COALESCE(i.quantidade, 0)::numeric(14,4)                                  AS quantidade,
+        COALESCE(i.valor_total, 0)::numeric(14,2)                                 AS valor_total
+      FROM "Vendas".pedidos_venda_itens i
+      WHERE i.codigo_pedido = $1::bigint
+      ORDER BY i.seq ASC
+    `, [codigoPedido]);
+
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro controle pedido-itens:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

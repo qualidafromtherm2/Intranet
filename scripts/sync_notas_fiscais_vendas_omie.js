@@ -6,6 +6,7 @@
  * Uso:
  *   node scripts/sync_notas_fiscais_vendas_omie.js
  *   node scripts/sync_notas_fiscais_vendas_omie.js --limpar-testes
+ *   node scripts/sync_notas_fiscais_vendas_omie.js --apenas-pendentes
  *
  * Observação:
  * - Este script preenche apenas "Vendas".notas_fiscais_omie.
@@ -76,6 +77,24 @@ function convertOmieDate(valor) {
   return null;
 }
 
+function onlyDigits(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function parseIntOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number.parseInt(String(value).trim(), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeAmbiente(tpAmb) {
+  const s = String(tpAmb || '').trim();
+  if (!s) return null;
+  if (s === '1') return 'P';
+  if (s === '2') return 'H';
+  return s;
+}
+
 function inferStatusNota(nf = {}) {
   const ide = nf.ide || {};
   const dCan = String(ide.dCan || '').trim();
@@ -96,12 +115,18 @@ function extractNota(nf = {}) {
   const numeroNota = String(ide.nNF || '').trim() || null;
   const numeroPedido = String(compl.nIdPedido || '').trim() || null;
   const valorTotal = Number(icmsTot.vNF || icmsTot.vProd || 0) || null;
-  const cnpj = String(dest.cnpj_cpf || '').replace(/\D/g, '').trim() || null;
+  const cnpj = onlyDigits(dest.cnpj_cpf) || null;
   const razao = String(dest.cRazao || '').trim() || null;
   const dataEmissao = convertOmieDate(ide.dEmi || ide.dReg || null);
+  const idNfOmie = parseIntOrNull(compl.nIdNF || compl.nIdNf || null);
+  const idPedidoOmie = parseIntOrNull(compl.nIdPedido || null);
+  const serie = String(ide.serie || '').trim() || null;
+  const ambiente = normalizeAmbiente(ide.tpAmb);
+  const horaEmissao = String(ide.hEmi || '').trim() || null;
 
   const status = inferStatusNota(nf);
   const topic = status === 'Cancelada' ? 'NFe.NotaCancelada' : 'NFe.NotaAutorizada';
+  const acao = status === 'Cancelada' ? 'cancelada' : 'autorizada';
 
   const identidade = chaveNfe
     ? `chave:${chaveNfe}`
@@ -118,6 +143,13 @@ function extractNota(nf = {}) {
     cnpj,
     razao,
     dataEmissao,
+    acao,
+    idNfOmie,
+    serie,
+    ambiente,
+    horaEmissao,
+    idPedidoOmie,
+    empresaCnpj: cnpj,
     payload: nf,
   };
 }
@@ -132,16 +164,22 @@ async function upsertNFe(client, dados) {
   await client.query(`
     INSERT INTO "Vendas".notas_fiscais_omie (
       identidade, tipo_documento, topic_ultimo, status_ultimo,
-      numero_nota, chave_nfe, numero_pedido, valor_total,
+      numero_nota, chave_nfe, numero_pedido,
+      acao_ultimo, id_nf_omie, serie, ambiente,
+      hora_emissao, id_pedido_omie, empresa_cnpj,
+      valor_total,
       cnpj_emitente, razao_emitente, data_emissao,
       message_id_ultimo, author_ultimo, payload_ultimo,
       ativa, updated_at
     ) VALUES (
       $1,'NFe',$2,$3,
-      $4,$5,$6,$7,
-      $8,$9,$10,
-      $11,'script-sync-omie',$12,
-      $13,NOW()
+      $4,$5,$6,
+      $7,$8,$9,$10,
+      $11,$12,$13,
+      $14,
+      $15,$16,$17,
+      $18,'script-sync-omie',$19,
+      $20,NOW()
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
@@ -150,6 +188,13 @@ async function upsertNFe(client, dados) {
       numero_nota     = COALESCE(EXCLUDED.numero_nota,   "Vendas".notas_fiscais_omie.numero_nota),
       chave_nfe       = COALESCE(EXCLUDED.chave_nfe,     "Vendas".notas_fiscais_omie.chave_nfe),
       numero_pedido   = COALESCE(EXCLUDED.numero_pedido, "Vendas".notas_fiscais_omie.numero_pedido),
+      acao_ultimo     = COALESCE(EXCLUDED.acao_ultimo,   "Vendas".notas_fiscais_omie.acao_ultimo),
+      id_nf_omie      = COALESCE(EXCLUDED.id_nf_omie,    "Vendas".notas_fiscais_omie.id_nf_omie),
+      serie           = COALESCE(EXCLUDED.serie,         "Vendas".notas_fiscais_omie.serie),
+      ambiente        = COALESCE(EXCLUDED.ambiente,      "Vendas".notas_fiscais_omie.ambiente),
+      hora_emissao    = COALESCE(EXCLUDED.hora_emissao,  "Vendas".notas_fiscais_omie.hora_emissao),
+      id_pedido_omie  = COALESCE(EXCLUDED.id_pedido_omie,"Vendas".notas_fiscais_omie.id_pedido_omie),
+      empresa_cnpj    = COALESCE(EXCLUDED.empresa_cnpj,  "Vendas".notas_fiscais_omie.empresa_cnpj),
       valor_total     = COALESCE(EXCLUDED.valor_total,   "Vendas".notas_fiscais_omie.valor_total),
       cnpj_emitente   = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
       razao_emitente  = COALESCE(EXCLUDED.razao_emitente,"Vendas".notas_fiscais_omie.razao_emitente),
@@ -166,6 +211,13 @@ async function upsertNFe(client, dados) {
     dados.numeroNota,
     dados.chaveNfe,
     dados.numeroPedido,
+    dados.acao,
+    dados.idNfOmie,
+    dados.serie,
+    dados.ambiente,
+    dados.horaEmissao,
+    dados.idPedidoOmie,
+    dados.empresaCnpj,
     dados.valorTotal,
     dados.cnpj,
     dados.razao,
@@ -188,21 +240,60 @@ async function limparTestes(client) {
   console.log(`Limpeza: ${r2.rowCount} notas de teste removidas.`);
 }
 
+async function ensureFlatColumns(client) {
+  await client.query(`
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+  `);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   const limparTestes_ = process.argv.includes('--limpar-testes');
+  const apenasPendentes = process.argv.includes('--apenas-pendentes');
   const client = await pool.connect();
 
   try {
+    await ensureFlatColumns(client);
+
     if (limparTestes_) {
       await client.query('BEGIN');
       await limparTestes(client);
       await client.query('COMMIT');
     }
 
+    let identidadesPendentes = null;
+    if (apenasPendentes) {
+      const pend = await client.query(`
+        SELECT identidade
+        FROM "Vendas".notas_fiscais_omie
+        WHERE identidade IS NOT NULL
+          AND tipo_documento = 'NFe'
+          AND (
+            id_nf_omie IS NULL
+            OR serie IS NULL
+            OR ambiente IS NULL
+            OR hora_emissao IS NULL
+            OR id_pedido_omie IS NULL
+          )
+      `);
+      identidadesPendentes = new Set(
+        pend.rows
+          .map((r) => String(r.identidade || '').trim())
+          .filter(Boolean)
+      );
+      console.log(`Modo --apenas-pendentes: ${identidadesPendentes.size} identidades alvo.`);
+    }
+
     let pagina = 1;
     let totalProcessados = 0;
     let totalUpserts = 0;
+    let totalIgnorados = 0;
     let totalErros = 0;
     let continuar = true;
 
@@ -248,6 +339,10 @@ async function main() {
           totalErros++;
           continue;
         }
+        if (identidadesPendentes && !identidadesPendentes.has(dados.identidade)) {
+          totalIgnorados++;
+          continue;
+        }
         try {
           await upsertNFe(client, dados);
           totalUpserts++;
@@ -272,7 +367,7 @@ async function main() {
       FROM "Vendas".notas_fiscais_omie
     `);
     console.log('\n=== Resumo final ===');
-    console.log(`Processados: ${totalProcessados} | Upserts OK: ${totalUpserts} | Erros: ${totalErros}`);
+    console.log(`Processados: ${totalProcessados} | Upserts OK: ${totalUpserts} | Ignorados: ${totalIgnorados} | Erros: ${totalErros}`);
     console.log(`Tabela: ${resumo.rows[0].total_notas} notas (${resumo.rows[0].ativas} ativas)`);
   } catch (err) {
     console.error('Erro fatal:', err.message);

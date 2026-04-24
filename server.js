@@ -187,6 +187,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/auth/',          // login, status, logout, first-password, tema
   '/api/client-log',     // log de erros do front (já validado/limitado)
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
+  '/api/produtos/webhook', // webhook Omie de produtos (validado por token na própria rota)
   '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
   '/api/cep',            // consulta de CEP (proxy público)
   // ── Portal AT (técnicos externos — auth própria via token AT) ──
@@ -6801,7 +6802,10 @@ app.post([
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const topic = extrairTopicOmie(body);
     const messageId = String(body.messageId || body.message_id || '').trim() || null;
-    const author = String(body.author || body?.event?.author || body?.evento?.author || '').trim() || null;
+    const authorSource = body.author || body?.event?.author || body?.evento?.author || null;
+    const author = authorSource && typeof authorSource === 'object'
+      ? String(authorSource.name || authorSource.email || authorSource.userId || '').trim() || null
+      : String(authorSource || '').trim() || null;
 
     if (!topic) {
       console.log('[webhook/notas-vendas] recebido sem topic — body:', JSON.stringify(body).slice(0, 300));
@@ -6833,6 +6837,18 @@ app.post([
         numeroNota: parsed.numeroNota,
         chaveNfe: parsed.chaveNfe,
         numeroPedido: parsed.numeroPedido,
+        acao: parsed.acao,
+        idNfOmie: parsed.idNfOmie,
+        serie: parsed.serie,
+        urlXml: parsed.urlXml,
+        ambiente: parsed.ambiente,
+        operacao: parsed.operacao,
+        horaEmissao: parsed.horaEmissao,
+        idPedidoOmie: parsed.idPedidoOmie,
+        urlDanfe: parsed.urlDanfe,
+        empresaIe: parsed.empresaIe,
+        empresaUf: parsed.empresaUf,
+        empresaCnpj: parsed.empresaCnpj,
         valorTotal: parsed.valorTotal,
         cnpjEmitente: parsed.cnpjEmitente,
         razaoEmitente: parsed.razaoEmitente,
@@ -13126,17 +13142,42 @@ function inferStatusNotaVendaFromTopic(topic = '') {
   return 'Desconhecida';
 }
 
+function normalizeFieldKey(key) {
+  return String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getFieldLoose(cur, key) {
+  if (!cur || typeof cur !== 'object') return undefined;
+  if (key in cur) return cur[key];
+
+  const target = normalizeFieldKey(key);
+  if (!target) return undefined;
+
+  for (const k of Object.keys(cur)) {
+    if (normalizeFieldKey(k) === target) return cur[k];
+  }
+
+  return undefined;
+}
+
 function pickField(obj, paths = []) {
   for (const path of paths) {
     const parts = path.split('.');
     let cur = obj;
     let found = true;
     for (const p of parts) {
-      if (!cur || typeof cur !== 'object' || !(p in cur)) {
+      if (!cur || typeof cur !== 'object') {
         found = false;
         break;
       }
-      cur = cur[p];
+
+      const next = getFieldLoose(cur, p);
+      if (next === undefined) {
+        found = false;
+        break;
+      }
+
+      cur = next;
     }
     if (found && cur !== null && cur !== undefined && String(cur).trim() !== '') {
       return cur;
@@ -13159,11 +13200,11 @@ function extractNotaVendaFields(body = {}) {
     || {};
 
   const numeroNota = pickField({ body, event, cab }, [
-    'event.numero_nota', 'event.numeroNota', 'event.cNumeroNFe', 'event.cNumeroNFSe',
+    'event.numero_nf', 'event.numero_nota', 'event.numeroNota', 'event.cNumeroNFe', 'event.cNumeroNFSe',
     'cab.cNumeroNFe', 'cab.cNumeroNFSe', 'body.numero_nota', 'body.numeroNota'
   ]);
   const chaveNfe = pickField({ body, event, cab }, [
-    'event.cChaveNFe', 'event.cChaveNfe', 'cab.cChaveNFe', 'cab.cChaveNfe',
+    'event.nfe_chave', 'event.cChaveNFe', 'event.cChaveNfe', 'cab.cChaveNFe', 'cab.cChaveNfe',
     'body.cChaveNFe', 'body.cChaveNfe', 'body.chave_nfe'
   ]);
   const numeroPedido = pickField({ body, event, cab }, [
@@ -13172,7 +13213,7 @@ function extractNotaVendaFields(body = {}) {
     'body.numero_pedido', 'body.numeroPedido'
   ]);
   const cnpjEmitente = pickField({ body, event, cab }, [
-    'event.cnpj_emitente', 'event.cCNPJ', 'event.cnpj',
+    'event.empresa_cnpj', 'event.cnpj_emitente', 'event.cCNPJ', 'event.cnpj',
     'cab.cCNPJ', 'cab.cnpj', 'body.cnpj_emitente', 'body.cnpj'
   ]);
   const razaoEmitente = pickField({ body, event, cab }, [
@@ -13185,9 +13226,52 @@ function extractNotaVendaFields(body = {}) {
   ]);
   const valorTotal = valorRaw !== null ? Number(String(valorRaw).replace(',', '.')) : null;
   const dataEmissao = pickField({ body, event, cab }, [
-    'event.data_emissao', 'event.dEmissao', 'event.dEmi',
+    'event.data_emis', 'event.data_emissao', 'event.dEmissao', 'event.dEmi',
     'cab.dEmissao', 'cab.data_emissao', 'body.data_emissao'
   ]);
+  const acao = pickField({ body, event, cab }, [
+    'event.acao', 'body.acao'
+  ]);
+  const idNfOmieRaw = pickField({ body, event, cab }, [
+    'event.id_nf', 'event.idNf', 'body.id_nf'
+  ]);
+  const serie = pickField({ body, event, cab }, [
+    'event.serie', 'event.cSerie', 'body.serie'
+  ]);
+  const urlXml = pickField({ body, event, cab }, [
+    'event.nfe_xml', 'event.url_xml', 'event.xml', 'body.nfe_xml'
+  ]);
+  const ambiente = pickField({ body, event, cab }, [
+    'event.ambiente', 'body.ambiente'
+  ]);
+  const operacao = pickField({ body, event, cab }, [
+    'event.operacao', 'body.operacao'
+  ]);
+  const horaEmissao = pickField({ body, event, cab }, [
+    'event.hora_emis', 'event.hora_emissao', 'body.hora_emis'
+  ]);
+  const idPedidoOmieRaw = pickField({ body, event, cab }, [
+    'event.id_pedido', 'event.idPedido', 'body.id_pedido'
+  ]);
+  const urlDanfe = pickField({ body, event, cab }, [
+    'event.nfe_danfe', 'event.danfe', 'event.url_danfe', 'body.nfe_danfe', 'body.danfe'
+  ]);
+  const empresaIe = pickField({ body, event, cab }, [
+    'event.empresa_ie', 'body.empresa_ie'
+  ]);
+  const empresaUf = pickField({ body, event, cab }, [
+    'event.empresa_uf', 'body.empresa_uf'
+  ]);
+  const empresaCnpj = pickField({ body, event, cab }, [
+    'event.empresa_cnpj', 'body.empresa_cnpj'
+  ]);
+
+  const idNfOmie = idNfOmieRaw !== null && idNfOmieRaw !== undefined
+    ? Number.parseInt(String(idNfOmieRaw).trim(), 10)
+    : null;
+  const idPedidoOmie = idPedidoOmieRaw !== null && idPedidoOmieRaw !== undefined
+    ? Number.parseInt(String(idPedidoOmieRaw).trim(), 10)
+    : null;
 
   return {
     event,
@@ -13198,6 +13282,18 @@ function extractNotaVendaFields(body = {}) {
     razaoEmitente: razaoEmitente ? String(razaoEmitente).trim() : null,
     valorTotal: Number.isFinite(valorTotal) ? valorTotal : null,
     dataEmissao: dataEmissao ? String(dataEmissao).trim() : null,
+    acao: acao ? String(acao).trim() : null,
+    idNfOmie: Number.isFinite(idNfOmie) ? idNfOmie : null,
+    serie: serie ? String(serie).trim() : null,
+    urlXml: urlXml ? String(urlXml).trim() : null,
+    ambiente: ambiente ? String(ambiente).trim() : null,
+    operacao: operacao ? String(operacao).trim() : null,
+    horaEmissao: horaEmissao ? String(horaEmissao).trim() : null,
+    idPedidoOmie: Number.isFinite(idPedidoOmie) ? idPedidoOmie : null,
+    urlDanfe: urlDanfe ? String(urlDanfe).trim() : null,
+    empresaIe: empresaIe ? String(empresaIe).trim() : null,
+    empresaUf: empresaUf ? String(empresaUf).trim() : null,
+    empresaCnpj: empresaCnpj ? String(empresaCnpj).trim() : null,
   };
 }
 
@@ -13216,6 +13312,18 @@ async function ensureVendasNotasOmieTables(client) {
       numero_nota VARCHAR(40),
       chave_nfe VARCHAR(60),
       numero_pedido VARCHAR(40),
+      acao_ultimo VARCHAR(40),
+      id_nf_omie BIGINT,
+      serie VARCHAR(10),
+      url_xml TEXT,
+      ambiente VARCHAR(10),
+      operacao VARCHAR(30),
+      hora_emissao VARCHAR(20),
+      id_pedido_omie BIGINT,
+      url_danfe TEXT,
+      empresa_ie VARCHAR(40),
+      empresa_uf VARCHAR(5),
+      empresa_cnpj VARCHAR(20),
       valor_total NUMERIC(18,2),
       cnpj_emitente VARCHAR(20),
       razao_emitente VARCHAR(200),
@@ -13256,6 +13364,19 @@ async function ensureVendasNotasOmieTables(client) {
     CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_fiscais_omie_eventos_message_topic
       ON "Vendas".notas_fiscais_omie_eventos(message_id, topic)
       WHERE message_id IS NOT NULL;
+
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
   `);
 
   _vendasNotasOmieTablesReady = true;
@@ -13271,16 +13392,24 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
   await client.query(`
     INSERT INTO "Vendas".notas_fiscais_omie (
       identidade, tipo_documento, topic_ultimo, status_ultimo,
-      numero_nota, chave_nfe, numero_pedido, valor_total,
+      numero_nota, chave_nfe, numero_pedido,
+      acao_ultimo, id_nf_omie, serie, url_xml,
+      ambiente, operacao, hora_emissao, id_pedido_omie,
+      url_danfe, empresa_ie, empresa_uf, empresa_cnpj,
+      valor_total,
       cnpj_emitente, razao_emitente, data_emissao,
       message_id_ultimo, author_ultimo, payload_ultimo,
       ativa, updated_at
     ) VALUES (
       $1,$2,$3,$4,
-      $5,$6,$7,$8,
-      $9,$10,$11,
-      $12,$13,$14,
-      $15,NOW()
+      $5,$6,$7,
+      $8,$9,$10,$11,
+      $12,$13,$14,$15,
+      $16,$17,$18,$19,
+      $20,
+      $21,$22,$23,
+      $24,$25,$26,
+      $27,NOW()
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
@@ -13290,6 +13419,18 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       numero_nota = COALESCE(EXCLUDED.numero_nota, "Vendas".notas_fiscais_omie.numero_nota),
       chave_nfe = COALESCE(EXCLUDED.chave_nfe, "Vendas".notas_fiscais_omie.chave_nfe),
       numero_pedido = COALESCE(EXCLUDED.numero_pedido, "Vendas".notas_fiscais_omie.numero_pedido),
+      acao_ultimo = COALESCE(EXCLUDED.acao_ultimo, "Vendas".notas_fiscais_omie.acao_ultimo),
+      id_nf_omie = COALESCE(EXCLUDED.id_nf_omie, "Vendas".notas_fiscais_omie.id_nf_omie),
+      serie = COALESCE(EXCLUDED.serie, "Vendas".notas_fiscais_omie.serie),
+      url_xml = COALESCE(EXCLUDED.url_xml, "Vendas".notas_fiscais_omie.url_xml),
+      ambiente = COALESCE(EXCLUDED.ambiente, "Vendas".notas_fiscais_omie.ambiente),
+      operacao = COALESCE(EXCLUDED.operacao, "Vendas".notas_fiscais_omie.operacao),
+      hora_emissao = COALESCE(EXCLUDED.hora_emissao, "Vendas".notas_fiscais_omie.hora_emissao),
+      id_pedido_omie = COALESCE(EXCLUDED.id_pedido_omie, "Vendas".notas_fiscais_omie.id_pedido_omie),
+      url_danfe = COALESCE(EXCLUDED.url_danfe, "Vendas".notas_fiscais_omie.url_danfe),
+      empresa_ie = COALESCE(EXCLUDED.empresa_ie, "Vendas".notas_fiscais_omie.empresa_ie),
+      empresa_uf = COALESCE(EXCLUDED.empresa_uf, "Vendas".notas_fiscais_omie.empresa_uf),
+      empresa_cnpj = COALESCE(EXCLUDED.empresa_cnpj, "Vendas".notas_fiscais_omie.empresa_cnpj),
       valor_total = COALESCE(EXCLUDED.valor_total, "Vendas".notas_fiscais_omie.valor_total),
       cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
       razao_emitente = COALESCE(EXCLUDED.razao_emitente, "Vendas".notas_fiscais_omie.razao_emitente),
@@ -13307,6 +13448,18 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     dados.numeroNota || null,
     dados.chaveNfe || null,
     dados.numeroPedido || null,
+    dados.acao || null,
+    dados.idNfOmie || null,
+    dados.serie || null,
+    dados.urlXml || null,
+    dados.ambiente || null,
+    dados.operacao || null,
+    dados.horaEmissao || null,
+    dados.idPedidoOmie || null,
+    dados.urlDanfe || null,
+    dados.empresaIe || null,
+    dados.empresaUf || null,
+    dados.empresaCnpj || null,
     dados.valorTotal || null,
     dados.cnpjEmitente || null,
     dados.razaoEmitente || null,
