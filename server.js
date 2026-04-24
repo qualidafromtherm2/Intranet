@@ -187,7 +187,6 @@ const API_PUBLIC_PREFIXES = [
   '/api/auth/',          // login, status, logout, first-password, tema
   '/api/client-log',     // log de erros do front (já validado/limitado)
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
-  '/api/produtos/webhook',// webhook Omie de produtos (validado por token na rota)
   '/api/webhooks/',      // webhooks Omie (validados por chkOmieToken)
   '/api/cep',            // consulta de CEP (proxy público)
   // ── Portal AT (técnicos externos — auth própria via token AT) ──
@@ -198,6 +197,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/at/tecnico/os-portal/',   // detalhes de uma OS
   '/api/sac/at/tecnico/fechamento/',  // fechamento + evidências + NFe
   '/api/ai/manual-chat',              // chatbot do portal AT
+  '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
 ];
 function isApiPublic(pathname) {
   if (!pathname.startsWith('/api/')) return true;
@@ -13158,25 +13158,20 @@ function extractNotaVendaFields(body = {}) {
     || (body.cabec && typeof body.cabec === 'object' ? body.cabec : null)
     || {};
 
-  // Omie Connect 2.0 usa campos snake_case diferentes dos campos clássicos
   const numeroNota = pickField({ body, event, cab }, [
-    'event.numero_nf',    // Connect 2.0
     'event.numero_nota', 'event.numeroNota', 'event.cNumeroNFe', 'event.cNumeroNFSe',
     'cab.cNumeroNFe', 'cab.cNumeroNFSe', 'body.numero_nota', 'body.numeroNota'
   ]);
   const chaveNfe = pickField({ body, event, cab }, [
-    'event.nfe_chave',    // Connect 2.0
     'event.cChaveNFe', 'event.cChaveNfe', 'cab.cChaveNFe', 'cab.cChaveNfe',
     'body.cChaveNFe', 'body.cChaveNfe', 'body.chave_nfe'
   ]);
   const numeroPedido = pickField({ body, event, cab }, [
-    'event.id_pedido',    // Connect 2.0 (ID interno Omie)
     'event.numero_pedido', 'event.numeroPedido', 'event.cNumeroPedido',
     'cab.numero_pedido', 'cab.numeroPedido', 'cab.cNumeroPedido',
     'body.numero_pedido', 'body.numeroPedido'
   ]);
   const cnpjEmitente = pickField({ body, event, cab }, [
-    'event.empresa_cnpj', // Connect 2.0
     'event.cnpj_emitente', 'event.cCNPJ', 'event.cnpj',
     'cab.cCNPJ', 'cab.cnpj', 'body.cnpj_emitente', 'body.cnpj'
   ]);
@@ -13189,16 +13184,10 @@ function extractNotaVendaFields(body = {}) {
     'cab.nValorTotal', 'cab.nValorNota', 'body.valor_total'
   ]);
   const valorTotal = valorRaw !== null ? Number(String(valorRaw).replace(',', '.')) : null;
-  // Connect 2.0 usa data_emis em formato ISO (ex: "2026-04-22T00:00:00-03:00")
-  const dataEmissaoRaw = pickField({ body, event, cab }, [
-    'event.data_emis',    // Connect 2.0
+  const dataEmissao = pickField({ body, event, cab }, [
     'event.data_emissao', 'event.dEmissao', 'event.dEmi',
     'cab.dEmissao', 'cab.data_emissao', 'body.data_emissao'
   ]);
-  // Normaliza para YYYY-MM-DD se vier em formato ISO
-  const dataEmissao = dataEmissaoRaw
-    ? String(dataEmissaoRaw).trim().slice(0, 10)
-    : null;
 
   return {
     event,
@@ -13208,7 +13197,7 @@ function extractNotaVendaFields(body = {}) {
     cnpjEmitente: cnpjEmitente ? String(cnpjEmitente).trim() : null,
     razaoEmitente: razaoEmitente ? String(razaoEmitente).trim() : null,
     valorTotal: Number.isFinite(valorTotal) ? valorTotal : null,
-    dataEmissao: dataEmissao || null,
+    dataEmissao: dataEmissao ? String(dataEmissao).trim() : null,
   };
 }
 
