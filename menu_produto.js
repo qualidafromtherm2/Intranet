@@ -320,7 +320,7 @@ window._loadSolicitacoesTab = async function() {
 
   const COLS = [
     { key: 'Solicitado',           label: 'Solicitado',           icon: 'fa-clock',          color: '#3b82f6', bg: '#0f1929', acao: 'iniciar'  },
-    { key: 'Em compra',            label: 'Em compra',            icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', acao: 'modal'    },
+    { key: 'Stund-by',            label: 'Stund-by',            icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', acao: 'modal'    },
     { key: 'Em Separação',         label: 'Em Separação',         icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', acao: 'modal'    },
     { key: 'Separado',             label: 'Separado',             icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', acao: 'modal'    },
     { key: 'Aguardando retirada',  label: 'Aguardando retirada',  icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', acao: null       },
@@ -500,10 +500,15 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
   function _renderAggItem(it, nSolic) {
     const qty      = parseFloat(it.quantidade) || 0;
     const isSep    = it.status === 'Separado';
+    const isEmSeparacao = ['Separação', 'Em Separação'].includes(String(it.status || ''));
     const dp       = _solFmtDataPrevista(it.data_prevista);
     const dh       = [dp, it.horario].filter(Boolean).join(' ');
     const hasObs = !!String(it.observacao || '').trim();
     const obsText = (it.observacao || '').trim();
+    // Renderizar histórico de troca se existir
+    const swapHistory = it.codigo_produto_ant && it.codigo_produto_novo 
+      ? `<div style="font-size:.70rem;color:#a78bfa;margin-top:2px;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i><span>${it.codigo_produto_ant} → ${it.codigo_produto_novo}</span></div>`
+      : '';
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
       ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
@@ -536,6 +541,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
             ${_solStatusBadge(it.status || 'Separação')}
             ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
           </div>
+          ${swapHistory}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
           ${qtyHtml}
@@ -554,10 +560,18 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
                    <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
                  </button>
                </div>`
-            : `<button class="btn-item-acao" title="Ações do item"
-                 style="padding:4px 10px;border:none;border-radius:6px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .2s;">
-                 <i class="fa-solid fa-gear" style="margin-right:4px;"></i>Ação
-               </button>`}
+            : `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                 <button class="btn-item-acao" title="Ações do item"
+                   style="padding:4px 10px;border:none;border-radius:6px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .2s;">
+                   <i class="fa-solid fa-gear" style="margin-right:4px;"></i>Ação
+                 </button>
+                 ${isEmSeparacao
+                   ? `<button class="btn-item-trocar" title="Trocar este produto"
+                        style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                        <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
+                      </button>`
+                   : ''}
+               </div>`}
         </div>
       </div>`;
   }
@@ -614,10 +628,10 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
   modal.id = 'modalSeparacaoLogistica';
   modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);z-index:10050;display:flex;align-items:center;justify-content:center;';
   modal.innerHTML = `
-    <div style="position:relative;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(500px,95vw);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+    <div style="position:relative;background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(760px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;flex-shrink:0;">
         <i class="fa-solid fa-boxes-stacked" style="color:#f59e0b;font-size:1.1rem;"></i>
-        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">Separação — ${grupoAtual.nome_user}</span>
+        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;" id="modalSeparacaoTitle">Em Separação — ${grupoAtual.nome_user}</span>
         <button id="btnModalSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
       </div>
       <div id="modalSepInner" style="overflow-y:auto;flex:1;padding-bottom:16px;">
@@ -636,7 +650,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
   const modalInner = document.getElementById('modalSepInner');
 
-  async function _abrirModalAcaoItemSep(row) {
+  async function _abrirModalAcaoItemSep(row, coluna) {
     document.getElementById('modalAcaoItemSep')?.remove();
     const codigo = row.dataset.codigo || '';
     const descricao = decodeURIComponent(row.dataset.descricao || '');
@@ -645,6 +659,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
     const solicIds = JSON.parse(row.dataset.solicIds || '[]');
     const carrIds = JSON.parse(row.dataset.carrIds || '[]');
+    const status = row.dataset.status || 'Separação';
 
     const modal = document.createElement('div');
     modal.id = 'modalAcaoItemSep';
@@ -653,7 +668,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       <div style="background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(520px,95vw);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
         <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;">
           <i class="fa-solid fa-list-check" style="color:#f59e0b;font-size:1.05rem;"></i>
-          <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">Ação do item</span>
+          <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">${coluna || 'Ação do item'}</span>
           <button id="btnAcaoItemFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
         </div>
         <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
@@ -665,7 +680,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
           <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
           <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Separei parcial</button>
-          <button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>
+          ${status !== 'Stund-by' ? `<button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>` : ''}
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -731,7 +746,9 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       }
     });
 
-    document.getElementById('btnAcaoNaoSep').addEventListener('click', async () => {
+    const btnNaoSep = document.getElementById('btnAcaoNaoSep');
+    if (btnNaoSep) {
+      btnNaoSep.addEventListener('click', async () => {
       const ok = confirm('Confirmar que este item não foi separado?');
       if (!ok) return;
       try {
@@ -754,111 +771,110 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
       } catch (err) {
         alert('Erro: ' + (err.message || err));
       }
-    });
-  }
+      });
+    }
 
-  // Modal de trocar produto
-  async function _abrirModalTrocarProduto(solicId, codigoAtual) {
-    const modalTrocar = document.createElement('div');
-    modalTrocar.style.cssText = `
-      position:fixed;top:0;left:0;width:100%;height:100%;
-      background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;
-      z-index:9999;
-    `;
+  // Busca inline de troca de produto (sem abrir modal sobre modal)
+  async function _abrirTrocaInline(row) {
+    if (!row) return;
 
-    let timer = null;
-    let ultimaBusca = '';
-    const resultados = [];
+    // Mantém somente um editor de troca aberto por vez
+    modalInner.querySelectorAll('.sep-troca-inline-wrap').forEach(el => el.remove());
 
-    const html = `
-      <div style="background:#1a1a1a;border-radius:12px;padding:20px;width:90%;max-width:500px;color:#d1d5db;box-shadow:0 10px 40px rgba(0,0,0,.8);">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h2 style="margin:0;font-size:1.1rem;color:#f0f0f0;">Trocar Produto</h2>
-          <button id="closeTrocarModal" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:1.3rem;">✕</button>
-        </div>
-        
-        <label style="display:block;margin-bottom:8px;font-size:.85rem;color:#a0aec0;font-weight:700;">Buscar novo produto</label>
-        <input type="text" id="trocarProdutoBusca" placeholder="Digite código ou descrição..." 
-          style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#d1d5db;font-size:.88rem;box-sizing:border-box;margin-bottom:12px;">
-        
-        <div id="trocarResultados" style="max-height:300px;overflow-y:auto;border:1px solid #334155;border-radius:6px;background:#0f172a;min-height:40px;padding:8px;font-size:.80rem;">
-          <div style="color:#6b7280;text-align:center;padding:12px;">Digite algo para buscar...</div>
-        </div>
-        
-        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
-          <button id="cancelTrocarModal" style="padding:8px 16px;border:1px solid #4b5563;background:transparent;color:#d1d5db;border-radius:6px;cursor:pointer;font-weight:700;font-size:.85rem;">Cancelar</button>
-        </div>
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    if (!solicIds.length) return;
+    const solicId = solicIds[0];
+    const codigoAtual = String(row.dataset.codigo || '').trim();
+    const descricaoAtual = decodeURIComponent(row.dataset.descricao || '');
+    const quantidadeAtual = parseFloat(row.dataset.qtyTotal || '0') || null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'sep-troca-inline-wrap';
+    wrap.style.cssText = 'padding:10px 16px 14px;border-top:1px solid #2a2a2a;background:#141a27;display:flex;flex-direction:column;gap:8px;';
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;">
+        <i class="fa-solid fa-arrows-rotate" style="color:#a78bfa;"></i>
+        <span style="font-size:.80rem;color:#e5e7eb;font-weight:700;">Trocar produto ${codigoAtual ? `(${codigoAtual})` : ''}</span>
+        <button type="button" class="btn-troca-inline-fechar" style="margin-left:auto;padding:3px 8px;border:1px solid #4b5563;border-radius:6px;background:transparent;color:#d1d5db;cursor:pointer;font-size:.74rem;">Fechar</button>
+      </div>
+      <div style="font-size:.73rem;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${descricaoAtual || 'Selecione um novo produto abaixo'}</div>
+      <div style="position:relative;">
+        <input type="text" class="sep-troca-input" placeholder="Pesquisar produto (código ou descrição)..." autocomplete="off"
+          style="width:100%;padding:7px 10px;border:1px solid #475569;border-radius:8px;font-size:12px;background:#1f2937;color:#f8fafc;box-sizing:border-box;" />
+        <div class="sep-troca-resultados" style="display:none;position:static;max-height:300px;overflow-y:auto;background:#1f2937;border:1px solid #475569;border-radius:8px;box-shadow:0 12px 28px rgba(0,0,0,.35);margin-top:6px;"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" class="btn-troca-inline-cancelar" style="padding:5px 10px;border:1px solid #4b5563;border-radius:6px;background:transparent;color:#d1d5db;cursor:pointer;font-size:.75rem;">Cancelar</button>
       </div>
     `;
 
-    modalTrocar.innerHTML = html;
-    document.body.appendChild(modalTrocar);
+    row.insertAdjacentElement('afterend', wrap);
 
-    const inputBusca = document.getElementById('trocarProdutoBusca');
-    const divResultados = document.getElementById('trocarResultados');
-    const btnClose = document.getElementById('closeTrocarModal');
-    const btnCancel = document.getElementById('cancelTrocarModal');
+    const input = wrap.querySelector('.sep-troca-input');
+    const resultadosEl = wrap.querySelector('.sep-troca-resultados');
+    const btnFechar = wrap.querySelector('.btn-troca-inline-fechar');
+    const btnCancelar = wrap.querySelector('.btn-troca-inline-cancelar');
 
-    function fecharTrocar() {
+    let timer = null;
+    let lastQ = '';
+    let resultados = [];
+
+    const fechar = () => {
       if (timer) clearTimeout(timer);
-      modalTrocar.remove();
-    }
+      wrap.remove();
+    };
 
-    btnClose.onclick = fecharTrocar;
-    btnCancel.onclick = fecharTrocar;
+    btnFechar.addEventListener('click', fechar);
+    btnCancelar.addEventListener('click', fechar);
 
-    inputBusca.addEventListener('input', async (e) => {
-      const q = e.target.value.trim();
+    input.addEventListener('input', () => {
+      const q = (input.value || '').trim();
       if (timer) clearTimeout(timer);
-      
+
       if (q.length < 2) {
-        divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Digite pelo menos 2 caracteres...</div>';
-        resultados.length = 0;
+        resultados = [];
+        resultadosEl.style.display = 'none';
+        resultadosEl.innerHTML = '';
         return;
       }
 
-      divResultados.innerHTML = '<div style="color:#f59e0b;text-align:center;padding:12px;">Buscando...</div>';
-      ultimaBusca = q;
+      resultadosEl.style.display = 'block';
+      resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#93c5fd;font-size:12px;">Buscando...</div>';
+      lastQ = q;
 
       timer = setTimeout(async () => {
         try {
-          const r = await fetch('/api/logistica/produtos/buscar?q=' + encodeURIComponent(q), { credentials: 'include' });
-          const d = await r.json();
-          if (d.ok && Array.isArray(d.resultados) && ultimaBusca === q) {
-            resultados.length = 0;
-            d.resultados.forEach(p => resultados.push(p));
-            
-            if (resultados.length === 0) {
-              divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Nenhum resultado encontrado.</div>';
-            } else {
-              divResultados.innerHTML = resultados.map((p, idx) => `
-                <div class="trocar-resultado-item" data-idx="${idx}" 
-                  style="padding:10px;border-bottom:1px solid #334155;cursor:pointer;display:flex;gap:8px;align-items:center;transition:all .15s;"
-                  onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='transparent'">
-                  <div style="flex:1;min-width:0;">
-                    <div style="color:#f59e0b;font-weight:700;font-size:.80rem;">${p.codigo || '—'}</div>
-                    <div style="color:#d1d5db;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.descricao || '—'}</div>
-                  </div>
-                  <div style="color:#9ca3af;font-size:.75rem;flex-shrink:0;">${p.unidade || 'UN'}</div>
-                </div>
-              `).join('');
-            }
+          const resp = await fetch('/api/logistica/produtos/buscar?q=' + encodeURIComponent(q), { credentials: 'include' });
+          const data = await resp.json();
+          if (!data?.ok || lastQ !== q) return;
+
+          resultados = Array.isArray(data.resultados) ? data.resultados : [];
+          if (!resultados.length) {
+            resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#9ca3af;font-size:12px;">Nenhum produto encontrado.</div>';
+            return;
           }
+
+          resultadosEl.innerHTML = resultados.map((p, idx) => `
+            <div class="sep-troca-item" data-idx="${idx}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #334155;display:flex;flex-direction:column;gap:2px;">
+              <span style="font-weight:600;color:#f8fafc;font-size:12px;">${String(p.codigo || '—')}</span>
+              <span style="color:#cbd5e1;font-size:11px;">${String(p.descricao || '—')}</span>
+            </div>
+          `).join('');
         } catch (err) {
-          divResultados.innerHTML = '<div style="color:#ef4444;text-align:center;padding:12px;">Erro na busca.</div>';
+          resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#fca5a5;font-size:12px;">Erro ao buscar produtos.</div>';
         }
-      }, 300);
+      }, 260);
     });
 
-    divResultados.addEventListener('click', async (e) => {
-      const item = e.target.closest('.trocar-resultado-item');
-      if (!item) return;
-      const idx = parseInt(item.dataset.idx);
+    resultadosEl.addEventListener('click', async (e) => {
+      const itemEl = e.target.closest('.sep-troca-item');
+      if (!itemEl) return;
+      const idx = Number(itemEl.dataset.idx);
       const prod = resultados[idx];
-      if (!prod) return;
+      if (!prod?.codigo) return;
 
-      inputBusca.disabled = true;
-      divResultados.innerHTML = '<div style="color:#f59e0b;text-align:center;padding:12px;">Trocando...</div>';
+      input.disabled = true;
+      resultadosEl.innerHTML = '<div style="padding:10px 12px;color:#93c5fd;font-size:12px;">Aplicando troca...</div>';
 
       try {
         const r = await fetch('/api/logistica/itens_solicitados/trocar', {
@@ -868,14 +884,15 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           body: JSON.stringify({
             solic_id: solicId,
             codigo_novo: prod.codigo,
-            descricao_novo: prod.descricao,
-            unidade_novo: prod.unidade
+            descricao_novo: prod.descricao || '',
+            unidade_novo: prod.unidade || 'UN',
+            quantidade_nova: quantidadeAtual
           })
         });
         const d = await r.json();
-        if (!d.ok) throw new Error(d.error || 'Erro ao trocar produto.');
-        
-        fecharTrocar();
+        if (!d?.ok) throw new Error(d?.error || 'Erro ao trocar produto.');
+
+        fechar();
         await reloadItems();
         window._loadSolicitacoesTab.force = true;
         window._loadSolicitacoesTab();
@@ -883,12 +900,13 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
         window._loadKanbanSolicitacoesTab();
       } catch (err) {
         alert('Erro: ' + (err.message || err));
-        inputBusca.disabled = false;
-        divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Digite algo para buscar...</div>';
+        input.disabled = false;
+        resultadosEl.style.display = 'none';
+        resultadosEl.innerHTML = '';
       }
     });
 
-    inputBusca.focus();
+    setTimeout(() => input.focus(), 0);
   }
 
   // Delegação de clique — ações do item
@@ -961,11 +979,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (btnTrocar && !btnTrocar.disabled) {
       const row = btnTrocar.closest('[data-item-row]');
       if (!row) return;
-      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
-      if (!solicIds.length) return;
-      
-      const codigoAtual = row.querySelector('.codigo_produto')?.textContent || '';
-      await _abrirModalTrocarProduto(solicIds[0], codigoAtual);
+      await _abrirTrocaInline(row);
       return;
     }
 
@@ -973,7 +987,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     if (btnAcao && !btnAcao.disabled) {
       const row = btnAcao.closest('[data-item-row]');
       if (!row) return;
-      await _abrirModalAcaoItemSep(row);
+      await _abrirModalAcaoItemSep(row, row.dataset.status);
       return;
     }
 
@@ -1013,6 +1027,7 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
     }
   });
 }
+}
 
 // ============================================================================
 // KANBAN DE SOLICITAÇÕES
@@ -1029,7 +1044,7 @@ window._loadKanbanSolicitacoesTab = async function() {
 
   const COLS = [
     { key: 'pendente',              label: 'Solicitado',            icon: 'fa-clock',          color: '#3b82f6', bg: '#0f1929', bgLight: '#eff6ff', editable: true  },
-    { key: 'Em compra',             label: 'Em compra',             icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', bgLight: '#fdf2f8', editable: false },
+    { key: 'Stund-by',             label: 'Stund-by',             icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', bgLight: '#fdf2f8', editable: false },
     { key: 'Separação',             label: 'Em Separação',          icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', bgLight: '#fffbeb', editable: false },
     { key: 'Separado',              label: 'Separado',              icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', bgLight: '#f0fdf4', editable: false },
     { key: 'Aguardando retirada',   label: 'Aguardando retirada',   icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', bgLight: '#f5f3ff', editable: false },

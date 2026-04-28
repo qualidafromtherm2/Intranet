@@ -14975,7 +14975,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
        base.unidade, qtyRemainder, base.data_prevista, base.horario, base.cod_omie]
     );
     await client.query(
-      `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao) VALUES ($1,$2,'Em compra',$3)`,
+      `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao) VALUES ($1,$2,'Stund-by',$3)`,
       [newCarr.id, newNSolic, String(motivo || '').trim() || null]
     );
 
@@ -15057,7 +15057,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
         COUNT(*)                              AS total_itens,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'pendente'
-          WHEN bool_or(i.status = 'Em compra')           THEN 'Em compra'
+          WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
           WHEN bool_or(i.status = 'Separação')           THEN 'Separação'
           WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
           WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
@@ -15075,7 +15075,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
     const mapCols = {
       carrinho:              [],
       pendente:              [],
-      'Em compra':           [],
+      'Stund-by':           [],
       'Separação':           [],
       'Separado':            [],
       'Aguardando retirada': [],
@@ -15108,12 +15108,14 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
-               COALESCE(c.retirada_por, c.nome_user) AS nome_user
+               COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+               rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
           FROM solicitacao_produto.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
+          LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
          WHERE i.n_solic = $1
            AND (c.id_user = $2 OR c.retirada_por = $3)
-         ORDER BY c.criado_em ASC
+         ORDER BY c.criado_em ASC, rt.data_troca DESC
       `, [n_solic, id_user, nome_user]);
       return res.json({ ok: true, itens: rows });
     } else {
@@ -15125,7 +15127,9 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
-               COALESCE(c.retirada_por, c.nome_user) AS nome_user
+               COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+               NULL::text AS codigo_produto_ant, NULL::text AS descricao_ant,
+               NULL::text AS codigo_produto_novo, NULL::text AS descricao_novo
           FROM logistica.carrinho c
          WHERE c.id_user = $1
            AND NOT EXISTS (
@@ -15187,7 +15191,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         MIN(c.criado_em)                       AS criado_em_min,
         CASE
           WHEN bool_or(i.status = 'pendente')            THEN 'Solicitado'
-          WHEN bool_or(i.status = 'Em compra')           THEN 'Em compra'
+          WHEN bool_or(i.status = 'Stund-by')           THEN 'Stund-by'
           WHEN bool_or(i.status = 'Separação')           THEN 'Em Separação'
           WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
           WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
@@ -15200,7 +15204,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
       ORDER BY MIN(c.criado_em) ASC
     `);
 
-    const colunas = { 'Solicitado': [], 'Em compra': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
+    const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
     rows.forEach(r => { if (colunas[r.coluna]) colunas[r.coluna].push(r); });
 
     res.json({ ok: true, colunas });
@@ -15353,10 +15357,10 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     const newCarrId = newCarrRows[0].id;
 
-    // Cria novo item_solicitado com a nova SEP e status "Em compra"
+    // Cria novo item_solicitado com a nova SEP e status "Stund-by"
     await client.query(`
       INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao)
-      VALUES ($1, $2, 'Em compra', $3)
+      VALUES ($1, $2, 'Stund-by', $3)
     `, [newCarrId, newNSolic, justificativa || null]);
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
@@ -15402,7 +15406,7 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
 
     // Busca o item original
     const { rows: [item] } = await client.query(
-      `SELECT i.id, i.id_carr, c.codigo_produto, c.descricao, c.unidade FROM solicitacao_produto.itens_solicitados i
+      `SELECT i.id, i.id_carr, c.codigo_produto, c.descricao, c.unidade, c.quantidade FROM solicitacao_produto.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.id = $1`, [solic_id]
     );
@@ -15419,10 +15423,14 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
     );
 
     // Atualiza o carrinho com o novo produto
+    const quantidadeFinal = (quantidade_nova == null || quantidade_nova === '')
+      ? item.quantidade
+      : quantidade_nova;
+
     await client.query(
       `UPDATE logistica.carrinho SET codigo_produto = $1, descricao = $2, unidade = $3, quantidade = $4
        WHERE id = $5`,
-      [codigo_novo, descricao_novo || '', unidade_novo || 'UN', quantidade_nova || item.quantidade, item.id_carr]
+      [codigo_novo, descricao_novo || '', unidade_novo || 'UN', quantidadeFinal, item.id_carr]
     );
 
     await client.query('COMMIT');
