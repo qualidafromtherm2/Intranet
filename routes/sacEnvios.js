@@ -3215,10 +3215,10 @@ function extractDceChaveFromPdf(textRaw) {
   // Formato no PDF: espaçado em grupos de 4 ou com quebras
   // Ex: 5326 0434 0283 1600 0103 9900 1004 3348 3614 0314 7332
   const matches = [
-    text.match(/(\d{4}\s+){10}\d{4}(?:\s|$)/),  // Formato com espaços
+    text.match(/(?:\d{4}[\s\r\n]+){10}\d{4}/),  // Formato com espaços/quebras (grupo não-capturante p/ match[0] valer a chave inteira)
     text.match(/chDCe=(\d{44})/i),               // Se houver URL do QR
     text.match(/CH\s*DCe?[:\s=]+(\d{44})/i),    // Variações
-    text.match(/^(\d{44})$/m),                  // Linha só com 44 dígitos
+    text.match(/(?<!\d)(\d{44})(?!\d)/),        // 44 dígitos sequenciais (com ou sem quebras vizinhas)
   ];
 
   for (const match of matches) {
@@ -3231,6 +3231,104 @@ function extractDceChaveFromPdf(textRaw) {
   }
 
   return null;
+}
+
+// Decodifica entidades HTML básicas vindas do portal SEFAZ
+function decodeHtmlEntitiesBasic(s) {
+  return String(s || '')
+    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&atilde;/gi, 'ã')
+    .replace(/&otilde;/gi, 'õ').replace(/&acirc;/gi, 'â').replace(/&ecirc;/gi, 'ê')
+    .replace(/&ocirc;/gi, 'ô').replace(/&ccedil;/gi, 'ç').replace(/&Aacute;/g, 'Á')
+    .replace(/&Eacute;/g, 'É').replace(/&Iacute;/g, 'Í').replace(/&Oacute;/g, 'Ó')
+    .replace(/&Uacute;/g, 'Ú').replace(/&Atilde;/g, 'Ã').replace(/&Otilde;/g, 'Õ')
+    .replace(/&Acirc;/g, 'Â').replace(/&Ecirc;/g, 'Ê').replace(/&Ocirc;/g, 'Ô')
+    .replace(/&Ccedil;/g, 'Ç').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+}
+
+// Formata quantidade vinda da SEFAZ ("50,0000" -> "50"; "2,5000" -> "2,5")
+function formatSefazQuantidade(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  // troca vírgula por ponto para parsear, e depois remove zeros à direita
+  const num = Number(s.replace(/\./g, '').replace(',', '.'));
+  if (!Number.isFinite(num) || num <= 0) return '';
+  // Se inteiro, retorna sem decimais; caso contrário, mantém vírgula com até 4 casas e remove zeros finais
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
+}
+
+// Consulta a SEFAZ Paraná pela chave da DCe e devolve os itens estruturados como JSON string,
+// no mesmo formato que extractConteudo, ou null em caso de falha/timeout/sem itens.
+async function fetchSefazProdutos(chaveDce, { timeoutMs = 6000 } = {}) {
+  if (!/^\d{44}$/.test(String(chaveDce || ''))) return null;
+  const url = `https://www.fazenda.pr.gov.br/dce/qrcode?chDCe=${chaveDce}&tpAmb=1`;
+
+  let html = '';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; IntranetSAC/1.0)',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+      });
+      if (!resp || !resp.ok) return null;
+      html = await resp.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    console.warn('[SAC][SEFAZ] falha ao consultar', chaveDce, '-', err?.message || err);
+    return null;
+  }
+
+  if (!html || !/Detalhamento de Produtos/i.test(html)) return null;
+
+  // Cada item é uma <tr> contendo as 6 células fixo-prod-serv-*
+  const rowRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  const cellRegex = /<td[^>]*class="fixo-prod-serv-([a-z]+)"[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>/gi;
+
+  const items = [];
+  const seen = new Set();
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    if (!/fixo-prod-serv-descricao/i.test(rowHtml)) continue;
+    if (/<label\b/i.test(rowHtml)) continue; // pula linha de cabeçalho (tem <label>)
+
+    const cells = {};
+    let cellMatch;
+    cellRegex.lastIndex = 0;
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      cells[cellMatch[1].toLowerCase()] = decodeHtmlEntitiesBasic(cellMatch[2])
+        .replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    const conteudo = cells.descricao || '';
+    const quantidade = formatSefazQuantidade(cells.qtd || '');
+    if (!conteudo || !quantidade) continue;
+
+    const key = `${conteudo.toUpperCase()}::${quantidade}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const item = { conteudo, quantidade };
+    if (cells.vu) item.valor_unitario = cells.vu;
+    if (cells.vb) item.valor_total = cells.vb;
+    if (cells.ncm) item.ncm = cells.ncm;
+    items.push(item);
+  }
+
+  if (!items.length) return null;
+  return JSON.stringify(items);
 }
 
 // Extrai e formata o conteúdo da declaração de conteúdo (PDF) no layout DESCRIÇÃO/QTDE
@@ -4129,10 +4227,30 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   const urls = [];
   let identificacao = null;
   let chaveDce = null;
-  const conteudo = extractConteudo(declaracaoParsedText);
+  let conteudo = extractConteudo(declaracaoParsedText);
+  let conteudoOrigem = conteudo ? 'pdf' : null;
 
   // Extrai chave fiscal DCE para validação e consulta SEFAZ
   chaveDce = extractDceChaveFromPdf(declaracaoParsedText);
+
+  // Prioriza dados estruturados da SEFAZ quando a chave estiver disponível
+  if (chaveDce) {
+    try {
+      const sefazConteudo = await fetchSefazProdutos(chaveDce);
+      if (sefazConteudo) {
+        conteudo = sefazConteudo;
+        conteudoOrigem = 'sefaz';
+        console.log('[SAC] conteudo obtido via SEFAZ para chave', chaveDce);
+      } else if (!conteudo) {
+        console.warn('[SAC] SEFAZ não retornou itens e parser do PDF também falhou para chave', chaveDce);
+      }
+    } catch (err) {
+      console.warn('[SAC] erro ao consultar SEFAZ:', err?.message || err);
+    }
+  }
+  if (conteudoOrigem) {
+    console.log(`[SAC] origem do conteudo: ${conteudoOrigem}`);
+  }
 
   try {
     // Faz upload opcional dos arquivos selecionados
