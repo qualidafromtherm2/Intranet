@@ -7291,30 +7291,6 @@ if (vendasControleMenuLink) {
   });
 }
 
-const vendasKanbanMenuLink = document.getElementById('menu-vendas-kanban');
-if (vendasKanbanMenuLink) {
-  vendasKanbanMenuLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
-    vendasKanbanMenuLink.classList.add('is-active');
-    showMainTab('sacAtPane');
-    setSacAtModoVisual('vendas-kanban');
-    window._iniciarKanbanVendasPagina?.();
-  });
-}
-
-const vendasMapaMenuLink = document.getElementById('menu-vendas-mapa');
-if (vendasMapaMenuLink) {
-  vendasMapaMenuLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
-    vendasMapaMenuLink.classList.add('is-active');
-    showMainTab('sacAtPane');
-    setSacAtModoVisual('vendas-mapa');
-    window._iniciarMapaVendasPagina?.();
-  });
-}
-
 // COMPRAS: Configurações de Departamentos e Categorias
 const comprasConfigMenuLink = document.getElementById('menu-compras-configuracoes');
 if (comprasConfigMenuLink) {
@@ -12074,8 +12050,6 @@ function setSacAtModoVisual(mode = 'at') {
   const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
   const vendasControlePane = document.getElementById('vendasControlePane');
-  const vendasKanbanPane = document.getElementById('vendasKanbanPane');
-  const vendasMapaPane = document.getElementById('vendasMapaPane');
   const wrapper = sacAtGraficosPane?.parentElement;
   if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
 
@@ -12127,41 +12101,9 @@ function setSacAtModoVisual(mode = 'at') {
     return;
   }
 
-  if (mode === 'vendas-kanban') {
-    sacAtPane.style.display = 'flex';
-    Array.from(wrapper.children).forEach((child) => {
-      if (!(child instanceof HTMLElement)) return;
-      if (child === vendasKanbanPane) {
-        child.style.display = 'flex';
-        return;
-      }
-      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
-        return;
-      }
-      child.style.display = 'none';
-    });
-    return;
-  }
-
-  if (mode === 'vendas-mapa') {
-    sacAtPane.style.display = 'flex';
-    Array.from(wrapper.children).forEach((child) => {
-      if (!(child instanceof HTMLElement)) return;
-      if (child === vendasMapaPane) {
-        child.style.display = 'flex';
-        return;
-      }
-      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
-        return;
-      }
-      child.style.display = 'none';
-    });
-    return;
-  }
-
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasKanbanPane || child === vendasMapaPane || child.id === 'atGraficosView') {
+    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -12217,125 +12159,6 @@ function mergeAtSerieRows(rows) {
     pedido: Array.isArray(row.pedido_list) && row.pedido_list.length ? row.pedido_list.join(' / ') : row.pedido,
   }));
 }
-
-  // === Vendas: Kanban de vendas por etapa =====================================
-  (() => {
-    const board = document.getElementById('vendasKanbanBoard');
-    const status = document.getElementById('vendasKanbanStatus');
-    const refreshBtn = document.getElementById('vendasKanbanRefreshBtn');
-
-    let iniciado = false;
-    let carregando = false;
-
-    const ETAPAS = [
-      'PDV (Em Aprovação)',
-      'Entrega Futura',
-      'Faturar',
-      'Faturado',
-      'Entregue',
-      'Aprovado'
-    ];
-
-    const ETAPA_CORES = {
-      'Proposta': '#64748b',
-      'PDV (Em Aprovação)': '#f59e0b',
-      'Entrega Futura': '#a78bfa',
-      'Faturar': '#fb7185',
-      'Faturado': '#38bdf8',
-      'Entregue': '#22c55e',
-      'Aprovado': '#14b8a6',
-    };
-
-    function esc(v) {
-      return String(v ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function fmtMoeda(v) {
-      return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    }
-
-    function fmtData(v) {
-      if (!v) return '-';
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) return '-';
-      return d.toLocaleDateString('pt-BR');
-    }
-
-    function renderKanban(colunas = {}) {
-      if (!board) return;
-      board.innerHTML = '';
-
-      ETAPAS.forEach((etapaNome) => {
-        const cor = ETAPA_CORES[etapaNome] || '#64748b';
-        const cards = Array.isArray(colunas[etapaNome]) ? colunas[etapaNome] : [];
-
-        const col = document.createElement('div');
-        col.style.cssText = 'flex:0 0 250px;display:flex;flex-direction:column;background:rgba(255,255,255,.02);border:1px solid #1e293b;border-radius:12px;overflow:hidden;';
-
-        const cardsHtml = cards.length
-          ? cards.map((c) => `
-              <div style="background:#0f172a;border:1px solid #1f2937;border-radius:10px;padding:10px;margin:8px;">
-                <div style="font-size:16px;font-weight:800;color:#f59e0b;line-height:1;">${esc(c.numero_pedido || '-')}</div>
-                <div style="margin-top:8px;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between;gap:8px;">
-                  <span>${esc(fmtData(c.created_at))}</span>
-                  <span>${esc(fmtMoeda(c.valor_total_pedido))}</span>
-                </div>
-              </div>
-            `).join('')
-          : '<div style="padding:12px;color:#64748b;font-size:12px;text-align:center;">Nenhum pedido</div>';
-
-        col.innerHTML = `
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1e293b;background:rgba(2,6,23,.8);">
-            <span style="font-size:13px;font-weight:700;color:${cor};">${esc(etapaNome)}</span>
-            <span style="font-size:11px;font-weight:700;color:#cbd5e1;background:rgba(148,163,184,.15);padding:2px 8px;border-radius:999px;">${cards.length}</span>
-          </div>
-          <div style="max-height:60vh;overflow:auto;">${cardsHtml}</div>
-        `;
-
-        board.appendChild(col);
-      });
-    }
-
-    async function carregarKanban() {
-      if (!board || carregando) return;
-      carregando = true;
-      if (status) {
-        status.style.display = 'block';
-        status.style.color = 'var(--inactive-color)';
-        status.textContent = 'Carregando kanban de vendas...';
-      }
-
-      try {
-        const resp = await fetch('/api/sac/vendas/kanban/pedidos', { credentials: 'include' });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar kanban.');
-        renderKanban(data.colunas || {});
-        if (status) status.style.display = 'none';
-      } catch (err) {
-        if (status) {
-          status.style.display = 'block';
-          status.style.color = '#f87171';
-          status.textContent = err.message || 'Erro ao carregar kanban.';
-        }
-        board.innerHTML = '<div style="padding:10px;color:#fca5a5;font-size:12px;">Falha ao carregar dados.</div>';
-      } finally {
-        carregando = false;
-      }
-    }
-
-    window._iniciarKanbanVendasPagina = function () {
-      if (!iniciado) {
-        iniciado = true;
-        if (refreshBtn) refreshBtn.addEventListener('click', carregarKanban);
-      }
-      carregarKanban();
-    };
-  })();
 
 function renderAtSerieRows(rows) {
   if (!atSerieModalTbody) return;
@@ -24036,6 +23859,13 @@ function configurarObjetivoCompraGlobalCarrinho() {
   if (!input) return;
 
   if (!input.dataset.bound) {
+    const selecionarTextoObjetivoGlobal = () => {
+      input.select();
+    };
+
+    input.addEventListener('focus', selecionarTextoObjetivoGlobal);
+    input.addEventListener('click', selecionarTextoObjetivoGlobal);
+
     input.addEventListener('change', async () => {
       const valor = (input.value || '').trim();
       const carrinho = window.carrinhoCompras || [];
@@ -25099,6 +24929,14 @@ function renderModalCarrinhoLista() {
       }
     });
   });
+
+  tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
+    const selecionarTextoObjetivoItem = () => {
+      input.select();
+    };
+    input.addEventListener('focus', selecionarTextoObjetivoItem);
+    input.addEventListener('click', selecionarTextoObjetivoItem);
+  });
   
   tbody.querySelectorAll('.lista-input-objetivo').forEach(input => {
     input.addEventListener('change', async (e) => {
@@ -25200,6 +25038,10 @@ async function enviarPedidoModal() {
     alert('Carrinho vazio!');
     return;
   }
+
+  const solicitanteAtual = (document.getElementById('userNameDisplay')?.textContent || '').trim()
+    || window.__sessionUser?.username
+    || 'Usuário';
   
   // Captura valores dos campos globais do modal
   const departamentoGlobal = document.getElementById('carrinhoDepartamentoGlobal')?.value?.trim() || null;
@@ -25355,11 +25197,32 @@ async function enviarPedidoModal() {
         : `Solicitação ${i+1} (${sol.itens.length} itens sem Requisição Direta)`;
       
       try {
+        const itensPayload = (sol.itens || []).map((item) => {
+          const itemSolicitante = String(item.solicitante || solicitanteAtual || '').trim();
+          const objetivoBase = String(item.objetivo_compra || '').trim();
+          const respBase = String(item.resp_inspecao_recebimento || '').trim();
+          
+          // Objetivo: usa o que foi digitado, ou padrão
+          const objetivoFinal = objetivoBase || 'Compra via catálogo Omie';
+          // Inspeção: usa o que foi digitado, ou padrão
+          const respFinal = respBase || `a pedido de: ${itemSolicitante}`;
+          
+          // obsItem: formatação limpa com os dados
+          const obsItem = `Solicitante: ${itemSolicitante}\nObjetivo: ${objetivoFinal}\nA pedido de: ${respFinal}`;
+
+          return {
+            ...item,
+            objetivo_compra: objetivoFinal,
+            resp_inspecao_recebimento: respFinal,
+            obsItem: obsItem
+          };
+        });
+
         const response = await fetch('/api/compras/solicitacao', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            itens: sol.itens,
+            itens: itensPayload,
             compra_autorizada: compraAutorizada,
             compra_realizada: compraRealizada,
             n_nota_fiscal: notaFiscalGlobal
@@ -26568,7 +26431,7 @@ async function adicionarItemCarrinho(ev) {
   const responsavel = (document.getElementById('modalComprasResponsavel')?.value || '').trim();
   const responsavelCompra = (document.getElementById('modalComprasResponsavelCompra')?.value || '').trim();
   const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
-  const categoriaCompra = (document.getElementById('modalComprasCategoriaCompra')?.value || '').trim();
+  let categoriaCompra = (document.getElementById('modalComprasCategoriaCompra')?.value || '').trim();
   const categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
   const requisicaoDireta = document.getElementById('modalComprasRequisicaoDireta')?.checked || false;
@@ -26788,10 +26651,31 @@ async function enviarPedidoCompras() {
       statusEl.textContent = 'Enviando solicitações...';
     }
     
+    const itensPayload = carrinho.map((item) => {
+      const itemSolicitante = String(item.solicitante || solicitante || '').trim();
+      const objetivoBase = String(item.objetivo_compra || '').trim();
+      const respBase = String(item.resp_inspecao_recebimento || '').trim();
+      
+      // Objetivo: usa o que foi digitado, ou padrão
+      const objetivoFinal = objetivoBase || 'Compra via catálogo Omie';
+      // Inspeção: usa o que foi digitado, ou padrão
+      const respFinal = respBase || `a pedido de: ${itemSolicitante}`;
+      
+      // obsItem: formatação limpa com os dados
+      const obsItem = `Solicitante: ${itemSolicitante}\nObjetivo: ${objetivoFinal}\nA pedido de: ${respFinal}`;
+
+      return {
+        ...item,
+        objetivo_compra: objetivoFinal,
+        resp_inspecao_recebimento: respFinal,
+        obsItem: obsItem
+      };
+    });
+
     const resp = await fetch('/api/compras/pedido', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itens: carrinho, solicitante })
+      body: JSON.stringify({ itens: itensPayload, solicitante })
     });
     
     const data = await resp.json();
@@ -38694,7 +38578,7 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       : categoriaCompraTexto || `${categoriaPadraoCodigo} - Outros Materiais`;
   }
   // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
-  if ((centroCustoGlobal || '').toLowerCase() === 'materia prima') {
+  if ((centroCusto || '').toLowerCase() === 'materia prima') {
     categoriaCompra = '2.01.03';
     categoriaCompraTexto = '2.01.03 - Matérias-Primas';
   }
@@ -38792,13 +38676,17 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
   
   // Se o item já existe no carrinho com as mesmas configurações, soma a quantidade
   const retornoCotacaoFinal = retornoCotacoesTexto || (retornoCotacoes === 'sim' ? 'Sim' : 'Não');
-  const objetivoFinal = objetivoCompraGlobal || 'Compra via catálogo Omie';
+  const solicitanteCatalogo = (document.getElementById('userNameDisplay')?.textContent || '').trim()
+    || window.__sessionUser?.username
+    || 'Usuário';
+  const objetivoFinal = objetivoCompraGlobal || '';
+  const respInspecaoFinal = '';
   const existente = (window.carrinhoCompras || []).find(item => {
     return item.produto_codigo === codigo &&
       (item.departamento || '') === departamento &&
       (item.objetivo_compra || '') === objetivoFinal &&
       (item.categoria_compra || '') === (categoriaCompra || '') &&
-      (item.resp_inspecao_recebimento || '') === '' &&
+      (item.resp_inspecao_recebimento || '') === respInspecaoFinal &&
       (item.grupo_requisicao || item.np || null) === grupoRequisicaoSelecionado &&
       (item.retorno_cotacao || '') === retornoCotacaoFinal &&
       (item.requisicao_direta === (requisicaoDiretaGlobal || false));
@@ -38826,8 +38714,9 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       codigo_produto_omie: null,
       codigo_omie: codigoOmie,  // Novo campo: codigo_produto do catálogo Omie
       url_imagem: urlImagem,  // Adiciona URL da imagem do produto
+      solicitante: solicitanteCatalogo,
       objetivo_compra: objetivoFinal,
-      resp_inspecao_recebimento: '',
+      resp_inspecao_recebimento: respInspecaoFinal,
       retorno_cotacao: retornoCotacaoFinal,
       categoria_compra: categoriaCompra || '',  // Usar o código da opção selecionada (obrigatório para Omie)
       categoria_compra_codigo: categoriaCompra || '',
@@ -50812,345 +50701,7 @@ function exportarEstruturaAtualCSV_BOM(){
       if (btn) btn.disabled = prevDisabled;
     }
   })();
-
 }
-
-  // === Vendas: Mapa do Brasil por estado =====================================
-  (() => {
-    const pane = document.getElementById('vendasMapaPane');
-    const status = document.getElementById('vendasMapaStatus');
-    const mapaEl = document.getElementById('vendasMapaBrasil');
-    const mapaLoading = document.getElementById('vendasMapaLoading');
-    const rankingTbody = document.getElementById('vendasMapaRankingTbody');
-    const mesAtualEl = document.getElementById('vendasMapaMesAtual');
-    const refreshBtn = document.getElementById('vendasMapaRefreshBtn');
-    const timelineBtn = document.getElementById('vendasMapaTimelineBtn');
-    const etapaSelect = document.getElementById('vendasMapaEtapaFiltro');
-    const periodoBtns = Array.from(document.querySelectorAll('.vendas-mapa-periodo-btn'));
-
-    if (!pane || !mapaEl) return;
-
-    const moeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-    let iniciado = false;
-    let carregando = false;
-    let periodoMeses = 3;
-    let ultimoRows = [];
-    let googleChartsPromise = null;
-    let timelineTimer = null;
-    let timelineAtiva = false;
-
-    function esc(v) {
-      return String(v ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function setStatus(msg, tipo = 'info') {
-      if (!status) return;
-      status.style.display = msg ? 'block' : 'none';
-      if (!msg) return;
-      status.textContent = msg;
-      status.style.color = tipo === 'error' ? '#f87171' : (tipo === 'warn' ? '#fbbf24' : 'var(--inactive-color)');
-    }
-
-    function setMapaLoading(loading) {
-      if (!mapaLoading) return;
-      mapaLoading.style.display = loading ? 'flex' : 'none';
-    }
-
-    function aplicarEstadoPeriodoAtivo() {
-      periodoBtns.forEach((btn) => {
-        const ativo = Number.parseInt(btn.dataset.per, 10) === periodoMeses;
-        btn.style.borderColor = ativo ? '#0ea5e9' : '#374151';
-        btn.style.background = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
-        btn.style.color = ativo ? '#7dd3fc' : '#9ca3af';
-      });
-    }
-
-    function _labelMes(yyyymm) {
-      const [y, m] = String(yyyymm || '').split('-');
-      if (!y || !m) return String(yyyymm || '');
-      const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-      return `${nomes[Math.max(0, Number(m) - 1)]}/${String(y).slice(-2)}`;
-    }
-
-    function setTimelineBtnState(ativa) {
-      if (!timelineBtn) return;
-      timelineBtn.style.borderColor = ativa ? '#22c55e' : '#374151';
-      timelineBtn.style.background = ativa ? 'rgba(34,197,94,.16)' : 'rgba(255,255,255,.04)';
-      timelineBtn.style.color = ativa ? '#86efac' : '#9ca3af';
-      timelineBtn.innerHTML = ativa
-        ? '<i class="fa-solid fa-stopwatch"></i> Parar timeline'
-        : '<i class="fa-solid fa-timeline"></i> Timeline';
-    }
-
-    function setMesAtualMapa(label) {
-      if (!mesAtualEl) return;
-      const txt = String(label || '').trim();
-      mesAtualEl.textContent = `Mês no mapa: ${txt || '-'}`;
-    }
-
-    function pararTimeline() {
-      timelineAtiva = false;
-      if (timelineTimer) {
-        clearInterval(timelineTimer);
-        timelineTimer = null;
-      }
-      setTimelineBtnState(false);
-    }
-
-    function montarFramesTimeline(rowsTimeline = []) {
-      if (!Array.isArray(rowsTimeline) || !rowsTimeline.length) return [];
-      const meses = [...new Set(rowsTimeline.map((r) => String(r.mes || '').trim()).filter(Boolean))].sort();
-      if (!meses.length) return [];
-      const frames = [];
-
-      meses.forEach((mes) => {
-        const blocoMes = rowsTimeline.filter((r) => String(r.mes || '') === mes);
-        const totaisUf = new Map();
-        const totaisUfCliente = new Map();
-        blocoMes.forEach((r) => {
-          const uf = String(r.uf || '').trim().toUpperCase();
-          const cliente = String(r.cliente_nome || 'Cliente não identificado').trim();
-          const valor = Number(r.valor_total || 0);
-          if (!uf || uf === 'N/D' || !Number.isFinite(valor) || valor <= 0) return;
-
-          totaisUf.set(uf, (totaisUf.get(uf) || 0) + valor);
-
-          const porCliente = totaisUfCliente.get(uf) || new Map();
-          porCliente.set(cliente, (porCliente.get(cliente) || 0) + valor);
-          totaisUfCliente.set(uf, porCliente);
-        });
-
-        const rows = Array.from(totaisUf.entries())
-          .map(([uf, valor_total]) => {
-            const porCliente = totaisUfCliente.get(uf) || new Map();
-            let cliente_destaque = 'Cliente não identificado';
-            let cliente_valor = 0;
-            porCliente.forEach((v, nome) => {
-              if (v > cliente_valor) {
-                cliente_valor = v;
-                cliente_destaque = nome;
-              }
-            });
-            return { uf, valor_total, cliente_destaque, cliente_valor };
-          })
-          .sort((a, b) => Number(b.valor_total) - Number(a.valor_total));
-
-        frames.push({ mes, rows });
-      });
-
-      return frames;
-    }
-
-    function renderRanking(rows = []) {
-      if (!rankingTbody) return;
-      if (!rows.length) {
-        rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Sem dados para o filtro atual.</td></tr>';
-        return;
-      }
-      rankingTbody.innerHTML = rows.map((r) => `
-        <tr>
-          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;font-weight:700;">${esc(r.uf || '-')}</td>
-          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);color:#cbd5e1;">${esc(r.cliente_destaque || '-')}</td>
-          <td style="padding:6px;border-bottom:1px solid rgba(51,65,85,.45);text-align:right;color:#93c5fd;white-space:nowrap;">${moeda.format(Number(r.valor_total || 0))}</td>
-        </tr>
-      `).join('');
-    }
-
-    function carregarGoogleCharts() {
-      if (window.google?.charts?.load && window.google?.visualization?.GeoChart) {
-        return Promise.resolve();
-      }
-      if (googleChartsPromise) return googleChartsPromise;
-
-      googleChartsPromise = new Promise((resolve, reject) => {
-        const concluir = () => {
-          try {
-            window.google.charts.load('current', { packages: ['geochart'] });
-            window.google.charts.setOnLoadCallback(() => resolve());
-          } catch (err) {
-            reject(err);
-          }
-        };
-
-        const existente = document.querySelector('script[data-google-charts="1"]');
-        if (existente) {
-          if (window.google?.charts?.load) concluir();
-          else existente.addEventListener('load', concluir, { once: true });
-          return;
-        }
-
-        const script = document.createElement('script');
-        script.src = 'https://www.gstatic.com/charts/loader.js';
-        script.async = true;
-        script.dataset.googleCharts = '1';
-        script.onload = concluir;
-        script.onerror = () => reject(new Error('Falha ao carregar biblioteca do mapa.'));
-        document.head.appendChild(script);
-      });
-
-      return googleChartsPromise;
-    }
-
-    function desenharMapa(rows = []) {
-      if (!rows.length) {
-        mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:13px;">Sem dados para o filtro atual.</div>';
-        return;
-      }
-
-      const dt = new window.google.visualization.DataTable();
-      dt.addColumn('string', 'Estado');
-      dt.addColumn('number', 'Valor');
-      dt.addColumn({ type: 'string', role: 'tooltip' });
-
-      rows.forEach((r) => {
-        const uf = String(r.uf || '').trim().toUpperCase();
-        if (!uf || uf === 'N/D') return;
-        const valor = Number(r.valor_total || 0);
-        const tip = `${uf}\n${r.cliente_destaque || 'Sem cliente'}\n${moeda.format(valor)}`;
-        dt.addRow([`BR-${uf}`, valor, tip]);
-      });
-
-      const chart = new window.google.visualization.GeoChart(mapaEl);
-      chart.draw(dt, {
-        region: 'BR',
-        resolution: 'provinces',
-        legend: { textStyle: { color: '#000000', fontSize: 11, bold: false } },
-        backgroundColor: 'transparent',
-        datalessRegionColor: '#0f172a',
-        defaultColor: '#0f172a',
-        colorAxis: { colors: ['#bfdbfe', '#60a5fa', '#2563eb'] },
-        tooltip: { textStyle: { color: '#111827', fontSize: 12 } },
-      });
-
-      // Forca rótulos do SVG em preto e peso normal para melhor legibilidade.
-      mapaEl.querySelectorAll('svg text').forEach((el) => {
-        el.setAttribute('fill', '#000000');
-        el.setAttribute('font-weight', '400');
-        el.style.fill = '#000000';
-        el.style.fontWeight = '400';
-      });
-    }
-
-    async function carregarMapa() {
-      pararTimeline();
-      setMesAtualMapa('Consolidado');
-      if (carregando) return;
-      carregando = true;
-      setMapaLoading(true);
-      setStatus('Carregando mapa de vendas...');
-      if (rankingTbody) rankingTbody.innerHTML = '<tr><td colspan="3" style="padding:10px;text-align:center;color:#64748b;">Carregando...</td></tr>';
-
-      try {
-        const etapa = (etapaSelect?.value || '').trim();
-        const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}`;
-        const resp = await fetch(url, { credentials: 'include' });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar mapa.');
-
-        const rows = Array.isArray(data.rows) ? data.rows : [];
-        ultimoRows = rows;
-        renderRanking(rows);
-
-        await carregarGoogleCharts();
-        desenharMapa(rows);
-        setStatus(rows.length ? '' : 'Sem dados para o filtro atual.', rows.length ? 'info' : 'warn');
-      } catch (err) {
-        setStatus(err.message || 'Erro ao carregar mapa.', 'error');
-        if (mapaEl) {
-          mapaEl.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#fca5a5;font-size:13px;">Falha ao carregar o mapa.</div>';
-        }
-        renderRanking(ultimoRows);
-      } finally {
-        setMapaLoading(false);
-        carregando = false;
-      }
-    }
-
-    async function iniciarTimeline() {
-      if (timelineAtiva) {
-        pararTimeline();
-        setStatus('Timeline interrompida.', 'warn');
-        return;
-      }
-
-      if (carregando) return;
-      setStatus('Preparando timeline do mapa...');
-
-      try {
-        const etapa = (etapaSelect?.value || '').trim();
-        const url = `/api/sac/vendas/graficos/mapa-brasil?periodo=${encodeURIComponent(periodoMeses)}&etapa=${encodeURIComponent(etapa)}&timeline=1`;
-        const resp = await fetch(url, { credentials: 'include' });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao preparar timeline.');
-
-        const frames = montarFramesTimeline(data.timeline_rows || []);
-        if (!frames.length) {
-          setStatus('Sem dados mensais para o período selecionado.', 'warn');
-          return;
-        }
-
-        await carregarGoogleCharts();
-
-        let idx = 0;
-        timelineAtiva = true;
-        setTimelineBtnState(true);
-
-        const renderFrame = () => {
-          const frame = frames[idx];
-          if (!frame) return;
-          ultimoRows = frame.rows || [];
-          renderRanking(ultimoRows);
-          desenharMapa(ultimoRows);
-          setMesAtualMapa(_labelMes(frame.mes));
-          setStatus(`Timeline: ${_labelMes(frame.mes)} (${idx + 1}/${frames.length})`);
-        };
-
-        renderFrame();
-
-        timelineTimer = setInterval(() => {
-          if (!timelineAtiva) return;
-          idx += 1;
-          if (idx >= frames.length) {
-            pararTimeline();
-            setStatus('Timeline concluída.');
-            return;
-          }
-          renderFrame();
-        }, 2000);
-      } catch (err) {
-        pararTimeline();
-        setStatus(err.message || 'Erro ao executar timeline.', 'error');
-      }
-    }
-
-    window._iniciarMapaVendasPagina = function () {
-      if (!iniciado) {
-        iniciado = true;
-
-        aplicarEstadoPeriodoAtivo();
-        periodoBtns.forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const per = Number.parseInt(btn.dataset.per, 10);
-            if (!Number.isFinite(per)) return;
-            periodoMeses = per;
-            aplicarEstadoPeriodoAtivo();
-            carregarMapa();
-          });
-        });
-
-        if (etapaSelect) etapaSelect.addEventListener('change', carregarMapa);
-        if (refreshBtn) refreshBtn.addEventListener('click', carregarMapa);
-        if (timelineBtn) timelineBtn.addEventListener('click', iniciarTimeline);
-      }
-
-      carregarMapa();
-    };
-  })();
 
 
 // ——— Religa o botão Exportar para usar CSV ———

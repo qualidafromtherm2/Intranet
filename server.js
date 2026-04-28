@@ -24722,7 +24722,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     
     itensOmie.push({
       codProd: item.codigo_omie || null,
-      obsItem: item.objetivo_compra || '',
+       obsItem: item.obsItem || item.objetivo_compra || '',
       precoUnit: precoUnitario,
       qtde: parseFloat(item.quantidade) || 1,
       idDb: idDb,
@@ -24746,7 +24746,11 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
   }
 
   const objetivoCompraPrimeiroItem = String(primeiroItem.objetivo_compra || '').trim();
-  const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${primeiroItem.resp_inspecao_recebimento || solicitante}\nNPST: ${numeroPedido}\nNPOM: ${primeiroItem.codigo_omie || ''}\nNP: ${np}\nObjetivo da Compra: ${primeiroItem.objetivo_compra || ''}\nObservação: ${primeiroItem.observacao || ''}`.trim();
+  const solicitanteObsReq = String(primeiroItem?.solicitante || solicitante || '').trim();
+  const objetivoObsReq = objetivoCompraPrimeiroItem || 'Compra via catálogo Omie';
+  const aPedidoBaseObsReq = String(primeiroItem?.resp_inspecao_recebimento || '').trim();
+  const aPedidoObsReq = (aPedidoBaseObsReq.replace(/^a pedido de:\s*/i, '').trim()) || solicitanteObsReq;
+  const obsReqCompra = `Solicitante: ${solicitanteObsReq}\nObjetivo: ${objetivoObsReq}\nA pedido de: ${aPedidoObsReq}`.trim();
   
   // Pega a categoria de compra do primeiro item (todos do mesmo NP devem ter a mesma categoria)
   // Fallback: alguns fluxos enviam "categoria_compra_codigo" em vez de "categoria_compra".
@@ -24860,7 +24864,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     codIntReqCompra: numeroPedido,
     codCateg: categoriaCompra,
     dtSugestao: itensOmie[0].dtSugestao,
-    obsReqCompra: (objetivoCompraPrimeiroItem || obsReqCompra).slice(0, 500),
+    obsReqCompra: obsReqCompra.slice(0, 500),
     obsIntReqCompra: montarObsInternaComGrupo(primeiroItem?.grupo_requisicao || null, primeiroItem?.observacao || null),
     ItensReqCompra: itensOmie.map(it => ({
       codProd: it.codProd,
@@ -25599,12 +25603,11 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
     }
   }
 
-  const solicitante = item.solicitante || '';
-  const respInspecao = item.resp_inspecao_recebimento || '';
-  const observacao = '';
-  const objetivoCompra = item.objetivo_compra || '';
-  const codigoOmie = item.codigo_omie || '';
-  const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmie}\nObjetivo da Compra: ${objetivoCompra}`.trim();
+  const solicitante = String(item.solicitante || '').trim();
+  const objetivoCompra = String(item.objetivo_compra || '').trim() || 'Compra via catálogo Omie';
+  const aPedidoBase = String(item.resp_inspecao_recebimento || '').trim();
+  const aPedido = (aPedidoBase.replace(/^a pedido de:\s*/i, '').trim()) || solicitante;
+  const obsReqCompra = `Solicitante: ${solicitante}\nObjetivo: ${objetivoCompra}\nA pedido de: ${aPedido}`.trim();
 
   // Monta payload para Omie - IncluirReq
   const requisicaoOmie = {
@@ -25617,7 +25620,7 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
     ItensReqCompra: [
       {
         codProd: item.codigo_omie || item.codigo_produto_omie || null,
-        obsItem: item.objetivo_compra || '',
+         obsItem: item.obsItem || item.objetivo_compra || '',
         precoUnit: precoUnitario,
         qtde: parseFloat(item.quantidade) || 1
       }
@@ -25727,11 +25730,11 @@ async function criarRequisicaoOmieParaItens(itens) {
     throw new Error('Não foi possível determinar o id de compras.historico_compras para preencher cNumPedido (aprovação em grupo).');
   }
 
-  const solicitante = primeiroItem.solicitante || '';
-  const respInspecao = primeiroItem.resp_inspecao_recebimento || '';
-  const objetivoCompra = primeiroItem.objetivo_compra || '';
-  const codigoOmie = primeiroItem.codigo_omie || '';
-  const obsReqCompra = `Requisitante: ${solicitante}\nResp. por receber o produto: ${respInspecao}\nNPST: ${numeroPedido}\nNPOM: ${codigoOmie}\nObjetivo da Compra: ${objetivoCompra}`.trim();
+  const solicitante = String(primeiroItem.solicitante || '').trim();
+  const objetivoCompra = String(primeiroItem.objetivo_compra || '').trim() || 'Compra via catálogo Omie';
+  const aPedidoBase = String(primeiroItem.resp_inspecao_recebimento || '').trim();
+  const aPedido = (aPedidoBase.replace(/^a pedido de:\s*/i, '').trim()) || solicitante;
+  const obsReqCompra = `Solicitante: ${solicitante}\nObjetivo: ${objetivoCompra}\nA pedido de: ${aPedido}`.trim();
 
   // Monta itens com CMC
   const itensReqCompra = [];
@@ -25755,7 +25758,7 @@ async function criarRequisicaoOmieParaItens(itens) {
 
     itensReqCompra.push({
       codProd: item.codigo_omie || item.codigo_produto_omie || null,
-      obsItem: item.objetivo_compra || '',
+       obsItem: item.obsItem || item.objetivo_compra || '',
       precoUnit: precoUnitario,
       qtde: parseFloat(item.quantidade) || 1
     });
