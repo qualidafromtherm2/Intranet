@@ -210,6 +210,52 @@ function _solStatusBadge(status) {
   const s = map[status] || { color: '#6b7280', bg: '#1f2937', label: status || '?' };
   return `<span style="display:inline-block;padding:2px 7px;border-radius:20px;font-size:.68rem;font-weight:700;color:${s.color};background:${s.bg};border:1px solid ${s.color}33;">${s.label}</span>`;
 }
+
+// Feedback global curto para qualquer botão clicado.
+(function initGlobalButtonClickFeedback() {
+  if (window.__globalButtonClickFeedbackInitialized) return;
+  window.__globalButtonClickFeedbackInitialized = true;
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .global-btn-click-spinner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 6px;
+      width: 12px;
+      height: 12px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 999px;
+      animation: globalBtnSpin .65s linear infinite;
+      vertical-align: middle;
+      opacity: .9;
+    }
+    @keyframes globalBtnSpin {
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.noGlobalSpinner === '1') return;
+    if (button.querySelector('.global-btn-click-spinner')) return;
+    if (button.querySelector('.fa-spinner, .fa-spin')) return;
+
+    const spinner = document.createElement('span');
+    spinner.className = 'global-btn-click-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    button.appendChild(spinner);
+
+    window.setTimeout(() => {
+      spinner.remove();
+    }, 900);
+  }, true);
+})();
+
 // mode: 'normal' | 'separado-btn' | 'disabled'
 function _solRenderItemRow(item, mode) {
   const solicIds = Array.isArray(item.solic_ids) ? item.solic_ids : (item.solic_id ? [item.solic_id] : []);
@@ -274,7 +320,8 @@ window._loadSolicitacoesTab = async function() {
 
   const COLS = [
     { key: 'Solicitado',           label: 'Solicitado',           icon: 'fa-clock',          color: '#3b82f6', bg: '#0f1929', acao: 'iniciar'  },
-    { key: 'Em compra',            label: 'Em compra',            icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', acao: null       },
+    { key: 'Em compra',            label: 'Em compra',            icon: 'fa-bag-shopping',   color: '#ec4899', bg: '#1f0d1a', acao: 'modal'    },
+    { key: 'Em Separação',         label: 'Em Separação',         icon: 'fa-boxes-stacked',  color: '#f59e0b', bg: '#1c1500', acao: 'modal'    },
     { key: 'Separado',             label: 'Separado',             icon: 'fa-check-circle',   color: '#22c55e', bg: '#0a1f0f', acao: 'modal'    },
     { key: 'Aguardando retirada',  label: 'Aguardando retirada',  icon: 'fa-hourglass-half', color: '#a78bfa', bg: '#140d2a', acao: null       },
     { key: 'Concluído',            label: 'Concluído',            icon: 'fa-flag-checkered', color: '#9ca3af', bg: '#111',    acao: null       },
@@ -304,7 +351,7 @@ window._loadSolicitacoesTab = async function() {
             const dataHora = [dataPrev, horario].filter(Boolean).join(' ');
             const cursor   = col.acao ? 'cursor:pointer;' : 'cursor:default;';
             const hint     = col.acao === 'iniciar'
-              ? `<span style="font-size:.65rem;color:#3b82f6;margin-top:3px;display:block;"><i class="fa-solid fa-play" style="margin-right:2px;"></i>Iniciar separação</span>`
+              ? `<button class="solic-sep-start-btn" data-n-solic="${sep.n_solic}" style="margin-top:6px;padding:4px 8px;border:none;border-radius:6px;background:#1d4ed8;color:#dbeafe;font-size:.68rem;font-weight:700;cursor:pointer;"><i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação</button>`
               : col.acao === 'modal'
                 ? `<span style="font-size:.65rem;color:#22c55e55;margin-top:3px;display:block;"><i class="fa-solid fa-eye" style="margin-right:2px;"></i>Ver itens</span>`
                 : '';
@@ -360,6 +407,7 @@ window._loadSolicitacoesTab = async function() {
 
       cardEl.addEventListener('click', async () => {
         if (cardEl._loading) return;
+        if (acao === 'iniciar') return;
         cardEl._loading = true;
         try {
           const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
@@ -368,14 +416,51 @@ window._loadSolicitacoesTab = async function() {
           const itens = (di.itens || []).map(it => ({ ...it, solic_ids: [it.solic_id], carr_ids: [it.carr_id] }));
           if (!itens.length) throw new Error('Nenhum item encontrado');
 
-          if (acao === 'iniciar' || acao === 'modal') {
-            // Abre modal sem alterar status — a separação só começa quando o user clicar num item
+          if (acao === 'modal') {
             _abrirModalSeparacao({ nome_user: itens[0]?.nome_user || nSolic, n_solic: nSolic, itens }, []);
           }
         } catch (err) {
           alert('Erro: ' + err.message);
         } finally {
           cardEl._loading = false;
+        }
+      });
+    });
+
+    // Botão único por SEP: inicia separação de todos os itens da requisição
+    board.querySelectorAll('.solic-sep-start-btn').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const nSolic = btn.dataset.nSolic;
+        if (!nSolic || btn.disabled) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>Iniciando...';
+        try {
+          const ri = await fetch(`/api/logistica/kanban/itens?n_solic=${encodeURIComponent(nSolic)}`, { credentials: 'include' });
+          const di = await ri.json();
+          if (!di.ok) throw new Error(di.error || 'Erro ao buscar itens da SEP.');
+          const solicIds = (di.itens || [])
+            .map(it => parseInt(it.solic_id, 10))
+            .filter(id => !Number.isNaN(id));
+          if (!solicIds.length) throw new Error('Nenhum item pendente encontrado para iniciar separação.');
+
+          const r = await fetch('/api/logistica/itens_solicitados/separacao', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ solic_ids: solicIds })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'Erro ao iniciar separação da SEP.');
+
+          window._loadSolicitacoesTab.force = true;
+          window._loadSolicitacoesTab();
+          window._loadKanbanSolicitacoesTab.force = true;
+          window._loadKanbanSolicitacoesTab();
+        } catch (err) {
+          alert('Erro: ' + (err.message || err));
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar separação';
         }
       });
     });
@@ -415,14 +500,10 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
   function _renderAggItem(it, nSolic) {
     const qty      = parseFloat(it.quantidade) || 0;
     const isSep    = it.status === 'Separado';
-    const isPend   = it.status === 'pendente';
     const dp       = _solFmtDataPrevista(it.data_prevista);
     const dh       = [dp, it.horario].filter(Boolean).join(' ');
-    const btnBg    = isSep ? '#16a34a' : isPend ? '#1e3a5f' : '#374151';
-    const btnCo    = isSep ? '#fff'    : isPend ? '#93c5fd' : '#d1d5db';
-    const btnLabel = isSep ? '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado'
-                           : isPend ? '<i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar'
-                           : '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado';
+    const hasObs = !!String(it.observacao || '').trim();
+    const obsText = (it.observacao || '').trim();
     // Itens de sub-SEPs (já Separado) não têm input de quantidade editável
     const qtyHtml = isSep
       ? `<span style="font-size:.80rem;font-weight:700;color:#f0f0f0;">${_solFmtQty(qty)} ${it.unidade || 'UN'}</span>`
@@ -439,6 +520,10 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
            data-carr-ids='${JSON.stringify(it.carr_ids)}'
            data-qty-total="${qty}"
            data-status="${it.status}"
+           data-codigo="${String(it.codigo_produto || '').replace(/"/g, '&quot;')}"
+           data-descricao="${encodeURIComponent(it.descricao || '')}"
+           data-observacao="${encodeURIComponent(obsText)}"
+           data-unidade="${String(it.unidade || 'UN').replace(/"/g, '&quot;')}"
            style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #222;">
         <div style="width:40px;height:40px;border-radius:8px;background:#0f0f0f;overflow:hidden;flex-shrink:0;">
           <img src="/imagens_produtos/${it.codigo_produto}.jpg" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">
@@ -449,14 +534,30 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
           <div style="font-size:.73rem;color:#9ca3af;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             ${dh ? `<i class="fa-regular fa-calendar" style="color:#6b7280;"></i><span>${dh}</span>` : ''}
             ${_solStatusBadge(it.status || 'Separação')}
+            ${hasObs ? `<span title="Item com observação" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:999px;background:#f97316;color:#111;font-weight:800;font-size:.70rem;line-height:1;">!</span>` : ''}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
           ${qtyHtml}
-          <button class="btn-item-toggle"
-            style="padding:4px 10px;border:none;border-radius:6px;background:${btnBg};color:${btnCo};font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .2s;">
-            ${btnLabel}
-          </button>
+          ${isSep
+            ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                 <button class="btn-item-conferido" title="Enviar para Aguardando retirada"
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#16a34a;color:#dcfce7;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   <i class="fa-solid fa-clipboard-check" style="margin-right:3px;"></i>Conferido
+                 </button>
+                 <button class="btn-item-retificar" title="Voltar item para Em Separação"
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#4b5563;color:#e5e7eb;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   <i class="fa-solid fa-rotate-left" style="margin-right:3px;"></i>Retificar
+                 </button>
+                 <button class="btn-item-trocar" title="Trocar este produto"
+                   style="padding:4px 9px;border:none;border-radius:6px;background:#7c3aed;color:#f3e8ff;font-weight:700;font-size:.70rem;cursor:pointer;white-space:nowrap;">
+                   <i class="fa-solid fa-arrows-rotate" style="margin-right:3px;"></i>Trocar
+                 </button>
+               </div>`
+            : `<button class="btn-item-acao" title="Ações do item"
+                 style="padding:4px 10px;border:none;border-radius:6px;background:#374151;color:#d1d5db;font-weight:700;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:all .2s;">
+                 <i class="fa-solid fa-gear" style="margin-right:4px;"></i>Ação
+               </button>`}
         </div>
       </div>`;
   }
@@ -535,69 +636,344 @@ function _abrirModalSeparacao(grupoAtual, gruposConflito) {
 
   const modalInner = document.getElementById('modalSepInner');
 
-  // Delegação de clique — toggle Separado/Separação e separação parcial SEP.X
-  modalInner.addEventListener('click', async (e) => {
-    const toggleBtn = e.target.closest('.btn-item-toggle');
-    if (toggleBtn && !toggleBtn.disabled) {
-      const row      = toggleBtn.closest('[data-item-row]');
-      if (!row) return;
-      const solicIds = JSON.parse(row.dataset.solicIds  || '[]');
-      const carrIds  = JSON.parse(row.dataset.carrIds   || '[]');
-      const qtyTotal = parseFloat(row.dataset.qtyTotal) || 0;
-      const status   = row.dataset.status;
-      const input    = row.querySelector('.sep-qty-input');
-      const qtySep   = parseFloat(input?.value?.replace(',', '.')) || qtyTotal;
+  async function _abrirModalAcaoItemSep(row) {
+    document.getElementById('modalAcaoItemSep')?.remove();
+    const codigo = row.dataset.codigo || '';
+    const descricao = decodeURIComponent(row.dataset.descricao || '');
+    const observacao = decodeURIComponent(row.dataset.observacao || '');
+    const unidade = row.dataset.unidade || 'UN';
+    const qtyTotal = parseFloat(row.dataset.qtyTotal || '0') || 0;
+    const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+    const carrIds = JSON.parse(row.dataset.carrIds || '[]');
 
-      toggleBtn.disabled = true;
-      toggleBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    const modal = document.createElement('div');
+    modal.id = 'modalAcaoItemSep';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);z-index:10080;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(520px,95vw);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;">
+          <i class="fa-solid fa-list-check" style="color:#f59e0b;font-size:1.05rem;"></i>
+          <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">Ação do item</span>
+          <button id="btnAcaoItemFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
+          <div style="font-size:.78rem;color:#f59e0b;font-weight:700;">${codigo}</div>
+          <div style="font-size:.84rem;color:#d1d5db;">${descricao || '—'}</div>
+          <div style="font-size:.78rem;color:#93c5fd;">Observação: ${observacao || 'Sem observação'}</div>
+          <div style="font-size:.82rem;color:#f0f0f0;font-weight:700;">Quantidade original: ${_solFmtQty(qtyTotal)} ${unidade}</div>
+        </div>
+        <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;background:#171717;">
+          <button id="btnAcaoSepTudo" style="padding:7px 12px;border:none;border-radius:8px;background:#166534;color:#dcfce7;font-weight:700;font-size:.82rem;cursor:pointer;">Separei tudo</button>
+          <button id="btnAcaoSepParcial" style="padding:7px 12px;border:none;border-radius:8px;background:#b45309;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Separei parcial</button>
+          <button id="btnAcaoNaoSep" style="padding:7px 12px;border:none;border-radius:8px;background:#7c2d12;color:#ffedd5;font-weight:700;font-size:.82rem;cursor:pointer;">Não separei</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const closeModal = () => modal.remove();
+    document.getElementById('btnAcaoItemFechar').addEventListener('click', closeModal);
+    modal.addEventListener('click', ev => { if (ev.target === modal) closeModal(); });
+
+    document.getElementById('btnAcaoSepTudo').addEventListener('click', async () => {
+      const btn = document.getElementById('btnAcaoSepTudo');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Processando...';
       try {
-        if (status === 'Separado') {
-          // Toggle: reverte para Separação
-          const r   = await fetch('/api/logistica/itens_solicitados/reverter-separacao', {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-            body: JSON.stringify({ solic_ids: solicIds })
-          });
-          const res = await r.json();
-          if (!res.ok) throw new Error(res.error || 'Erro ao reverter');
-          await reloadItems();
-        } else if (status === 'pendente') {
-          // 1º clique em item ainda pendente: inicia separação deste item (Separação)
-          const r   = await fetch('/api/logistica/itens_solicitados/separacao', {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-            body: JSON.stringify({ solic_ids: solicIds })
-          });
-          const res = await r.json();
-          if (!res.ok) throw new Error(res.error || 'Erro ao iniciar separação');
-          await reloadItems();
-        } else if (qtySep >= qtyTotal - 0.0001) {
-          // Separação total (item já em Separação → marca como Separado)
-          const r   = await fetch('/api/logistica/itens_solicitados/separar', {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-            body: JSON.stringify({ solic_ids: solicIds })
-          });
-          const res = await r.json();
-          if (!res.ok) throw new Error(res.error || 'Erro ao separar');
-          await reloadItems();
-        } else {
-          // Separação parcial → gera SEP-NNNN.X
-          if (qtySep <= 0) { alert('Digite uma quantidade válida.'); toggleBtn.disabled = false; toggleBtn.innerHTML = '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado'; return; }
-          const r   = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-            body: JSON.stringify({ solic_ids: solicIds, carr_ids: carrIds, quantidade_separada: qtySep })
-          });
-          const res = await r.json();
-          if (!res.ok) throw new Error(res.error || 'Erro na separação parcial');
-          await reloadItems();
-          return;
-        }
+        const r = await fetch('/api/logistica/itens_solicitados/separar', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao registrar item separado.');
+        closeModal();
+        await reloadItems();
       } catch (err) {
-        alert('Erro: ' + err.message);
-        toggleBtn.disabled = false;
-        const statusFb = row?.dataset?.status;
-        toggleBtn.innerHTML = statusFb === 'pendente'
-          ? '<i class="fa-solid fa-play" style="margin-right:3px;"></i>Iniciar'
-          : '<i class="fa-solid fa-check" style="margin-right:3px;"></i>Separado';
+        alert('Erro: ' + (err.message || err));
+        btn.disabled = false;
+        btn.textContent = 'Separei tudo';
       }
+    });
+
+    document.getElementById('btnAcaoSepParcial').addEventListener('click', async () => {
+      closeModal();
+      const qtyInput = prompt(`Quantidade separada (máx ${_solFmtQty(qtyTotal)} ${unidade}):`, _solFmtQty(qtyTotal));
+      if (qtyInput === null) return;
+      const qtySep = parseFloat(String(qtyInput).replace(',', '.'));
+      if (!Number.isFinite(qtySep) || qtySep <= 0 || qtySep >= qtyTotal) {
+        alert('Quantidade parcial inválida. Use um valor maior que 0 e menor que a quantidade original.');
+        return;
+      }
+      const motivo = prompt('Motivo da separação parcial:', '') || '';
+
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/separar-parcial', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            solic_ids: solicIds,
+            carr_ids: carrIds,
+            quantidade_separada: qtySep,
+            motivo
+          })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao processar separação parcial.');
+        await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+      }
+    });
+
+    document.getElementById('btnAcaoNaoSep').addEventListener('click', async () => {
+      const ok = confirm('Confirmar que este item não foi separado?');
+      if (!ok) return;
+      try {
+        for (const sid of solicIds) {
+          const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ solic_id: sid })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error || 'Erro ao marcar item como não separado.');
+        }
+        closeModal();
+        await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+      }
+    });
+  }
+
+  // Modal de trocar produto
+  async function _abrirModalTrocarProduto(solicId, codigoAtual) {
+    const modalTrocar = document.createElement('div');
+    modalTrocar.style.cssText = `
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;
+      z-index:9999;
+    `;
+
+    let timer = null;
+    let ultimaBusca = '';
+    const resultados = [];
+
+    const html = `
+      <div style="background:#1a1a1a;border-radius:12px;padding:20px;width:90%;max-width:500px;color:#d1d5db;box-shadow:0 10px 40px rgba(0,0,0,.8);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h2 style="margin:0;font-size:1.1rem;color:#f0f0f0;">Trocar Produto</h2>
+          <button id="closeTrocarModal" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:1.3rem;">✕</button>
+        </div>
+        
+        <label style="display:block;margin-bottom:8px;font-size:.85rem;color:#a0aec0;font-weight:700;">Buscar novo produto</label>
+        <input type="text" id="trocarProdutoBusca" placeholder="Digite código ou descrição..." 
+          style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#d1d5db;font-size:.88rem;box-sizing:border-box;margin-bottom:12px;">
+        
+        <div id="trocarResultados" style="max-height:300px;overflow-y:auto;border:1px solid #334155;border-radius:6px;background:#0f172a;min-height:40px;padding:8px;font-size:.80rem;">
+          <div style="color:#6b7280;text-align:center;padding:12px;">Digite algo para buscar...</div>
+        </div>
+        
+        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+          <button id="cancelTrocarModal" style="padding:8px 16px;border:1px solid #4b5563;background:transparent;color:#d1d5db;border-radius:6px;cursor:pointer;font-weight:700;font-size:.85rem;">Cancelar</button>
+        </div>
+      </div>
+    `;
+
+    modalTrocar.innerHTML = html;
+    document.body.appendChild(modalTrocar);
+
+    const inputBusca = document.getElementById('trocarProdutoBusca');
+    const divResultados = document.getElementById('trocarResultados');
+    const btnClose = document.getElementById('closeTrocarModal');
+    const btnCancel = document.getElementById('cancelTrocarModal');
+
+    function fecharTrocar() {
+      if (timer) clearTimeout(timer);
+      modalTrocar.remove();
+    }
+
+    btnClose.onclick = fecharTrocar;
+    btnCancel.onclick = fecharTrocar;
+
+    inputBusca.addEventListener('input', async (e) => {
+      const q = e.target.value.trim();
+      if (timer) clearTimeout(timer);
+      
+      if (q.length < 2) {
+        divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Digite pelo menos 2 caracteres...</div>';
+        resultados.length = 0;
+        return;
+      }
+
+      divResultados.innerHTML = '<div style="color:#f59e0b;text-align:center;padding:12px;">Buscando...</div>';
+      ultimaBusca = q;
+
+      timer = setTimeout(async () => {
+        try {
+          const r = await fetch('/api/logistica/produtos/buscar?q=' + encodeURIComponent(q), { credentials: 'include' });
+          const d = await r.json();
+          if (d.ok && Array.isArray(d.resultados) && ultimaBusca === q) {
+            resultados.length = 0;
+            d.resultados.forEach(p => resultados.push(p));
+            
+            if (resultados.length === 0) {
+              divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Nenhum resultado encontrado.</div>';
+            } else {
+              divResultados.innerHTML = resultados.map((p, idx) => `
+                <div class="trocar-resultado-item" data-idx="${idx}" 
+                  style="padding:10px;border-bottom:1px solid #334155;cursor:pointer;display:flex;gap:8px;align-items:center;transition:all .15s;"
+                  onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='transparent'">
+                  <div style="flex:1;min-width:0;">
+                    <div style="color:#f59e0b;font-weight:700;font-size:.80rem;">${p.codigo || '—'}</div>
+                    <div style="color:#d1d5db;font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.descricao || '—'}</div>
+                  </div>
+                  <div style="color:#9ca3af;font-size:.75rem;flex-shrink:0;">${p.unidade || 'UN'}</div>
+                </div>
+              `).join('');
+            }
+          }
+        } catch (err) {
+          divResultados.innerHTML = '<div style="color:#ef4444;text-align:center;padding:12px;">Erro na busca.</div>';
+        }
+      }, 300);
+    });
+
+    divResultados.addEventListener('click', async (e) => {
+      const item = e.target.closest('.trocar-resultado-item');
+      if (!item) return;
+      const idx = parseInt(item.dataset.idx);
+      const prod = resultados[idx];
+      if (!prod) return;
+
+      inputBusca.disabled = true;
+      divResultados.innerHTML = '<div style="color:#f59e0b;text-align:center;padding:12px;">Trocando...</div>';
+
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/trocar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            solic_id: solicId,
+            codigo_novo: prod.codigo,
+            descricao_novo: prod.descricao,
+            unidade_novo: prod.unidade
+          })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao trocar produto.');
+        
+        fecharTrocar();
+        await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        inputBusca.disabled = false;
+        divResultados.innerHTML = '<div style="color:#6b7280;text-align:center;padding:12px;">Digite algo para buscar...</div>';
+      }
+    });
+
+    inputBusca.focus();
+  }
+
+  // Delegação de clique — ações do item
+  modalInner.addEventListener('click', async (e) => {
+    const btnConferido = e.target.closest('.btn-item-conferido');
+    if (btnConferido && !btnConferido.disabled) {
+      const row = btnConferido.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      if (!solicIds.length) return;
+
+      btnConferido.disabled = true;
+      const htmlOrig = btnConferido.innerHTML;
+      btnConferido.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/aguardando-retirada', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao marcar como aguardando retirada.');
+        await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        btnConferido.disabled = false;
+        btnConferido.innerHTML = htmlOrig;
+      }
+      return;
+    }
+
+    const btnRetificar = e.target.closest('.btn-item-retificar');
+    if (btnRetificar && !btnRetificar.disabled) {
+      const row = btnRetificar.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      if (!solicIds.length) return;
+
+      btnRetificar.disabled = true;
+      const htmlOrig = btnRetificar.innerHTML;
+      btnRetificar.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:3px;"></i>...';
+      try {
+        const r = await fetch('/api/logistica/itens_solicitados/reverter-separacao', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ solic_ids: solicIds })
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || 'Erro ao retificar item.');
+        await reloadItems();
+        window._loadSolicitacoesTab.force = true;
+        window._loadSolicitacoesTab();
+        window._loadKanbanSolicitacoesTab.force = true;
+        window._loadKanbanSolicitacoesTab();
+      } catch (err) {
+        alert('Erro: ' + (err.message || err));
+        btnRetificar.disabled = false;
+        btnRetificar.innerHTML = htmlOrig;
+      }
+      return;
+    }
+
+    const btnTrocar = e.target.closest('.btn-item-trocar');
+    if (btnTrocar && !btnTrocar.disabled) {
+      const row = btnTrocar.closest('[data-item-row]');
+      if (!row) return;
+      const solicIds = JSON.parse(row.dataset.solicIds || '[]');
+      if (!solicIds.length) return;
+      
+      const codigoAtual = row.querySelector('.codigo_produto')?.textContent || '';
+      await _abrirModalTrocarProduto(solicIds[0], codigoAtual);
+      return;
+    }
+
+    const btnAcao = e.target.closest('.btn-item-acao');
+    if (btnAcao && !btnAcao.disabled) {
+      const row = btnAcao.closest('[data-item-row]');
+      if (!row) return;
+      await _abrirModalAcaoItemSep(row);
       return;
     }
 
@@ -804,6 +1180,69 @@ window._loadKanbanSolicitacoesTab = async function() {
   }
 };
 
+// Modal para registrar justificativa de "Não separar"
+async function _abrirModalNaoSeparar(solicId, callback) {
+  document.getElementById('modalNaoSeparar')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modalNaoSeparar';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);z-index:10070;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#1c1c1c;border:1px solid #2a2a2a;border-radius:16px;width:min(450px,95vw);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #2a2a2a;background:#171717;flex-shrink:0;">
+        <i class="fa-solid fa-triangle-exclamation" style="color:#f97316;font-size:1.1rem;"></i>
+        <span style="font-weight:700;font-size:1rem;color:#f0f0f0;">Justificar não separação</span>
+        <button id="btnModalNaoSepFechar" style="margin-left:auto;background:none;border:none;color:#9ca3af;font-size:1.3rem;cursor:pointer;padding:2px 6px;line-height:1;">&#x2715;</button>
+      </div>
+      <div style="padding:16px;flex:1;">
+        <label style="display:block;font-size:.85rem;font-weight:700;color:#f0f0f0;margin-bottom:8px;">Por que não separar este item?</label>
+        <textarea id="txtJustificativa" 
+          placeholder="Ex: Produto fora de estoque, item danificado, etc."
+          style="width:100%;height:120px;padding:10px 12px;border-radius:8px;border:1px solid #4b5563;background:#111;color:#f0f0f0;font-size:.85rem;font-family:inherit;resize:vertical;"></textarea>
+        <div style="font-size:.72rem;color:#6b7280;margin-top:6px;">Esta observação será registrada no sistema.</div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;background:#171717;">
+        <button id="btnNaoSepCancel" style="padding:7px 20px;border:1px solid #4b5563;border-radius:8px;background:transparent;color:#d1d5db;font-weight:700;font-size:.85rem;cursor:pointer;">Cancelar</button>
+        <button id="btnNaoSepConfirm" style="padding:7px 20px;border:none;border-radius:8px;background:#f97316;color:#111;font-weight:700;font-size:.85rem;cursor:pointer;">
+          <i class="fa-solid fa-ban" style="margin-right:4px;"></i>Não Separar
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const closeModal = () => modal.remove();
+  document.getElementById('btnModalNaoSepFechar').addEventListener('click', closeModal);
+  document.getElementById('btnNaoSepCancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  document.getElementById('btnNaoSepConfirm').addEventListener('click', async () => {
+    const justificativa = document.getElementById('txtJustificativa').value.trim();
+    if (!justificativa) { alert('Por favor, escreva uma justificativa.'); return; }
+
+    const btn = document.getElementById('btnNaoSepConfirm');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:4px;"></i>Processando...';
+
+    try {
+      const r = await fetch('/api/logistica/itens_solicitados/nao-separar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ solic_id: solicId, justificativa })
+      });
+      const d = await r.json();
+      if (!d.ok) { alert('Erro: ' + (d.error || 'Falha ao processar')); btn.disabled = false; return; }
+
+      closeModal();
+      if (callback) callback();
+    } catch (err) {
+      console.error('[nao-separar] erro:', err);
+      alert('Erro ao processar solicitação.');
+      btn.disabled = false;
+    }
+  });
+}
+
 // Modal de edição de SEP (carrinho ou pendente)
 async function _abrirModalEdicaoSep(nSolic) {
   // Fecha tooltip caso esteja visível
@@ -847,6 +1286,10 @@ async function _abrirModalEdicaoSep(nSolic) {
           onfocus="this.select()"
           style="width:64px;padding:4px 7px;border-radius:6px;border:1px solid #4b5563;background:#111;color:#f0f0f0;font-size:.80rem;text-align:center;">
         <span style="font-size:.72rem;color:#6b7280;">${it.unidade || 'UN'}</span>
+        <button class="sep-edit-nao-separar" data-solic-id="${it.solic_id}" title="Marcar como não separado"
+          style="background:none;border:none;color:#f97316;cursor:pointer;font-size:.95rem;padding:2px 4px;">
+          <i class="fa-solid fa-ban"></i>
+        </button>
         <button class="sep-edit-del" data-carr-id="${it.carr_id}" title="Excluir item"
           style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:.95rem;padding:2px 4px;">
           <i class="fa-solid fa-trash-can"></i>
@@ -899,6 +1342,28 @@ async function _abrirModalEdicaoSep(nSolic) {
           }
         } else { alert('Erro: ' + d.error); btn.disabled = false; }
       } catch (_) { alert('Erro ao excluir.'); btn.disabled = false; }
+    });
+  });
+
+  // Botões "Não separar" — abre modal com campo de observação
+  modal.querySelectorAll('.sep-edit-nao-separar').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const solicId = parseInt(btn.dataset.solicId, 10);
+      if (!solicId) { alert('ID do item não encontrado.'); return; }
+      
+      // Abre modal para inserir justificativa
+      _abrirModalNaoSeparar(solicId, () => {
+        // Callback: após salvar, remove a linha e fecha modal se estiver vazio
+        btn.closest('[data-sep-row]')?.remove();
+        const lista = document.getElementById('sepEditLista');
+        if (lista && !lista.querySelectorAll('[data-sep-row]').length) {
+          modal.remove();
+          window._loadKanbanSolicitacoesTab.force = true;
+          window._loadKanbanSolicitacoesTab();
+          window._loadSolicitacoesTab.force = true;
+          window._loadSolicitacoesTab();
+        }
+      });
     });
   });
 
@@ -37725,8 +38190,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   async function confirmar() {
     if (!_sepCtx) return;
     const input = document.getElementById('sepQtyInput');
-    const qty = Number(String(input?.value || '').replace(',', '.'));
+    let qty = Number(String(input?.value || '').replace(',', '.'));
     if (!Number.isFinite(qty) || qty <= 0) { input?.focus({ preventScroll: true }); return; }
+    if (_sepCtx.unidade === 'UN') {
+      qty = Math.max(1, Math.round(qty));
+    }
     const { codigo, descricao, unidade } = _sepCtx;
     fechar();
     try {
@@ -37744,8 +38212,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
         const badge = document.getElementById('listaSeparacaoCount');
         if (badge) {
           const atual = parseInt(badge.textContent) || 0;
-          badge.textContent = atual + 1;
-          badge.style.display = '';
+          const incremento = data.merged ? 0 : 1;
+          const total = atual + incremento;
+          badge.textContent = total;
+          badge.style.display = total > 0 ? '' : 'none';
         }
       }
     } catch (err) {
@@ -37769,7 +38239,17 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     el('sepQtyTitle').textContent = 'Quantidade para separação';
     el('sepQtyProd').textContent  = descricao || codigo;
     el('sepQtyUnit').textContent  = 'SOLICITAR COMO: ' + _sepCtx.unidade;
-    const inp = el('sepQtyInput'); if (inp) inp.value = 1;
+    const inp = el('sepQtyInput');
+    if (inp) {
+      inp.value = 1;
+      if (_sepCtx.unidade === 'UN') {
+        inp.min = '1';
+        inp.step = '1';
+      } else {
+        inp.min = '0.001';
+        inp.step = '0.001';
+      }
+    }
     ov.style.display = 'flex';
     try { inp?.focus({ preventScroll: true }); } catch {}
   };
@@ -37793,21 +38273,21 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
       </div>
       <!-- Conteúdo: Botões de ação -->
       <div id="modalAcoesBotoes" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px;">
-        <div style="display:flex;gap:8px;">
-          <input type="number" id="modalAcoesQtd" min="1" value="1" style="width:70px;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;text-align:center;" />
-          <button id="modalAcoesBtnCarrinho" style="flex:1;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+        <div style="display:grid;grid-template-columns:1fr 80px 1fr;gap:8px;align-items:stretch;">
+          <button id="modalAcoesBtnCarrinho" style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-cart-plus"></i> Adicionar ao Carrinho
           </button>
+          <input type="number" id="modalAcoesQtd" min="1" value="1" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:16px;line-height:1.1;text-align:center;box-sizing:border-box;min-height:40px;" />
+          <button id="modalAcoesBtnSeparacao" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#1a1200;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <i class="fa-solid fa-clipboard-list"></i> Adicionar separação
+          </button>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
           <button id="modalAcoesBtnEditar" style="background:#fef3c7;color:#d97706;border:1px solid #fbbf24;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-pencil"></i> Editar
           </button>
           <button id="modalAcoesBtnCompras" style="background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-receipt"></i> Últimas Compras
-          </button>
-          <button id="modalAcoesBtnSeparacao" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#1a1200;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <i class="fa-solid fa-clipboard-list"></i> Separação
           </button>
           <button id="modalAcoesBtnMovimentar" style="background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;padding:10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <i class="fa-solid fa-arrows-rotate"></i> Movimentar
@@ -37840,9 +38320,36 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   `;
   document.body.appendChild(ov);
 
+  if (!document.getElementById('modalAcoesQtdSpinStyle')) {
+    const spinStyle = document.createElement('style');
+    spinStyle.id = 'modalAcoesQtdSpinStyle';
+    spinStyle.textContent = `
+      #modalAcoesQtd::-webkit-outer-spin-button,
+      #modalAcoesQtd::-webkit-inner-spin-button {
+        width: 24px;
+        height: 24px;
+        transform: scale(1.18);
+        opacity: 1;
+        cursor: pointer;
+      }
+    `;
+    document.head.appendChild(spinStyle);
+  }
+
   let _ctx = {};
 
-  function fechar() { ov.style.display = 'none'; _ctx = {}; }
+  function resetBotaoSeparacao() {
+    const btn = document.getElementById('modalAcoesBtnSeparacao');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-clipboard-list"></i> Adicionar separação';
+  }
+
+  function fechar() {
+    ov.style.display = 'none';
+    _ctx = {};
+    resetBotaoSeparacao();
+  }
 
   function mostrarBotoes() {
     document.getElementById('modalAcoesBotoes').style.display = 'flex';
@@ -37932,10 +38439,57 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
   document.getElementById('modalAcoesBtnEditar').addEventListener('click', () => { const c = _ctx.codigo; fechar(); abrirModalEditarProduto(c); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
-  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => { const {codigo, descricao, unidade} = _ctx; fechar(); abrirModalSeparacaoQtd(codigo, descricao, unidade); });
+  document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', async () => {
+    const qtdInput = document.getElementById('modalAcoesQtd');
+    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
+    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
+    if (!Number.isFinite(qtd) || qtd <= 0) {
+      qtdInput?.focus();
+      return;
+    }
+    if (unidadeNorm === 'UN') {
+      qtd = Math.max(1, Math.round(qtd));
+    }
+
+    const btn = document.getElementById('modalAcoesBtnSeparacao');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Adicionando...';
+    try {
+      const resp = await fetch('/api/logistica/separacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          codigo: _ctx.codigo,
+          descricao: _ctx.descricao,
+          quantidade: qtd,
+          unidade: unidadeNorm
+        })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || 'tente novamente.');
+
+      const badge = document.getElementById('listaSeparacaoCount');
+      if (badge) {
+        const atual = parseInt(badge.textContent) || 0;
+        const incremento = data.merged ? 0 : 1;
+        const total = atual + incremento;
+        badge.textContent = total;
+        badge.style.display = total > 0 ? '' : 'none';
+      }
+      fechar();
+    } catch (err) {
+      alert('Erro ao registrar separação: ' + (err.message || err));
+      resetBotaoSeparacao();
+    }
+  });
   document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => { const {codigo, descricao} = _ctx; fechar(); abrirModalMovimentacao(codigo, descricao); });
   document.getElementById('modalAcoesBtnCarrinho').addEventListener('click', () => {
-    const qtd = parseInt(document.getElementById('modalAcoesQtd').value) || 1;
+    const qtdInput = document.getElementById('modalAcoesQtd');
+    const unidadeNorm = String(_ctx.unidade || 'UN').toUpperCase();
+    let qtd = Number(String(qtdInput?.value || '').replace(',', '.'));
+    if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
+    if (unidadeNorm === 'UN') qtd = Math.max(1, Math.round(qtd));
     const {codigo, descricao} = _ctx;
     // Cria input temporário para compatibilidade
     const tempInput = document.createElement('input');
@@ -37952,7 +38506,17 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     _ctx = { codigo, codigo_produto: codigoProduto, descricao, unidade };
     document.getElementById('modalAcoesTitulo').textContent = codigo;
     document.getElementById('modalAcoesDescricao').textContent = descricao;
-    document.getElementById('modalAcoesQtd').value = 1;
+    resetBotaoSeparacao();
+    const qtdInput = document.getElementById('modalAcoesQtd');
+    qtdInput.value = 1;
+    const unidadeNorm = String(unidade || 'UN').toUpperCase();
+    if (unidadeNorm === 'UN') {
+      qtdInput.min = '1';
+      qtdInput.step = '1';
+    } else {
+      qtdInput.min = '0.001';
+      qtdInput.step = '0.001';
+    }
     document.getElementById('modalManualStatus').textContent = '';
     mostrarBotoes();
     ov.style.display = 'flex';
@@ -50345,20 +50909,13 @@ function aplicarVisibilidadeMenuChatbotAdmin() {
   }
 }
 
-// Logado: revela só o que a ÁRVORE permitir
-async function applyCurrentUserPermissionsToUI(){
+// Aplica uma árvore de permissões (já carregada) à UI
+function _applyPermissionTreeToUI(data){
   // começa escondendo tudo
   const gated = findGatedCandidates();
   gated.forEach(el => el.classList.add('perm-hidden'));
 
-  const me = window.__sessionUser;
-  if (!me) { applyLoggedOutUI(); return; }
-
-  const r = await fetch(`/api/users/${me.id}/permissions/tree`, { credentials:'include' });
-  if (!r.ok) { applyLoggedOutUI(); return; }
-  const data = await r.json();
-
-  for (const n of data.nodes || []) {
+  for (const n of (data && data.nodes) || []) {
     if (!n.selector) continue;
     document.querySelectorAll(n.selector).forEach(el => {
       el.classList.toggle('perm-hidden', !n.allowed);
@@ -50389,6 +50946,45 @@ async function applyCurrentUserPermissionsToUI(){
         firstVisible.click();
       }
     }
+  }
+}
+
+// Logado: revela só o que a ÁRVORE permitir.
+// Estratégia anti-flicker: aplica imediatamente cache local (se houver) e revalida em background.
+async function applyCurrentUserPermissionsToUI(){
+  const me = window.__sessionUser;
+  if (!me) { applyLoggedOutUI(); return; }
+
+  const cacheKey = `perm-tree:${me.id}`;
+  let appliedFromCache = false;
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached && Array.isArray(cached.nodes)) {
+        _applyPermissionTreeToUI(cached);
+        appliedFromCache = true;
+      }
+    }
+  } catch {}
+
+  // Função que busca a árvore atualizada e re-aplica se mudou
+  const refresh = async () => {
+    try {
+      const r = await fetch(`/api/users/${me.id}/permissions/tree`, { credentials:'include' });
+      if (!r.ok) return;
+      const data = await r.json();
+      _applyPermissionTreeToUI(data);
+      try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
+    } catch {}
+  };
+
+  if (appliedFromCache) {
+    // Não bloqueia o boot: revalida em segundo plano
+    refresh();
+  } else {
+    // Sem cache: precisamos esperar para não revelar UI vazia
+    await refresh();
   }
 }
 
@@ -50438,7 +51034,26 @@ async function ensureAuthVisibility(){
   } catch {
     applyLoggedOutUI();
   }
+  finally {
+    // Libera a UI (remove anti-flicker / overlay) somente após permissões aplicadas
+    try {
+      document.body.classList.add('app-ready');
+      const ov = document.getElementById('app-boot-overlay');
+      if (ov) setTimeout(() => ov.remove(), 280);
+    } catch {}
+  }
 }
+
+// Fallback: se algo travar, libera a UI após 4s no máximo
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    if (!document.body.classList.contains('app-ready')) {
+      document.body.classList.add('app-ready');
+      const ov = document.getElementById('app-boot-overlay');
+      if (ov) ov.remove();
+    }
+  }, 4000);
+});
 
 // ====== AUTODESCoberta de navegação + sync ======
 function _navComputeSelector(el) {
@@ -50565,9 +51180,13 @@ window.addEventListener('auth:changed', async () => {
     } catch {}
 
     // limpa sessão local
+    const _prevUser = window.__sessionUser;
     window.__sessionUser = null;
     localStorage.removeItem('user');
     localStorage.removeItem('password');
+    try {
+      if (_prevUser && _prevUser.id) localStorage.removeItem(`perm-tree:${_prevUser.id}`);
+    } catch {}
 
     // dispara evento para toda a UI se atualizar
     window.dispatchEvent(new Event('auth:changed'));
@@ -57220,6 +57839,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Observação (opcional)</label>
           <textarea id="modalCarrinhoSepObs" rows="3" placeholder="Instruções adicionais para o almoxarifado" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:10px 12px;font-size:.9rem;resize:vertical;"></textarea>
         </div>
+        <button id="modalCarrinhoSepClear" type="button" style="background:transparent;color:#f87171;font-weight:700;border:1px solid #7f1d1d;border-radius:10px;padding:10px 12px;width:100%;font-size:.92rem;cursor:pointer;">Excluir lista</button>
         <button id="modalCarrinhoSepSend" style="background:#ffb400;color:#1a1200;font-weight:700;border:none;border-radius:12px;padding:14px;width:100%;font-size:1rem;cursor:pointer;letter-spacing:.02em;">Enviar separação</button>
       </div>
     </div>
@@ -57268,7 +57888,49 @@ document.addEventListener('DOMContentLoaded', async () => {
         <span style="font-weight:700;font-size:.85rem;color:#f59e0b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.codigo_produto}</span>
         <span style="font-size:.82rem;color:#d1d5db;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.descricao || '—'}</span>
         <span style="font-size:.78rem;color:#9ca3af;">${_fmtQty(item.quantidade)} ${item.unidade || 'UN'}</span>
+        ${item.comentario ? `<span class="sep-item-coment" style="font-size:.76rem;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Obs: ${item.comentario}</span>` : '<span class="sep-item-coment" style="display:none;"></span>'}
       `;
+      const obsEl = info.querySelector('.sep-item-coment');
+      // Ações da linha
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;align-items:center;gap:8px;flex-shrink:0;';
+      const btnComent = document.createElement('button');
+      btnComent.innerHTML = '<i class="fa-solid fa-comment"></i>';
+      btnComent.style.cssText = 'background:#1f2937;border:none;border-radius:8px;color:#93c5fd;padding:8px 10px;cursor:pointer;';
+      btnComent.title = 'Adicionar comentário';
+      btnComent.addEventListener('click', async () => {
+        const novo = prompt('Comentário do item:', item.comentario || '');
+        if (novo === null) return;
+        const comentario = String(novo || '').trim();
+        btnComent.disabled = true;
+        try {
+          const resp = await fetch(`/api/logistica/carrinho/${item.id}/comentario`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comentario })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao salvar comentário.');
+          item.comentario = comentario;
+          if (comentario) {
+            obsEl.style.display = '';
+            obsEl.textContent = `Obs: ${comentario}`;
+            obsEl.style.fontSize = '.76rem';
+            obsEl.style.color = '#93c5fd';
+            obsEl.style.whiteSpace = 'nowrap';
+            obsEl.style.overflow = 'hidden';
+            obsEl.style.textOverflow = 'ellipsis';
+          } else {
+            obsEl.style.display = 'none';
+            obsEl.textContent = '';
+          }
+        } catch (e) {
+          alert(e.message || 'Erro ao salvar comentário.');
+        } finally {
+          btnComent.disabled = false;
+        }
+      });
       // Botão remover
       const btn = document.createElement('button');
       btn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
@@ -57298,7 +57960,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
       row.appendChild(thumb);
       row.appendChild(info);
-      row.appendChild(btn);
+      actions.appendChild(btnComent);
+      actions.appendChild(btn);
+      row.appendChild(actions);
       container.appendChild(row);
     });
   }
@@ -57391,6 +58055,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   document.getElementById('modalCarrinhoSepClose').addEventListener('click', fechar);
+  document.getElementById('modalCarrinhoSepClear').addEventListener('click', async () => {
+    if (!confirm('Deseja excluir todos os itens desta lista?')) return;
+    const btn = document.getElementById('modalCarrinhoSepClear');
+    btn.disabled = true;
+    btn.textContent = 'Excluindo...';
+    try {
+      const resp = await fetch('/api/logistica/carrinho', {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao excluir lista.');
+
+      const container = document.getElementById('modalCarrinhoSepItems');
+      const empty = document.getElementById('modalCarrinhoSepEmpty');
+      const form = document.getElementById('modalCarrinhoSepForm');
+      container.innerHTML = '';
+      empty.style.display = 'block';
+      form.style.display = 'none';
+
+      const badge = document.getElementById('listaSeparacaoCount');
+      if (badge) {
+        badge.textContent = '0';
+        badge.style.display = 'none';
+      }
+    } catch (e) {
+      alert(e.message || 'Erro ao excluir lista.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Excluir lista';
+    }
+  });
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
 
   window.abrirModalCarrinhoSeparacao = abrir;
@@ -57892,3 +58588,17 @@ window.producaoVerificacao = (() => {
   return { buscar, resetar };
 })();
 // ===================== FIM SIDEBAR VERIFICAÇÃO 1ª PEÇA OK =====================
+
+// ===== ATALHO MENU SUPERIOR: Lista de produtos =====
+document.addEventListener('DOMContentLoaded', () => {
+  const btnTopLista = document.getElementById('menu-lista-produtos');
+  if (!btnTopLista) return;
+  btnTopLista.addEventListener('click', (e) => {
+    e.preventDefault();
+    const btnLateral = document.getElementById('btn-omie-list1')
+                    || document.getElementById('btn-omie-list');
+    if (btnLateral) {
+      btnLateral.click();
+    }
+  });
+});
