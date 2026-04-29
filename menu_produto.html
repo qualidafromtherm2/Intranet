@@ -2438,6 +2438,11 @@
                 <textarea id="sacObservacao" rows="3" placeholder="Descreva detalhes do envio" style="width:100%;"></textarea>
               </div>
 
+              <div class="form-field" style="margin-top:14px;max-width:320px;">
+                <label for="sacNumeroSep">Número da SEP</label>
+                <input id="sacNumeroSep" type="text" placeholder="Ex: SEP 12345" style="width:100%;">
+              </div>
+
               <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;">
                 <div id="sacEnvioStatus" style="display:none;font-size:13px;color:var(--inactive-color);"></div>
                 <button id="sacSendBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:white;">
@@ -2466,6 +2471,7 @@
                         <th>Criado em</th>
                         <th>Observação</th>
                         <th>Identificação</th>
+                        <th>SEP</th>
                         <th>Conteúdo</th>
                         <th>Status</th>
                         <th>Anexos</th>
@@ -2473,7 +2479,7 @@
                       </tr>
                     </thead>
                     <tbody id="sacTabelaBody">
-                      <tr><td colspan="8" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
+                      <tr><td colspan="9" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -4350,20 +4356,104 @@
         </div>
       </div>
         <div id="envioMercadoriaPane" class="tab-pane" style="display:none;">
+          <style>
+            .envio-mercadoria-shell{display:flex;flex-direction:column;gap:12px;}
+            .envio-mercadoria-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:16px 20px;border:1px solid rgba(148,163,184,.22);border-radius:10px;background:linear-gradient(135deg,rgba(15,23,42,.96),rgba(17,24,39,.88));box-shadow:0 18px 40px rgba(0,0,0,.18);}
+            .envio-mercadoria-title{display:flex;gap:12px;align-items:flex-start;min-width:260px;}
+            .envio-mercadoria-title i{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;background:rgba(14,165,233,.12);color:#38bdf8;font-size:18px;}
+            .envio-mercadoria-title h2{margin:0;color:#f8fafc;font-size:20px;line-height:1.2;letter-spacing:0;}
+            .envio-mercadoria-title p{margin:4px 0 0;color:#94a3b8;font-size:13px;line-height:1.45;}
+            .envio-mercadoria-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+            .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;}
+            .envio-metric{border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(15,23,42,.62);padding:10px 14px;min-height:72px;}
+            .envio-metric span{display:block;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+            .envio-metric strong{display:block;margin-top:4px;color:#f8fafc;font-size:20px;line-height:1;}
+            .envio-mercadoria-filters{display:grid;grid-template-columns:minmax(260px,1fr) 210px 190px;gap:10px;align-items:center;}
+            .envio-mercadoria-filters input,.envio-mercadoria-filters select{height:40px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:rgba(15,23,42,.68);color:#e5e7eb;padding:0 12px;font-size:13px;outline:none;}
+            .envio-mercadoria-list{display:flex;flex-direction:column;gap:10px;}
+            .envio-card{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(250px,1.1fr) minmax(300px,1.6fr) minmax(250px,1fr) minmax(170px,.8fr);gap:12px;padding:14px 14px 14px 18px;border:1px solid rgba(148,163,184,.2);border-radius:10px;background:rgba(15,23,42,.78);}
+            .envio-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--envio-status-color,#64748b);box-shadow:0 0 22px var(--envio-status-glow,rgba(100,116,139,.2));}
+            .envio-card:hover{border-color:color-mix(in srgb,var(--envio-status-color,#38bdf8) 52%,transparent);background:rgba(15,23,42,.9);}
+            .envio-card-status-pendente{--envio-status-color:#94a3b8;--envio-status-glow:rgba(148,163,184,.28);--envio-status-bg:rgba(148,163,184,.14);--envio-status-border:rgba(148,163,184,.34);--envio-status-text:#e2e8f0;}
+            .envio-card-status-separacao{--envio-status-color:#f59e0b;--envio-status-glow:rgba(245,158,11,.32);--envio-status-bg:rgba(245,158,11,.14);--envio-status-border:rgba(245,158,11,.38);--envio-status-text:#fde68a;}
+            .envio-card-status-correios{--envio-status-color:#3b82f6;--envio-status-glow:rgba(59,130,246,.34);--envio-status-bg:rgba(59,130,246,.16);--envio-status-border:rgba(59,130,246,.42);--envio-status-text:#bfdbfe;}
+            .envio-card-status-enviado{--envio-status-color:#06b6d4;--envio-status-glow:rgba(6,182,212,.32);--envio-status-bg:rgba(6,182,212,.15);--envio-status-border:rgba(6,182,212,.4);--envio-status-text:#a5f3fc;}
+            .envio-card-status-finalizado{--envio-status-color:#22c55e;--envio-status-glow:rgba(34,197,94,.3);--envio-status-bg:rgba(34,197,94,.14);--envio-status-border:rgba(34,197,94,.38);--envio-status-text:#bbf7d0;}
+            .envio-card-main{display:flex;flex-direction:column;gap:6px;}
+            .envio-card-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+            .envio-card-id{display:flex;align-items:center;gap:8px;color:#f8fafc;font-weight:800;font-size:15px;}
+            .envio-card-sep{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(56,189,248,.18),rgba(37,99,235,.2));border:1px solid rgba(96,165,250,.28);color:#dbeafe;font-weight:900;font-size:15px;letter-spacing:.02em;white-space:nowrap;}
+            .envio-card-sep small{font-size:10px;font-weight:800;letter-spacing:.08em;color:#93c5fd;text-transform:uppercase;}
+            .envio-card-meta{color:#94a3b8;font-size:12px;line-height:1.35;}
+            .envio-card-label{color:#64748b;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+            .envio-card-text{color:#e5e7eb;font-size:13px;line-height:1.35;word-break:break-word;}
+            .envio-content-list{display:flex;flex-direction:column;gap:5px;}
+            .envio-content-item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;padding:7px 10px;border:1px solid rgba(148,163,184,.14);border-radius:8px;background:rgba(2,6,23,.28);}
+            .envio-content-item b{color:#f8fafc;font-size:13px;font-weight:650;line-height:1.35;}
+            .envio-content-item span{color:#93c5fd;font-size:12px;font-weight:800;white-space:nowrap;}
+            .envio-status-pill{display:inline-flex;align-items:center;gap:7px;width:max-content;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;border:1px solid var(--envio-status-border,transparent);box-shadow:0 0 0 1px rgba(255,255,255,.02) inset;}
+            .envio-status-pendente{background:rgba(148,163,184,.16);color:#cbd5e1;}
+            .envio-status-separacao{background:rgba(245,158,11,.16);color:#fbbf24;}
+            .envio-status-correios{background:rgba(59,130,246,.17);color:#93c5fd;}
+            .envio-status-enviado{background:rgba(14,165,233,.17);color:#67e8f9;}
+            .envio-status-finalizado{background:rgba(34,197,94,.16);color:#86efac;}
+            .envio-status-select{width:100%;padding:9px 10px;border:1px solid var(--envio-status-border,rgba(148,163,184,.24));border-radius:8px;background:linear-gradient(135deg,var(--envio-status-bg,rgba(15,23,42,.72)),rgba(15,23,42,.82));color:var(--envio-status-text,#e5e7eb);font-weight:800;outline:none;box-shadow:0 0 0 1px rgba(255,255,255,.02) inset,0 0 18px var(--envio-status-glow,rgba(0,0,0,0));}
+            .envio-status-select option{background:#1f2937;color:#f8fafc;}
+            .envio-card-rastreio{display:flex;flex-direction:column;gap:6px;}
+            .envio-card-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch;justify-content:center;}
+            .envio-card-actions .content-button{justify-content:center;width:100%;}
+            .envio-empty-state{padding:28px;border:1px dashed rgba(148,163,184,.26);border-radius:10px;text-align:center;color:#94a3b8;background:rgba(15,23,42,.48);}
+            @media (max-width:1200px){.envio-card{grid-template-columns:1fr 1fr}.envio-mercadoria-metrics{grid-template-columns:repeat(2,minmax(140px,1fr));}.envio-mercadoria-filters{grid-template-columns:1fr 1fr;}}
+            @media (max-width:760px){.envio-mercadoria-hero{flex-direction:column}.envio-mercadoria-actions{justify-content:flex-start}.envio-card,.envio-mercadoria-filters,.envio-mercadoria-metrics{grid-template-columns:1fr;}}
+          </style>
           <div class="content-wrapper">
-            <div class="content-section" style="margin-top:0;">
-              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-truck-fast" style="color:#0ea5e9;"></i>
-                  Envios registrados
+            <div class="content-section envio-mercadoria-shell" style="margin-top:0;">
+              <div class="envio-mercadoria-hero">
+                <div class="envio-mercadoria-title">
+                  <i class="fa-solid fa-truck-fast"></i>
+                  <div>
+                    <h2>Envio de mercadoria</h2>
+                    <p>Fila de postagens com etiqueta, declaração, rastreio e status operacional.</p>
+                  </div>
                 </div>
-                <button id="envioMercadoriaRefreshBtnTop" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
-                  <i class="fa-solid fa-rotate"></i>
-                  <span>Recarregar</span>
-                </button>
+                <div class="envio-mercadoria-actions">
+                  <a href="https://vipp.visualset.com.br/vipp/inicio/index.php" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;gap:8px;background:#111827;color:#fff;text-decoration:none;">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    <span>VIPP</span>
+                  </a>
+                  <button id="envioMercadoriaRefreshBtnTop" class="content-button" type="button" style="display:flex;align-items:center;gap:6px;">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>Recarregar</span>
+                  </button>
+                </div>
               </div>
 
-              <div class="tabela-wrapper" style="overflow:auto; margin-top:12px;">
+              <div class="envio-mercadoria-metrics">
+                <div class="envio-metric"><span>Pendentes</span><strong id="envioMetricPendente">0</strong></div>
+                <div class="envio-metric"><span>Aguardando correios</span><strong id="envioMetricCorreios">0</strong></div>
+                <div class="envio-metric"><span>Enviados</span><strong id="envioMetricEnviado">0</strong></div>
+                <div class="envio-metric"><span>Total ativo</span><strong id="envioMetricTotal">0</strong></div>
+              </div>
+
+              <div class="envio-mercadoria-filters">
+                <input id="envioMercadoriaBusca" type="search" placeholder="Buscar por ID, requisitante, rastreio, conteúdo ou observação">
+                <select id="envioMercadoriaFiltroStatus">
+                  <option value="">Todos os status</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Em separação">Em separação</option>
+                  <option value="Aguardando correios">Aguardando correios</option>
+                  <option value="Enviado">Enviado</option>
+                  <option value="Finalizado">Finalizado</option>
+                </select>
+                <select id="envioMercadoriaFiltroPrazo">
+                  <option value="">Todas as datas</option>
+                  <option value="hoje">Criados hoje</option>
+                  <option value="sem-rastreio">Sem rastreio</option>
+                  <option value="com-rastreio">Com rastreio</option>
+                </select>
+              </div>
+
+              <div class="tabela-wrapper" style="display:none;overflow:auto; margin-top:12px;">
                 <table class="tabela padrao" style="min-width:1050px;">
                   <thead>
                     <tr>
@@ -4381,6 +4471,9 @@
                     <tr><td colspan="8" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>
                   </tbody>
                 </table>
+              </div>
+              <div id="envioMercadoriaCardsPane" class="envio-mercadoria-list">
+                <div class="envio-empty-state">Carregando envios...</div>
               </div>
             </div>
           </div>
