@@ -57701,6 +57701,82 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// Menu flutuante global: Produtos no mínimo (abre Lista de produtos filtrada)
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btnFloatingMinimo');
+  if (!btn) return;
+
+  const badge = document.getElementById('floatingMinimoBadge');
+
+  // Cache do último resultado para reutilizar entre clique e badge
+  let _ultimosCodigos = null;
+  let _carregando = false;
+
+  function atualizaBadge(qtd) {
+    if (!badge) return;
+    const n = Number(qtd) || 0;
+    badge.textContent = n > 999 ? '999+' : String(n);
+    badge.hidden = n <= 0;
+  }
+
+  async function carregaMinimos({ silencioso = false } = {}) {
+    if (_carregando) return _ultimosCodigos;
+    _carregando = true;
+    try {
+      const resp = await fetch('/api/logistica/produtos-no-minimo', { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      const itens = Array.isArray(data.itens) ? data.itens : [];
+      _ultimosCodigos = new Set(
+        itens.map(it => String(it.codigo || '').trim()).filter(Boolean)
+      );
+      atualizaBadge(_ultimosCodigos.size);
+      return _ultimosCodigos;
+    } catch (err) {
+      console.error('[floating-menu] erro ao carregar produtos no mínimo:', err);
+      if (!silencioso) alert(`Erro ao abrir lista filtrada: ${err.message || err}`);
+      return null;
+    } finally {
+      _carregando = false;
+    }
+  }
+
+  // Carrega contador silenciosamente ao abrir a página
+  carregaMinimos({ silencioso: true });
+
+  // Atualiza badge a cada 5 minutos sem incomodar o usuário
+  setInterval(() => carregaMinimos({ silencioso: true }), 5 * 60 * 1000);
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const codigosNoMinimo = await carregaMinimos();
+      if (!codigosNoMinimo) return;
+
+      const btnTopLista = document.getElementById('menu-lista-produtos');
+      const btnLateral = document.getElementById('btn-omie-list1')
+                      || document.getElementById('btn-omie-list');
+
+      if (btnTopLista) {
+        btnTopLista.click();
+      } else if (btnLateral) {
+        btnLateral.click();
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 120));
+
+      if (typeof window.__setListaProdutosExternalFilter === 'function') {
+        window.__setListaProdutosExternalFilter(
+          (item) => codigosNoMinimo.has(String(item?.codigo || '').trim()),
+          'Filtro: Produtos no mínimo'
+        );
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+
 // ===================== MODAL MOVIMENTAÇÃO DE ESTOQUE =====================
 (function () {
   const overlay   = document.getElementById('modalMovimentacao');

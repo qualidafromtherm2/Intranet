@@ -15781,7 +15781,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     if (!codigos.length) return res.json({ ok: true, dados: {} });
 
     const { rows } = await pool.query(
-      `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.estoque_minimo,
+      `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.fisico, e.estoque_minimo,
               p.unidade
        FROM logistica.estoque_atual e
        LEFT JOIN public.produtos_omie p ON p.codigo = e.codigo
@@ -15792,6 +15792,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
 
     const dados = {};
     const minimos = {};
+    const PORTA_PALLET_CODE = '10717096386';
 
     // Passo 1: coleta todos os dados
     for (const row of rows) {
@@ -15802,17 +15803,19 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
       const min = parseFloat(row.estoque_minimo) || 0;
       // Guarda o maior estoque_minimo encontrado para o produto
       if (min > minimos[row.codigo].min) minimos[row.codigo].min = min;
-      // Guarda saldo do local ALMOXARIFADO
-      if (row.local_nome && row.local_nome.toUpperCase().includes('ALMOXARIFADO')) {
-        minimos[row.codigo].saldoAlmox = parseFloat(row.saldo) || 0;
+      // Guarda saldo físico do PORTA PALLET (ALMOXARIFADO) — local 10717096386
+      if (String(row.local_codigo) === PORTA_PALLET_CODE) {
+        minimos[row.codigo].saldoAlmox = parseFloat(row.fisico) || 0;
       }
     }
 
     // Passo 2: calcula abaixo_minimo com o min correto
     for (const cod of Object.keys(minimos)) {
       const info = minimos[cod];
-      if (info.min > 0 && info.saldoAlmox !== null) {
-        info.abaixo = info.saldoAlmox < info.min;
+      // Se produto NÃO está no PORTA PALLET, considera saldo 0 → abaixo do mínimo
+      if (info.min > 0) {
+        const saldo = info.saldoAlmox === null ? 0 : info.saldoAlmox;
+        info.abaixo = saldo < info.min;
       }
     }
 
@@ -17107,10 +17110,18 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           descricao,
           lead_time,
           estoque_minimo,
-          url_imagem,
+          COALESCE(
+            to_jsonb(produtos_omie)->>'primeira_imagem',
+            to_jsonb(produtos_omie)->>'url_imagem',
+            ''
+          ) AS url_imagem,
           descricao_familia,
           codigo_familia,
-          saldo_estoque
+          COALESCE(
+            NULLIF(to_jsonb(produtos_omie)->>'saldo_estoque', ''),
+            NULLIF(to_jsonb(produtos_omie)->>'quantidade_estoque', ''),
+            '0'
+          ) AS saldo_estoque
         FROM public.produtos_omie 
         WHERE codigo = $1 
         LIMIT 1`,
@@ -17145,18 +17156,38 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       }
       
       // Atualiza apenas os campos permitidos
-      const updateResult = await pool.query(
-        `UPDATE public.produtos_omie 
-        SET 
-          descricao = COALESCE($1, descricao),
-          lead_time = $2,
-          estoque_minimo = $3,
-          url_imagem = $4,
-          updated_at = NOW()
-        WHERE codigo = $5
-        RETURNING *`,
-        [descricao, lead_time, estoque_minimo, url_imagem, codigo]
+      // A coluna de imagem pode variar entre ambientes (url_imagem ou primeira_imagem)
+      const colResult = await pool.query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'produtos_omie'
+           AND column_name IN ('primeira_imagem', 'url_imagem')
+         ORDER BY CASE WHEN column_name = 'primeira_imagem' THEN 0 ELSE 1 END
+         LIMIT 1`
       );
+
+      const imageColumnRaw = colResult.rows?.[0]?.column_name || null;
+      const imageColumn = ['primeira_imagem', 'url_imagem'].includes(imageColumnRaw)
+        ? imageColumnRaw
+        : null;
+
+      const params = [descricao, lead_time, estoque_minimo];
+      let sql = `UPDATE public.produtos_omie
+                 SET descricao = COALESCE($1, descricao),
+                     lead_time = $2,
+                     estoque_minimo = $3`;
+
+      if (imageColumn) {
+        params.push(url_imagem);
+        sql += `, ${imageColumn} = COALESCE($${params.length}, ${imageColumn})`;
+      }
+
+      sql += `, updated_at = NOW()`;
+      params.push(codigo);
+      sql += ` WHERE codigo = $${params.length} RETURNING *`;
+
+      const updateResult = await pool.query(sql, params);
       
       // Auditoria
       try {
@@ -25526,6 +25557,103 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
   } catch (err) {
     console.error('[Compras] Erro ao buscar catálogo Omie:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar catálogo' });
+  }
+});
+
+// GET /api/produtos/no-minimo - Lista produtos com estoque físico abaixo do mínimo
+app.get('/api/produtos/no-minimo', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        po.codigo_produto,
+        po.codigo,
+        po.descricao,
+        po.inativo,
+        po.bloqueado,
+        up.local_codigo,
+        up.local_nome,
+        up.fisico,
+        up.estoque_minimo,
+        (up.estoque_minimo - up.fisico) AS deficit,
+        up.data_posicao,
+        up.ingested_at
+      FROM public.produtos_omie po
+      JOIN LATERAL (
+        SELECT
+          COALESCE(p.fisico, 0) AS fisico,
+          COALESCE(p.estoque_minimo, 0) AS estoque_minimo,
+          COALESCE(
+            NULLIF(to_jsonb(p)->>'local_codigo', ''),
+            NULLIF(to_jsonb(p)->>'codigo_local_estoque', ''),
+            ''
+          ) AS local_codigo,
+          COALESCE(
+            NULLIF(to_jsonb(p)->>'local_nome', ''),
+            NULLIF(to_jsonb(p)->>'nome_local_estoque', ''),
+            ''
+          ) AS local_nome,
+          p.data_posicao,
+          p.ingested_at
+        FROM public.omie_estoque_posicao p
+        WHERE COALESCE(p.omie_prod_id::text, p.codigo) = po.codigo_produto::text
+        ORDER BY p.data_posicao DESC NULLS LAST, p.ingested_at DESC NULLS LAST, p.id DESC
+        LIMIT 1
+      ) up ON true
+      WHERE COALESCE(po.inativo, 'N') = 'N'
+        AND COALESCE(po.bloqueado, 'N') = 'N'
+        AND COALESCE(up.fisico, 0) < COALESCE(up.estoque_minimo, 0)
+      ORDER BY deficit DESC, po.descricao ASC
+      LIMIT 2000
+    `);
+
+    res.json({ ok: true, total: rows.length, itens: rows });
+  } catch (err) {
+    console.error('[produtos/no-minimo] erro:', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// Alias sem conflito com /api/produtos/:codigo
+app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // Limita o tempo da query no servidor para evitar locks longos em produtos_omie
+    await client.query("SET LOCAL statement_timeout = '20000'");
+    const { rows } = await client.query(`
+      WITH minimos AS (
+        SELECT omie_prod_id, MAX(estoque_minimo) AS minimo
+        FROM logistica.estoque_atual
+        WHERE COALESCE(estoque_minimo, 0) > 0
+        GROUP BY omie_prod_id
+      )
+      SELECT
+        m.omie_prod_id                              AS codigo_produto,
+        COALESCE(pp.codigo, po.codigo)              AS codigo,
+        COALESCE(po.descricao, pp.descricao)        AS descricao,
+        '10717096386'                               AS local_codigo,
+        '2. PORTA PALLET (ALMOXARIFADO)'            AS local_nome,
+        COALESCE(pp.fisico, 0)                      AS fisico,
+        m.minimo                                    AS estoque_minimo,
+        (m.minimo - COALESCE(pp.fisico, 0))         AS deficit,
+        COALESCE(pp.updated_at, NOW())              AS data_posicao
+      FROM minimos m
+      JOIN public.produtos_omie po
+        ON po.codigo_produto = m.omie_prod_id
+      LEFT JOIN logistica.estoque_atual pp
+        ON pp.omie_prod_id = m.omie_prod_id
+       AND pp.local_codigo = '10717096386'
+      WHERE COALESCE(pp.fisico, 0) < m.minimo
+        AND COALESCE(po.descricao, pp.descricao, '') !~* '^\\s*(engenharia|obsoleto)'
+      ORDER BY deficit DESC, descricao ASC
+      LIMIT 2000
+    `);
+
+    res.json({ ok: true, total: rows.length, itens: rows });
+  } catch (err) {
+    console.error('[logistica/produtos-no-minimo] erro:', err?.message || err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    try { client.release(); } catch (_) {}
   }
 });
 
