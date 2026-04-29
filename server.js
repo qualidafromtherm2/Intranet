@@ -14563,6 +14563,7 @@ async function initSolicitacaoProdutoSchema() {
             n_solic  TEXT,
             status   TEXT,
             observacao TEXT,
+            motivo   TEXT,
             criado_em TIMESTAMPTZ DEFAULT now()
           )
         `);
@@ -14584,6 +14585,7 @@ async function initSolicitacaoProdutoSchema() {
             n_solic  TEXT,
             status   TEXT,
             observacao TEXT,
+            motivo   TEXT,
             criado_em TIMESTAMPTZ DEFAULT now()
           )
         `);
@@ -14645,7 +14647,26 @@ async function initSolicitacaoProdutoSchema() {
           )
         `);
       }
+
     }
+
+    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
+        id              BIGSERIAL PRIMARY KEY,
+        id_carr         BIGINT NOT NULL,
+        solic_id        BIGINT,
+        status_origem   TEXT,
+        status_destino  TEXT NOT NULL,
+        id_user         TEXT,
+        nome_user       TEXT,
+        movimentado_em  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        observacao      TEXT
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_carr ON solicitacao_produto.movimentacoes_kanban_itens (id_carr)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_em ON solicitacao_produto.movimentacoes_kanban_itens (movimentado_em DESC)`);
   } catch (err) {
     console.error('[initSolicitacaoProdutoSchema] erro:', err.message);
   }
@@ -14658,6 +14679,23 @@ async function ensureSchemaMigrated() {
     await initSolicitacaoProdutoSchema();
     schemaMigrated = true;
   }
+}
+
+async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino, req, observacao = null) {
+  const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  if (!ids.length) return;
+
+  const id_user = String(req.session?.user?.id || '');
+  const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '');
+
+  await client.query(
+    `INSERT INTO solicitacao_produto.movimentacoes_kanban_itens
+       (id_carr, solic_id, status_origem, status_destino, id_user, nome_user, observacao)
+     SELECT i.id_carr, i.id, i.status, $2, $3, $4, $5
+       FROM solicitacao_produto.itens_solicitados i
+      WHERE i.id = ANY($1::bigint[])`,
+    [ids, statusDestino, id_user, nome_user, observacao]
+  );
 }
 
 // POST /api/logistica/separacao - Adiciona produto ao carrinho de separação
@@ -14799,6 +14837,7 @@ app.get('/api/logistica/solicitacoes-pendentes', async (req, res) => {
 // PATCH /api/logistica/itens_solicitados/separacao - Muda status dos itens para 'Separação'
 app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
@@ -14807,6 +14846,7 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     }
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'pendente'`,
       [ids]
@@ -14822,6 +14862,7 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
 // PATCH /api/logistica/itens_solicitados/reverter-pendente - Reverte itens para 'pendente'
 app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
@@ -14830,6 +14871,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
     }
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await registrarMovimentacaoKanbanItens(pool, ids, 'pendente', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'pendente' WHERE id = ANY($1::bigint[])`,
       [ids]
@@ -14845,6 +14887,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
 // PATCH /api/logistica/itens_solicitados/reverter-separacao — Reverte 'Separado' → 'Separação'
 app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
@@ -14852,6 +14895,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Separação', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separação' WHERE id = ANY($1::bigint[]) AND status = 'Separado'`,
       [ids]
@@ -14867,10 +14911,12 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
 // PATCH /api/logistica/itens_solicitados/:id/separado - Muda um item para 'Separado'
 app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const itemId = parseInt(req.params.id, 10);
     if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+    await registrarMovimentacaoKanbanItens(pool, [itemId], 'Separado', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = $1`,
       [itemId]
@@ -14886,12 +14932,14 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
 // PATCH /api/logistica/itens_solicitados/separar - Marca array de itens como 'Separado'
 app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Separado' WHERE id = ANY($1::bigint[])`, [ids]
     );
@@ -15066,7 +15114,6 @@ app.get('/api/logistica/kanban', async (req, res) => {
       FROM solicitacao_produto.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
-        AND i.n_solic !~ '\\.[0-9]+$'
         AND (c.id_user = $1 OR c.retirada_por = $2)
       GROUP BY i.n_solic, COALESCE(c.retirada_por, c.nome_user)
       ORDER BY MAX(c.criado_em) ASC
@@ -15099,11 +15146,12 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
     const nome_user = req.session?.user?.username || req.session?.user?.nome || '';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { n_solic } = req.query;
+    const includeDerivados = String(req.query?.include_derivados || '').toLowerCase();
 
     if (n_solic) {
       // Itens de uma SEP específica
       const { rows } = await pool.query(`
-        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao,
+        SELECT c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15117,12 +15165,35 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
            AND (c.id_user = $2 OR c.retirada_por = $3)
          ORDER BY c.criado_em ASC, rt.data_troca DESC
       `, [n_solic, id_user, nome_user]);
-      return res.json({ ok: true, itens: rows });
+
+      let itensDerivados = [];
+      if (includeDerivados === '1' || includeDerivados === 'true' || includeDerivados === 'yes') {
+        const baseNSolic = String(n_solic).replace(/\.\d+$/, '');
+        const { rows: derivRows } = await pool.query(`
+             SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo,
+                 c.codigo_produto, c.descricao, c.unidade,
+                 c.quantidade::numeric AS quantidade,
+                 c.data_prevista::text, c.horario, c.criado_em::text,
+                 c.cod_omie,
+                 COALESCE(c.retirada_por, c.nome_user) AS nome_user,
+                 NULL::text AS codigo_produto_ant, NULL::text AS descricao_ant,
+                 NULL::text AS codigo_produto_novo, NULL::text AS descricao_novo
+            FROM solicitacao_produto.itens_solicitados i
+            JOIN logistica.carrinho c ON c.id = i.id_carr
+           WHERE i.n_solic ~ ($1 || '\\.[0-9]+$')
+             AND (c.id_user = $2 OR c.retirada_por = $3)
+           ORDER BY i.n_solic ASC, c.criado_em ASC
+        `, [baseNSolic, id_user, nome_user]);
+        itensDerivados = derivRows;
+      }
+
+      return res.json({ ok: true, itens: rows, itens_derivados: itensDerivados });
     } else {
       // Carrinho sem SEP
       const { rows } = await pool.query(`
         SELECT c.id AS carr_id, NULL::bigint AS solic_id,
                'carrinho' AS status,
+           NULL::text AS motivo,
                c.codigo_produto, c.descricao, c.unidade,
                c.quantidade::numeric AS quantidade,
                c.data_prevista::text, c.horario, c.criado_em::text,
@@ -15254,12 +15325,14 @@ app.get('/api/logistica/solicitacoes-pendentes-sep', async (req, res) => {
 // PATCH /api/logistica/itens_solicitados/aguardando-retirada — muda status para 'Aguardando retirada'
 app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Aguardando retirada', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`, [ids]
     );
@@ -15273,12 +15346,14 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
 // PATCH /api/logistica/itens_solicitados/concluido — muda status para 'Concluído'
 app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
   try {
+    await ensureSchemaMigrated();
     const id_user = req.session?.user?.id;
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
     const { solic_ids } = req.body;
     if (!Array.isArray(solic_ids) || !solic_ids.length)
       return res.status(400).json({ ok: false, error: 'solic_ids inválido.' });
     const ids = solic_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+    await registrarMovimentacaoKanbanItens(pool, ids, 'Concluído', req);
     await pool.query(
       `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`, [ids]
     );
@@ -15563,7 +15638,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    const { solicitado_para, data_prevista, horario, observacao } = req.body || {};
+    const { solicitado_para, motivo, data_prevista, horario, observacao } = req.body || {};
+
+    const motivoRaw = String(motivo || '').trim();
+    const motivosPermitidos = new Set(['Produção', 'Engenharia', 'venda', 'Assistencia tecnica']);
+    const motivoSolicitacao = motivosPermitidos.has(motivoRaw) ? motivoRaw : 'Produção';
 
     await client.query('BEGIN');
 
@@ -15573,6 +15652,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     );
     await client.query(
       `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
+    );
+    await client.query(
+      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
     );
     await client.query(
       `ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`
@@ -15673,9 +15755,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
          data_prevista || null, horario || null, item.comentario || null]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao)
-         VALUES ($1, $2, 'pendente', $3)`,
-        [item.id, nSolic, observacao || null]
+        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo)
+         VALUES ($1, $2, 'pendente', $3, $4)`,
+        [item.id, nSolic, observacao || null, motivoSolicitacao]
       );
     }
 
