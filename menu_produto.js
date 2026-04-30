@@ -9172,6 +9172,7 @@ const sacFileInfoDeclaracao = document.getElementById('sacFileInfoDeclaracao');
 const sacSendBtn = document.getElementById('sacSendBtn');
 const sacEnvioStatus = document.getElementById('sacEnvioStatus');
 const sacObservacao = document.getElementById('sacObservacao');
+const sacNumeroSep = document.getElementById('sacNumeroSep');
 const sacRefreshBtn = document.getElementById('sacRefreshBtn');
 const sacTabelaBody = document.getElementById('sacTabelaBody');
 const atTipoAtendimentoInput = document.getElementById('atTipoAtendimento');
@@ -10309,7 +10310,14 @@ const atSerieModal = document.getElementById('atSerieModal');
 const atSerieModalClose = document.getElementById('atSerieModalClose');
 const atSerieModalTbody = document.getElementById('atSerieModalTbody');
 const envioMercadoriaRefreshBtnTop = document.getElementById('envioMercadoriaRefreshBtnTop'); // painel dedicado
-const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaTabelaBodyPane');
+const envioMercadoriaTabelaBodyPane = document.getElementById('envioMercadoriaCardsPane') || document.getElementById('envioMercadoriaTabelaBodyPane');
+const envioMercadoriaBusca = document.getElementById('envioMercadoriaBusca');
+const envioMercadoriaFiltroStatus = document.getElementById('envioMercadoriaFiltroStatus');
+const envioMercadoriaFiltroPrazo = document.getElementById('envioMercadoriaFiltroPrazo');
+const envioMetricPendente = document.getElementById('envioMetricPendente');
+const envioMetricCorreios = document.getElementById('envioMetricCorreios');
+const envioMetricEnviado = document.getElementById('envioMetricEnviado');
+const envioMetricTotal = document.getElementById('envioMetricTotal');
 const envioMercadoriaMenu = document.getElementById('menu-envio-mercadoria');
 const sacStatusOptions = ['Pendente', 'Em separação', 'Aguardando correios', 'Enviado', 'Finalizado'];
 // Preenche status de rastreio nas células com data-rastreio
@@ -10354,6 +10362,166 @@ const setAtEnvioStatus = (text, isError = false) => {
   atEnvioStatus.style.color = isError ? '#f87171' : 'var(--inactive-color)';
   atEnvioStatus.textContent = text || '';
 };
+
+function normalizarTextoEnvioMercadoria(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function isCodigoRastreioEnvioMercadoria(value) {
+  return /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(String(value || '').replace(/\s+/g, '').toUpperCase());
+}
+
+function getClasseStatusEnvioMercadoria(statusRaw) {
+  const status = normalizeSacStatus(statusRaw);
+  if (status === 'Em separação') return 'envio-status-separacao';
+  if (status === 'Aguardando correios') return 'envio-status-correios';
+  if (status === 'Enviado') return 'envio-status-enviado';
+  if (status === 'Finalizado') return 'envio-status-finalizado';
+  return 'envio-status-pendente';
+}
+
+function getStatusTokenEnvioMercadoria(statusRaw) {
+  return getClasseStatusEnvioMercadoria(statusRaw).replace('envio-status-', '');
+}
+
+function atualizarMetricasEnvioMercadoria(rows) {
+  const ativos = Array.isArray(rows) ? rows : [];
+  const total = ativos.length;
+  const pendentes = ativos.filter(r => normalizeSacStatus(r.status) === 'Pendente').length;
+  const correios = ativos.filter(r => normalizeSacStatus(r.status) === 'Aguardando correios').length;
+  const enviados = ativos.filter(r => normalizeSacStatus(r.status) === 'Enviado').length;
+
+  if (envioMetricPendente) envioMetricPendente.textContent = pendentes;
+  if (envioMetricCorreios) envioMetricCorreios.textContent = correios;
+  if (envioMetricEnviado) envioMetricEnviado.textContent = enviados;
+  if (envioMetricTotal) envioMetricTotal.textContent = total;
+}
+
+function filtrarEnvioMercadoria(row) {
+  const busca = normalizarTextoEnvioMercadoria(envioMercadoriaBusca?.value || '');
+  const statusFiltro = envioMercadoriaFiltroStatus?.value || '';
+  const prazoFiltro = envioMercadoriaFiltroPrazo?.value || '';
+  const status = normalizeSacStatus(row?.status || 'Pendente');
+  const identClean = String(row?.identificacao || '').replace(/\s+/g, '').toUpperCase();
+  const criado = row?.created_at ? new Date(row.created_at) : null;
+
+  if (statusFiltro && status !== statusFiltro) return false;
+
+  if (prazoFiltro === 'hoje') {
+    const hoje = new Date();
+    if (!criado || criado.toDateString() !== hoje.toDateString()) return false;
+  }
+  if (prazoFiltro === 'sem-rastreio' && isCodigoRastreioEnvioMercadoria(identClean)) return false;
+  if (prazoFiltro === 'com-rastreio' && !isCodigoRastreioEnvioMercadoria(identClean)) return false;
+
+  if (!busca) return true;
+  const searchable = [
+    row?.id,
+    row?.usuario,
+    row?.observacao,
+    row?.numero_sep,
+    row?.identificacao,
+    row?.conteudo,
+    row?.status,
+    row?.rastreio_status
+  ].join(' ');
+  return normalizarTextoEnvioMercadoria(searchable).includes(busca);
+}
+
+function montarConteudoEnvioMercadoria(conteudoRaw) {
+  if (!conteudoRaw) {
+    return '<div class="envio-card-text">Sem conteúdo informado.</div>';
+  }
+
+  try {
+    const items = JSON.parse(conteudoRaw);
+    if (Array.isArray(items) && items.length) {
+      return `
+        <div class="envio-content-list">
+          ${items.map((item) => {
+            const texto = escapeAtHtml(item?.conteudo || 'Item sem descrição');
+            const qtd = escapeAtHtml(formatarQuantidadeExibicao(item?.quantidade));
+            return `<div class="envio-content-item"><b>${texto}</b><span>Qtd. ${qtd}</span></div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+  } catch (_) {}
+
+  return `<div class="envio-card-text" style="white-space:pre-wrap;">${escapeAtHtml(conteudoRaw)}</div>`;
+}
+
+function renderEnvioMercadoriaCard(r) {
+  const dataFmt = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '-';
+  const usuario = escapeAtHtml(r.usuario || '-');
+  const obs = escapeAtHtml(r.observacao || 'Sem observação');
+  const numeroSep = escapeAtHtml(r.numero_sep || '-');
+  const statusRaw = r.status || 'Pendente';
+  const status = normalizeSacStatus(statusRaw);
+  const etiqueta = r.etiqueta_url || r.etiqueta || '';
+  const declaracao = r.declaracao_url || r.declaracao || '';
+  const identRaw = r.identificacao ? String(r.identificacao).trim() : '-';
+  const identClean = identRaw.replace(/\s+/g, '').toUpperCase();
+  const isRastreio = isCodigoRastreioEnvioMercadoria(identClean);
+  const isFinalizado = status.toLowerCase() === 'finalizado';
+  const rastStatus = r.rastreio_status ? String(r.rastreio_status).trim() : '';
+  const rastQuando = r.rastreio_quando ? new Date(r.rastreio_quando).toLocaleString('pt-BR') : '';
+  const finalizadoEm = r.finalizado_em ? new Date(r.finalizado_em).toLocaleString('pt-BR') : '';
+  const rastStatusDisplay = isFinalizado ? (rastStatus || 'Objeto entregue ao destinatário') : rastStatus;
+  const rastQuandoDisplay = isFinalizado ? (finalizadoEm || rastQuando) : rastQuando;
+  const dataRastreio = (!rastStatusDisplay && isRastreio && !isFinalizado) ? identClean : '';
+  const rastText = [rastStatusDisplay, rastQuandoDisplay].filter(Boolean).join(' | ');
+  const buttons = [
+    etiqueta ? `<button class="content-button btn-print-etiqueta" data-print-url="${escapeAtHtml(etiqueta)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Etiqueta</span></button>` : '',
+    declaracao ? `<button class="content-button btn-print-declaracao" data-print-url="${escapeAtHtml(declaracao)}" style="padding:8px 10px;font-size:12px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-print"></i><span>Declaração</span></button>` : ''
+  ].filter(Boolean).join('');
+
+  const statusToken = getStatusTokenEnvioMercadoria(statusRaw);
+  const statusClasse = `envio-card-status-${statusToken}`;
+  const statusPillClasse = `envio-status-${statusToken}`;
+
+  const statusSelect = `
+    <select class="sac-status-select envio-status-select ${statusClasse}" data-id="${r.id}">
+      ${sacStatusOptions.map(opt => `<option value="${opt}" ${opt === statusRaw ? 'selected' : ''}>${opt}</option>`).join('')}
+      ${!sacStatusOptions.includes(statusRaw) ? `<option value="${escapeAtHtml(statusRaw)}" selected>${escapeAtHtml(statusRaw)}</option>` : ''}
+    </select>`;
+
+  return `
+    <article class="envio-card ${statusClasse}">
+      <div class="envio-card-rastreio">
+        <div class="envio-card-heading">
+          <div class="envio-card-id"><i class="fa-solid fa-box-open" style="color:#38bdf8;"></i> Envio #${escapeAtHtml(r.id || '-')}</div>
+          <div class="envio-card-sep"><small>SEP</small><span>${numeroSep}</span></div>
+        </div>
+        <div class="envio-card-meta">${escapeAtHtml(dataFmt)}<br>Solicitado por <strong style="color:#e5e7eb;">${usuario}</strong></div>
+        <div>
+          <div class="envio-card-label">Observação</div>
+          <div class="envio-card-text">${obs}</div>
+        </div>
+      </div>
+      <div>
+        <div class="envio-card-label">Conteúdo</div>
+        ${montarConteudoEnvioMercadoria(r.conteudo || '')}
+      </div>
+      <div class="envio-card-main">
+        <div>
+          <div class="envio-card-label">Rastreio</div>
+          <div class="envio-card-text" style="font-weight:800;color:#f8fafc;">${escapeAtHtml(identRaw)}</div>
+          <small class="rast-status" data-rastreio="${escapeAtHtml(dataRastreio)}" style="display:block;margin-top:5px;color:#94a3b8;line-height:1.35;">${escapeAtHtml(rastText || (isRastreio ? 'Consultando rastreio...' : 'Sem rastreio válido'))}</small>
+        </div>
+        <span class="envio-status-pill ${statusPillClasse}"><i class="fa-solid fa-circle"></i>${escapeAtHtml(status)}</span>
+        ${statusSelect}
+      </div>
+      <div class="envio-card-actions">
+        <div class="envio-card-label">Ações</div>
+        ${buttons || '<div class="envio-card-text">Sem anexos.</div>'}
+      </div>
+    </article>`;
+}
 
 function resetAtFormulario() {
   if (atTipoAtendimentoInput) atTipoAtendimentoInput.value = '';
@@ -13078,6 +13246,7 @@ if (sacSendBtn) {
   sacSendBtn.addEventListener('click', async () => {
     const userName = document.getElementById('userNameDisplay')?.textContent?.trim() || '';
     const observacao = sacObservacao?.value?.trim() || '';
+    const numeroSep = sacNumeroSep?.value?.trim() || '';
     const etiqueta = sacFileInputEtiqueta?.files?.[0] || null;
     const declaracao = sacFileInputDeclaracao?.files?.[0] || null;
 
@@ -13105,6 +13274,7 @@ if (sacSendBtn) {
       const formData = new FormData();
       formData.append('usuario', userName);
       formData.append('observacao', observacao);
+      formData.append('numero_sep', numeroSep);
       formData.append('anexos', etiqueta);
       formData.append('anexos', declaracao);
 
@@ -13122,6 +13292,7 @@ if (sacSendBtn) {
         if (sacFileInfoEtiqueta) sacFileInfoEtiqueta.textContent = 'Nenhum arquivo.';
         if (sacFileInfoDeclaracao) sacFileInfoDeclaracao.textContent = 'Nenhum arquivo.';
         sacObservacao.value = '';
+        if (sacNumeroSep) sacNumeroSep.value = '';
         try { await carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }); } catch {}
       } else {
         setStatus(data.error || 'Falha ao registrar.', true);
@@ -16001,10 +16172,12 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
   
   // Detecta se é a tabela do painel "Envio de mercadoria" (que tem a coluna Requisitante)
   const isEnvioMercadoriaPane = bodyEl === envioMercadoriaTabelaBodyPane;
-  const numCols = isEnvioMercadoriaPane ? 8 : 8; // Ambas têm 8 colunas agora (SAC tem coluna Ações)
+  const numCols = isEnvioMercadoriaPane ? 8 : 9;
   
   if (!titleOnly) {
-    bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>`;
+    bodyEl.innerHTML = isEnvioMercadoriaPane
+      ? '<div class="envio-empty-state">Carregando envios...</div>'
+      : `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Carregando...</td></tr>`;
   }
   try {
     // Monta a URL com os parâmetros necessários
@@ -16029,6 +16202,11 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
     if (titleOnly) return; // já atualizou o título, não altera a tabela
 
     if (!rows.length) {
+      if (isEnvioMercadoriaPane) {
+        atualizarMetricasEnvioMercadoria([]);
+        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio registrado.</div>';
+        return;
+      }
       bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
       return;
     }
@@ -16039,7 +16217,24 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       : rows;
     
     if (!filteredRows.length) {
+      if (isEnvioMercadoriaPane) {
+        atualizarMetricasEnvioMercadoria([]);
+        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio ativo encontrado.</div>';
+        return;
+      }
       bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:var(--inactive-color);">Nenhum registro.</td></tr>`;
+      return;
+    }
+
+    if (isEnvioMercadoriaPane) {
+      atualizarMetricasEnvioMercadoria(filteredRows);
+      const rowsVisiveis = filteredRows.filter(filtrarEnvioMercadoria);
+      if (!rowsVisiveis.length) {
+        bodyEl.innerHTML = '<div class="envio-empty-state">Nenhum envio combina com os filtros atuais.</div>';
+        return;
+      }
+      bodyEl.innerHTML = rowsVisiveis.map(renderEnvioMercadoriaCard).join('');
+      preencherStatusRastreio(bodyEl);
       return;
     }
     
@@ -16049,6 +16244,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
       const obs = r.observacao || '—';
       const statusRaw = r.status || 'Pendente'; // Status bruto do banco de dados
       const status = normalizeSacStatus(statusRaw); // Status normalizado para as opções predefinidas
+      const numeroSep = r.numero_sep || '-';
       const etiqueta = r.etiqueta_url || r.etiqueta || '';
       const declaracao = r.declaracao_url || r.declaracao || '';
       const identRaw = r.identificacao ? String(r.identificacao).trim() : '—';
@@ -16132,6 +16328,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${usuario}</td>
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectEnvioMercadoria}</td>
             <td>${buttons || '—'}</td>
@@ -16156,6 +16353,7 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
             <td>${dataFmt}</td>
             <td style="max-width:280px;">${obs}</td>
             <td>${identRaw}<br><small class="rast-status" data-rastreio="${dataRastreio}" style="color:var(--inactive-color);">${rastText}</small></td>
+            <td>${numeroSep}</td>
             <td style="max-width:400px;white-space:pre-wrap;line-height:1.8;padding:12px 8px;vertical-align:top;">${conteudo}</td>
             <td>${statusSelectSac}</td>
             <td>${buttons || '—'}</td>
@@ -16166,8 +16364,10 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
     preencherStatusRastreio(bodyEl);
   } catch (err) {
     console.error('[SAC] erro ao carregar tabela', err);
-    const numCols = bodyEl === envioMercadoriaTabelaBodyPane ? 8 : 8; // 8 colunas para ambas agora (SAC tem coluna Ações)
-    bodyEl.innerHTML = `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
+    const numCols = bodyEl === envioMercadoriaTabelaBodyPane ? 8 : 9;
+    bodyEl.innerHTML = bodyEl === envioMercadoriaTabelaBodyPane
+      ? '<div class="envio-empty-state" style="color:#f87171;">Erro ao carregar envios.</div>'
+      : `<tr><td colspan="${numCols}" style="text-align:center;padding:16px;color:#f87171;">Erro ao carregar</td></tr>`;
   }
 }
 
@@ -16175,6 +16375,13 @@ async function carregarSacSolicitacoes(targetBody, { hideDone = false, titleOnly
 sacRefreshBtn?.addEventListener('click', () => carregarSacSolicitacoes(sacTabelaBody, { hideDone: false, filterByUser: true }));
 // Painel Envio de Mercadoria: mostra todos os registros (filterByUser: false)
 envioMercadoriaRefreshBtnTop?.addEventListener('click', () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
+
+[envioMercadoriaBusca, envioMercadoriaFiltroStatus, envioMercadoriaFiltroPrazo]
+  .filter(Boolean)
+  .forEach((el) => {
+    const evento = el.tagName === 'INPUT' ? 'input' : 'change';
+    el.addEventListener(evento, () => carregarSacSolicitacoes(envioMercadoriaTabelaBodyPane, { hideDone: true, filterByUser: false }));
+  });
 
 // Carrega registros ao abrir o painel SAC (com filtro por usuário)
 if (sacMenuLink) {
@@ -16383,10 +16590,30 @@ document.addEventListener('change', async (ev) => {
     if (!resp.ok || data.ok === false) throw new Error(data.error || 'Falha ao atualizar');
     sel.dataset.prev = novoStatus;
 
+    if (sel.classList.contains('envio-status-select')) {
+      const token = getStatusTokenEnvioMercadoria(novoStatus);
+      const statusClasses = ['pendente', 'separacao', 'correios', 'enviado', 'finalizado'].map(t => `envio-card-status-${t}`);
+      sel.classList.remove(...statusClasses);
+      sel.classList.add(`envio-card-status-${token}`);
+
+      const card = sel.closest('.envio-card');
+      if (card) {
+        card.classList.remove(...statusClasses);
+        card.classList.add(`envio-card-status-${token}`);
+        const pill = card.querySelector('.envio-status-pill');
+        if (pill) {
+          pill.className = `envio-status-pill envio-status-${token}`;
+          pill.innerHTML = `<i class="fa-solid fa-circle"></i>${escapeAtHtml(novoStatus)}`;
+        }
+      }
+    }
+
     // Se mudou para Enviado ou Finalizado, remove a linha da tabela imediatamente
     if (['Enviado', 'Finalizado'].includes(novoStatus)) {
       const row = sel.closest('tr');
       if (row) row.remove();
+      const card = sel.closest('.envio-card');
+      if (card) card.remove();
     }
   } catch (err) {
     console.error('[SAC] erro ao atualizar status', err);

@@ -3539,6 +3539,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS identificacao TEXT;
 
     ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS numero_sep TEXT;
+
+    ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS conteudo TEXT;
 
     ALTER TABLE envios.solicitacoes
@@ -4143,6 +4146,7 @@ router.patch('/at/fechamento/:id_at', async (req, res) => {
 router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
   const usuario = String(req.body?.usuario || '').trim();
   const observacao = String(req.body?.observacao || '').trim();
+  const numeroSep = String(req.body?.numero_sep || req.body?.numeroSep || '').trim() || null;
   const status = normalizeStatus(req.body?.status);
 
   if (!usuario) {
@@ -4238,14 +4242,14 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING id, created_at, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce`,
-      [usuario, observacao, status, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
+      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, created_at, status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce`,
+      [usuario, observacao, numeroSep, status, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce]
     );
 
     const row = result.rows[0];
-    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, conteudo: row.conteudo, chave_dce: row.chave_dce });
+    return res.json({ ok: true, id: row.id, created_at: row.created_at, status: row.status, anexos: row.anexos, conferido: row.conferido, etiqueta_url: row.etiqueta_url, declaracao_url: row.declaracao_url, identificacao: row.identificacao, numero_sep: row.numero_sep, conteudo: row.conteudo, chave_dce: row.chave_dce });
   } catch (err) {
     console.error('[SAC] erro ao inserir solicitação:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao registrar solicitação.' });
@@ -4285,7 +4289,7 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em
+      `SELECT id, created_at, usuario, observacao, numero_sep, status, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
