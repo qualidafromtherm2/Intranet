@@ -328,13 +328,25 @@
         </div>
       `;
 
-      // expandir ao clicar; se já ativa, abre modal
+      // expandir ao clicar; se já ativa, abre modal (com foto) ou upload (sem foto)
       div.addEventListener('click', () => {
         if (isCoolingDown()) return;
         const wasActive = div.classList.contains('active');
         container.querySelectorAll('.option').forEach(o => o.classList.remove('active'));
         div.classList.add('active');
-        if (wasActive && slot.hasFoto) openModal(slot);
+        if (!wasActive) return;
+        if (slot.hasFoto) {
+          openModal(slot, codigo);
+        } else {
+          openUploadModal({
+            codigo,
+            slot,
+            onSuccess: async () => {
+              await reloadAndRender();
+              tryStartCooldown();
+            }
+          });
+        }
       });
 
       // ícone câmera -> abre modal de upload
@@ -379,27 +391,132 @@
     });
   }
 
-  // Modal simples
-  function openModal(slot) {
+  // Modal de visualização com pilha de fotos da mesma posição.
+  // - A foto ativa fica na frente.
+  // - Demais fotos da mesma posição (histórico no Supabase) ficam empilhadas
+  //   logo atrás, peek de ~10% para cada lado.
+  // - Botão "Adicionar foto" sobe nova imagem para a pasta do produto no Supabase
+  //   (POST /api/produtos/:codigo/fotos?pos=N) — a anterior vira peek atrás.
+  // - Clicar em uma foto do fundo a torna ativa (PATCH .../ativar).
+  async function openModal(slot, codigoArg) {
+    const codigo = codigoArg || getCodigoAtual();
     const overlay = document.createElement('div');
     overlay.className = 'foto-modal-overlay';
+
     const wrap = document.createElement('div');
-    wrap.className = 'foto-modal-content';
-    const img = document.createElement('img');
-    img.src = slot.url;
-    wrap.appendChild(img);
-    if (slot.nome || slot.descricao) {
-      const caption = document.createElement('div');
-      caption.className = 'foto-modal-caption';
-      caption.innerHTML = `
-        ${slot.nome ? `<strong>${slot.nome}</strong>` : ''}
-        ${slot.descricao ? `<p>${slot.descricao}</p>` : ''}
-      `;
-      wrap.appendChild(caption);
-    }
+    wrap.className = 'foto-modal-content foto-stack-content';
+    wrap.innerHTML = `
+      <div class="foto-stack" data-pos="${slot.posReal}"></div>
+      <div class="foto-modal-caption"></div>
+      <div class="foto-stack-actions">
+        <button type="button" class="foto-stack-add">
+          <i class="fas fa-plus"></i> Adicionar foto
+        </button>
+      </div>
+    `;
     overlay.appendChild(wrap);
-    overlay.addEventListener('click', () => document.body.removeChild(overlay));
+
+    const close = () => {
+      overlay.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); close(); } };
+    document.addEventListener('keydown', onKey);
+
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+
+    const stackEl = wrap.querySelector('.foto-stack');
+    const captionEl = wrap.querySelector('.foto-modal-caption');
+    const addBtn = wrap.querySelector('.foto-stack-add');
+
+    async function carregarFotosDaPosicao() {
+      try {
+        const all = await getFotosAll(codigo);
+        return (all || [])
+          .filter((f) => Number(f.pos) === Number(slot.posReal))
+          .sort((a, b) => {
+            const aa = (a.ativo === true || String(a.ativo).toLowerCase() === 'true') ? 0 : 1;
+            const bb = (b.ativo === true || String(b.ativo).toLowerCase() === 'true') ? 0 : 1;
+            if (aa !== bb) return aa - bb;
+            return Number(b.id) - Number(a.id);
+          });
+      } catch (e) {
+        console.error('[openModal] falha ao listar fotos da posição', e);
+        return [];
+      }
+    }
+
+    function renderStack(fotos) {
+      stackEl.innerHTML = '';
+      if (!fotos.length) {
+        stackEl.innerHTML = '<div class="foto-stack-empty">Nenhuma foto nesta posição.</div>';
+        captionEl.innerHTML = '';
+        return;
+      }
+
+      const total = fotos.length;
+      fotos.forEach((f, idx) => {
+        const card = document.createElement('div');
+        card.className = 'foto-stack-card';
+        card.dataset.id = f.id;
+        // idx 0 = ativa (frente). idx>0 = peek atrás (alternando lados).
+        if (idx === 0) {
+          card.classList.add('is-front');
+        } else {
+          const side = idx % 2 === 1 ? 'right' : 'left';
+          card.classList.add('is-peek', `peek-${side}`);
+          // empilha cada peek um pouco mais atrás
+          const depth = Math.ceil(idx / 2);
+          card.style.setProperty('--peek-depth', String(depth));
+        }
+        card.innerHTML = `<img src="${f.url_imagem}" alt="${f.nome_foto || 'Foto'}" />`;
+        card.title = f.nome_foto || `Foto ${idx + 1}`;
+
+        if (idx > 0) {
+          card.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            try {
+              await ativarFoto(codigo, slot.posReal, Number(f.id));
+              const novas = await carregarFotosDaPosicao();
+              renderStack(novas);
+              // Atualiza também o carrossel principal em background
+              try { await reloadAndRender(); } catch {}
+            } catch (e) {
+              console.error('Falha ao trazer foto para frente', e);
+              alert('Não foi possível trazer esta foto para frente.');
+            }
+          });
+        }
+
+        stackEl.appendChild(card);
+      });
+
+      const ativa = fotos[0];
+      captionEl.innerHTML = `
+        ${ativa.nome_foto ? `<strong>${ativa.nome_foto}</strong>` : ''}
+        ${ativa.descricao_foto ? `<p>${ativa.descricao_foto}</p>` : ''}
+        <small style="opacity:.7">${total} foto${total > 1 ? 's' : ''} nesta posição</small>
+      `;
+    }
+
+    addBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openUploadModal({
+        codigo,
+        slot,
+        onSuccess: async () => {
+          try { await reloadAndRender(); } catch {}
+          tryStartCooldown();
+          const novas = await carregarFotosDaPosicao();
+          renderStack(novas);
+        }
+      });
+    });
+
     document.body.appendChild(overlay);
+    const fotos = await carregarFotosDaPosicao();
+    renderStack(fotos);
   }
 
   function openUploadModal({ codigo, slot, onSuccess }) {
@@ -555,6 +672,62 @@
         max-width:90vw; max-height:90vh; border-radius:8px;
         box-shadow:0 10px 30px rgba(0,0,0,.35);
       }
+      .foto-stack-content{
+        display:flex; flex-direction:column; align-items:center; gap:18px;
+        width:min(640px, 92vw);
+      }
+      .foto-stack{
+        position:relative;
+        width:min(560px, 80vw);
+        height:min(560px, 70vh);
+        display:flex; align-items:center; justify-content:center;
+      }
+      .foto-stack-empty{
+        color:#cbd5e1; font-size:.95rem;
+      }
+      .foto-stack-card{
+        position:absolute;
+        top:50%; left:50%;
+        width:78%; height:78%;
+        transform:translate(-50%, -50%);
+        border-radius:10px;
+        overflow:hidden;
+        background:#111;
+        box-shadow:0 16px 40px rgba(0,0,0,.55);
+        transition:transform .2s ease, box-shadow .2s ease;
+      }
+      .foto-stack-card img{
+        width:100%; height:100%; object-fit:contain; display:block;
+        background:#0c0c0c;
+      }
+      .foto-stack-card.is-front{
+        z-index:10;
+      }
+      .foto-stack-card.is-peek{
+        cursor:pointer;
+        z-index:calc(9 - var(--peek-depth, 1));
+        filter:brightness(.65);
+      }
+      /* peek mostra apenas ~10% do card atrás, em laterais alternadas */
+      .foto-stack-card.is-peek.peek-right{
+        transform:translate(calc(-50% + (78% * 0.45) * var(--peek-depth, 1)), -50%) scale(.96);
+      }
+      .foto-stack-card.is-peek.peek-left{
+        transform:translate(calc(-50% - (78% * 0.45) * var(--peek-depth, 1)), -50%) scale(.96);
+      }
+      .foto-stack-card.is-peek:hover{
+        filter:brightness(.85);
+      }
+      .foto-stack-actions{
+        display:flex; gap:10px; justify-content:center;
+      }
+      .foto-stack-actions button{
+        background:#2563eb; color:#fff; border:0;
+        padding:9px 16px; border-radius:8px; cursor:pointer;
+        font-size:.92rem; display:inline-flex; align-items:center; gap:6px;
+      }
+      .foto-stack-actions button:hover{ background:#1d4ed8; }
+      .foto-stack-actions button .fas{ font-size:.85rem; }
       .foto-modal-caption{
         margin-top:16px;
         text-align:center;

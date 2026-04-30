@@ -5183,26 +5183,10 @@ async function sincronizarProdutoParaPostgres(produto) {
   ];
   
   await pool.query(sql, valores);
-  
-  // Sincroniza imagens do produto (se existirem)
-  if (produto.imagens && Array.isArray(produto.imagens) && produto.imagens.length > 0) {
-    const codigoProduto = produto.codigo_produto;
-    
-    // Remove imagens antigas
-    await pool.query('DELETE FROM produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
-    
-    // Insere novas imagens
-    for (let pos = 0; pos < produto.imagens.length; pos++) {
-      const img = produto.imagens[pos];
-      if (img.url_imagem) {
-        await pool.query(
-          `INSERT INTO produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-           VALUES ($1, $2, $3, $4)`,
-          [codigoProduto, pos, img.url_imagem, img.path_key || null]
-        );
-      }
-    }
-  }
+
+  // Imagens NÃO são mais sincronizadas a partir da Omie.
+  // O storage oficial das fotos é o Supabase (bucket produtos/Fotos_produto/<codigo_produto>),
+  // gerenciado por /api/produtos/:codigo/fotos.
 }
 
 
@@ -5821,14 +5805,11 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
       
       console.log(`[webhooks/omie/produtos] Processando evento "${topic}" para produto ${codigoProduto}`);
       
-      // Se produto foi excluído, remove imagens
+      // Mesmo se o produto foi excluído/inativado na Omie, NÃO mexemos nas imagens locais
+      // (o Supabase é a fonte oficial; remoções devem ser feitas via UI de fotos).
       if (topic === 'Produto.Excluido' || body.inativo === 'S' || body.bloqueado === 'S') {
-        await pool.query(
-          'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
-          [codigoProduto]
-        );
-        console.log(`[webhooks/omie/produtos] Imagens do produto ${codigoProduto} removidas (excluído/inativo)`);
-        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'removido' });
+        console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} excluído/inativo na Omie — imagens locais preservadas`);
+        return res.json({ ok: true, codigo_produto: codigoProduto, acao: 'inativo_sem_remover_imagens' });
       }
       
       // Consulta produto na Omie para pegar imagens atualizadas
@@ -5871,36 +5852,14 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
         console.error(`[webhooks/omie/produtos] Erro ao atualizar public.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
       }
       
-      // Remove imagens antigas
-      await pool.query(
-        'DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1',
-        [codigoProduto]
-      );
-      
-      // Insere novas imagens
-      let totalImagens = 0;
-      if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-        for (let pos = 0; pos < omieData.imagens.length; pos++) {
-          const img = omieData.imagens[pos];
-          if (img.url_imagem) {
-            await pool.query(
-              `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-               VALUES ($1, $2, $3, $4)`,
-              [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
-            );
-            totalImagens++;
-          }
-        }
-      }
-      
-      const acao = totalImagens > 0 ? `atualizado (${totalImagens} imagens)` : 'atualizado (sem imagens)';
-      console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} ${acao}`);
-      
-      res.json({ 
-        ok: true, 
+      // Imagens NÃO são mais atualizadas via Omie — Supabase é a fonte oficial.
+      console.log(`[webhooks/omie/produtos] Produto ${codigoProduto} cadastro atualizado (imagens ignoradas — gerenciadas pelo Supabase)`);
+
+      res.json({
+        ok: true,
         codigo_produto: codigoProduto,
-        acao: acao,
-        total_imagens: totalImagens 
+        acao: 'cadastro_atualizado',
+        imagens: 'gerenciadas pelo Supabase (bucket produtos/Fotos_produto/<codigo>)'
       });
     } catch (err) {
       console.error('[webhooks/omie/produtos] erro:', err);
@@ -25657,196 +25616,56 @@ app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
   }
 });
 
-// Fila para chamadas à Omie — serializa requisições com delay de 350ms (3 req/s max)
+// Fila legada usada apenas por chamadas restantes à Omie (mantida para compatibilidade).
 const _omieImageQueue = (() => {
-  const DELAY_MS = 370; // um pouco acima de 333ms para margem de segurança
+  const DELAY_MS = 370;
   let _lastCall = 0;
-  let _pending = 0;
-
   return async function enqueue(fn) {
-    _pending++;
     const now = Date.now();
     const wait = Math.max(0, _lastCall + DELAY_MS - now);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     _lastCall = Date.now();
-    try {
-      return await fn();
-    } finally {
-      _pending--;
-    }
+    return fn();
   };
 })();
 
-// GET /api/compras/imagem-fresca/:codigo_produto - Busca URL fresca da imagem direto da Omie
+// GET /api/compras/imagem-fresca/:codigo_produto
+// As imagens agora vivem 100% no Supabase. Esta rota apenas lê a URL pública mais recente
+// armazenada em public.produtos_omie_imagens (alimentada pelo bucket produtos/Fotos_produto).
 app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
   try {
-    const codigoProduto = req.params.codigo_produto;
+    const codigoProduto = String(req.params.codigo_produto || '').trim();
+    if (!codigoProduto) return res.json({ ok: true, url_imagem: null });
 
-    const omieData = await _omieImageQueue(async () => {
-      const omieBody = {
-        call: 'ConsultarProduto',
-        app_key: process.env.OMIE_APP_KEY,
-        app_secret: process.env.OMIE_APP_SECRET,
-        param: [{ codigo_produto: parseInt(codigoProduto) }]
-      };
+    const { rows } = await pool.query(
+      `SELECT TRIM(url_imagem) AS url_imagem
+         FROM public.produtos_omie_imagens
+        WHERE codigo_produto = $1
+          AND COALESCE(ativo, true) = true
+        ORDER BY pos NULLS LAST, id ASC
+        LIMIT 1`,
+      [codigoProduto]
+    );
 
-      const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(omieBody)
-      });
-
-      if (!omieResp.ok) {
-        const err = new Error(`HTTP_${omieResp.status}`);
-        err.httpStatus = omieResp.status;
-        throw err;
-      }
-
-      return omieResp.json();
-    });
-
-    // Verifica se houve erro na resposta da Omie
-    if (omieData.faultstring || omieData.faultcode) {
-      console.warn(`[Imagem Fresca] Erro Omie para produto ${codigoProduto}:`, omieData.faultstring);
-      return res.json({ ok: true, url_imagem: null });
-    }
-
-    // Atualiza URLs no banco se houver imagens
-    if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-      await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [codigoProduto]);
-
-      for (let pos = 0; pos < omieData.imagens.length; pos++) {
-        const img = omieData.imagens[pos];
-        if (img.url_imagem) {
-          await pool.query(
-            `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-             VALUES ($1, $2, $3, $4)`,
-            [codigoProduto, pos, img.url_imagem.trim(), img.path_key || null]
-          );
-        }
-      }
-
-      const primeiraImagem = omieData.imagens[0]?.url_imagem?.trim() || null;
-      res.json({ ok: true, url_imagem: primeiraImagem });
-    } else {
-      res.json({ ok: true, url_imagem: null });
-    }
+    res.json({ ok: true, url_imagem: rows[0]?.url_imagem || null });
   } catch (err) {
-    if (err.httpStatus === 429) {
-      console.warn(`[Imagem Fresca] Rate limit Omie para produto ${req.params.codigo_produto} — retornando sem imagem`);
-      return res.json({ ok: true, url_imagem: null });
-    }
-    if (err.httpStatus) {
-      console.error(`[Imagem Fresca] Erro HTTP ${err.httpStatus} ao consultar produto ${req.params.codigo_produto}`);
-      return res.status(500).json({ ok: false, error: 'Erro ao consultar Omie' });
-    }
     console.error('[Imagem Fresca] Erro ao buscar imagem:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem' });
   }
 });
 
-// POST /api/admin/sync/imagens-omie - Sincroniza TODAS as imagens dos produtos ativos
-app.post('/api/admin/sync/imagens-omie', express.json(), async (req, res) => {
-  const startTime = Date.now();
-  
-  try {
-    console.log('[Sync Imagens] Iniciando sincronização...');
-    
-    // Busca todos os produtos ativos que têm imagens na tabela atual
-    const { rows: produtos } = await pool.query(`
-      SELECT DISTINCT p.codigo_produto, p.codigo, p.descricao
-      FROM public.produtos_omie p
-      WHERE p.inativo = 'N' AND p.bloqueado = 'N'
-      ORDER BY p.codigo_produto
-    `);
-    
-    console.log(`[Sync Imagens] ${produtos.length} produtos ativos encontrados`);
-    
-    let sucessos = 0;
-    let erros = 0;
-    let semImagem = 0;
-    const DELAY_MS = 350; // Rate limit Omie: 3 req/seg = ~333ms, usando 350ms para segurança
-    
-    for (let i = 0; i < produtos.length; i++) {
-      const produto = produtos[i];
-      
-      try {
-        // Consulta produto na Omie para pegar URLs frescas
-        const omieBody = {
-          call: 'ConsultarProduto',
-          app_key: process.env.OMIE_APP_KEY,
-          app_secret: process.env.OMIE_APP_SECRET,
-          param: [{ codigo_produto: parseInt(produto.codigo_produto) }]
-        };
-        
-        const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(omieBody)
-        });
-        
-        if (!omieResp.ok) {
-          console.error(`[Sync Imagens] Erro HTTP ${omieResp.status} para produto ${produto.codigo}`);
-          erros++;
-          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-          continue;
-        }
-        
-        const omieData = await omieResp.json();
-        
-        // Se houver imagens, atualiza no banco
-        if (omieData.imagens && Array.isArray(omieData.imagens) && omieData.imagens.length > 0) {
-          // Remove imagens antigas
-          await pool.query('DELETE FROM public.produtos_omie_imagens WHERE codigo_produto = $1', [produto.codigo_produto]);
-          
-          // Insere novas imagens com URLs frescas
-          for (let pos = 0; pos < omieData.imagens.length; pos++) {
-            const img = omieData.imagens[pos];
-            if (img.url_imagem) {
-              await pool.query(
-                `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key)
-                 VALUES ($1, $2, $3, $4)`,
-                [produto.codigo_produto, pos, img.url_imagem.trim(), img.path_key || null]
-              );
-            }
-          }
-          
-          sucessos++;
-          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: ${omieData.imagens.length} imagens atualizadas`);
-        } else {
-          semImagem++;
-          console.log(`[Sync Imagens] ${i + 1}/${produtos.length} - ${produto.codigo}: sem imagens`);
-        }
-        
-        // Aguarda para respeitar rate limit
-        if (i < produtos.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-        }
-        
-      } catch (err) {
-        console.error(`[Sync Imagens] Erro ao processar produto ${produto.codigo}:`, err.message);
-        erros++;
-      }
-    }
-    
-    const tempoDecorrido = ((Date.now() - startTime) / 1000).toFixed(1);
-    const resultado = {
-      ok: true,
-      total: produtos.length,
-      sucessos,
-      erros,
-      semImagem,
-      tempoDecorrido: `${tempoDecorrido}s`
-    };
-    
-    console.log('[Sync Imagens] Concluído:', resultado);
-    res.json(resultado);
-    
-  } catch (err) {
-    console.error('[Sync Imagens] Erro geral:', err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+// POST /api/admin/sync/imagens-omie
+// Endpoint legado — sincronização via Omie foi descontinuada.
+// Imagens agora são gerenciadas via Supabase Storage (scripts/sync_fotos_produtos_supabase.js
+// para refazer toda a base; uploads incrementais via /api/produtos/:codigo/fotos).
+app.post('/api/admin/sync/imagens-omie', express.json(), (_req, res) => {
+  res.status(410).json({
+    ok: false,
+    error: 'Endpoint descontinuado. Use scripts/sync_fotos_produtos_supabase.js (Supabase) ou /api/produtos/:codigo/fotos para uploads.'
+  });
 });
+
+// GET /api/compras/minhas - Lista solicitações do usuário logado
 
 // GET /api/compras/minhas - Lista solicitações do usuário logado
 app.get('/api/compras/minhas', async (req, res) => {
