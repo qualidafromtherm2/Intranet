@@ -38399,7 +38399,7 @@ function renderizarCatalogoOmie(produtos, options = {}) {
         src="${produto.url_imagem}" 
         alt="${escapeHtml(produto.descricao)}"
         style="max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;transition:transform 0.2s;"
-        onclick='ampliarImagemProduto(${JSON.stringify(produto.url_imagem || '')}, ${JSON.stringify(infoProdutoTexto)});event.stopPropagation();'
+        onclick='ampliarImagemProduto(${JSON.stringify(produto.url_imagem || '')}, ${JSON.stringify(infoProdutoTexto)}, ${JSON.stringify(produto.codigo || '')});event.stopPropagation();'
         onmouseover="this.style.transform='scale(1.05)'"
         onmouseout="this.style.transform='scale(1)'"
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
@@ -40138,7 +40138,7 @@ function toggleFiltrosCatalogo(forceOpen) {
 }
 
 // Abre modal de imagem ampliada
-function ampliarImagemProduto(urlImagem, infoProduto) {
+function ampliarImagemProduto(urlImagem, infoProduto, codigoProduto) {
   const modal = document.getElementById('modalImagemAmpliada');
   const img = document.getElementById('imagemAmpliada');
   if (!modal || !img) return;
@@ -40148,6 +40148,24 @@ function ampliarImagemProduto(urlImagem, infoProduto) {
   }
   
   img.src = urlImagem;
+
+  // Resolve código do produto: usa o argumento ou tenta extrair do "CODIGO - DESCRIÇÃO"
+  let codigo = String(codigoProduto || '').trim();
+  if (!codigo && typeof infoProduto === 'string') {
+    const m = infoProduto.match(/^\s*([^\s-][^-]*?)\s*-\s*/);
+    if (m) codigo = m[1].trim();
+  }
+  const btnEditar = document.getElementById('btnEditarProdutoAmpliada');
+  if (btnEditar) {
+    if (codigo) {
+      btnEditar.dataset.codigo = codigo;
+      btnEditar.style.display = 'inline-flex';
+    } else {
+      btnEditar.removeAttribute('data-codigo');
+      btnEditar.style.display = 'none';
+    }
+  }
+
   modal.style.display = 'flex';
   
   // Fechar com ESC
@@ -40159,6 +40177,110 @@ function ampliarImagemProduto(urlImagem, infoProduto) {
   };
   document.addEventListener('keydown', handleEsc);
 }
+
+// Handler do botão "Editar foto" no modal de imagem ampliada — abre o produto e vai direto para a aba Fotos
+async function editarFotoDaImagemAmpliada() {
+  const btn = document.getElementById('btnEditarProdutoAmpliada');
+  const codigo = (btn?.dataset?.codigo || '').trim();
+  fecharImagemAmpliada();
+  if (!codigo) return;
+
+  // Mostra spinner overlay enquanto o produto carrega — evita ver o produto anterior na tela
+  mostrarSpinnerCarregamentoProduto(codigo);
+
+  // Fecha catálogo se estiver aberto e abre o produto. Usa diretamente openProdutoPorCodigo
+  // (que é async e aguarda loadDadosProduto preencher #productTitle / #codigo_produto).
+  try { if (typeof fecharModalCatalogoOmie === 'function') fecharModalCatalogoOmie(); } catch {}
+  try {
+    if (typeof window.openProdutoPorCodigo === 'function') {
+      await window.openProdutoPorCodigo(codigo);
+    } else if (typeof abrirModalEditarProduto === 'function') {
+      abrirModalEditarProduto(codigo);
+    }
+  } catch (e) {
+    console.warn('[editarFotoDaImagemAmpliada] erro abrindo produto:', e);
+  }
+
+  // Espera o título do produto refletir o código (loadDadosProduto preencheu o cabeçalho)
+  const codigoCarregado = () => {
+    const h = document.getElementById('productTitle');
+    const hidden = document.getElementById('codigo_produto');
+    const txt = (h?.textContent || '').trim();
+    const alt = (hidden?.value || '').trim();
+    const atual = txt || alt;
+    return atual && atual.includes(codigo);
+  };
+  await new Promise((resolve) => {
+    let t = 0;
+    const tick = () => {
+      if (codigoCarregado() || ++t > 40) return resolve();
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+
+  // Ativa a aba "Fotos" — o MutationObserver em produto_foto.js dispara reloadAndRender quando ela ficar visível
+  const navFotos = document.querySelector('.nav-card[data-target="listaFotos"]');
+  if (navFotos) navFotos.click();
+
+  // Garantia extra: força um reload do carrossel após pequena espera, caso a aba já estivesse visível
+  setTimeout(() => {
+    try {
+      const pane = document.getElementById('listaFotos');
+      if (pane && getComputedStyle(pane).display !== 'none') {
+        // re-aplica display para acionar o observer
+        pane.style.display = 'none';
+        // força reflow
+        void pane.offsetHeight;
+        pane.style.display = 'block';
+      }
+    } catch {}
+  }, 300);
+
+  // Espera as fotos renderizarem antes de remover o spinner
+  await new Promise((resolve) => {
+    let t = 0;
+    const tick = () => {
+      const pane = document.getElementById('listaFotos');
+      const visivel = pane && getComputedStyle(pane).display !== 'none';
+      // considera carregado quando a aba está visível e algo foi renderizado dentro do container
+      const cont = document.getElementById('fotosContainer');
+      const renderizou = cont && cont.children && cont.children.length > 0;
+      if ((visivel && renderizou) || ++t > 40) return resolve();
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+
+  esconderSpinnerCarregamentoProduto();
+}
+window.editarFotoDaImagemAmpliada = editarFotoDaImagemAmpliada;
+
+// Spinner overlay usado durante a navegação para a página do produto
+function mostrarSpinnerCarregamentoProduto(codigo) {
+  let ov = document.getElementById('spinnerCarregamentoProduto');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'spinnerCarregamentoProduto';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.78);z-index:10080;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;backdrop-filter:blur(2px);';
+    ov.innerHTML = `
+      <div style="width:64px;height:64px;border:6px solid rgba(255,255,255,0.18);border-top-color:#3b82f6;border-radius:50%;animation:spinProdutoLoad 0.9s linear infinite;"></div>
+      <div id="spinnerCarregamentoProdutoMsg" style="color:#e2e8f0;font-size:15px;font-weight:600;letter-spacing:0.3px;">Carregando produto…</div>
+      <style>@keyframes spinProdutoLoad{to{transform:rotate(360deg);}}</style>
+    `;
+    document.body.appendChild(ov);
+  }
+  const msg = document.getElementById('spinnerCarregamentoProdutoMsg');
+  if (msg && codigo) msg.textContent = `Carregando produto ${codigo}…`;
+  ov.style.display = 'flex';
+}
+
+function esconderSpinnerCarregamentoProduto() {
+  const ov = document.getElementById('spinnerCarregamentoProduto');
+  if (ov) ov.style.display = 'none';
+}
+window.mostrarSpinnerCarregamentoProduto = mostrarSpinnerCarregamentoProduto;
+window.esconderSpinnerCarregamentoProduto = esconderSpinnerCarregamentoProduto;
 
 // Fecha modal de imagem ampliada
 function fecharImagemAmpliada() {
@@ -55557,6 +55679,15 @@ async function excluirReservaAgenda() {
 let agendaAtasCache = []; // cache das atas carregadas
 let agendaPresencaCache = []; // cache dos registros de lista de presença
 let agendaAtasCriarNovoTema = false; // true quando usuário clicou em "Novo tema"
+let agendaAtaVisualizacaoModo = 'tudo';
+let agendaAtaDataSelecionada = '';
+let agendaAtaAtividadesAba = 'pendente';
+
+const agendaAtaVisualizacaoRotulos = {
+  datas: 'Datas',
+  atividades: 'Atividades',
+  tudo: 'Tudo'
+};
 
 async function abrirModalAtaAgenda() {
   if (!agendaReservaIdParaAta) return;
@@ -55597,6 +55728,11 @@ async function abrirModalAtaAgenda() {
 
   // Popular o select de temas com os temas já existentes
   _agendaPopularTemaSelect();
+  agendaAtaVisualizacaoModo = 'tudo';
+  agendaAtaDataSelecionada = '';
+  agendaAtaAtividadesAba = 'pendente';
+  _agendaAtualizarBotoesModoAta();
+  _agendaRenderSubmodosAta();
   // Renderizar histórico do tema selecionado
   _agendaRenderAtaTemaSelecionado();
 
@@ -55638,6 +55774,22 @@ async function abrirModalAtaAgenda() {
     btnPdf.addEventListener('click', _agendaGerarPdfAta);
   }
 
+  const btnModoDatas = document.getElementById('agendaAtaModoDatasBtn');
+  const btnModoAtividades = document.getElementById('agendaAtaModoAtividadesBtn');
+  const btnModoTudo = document.getElementById('agendaAtaModoTudoBtn');
+  if (btnModoDatas && !btnModoDatas.dataset.listenerOk) {
+    btnModoDatas.dataset.listenerOk = '1';
+    btnModoDatas.addEventListener('click', () => _agendaDefinirModoVisualizacaoAta('datas'));
+  }
+  if (btnModoAtividades && !btnModoAtividades.dataset.listenerOk) {
+    btnModoAtividades.dataset.listenerOk = '1';
+    btnModoAtividades.addEventListener('click', () => _agendaDefinirModoVisualizacaoAta('atividades'));
+  }
+  if (btnModoTudo && !btnModoTudo.dataset.listenerOk) {
+    btnModoTudo.dataset.listenerOk = '1';
+    btnModoTudo.addEventListener('click', () => _agendaDefinirModoVisualizacaoAta('tudo'));
+  }
+
   // Inicializar listeners e carregar notas pessoais (coluna direita)
   _initAgendaNotasListeners();
 
@@ -55672,6 +55824,149 @@ async function abrirModalAtaAgenda() {
   } else {
     await _agendaCarregarNotasReuniao();
   }
+}
+
+function _agendaAtualizarBotoesModoAta() {
+  const modo = agendaAtaVisualizacaoModo || 'tudo';
+  const mapeamento = [
+    { id: 'agendaAtaModoDatasBtn', valor: 'datas' },
+    { id: 'agendaAtaModoAtividadesBtn', valor: 'atividades' },
+    { id: 'agendaAtaModoTudoBtn', valor: 'tudo' }
+  ];
+  mapeamento.forEach((item) => {
+    const btn = document.getElementById(item.id);
+    if (!btn) return;
+    const ativo = item.valor === modo;
+    btn.style.background = ativo ? '#2563eb' : 'var(--theme-hover)';
+    btn.style.color = ativo ? '#fff' : 'var(--theme-color)';
+    btn.style.border = ativo ? '1px solid #2563eb' : '1px solid var(--border-color)';
+    btn.title = `Modo ${agendaAtaVisualizacaoRotulos[item.valor] || item.valor}`;
+  });
+}
+
+function _agendaDefinirModoVisualizacaoAta(modo) {
+  agendaAtaVisualizacaoModo = modo;
+  if (modo === 'datas') {
+    const datas = _agendaObterDatasAta();
+    agendaAtaDataSelecionada = datas.length ? datas[datas.length - 1] : '';
+  }
+  _agendaAtualizarBotoesModoAta();
+  _agendaRenderSubmodosAta();
+  _agendaRenderAtaTemaSelecionado();
+}
+
+function _agendaObterDatasAta() {
+  return [...new Set(agendaAtasCache.map((a) => String(a.criado_em_fmt || '').trim()).filter(Boolean))];
+}
+
+function _agendaRenderSubmodosAta() {
+  const wrap = document.getElementById('agendaAtaSubmodosWrap');
+  const el = document.getElementById('agendaAtaSubmodos');
+  if (!wrap || !el) return;
+
+  if (agendaAtaVisualizacaoModo === 'datas') {
+    const datas = _agendaObterDatasAta();
+    if (!datas.length) {
+      wrap.style.display = 'none';
+      el.innerHTML = '';
+      agendaAtaDataSelecionada = '';
+      return;
+    }
+    if (!agendaAtaDataSelecionada || !datas.includes(agendaAtaDataSelecionada)) {
+      agendaAtaDataSelecionada = datas[datas.length - 1];
+    }
+
+    el.innerHTML = datas.map((data) => {
+      const ativo = data === agendaAtaDataSelecionada;
+      return `<button type="button" data-ata-data-guia="${escapeHtml(data)}" class="content-button" style="font-size:11px;padding:4px 10px;${ativo ? 'background:#1d4ed8;color:#fff;border:1px solid #1d4ed8;' : 'background:var(--theme-hover);color:var(--theme-color);border:1px solid var(--border-color);'}">${escapeHtml(data)}</button>`;
+    }).join('');
+    wrap.style.display = 'flex';
+    el.querySelectorAll('[data-ata-data-guia]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const data = btn.getAttribute('data-ata-data-guia') || '';
+        if (!data) return;
+        agendaAtaDataSelecionada = data;
+        _agendaRenderSubmodosAta();
+        _agendaRenderAtaTemaSelecionado();
+      });
+    });
+    return;
+  }
+
+  if (agendaAtaVisualizacaoModo === 'atividades') {
+    const abas = [
+      { chave: 'pendente', label: 'Pendente' },
+      { chave: 'executadas', label: 'Executadas' }
+    ];
+    el.innerHTML = abas.map((aba) => {
+      const ativo = aba.chave === agendaAtaAtividadesAba;
+      return `<button type="button" data-ata-atividade-aba="${aba.chave}" class="content-button" style="font-size:11px;padding:4px 10px;${ativo ? 'background:#1d4ed8;color:#fff;border:1px solid #1d4ed8;' : 'background:var(--theme-hover);color:var(--theme-color);border:1px solid var(--border-color);'}">${aba.label}</button>`;
+    }).join('');
+    wrap.style.display = 'flex';
+    el.querySelectorAll('[data-ata-atividade-aba]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const aba = btn.getAttribute('data-ata-atividade-aba') || 'pendente';
+        agendaAtaAtividadesAba = aba;
+        _agendaRenderSubmodosAta();
+        _agendaRenderAtaTemaSelecionado();
+      });
+    });
+    return;
+  }
+
+  wrap.style.display = 'none';
+  el.innerHTML = '';
+}
+
+function _agendaAtaStatusChecklist(ata) {
+  const tarefas = Array.isArray(ata?.tarefas) ? ata.tarefas : [];
+  if (tarefas.length > 0) {
+    let pendentes = 0;
+    let executadas = 0;
+    tarefas.forEach((t) => {
+      if (t?.concluida) executadas += 1;
+      else pendentes += 1;
+    });
+    return { pendentes, executadas };
+  }
+
+  const linhas = String(ata?.conteudo || '').split(/\r?\n/);
+  let pendentes = 0;
+  let executadas = 0;
+  linhas.forEach((linha) => {
+    const m = linha.match(/^\s*\[( |x|X)\]\s*/);
+    if (!m) return;
+    if (String(m[1]).toLowerCase() === 'x') executadas += 1;
+    else pendentes += 1;
+  });
+  return { pendentes, executadas };
+}
+
+function _agendaFiltrarConteudoAtaPorStatus(ata, status) {
+  if (!status) return ata;
+  const tarefasOrig = Array.isArray(ata?.tarefas) ? ata.tarefas : [];
+  const tarefas = tarefasOrig.filter((t) => {
+    return status === 'executadas' ? !!t?.concluida : !t?.concluida;
+  });
+
+  const linhas = String(ata?.conteudo || '').split(/\r?\n/);
+  const filtradas = linhas.filter((linha) => {
+    const m = linha.match(/^\s*\[( |x|X)\]\s*/);
+    if (!m) return false;
+    const marcada = String(m[1]).toLowerCase() === 'x';
+    return status === 'executadas' ? marcada : !marcada;
+  });
+
+  return {
+    ...ata,
+    conteudo: filtradas.join('\n'),
+    tarefas
+  };
+}
+
+function _agendaAtaTemChecklist(ata) {
+  const st = _agendaAtaStatusChecklist(ata);
+  return (st.pendentes + st.executadas) > 0;
 }
 
 /** Popular o <datalist> de temas com os temas já cadastrados */
@@ -55830,19 +56125,32 @@ function _agendaRenderConteudoAtaComTarefas(ata, podeEditarTarefa) {
   return partes.join('<br>');
 }
 
-/** Renderizar o histórico — sempre exibe TODOS os temas/entradas agrupados */
+/** Renderizar o histórico conforme o modo de visualização selecionado */
 function _agendaRenderAtaTemaSelecionado() {
   const el = document.getElementById('agendaAtaHistorico');
   if (!el) return;
 
-  if (!agendaAtasCache.length && !agendaPresencaCache.length) {
+  const modoVisualizacao = agendaAtaVisualizacaoModo || 'tudo';
+  let atasRender = [...agendaAtasCache];
+  if (modoVisualizacao === 'datas') {
+    if (agendaAtaDataSelecionada) {
+      atasRender = atasRender.filter((a) => String(a.criado_em_fmt || '').trim() === agendaAtaDataSelecionada);
+    }
+  } else if (modoVisualizacao === 'atividades') {
+    atasRender = atasRender.filter((a) => {
+      const st = _agendaAtaStatusChecklist(a);
+      return agendaAtaAtividadesAba === 'executadas' ? st.executadas > 0 : st.pendentes > 0;
+    });
+  }
+
+  if (!atasRender.length && !agendaPresencaCache.length) {
     el.innerHTML = '<p style="color:var(--inactive-color);font-size:13px;padding:8px 0;">Nenhuma anotação registrada ainda. Selecione ou crie um tema para começar.</p>';
     return;
   }
 
   // ── Seção 0: Lista de Presença ────────────────────────────────────────────
   let secao0Html = '';
-  if (agendaPresencaCache.length > 0) {
+  if (agendaPresencaCache.length > 0 && modoVisualizacao === 'tudo') {
     const itensPresenca = agendaPresencaCache.map((reg, i) => {
       const num = `0.${i + 1}`;
       const dataHora = reg.hora_inicio
@@ -55874,18 +56182,30 @@ function _agendaRenderAtaTemaSelecionado() {
     </div>`;
   }
 
+  if (!atasRender.length) {
+    const msgSemItens = modoVisualizacao === 'datas'
+      ? 'Nenhum registro encontrado para a data selecionada.'
+      : (modoVisualizacao === 'atividades'
+        ? `Nenhuma atividade ${agendaAtaAtividadesAba === 'executadas' ? 'executada' : 'pendente'} encontrada.`
+        : 'Nenhuma anotação encontrada para o modo selecionado.');
+    el.innerHTML = `${secao0Html}<p style="color:var(--inactive-color);font-size:13px;padding:8px 0;">${msgSemItens}</p>`;
+    return;
+  }
+
+  let secoesHtml = '';
   // Agrupa por tema mantendo a ordem de primeira aparição
   const porTema = {};
-  for (const a of agendaAtasCache) {
+  for (const a of atasRender) {
     const t = String(a.tema || 'Geral').trim();
     if (!porTema[t]) porTema[t] = [];
     porTema[t].push(a);
   }
+  secoesHtml = Object.entries(porTema).map(([tema, entradas], idxTema) =>
+    _agendaHtmlGrupoTema(tema, entradas, idxTema + 1)
+  ).join('');
 
   window._agendaAtasRawMap = {};
-  el.innerHTML = secao0Html + Object.entries(porTema).map(([tema, entradas], idx) =>
-    _agendaHtmlGrupoTema(tema, entradas, idx + 1)
-  ).join('');
+  el.innerHTML = secao0Html + secoesHtml;
 
   // Listener: excluir anotação (soft-delete via DELETE)
   el.querySelectorAll('[data-ata-excluir-id]').forEach((btn) => {
@@ -56024,7 +56344,10 @@ function _agendaHtmlGrupoTema(tema, entradas, temaIndex) {
     const inicial = String(g.criado_por || '?').charAt(0).toUpperCase();
     const itemsHtml = g.itens.map((it) => {
       const num = `${idx}.${entryCounter++}`;
-      const conteudoStr = String(it.conteudo || '');
+      const itRender = (agendaAtaVisualizacaoModo === 'atividades')
+        ? _agendaFiltrarConteudoAtaPorStatus(it, agendaAtaAtividadesAba)
+        : it;
+      const conteudoStr = String(itRender.conteudo || '');
       window._agendaAtasRawMap[it.id] = conteudoStr;
       const idStr = escapeHtml(String(it.id));
 
@@ -56046,7 +56369,7 @@ function _agendaHtmlGrupoTema(tema, entradas, temaIndex) {
                 <i class="fa-solid fa-eye"></i></button>
               ${btnRestaurarHtml}
             </div>
-            <div id="ata-ver-${idStr}" style="display:none;margin-top:6px;padding:8px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:6px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#d1d5db;">${_agendaRenderConteudoAtaComTarefas(it, false)}</div>
+            <div id="ata-ver-${idStr}" style="display:none;margin-top:6px;padding:8px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.25);border-radius:6px;font-size:12px;line-height:1.5;white-space:pre-wrap;color:#d1d5db;">${_agendaRenderConteudoAtaComTarefas(itRender, false)}</div>
           </div>
         </div>`;
       }
@@ -56064,7 +56387,7 @@ function _agendaHtmlGrupoTema(tema, entradas, temaIndex) {
         <span style="min-width:34px;font-size:11px;font-weight:700;color:#60a5fa;padding-top:2px;flex-shrink:0;">${escapeHtml(num)}</span>
         <div style="flex:1;">
           <div data-ata-display-id="${idStr}" style="font-size:13px;line-height:1.6;display:flex;align-items:flex-start;gap:4px;">
-            <span ${textoSpanAttrs}>${_agendaRenderConteudoAtaComTarefas(it, podeDel(g.criado_por))}</span>${btnExcluirHtml}
+            <span ${textoSpanAttrs}>${_agendaRenderConteudoAtaComTarefas(itRender, podeDel(g.criado_por))}</span>${btnExcluirHtml}
           </div>
         </div>
       </div>`;

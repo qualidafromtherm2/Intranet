@@ -1933,19 +1933,28 @@
             justify-content:center;
             padding:20px;
           ">
-            <img 
-              id="imagemAmpliada" 
-              src="" 
-              alt="Imagem ampliada"
-              onclick="event.stopPropagation();"
-              style="
-                max-width:95%;
-                max-height:95vh;
-                object-fit:contain;
-                border-radius:8px;
-                box-shadow:0 10px 40px rgba(0,0,0,0.5);
-              "
-            />
+            <div onclick="event.stopPropagation();" style="position:relative;display:flex;flex-direction:column;align-items:center;gap:14px;max-width:95%;max-height:95vh;">
+              <img 
+                id="imagemAmpliada" 
+                src="" 
+                alt="Imagem ampliada"
+                style="
+                  max-width:100%;
+                  max-height:85vh;
+                  object-fit:contain;
+                  border-radius:8px;
+                  box-shadow:0 10px 40px rgba(0,0,0,0.5);
+                "
+              />
+              <button
+                id="btnEditarProdutoAmpliada"
+                type="button"
+                style="display:none;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.35);align-items:center;gap:8px;"
+                onclick="event.stopPropagation();editarFotoDaImagemAmpliada();"
+              >
+                <i class="fa-solid fa-camera-retro"></i> Editar foto
+              </button>
+            </div>
           </div>
         </div>
 
@@ -4960,6 +4969,22 @@
                     <button id="agendaAtaSalvarEntrada" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">
                       <i class="fa-solid fa-floppy-disk" style="margin-right:5px;"></i>Salvar anotação
                     </button>
+                  </div>
+
+                  <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                    <button id="agendaAtaModoDatasBtn" type="button" class="content-button" style="font-size:12px;padding:5px 12px;white-space:nowrap;">
+                      Datas
+                    </button>
+                    <button id="agendaAtaModoAtividadesBtn" type="button" class="content-button" style="font-size:12px;padding:5px 12px;white-space:nowrap;">
+                      Atividades
+                    </button>
+                    <button id="agendaAtaModoTudoBtn" type="button" class="content-button" style="font-size:12px;padding:5px 12px;white-space:nowrap;">
+                      Tudo
+                    </button>
+                  </div>
+
+                  <div id="agendaAtaSubmodosWrap" style="display:none;justify-content:flex-end;margin-bottom:12px;">
+                    <div id="agendaAtaSubmodos" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
                   </div>
 
                   <hr style="border:none;border-top:1px solid var(--border-color);margin-bottom:14px;" />
@@ -8086,13 +8111,13 @@
   <!-- Interceptor de sessão: precisa carregar ANTES de qualquer módulo que faça fetch -->
   <script src="/public/js/sessao_resiliente.js?v=20260422a"></script>
   <script type="module" src="login/login.js"></script>
-  <script type="module" src="menu_produto.js?v=20260401g"></script>
+  <script type="module" src="menu_produto.js?v=20260430d"></script>
   
   <script type="module" src="./requisicoes_omie/filtro_produto.js"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
-  <script src="produtos/produto_foto.js" defer></script>
+  <script src="produtos/produto_foto.js?v=20260430c" defer></script>
   <script src="produtos/produto_anexo.js" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
   <script type="module" src="kanban/kanban_preparacao.js"></script>
