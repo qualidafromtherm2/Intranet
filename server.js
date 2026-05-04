@@ -29636,17 +29636,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     return { itensIde };
   });
 
-  const itensSemIdItemPedido = previewItens.filter(
-    (item) => !Number.isFinite(Number(item?.pedido_n_cod_item || NaN))
-  );
-
-  if (itensSemIdItemPedido.length > 0) {
-    throw new Error(
-      `Não foi possível mapear nIdItPedidoExistente para ${itensSemIdItemPedido.length} item(ns) da NF-e. ` +
-      'Verifique se os itens do pedido Omie correspondem aos itens do recebimento.'
-    );
-  }
-
   return {
     numero_nfe: String(recebimento?.cabec?.cNumeroNFe || '').trim() || String(numeroNfe || '').trim(),
     n_id_receb: Number(recebimento?.cabec?.nIdReceb || 0) || null,
@@ -29840,6 +29829,29 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       if (seq > 0) overrideMap.set(seq, ov);
     }
 
+    // Valida que todos os itens da NF-e foram mapeados a um item do pedido Omie
+    // (considerando possíveis ajustes manuais vindos do frontend)
+    const itensSemMapeamento = Array.isArray(plano?.itens_preview)
+      ? plano.itens_preview.filter((it) => {
+        const seq = Number(it?.n_sequencia || 0);
+        const override = overrideMap.get(seq);
+        const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
+        if (Number.isFinite(codItemOverride) && codItemOverride > 0) return false;
+        return !Number.isFinite(Number(it?.pedido_n_cod_item || NaN));
+      })
+      : [];
+    if (itensSemMapeamento.length > 0) {
+      return res.status(422).json({
+        ok: false,
+        error: `Não foi possível mapear ${itensSemMapeamento.length} item(ns) da NF-e ao pedido. Revise a prévia antes de confirmar.`,
+        itens_sem_match: itensSemMapeamento.map((it) => ({
+          n_sequencia: it?.n_sequencia,
+          nf_codigo_produto: it?.nf_codigo_produto,
+          nf_descricao_produto: it?.nf_descricao_produto
+        }))
+      });
+    }
+
     try {
       const pedidoNumero = plano.c_numero_pedido || numeroPedido || String(nCodPed || '');
       const paramPed = pedidoNumero
@@ -29868,7 +29880,24 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     const aplicarEstoqueEspecial = nCodCC && CONTAS_ESPECIAIS.includes(nCodCC);
 
     // Itens conforme plano (ASSOCIAR-PEDIDO)
-    const itensParaEnviar = plano.itensRecebimentoEditar;
+    const itensParaEnviar = Array.isArray(plano?.itensRecebimentoEditar)
+      ? plano.itensRecebimentoEditar.map((itemEditar) => ({
+        ...itemEditar,
+        itensIde: { ...(itemEditar?.itensIde || {}) }
+      }))
+      : [];
+
+    // Aplica troca manual do item do pedido por sequência da NF-e
+    itensParaEnviar.forEach((itemEditar) => {
+      const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
+      if (!seq) return;
+
+      const override = overrideMap.get(seq);
+      const codItemOverride = Number(override?.nIdItPedidoExistente || 0);
+      if (Number.isFinite(codItemOverride) && codItemOverride > 0) {
+        itemEditar.itensIde.nIdItPedidoExistente = codItemOverride;
+      }
+    });
 
     // Monta parcelas, infoAdicionais e estoque para TODAS as associações
     let financeiroParaEnviar = undefined;

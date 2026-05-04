@@ -46199,20 +46199,155 @@ function obterUnidadePedidoPreviewAssociacao(item) {
   return String(encontrado?.unidade || '-').trim() || '-';
 }
 
+function snapshotEdicoesQtdUnidAssociacaoNfe() {
+  const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
+  if (!previewConteudo) return;
+
+  if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
+    window.__associarNfeCamposEditados = {};
+  }
+
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+    const seq = Number(input.dataset.seq || 0);
+    if (!seq) return;
+
+    if (!window.__associarNfeCamposEditados[seq]) {
+      window.__associarNfeCamposEditados[seq] = {};
+    }
+
+    if (input.classList.contains('assoc-override-qtd')) {
+      const valorQtd = parseFloat(String(input.value || '').replace(',', '.'));
+      window.__associarNfeCamposEditados[seq].nQtde = Number.isFinite(valorQtd) ? valorQtd : null;
+    }
+
+    if (input.classList.contains('assoc-override-unid')) {
+      window.__associarNfeCamposEditados[seq].cUnidade = String(input.value || '').trim().toUpperCase() || null;
+    }
+  });
+}
+
+function trocarVinculoPedidoEntreSequenciasAssociacaoNfe(seqOrigem, seqDestino) {
+  if (!Array.isArray(window.__associarNfePreviewEstadoItens)) return false;
+  if (!seqOrigem || !seqDestino || seqOrigem === seqDestino) return false;
+
+  snapshotEdicoesQtdUnidAssociacaoNfe();
+
+  const itensEstado = window.__associarNfePreviewEstadoItens;
+  const idxOrigem = itensEstado.findIndex((it) => Number(it?.n_sequencia || 0) === Number(seqOrigem));
+  const idxDestino = itensEstado.findIndex((it) => Number(it?.n_sequencia || 0) === Number(seqDestino));
+  if (idxOrigem < 0 || idxDestino < 0) return false;
+
+  const camposPedido = [
+    'pedido_item_encontrado',
+    'pedido_n_cod_item',
+    'pedido_codigo_produto',
+    'pedido_descricao_produto',
+    'pedido_qtde',
+    'pedido_unidade',
+    'pedido_valor_total',
+    'criterio_match',
+    'score_match'
+  ];
+
+  const origem = itensEstado[idxOrigem];
+  const destino = itensEstado[idxDestino];
+  const snapshotOrigem = {};
+  const snapshotDestino = {};
+
+  camposPedido.forEach((campo) => {
+    snapshotOrigem[campo] = origem?.[campo];
+    snapshotDestino[campo] = destino?.[campo];
+  });
+
+  camposPedido.forEach((campo) => {
+    origem[campo] = snapshotDestino[campo];
+    destino[campo] = snapshotOrigem[campo];
+  });
+
+  [origem, destino].forEach((item) => {
+    const codItem = Number(item?.pedido_n_cod_item || 0);
+    item.pedido_item_encontrado = Number.isFinite(codItem) && codItem > 0;
+    item.criterio_match = 'ajuste_manual_arrastar';
+    item.score_match = 9999;
+  });
+
+  return true;
+}
+
+function habilitarDragDropAssociacaoPedidoNfe(preview) {
+  const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
+  if (!previewConteudo) return;
+
+  const linhas = previewConteudo.querySelectorAll('tr[data-seq]');
+  linhas.forEach((linha) => {
+    linha.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      linha.style.outline = '2px dashed #0ea5e9';
+      linha.style.outlineOffset = '-2px';
+    });
+
+    linha.addEventListener('dragleave', () => {
+      linha.style.outline = 'none';
+    });
+
+    linha.addEventListener('drop', (event) => {
+      event.preventDefault();
+      linha.style.outline = 'none';
+
+      const origemSeq = Number(event.dataTransfer?.getData('text/plain') || 0);
+      const destinoSeq = Number(linha.dataset.seq || 0);
+      if (!origemSeq || !destinoSeq || origemSeq === destinoSeq) return;
+
+      const trocou = trocarVinculoPedidoEntreSequenciasAssociacaoNfe(origemSeq, destinoSeq);
+      if (!trocou) return;
+
+      renderPreviewAssociacaoPedidoNfe(preview || window.__associarNfePreviewAtual?.preview || {});
+      setStatusModalAssociarPedidoNfe(
+        `Vínculo do pedido ajustado manualmente: Seq ${origemSeq} ↔ Seq ${destinoSeq}.`,
+        'info'
+      );
+
+      const btnAssociar = document.getElementById('modalAssociarPedidoBtnConfirmar');
+      if (btnAssociar) btnAssociar.disabled = false;
+    });
+  });
+
+  previewConteudo.querySelectorAll('.assoc-pedido-draggable').forEach((el) => {
+    el.addEventListener('dragstart', (event) => {
+      const seq = Number(el.dataset.seq || 0);
+      if (!seq) return;
+      event.dataTransfer?.setData('text/plain', String(seq));
+      event.dataTransfer.effectAllowed = 'move';
+      el.style.opacity = '0.55';
+    });
+
+    el.addEventListener('dragend', () => {
+      el.style.opacity = '1';
+      linhas.forEach((linha) => {
+        linha.style.outline = 'none';
+      });
+    });
+  });
+}
+
 function renderPreviewAssociacaoPedidoNfe(preview) {
   const previewWrap = document.getElementById('modalAssociarPedidoNfePreviewWrap');
   const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
   if (!previewWrap || !previewConteudo) return;
 
-  const itens = (Array.isArray(preview?.itens) ? [...preview.itens] : []).sort((a, b) => {
-    const aEncontrou = a?.pedido_item_encontrado ? 1 : 0;
-    const bEncontrou = b?.pedido_item_encontrado ? 1 : 0;
-    if (aEncontrou !== bEncontrou) return bEncontrou - aEncontrou;
-    const scoreA = Number(a?.score_match || 0);
-    const scoreB = Number(b?.score_match || 0);
-    if (scoreA !== scoreB) return scoreB - scoreA;
-    return Number(a?.n_sequencia || 0) - Number(b?.n_sequencia || 0);
-  });
+  if (!Array.isArray(window.__associarNfePreviewEstadoItens)) {
+    window.__associarNfePreviewEstadoItens = Array.isArray(preview?.itens)
+      ? preview.itens.map((item) => ({ ...item }))
+      : [];
+  }
+
+  const itens = [...window.__associarNfePreviewEstadoItens].sort(
+    (a, b) => Number(a?.n_sequencia || 0) - Number(b?.n_sequencia || 0)
+  );
+
+  if (!window.__associarNfeCamposEditados || typeof window.__associarNfeCamposEditados !== 'object') {
+    window.__associarNfeCamposEditados = {};
+  }
   const compararQuantidadePreview = (item) => {
     const nfQtd = Number(item?.nf_qtde);
     const pedidoQtd = Number(item?.pedido_qtde);
@@ -46227,6 +46362,9 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     if (!nfUnidade && !pedidoUnidade) return false;
     return nfUnidade !== pedidoUnidade;
   };
+
+  const itensComMatch = itens.filter((item) => !!item?.pedido_item_encontrado).length;
+  const itensSemMatch = itens.length - itensComMatch;
 
   const divergenciasValor = itens.filter((item) => {
     const nfValor = Number(item?.nf_valor_total || 0);
@@ -46253,11 +46391,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
       </div>
       <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:#166534;">Itens com match</div>
-        <div style="font-size:13px;font-weight:700;color:#166534;">${Number(preview?.itens_match_total || 0)}</div>
+        <div style="font-size:13px;font-weight:700;color:#166534;">${itensComMatch}</div>
       </div>
       <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:#991b1b;">Sem match</div>
-        <div style="font-size:13px;font-weight:700;color:#991b1b;">${Number(preview?.itens_sem_match_total || 0)}</div>
+        <div style="font-size:13px;font-weight:700;color:#991b1b;">${itensSemMatch}</div>
       </div>
       <div style="background:${divergenciasValor > 0 ? '#fef2f2' : '#eff6ff'};border:1px solid ${divergenciasValor > 0 ? '#fecaca' : '#bfdbfe'};border-radius:10px;padding:10px;">
         <div style="font-size:11px;color:${divergenciasValor > 0 ? '#991b1b' : '#1d4ed8'};">Divergências de valor</div>
@@ -46277,18 +46415,24 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
           ? 'ID produto'
           : item?.criterio_match === 'codigo_produto'
             ? 'Código produto'
+            : item?.criterio_match === 'ajuste_manual_arrastar'
+              ? 'Ajuste manual'
             : item?.criterio_match === 'fallback_item_unico_pedido'
               ? 'Item único do pedido'
               : (encontrou ? 'Match identificado' : 'Sem match');
         const nfValor = Number(item?.nf_valor_total || 0);
         const pedidoValor = Number(item?.pedido_valor_total || 0);
         const divergiuValor = Number.isFinite(nfValor) && Number.isFinite(pedidoValor) && Math.abs(nfValor - pedidoValor) > 0.01;
-        const unidadePedido = obterUnidadePedidoPreviewAssociacao(item);
-        const divergiuQtd = compararQuantidadePreview(item);
+        const seq = Number(item?.n_sequencia || 0);
+        const overrideCampos = window.__associarNfeCamposEditados?.[seq] || {};
+        const qtdPedidoBase = item?.pedido_qtde ?? '-';
+        const qtdPedido = overrideCampos?.nQtde ?? qtdPedidoBase;
+        const unidadePedidoBase = obterUnidadePedidoPreviewAssociacao(item);
+        const unidadePedido = overrideCampos?.cUnidade || unidadePedidoBase;
+        const divergiuQtd = compararQuantidadePreview({ ...item, pedido_qtde: qtdPedido });
         const divergiuUnidade = compararUnidadePreview(item, unidadePedido);
         const temDivergencia = divergiuValor || divergiuQtd || divergiuUnidade;
         const qtdNf = item?.nf_qtde ?? '-';
-        const qtdPedido = item?.pedido_qtde ?? '-';
         const corQtd = divergiuQtd ? '#b91c1c' : '#0f172a';
         const bgQtd = divergiuQtd ? '#fee2e2' : 'transparent';
         const corUnid = divergiuUnidade ? '#b91c1c' : '#0f172a';
@@ -46302,16 +46446,23 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;font-weight:${divergiuQtd ? '700' : '400'};">${escapeHtml(String(qtdNf))}</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;font-weight:${divergiuUnidade ? '700' : '400'};">${escapeHtml(String(item?.nf_unidade || '-'))}</td>
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};border-right:3px solid #cbd5e1;">${escapeHtml(formatarValorRecebimento(item?.nf_valor_total))}</td>
-            <td style="padding:7px 8px;font-size:11px;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</td>
-            <td style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:220px;line-height:1.35;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</td>
+            <td colspan="2" style="padding:7px 8px;font-size:11px;color:#0f172a;max-width:380px;line-height:1.35;">
+              <div class="assoc-pedido-draggable" data-seq="${seq}" draggable="true" style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px dashed #cbd5e1;border-radius:8px;background:#ffffff;cursor:grab;">
+                <i class="fa-solid fa-grip-vertical" style="margin-top:1px;color:#64748b;"></i>
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                  <div style="font-size:11px;font-weight:700;color:#0f172a;">${escapeHtml(String(item?.pedido_codigo_produto || '-'))}</div>
+                  <div style="font-size:11px;color:#334155;line-height:1.35;max-width:320px;" title="${escapeHtml(String(item?.pedido_descricao_produto || '-'))}">${escapeHtml(String(item?.pedido_descricao_produto || '-'))}</div>
+                </div>
+              </div>
+            </td>
             <td style="padding:7px 8px;font-size:11px;color:${corQtd};background:${bgQtd};text-align:right;white-space:nowrap;">${
               (divergiuQtd || divergiuUnidade)
-                ? `<input type="text" class="assoc-override-qtd" data-seq="${Number(item?.n_sequencia || 0)}" value="${escapeHtml(String(qtdPedido))}" style="width:60px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade para associação">`
+                ? `<input type="text" class="assoc-override-qtd" data-seq="${seq}" value="${escapeHtml(String(qtdPedido))}" style="width:60px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:right;background:#fff5f5;" title="Edite a quantidade para associação">`
                 : escapeHtml(String(qtdPedido))
             }</td>
             <td style="padding:7px 8px;font-size:11px;color:${corUnid};background:${bgUnid};text-align:center;white-space:nowrap;">${
               (divergiuQtd || divergiuUnidade)
-                ? `<input type="text" class="assoc-override-unid" data-seq="${Number(item?.n_sequencia || 0)}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
+                ? `<input type="text" class="assoc-override-unid" data-seq="${seq}" value="${escapeHtml(String(unidadePedido || ''))}" style="width:50px;padding:2px 4px;font-size:11px;font-weight:700;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;text-align:center;background:#fff5f5;text-transform:uppercase;" title="Edite a unidade para associação">`
                 : escapeHtml(String(unidadePedido || '-'))
             }</td>
             <td style="padding:7px 8px;font-size:11px;text-align:right;font-weight:700;color:${divergiuValor ? '#b91c1c' : '#0f172a'};background:${divergiuValor ? '#fee2e2' : 'transparent'};">${escapeHtml(formatarValorRecebimento(item?.pedido_valor_total))}</td>
@@ -46323,6 +46474,7 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
 
   previewConteudo.innerHTML = `
     ${resumoHtml}
+    <div style="margin:0 0 10px;padding:9px 12px;border:1px solid #bae6fd;background:#f0f9ff;color:#0c4a6e;border-radius:8px;font-size:12px;font-weight:700;">Arraste o bloco do item do Pedido (coluna azul com ícone <i class="fa-solid fa-grip-vertical"></i>) para outra linha da NF-e para trocar a associação.</div>
     ${(divergenciasValor > 0 || divergenciasQtdUnid > 0) ? `<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #fecaca;background:#fff1f2;color:#b91c1c;border-radius:8px;font-size:12px;font-weight:700;">Existem divergências de valor, quantidade ou unidade entre a NF-e e o pedido.${divergenciasQtdUnid > 0 ? ' Edite os campos de Qtd/Unid. do Pedido (em vermelho) antes de associar.' : ' Os campos divergentes estão destacados em vermelho.'}</div>` : ''}
     <div style="max-height:340px;overflow:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table style="width:100%;border-collapse:collapse;min-width:1220px;">
@@ -46356,6 +46508,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
   `;
 
   previewWrap.style.display = 'block';
+  habilitarDragDropAssociacaoPedidoNfe(preview);
+  previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach((input) => {
+    input.addEventListener('input', snapshotEdicoesQtdUnidAssociacaoNfe);
+    input.addEventListener('change', snapshotEdicoesQtdUnidAssociacaoNfe);
+  });
 }
 
 async function previsualizarAssociacaoPedidoNfeOmie() {
@@ -46409,6 +46566,10 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
       numeroPedido,
       preview: data.preview
     };
+    window.__associarNfePreviewEstadoItens = Array.isArray(data?.preview?.itens)
+      ? data.preview.itens.map((item) => ({ ...item }))
+      : [];
+    window.__associarNfeCamposEditados = {};
 
     if (window.__associarNfeRecebimentoAtual && data?.preview?.categoria) {
       window.__associarNfeRecebimentoAtual = {
@@ -46427,13 +46588,17 @@ async function previsualizarAssociacaoPedidoNfeOmie() {
 
     renderPreviewAssociacaoPedidoNfe(data.preview);
 
-    if (Number(data?.preview?.itens_sem_match_total || 0) > 0) {
-      setStatusModalAssociarPedidoNfe('Prévia gerada. Existem itens sem match; revise antes de confirmar.', 'erro');
+    const qtdSemMatch = Number(data?.preview?.itens_sem_match_total || 0);
+    if (qtdSemMatch > 0) {
+      setStatusModalAssociarPedidoNfe(
+        `Prévia gerada. ${qtdSemMatch} item(ns) da NF-e não foram mapeados ao pedido — revise antes de confirmar.`,
+        'erro'
+      );
+      btnAssociar.disabled = true;
     } else {
       setStatusModalAssociarPedidoNfe('Prévia gerada. Itens prontos para associação.', 'sucesso');
+      btnAssociar.disabled = false;
     }
-
-    btnAssociar.disabled = false;
   } catch (err) {
     setStatusModalAssociarPedidoNfe(err?.message || 'Erro ao gerar prévia de associação.', 'erro');
   } finally {
@@ -46562,15 +46727,29 @@ async function confirmarAssociacaoPedidoNfeOmie() {
   try {
     const contextoAtual = window.__associarNfeContextoAtual || {};
 
-    // Coleta overrides de Qtd/Unid editados pelo usuário na prévia
-    const itensOverride = [];
+    // Coleta overrides de vínculo/Qtd/Unid editados pelo usuário na prévia
+    const itensOverrideMap = new Map();
+    const itensEstado = Array.isArray(window.__associarNfePreviewEstadoItens)
+      ? window.__associarNfePreviewEstadoItens
+      : [];
+
+    itensEstado.forEach((item) => {
+      const seq = Number(item?.n_sequencia || 0);
+      const nIdItPedidoExistente = Number(item?.pedido_n_cod_item || 0);
+      if (!seq || !Number.isFinite(nIdItPedidoExistente) || nIdItPedidoExistente <= 0) return;
+      itensOverrideMap.set(seq, { n_sequencia: seq, nIdItPedidoExistente });
+    });
+
     const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
     if (previewConteudo) {
       previewConteudo.querySelectorAll('.assoc-override-qtd, .assoc-override-unid').forEach(input => {
         const seq = Number(input.dataset.seq || 0);
         if (!seq) return;
-        let entry = itensOverride.find(e => e.n_sequencia === seq);
-        if (!entry) { entry = { n_sequencia: seq }; itensOverride.push(entry); }
+        let entry = itensOverrideMap.get(seq);
+        if (!entry) {
+          entry = { n_sequencia: seq };
+          itensOverrideMap.set(seq, entry);
+        }
         if (input.classList.contains('assoc-override-qtd')) {
           entry.nQtde = parseFloat(String(input.value || '').replace(',', '.')) || null;
         }
@@ -46579,6 +46758,8 @@ async function confirmarAssociacaoPedidoNfeOmie() {
         }
       });
     }
+
+    const itensOverride = Array.from(itensOverrideMap.values());
 
     const resp = await fetch('/api/compras/pedidos-omie/nfe-associar-pedido', {
       method: 'POST',
