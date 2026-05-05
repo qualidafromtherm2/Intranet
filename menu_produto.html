@@ -3568,17 +3568,19 @@
               </div>
               <!-- Seção Dados da Busca (at_busca_selecionada) -->
               <div>
-                <div class="at-em-section-title" style="color:#a78bfa;">
+                <div class="at-em-section-title" style="color:#a78bfa;display:flex;align-items:center;gap:8px;">
                   <i class="fa-solid fa-barcode"></i> Dados da Busca
+                  <span id="atEmBuscaSpinner" style="display:none;width:13px;height:13px;border:2px solid rgba(167,139,250,.3);border-top-color:#a78bfa;border-radius:50%;animation:atSpinAnim .7s linear infinite;flex-shrink:0;"></span>
+                  <span id="atEmBuscaSpinnerTxt" style="display:none;font-size:11px;font-weight:400;color:#a78bfa;opacity:.85;">Pesquisando...</span>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
-                    <label class="at-em-lbl">Pedido</label>
-                    <input type="text" id="atEmPedido" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                    <label class="at-em-lbl">Pedido <small style="color:#6b7280;font-weight:400;">(Enter para buscar)</small></label>
+                    <input type="text" id="atEmPedido" class="at-em-input" placeholder="Digite e pressione Enter para buscar" autocomplete="off">
                   </div>
                   <div class="at-em-wrap">
-                    <label class="at-em-lbl">Ordem de Produção</label>
-                    <input type="text" id="atEmOrdemProducao" class="at-em-input" placeholder="—" readonly style="opacity:.8;cursor:default;">
+                    <label class="at-em-lbl">Ordem de Produção <small style="color:#6b7280;font-weight:400;">(Enter para buscar)</small></label>
+                    <input type="text" id="atEmOrdemProducao" class="at-em-input" placeholder="Digite e pressione Enter para buscar" autocomplete="off">
                   </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Nota Fiscal</label>
@@ -4200,7 +4202,7 @@
           </div>
         </div>
 
-        <div id="atSerieModal" class="modal-overlay" style="display:none;z-index:10035;">
+        <div id="atSerieModal" class="modal-overlay" style="display:none;z-index:10050;">
           <div class="modal-container" style="max-width:980px;width:94%;">
             <div class="modal-header">
               <h3 style="margin:0;display:flex;align-items:center;gap:8px;">

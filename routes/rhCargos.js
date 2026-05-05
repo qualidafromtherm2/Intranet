@@ -187,6 +187,7 @@ function normalizeColaboradorPayload(body = {}) {
     data_nascimento: body.data_nascimento || null,
     telefone_contato: body.telefone_contato == null ? null : String(body.telefone_contato).trim() || null,
     receber_notificacao: body.receber_notificacao === true,
+    is_active: body.is_active !== false,
     tipo_contrato: ['CLT','PJ','Temporario','Terceiro'].includes(body.tipo_contrato) ? body.tipo_contrato : null,
     funcao_id: toInt(body.funcao_id),
     setor_id: toInt(body.setor_id),
@@ -201,6 +202,7 @@ router.get('/colaboradores/usuarios', async (_req, res) => {
          u.id,
          u.username,
          u.email,
+         u.is_active,
          up.funcao_id,
          up.sector_id AS setor_id,
          f.name AS funcao,
@@ -213,12 +215,38 @@ router.get('/colaboradores/usuarios', async (_req, res) => {
        LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
        LEFT JOIN public.auth_sector s ON s.id = up.sector_id
        LEFT JOIN rh.colaboradores rc ON rc.user_id = u.id
+       WHERE u.is_active IS DISTINCT FROM false
        ORDER BY u.username`
     );
     return res.json(rows);
   } catch (err) {
     console.error('[GET /api/rh/colaboradores/usuarios] erro:', err?.message || err);
     return res.status(500).json({ error: 'Erro ao listar usuários para RH' });
+  }
+});
+
+router.get('/colaboradores/inativos', async (_req, res) => {
+  try {
+    const { rows } = await dbQuery(
+      `SELECT
+         u.id,
+         u.username,
+         u.email,
+         up.funcao_id,
+         up.sector_id AS setor_id,
+         f.name AS funcao,
+         s.name AS setor
+       FROM public.auth_user u
+       LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+       LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+       LEFT JOIN public.auth_sector s ON s.id = up.sector_id
+       WHERE u.is_active = false
+       ORDER BY u.username`
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error('[GET /api/rh/colaboradores/inativos] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao listar colaboradores inativos' });
   }
 });
 
@@ -238,6 +266,7 @@ router.get('/colaboradores/:userId', async (req, res) => {
          u.data_nascimento,
          u.telefone_contato,
          u.receber_notificacao,
+         u.is_active,
          u.tipo_contrato,
          u.ultimo_acesso,
          up.funcao_id,
@@ -305,9 +334,10 @@ router.post('/colaboradores/salvar', async (req, res) => {
               telefone_contato = $4,
               receber_notificacao = $5,
               tipo_contrato = $6,
+              is_active = $7,
               updated_at = NOW()
-        WHERE id = $7`,
-      [data.nome_completo, data.email, data.data_nascimento, data.telefone_contato, data.receber_notificacao, data.tipo_contrato, data.user_id]
+        WHERE id = $8`,
+      [data.nome_completo, data.email, data.data_nascimento, data.telefone_contato, data.receber_notificacao, data.tipo_contrato, data.is_active, data.user_id]
     );
 
     await client.query(
@@ -1093,6 +1123,30 @@ router.delete('/funcionarios/ferias-registros/:id', async (req, res) => {
   } catch (err) {
     console.error('[DELETE /api/rh/funcionarios/ferias-registros/:id] erro:', err?.message || err);
     return res.status(500).json({ error: 'Erro ao excluir registro de férias' });
+  }
+});
+
+router.patch('/colaboradores/:userId/status', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  const { is_active } = req.body || {};
+  if (typeof is_active !== 'boolean') {
+    return res.status(400).json({ error: 'Campo is_active (boolean) é obrigatório' });
+  }
+  try {
+    const { rowCount } = await dbQuery(
+      `UPDATE public.auth_user SET is_active = $1, updated_at = NOW() WHERE id = $2`,
+      [is_active, userId]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    return res.json({ ok: true, is_active });
+  } catch (err) {
+    console.error('[PATCH /api/rh/colaboradores/:userId/status] erro:', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao alterar status do colaborador' });
   }
 });
 

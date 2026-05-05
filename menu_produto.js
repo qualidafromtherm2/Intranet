@@ -13108,8 +13108,17 @@ async function buscarSerieAtComTermo(termoBruto, options = {}) {
 
   if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = true;
   if (atBuscaSpinner) atBuscaSpinner.style.display = 'block';
-  if (isEditMode) _atEditBuscaSetFeedback('Pesquisando dados...', false);
-  else setAtSerieBuscaStatus('Pesquisando número de série...', false);
+  if (isEditMode) {
+    _atEditBuscaSetFeedback('', false);
+    const _sp = document.getElementById('atEmBuscaSpinner');
+    const _spTxt = document.getElementById('atEmBuscaSpinnerTxt');
+    const _fPed = document.getElementById('atEmPedido');
+    const _fOp  = document.getElementById('atEmOrdemProducao');
+    if (_sp) _sp.style.display = 'inline-block';
+    if (_spTxt) _spTxt.style.display = 'inline';
+    if (_fPed) _fPed.disabled = true;
+    if (_fOp)  _fOp.disabled  = true;
+  } else setAtSerieBuscaStatus('Pesquisando número de série...', false);
 
   try {
     const resp = await fetch(`/api/sac/at/busca-serie?termo=${encodeURIComponent(termo)}`);
@@ -13140,6 +13149,16 @@ async function buscarSerieAtComTermo(termoBruto, options = {}) {
   } finally {
     if (atSerieBuscaBtn) atSerieBuscaBtn.disabled = false;
     if (atBuscaSpinner) atBuscaSpinner.style.display = 'none';
+    if (isEditMode) {
+      const _sp = document.getElementById('atEmBuscaSpinner');
+      const _spTxt = document.getElementById('atEmBuscaSpinnerTxt');
+      const _fPed = document.getElementById('atEmPedido');
+      const _fOp  = document.getElementById('atEmOrdemProducao');
+      if (_sp) _sp.style.display = 'none';
+      if (_spTxt) _spTxt.style.display = 'none';
+      if (_fPed) _fPed.disabled = false;
+      if (_fOp)  _fOp.disabled  = false;
+    }
   }
 }
 
@@ -13478,12 +13497,21 @@ if (atSerieModalTbody) {
     const rowData = atSerieRenderedRows[idx];
     if (!rowData) return;
 
-    if (atSerieSelectionContext.mode === 'edit' && _atEditModalCurrentId) {
+    // Se o modal de edição está aberto, SEMPRE aplica na OS em edição (não abre Nova OS)
+    if (_atEditModalCurrentId) {
+      // Spinner na linha clicada
+      const _origHtml = rowEl.innerHTML;
+      rowEl.innerHTML = `<td colspan="7" style="text-align:center;padding:8px;">
+        <span style="display:inline-flex;align-items:center;gap:8px;color:#a78bfa;font-size:13px;">
+          <span style="width:14px;height:14px;border:2px solid rgba(167,139,250,.3);border-top-color:#a78bfa;border-radius:50%;animation:atSpinAnim .7s linear infinite;display:inline-block;"></span>
+          Associando...
+        </span></td>`;
       try {
         await _atAplicarBuscaSelecionadaNoEditModal(rowData);
         closeAtSerieModal();
       } catch (err) {
         console.error('[SAC/AT] erro ao aplicar Dados da Busca no modal de edição', err);
+        rowEl.innerHTML = _origHtml;
         _atEditBuscaSetFeedback(err?.message || 'Erro ao associar Dados da Busca.', true);
       } finally {
         setAtSerieSelectionContext('create', null);
@@ -16034,10 +16062,10 @@ if (_atStatusBtn && _atStatusDropdown) {
 }
 const _atEmCancelBtn    = document.getElementById('atEmCancelBtn');
 const _atEmSaveBtn      = document.getElementById('atEmSaveBtn');
-if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; });
-if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; });
+if (_atEditModalClose) _atEditModalClose.addEventListener('click', () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
+if (_atEmCancelBtn)    _atEmCancelBtn.addEventListener('click',    () => { if (_atEditModal) _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; });
 if (_atEmSaveBtn)      _atEmSaveBtn.addEventListener('click',      () => _salvarAtEditModal());
-if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) _atEditModal.style.display = 'none'; });
+if (_atEditModal)      _atEditModal.addEventListener('click', e => { if (e.target === _atEditModal) { _atEditModal.style.display = 'none'; _atEditModalCurrentId = null; } });
 
 // Botão Anexar arquivo no modal editar
 const _atEmAnexarBtn   = document.getElementById('atEmAnexarBtn');
