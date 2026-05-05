@@ -29928,6 +29928,13 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     let ufNfeRegraCfop = '';
     let cfopCalculado = null;
 
+    const dHoje = (() => {
+      const d = new Date();
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${d.getFullYear()}`;
+    })();
+
     if (nCodCC) {
       try {
         // Busca dados atuais do recebimento + unidades do pedido
@@ -30083,12 +30090,6 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }
 
         // --- infoAdicionais: dRegistro = hoje, nIdConta = nCodCC ---
-        const dHoje = (() => {
-          const d = new Date();
-          const dd = String(d.getDate()).padStart(2, '0');
-          const mm = String(d.getMonth() + 1).padStart(2, '0');
-          return `${dd}/${mm}/${d.getFullYear()}`;
-        })();
         // novaCategoriaCompra: substitui a categoria inativa se o usuário selecionou uma nova
         const categoriaParaInforAdic = novaCategoriaCompra || recebAtual?.infoAdicionais?.cCategCompra || undefined;
         infoAdicionaisParaEnviar = {
@@ -30160,6 +30161,16 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
+    if (novaCategoriaCompra && !infoAdicionaisParaEnviar) {
+      infoAdicionaisParaEnviar = {
+        cCategCompra: novaCategoriaCompra,
+        dRegistro: dHoje,
+        ...(nCodCC ? { nIdConta: nCodCC } : {})
+      };
+      cCategCompraRegraCfop = novaCategoriaCompra;
+      console.log(`[Compras/NFeAssociarPedido] infoAdicionais fallback montado para categoria=${novaCategoriaCompra}`);
+    }
+
     // ─── Passo 1: associação do pedido (PRIMEIRO, pois pode resetar dados financeiros) ───
     // Se houver troca de categoria, ela precisa ir junto com a associação.
     // A Omie pode validar a categoria antiga já no vínculo do pedido antes do Passo 2.
@@ -30204,7 +30215,51 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           tentativasMaximas: 2
         });
         console.log('[Compras/NFeAssociarPedido] Parcelas/infoAdicionais atualizados com sucesso.');
+
+        if (novaCategoriaCompra) {
+          let categoriaConfirmada = '';
+          try {
+            const recebConf = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
+              nIdReceb: Number(plano.n_id_receb)
+            }, { tentativasMaximas: 2 });
+            categoriaConfirmada = String(
+              recebConf?.infoAdicionais?.cCategCompra
+              || recebConf?.cabec?.cCategCompra
+              || recebConf?.cabec?.c_categoria_compra
+              || ''
+            ).trim();
+          } catch (errConf) {
+            console.warn('[Compras/NFeAssociarPedido] Falha ao confirmar categoria após AlterarRecebimento:', errConf?.message);
+          }
+
+          if (categoriaConfirmada !== novaCategoriaCompra) {
+            console.warn(`[Compras/NFeAssociarPedido] Categoria ainda não confirmada (${categoriaConfirmada || 'vazia'}). Tentando AlterarRecebimentoConcluido.`);
+            await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimentoConcluido', {
+              ide: { nIdReceb: Number(plano.n_id_receb) },
+              infoAdicionais: infoAdicionaisParaEnviar
+            }, { tentativasMaximas: 2 });
+
+            const recebConfFinal = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConsultarRecebimento', {
+              nIdReceb: Number(plano.n_id_receb)
+            }, { tentativasMaximas: 2 });
+            categoriaConfirmada = String(
+              recebConfFinal?.infoAdicionais?.cCategCompra
+              || recebConfFinal?.cabec?.cCategCompra
+              || recebConfFinal?.cabec?.c_categoria_compra
+              || ''
+            ).trim();
+          }
+
+          if (categoriaConfirmada !== novaCategoriaCompra) {
+            throw new Error(`Omie não confirmou a nova categoria antes da conclusão. Esperado=${novaCategoriaCompra}, atual=${categoriaConfirmada || 'N/A'}.`);
+          }
+
+          console.log(`[Compras/NFeAssociarPedido] Categoria confirmada na Omie: ${categoriaConfirmada}`);
+        }
       } catch (errParcelas) {
+        if (novaCategoriaCompra) {
+          throw errParcelas;
+        }
         console.warn('[Compras/NFeAssociarPedido] Falha ao atualizar parcelas/infoAdicionais:', errParcelas?.message);
       }
     }
