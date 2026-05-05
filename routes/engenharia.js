@@ -1,6 +1,16 @@
 // routes/engenharia.js
 const express = require('express');
 const router = express.Router();
+const { createClient } = require('@supabase/supabase-js');
+
+function getSupabase() {
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE
+  );
+}
+const ENGENHARIA_BUCKET = 'Engenharia';
+const PASTAS = ['Documento', 'Fotos', 'Videos'];
 
 module.exports = (pool) => {
   
@@ -172,5 +182,356 @@ module.exports = (pool) => {
     }
   });
   
+  // -------------------------------------------------------------------------
+  // CÓDIGOS DE ERRO  (3 tabelas: codigos_erro → codigo_analise → codigo_solucao)
+  // -------------------------------------------------------------------------
+
+  // GET /api/engenharia/codigos-erro?codigo=XXX
+  // Retorna lista de códigos únicos, cada um com suas análises e soluções.
+  router.get('/codigos-erro', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const codigo = String(req.query.codigo || '').trim();
+      if (!codigo) {
+        return res.status(400).json({ error: 'Parâmetro "codigo" é obrigatório.' });
+      }
+
+      const result = await client.query(
+        `SELECT
+           ce.id              AS codigo_erro_id,
+           ce.codigo,
+           ce.criado_por      AS codigo_criado_por,
+           ca.id              AS analise_id,
+           ca.analise,
+           cs.id              AS solucao_id,
+           cs.solucao_problema
+         FROM engenharia.codigos_erro ce
+         LEFT JOIN engenharia.codigo_analise ca ON ca.codigo_erro_id = ce.id
+         LEFT JOIN engenharia.codigo_solucao cs ON cs.codigo_analise_id = ca.id
+         WHERE ce.codigo ILIKE $1
+         ORDER BY ce.id ASC, ca.id ASC, cs.id ASC`,
+        [`%${codigo}%`]
+      );
+
+      // Agregar resultado flat → estrutura aninhada
+      const codesMap = new Map();
+      for (const row of result.rows) {
+        if (!codesMap.has(row.codigo_erro_id)) {
+          codesMap.set(row.codigo_erro_id, {
+            id: row.codigo_erro_id,
+            codigo: row.codigo,
+            criado_por: row.codigo_criado_por,
+            analises: []
+          });
+        }
+        const entry = codesMap.get(row.codigo_erro_id);
+
+        if (row.analise_id) {
+          let analise = entry.analises.find(a => a.id === row.analise_id);
+          if (!analise) {
+            analise = { id: row.analise_id, analise: row.analise, solucoes: [] };
+            entry.analises.push(analise);
+          }
+          if (row.solucao_id && !analise.solucoes.find(s => s.id === row.solucao_id)) {
+            analise.solucoes.push({ id: row.solucao_id, solucao_problema: row.solucao_problema });
+          }
+        }
+      }
+
+      res.json({ ok: true, registros: Array.from(codesMap.values()) });
+    } catch (e) {
+      console.error('[GET /api/engenharia/codigos-erro] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/engenharia/codigos-erro — cadastra código + análise + solução
+  // Body: { codigo, analise, solucao_problema }
+  router.post('/codigos-erro', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { codigo, analise, solucao_problema } = req.body;
+      if (!codigo) {
+        return res.status(400).json({ error: 'Campo "codigo" é obrigatório.' });
+      }
+      const criadoPor = req.session?.usuario?.username || req.session?.usuario?.nome || 'sistema';
+
+      await client.query('BEGIN');
+
+      // Upsert código
+      let codigoErroId;
+      const existing = await client.query(
+        `SELECT id FROM engenharia.codigos_erro WHERE codigo = $1 LIMIT 1`,
+        [codigo.trim()]
+      );
+      if (existing.rows.length) {
+        codigoErroId = existing.rows[0].id;
+      } else {
+        const ins = await client.query(
+          `INSERT INTO engenharia.codigos_erro (codigo, criado_por) VALUES ($1, $2) RETURNING id`,
+          [codigo.trim(), criadoPor]
+        );
+        codigoErroId = ins.rows[0].id;
+      }
+
+      // Inserir análise
+      const analiseRes = await client.query(
+        `INSERT INTO engenharia.codigo_analise (codigo_erro_id, analise, criado_por)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [codigoErroId, analise || null, criadoPor]
+      );
+      const analiseId = analiseRes.rows[0].id;
+
+      // Inserir solução (se fornecida)
+      if (solucao_problema && String(solucao_problema).trim()) {
+        await client.query(
+          `INSERT INTO engenharia.codigo_solucao (codigo_analise_id, solucao_problema, criado_por)
+           VALUES ($1, $2, $3)`,
+          [analiseId, solucao_problema, criadoPor]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.json({ ok: true, codigo_erro_id: codigoErroId, analise_id: analiseId });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[POST /api/engenharia/codigos-erro] erro:', e);
+      res.status(500).json({ error: e.message || String(e) });
+    } finally {
+      client.release();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // ARQUIVOS SUPABASE — codigos-erro/{id}/{pasta}/
+  // -------------------------------------------------------------------------
+
+  // GET /api/engenharia/codigos-erro/:id/arquivos  — lista arquivos das 3 pastas
+  router.get('/codigos-erro/:id/arquivos', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      const supabase = getSupabase();
+      const resultado = {};
+      for (const pasta of PASTAS) {
+        const prefixo = `codigos-erro/${id}/${pasta}`;
+        const { data, error } = await supabase.storage.from(ENGENHARIA_BUCKET).list(prefixo);
+        if (error) { resultado[pasta] = []; continue; }
+        resultado[pasta] = (data || [])
+          .filter(f => f.name && f.name !== '.emptyFolderPlaceholder')
+          .map(f => {
+            const filePath = `${prefixo}/${f.name}`;
+            const { data: pub } = supabase.storage.from(ENGENHARIA_BUCKET).getPublicUrl(filePath);
+            return { nome: f.name, url: pub.publicUrl, path: filePath, tamanho: f.metadata?.size || 0 };
+          });
+      }
+      res.json({ ok: true, arquivos: resultado });
+    } catch (e) {
+      console.error('[GET /api/engenharia/codigos-erro/:id/arquivos] erro:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // DELETE /api/engenharia/codigos-erro/arquivo  — remove arquivo do Supabase
+  // Body: { path: 'codigos-erro/1/Fotos/imagem.jpg' }
+  router.delete('/codigos-erro/arquivo', async (req, res) => {
+    try {
+      const { path: filePath } = req.body;
+      if (!filePath) return res.status(400).json({ error: 'Campo "path" obrigatório.' });
+      // Segurança: só permite caminhos dentro de codigos-erro/
+      if (!String(filePath).startsWith('codigos-erro/')) {
+        return res.status(403).json({ error: 'Caminho não permitido.' });
+      }
+      const supabase = getSupabase();
+      const { error } = await supabase.storage.from(ENGENHARIA_BUCKET).remove([filePath]);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[DELETE /api/engenharia/codigos-erro/arquivo] erro:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PUT /api/engenharia/codigos-erro/:id  — edita o texto do código
+  router.put('/codigos-erro/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { codigo } = req.body;
+      if (!id || !codigo) return res.status(400).json({ error: 'id e codigo obrigatórios.' });
+      await client.query('UPDATE engenharia.codigos_erro SET codigo = $1 WHERE id = $2', [codigo.trim(), id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[PUT /api/engenharia/codigos-erro/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // POST /api/engenharia/codigo-analise  — adiciona análise a um código
+  router.post('/codigo-analise', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { codigo_erro_id, analise, solucao_problema } = req.body;
+      if (!codigo_erro_id) return res.status(400).json({ error: 'codigo_erro_id obrigatório.' });
+      const criadoPor = req.session?.usuario?.username || req.session?.usuario?.nome || 'sistema';
+      await client.query('BEGIN');
+      const analiseRes = await client.query(
+        `INSERT INTO engenharia.codigo_analise (codigo_erro_id, analise, criado_por) VALUES ($1, $2, $3) RETURNING id`,
+        [codigo_erro_id, analise || null, criadoPor]
+      );
+      const analiseId = analiseRes.rows[0].id;
+      if (solucao_problema && String(solucao_problema).trim()) {
+        await client.query(
+          `INSERT INTO engenharia.codigo_solucao (codigo_analise_id, solucao_problema, criado_por) VALUES ($1, $2, $3)`,
+          [analiseId, solucao_problema.trim(), criadoPor]
+        );
+      }
+      await client.query('COMMIT');
+      res.json({ ok: true, analise_id: analiseId });
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[POST /api/engenharia/codigo-analise] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // PUT /api/engenharia/codigo-analise/:id  — edita análise
+  router.put('/codigo-analise/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { analise } = req.body;
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('UPDATE engenharia.codigo_analise SET analise = $1 WHERE id = $2', [analise || null, id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[PUT /api/engenharia/codigo-analise/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // DELETE /api/engenharia/codigo-analise/:id  — remove análise (e suas soluções via cascade)
+  router.delete('/codigo-analise/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('DELETE FROM engenharia.codigo_analise WHERE id = $1', [id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[DELETE /api/engenharia/codigo-analise/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // PUT /api/engenharia/codigo-solucao/:id  — edita solução
+  router.put('/codigo-solucao/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { solucao_problema } = req.body;
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('UPDATE engenharia.codigo_solucao SET solucao_problema = $1 WHERE id = $2', [solucao_problema || null, id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[PUT /api/engenharia/codigo-solucao/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // POST /api/engenharia/codigo-solucao  — adiciona solução a uma análise
+  router.post('/codigo-solucao', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { codigo_analise_id, solucao_problema } = req.body;
+      if (!codigo_analise_id || !solucao_problema) return res.status(400).json({ error: 'codigo_analise_id e solucao_problema obrigatórios.' });
+      const criadoPor = req.session?.usuario?.username || req.session?.usuario?.nome || 'sistema';
+      const r = await client.query(
+        `INSERT INTO engenharia.codigo_solucao (codigo_analise_id, solucao_problema, criado_por) VALUES ($1, $2, $3) RETURNING id`,
+        [codigo_analise_id, solucao_problema.trim(), criadoPor]
+      );
+      res.json({ ok: true, id: r.rows[0].id });
+    } catch (e) {
+      console.error('[POST /api/engenharia/codigo-solucao] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // DELETE /api/engenharia/codigo-solucao/:id
+  router.delete('/codigo-solucao/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('DELETE FROM engenharia.codigo_solucao WHERE id = $1', [id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[DELETE /api/engenharia/codigo-solucao/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // -------------------------------------------------------------------------
+  // VERIFICAÇÕES (codigo_verificacoes) — questionamentos ligados a um código
+  // -------------------------------------------------------------------------
+
+  // GET /api/engenharia/codigos-erro/:id/verificacoes
+  router.get('/codigos-erro/:id/verificacoes', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      const { rows } = await client.query(`
+        SELECT v.id, v.codigo_erro_id, v.codigo_analise_id,
+               v.verificacao, v.criado_por, v.criado_em,
+               ca.analise AS analise_texto
+        FROM engenharia.codigo_verificacoes v
+        LEFT JOIN engenharia.codigo_analise ca ON ca.id = v.codigo_analise_id
+        WHERE v.codigo_erro_id = $1
+        ORDER BY v.criado_em ASC
+      `, [id]);
+      res.json({ ok: true, verificacoes: rows });
+    } catch (e) {
+      console.error('[GET /codigos-erro/:id/verificacoes] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // POST /api/engenharia/codigo-verificacoes
+  // Body: { codigo_erro_id, codigo_analise_id?, verificacao }
+  router.post('/codigo-verificacoes', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const { codigo_erro_id, codigo_analise_id, verificacao } = req.body;
+      if (!codigo_erro_id) return res.status(400).json({ error: 'codigo_erro_id obrigatório.' });
+      const criadoPor = req.session?.usuario?.username || req.session?.usuario?.nome || 'sistema';
+      const { rows } = await client.query(`
+        INSERT INTO engenharia.codigo_verificacoes
+          (codigo_erro_id, codigo_analise_id, verificacao, criado_por)
+        VALUES ($1, $2, $3, $4) RETURNING id
+      `, [codigo_erro_id, codigo_analise_id || null, verificacao || null, criadoPor]);
+      res.json({ ok: true, id: rows[0].id });
+    } catch (e) {
+      console.error('[POST /api/engenharia/codigo-verificacoes] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
+  // DELETE /api/engenharia/codigo-verificacoes/:id
+  router.delete('/codigo-verificacoes/:id', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: 'ID inválido.' });
+      await client.query('DELETE FROM engenharia.codigo_verificacoes WHERE id = $1', [id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[DELETE /api/engenharia/codigo-verificacoes/:id] erro:', e);
+      res.status(500).json({ error: e.message });
+    } finally { client.release(); }
+  });
+
   return router;
 };

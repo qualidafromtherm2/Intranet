@@ -10597,7 +10597,7 @@ app.post('/api/upload/supabase', upload.single('file'), async (req, res) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
     
     // Permite especificar o bucket via body; padrão: 'compras-anexos'
-    const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios'];
+    const ALLOWED_BUCKETS = ['compras-anexos', 'Funcionarios', 'Engenharia'];
     const requestedBucket = String(req.body.bucket || '').trim();
     const bucketName = ALLOWED_BUCKETS.includes(requestedBucket) ? requestedBucket : 'compras-anexos';
     const filePath = req.body.path || `uploads/${Date.now()}_${req.file.originalname}`;
