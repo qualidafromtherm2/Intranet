@@ -11,6 +11,7 @@ Guia operacional para agentes IA neste repositório (Codex/Chat):
 - Verificar `git status` e branch atual.
 - Confirmar escopo da tarefa e evitar tocar áreas fora do pedido.
 - Se houver risco de conflito (ex.: `server.js`), editar apenas trecho estritamente necessário.
+- ⚠️ Se houver arquivos modificados não commitados não relacionados à nova tarefa, commitá-los ANTES de iniciar.
 
 3. Regras de convivência entre áreas
 - Layout/UI: `menu_produto.*`, `public/`, `img/`.
@@ -22,10 +23,15 @@ Guia operacional para agentes IA neste repositório (Codex/Chat):
 - Nunca versionar segredos, credenciais, tokens ou dumps sensíveis.
 - Respeitar `.gitignore` e não recriar arquivos acidentais/local-only.
 
-5. Commits e revisão
+5. Commits e revisão — OBRIGATÓRIO AO FINAL DE CADA TAREFA
+- ⚠️ NUNCA terminar uma tarefa sem commitar. Arquivos só no working directory são perdidos permanentemente se a próxima sessão editar o mesmo arquivo.
 - Separar commits por tema: limpeza, docs, funcionalidade.
 - Não misturar refatoração ampla com correção funcional.
 - Relatar claramente o que foi alterado e por quê.
+- Fluxo mínimo ao fechar uma tarefa:
+  1. `git status --short`
+  2. `node --check <arquivos JS alterados>`
+  3. `git add <arquivos> && git commit -m "tipo(area): descrição"`
 
 6. PM2
 - Após alterações relevantes de backend, aplicar sequência operacional:
