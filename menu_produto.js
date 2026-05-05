@@ -46199,6 +46199,63 @@ function obterUnidadePedidoPreviewAssociacao(item) {
   return String(encontrado?.unidade || '-').trim() || '-';
 }
 
+const DICIONARIO_EQUIVALENCIA_UNIDADE_PREVIEW = {
+  UN: ['UN', 'UND', 'UNID', 'UNIDADE', 'UNIDAD', 'UNIT', 'PC', 'PÇ', 'PECA', 'PEÇA', 'PCS', 'PÇS', 'PECAS', 'PEÇAS'],
+  PAR: ['PAR', 'PARES', 'PR'],
+  CX: ['CX', 'CAIXA', 'CXS', 'CAIXAS'],
+  PCT: ['PCT', 'PAC', 'PACOTE', 'PACOTES', 'EMB', 'EMBALAGEM', 'EMBALAGENS'],
+  RL: ['RL', 'RLO', 'ROLO', 'ROLOS'],
+  M: ['M', 'MT', 'MTS', 'METRO', 'METROS'],
+  CM: ['CM', 'CENTIMETRO', 'CENTÍMETRO', 'CENTIMETROS', 'CENTÍMETROS'],
+  MM: ['MM', 'MILIMETRO', 'MILÍMETRO', 'MILIMETROS', 'MILÍMETROS'],
+  KG: ['KG', 'KILO', 'QUILO', 'QUILOGRAMA', 'QUILOGRAMAS'],
+  G: ['G', 'GR', 'GRAMA', 'GRAMAS'],
+  TON: ['TON', 'T', 'TONELADA', 'TONELADAS'],
+  L: ['L', 'LT', 'LTS', 'LITRO', 'LITROS'],
+  ML: ['ML', 'MILILITRO', 'MILILITROS'],
+  M2: ['M2', 'M²', 'MT2', 'METRO2', 'METRO QUADRADO', 'METROS QUADRADOS'],
+  M3: ['M3', 'M³', 'MT3', 'METRO3', 'METRO CUBICO', 'METRO CÚBICO', 'METROS CUBICOS', 'METROS CÚBICOS']
+};
+
+function normalizarTokenUnidadePreview(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+}
+
+const MAPA_CANONICO_UNIDADE_PREVIEW = (() => {
+  const mapa = new Map();
+
+  Object.entries(DICIONARIO_EQUIVALENCIA_UNIDADE_PREVIEW).forEach(([canonico, aliases]) => {
+    const chaveCanonica = normalizarTokenUnidadePreview(canonico);
+    if (chaveCanonica) mapa.set(chaveCanonica, canonico);
+
+    aliases.forEach((alias) => {
+      const chaveAlias = normalizarTokenUnidadePreview(alias);
+      if (chaveAlias) mapa.set(chaveAlias, canonico);
+    });
+  });
+
+  return mapa;
+})();
+
+function unidadeCanonicaPreview(valor) {
+  const token = normalizarTokenUnidadePreview(valor);
+  if (!token) return '';
+  return MAPA_CANONICO_UNIDADE_PREVIEW.get(token) || token;
+}
+
+function unidadesEquivalentesPreview(unidadeA, unidadeB) {
+  const canonicaA = unidadeCanonicaPreview(unidadeA);
+  const canonicaB = unidadeCanonicaPreview(unidadeB);
+  if (!canonicaA || !canonicaB) return false;
+  return canonicaA === canonicaB;
+}
+
 function snapshotEdicoesQtdUnidAssociacaoNfe() {
   const previewConteudo = document.getElementById('modalAssociarPedidoNfePreviewConteudo');
   if (!previewConteudo) return;
@@ -46357,10 +46414,11 @@ function renderPreviewAssociacaoPedidoNfe(preview) {
     return String(item?.nf_qtde ?? '').trim() !== String(item?.pedido_qtde ?? '').trim();
   };
   const compararUnidadePreview = (item, unidadePedido) => {
-    const nfUnidade = normalizarTextoRecebimento(item?.nf_unidade || '');
-    const pedidoUnidade = normalizarTextoRecebimento(unidadePedido || '');
+    const nfUnidade = String(item?.nf_unidade || '').trim();
+    const pedidoUnidade = String(unidadePedido || '').trim();
     if (!nfUnidade && !pedidoUnidade) return false;
-    return nfUnidade !== pedidoUnidade;
+    if (!nfUnidade || !pedidoUnidade) return true;
+    return !unidadesEquivalentesPreview(nfUnidade, pedidoUnidade);
   };
 
   const itensComMatch = itens.filter((item) => !!item?.pedido_item_encontrado).length;
