@@ -2408,6 +2408,31 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     await enviarMenuPrincipal('✅ Posso ajudar com mais alguma coisa?', logMode ? logMode + ' → menu' : 'finalizar → menu');
   }
 
+  // Helper para enviar menu externo (somente Manual de instrução)
+  async function enviarMenuExterno(textoIntro, logMode) {
+    const sendPayload = await enviarMensagemWhatsappLista({
+      phoneNumberId, toPhone: phoneDigits,
+      headerText: 'Atendimento Fromtherm',
+      bodyText: textoIntro || 'Como posso ajudar?',
+      footerText: 'Selecione uma opção',
+      buttonText: 'Menu de opções',
+      sections: [{
+        title: 'Opções disponíveis',
+        rows: [
+          { id: 'menu_manual_instrucao', title: 'Manual de instrução', description: 'Buscar manual do seu equipamento' }
+        ]
+      }]
+    });
+    const outMsgId = String(sendPayload?.messages?.[0]?.id || '').trim() || null;
+    await insertWhatsappMessageRecord({
+      waMessageId: outMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm',
+      messageType: 'interactive', messageText: textoIntro || 'Menu externo',
+      phoneNumberId, displayPhoneNumber, payload: sendPayload, direction: 'outbound'
+    });
+    if (logMode) console.log(`[WhatsApp] ${logMode}:`, JSON.stringify({ to_phone: phoneDigits }));
+    return { sendPayload, outMsgId };
+  }
+
   async function enviarBotoesConsultaPedidoVenda(bodyText) {
     const bPayload = await enviarMensagemWhatsappComBotoes({
       phoneNumberId,
@@ -3046,35 +3071,131 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
   }
 
   /* ====================================================================
-   *  CONTATOS EXTERNOS — Resposta automática via IA
+   *  CONTATOS EXTERNOS — Menu com Manual de instrução
    * ==================================================================== */
-  const historyRows = await listarHistoricoWhatsapp(phoneDigits, 10);
-  const replyData = await gerarRespostaAutomaticaWhatsapp({
-    phone: phoneDigits,
-    profileName,
-    userMessage: userText,
-    historyRows
-  });
-  const sendResult = await enviarRespostaWhatsappComMidia({
-    phoneDigits,
-    profileName: 'Chatbot Fromtherm',
-    phoneNumberId,
-    displayPhoneNumber,
-    requestText: userText,
-    replyData
-  });
+  {
+    let menuState = menuInternoState.get(phoneDigits);
 
-  console.log(
-    '[WhatsApp] resposta automática enviada:',
-    JSON.stringify({
-      mode: replyData?.modo || 'externo',
-      from_phone_number_id: phoneNumberId,
-      to_phone_requested: phoneDigits,
-      to_phone_sent: sendResult?.sendPayload?.__meta?.sent_to || null,
-      outbound_message_id: sendResult?.outboundMessageId || null,
-      media_messages: Array.isArray(sendResult?.mediaPayloads) ? sendResult.mediaPayloads.length : 0
-    })
-  );
+    // "voltar" / "menu" → reseta e mostra menu externo
+    if (menuState?.fluxo && (/^(0|finalizar|encerrar|voltar|menu|sair)$/i.test(userText) || interactiveId === 'menu_voltar')) {
+      menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+      await enviarMenuExterno('✅ Assunto finalizado!\n\nPosso ajudar com mais alguma coisa?', 'externo menu finalizar');
+      return;
+    }
+
+    // Se está em fluxo de MANUAL_INSTRUCAO
+    if (menuState?.fluxo === 'MANUAL_INSTRUCAO') {
+      const step = menuState.step || 'ESCOLHENDO_MANUAL';
+
+      if (step === 'ESCOLHENDO_MANUAL') {
+        if (interactiveId?.startsWith('msel_')) {
+          const manualId = parseInt(interactiveId.slice(5), 10);
+          const { rows: manualRows } = await pool.query(
+            `SELECT id, nome_arquivo, caminho_manual, paginas FROM "Chatbot".manuais_instrucao WHERE id = $1`,
+            [manualId]
+          );
+          const manual = manualRows[0];
+          if (!manual) { await enviarTextoERegistrar('❓ Manual não encontrado.', 'externo manual sel inválida'); return; }
+          menuInternoState.set(phoneDigits, {
+            fluxo: 'MANUAL_INSTRUCAO', step: 'AGUARDANDO_DUVIDA_MANUAL',
+            manualId: manual.id, nomeManual: manual.nome_arquivo,
+            caminho: manual.caminho_manual, updatedAt: Date.now()
+          });
+          await enviarTextoERegistrar(
+            `📘 *Manual selecionado:* ${manual.nome_arquivo}\n\nAgora me envie sua dúvida sobre este manual.\n\nExemplo: _como configurar a temperatura?_`,
+            'externo manual aguardando dúvida'
+          );
+          const bPayload = await enviarMensagemWhatsappComBotoes({
+            phoneNumberId, toPhone: phoneDigits,
+            bodyText: 'Você pode perguntar em texto ou usar uma ação abaixo:',
+            buttons: [
+              { id: 'manual_perguntar_mais', title: 'Enviar duvida' },
+              { id: 'msel_voltar_lista', title: 'Trocar manual' },
+              { id: 'menu_voltar', title: 'Menu principal' }
+            ]
+          });
+          const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+          await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações manual instrução externo', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+          return;
+        }
+        // Texto livre ou qualquer outra coisa → reapresenta a lista
+        await enviarListaTodosManuais();
+        return;
+      }
+
+      if (step === 'AGUARDANDO_DUVIDA_MANUAL') {
+        const { manualId, nomeManual, caminho } = menuState;
+
+        if (interactiveId === 'msel_voltar_lista') {
+          menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'ESCOLHENDO_MANUAL', updatedAt: Date.now() });
+          await enviarListaTodosManuais();
+          return;
+        }
+
+        if (interactiveId === 'manual_perguntar_mais') {
+          await enviarTextoERegistrar(
+            `✍️ Envie sua dúvida sobre o manual *${nomeManual}* em uma única mensagem.`,
+            'externo manual pedir dúvida novamente'
+          );
+          return;
+        }
+
+        const duvida = String(userText || '').trim();
+        if (!duvida) {
+          await enviarTextoERegistrar(
+            `✍️ Escreva sua dúvida sobre o manual *${nomeManual}* para eu procurar nos capítulos.`,
+            'externo manual aguardando texto dúvida'
+          );
+          return;
+        }
+        if (duvida.length < 4) {
+          await enviarTextoERegistrar('❗ Escreva uma dúvida mais completa (pelo menos 4 caracteres).', 'externo manual dúvida curta');
+          return;
+        }
+
+        const trechos = await buscarRespostaManualPorDuvida(manualId, duvida);
+        if (trechos.length === 0) {
+          await enviarTextoERegistrar(
+            `Não encontrei um trecho exato no manual para: *${duvida}*\n\nTente com outras palavras (ex: "instalacao", "temperatura", "erro").\n\n🔗 ${caminho}`,
+            'externo manual sem resposta por dúvida'
+          );
+        } else {
+          const blocos = trechos.map((t, idx) =>
+            `*Trecho ${idx + 1} (pag. ${t.pagina ?? '?'})*\n${t.texto}`
+          ).join('\n\n');
+          await enviarTextoERegistrar(
+            `📘 *${nomeManual}*\n\n🔎 *Sua dúvida:* ${duvida}\n\n${blocos}\n\n🔗 ${caminho}`,
+            'externo manual resposta por dúvida'
+          );
+        }
+
+        const bPayload = await enviarMensagemWhatsappComBotoes({
+          phoneNumberId, toPhone: phoneDigits,
+          bodyText: 'Deseja fazer mais alguma ação neste manual?',
+          buttons: [
+            { id: 'manual_perguntar_mais', title: 'Outra duvida' },
+            { id: 'msel_voltar_lista', title: 'Trocar manual' },
+            { id: 'menu_voltar', title: 'Menu principal' }
+          ]
+        });
+        const bMsgId = String(bPayload?.messages?.[0]?.id || '').trim() || null;
+        await insertWhatsappMessageRecord({ waMessageId: bMsgId, phone: phoneDigits, profileName: 'Chatbot Fromtherm', messageType: 'interactive', messageText: 'Ações pós-resposta manual externo', phoneNumberId, displayPhoneNumber, payload: bPayload, direction: 'outbound' });
+        return;
+      }
+    }
+
+    // Selecionou "Manual de instrução" do menu externo
+    if (interactiveId === 'menu_manual_instrucao') {
+      menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'ESCOLHENDO_MANUAL', updatedAt: Date.now() });
+      await enviarListaTodosManuais();
+      return;
+    }
+
+    // Qualquer outra mensagem → mostra menu externo
+    menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
+    await enviarMenuExterno('Olá! 👋\n\nPara iniciar o seu atendimento, escolha uma das opções 👇', 'externo menu principal');
+    return;
+  }
 }
 
 async function getStoredStatus(codigo) {
