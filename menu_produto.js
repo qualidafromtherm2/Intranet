@@ -39534,6 +39534,13 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
     return null;
   }
 
+  const itemAntesDaConsulta = window.carrinhoCompras[itemIdx];
+  const categoriaOperacionalAtual = obterCategoriaCompraOmieOperacionalCarrinho(itemAntesDaConsulta?.centro_custo);
+  if (categoriaOperacionalAtual) {
+    console.log('[DEBUG CATEGORIA] Mantendo categoria operacional escolhida no carrinho:', categoriaOperacionalAtual);
+    return categoriaOperacionalAtual;
+  }
+
   try {
     const url = `/api/compras/categoria-por-produto/${encodeURIComponent(codigo)}`;
     console.log('[DEBUG CATEGORIA] Fazendo fetch para:', url);
@@ -39567,17 +39574,24 @@ async function aplicarCategoriaCompraPorProdutoCarrinho(codigoProdutoOmie, itemI
       return null;
     }
 
-    // Atualiza o item do carrinho
     if (window.carrinhoCompras[itemIdx]) {
+      const itemAtual = window.carrinhoCompras[itemIdx];
+      const categoriaOperacionalDepoisDaConsulta = obterCategoriaCompraOmieOperacionalCarrinho(itemAtual?.centro_custo);
+      if (categoriaOperacionalDepoisDaConsulta) {
+        console.log('[DEBUG CATEGORIA] Consulta atrasada ignorada para preservar categoria operacional:', categoriaOperacionalDepoisDaConsulta);
+        return categoriaOperacionalDepoisDaConsulta;
+      }
+
+      // Atualiza o item do carrinho
       console.log('[DEBUG CATEGORIA] Atualizando item no índice:', itemIdx);
       
-      window.carrinhoCompras[itemIdx].categoria_compra_codigo = categoriaCodigo;
-      window.carrinhoCompras[itemIdx].categoria_compra = categoriaDescricao;
-      window.carrinhoCompras[itemIdx].categoria_compra_nome = categoriaNome;
+      itemAtual.categoria_compra_codigo = categoriaCodigo;
+      itemAtual.categoria_compra = categoriaDescricao;
+      itemAtual.categoria_compra_nome = categoriaNome;
 
       // Atualiza no banco
       console.log('[DEBUG CATEGORIA] Salvando no banco...');
-      await atualizarItemCarrinhoNoBanco(window.carrinhoCompras[itemIdx]);
+      await atualizarItemCarrinhoNoBanco(itemAtual);
       console.log('[DEBUG CATEGORIA] Salvo no banco!');
       
       // Atualiza a UI
