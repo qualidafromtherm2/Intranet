@@ -26494,11 +26494,40 @@ window.categoriasPorDepartamento = {
     'Investimento na produção',
     'Manutenção',
     'Maquinas e equipamentos',
+    'Embalagem dos produtos',
     'Materia prima',
     'Outros',
     'P&D'
   ]
 };
+
+function normalizarCategoriaOperacionalCompra(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function obterCategoriaCompraOmiePorCentroCusto(centroCusto) {
+  const categoria = normalizarCategoriaOperacionalCompra(centroCusto);
+
+  if (categoria === 'materia prima') {
+    return {
+      codigo: '2.01.03',
+      nome: '2.01.03 - Materia Prima Nacional'
+    };
+  }
+
+  if (categoria === 'embalagem dos produtos') {
+    return {
+      codigo: '2.01.93',
+      nome: '2.01.93 - Embalagem Dos Produtos'
+    };
+  }
+
+  return null;
+}
 
 // Carrega opções de departamentos, centros de custo e usuários
 async function carregarDepartamentosECentros() {
@@ -27305,7 +27334,7 @@ async function adicionarItemCarrinho(ev) {
   const responsavelCompra = (document.getElementById('modalComprasResponsavelCompra')?.value || '').trim();
   const retornoCotacao = (document.getElementById('modalComprasRetornoCotacao')?.value || '').trim();
   let categoriaCompra = (document.getElementById('modalComprasCategoriaCompra')?.value || '').trim();
-  const categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
+  let categoriaCompraTexto = document.getElementById('modalComprasCategoriaCompra')?.selectedOptions[0]?.text || '';
   const codigoProdutoOmie = document.getElementById('modalComprasCodigoProdutoOmie')?.value || null;
   const requisicaoDireta = document.getElementById('modalComprasRequisicaoDireta')?.checked || false;
   const statusPedido = (document.getElementById('modalComprasStatus')?.value || 'aguardando aprovação da requisição').trim();
@@ -27370,9 +27399,11 @@ async function adicionarItemCarrinho(ev) {
   if (!categoriaCompra) {
     categoriaCompra = categoriaPadraoCodigo;
   }
-  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
-  if ((centroCusto || '').toLowerCase() === 'materia prima') {
-    categoriaCompra = '2.01.03';
+  // Categorias operacionais especificas devem gravar o codigo correto da Omie.
+  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  if (categoriaOperacionalOmie) {
+    categoriaCompra = categoriaOperacionalOmie.codigo;
+    categoriaCompraTexto = categoriaOperacionalOmie.nome;
   }
   
   // Busca codigo_produto da tabela produtos_omie usando o codigo do produto
@@ -39112,6 +39143,7 @@ window.categoriasPorDepartamento = {
     'Investimento na produção',
     'Manutenção',
     'Maquinas e equipamentos',
+    'Embalagem dos produtos',
     'Materia prima',
     'Outros',
     'P&D'
@@ -39549,10 +39581,11 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       ? `${cat.codigo} - ${cat.descricao}`
       : categoriaCompraTexto || `${categoriaPadraoCodigo} - Outros Materiais`;
   }
-  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
-  if ((centroCusto || '').toLowerCase() === 'materia prima') {
-    categoriaCompra = '2.01.03';
-    categoriaCompraTexto = '2.01.03 - Matérias-Primas';
+  // Categorias operacionais especificas devem gravar o codigo correto da Omie.
+  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  if (categoriaOperacionalOmie) {
+    categoriaCompra = categoriaOperacionalOmie.codigo;
+    categoriaCompraTexto = categoriaOperacionalOmie.nome;
   }
   
   console.log('[Catálogo] Categoria selecionada - Código:', categoriaCompra, 'Descrição:', categoriaCompraTexto);
@@ -39828,9 +39861,10 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
   if (!categoriaCompra) {
     categoriaCompra = categoriaPadraoCodigo;
   }
-  // Se Categoria for "Materia prima", força código de categoria Omie 2.01.03
-  if ((centroCusto || '').toLowerCase() === 'materia prima') {
-    categoriaCompra = '2.01.03';
+  // Categorias operacionais especificas devem gravar o codigo correto da Omie.
+  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  if (categoriaOperacionalOmie) {
+    categoriaCompra = categoriaOperacionalOmie.codigo;
   }
   
   console.log('[Catálogo] Descrição (keywords):', descricao);
@@ -39982,7 +40016,7 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
       departamento: departamento,
       centro_custo: centroCusto,
       categoria_compra_codigo: categoriaCompra,
-      categoria_compra_nome: categoriaCompra === '2.01.03' ? 'Matérias-Primas' : (categoriaCompra === '2.14.94' ? 'Outros Materiais' : ''),
+      categoria_compra_nome: categoriaOperacionalOmie?.nome || (categoriaCompra === '2.14.94' ? 'Outros Materiais' : ''),
       objetivo_compra: objetivoCompra,
       retorno_cotacao: retornoCotacao,
       tipo_retorno_solicitado: retornoCotacao,
@@ -46093,11 +46127,29 @@ async function carregarSeletorCategoriasAssociarNfe(categoriaAtualCodigo, catego
   picker.style.display = 'flex';
 
   try {
-    const resp = await fetch('/api/compras/categorias-ativas', { credentials: 'include' });
+    // Usa a mesma lista curta do fluxo de compras, não o plano de contas inteiro.
+    const resp = await fetch('/api/compras/categorias', { credentials: 'include' });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data?.ok) throw new Error(data?.error || 'Falha ao carregar categorias');
 
     const categorias = Array.isArray(data.categorias) ? data.categorias : [];
+    const categoriasOrdenadas = [...categorias].sort((a, b) => {
+      const da = String(a?.descricao || a?.codigo || '');
+      const db = String(b?.descricao || b?.codigo || '');
+      return da.localeCompare(db, 'pt-BR', { sensitivity: 'base' });
+    });
+
+    select.innerHTML = '<option value="">-- Selecione uma categoria --</option>';
+    categoriasOrdenadas.forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat.codigo;
+      opt.textContent = `${cat.codigo} - ${cat.descricao || cat.codigo}`;
+      select.appendChild(opt);
+    });
+    if (categoriaAtualCodigo && categoriasOrdenadas.some(cat => String(cat.codigo) === String(categoriaAtualCodigo))) {
+      select.value = categoriaAtualCodigo;
+    }
+    return;
 
     // Separa categorias-pai (sem categoria_superior ou categoria_superior que não existe como codigo)
     const codigosExistentes = new Set(categorias.map(c => c.codigo));
