@@ -521,6 +521,28 @@
   </div>
 </div>
 
+<!-- Engenharia: Códigos de Erro -->
+<div class="side-wrapper" id="engenhariaCodigosErroSideWrapper">
+  <div class="side-title"
+       data-nav-key="side:engenharia"
+       data-nav-pos="side"
+       data-nav-label="Engenharia">Engenharia</div>
+
+  <div class="side-menu">
+    <a href="#"
+       id="menu-engenharia-codigos-erro"
+       class="menu-link"
+       data-nav-key="side:engenharia:codigos-erro"
+       data-nav-parent="side:engenharia"
+       data-nav-pos="side"
+       data-nav-label="Códigos de Erro"
+       data-nav-selector="#menu-engenharia-codigos-erro">
+      <i class="fa-solid fa-triangle-exclamation" style="margin-right:8px;"></i>
+      Códigos de Erro
+    </a>
+  </div>
+</div>
+
         </div><!-- Fim do sidebar-content -->
 
       </div><!-- Fim do left-side -->
@@ -6184,6 +6206,52 @@
               </thead>
               <tbody id="engTbody">
                 <tr><td colspan="5" style="padding:32px 12px;text-align:center;color:#9ca3af;font-size:13px;">Clique na guia Engenharia para carregar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Painel Engenharia: Códigos de Erro -->
+      <div id="engenhariaCodigosErroPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b;"></i>
+                <span>Códigos de Erro</span>
+              </h3>
+              <div class="content-text">Catálogo de códigos de erro com análise, solução, anexos e fotos.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <button id="engCodigoErroNovoBtn" class="content-button" type="button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:white;">
+                <i class="fa-solid fa-plus"></i>
+                <span>Novo código</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="engCodigoErroStatus" style="display:none;margin:10px 0;font-size:13px;color:#94a3b8;"></div>
+
+          <!-- Busca -->
+          <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+            <input id="engCodigoErroBusca" type="text" placeholder="Buscar por código..." style="flex:1;min-width:180px;padding:8px 12px;border-radius:8px;border:1px solid #374151;background:#1e293b;color:#e2e8f0;font-size:13px;" />
+          </div>
+
+          <!-- Tabela de códigos -->
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="background:rgba(30,41,59,.8);">
+                  <th style="padding:10px 12px;text-align:left;border-bottom:1px solid #334155;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11px;width:130px;">Código</th>
+                  <th style="padding:10px 12px;text-align:left;border-bottom:1px solid #334155;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11px;">Análise</th>
+                  <th style="padding:10px 12px;text-align:left;border-bottom:1px solid #334155;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11px;">Solução</th>
+                  <th style="padding:10px 12px;text-align:center;border-bottom:1px solid #334155;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11px;width:90px;">Arquivos</th>
+                  <th style="padding:10px 12px;text-align:center;border-bottom:1px solid #334155;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:11px;width:70px;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="engCodigoErroTbody">
+                <tr><td colspan="5" style="padding:32px;text-align:center;color:#6b7280;">Clique em Códigos de Erro para carregar.</td></tr>
               </tbody>
             </table>
           </div>

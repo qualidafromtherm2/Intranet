@@ -59762,3 +59762,634 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// ============================================================================
+// ENGENHARIA: Código de Erros
+// ============================================================================
+(function () {
+  const menuLink = document.getElementById('menu-engenharia-codigos-erro');
+  if (!menuLink) return;
+  menuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    menuLink.classList.add('is-active');
+    showMainTab('engenhariaCodigosErroPane');
+  });
+
+  function esc(v) { return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function ext(nome) { return (nome || '').split('.').pop().toLowerCase(); }
+  function iconeArquivo(nome) {
+    const e = ext(nome);
+    if (['jpg','jpeg','png','gif','webp','bmp','svg'].includes(e)) return '<i class="fa-solid fa-image" style="color:#22c55e;"></i>';
+    if (['mp4','mov','avi','webm','mkv'].includes(e)) return '<i class="fa-solid fa-film" style="color:#a855f7;"></i>';
+    if (e === 'pdf') return '<i class="fa-solid fa-file-pdf" style="color:#ef4444;"></i>';
+    return '<i class="fa-solid fa-file" style="color:#60a5fa;"></i>';
+  }
+  function ehImagem(nome) { return ['jpg','jpeg','png','gif','webp','bmp'].includes(ext(nome)); }
+  function ehVideo(nome)  { return ['mp4','mov','webm','avi'].includes(ext(nome)); }
+
+  // Extrai prefixo numérico: "4.2.1 texto" → "4.2.1"
+  function extrairPrefixo(texto) {
+    const m = String(texto || '').match(/^(\d+(?:\.\d+)*)/);
+    return m ? m[1] : null;
+  }
+  // Constrói árvore hierárquica de análises
+  function buildTree(analises) {
+    const nodes = {}, keys = [];
+    for (const a of analises) {
+      const pref = extrairPrefixo(a.analise);
+      if (!pref) continue;
+      nodes[pref] = { id: a.id, texto: a.analise, prefixo: pref, filhos: [] };
+      keys.push(pref);
+    }
+    const roots = [];
+    for (const pref of keys) {
+      const partes = pref.split('.');
+      if (partes.length === 1) { roots.push(nodes[pref]); }
+      else {
+        const pai = partes.slice(0, -1).join('.');
+        if (nodes[pai]) nodes[pai].filhos.push(nodes[pref]);
+        else roots.push(nodes[pref]);
+      }
+    }
+    return roots;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const inputBusca   = document.getElementById('codigosErroBusca');
+    const btnBuscar    = document.getElementById('codigosErroBuscarBtn');
+    const statusEl     = document.getElementById('codigosErroStatus');
+    const resultadosEl = document.getElementById('codigosErroResultados');
+
+    const arquivosCache     = {};
+    const analisesCache     = {};
+    const verificacoesCache = {};
+
+    async function carregarArquivos(id) {
+      if (arquivosCache[id]) return arquivosCache[id];
+      try {
+        const r = await fetch(`/api/engenharia/codigos-erro/${id}/arquivos`, { credentials: 'include' });
+        arquivosCache[id] = (await r.json().catch(() => ({}))).arquivos || {};
+      } catch (_) { arquivosCache[id] = {}; }
+      return arquivosCache[id];
+    }
+
+    async function carregarVerificacoes(id) {
+      try {
+        const r = await fetch(`/api/engenharia/codigos-erro/${id}/verificacoes`, { credentials: 'include' });
+        verificacoesCache[id] = (await r.json().catch(() => ({}))).verificacoes || [];
+      } catch (_) { verificacoesCache[id] = []; }
+      return verificacoesCache[id];
+    }
+
+    // ── renderização dos cards de resultado ───────────────────────────────
+    function renderArquivosCard(arquivos) {
+      if (!arquivos) return '';
+      const blocos = ['Documento','Fotos','Videos'].map(pasta => {
+        const itens = arquivos[pasta] || [];
+        if (!itens.length) return '';
+        const lista = itens.map(f => {
+          if (ehImagem(f.nome)) return `<a href="${esc(f.url)}" target="_blank" style="display:inline-block;border-radius:8px;overflow:hidden;border:1px solid #334155;"><img src="${esc(f.url)}" alt="${esc(f.nome)}" style="width:90px;height:70px;object-fit:cover;display:block;" loading="lazy"/></a>`;
+          if (ehVideo(f.nome)) return `<video src="${esc(f.url)}" controls style="width:160px;height:100px;border-radius:8px;border:1px solid #334155;background:#000;"></video>`;
+          return `<a href="${esc(f.url)}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:12px;text-decoration:none;">${iconeArquivo(f.nome)}<span>${esc(f.nome)}</span></a>`;
+        }).join('');
+        return `<div style="margin-top:8px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:6px;">${esc(pasta)}</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${lista}</div></div>`;
+      }).join('');
+      return blocos ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06);">${blocos}</div>` : '';
+    }
+
+    function renderCard(r, arquivos, verificacoes) {
+      const analises = Array.isArray(r.analises) ? r.analises : [];
+
+      const linhas = analises.map(a => {
+        // Verificações vinculadas a esta análise — aparecem entre análise e solução
+        const verifDaAnalise = (verificacoes || []).filter(v => v.codigo_analise_id === a.id);
+        const verifHtml = verifDaAnalise.length
+          ? `<div style="margin:8px 0;padding:8px 12px;background:rgba(245,158,11,.07);border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#f59e0b;margin-bottom:4px;"><i class="fa-solid fa-clipboard-check" style="margin-right:4px;"></i>Verificações</div>
+              ${verifDaAnalise.map(v => `<div style="font-size:12px;color:#e2e8f0;padding:2px 0;white-space:pre-wrap;">• ${esc(v.verificacao)}</div>`).join('')}
+            </div>`
+          : '';
+
+        const sol = (a.solucoes || []).map(s =>
+          `<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.07);border-left:3px solid #22c55e;border-radius:0 6px 6px 0;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#22c55e;margin-bottom:2px;">Solução</div>
+            <div style="font-size:13px;color:var(--content-color);white-space:pre-wrap;">${esc(s.solucao_problema)}</div>
+          </div>`).join('');
+
+        return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+            <div style="flex:1;">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:3px;">Análise</div>
+              <div style="font-size:13px;color:var(--content-color);white-space:pre-wrap;">${esc(a.analise)}</div>
+            </div>
+            <button class="ce-btn-edit-analise" data-analise-id="${a.id}" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button" title="Editar análise"
+              style="padding:4px 8px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#64748b;cursor:pointer;font-size:11px;flex-shrink:0;margin-top:2px;">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+          </div>
+          ${verifHtml}
+          ${sol}
+        </div>`;
+      }).join('');
+
+      // Verificações sem análise vinculada
+      const verifGeral = (verificacoes || []).filter(v => !v.codigo_analise_id);
+      const verifGeralHtml = verifGeral.length
+        ? `<div style="margin-top:10px;padding:10px 14px;background:rgba(245,158,11,.07);border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#f59e0b;margin-bottom:6px;"><i class="fa-solid fa-clipboard-check" style="margin-right:4px;"></i>Verificações gerais</div>
+            ${verifGeral.map(v => `<div style="font-size:12px;color:#e2e8f0;padding:2px 0;white-space:pre-wrap;">• ${esc(v.verificacao)}</div>`).join('')}
+          </div>`
+        : '';
+
+      return `<div data-card-id="${r.id}" style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:14px;padding:20px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+          <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:14px;padding:5px 16px;border-radius:20px;">${esc(r.codigo)}</span>
+          <button class="ce-btn-editar" data-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button"
+            style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;font-size:12px;cursor:pointer;">
+            <i class="fa-solid fa-clipboard-check"></i>Verificações / Anexos
+          </button>
+        </div>
+        <div>${linhas || '<div style="color:var(--inactive-color);font-size:13px;">Sem análises cadastradas.</div>'}</div>
+        ${verifGeralHtml}
+        ${renderArquivosCard(arquivos)}
+      </div>`;
+    }
+
+    // ── busca ─────────────────────────────────────────────────────────────
+    async function buscarCodigo() {
+      const codigo = (inputBusca?.value || '').trim();
+      if (!codigo) { statusEl.textContent = 'Digite um código para pesquisar.'; return; }
+      statusEl.textContent = 'Buscando...';
+      resultadosEl.style.display = 'none';
+      resultadosEl.innerHTML = '';
+      try {
+        const resp = await fetch(`/api/engenharia/codigos-erro?codigo=${encodeURIComponent(codigo)}`, { credentials: 'include' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
+        const registros = Array.isArray(data.registros) ? data.registros : [];
+        if (!registros.length) { statusEl.textContent = `Nenhum resultado para "${codigo}".`; return; }
+
+        const totalAnalises = registros.reduce((s, r) => s + (r.analises?.length || 0), 0);
+        statusEl.textContent = `${registros.length} código(s) — ${totalAnalises} análise(s).`;
+        registros.forEach(r => {
+          analisesCache[r.id] = r.analises || [];
+          delete arquivosCache[r.id];
+          delete verificacoesCache[r.id];
+        });
+
+        const [arquivosLista, verificacoesLista] = await Promise.all([
+          Promise.all(registros.map(r => carregarArquivos(r.id))),
+          Promise.all(registros.map(r => carregarVerificacoes(r.id)))
+        ]);
+
+        resultadosEl.style.display = 'block';
+        resultadosEl.innerHTML = registros.map((r, i) => renderCard(r, arquivosLista[i], verificacoesLista[i])).join('');
+        bindCardEvents();
+      } catch (err) {
+        statusEl.textContent = `Erro: ${err.message}`;
+      }
+    }
+
+    function bindCardEvents() {
+      // Botão "Verificações / Anexos"
+      resultadosEl.querySelectorAll('.ce-btn-editar').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalVerificacoesAnexos(Number(btn.dataset.id), btn.dataset.codigo));
+      });
+      // Botão editar análise (lápis)
+      resultadosEl.querySelectorAll('.ce-btn-edit-analise').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalAnalise(
+          Number(btn.dataset.analiseId),
+          Number(btn.dataset.codigoId),
+          btn.dataset.codigo
+        ));
+      });
+    }
+
+    if (btnBuscar) btnBuscar.addEventListener('click', buscarCodigo);
+    if (inputBusca) inputBusca.addEventListener('keydown', e => { if (e.key === 'Enter') buscarCodigo(); });
+
+    // ── Modal overlay ─────────────────────────────────────────────────────
+    const overlay   = document.getElementById('ceModalOverlay');
+    const conteudo  = document.getElementById('ceModalConteudo');
+    const btnFechar = document.getElementById('ceModalFechar');
+    if (btnFechar) btnFechar.addEventListener('click', fecharModal);
+    if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) fecharModal(); });
+    function fecharModal() { if (overlay) overlay.style.display = 'none'; }
+
+    // Atualiza card na página sem re-buscar tudo
+    async function refreshCardInPlace(codigoErroId) {
+      const cardEl = resultadosEl?.querySelector(`[data-card-id="${codigoErroId}"]`);
+      if (!cardEl) return;
+      delete verificacoesCache[codigoErroId];
+      const novasVerif = await carregarVerificacoes(codigoErroId);
+      const analises   = analisesCache[codigoErroId] || [];
+      const arquivos   = arquivosCache[codigoErroId] || {};
+      const codigoTexto = cardEl.querySelector('span[style*="f59e0b"]')?.textContent?.trim() || '';
+      const novoHtml = renderCard({ id: codigoErroId, codigo: codigoTexto, analises }, arquivos, novasVerif);
+      const temp = document.createElement('div');
+      temp.innerHTML = novoHtml;
+      const novoCard = temp.firstElementChild;
+      cardEl.parentNode.replaceChild(novoCard, cardEl);
+      // Re-bind
+      novoCard.querySelectorAll('.ce-btn-editar').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalVerificacoesAnexos(Number(btn.dataset.id), btn.dataset.codigo));
+      });
+      novoCard.querySelectorAll('.ce-btn-edit-analise').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalAnalise(Number(btn.dataset.analiseId), Number(btn.dataset.codigoId), btn.dataset.codigo));
+      });
+    }
+
+    // ── Modal: Verificações + Anexos ──────────────────────────────────────
+    // (só registra novas verificações — a lista fica no card da página)
+    async function abrirModalVerificacoesAnexos(codigoErroId, codigoTexto) {
+      if (!overlay || !conteudo) return;
+      conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+      overlay.style.display = 'block';
+      try {
+        let analises = analisesCache[codigoErroId];
+        if (!analises && codigoTexto) {
+          const r = await fetch(`/api/engenharia/codigos-erro?codigo=${encodeURIComponent(codigoTexto)}`, { credentials: 'include' });
+          const d = await r.json().catch(() => ({}));
+          const reg = (d.registros || []).find(x => x.id === codigoErroId);
+          analises = reg?.analises || [];
+          analisesCache[codigoErroId] = analises;
+        }
+        analises = analises || [];
+        const arquivos = await fetch(`/api/engenharia/codigos-erro/${codigoErroId}/arquivos`, { credentials: 'include' })
+          .then(r => r.json()).then(d => d.arquivos || {}).catch(() => ({}));
+        arquivosCache[codigoErroId] = arquivos;
+        renderModalVerificacoesAnexos(codigoErroId, codigoTexto, analises, arquivos);
+      } catch (e) {
+        conteudo.innerHTML = `<div style="color:#ef4444;padding:20px;">Erro: ${esc(e.message)}</div>`;
+      }
+    }
+
+    function renderModalVerificacoesAnexos(id, codigoTexto, analises, arquivos) {
+      const tree = buildTree(analises);
+
+      const secaoArquivos = ['Documento', 'Fotos', 'Videos'].map(pasta => {
+        const iconesPasta = { Documento: 'fa-file-lines', Fotos: 'fa-images', Videos: 'fa-film' };
+        const itens = (arquivos[pasta] || []).map(f => {
+          const preview = ehImagem(f.nome)
+            ? `<img src="${esc(f.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
+            : ehVideo(f.nome)
+            ? `<video src="${esc(f.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
+            : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(f.nome)}</div>`;
+          return `<div style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;">
+            <a href="${esc(f.url)}" target="_blank">${preview}</a>
+            <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.nome)}</div></div>
+            <button class="ce-btn-del-arquivo" data-path="${esc(f.path)}" data-pasta="${esc(pasta)}" type="button"
+              style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>`;
+        }).join('');
+        return `<div style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:6px;"><i class="fa-solid ${iconesPasta[pasta]}"></i>${pasta}</div>
+            <label style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#1e3a5f;border:1px solid #2563eb;border-radius:7px;color:#93c5fd;font-size:11px;cursor:pointer;">
+              <i class="fa-solid fa-upload"></i>Enviar
+              <input type="file" class="ce-input-arquivo" data-pasta="${pasta}" data-codigo-id="${id}" style="display:none;" multiple accept="${pasta === 'Fotos' ? 'image/*' : pasta === 'Videos' ? 'video/*' : '*/*'}"/>
+            </label>
+          </div>
+          <div class="ce-lista-arquivos" data-pasta="${pasta}" style="display:flex;flex-direction:column;gap:6px;">${itens || '<div style="font-size:12px;color:#4b5563;">Nenhum arquivo.</div>'}</div>
+        </div>`;
+      }).join('');
+
+      conteudo.innerHTML = `
+        <div style="margin-bottom:20px;padding-right:36px;">
+          <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:15px;padding:6px 18px;border-radius:20px;">${esc(codigoTexto)}</span>
+        </div>
+
+        <div style="margin-bottom:24px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:12px;">
+            <i class="fa-solid fa-clipboard-check" style="color:#f59e0b;margin-right:4px;"></i>Registrar verificação
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Selecione a análise relacionada (opcional):</div>
+          <div id="ce-cascata" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
+            ${tree.length === 0 ? '<div style="font-size:12px;color:#4b5563;">Nenhuma análise cadastrada.</div>' : ''}
+          </div>
+          <textarea id="ce-verif-texto"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:60px;margin-bottom:10px;"
+            placeholder="Verificação / questionamento a registrar..."></textarea>
+          <div style="display:flex;justify-content:flex-end;">
+            <button id="ce-btn-salvar-verif" type="button" disabled
+              style="padding:7px 18px;background:#1e3a5f;border:1px solid #2563eb;border-radius:8px;color:#93c5fd;font-size:13px;cursor:pointer;opacity:.5;display:inline-flex;align-items:center;gap:6px;">
+              <i class="fa-solid fa-floppy-disk"></i>Salvar verificação
+            </button>
+          </div>
+          <div id="ce-verif-form-status" style="font-size:12px;min-height:16px;margin-top:6px;text-align:right;"></div>
+        </div>
+
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:10px;">Documentos, fotos e vídeos</div>
+          ${secaoArquivos}
+        </div>
+        <div id="ce-modal-status" style="margin-top:8px;font-size:12px;color:#94a3b8;text-align:right;min-height:16px;"></div>
+      `;
+
+      // Cascata
+      const cascataEl  = conteudo.querySelector('#ce-cascata');
+      const btnSalvar  = conteudo.querySelector('#ce-btn-salvar-verif');
+      const textoEl    = conteudo.querySelector('#ce-verif-texto');
+      const formStatus = conteudo.querySelector('#ce-verif-form-status');
+      let selectedAnaliseId = null;
+
+      textoEl.addEventListener('input', () => {
+        if (textoEl.value.trim()) { btnSalvar.disabled = false; btnSalvar.style.opacity = '1'; }
+        else if (!selectedAnaliseId) { btnSalvar.disabled = true; btnSalvar.style.opacity = '.5'; }
+      });
+
+      function addNivel(nos, nivelIdx) {
+        cascataEl.querySelectorAll('[data-nivel]').forEach(el => { if (Number(el.dataset.nivel) >= nivelIdx) el.remove(); });
+        if (!nos.length) return;
+        const wrap = document.createElement('div');
+        wrap.dataset.nivel = nivelIdx;
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#64748b;margin-bottom:4px;';
+        lbl.textContent = nivelIdx === 0 ? 'Nível principal' : `Sub-nível ${nivelIdx}`;
+        wrap.appendChild(lbl);
+        const sel = document.createElement('select');
+        sel.style.cssText = 'width:100%;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;';
+        const opt0 = document.createElement('option'); opt0.value = ''; opt0.textContent = '— Selecione —';
+        sel.appendChild(opt0);
+        for (const no of nos) {
+          const opt = document.createElement('option'); opt.value = no.id; opt.textContent = no.texto;
+          sel.appendChild(opt);
+        }
+        sel.addEventListener('change', () => {
+          const noSel = nos.find(n => String(n.id) === sel.value);
+          if (!noSel) { selectedAnaliseId = null; return; }
+          selectedAnaliseId = noSel.id;
+          btnSalvar.disabled = false; btnSalvar.style.opacity = '1';
+          if (noSel.filhos?.length) addNivel(noSel.filhos, nivelIdx + 1);
+          else cascataEl.querySelectorAll('[data-nivel]').forEach(el => { if (Number(el.dataset.nivel) > nivelIdx) el.remove(); });
+        });
+        wrap.appendChild(sel);
+        cascataEl.appendChild(wrap);
+      }
+      if (tree.length) addNivel(tree, 0);
+
+      btnSalvar.addEventListener('click', async () => {
+        const verificacao = textoEl.value.trim();
+        if (!verificacao) { formStatus.style.color = '#ef4444'; formStatus.textContent = 'Digite o texto da verificação.'; return; }
+        btnSalvar.disabled = true;
+        formStatus.style.color = '#94a3b8'; formStatus.textContent = 'Salvando...';
+        try {
+          const r = await fetch('/api/engenharia/codigo-verificacoes', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codigo_erro_id: id, codigo_analise_id: selectedAnaliseId || null, verificacao })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          formStatus.style.color = '#22c55e'; formStatus.textContent = 'Salvo! Verificação adicionada no resultado da busca.';
+          textoEl.value = ''; selectedAnaliseId = null;
+          btnSalvar.disabled = true; btnSalvar.style.opacity = '.5';
+          // Reseta cascata
+          cascataEl.innerHTML = tree.length === 0 ? '<div style="font-size:12px;color:#4b5563;">Nenhuma análise cadastrada.</div>' : '';
+          if (tree.length) addNivel(tree, 0);
+          // Atualiza card na página em background
+          refreshCardInPlace(id);
+          setTimeout(() => { formStatus.textContent = ''; }, 4000);
+        } catch (e) {
+          formStatus.style.color = '#ef4444'; formStatus.textContent = `Erro: ${e.message}`;
+          btnSalvar.disabled = false;
+        }
+      });
+
+      bindModalArquivosEvents(id);
+    }
+
+    // ── Modal: Editar Análise ─────────────────────────────────────────────
+    async function abrirModalAnalise(analiseId, codigoErroId, codigoTexto) {
+      if (!overlay || !conteudo) return;
+      conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+      overlay.style.display = 'block';
+
+      let analises = analisesCache[codigoErroId] || [];
+      if (!analises.length && codigoTexto) {
+        const r = await fetch(`/api/engenharia/codigos-erro?codigo=${encodeURIComponent(codigoTexto)}`, { credentials: 'include' });
+        const d = await r.json().catch(() => ({}));
+        const reg = (d.registros || []).find(x => x.id === codigoErroId);
+        analises = reg?.analises || [];
+        analisesCache[codigoErroId] = analises;
+      }
+      const analise = analises.find(a => a.id === analiseId);
+      if (!analise) { conteudo.innerHTML = `<div style="color:#ef4444;padding:20px;">Análise não encontrada.</div>`; return; }
+      renderModalAnalise(analise, codigoErroId, codigoTexto);
+    }
+
+    function renderModalAnalise(analise, codigoErroId, codigoTexto) {
+      const solucoes = analise.solucoes || [];
+      const solHtml = solucoes.map(s =>
+        `<div class="ce-sol-row" data-sol-id="${s.id}" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">
+          <textarea class="ce-sol-text" data-sol-id="${s.id}"
+            style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:44px;">${esc(s.solucao_problema)}</textarea>
+          <button class="ce-btn-del-sol-modal" data-sol-id="${s.id}" type="button" title="Remover solução"
+            style="padding:6px 9px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;flex-shrink:0;">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>`).join('');
+
+      conteudo.innerHTML = `
+        <div style="margin-bottom:20px;padding-right:36px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:15px;padding:6px 18px;border-radius:20px;">${esc(codigoTexto)}</span>
+          <span style="font-size:12px;color:#64748b;">— Editar análise</span>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:6px;">Texto da análise</div>
+          <textarea id="ce-analise-modal-text"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:60px;">${esc(analise.analise)}</textarea>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:8px;">Soluções</div>
+          <div id="ce-modal-sol-lista">
+            ${solHtml || '<div style="font-size:12px;color:#4b5563;margin-bottom:8px;">Nenhuma solução.</div>'}
+          </div>
+          <button id="ce-modal-btn-add-sol" type="button"
+            style="margin-top:4px;padding:5px 12px;background:#1e3a5f;border:1px solid #2563eb;border-radius:7px;color:#93c5fd;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+            <i class="fa-solid fa-plus"></i>Adicionar solução
+          </button>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #1e293b;flex-wrap:wrap;">
+          <button id="ce-modal-btn-del-analise" type="button"
+            style="padding:8px 16px;background:#7f1d1d;border:none;border-radius:8px;color:#fca5a5;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-trash"></i>Excluir análise
+          </button>
+          <button id="ce-modal-btn-salvar" type="button"
+            style="padding:9px 26px;background:#16a34a;color:#fff;border:none;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-floppy-disk"></i>Salvar
+          </button>
+        </div>
+        <div id="ce-modal-analise-status" style="margin-top:8px;font-size:12px;color:#94a3b8;text-align:right;min-height:16px;"></div>
+      `;
+
+      const statusEl2 = conteudo.querySelector('#ce-modal-analise-status');
+      function setStatus2(msg, cor) { if (statusEl2) { statusEl2.textContent = msg; statusEl2.style.color = cor || '#94a3b8'; } }
+
+      // Salvar análise + soluções existentes
+      conteudo.querySelector('#ce-modal-btn-salvar')?.addEventListener('click', async () => {
+        setStatus2('Salvando...', '#94a3b8');
+        try {
+          const novoTexto = conteudo.querySelector('#ce-analise-modal-text')?.value || '';
+          const ps = [
+            fetch(`/api/engenharia/codigo-analise/${analise.id}`, {
+              method: 'PUT', credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ analise: novoTexto })
+            })
+          ];
+          conteudo.querySelectorAll('.ce-sol-text').forEach(ta => {
+            ps.push(fetch(`/api/engenharia/codigo-solucao/${ta.dataset.solId}`, {
+              method: 'PUT', credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ solucao_problema: ta.value })
+            }));
+          });
+          await Promise.all(ps);
+          setStatus2('Salvo!', '#22c55e');
+          delete analisesCache[codigoErroId];
+          setTimeout(() => { fecharModal(); buscarCodigo(); }, 700);
+        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+      });
+
+      // Excluir análise inteira
+      conteudo.querySelector('#ce-modal-btn-del-analise')?.addEventListener('click', async () => {
+        if (!confirm('Excluir esta análise e todas as suas soluções?')) return;
+        try {
+          const r = await fetch(`/api/engenharia/codigo-analise/${analise.id}`, { method: 'DELETE', credentials: 'include' });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          delete analisesCache[codigoErroId];
+          fecharModal(); buscarCodigo();
+        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+      });
+
+      // Adicionar nova solução
+      conteudo.querySelector('#ce-modal-btn-add-sol')?.addEventListener('click', async () => {
+        try {
+          const r = await fetch('/api/engenharia/codigo-solucao', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codigo_analise_id: analise.id, solucao_problema: '' })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          const lista = conteudo.querySelector('#ce-modal-sol-lista');
+          const vazio = lista?.querySelector('div:not([class]):not([data-sol-id])');
+          if (vazio && vazio.textContent.trim() === 'Nenhuma solução.') vazio.remove();
+          if (lista) {
+            const div = document.createElement('div');
+            div.className = 'ce-sol-row'; div.dataset.solId = d.id;
+            div.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;';
+            div.innerHTML = `
+              <textarea class="ce-sol-text" data-sol-id="${d.id}"
+                style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:44px;"></textarea>
+              <button class="ce-btn-del-sol-modal" data-sol-id="${d.id}" type="button"
+                style="padding:6px 9px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;flex-shrink:0;">
+                <i class="fa-solid fa-trash"></i>
+              </button>`;
+            lista.appendChild(div);
+            div.querySelector('.ce-btn-del-sol-modal').addEventListener('click', function () {
+              const solId = Number(this.dataset.solId);
+              if (!confirm('Remover esta solução?')) return;
+              fetch(`/api/engenharia/codigo-solucao/${solId}`, { method: 'DELETE', credentials: 'include' })
+                .then(r => r.json()).then(d => { if (d.ok) div.remove(); });
+            });
+          }
+        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+      });
+
+      // Deletar soluções existentes
+      conteudo.querySelectorAll('.ce-btn-del-sol-modal').forEach(btn => {
+        btn.addEventListener('click', function () {
+          const solId = Number(this.dataset.solId);
+          if (!confirm('Remover esta solução?')) return;
+          const row = this.closest('.ce-sol-row');
+          fetch(`/api/engenharia/codigo-solucao/${solId}`, { method: 'DELETE', credentials: 'include' })
+            .then(r => r.json()).then(d => { if (d.ok) row?.remove(); });
+        });
+      });
+    }
+
+    // ── Upload/delete de arquivos no modal ────────────────────────────────
+    function bindModalArquivosEvents(codigoErroId) {
+      const modalStatus = document.getElementById('ce-modal-status');
+      function setStatus(msg, cor) { if (modalStatus) { modalStatus.textContent = msg; modalStatus.style.color = cor || '#94a3b8'; } }
+
+      document.querySelectorAll('#ceModalConteudo .ce-input-arquivo').forEach(input => {
+        input.addEventListener('change', async () => {
+          const pasta = input.dataset.pasta;
+          const cId   = input.dataset.codigoId;
+          const files = Array.from(input.files || []);
+          if (!files.length) return;
+          setStatus(`Enviando ${files.length} arquivo(s)...`, '#f59e0b');
+          for (const file of files) {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('bucket', 'Engenharia');
+            fd.append('path', `codigos-erro/${cId}/${pasta}/${Date.now()}_${file.name}`);
+            try {
+              const r = await fetch('/api/upload/supabase', { method: 'POST', credentials: 'include', body: fd });
+              const d = await r.json();
+              if (!d.ok) throw new Error(d.error);
+              const lista = document.querySelector(`.ce-lista-arquivos[data-pasta="${pasta}"]`);
+              if (lista) {
+                const div = document.createElement('div');
+                div.style.cssText = 'display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;';
+                const preview = ehImagem(file.name)
+                  ? `<img src="${esc(d.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
+                  : ehVideo(file.name)
+                  ? `<video src="${esc(d.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
+                  : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(file.name)}</div>`;
+                div.innerHTML = `
+                  <a href="${esc(d.url)}" target="_blank">${preview}</a>
+                  <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(file.name)}</div></div>
+                  <button class="ce-btn-del-arquivo" data-path="${esc(d.path)}" data-pasta="${esc(pasta)}" type="button"
+                    style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>`;
+                const vazio = lista.querySelector('div:not([style*="display:flex"])');
+                if (vazio && vazio.textContent.trim() === 'Nenhum arquivo.') vazio.remove();
+                lista.appendChild(div);
+                bindDelArquivo(div.querySelector('.ce-btn-del-arquivo'), cId);
+              }
+              delete arquivosCache[Number(cId)];
+            } catch (e) { setStatus(`Erro no upload: ${e.message}`, '#ef4444'); }
+          }
+          input.value = '';
+          setStatus('Upload concluído!', '#22c55e');
+        });
+      });
+
+      document.querySelectorAll('#ceModalConteudo .ce-btn-del-arquivo').forEach(btn => {
+        bindDelArquivo(btn, codigoErroId);
+      });
+    }
+
+    function bindDelArquivo(btn, codigoErroId) {
+      if (!btn) return;
+      btn.addEventListener('click', async function () {
+        const filePath = this.dataset.path;
+        if (!confirm(`Remover "${filePath.split('/').pop()}"?`)) return;
+        try {
+          const r = await fetch('/api/engenharia/codigos-erro/arquivo', {
+            method: 'DELETE', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filePath })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          this.closest('div[style*="display:flex"]')?.remove();
+          delete arquivosCache[Number(codigoErroId)];
+        } catch (e) { alert(`Erro: ${e.message}`); }
+      });
+    }
+
+  }); // DOMContentLoaded
+})();
