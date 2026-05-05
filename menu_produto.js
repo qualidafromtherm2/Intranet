@@ -24656,6 +24656,33 @@ function obterUsuarioLogado() {
          '';
 }
 
+function garantirCategoriasPadraoProducao(map = window.categoriasPorDepartamento) {
+  if (!map) return map;
+
+  const chaveProducao = Object.keys(map).find(key =>
+    String(key || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === 'producao'
+  ) || 'Produção';
+
+  const categorias = Array.isArray(map[chaveProducao]) ? map[chaveProducao] : [];
+  const temEmbalagem = categorias.some(cat =>
+    String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === 'embalagem dos produtos'
+  );
+
+  if (!temEmbalagem) {
+    const idxMateriaPrima = categorias.findIndex(cat =>
+      String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() === 'materia prima'
+    );
+    if (idxMateriaPrima >= 0) {
+      categorias.splice(idxMateriaPrima, 0, 'Embalagem dos produtos');
+    } else {
+      categorias.push('Embalagem dos produtos');
+    }
+  }
+
+  map[chaveProducao] = categorias;
+  return map;
+}
+
 // Carrega departamentos e categorias do backend
 async function carregarCategoriasPorDepartamento() {
   try {
@@ -24681,7 +24708,7 @@ async function carregarCategoriasPorDepartamento() {
       const categorias = Array.isArray(dept.categorias) ? dept.categorias : [];
       map[dept.nome] = categorias.map(cat => cat.nome);
     });
-    window.categoriasPorDepartamento = map;
+    window.categoriasPorDepartamento = garantirCategoriasPadraoProducao(map);
 
     return departamentos;
   } catch (err) {
@@ -24745,6 +24772,61 @@ function aplicarCategoriaPadraoCarrinho() {
   if (option) {
     select.value = option.value;
   }
+}
+
+function obterCategoriaCompraOmieOperacionalCarrinho(centroCusto) {
+  const categoria = String(centroCusto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+  if (categoria === 'materia prima') {
+    return {
+      codigo: '2.01.03',
+      nome: '2.01.03 - Materia Prima Nacional'
+    };
+  }
+
+  if (categoria === 'embalagem dos produtos') {
+    return {
+      codigo: '2.01.93',
+      nome: '2.01.93 - Embalagem Dos Produtos'
+    };
+  }
+
+  return null;
+}
+
+function aplicarCategoriaCompraOmieOperacionalNoItem(item, centroCusto) {
+  const categoriaOmie = obterCategoriaCompraOmieOperacionalCarrinho(centroCusto);
+  if (!item || !categoriaOmie) return false;
+
+  item.categoria_compra = categoriaOmie.codigo;
+  item.categoria_compra_codigo = categoriaOmie.codigo;
+  item.categoria_compra_nome = categoriaOmie.nome;
+  return true;
+}
+
+function configurarCategoriaGlobalCarrinho() {
+  const select = document.getElementById('carrinhoCentroCustoGlobal');
+  if (!select || select.dataset.boundCategoriaGlobal) return;
+
+  select.addEventListener('change', async () => {
+    const centroCusto = (select.value || '').trim();
+    const carrinho = window.carrinhoCompras || [];
+
+    await Promise.all(carrinho.map(async (item) => {
+      item.centro_custo = centroCusto || item.centro_custo || '';
+      aplicarCategoriaCompraOmieOperacionalNoItem(item, centroCusto);
+      await atualizarItemCarrinhoNoBanco(item);
+    }));
+
+    renderCarrinhoCompras();
+    renderModalCarrinhoCompras();
+  });
+
+  select.dataset.boundCategoriaGlobal = '1';
 }
 
 // Configura o Prazo Solicitado global do carrinho
@@ -25022,6 +25104,7 @@ window.abrirModalCarrinhoCompras = async function() {
   configurarCompraRealizadaGlobalCarrinho();
   await carregarCategoriasPorDepartamento();
   await carregarDepartamentosCarrinho();
+  configurarCategoriaGlobalCarrinho();
   await carregarCategoriaCompraDropdown();
   await carregarGruposRequisicaoDisponiveis();
   atualizarBlocoCompraOmieModal();
@@ -26043,6 +26126,7 @@ async function enviarPedidoModal() {
     }
     if (centroCustoGlobal) {
       item.centro_custo = centroCustoGlobal;
+      aplicarCategoriaCompraOmieOperacionalNoItem(item, centroCustoGlobal);
       console.log(`[Enviar Pedido] Item ${idx}: centro_custo aplicado = ${centroCustoGlobal}`);
     }
     if (prazoSolicitadoGlobal) {
@@ -26680,6 +26764,7 @@ async function carregarDepartamentosECentros() {
 function atualizarCategoriasPorDepartamento(departamento, selectId = 'modalComprasCentroCusto') {
   const selectCategorias = document.getElementById(selectId);
   if (!selectCategorias) return;
+  garantirCategoriasPadraoProducao();
   
   if (!departamento || !window.categoriasPorDepartamento[departamento]) {
     selectCategorias.innerHTML = '<option value="">Selecione departamento</option>';
@@ -27471,7 +27556,16 @@ async function adicionarItemCarrinho(ev) {
     categoriaCompra = categoriaPadraoCodigo;
   }
   // Categorias operacionais especificas devem gravar o codigo correto da Omie.
-  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  const categoriaOperacionalOmie = (() => {
+    const categoria = String(centroCusto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    if (categoria === 'materia prima') return { codigo: '2.01.03', nome: '2.01.03 - Materia Prima Nacional' };
+    if (categoria === 'embalagem dos produtos') return { codigo: '2.01.93', nome: '2.01.93 - Embalagem Dos Produtos' };
+    return null;
+  })();
   if (categoriaOperacionalOmie) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
     categoriaCompraTexto = categoriaOperacionalOmie.nome;
@@ -39269,6 +39363,7 @@ async function loadModalComprasCategoriasCompra() {
 function atualizarCategoriasPorDepartamento(departamento, selectId = 'modalComprasCentroCusto') {
   const selectCategorias = document.getElementById(selectId);
   if (!selectCategorias) return;
+  garantirCategoriasPadraoProducao();
   
   if (!departamento || !window.categoriasPorDepartamento[departamento]) {
     selectCategorias.innerHTML = '<option value="">Selecione departamento</option>';
@@ -39653,7 +39748,16 @@ async function selecionarProdutoCatalogo(codigo, descricao, event = null) {
       : categoriaCompraTexto || `${categoriaPadraoCodigo} - Outros Materiais`;
   }
   // Categorias operacionais especificas devem gravar o codigo correto da Omie.
-  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  const categoriaOperacionalOmie = (() => {
+    const categoria = String(centroCusto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    if (categoria === 'materia prima') return { codigo: '2.01.03', nome: '2.01.03 - Materia Prima Nacional' };
+    if (categoria === 'embalagem dos produtos') return { codigo: '2.01.93', nome: '2.01.93 - Embalagem Dos Produtos' };
+    return null;
+  })();
   if (categoriaOperacionalOmie) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
     categoriaCompraTexto = categoriaOperacionalOmie.nome;
@@ -39933,7 +40037,16 @@ async function adicionarProdutoNaoCadastradoAoCarrinho(event) {
     categoriaCompra = categoriaPadraoCodigo;
   }
   // Categorias operacionais especificas devem gravar o codigo correto da Omie.
-  const categoriaOperacionalOmie = obterCategoriaCompraOmiePorCentroCusto(centroCusto);
+  const categoriaOperacionalOmie = (() => {
+    const categoria = String(centroCusto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+    if (categoria === 'materia prima') return { codigo: '2.01.03', nome: '2.01.03 - Materia Prima Nacional' };
+    if (categoria === 'embalagem dos produtos') return { codigo: '2.01.93', nome: '2.01.93 - Embalagem Dos Produtos' };
+    return null;
+  })();
   if (categoriaOperacionalOmie) {
     categoriaCompra = categoriaOperacionalOmie.codigo;
   }
