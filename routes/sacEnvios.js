@@ -4051,7 +4051,11 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     }
   }
 
-  if (!setClauses.length)
+  // Verifica se veio selected_item para upsert em sac.at_busca_selecionada
+  const selectedItemRaw = req.body.selected_item && typeof req.body.selected_item === 'object'
+    ? req.body.selected_item : null;
+
+  if (!setClauses.length && !selectedItemRaw)
     return res.status(400).json({ ok: false, error: 'Nenhum campo válido enviado.' });
 
   const usuarioLogado = req.session?.user?.fullName
@@ -4059,18 +4063,56 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
                      || req.session?.user?.login
                      || 'desconhecido';
 
-  // editado_por como parâmetro; editado_em usa NOW() direto
-  setClauses.push(`editado_por = $${setClauses.length + 1}`);
-  colValues.push(usuarioLogado);
-  setClauses.push(`editado_em = NOW()`);
-
-  const values = [...colValues, id];
-
   try {
-    await pool.query(
-      `UPDATE sac.at SET ${setClauses.join(', ')} WHERE id = $${values.length}`,
-      values
-    );
+    // Atualiza campos do AT principal (se houver)
+    if (setClauses.length) {
+      setClauses.push(`editado_por = $${setClauses.length + 1}`);
+      colValues.push(usuarioLogado);
+      setClauses.push(`editado_em = NOW()`);
+      const values = [...colValues, id];
+      await pool.query(
+        `UPDATE sac.at SET ${setClauses.join(', ')} WHERE id = $${values.length}`,
+        values
+      );
+    }
+
+    // Grava/atualiza sac.at_busca_selecionada se veio selected_item
+    if (selectedItemRaw) {
+      const si = {
+        pedido:         String(selectedItemRaw.pedido         || '').trim() || null,
+        ordemProducao:  String(selectedItemRaw.ordem_producao || '').trim() || null,
+        modelo:         String(selectedItemRaw.modelo         || '').trim() || null,
+        cliente:        String(selectedItemRaw.cliente        || '').trim() || null,
+        notaFiscal:     String(selectedItemRaw.nota_fiscal    || '').trim() || null,
+        dataEntrega:    String(selectedItemRaw.data_entrega   || '').trim() || null,
+        testeTipoGas:   String(selectedItemRaw.teste_tipo_gas || '').trim() || null,
+      };
+      const _buscaExist = await pool.query(
+        `SELECT id FROM sac.at_busca_selecionada WHERE id_at = $1 LIMIT 1`, [id]
+      );
+      if (_buscaExist.rowCount > 0) {
+        await pool.query(
+          `UPDATE sac.at_busca_selecionada SET
+             pedido         = $2,
+             ordem_producao = $3,
+             modelo         = $4,
+             cliente        = $5,
+             nota_fiscal    = $6,
+             data_entrega   = $7,
+             teste_tipo_gas = $8
+           WHERE id_at = $1`,
+          [id, si.pedido, si.ordemProducao, si.modelo, si.cliente, si.notaFiscal, si.dataEntrega, si.testeTipoGas]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO sac.at_busca_selecionada
+             (id_at, pedido, ordem_producao, modelo, cliente, nota_fiscal, data_entrega, teste_tipo_gas)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, si.pedido, si.ordemProducao, si.modelo, si.cliente, si.notaFiscal, si.dataEntrega, si.testeTipoGas]
+        );
+      }
+    }
+
     return res.json({ ok: true, editado_por: usuarioLogado, editado_em: new Date().toISOString() });
   } catch (err) {
     console.error('[SAC/AT] erro ao atualizar atendimento:', err);
