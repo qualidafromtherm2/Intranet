@@ -12216,6 +12216,58 @@ function attachDropZone(ul) {
   const fmtMoeda = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}) : '-'; };
   const fmtQtd   = (v) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:4}) : '-'; };
 
+  const DICIONARIO_EQUIVALENCIA_UNIDADE_LOCALIZAR = {
+    UN: ['UN', 'UND', 'UNID', 'UNIDADE', 'UNIDAD', 'UNIT', 'PC', 'PÇ', 'PECA', 'PEÇA', 'PCS', 'PÇS', 'PECAS', 'PEÇAS'],
+    PAR: ['PAR', 'PARES', 'PR'],
+    CX: ['CX', 'CAIXA', 'CXS', 'CAIXAS'],
+    PCT: ['PCT', 'PAC', 'PACOTE', 'PACOTES', 'EMB', 'EMBALAGEM', 'EMBALAGENS'],
+    RL: ['RL', 'RLO', 'ROLO', 'ROLOS'],
+    M: ['M', 'MT', 'MTS', 'METRO', 'METROS'],
+    CM: ['CM', 'CENTIMETRO', 'CENTÍMETRO', 'CENTIMETROS', 'CENTÍMETROS'],
+    MM: ['MM', 'MILIMETRO', 'MILÍMETRO', 'MILIMETROS', 'MILÍMETROS'],
+    KG: ['KG', 'KILO', 'QUILO', 'QUILOGRAMA', 'QUILOGRAMAS'],
+    G: ['G', 'GR', 'GRAMA', 'GRAMAS'],
+    TON: ['TON', 'T', 'TONELADA', 'TONELADAS'],
+    L: ['L', 'LT', 'LTS', 'LITRO', 'LITROS'],
+    ML: ['ML', 'MILILITRO', 'MILILITROS'],
+    M2: ['M2', 'M²', 'MT2', 'METRO2', 'METRO QUADRADO', 'METROS QUADRADOS'],
+    M3: ['M3', 'M³', 'MT3', 'METRO3', 'METRO CUBICO', 'METRO CÚBICO', 'METROS CUBICOS', 'METROS CÚBICOS']
+  };
+
+  const normalizarTokenUnidadeLocalizar = (v) => String(v || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+
+  const mapaCanonicoUnidadeLocalizar = (() => {
+    const mapa = new Map();
+    Object.entries(DICIONARIO_EQUIVALENCIA_UNIDADE_LOCALIZAR).forEach(([canonico, aliases]) => {
+      const chaveCanonica = normalizarTokenUnidadeLocalizar(canonico);
+      if (chaveCanonica) mapa.set(chaveCanonica, canonico);
+      aliases.forEach((alias) => {
+        const chaveAlias = normalizarTokenUnidadeLocalizar(alias);
+        if (chaveAlias) mapa.set(chaveAlias, canonico);
+      });
+    });
+    return mapa;
+  })();
+
+  const unidadeCanonicaLocalizar = (v) => {
+    const token = normalizarTokenUnidadeLocalizar(v);
+    if (!token) return '';
+    return mapaCanonicoUnidadeLocalizar.get(token) || token;
+  };
+
+  const unidadesEquivalentesLocalizar = (a, b) => {
+    const ua = unidadeCanonicaLocalizar(a);
+    const ub = unidadeCanonicaLocalizar(b);
+    if (!ua || !ub) return false;
+    return ua === ub;
+  };
+
   // ── Score local determinístico ────────────────────────────────
   // Retorna 0-100. Usado para ordenar automaticamente sem depender da IA.
 
@@ -12248,6 +12300,7 @@ function attachDropZone(ul) {
     let melhorDesc = 0;
     let melhorQtd  = 0;
     let melhorVal  = 0;
+    let melhorUnid = 0;
 
     // Para cada item da NF-e, procura o item do pedido com maior match
     itensNfe.forEach(nfeItem => {
@@ -12256,7 +12309,7 @@ function attachDropZone(ul) {
       const qtdNfe    = Math.abs(Number(nfeItem.qtd) || 0);
       const totalNfe  = Number(nfeItem.vlr_item) || 0;   // valor total da linha NF-e
 
-      let bestForThisItem = { desc: 0, qtd: 0, val: 0 };
+      let bestForThisItem = { desc: 0, qtd: 0, val: 0, unid: 0 };
       itensPed.forEach(pedItem => {
         const tokPed = tokenizar(pedItem.produto_descricao);
         if (!tokPed.length) return;
@@ -12274,6 +12327,12 @@ function attachDropZone(ul) {
           ? Math.max(0, Math.round(100 - Math.abs(qtdNfe - qtdPed) / Math.max(qtdNfe, qtdPed) * 100))
           : 50;
 
+        const unidadeNfe = String(nfeItem.unidade || '').trim();
+        const unidadePed = String(pedItem.unidade || '').trim();
+        const uScore = (unidadeNfe && unidadePed)
+          ? (unidadesEquivalentesLocalizar(unidadeNfe, unidadePed) ? 100 : 0)
+          : 50;
+
         // Score de VALOR TOTAL (muito mais confiável que unitário — evita o problema
         // de "1 pacote com 4 peças" vs "4 peças individuais")
         const totalPed = Number(pedItem.valor_item) || 0;
@@ -12286,15 +12345,16 @@ function attachDropZone(ul) {
           tScore = 50;  // não temos valor para comparar → neutro
         }
 
-        const combinado = dScore * 0.40 + tScore * 0.35 + qScore * 0.20;
-        const bestComb  = bestForThisItem.desc * 0.40 + bestForThisItem.val * 0.35 + bestForThisItem.qtd * 0.20;
+        const combinado = dScore * 0.38 + tScore * 0.30 + qScore * 0.20 + uScore * 0.12;
+        const bestComb  = bestForThisItem.desc * 0.38 + bestForThisItem.val * 0.30 + bestForThisItem.qtd * 0.20 + bestForThisItem.unid * 0.12;
         if (combinado > bestComb) {
-          bestForThisItem = { desc: dScore, qtd: qScore, val: tScore };
+          bestForThisItem = { desc: dScore, qtd: qScore, val: tScore, unid: uScore };
         }
       });
       if (bestForThisItem.desc > melhorDesc) melhorDesc = bestForThisItem.desc;
       if (bestForThisItem.qtd > melhorQtd)  melhorQtd  = bestForThisItem.qtd;
       if (bestForThisItem.val > melhorVal)  melhorVal  = bestForThisItem.val;
+      if (bestForThisItem.unid > melhorUnid) melhorUnid = bestForThisItem.unid;
     });
 
     // Score de número de itens: NF-e com 1 item deve preferir pedido com 1 item.
@@ -12315,8 +12375,8 @@ function attachDropZone(ul) {
       fScore = setAll.size > 0 ? Math.round((inter / setAll.size) * 100) : 0;
     }
 
-    // Pesos: descrição 35%, valor total 30%, nº itens 20%, qtd 10%, fornecedor 5%
-    return Math.round(melhorDesc * 0.35 + melhorVal * 0.30 + nScore * 0.20 + melhorQtd * 0.10 + fScore * 0.05);
+    // Pesos: descrição 32%, valor total 28%, nº itens 18%, qtd 10%, unidade 7%, fornecedor 5%
+    return Math.round(melhorDesc * 0.32 + melhorVal * 0.28 + nScore * 0.18 + melhorQtd * 0.10 + melhorUnid * 0.07 + fScore * 0.05);
   };
 
   const scoreBadgeLocal = (s) => {

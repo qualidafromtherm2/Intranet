@@ -27838,8 +27838,9 @@ app.post('/api/compras/ranking-pedidos-nfe', async (req, res) => {
 REGRAS DE CLASSIFICAÇÃO (em ordem de importância):
 1. DESCRIÇÃO DO PRODUTO (peso 60%): Pedidos com descrição igual ou muito semelhante aos itens da NF-e devem ter score altíssimo. Correspondência parcial de palavras (ex: "BORBOLETA ZAMAC") ainda conta bastante.
 2. QUANTIDADE (peso 20%): Se a quantidade dos itens do pedido for igual ou muito próxima à da NF-e, aumente o score. Divergência grande reduz o score.
-3. VALOR UNITÁRIO (peso 15%): Se o valor unitário do item do pedido for próximo ao valor unitário da NF-e (vlr_item ÷ qtd), aumente o score.
-4. FORNECEDOR / DATA (peso 5%): Pedidos do mesmo fornecedor ou data próxima são leve tiebreaker.
+3. UNIDADE DE MEDIDA (peso 15%): Considere equivalentes: UN/UND/UNID/UNIDADE/PC/PECA; PAR/PARES/PR; CX/CAIXA; PCT/PAC/PACOTE/EMB/EMBALAGEM; RL/ROLO; M/MT/MTS/METRO; CM/CENTIMETRO; MM/MILIMETRO; KG/KILO/QUILO; G/GR/GRAMA; TON/T/TONELADA; L/LT/LITRO; ML/MILILITRO; M2/M²/MT2/METRO QUADRADO; M3/M³/MT3/METRO CUBICO. Equivalência deve aumentar score; unidade incompatível deve reduzir score.
+4. VALOR UNITÁRIO (peso 10%): Se o valor unitário do item do pedido for próximo ao valor unitário da NF-e (vlr_item ÷ qtd), aumente o score.
+5. FORNECEDOR / DATA (peso 5%): Pedidos do mesmo fornecedor ou data próxima são leve tiebreaker.
 IGNORE: categoria genérica, ordem de listagem, número do pedido.
 
 NF-e:
@@ -29375,6 +29376,64 @@ function tokenizarTextoAssociacaoNfePedido(valor) {
   )];
 }
 
+const DICIONARIO_EQUIVALENCIA_UNIDADE_MATCH = {
+  UN: ['UN', 'UND', 'UNID', 'UNIDADE', 'UNIDAD', 'UNIT', 'PC', 'PÇ', 'PECA', 'PEÇA', 'PCS', 'PÇS', 'PECAS', 'PEÇAS'],
+  PAR: ['PAR', 'PARES', 'PR'],
+  CX: ['CX', 'CAIXA', 'CXS', 'CAIXAS'],
+  PCT: ['PCT', 'PAC', 'PACOTE', 'PACOTES', 'EMB', 'EMBALAGEM', 'EMBALAGENS'],
+  RL: ['RL', 'RLO', 'ROLO', 'ROLOS'],
+  M: ['M', 'MT', 'MTS', 'METRO', 'METROS'],
+  CM: ['CM', 'CENTIMETRO', 'CENTÍMETRO', 'CENTIMETROS', 'CENTÍMETROS'],
+  MM: ['MM', 'MILIMETRO', 'MILÍMETRO', 'MILIMETROS', 'MILÍMETROS'],
+  KG: ['KG', 'KILO', 'QUILO', 'QUILOGRAMA', 'QUILOGRAMAS'],
+  G: ['G', 'GR', 'GRAMA', 'GRAMAS'],
+  TON: ['TON', 'T', 'TONELADA', 'TONELADAS'],
+  L: ['L', 'LT', 'LTS', 'LITRO', 'LITROS'],
+  ML: ['ML', 'MILILITRO', 'MILILITROS'],
+  M2: ['M2', 'M²', 'MT2', 'METRO2', 'METRO QUADRADO', 'METROS QUADRADOS'],
+  M3: ['M3', 'M³', 'MT3', 'METRO3', 'METRO CUBICO', 'METRO CÚBICO', 'METROS CUBICOS', 'METROS CÚBICOS']
+};
+
+function normalizarTokenUnidadeMatch(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+}
+
+const MAPA_CANONICO_UNIDADE_MATCH = (() => {
+  const mapa = new Map();
+
+  Object.entries(DICIONARIO_EQUIVALENCIA_UNIDADE_MATCH).forEach(([canonico, alias]) => {
+    const chaveCanonica = normalizarTokenUnidadeMatch(canonico);
+    if (chaveCanonica) mapa.set(chaveCanonica, canonico);
+
+    alias.forEach((itemAlias) => {
+      const chaveAlias = normalizarTokenUnidadeMatch(itemAlias);
+      if (chaveAlias) mapa.set(chaveAlias, canonico);
+    });
+  });
+
+  return mapa;
+})();
+
+function unidadeCanonicaMatch(valor) {
+  const token = normalizarTokenUnidadeMatch(valor);
+  if (!token) return '';
+  return MAPA_CANONICO_UNIDADE_MATCH.get(token) || token;
+}
+
+function unidadesEquivalentesMatch(unidadeA, unidadeB) {
+  const canonicaA = unidadeCanonicaMatch(unidadeA);
+  const canonicaB = unidadeCanonicaMatch(unidadeB);
+
+  if (!canonicaA || !canonicaB) return false;
+  return canonicaA === canonicaB;
+}
+
 function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   const itensCabec = itemReceb?.itensCabec || {};
   const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
@@ -29425,6 +29484,16 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
       const proporcao = Math.max(qtdRec, qtdPedido) / Math.min(qtdRec, qtdPedido);
       if (proporcao <= 1.25) score += 18;
       else if (proporcao <= 2) score += 8;
+    }
+  }
+
+  const unidadeRec = String(itensCabec?.cUnidadeNFe || itensCabec?.cUnidadeNfe || '').trim();
+  const unidadePedido = String(itemPedido?.c_unidade || '').trim();
+  if (unidadeRec && unidadePedido) {
+    if (unidadesEquivalentesMatch(unidadeRec, unidadePedido)) {
+      score += 55;
+    } else {
+      score -= 20;
     }
   }
 
