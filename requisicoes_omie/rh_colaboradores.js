@@ -376,6 +376,7 @@ function setBasicUserFields(pane, row) {
   val('#rhColabDataNascimento', pane).value = row?.data_nascimento ? row.data_nascimento.slice(0, 10) : '';
   val('#rhColabTelefone', pane).value = row?.telefone_contato || '';
   val('#rhColabReceberNotificacao', pane).checked = row?.receber_notificacao === true;
+  val('#rhColabIsActive', pane).checked = row?.is_active !== false;
 
   const funcaoId = normalizeId(row?.funcao_id);
   const setorId = normalizeId(row?.setor_id);
@@ -458,6 +459,7 @@ async function salvarCadastroRh(pane) {
     data_nascimento: val('#rhColabDataNascimento', pane).value || null,
     telefone_contato: val('#rhColabTelefone', pane).value.trim() || null,
     receber_notificacao: val('#rhColabReceberNotificacao', pane).checked,
+    is_active: val('#rhColabIsActive', pane).checked,
     funcao_id: normalizeId(val('#rhColabFuncao', pane).value),
     setor_id: normalizeId(val('#rhColabSetor', pane).value),
     cargo_id: normalizeId(val('#rhColabCargo', pane).value),
@@ -948,6 +950,134 @@ async function openConversasModal(_pane, userId) {
   });
 }
 
+/* ============================
+   Modal Status (Inativos / Ativos)
+   ============================ */
+function closeStatusColabModal() {
+  document.getElementById('rhStatusColabModal')?.remove();
+  document.body.style.overflow = '';
+}
+
+async function openStatusColabModal(pane, initialMode) {
+  closeStatusColabModal();
+
+  const back = document.createElement('div');
+  back.id = 'rhStatusColabModal';
+  back.className = 'rh-colab-modal-backdrop';
+
+  const modal = document.createElement('div');
+  modal.className = 'rh-colab-modal';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.style.cssText = 'max-height:90vh;display:flex;flex-direction:column;width:min(700px,94vw)';
+  back.appendChild(modal);
+  document.body.appendChild(back);
+  document.body.style.overflow = 'hidden';
+
+  let currentMode = initialMode || 'inativos';
+
+  async function render() {
+    const isInativos = currentMode === 'inativos';
+    const titulo = isInativos ? 'Colaboradores inativos' : 'Colaboradores ativos';
+    const toggleLabel = isInativos ? 'Exibir ativos' : 'Exibir inativos';
+    const url = isInativos ? '/api/rh/colaboradores/inativos' : '/api/rh/colaboradores/usuarios';
+    const acaoLabel = isInativos ? 'Ativar' : 'Inativar';
+    const acaoClass = isInativos ? 'btn-ativar-colab' : 'btn-inativar-colab';
+    const acaoStyle = isInativos
+      ? 'border:1px solid rgba(72,200,100,.35);background:rgba(72,200,100,.14);color:#9dffc5;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px'
+      : 'border:1px solid rgba(255,115,115,.35);background:rgba(255,95,95,.14);color:#ffc9c9;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px';
+
+    modal.innerHTML = `
+      <header style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+        <h3 style="margin:0;font-size:18px;font-weight:700">${titulo}</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="rhStatusColabToggle" type="button" class="content-button status-button" style="font-size:13px;padding:6px 12px">${toggleLabel}</button>
+          <button type="button" class="rh-status-colab-close-x" style="border:0;background:transparent;color:#cdd7f5;font-size:28px;cursor:pointer;line-height:1">×</button>
+        </div>
+      </header>
+      <div id="rhStatusColabLista" style="overflow-y:auto;flex:1;padding:14px 16px">
+        <div style="text-align:center;padding:20px;opacity:.7">Carregando...</div>
+      </div>
+      <footer style="padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);display:flex;justify-content:flex-end">
+        <button type="button" class="content-button status-button rh-status-colab-close">Fechar</button>
+      </footer>
+    `;
+
+    modal.querySelector('.rh-status-colab-close-x').addEventListener('click', closeStatusColabModal);
+    modal.querySelector('.rh-status-colab-close').addEventListener('click', closeStatusColabModal);
+    modal.querySelector('#rhStatusColabToggle').addEventListener('click', () => {
+      currentMode = isInativos ? 'ativos' : 'inativos';
+      render();
+    });
+
+    const lista = document.getElementById('rhStatusColabLista');
+    try {
+      const usuarios = await fetchJson(url);
+      if (!usuarios.length) {
+        lista.innerHTML = `<div style="text-align:center;padding:20px;opacity:.7">Nenhum colaborador ${isInativos ? 'inativo' : 'ativo'} encontrado.</div>`;
+        return;
+      }
+      lista.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#a8b3d4">Usuário</th>
+              <th style="text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#a8b3d4">Setor</th>
+              <th style="text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#a8b3d4">Função</th>
+              <th style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.12)"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${usuarios.map((u) => `
+              <tr>
+                <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);color:#e1e6f8">${escapeHtml(u.username)}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);color:#e1e6f8">${escapeHtml(u.setor || '—')}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);color:#e1e6f8">${escapeHtml(u.funcao || '—')}</td>
+                <td style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);text-align:right">
+                  <button class="${acaoClass}" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" style="${acaoStyle}">${acaoLabel}</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      lista.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest(`.${acaoClass}`);
+        if (!btn) return;
+        const userId = Number(btn.dataset.userId);
+        const username = btn.dataset.username;
+        const newActive = isInativos;
+        const confirmMsg = isInativos
+          ? `Ativar o colaborador "${username}"?`
+          : `Inativar o colaborador "${username}"? Ele não aparecerá mais na lista de ativos.`;
+        if (!confirm(confirmMsg)) return;
+        const prevText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '...';
+        try {
+          await fetchJson(`/api/rh/colaboradores/${userId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: newActive }),
+          });
+          await carregarBases(pane);
+          await render();
+        } catch (err) {
+          alert('Falha ao alterar status: ' + (err.message || err));
+          btn.disabled = false;
+          btn.textContent = prevText;
+        }
+      });
+    } catch (err) {
+      lista.innerHTML = `<div style="text-align:center;padding:20px;opacity:.7;color:#ffc9c9">Erro ao carregar lista: ${escapeHtml(err.message || String(err))}</div>`;
+    }
+  }
+
+  back.addEventListener('click', (ev) => { if (ev.target === back) closeStatusColabModal(); });
+  await render();
+}
+
 function ensurePane(root) {
   let pane = document.getElementById('rhCadastroColaboradores');
   if (pane) return pane;
@@ -963,6 +1093,7 @@ function ensurePane(root) {
           <div class="content-section-title">Cadastro RH de colaboradores</div>
           <div class="rh-colab-actions-top">
             <button id="rhColabReload" class="content-button status-button" type="button">Recarregar</button>
+            <button id="rhColabExibirInativos" class="content-button status-button" type="button">Exibir inativos</button>
             <button id="rhColabAddUser" class="content-button status-button" type="button">+ Novo colaborador</button>
           </div>
         </div>
@@ -989,6 +1120,10 @@ function ensurePane(root) {
                   <label class="rh-colab-check-label-inline" title="Receber notificação">
                     <input id="rhColabReceberNotificacao" type="checkbox">
                     <span>Notificação</span>
+                  </label>
+                  <label class="rh-colab-check-label-inline" title="Colaborador ativo">
+                    <input id="rhColabIsActive" type="checkbox" checked>
+                    <span>Ativo</span>
                   </label>
                 </div>
               </div>
@@ -1227,6 +1362,8 @@ function ensurePane(root) {
   });
 
   val('#rhColabAddUser', pane).addEventListener('click', () => openNewUserModal(pane));
+
+  val('#rhColabExibirInativos', pane).addEventListener('click', () => openStatusColabModal(pane, 'inativos'));
 
   val('#rhColabBtnEpi', pane).addEventListener('click', () => {
     const userId = getSelectedUserId(pane);
