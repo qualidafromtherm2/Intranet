@@ -30161,9 +30161,12 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
     }
 
     // ─── Passo 1: associação do pedido (PRIMEIRO, pois pode resetar dados financeiros) ───
+    // Se houver troca de categoria, ela precisa ir junto com a associação.
+    // A Omie pode validar a categoria antiga já no vínculo do pedido antes do Passo 2.
     const payloadAlterar = {
       ide: { nIdReceb: Number(plano.n_id_receb) },
-      itensRecebimentoEditar: itensParaEnviar
+      itensRecebimentoEditar: itensParaEnviar,
+      ...(novaCategoriaCompra && infoAdicionaisParaEnviar ? { infoAdicionais: infoAdicionaisParaEnviar } : {})
     };
 
     console.log('[Compras/NFeAssociarPedido] ===== PASSO 1: ASSOCIAR-PEDIDO =====');
