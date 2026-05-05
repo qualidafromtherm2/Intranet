@@ -6151,6 +6151,65 @@ router.get('/vendas/graficos/valor-familia-mes/detalhe', async (req, res) => {
   }
 });
 
+// GET /vendas/controle/pedidos — lista pedidos de venda com dados básicos
+router.get('/vendas/controle/pedidos', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        p.codigo_pedido,
+        p.numero_pedido,
+        COALESCE(NULLIF(TRIM(f.nome_fantasia), ''), NULLIF(TRIM(f.razao_social), ''), 'N/D') AS cliente_nome,
+        COALESCE(NULLIF(TRIM(p.etapa::text), ''), 'Sem etapa') AS etapa,
+        CASE COALESCE(NULLIF(TRIM(p.etapa::text), ''), '')
+          WHEN '00' THEN 'Aberto'
+          WHEN '10' THEN 'Em análise'
+          WHEN '20' THEN 'Aprovado'
+          WHEN '50' THEN 'Em processamento'
+          WHEN '60' THEN 'Em separação'
+          WHEN '70' THEN 'Faturado/Entregue'
+          WHEN '80' THEN 'Concluído'
+          ELSE 'Etapa ' || COALESCE(NULLIF(TRIM(p.etapa::text), ''), '?')
+        END AS etapa_descricao,
+        p.updated_at AS created_at,
+        p.data_previsao,
+        COALESCE(p.numero_pedido_cliente, '') AS origem_pedido,
+        COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total_pedido
+      FROM "Vendas".pedidos_venda p
+      LEFT JOIN omie.fornecedores f
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+      ORDER BY p.numero_pedido DESC NULLS LAST
+      LIMIT 500
+    `);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro controle/pedidos:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/controle/pedido-itens/:codigoPedido — itens de um pedido específico
+router.get('/vendas/controle/pedido-itens/:codigoPedido', async (req, res) => {
+  const codigoPedido = String(req.params.codigoPedido || '').trim();
+  if (!codigoPedido) return res.status(400).json({ ok: false, error: 'codigoPedido é obrigatório.' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        i.codigo,
+        COALESCE(po.descricao, i.descricao, '-') AS descricao,
+        i.quantidade,
+        COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
+      FROM "Vendas".pedidos_venda_itens i
+      LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      WHERE i.codigo_pedido = $1
+      ORDER BY i.descricao NULLS LAST
+    `, [codigoPedido]);
+    return res.json({ ok: true, rows });
+  } catch (err) {
+    console.error('[VENDAS] erro controle/pedido-itens:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // CRUD sac.alimentacao
 router.get('/at/alimentacao', async (req, res) => {
   try {

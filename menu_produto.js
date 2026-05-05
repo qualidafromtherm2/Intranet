@@ -7911,6 +7911,20 @@ if (sacAtGraficosMenuLink) {
   });
 }
 
+const sacAtMapaMenuLink = document.getElementById('menu-sac-at-mapa');
+if (sacAtMapaMenuLink) {
+  sacAtMapaMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    sacAtMapaMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('at');
+    // Abre o modal de mapa de técnicos diretamente
+    const mapaBtn = document.getElementById('atOsMapaBtn');
+    if (mapaBtn) mapaBtn.click();
+  });
+}
+
 const vendasGraficosMenuLink = document.getElementById('menu-vendas-graficos');
 if (vendasGraficosMenuLink) {
   vendasGraficosMenuLink.addEventListener('click', (e) => {
@@ -7934,6 +7948,18 @@ if (vendasControleMenuLink) {
     showMainTab('sacAtPane');
     setSacAtModoVisual('vendas-controle');
     window._iniciarControleVendasPagina?.();
+  });
+}
+
+const vendasMapaMenuLink = document.getElementById('menu-vendas-mapa');
+if (vendasMapaMenuLink) {
+  vendasMapaMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    vendasMapaMenuLink.classList.add('is-active');
+    showMainTab('sacAtPane');
+    setSacAtModoVisual('vendas-mapa');
+    window._iniciarMapaVendasPagina?.();
   });
 }
 
@@ -12864,6 +12890,7 @@ function setSacAtModoVisual(mode = 'at') {
   const sacAtGraficosPane = document.getElementById('sacAtGraficosPane');
   const vendasGraficosPane = document.getElementById('vendasGraficosPane');
   const vendasControlePane = document.getElementById('vendasControlePane');
+  const vendasMapaPane     = document.getElementById('vendasMapaPane');
   const wrapper = sacAtGraficosPane?.parentElement;
   if (!sacAtPane || !sacAtGraficosPane || !wrapper) return;
 
@@ -12915,9 +12942,25 @@ function setSacAtModoVisual(mode = 'at') {
     return;
   }
 
+  if (mode === 'vendas-mapa') {
+    sacAtPane.style.display = 'flex';
+    Array.from(wrapper.children).forEach((child) => {
+      if (!(child instanceof HTMLElement)) return;
+      if (child === vendasMapaPane) {
+        child.style.display = 'flex';
+        return;
+      }
+      if (child.classList.contains('modal-overlay') || child.id === 'atLightbox' || child.id === 'atWhatsappModal') {
+        return;
+      }
+      child.style.display = 'none';
+    });
+    return;
+  }
+
   Array.from(wrapper.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
-    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child.id === 'atGraficosView') {
+    if (child === sacAtGraficosPane || child === vendasGraficosPane || child === vendasControlePane || child === vendasMapaPane || child.id === 'atGraficosView') {
       child.style.display = 'none';
       return;
     }
@@ -42748,6 +42791,8 @@ async function abrirModalAprovacaoRequisicao() {
         : '__misto__';
       const totalSemPermissao = itensGrupo.length - itensPermitidos.length;
       const grupoRequisicaoEncoded = encodeURIComponent(grupoRequisicao);
+      const itensGrupoParaRecusa = itensGrupo.map(i => ({ id: i.id, ts: String(i.table_source || 'solicitacao_compras') }));
+      const itensGrupoJsonEncoded = encodeURIComponent(JSON.stringify(itensGrupoParaRecusa));
       
       tabelaHtml += `
         <div data-grupo-aprovacao="${escapeHtml(grupoRequisicao)}" style="margin-bottom:24px;border:2px solid #3b82f6;border-radius:8px;overflow:hidden;">
@@ -42768,6 +42813,15 @@ async function abrirModalAprovacaoRequisicao() {
                 <span>Comprar requisição ${escapeHtml(grupoRequisicao)}</span>
               </button>
               ` : '<span style="font-size:11px;opacity:0.8;">Sem permissão</span>'}
+              <button
+                type="button"
+                title="Recusar tudo — devolver todos os itens ao carrinho"
+                onclick="abrirModalRecusarTudoGrupo('${grupoRequisicaoEncoded}', '${itensGrupoJsonEncoded}')"
+                style="background:rgba(239,68,68,0.35);border:1px solid rgba(239,68,68,0.7);color:white;padding:4px 10px;border-radius:10px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;"
+              >
+                <i class="fa-solid fa-ban"></i>
+                <span>Recusar tudo</span>
+              </button>
               ${idsSolicitacaoGrupo.length > 0 ? `
               <div style="background:rgba(255,255,255,0.2);padding:4px 10px;border-radius:12px;display:flex;align-items:center;gap:8px;">
                 <span style="font-size:11px;opacity:0.9;">Retorno Cotação:</span>
@@ -43289,6 +43343,149 @@ async function aprovarGrupoRequisicao(itemIdsCsv, grupoRequisicaoEncoded = '', t
     console.error('[Aprovar Grupo] Erro:', err);
     alert('Erro ao aprovar itens do grupo: ' + err.message);
   }
+  await abrirModalAprovacaoRequisicao();
+}
+
+// ========== Recusar Tudo — modal de motivo e reprovação em lote ==========
+
+function abrirModalRecusarTudoGrupo(grupoRequisicaoEncoded, itensJsonEncoded) {
+  const grupoRequisicao = decodeURIComponent(grupoRequisicaoEncoded);
+  let itens = [];
+  try { itens = JSON.parse(decodeURIComponent(itensJsonEncoded)); } catch (e) { itens = []; }
+
+  if (!itens.length) {
+    alert('Nenhum item para recusar neste grupo.');
+    return;
+  }
+
+  window._recusarTudoGrupoRequisicao = grupoRequisicao;
+  window._recusarTudoItens = itens;
+
+  const modalId = 'modalRecusarTudoGrupo';
+  let modal = document.getElementById(modalId);
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal';
+    modal.style.display = 'none';
+    modal.style.setProperty('z-index', '10004', 'important');
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:600px;width:90%;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px;border-radius:8px 8px 0 0;">
+        <h3 style="margin:0;display:flex;align-items:center;gap:10px;font-size:16px;">
+          <i class="fa-solid fa-ban"></i>
+          <span>Recusar Tudo — ${escapeHtml(grupoRequisicao)}</span>
+        </h3>
+        <button id="recusarTudoBtnFechar" class="modal-close" onclick="fecharModalRecusarTudoGrupo()" style="color:white;opacity:0.9;">&times;</button>
+      </div>
+      <div id="recusarTudoModalBody" class="modal-body" style="padding:20px;background:#f9fafb;">
+        <div style="font-size:13px;color:#374151;margin-bottom:6px;">
+          Todos os <strong>${itens.length} item(ns)</strong> da requisição <strong>${escapeHtml(grupoRequisicao)}</strong> serão devolvidos ao carrinho.
+        </div>
+        <div style="font-size:13px;color:#374151;margin-bottom:10px;">Informe o motivo (obrigatório):</div>
+        <textarea id="recusarTudoTexto" rows="4" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;resize:vertical;font-size:13px;" placeholder="Descreva o motivo..."></textarea>
+        <div id="recusarTudoError" style="color:#ef4444;font-size:12px;margin-top:8px;display:none;">Motivo é obrigatório.</div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
+          <button onclick="fecharModalRecusarTudoGrupo()" style="background:#e5e7eb;color:#374151;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Cancelar</button>
+          <button onclick="confirmarRecusarTudoGrupo()" style="background:#ef4444;color:white;border:none;padding:10px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;">Recusar Tudo</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+}
+
+function fecharModalRecusarTudoGrupo() {
+  const modal = document.getElementById('modalRecusarTudoGrupo');
+  if (modal) modal.style.display = 'none';
+  const textarea = document.getElementById('recusarTudoTexto');
+  const errorDiv = document.getElementById('recusarTudoError');
+  if (textarea) textarea.value = '';
+  if (errorDiv) errorDiv.style.display = 'none';
+  window._recusarTudoGrupoRequisicao = null;
+  window._recusarTudoItens = null;
+}
+
+async function confirmarRecusarTudoGrupo() {
+  const textarea = document.getElementById('recusarTudoTexto');
+  const errorDiv = document.getElementById('recusarTudoError');
+  if (!textarea) return;
+  const motivo = textarea.value.trim();
+  if (!motivo) {
+    if (errorDiv) errorDiv.style.display = 'block';
+    textarea.focus();
+    return;
+  }
+
+  const itens = Array.isArray(window._recusarTudoItens) ? window._recusarTudoItens : [];
+  if (!itens.length) { fecharModalRecusarTudoGrupo(); return; }
+
+  // Troca o corpo do modal para spinner de progresso
+  const modalBody = document.getElementById('recusarTudoModalBody');
+  const btnFechar = document.getElementById('recusarTudoBtnFechar');
+  if (btnFechar) btnFechar.style.display = 'none'; // impede fechar durante operação
+
+  if (modalBody) {
+    modalBody.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 20px;gap:20px;">
+        <div style="width:56px;height:56px;border:5px solid #fecaca;border-top-color:#ef4444;border-radius:50%;animation:recusarTudoSpin 0.8s linear infinite;"></div>
+        <div style="text-align:center;">
+          <div style="font-weight:700;color:#1f2937;font-size:15px;margin-bottom:6px;">Recusando itens...</div>
+          <div id="recusarTudoProgresso" style="color:#6b7280;font-size:13px;">0 de ${itens.length}</div>
+        </div>
+        <div style="width:100%;background:#f3f4f6;border-radius:8px;height:8px;overflow:hidden;">
+          <div id="recusarTudoBarraProgresso" style="height:8px;background:linear-gradient(90deg,#ef4444,#dc2626);border-radius:8px;width:0%;transition:width 0.3s ease;"></div>
+        </div>
+        <div id="recusarTudoItemAtual" style="color:#9ca3af;font-size:11px;font-style:italic;text-align:center;"></div>
+      </div>
+      <style>
+        @keyframes recusarTudoSpin { to { transform: rotate(360deg); } }
+      </style>
+    `;
+  }
+
+  let processados = 0;
+  let erros = 0;
+  const total = itens.length;
+
+  for (const item of itens) {
+    // Atualiza progresso visual
+    const elProgresso = document.getElementById('recusarTudoProgresso');
+    const elBarra = document.getElementById('recusarTudoBarraProgresso');
+    const elItem = document.getElementById('recusarTudoItemAtual');
+    if (elProgresso) elProgresso.textContent = `${processados} de ${total}`;
+    if (elBarra) elBarra.style.width = `${Math.round((processados / total) * 100)}%`;
+    if (elItem) elItem.textContent = `Processando item #${item.id}...`;
+
+    try {
+      await reprovarItemAprovacao(item.id, motivo, item.ts || 'solicitacao_compras');
+    } catch (err) {
+      console.error('[Recusar Tudo] Erro ao reprovar item', item.id, err);
+      erros++;
+    }
+    processados++;
+  }
+
+  // Barra 100%
+  const elProgresso = document.getElementById('recusarTudoProgresso');
+  const elBarra = document.getElementById('recusarTudoBarraProgresso');
+  const elItem = document.getElementById('recusarTudoItemAtual');
+  if (elProgresso) elProgresso.textContent = `${total} de ${total}`;
+  if (elBarra) elBarra.style.width = '100%';
+  if (elItem) elItem.textContent = erros > 0 ? `Concluído com ${erros} erro(s).` : 'Todos os itens recusados com sucesso!';
+
+  // Pequena pausa para o usuário ver o 100%
+  await new Promise(resolve => setTimeout(resolve, 700));
+
+  fecharModalRecusarTudoGrupo();
+  if (erros > 0) {
+    alert(`${total - erros} item(ns) recusado(s). ${erros} erro(s) ocorreram.`);
+  }
+
   await abrirModalAprovacaoRequisicao();
 }
 
@@ -47974,6 +48171,9 @@ window.reprovarItemAprovacao = reprovarItemAprovacao;
 window.aprovarTodasRequisicoes = aprovarTodasRequisicoes;
 window.atualizarQuantidadeItemAprovacao = atualizarQuantidadeItemAprovacao;
 window.atualizarRetornoCotacaoGrupoAprovacao = atualizarRetornoCotacaoGrupoAprovacao;
+window.abrirModalRecusarTudoGrupo = abrirModalRecusarTudoGrupo;
+window.fecharModalRecusarTudoGrupo = fecharModalRecusarTudoGrupo;
+window.confirmarRecusarTudoGrupo = confirmarRecusarTudoGrupo;
 
 // Função para ajustar dinamicamente a altura do kanban
 function ajustarAlturaKanban() {
@@ -59787,13 +59987,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function ehImagem(nome) { return ['jpg','jpeg','png','gif','webp','bmp'].includes(ext(nome)); }
   function ehVideo(nome)  { return ['mp4','mov','webm','avi'].includes(ext(nome)); }
-
-  // Extrai prefixo numérico: "4.2.1 texto" → "4.2.1"
   function extrairPrefixo(texto) {
     const m = String(texto || '').match(/^(\d+(?:\.\d+)*)/);
     return m ? m[1] : null;
   }
-  // Constrói árvore hierárquica de análises
   function buildTree(analises) {
     const nodes = {}, keys = [];
     for (const a of analises) {
@@ -59815,24 +60012,23 @@ document.addEventListener('DOMContentLoaded', () => {
     return roots;
   }
 
+  function btnArqHtml(tipo, id, texto) {
+    return `<button class="ce-btn-arq-entidade" type="button"
+      data-tipo="${tipo}" data-id="${id}" data-texto="${esc(texto)}"
+      title="Documentos, Fotos e Vídeos"
+      style="padding:3px 7px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.35);border-radius:5px;color:#818cf8;cursor:pointer;font-size:11px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;">
+      <i class="fa-solid fa-paperclip"></i>
+    </button>`;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const inputBusca   = document.getElementById('codigosErroBusca');
     const btnBuscar    = document.getElementById('codigosErroBuscarBtn');
     const statusEl     = document.getElementById('codigosErroStatus');
     const resultadosEl = document.getElementById('codigosErroResultados');
 
-    const arquivosCache     = {};
     const analisesCache     = {};
     const verificacoesCache = {};
-
-    async function carregarArquivos(id) {
-      if (arquivosCache[id]) return arquivosCache[id];
-      try {
-        const r = await fetch(`/api/engenharia/codigos-erro/${id}/arquivos`, { credentials: 'include' });
-        arquivosCache[id] = (await r.json().catch(() => ({}))).arquivos || {};
-      } catch (_) { arquivosCache[id] = {}; }
-      return arquivosCache[id];
-    }
 
     async function carregarVerificacoes(id) {
       try {
@@ -59842,81 +60038,195 @@ document.addEventListener('DOMContentLoaded', () => {
       return verificacoesCache[id];
     }
 
-    // ── renderização dos cards de resultado ───────────────────────────────
-    function renderArquivosCard(arquivos) {
-      if (!arquivos) return '';
-      const blocos = ['Documento','Fotos','Videos'].map(pasta => {
-        const itens = arquivos[pasta] || [];
-        if (!itens.length) return '';
-        const lista = itens.map(f => {
-          if (ehImagem(f.nome)) return `<a href="${esc(f.url)}" target="_blank" style="display:inline-block;border-radius:8px;overflow:hidden;border:1px solid #334155;"><img src="${esc(f.url)}" alt="${esc(f.nome)}" style="width:90px;height:70px;object-fit:cover;display:block;" loading="lazy"/></a>`;
-          if (ehVideo(f.nome)) return `<video src="${esc(f.url)}" controls style="width:160px;height:100px;border-radius:8px;border:1px solid #334155;background:#000;"></video>`;
-          return `<a href="${esc(f.url)}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:12px;text-decoration:none;">${iconeArquivo(f.nome)}<span>${esc(f.nome)}</span></a>`;
-        }).join('');
-        return `<div style="margin-top:8px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:6px;">${esc(pasta)}</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${lista}</div></div>`;
-      }).join('');
-      return blocos ? `<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06);">${blocos}</div>` : '';
-    }
+    // ── GRID DE CARDS (estilo AT) ─────────────────────────────────────────
+    function renderGrid(registros, verificacoesLista) {
+      let html = '';
 
-    function renderCard(r, arquivos, verificacoes) {
-      const analises = Array.isArray(r.analises) ? r.analises : [];
+      registros.forEach((r, idx) => {
+        const analises = Array.isArray(r.analises) ? r.analises : [];
+        const verificacoes = verificacoesLista[idx] || [];
 
-      const linhas = analises.map(a => {
-        // Verificações vinculadas a esta análise — aparecem entre análise e solução
-        const verifDaAnalise = (verificacoes || []).filter(v => v.codigo_analise_id === a.id);
-        const verifHtml = verifDaAnalise.length
-          ? `<div style="margin:8px 0;padding:8px 12px;background:rgba(245,158,11,.07);border-left:3px solid #f59e0b;border-radius:0 6px 6px 0;">
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#f59e0b;margin-bottom:4px;"><i class="fa-solid fa-clipboard-check" style="margin-right:4px;"></i>Verificações</div>
-              ${verifDaAnalise.map(v => `<div style="font-size:12px;color:#e2e8f0;padding:2px 0;white-space:pre-wrap;">• ${esc(v.verificacao)}</div>`).join('')}
-            </div>`
-          : '';
-
-        const sol = (a.solucoes || []).map(s =>
-          `<div style="margin-top:6px;padding:8px 12px;background:rgba(34,197,94,.07);border-left:3px solid #22c55e;border-radius:0 6px 6px 0;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#22c55e;margin-bottom:2px;">Solução</div>
-            <div style="font-size:13px;color:var(--content-color);white-space:pre-wrap;">${esc(s.solucao_problema)}</div>
-          </div>`).join('');
-
-        return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
-            <div style="flex:1;">
-              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7280;margin-bottom:3px;">Análise</div>
-              <div style="font-size:13px;color:var(--content-color);white-space:pre-wrap;">${esc(a.analise)}</div>
-            </div>
-            <button class="ce-btn-edit-analise" data-analise-id="${a.id}" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button" title="Editar análise"
-              style="padding:4px 8px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#64748b;cursor:pointer;font-size:11px;flex-shrink:0;margin-top:2px;">
-              <i class="fa-solid fa-pen"></i>
-            </button>
-          </div>
-          ${verifHtml}
-          ${sol}
-        </div>`;
-      }).join('');
-
-      // Verificações sem análise vinculada
-      const verifGeral = (verificacoes || []).filter(v => !v.codigo_analise_id);
-      const verifGeralHtml = verifGeral.length
-        ? `<div style="margin-top:10px;padding:10px 14px;background:rgba(245,158,11,.07);border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#f59e0b;margin-bottom:6px;"><i class="fa-solid fa-clipboard-check" style="margin-right:4px;"></i>Verificações gerais</div>
-            ${verifGeral.map(v => `<div style="font-size:12px;color:#e2e8f0;padding:2px 0;white-space:pre-wrap;">• ${esc(v.verificacao)}</div>`).join('')}
-          </div>`
-        : '';
-
-      return `<div data-card-id="${r.id}" style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:14px;padding:20px;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-          <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:14px;padding:5px 16px;border-radius:20px;">${esc(r.codigo)}</span>
-          <button class="ce-btn-editar" data-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button"
-            style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:8px;font-size:12px;cursor:pointer;">
-            <i class="fa-solid fa-clipboard-check"></i>Verificações / Anexos
+        // ── Cabeçalho do código — aparece UMA única vez ──
+        const verifGeralCount = verificacoes.filter(v => !v.codigo_analise_id).length;
+        html += `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 4px 16px;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,.07);">
+          <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:15px;padding:6px 20px;border-radius:20px;letter-spacing:.02em;">${esc(r.codigo)}</span>
+          <span style="font-size:12px;color:#6b7280;">${analises.length} análise(s)</span>
+          ${verifGeralCount ? `<span style="font-size:11px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);padding:2px 10px;border-radius:20px;">${verifGeralCount} verificação(ões) geral</span>` : ''}
+          <button class="ce-btn-editar" data-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button" title="Registrar verificação"
+            style="margin-left:auto;padding:6px 14px;background:rgba(30,41,59,.9);border:1px solid #334155;border-radius:7px;color:#94a3b8;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-clipboard-check"></i> Registrar verificação
           </button>
-        </div>
-        <div>${linhas || '<div style="color:var(--inactive-color);font-size:13px;">Sem análises cadastradas.</div>'}</div>
-        ${verifGeralHtml}
-        ${renderArquivosCard(arquivos)}
-      </div>`;
+        </div>`;
+
+        if (!analises.length) {
+          html += `<div style="color:var(--inactive-color);font-size:13px;padding:8px 4px 20px;">Sem análises cadastradas.</div>`;
+          return;
+        }
+
+        // ── Árvore com soluções inclusas ──
+        function buildTreeComSolucoes(lista) {
+          const nodes = {}, keys = [];
+          for (const a of lista) {
+            const pref = extrairPrefixo(a.analise);
+            if (!pref) continue;
+            nodes[pref] = { id: a.id, texto: a.analise, prefixo: pref, solucoes: a.solucoes || [], filhos: [] };
+            keys.push(pref);
+          }
+          const roots = [];
+          for (const pref of keys) {
+            const partes = pref.split('.');
+            if (partes.length === 1) { roots.push(nodes[pref]); }
+            else {
+              const pai = partes.slice(0, -1).join('.');
+              if (nodes[pai]) nodes[pai].filhos.push(nodes[pref]);
+              else roots.push(nodes[pref]);
+            }
+          }
+          return roots;
+        }
+
+        const tree = buildTreeComSolucoes(analises);
+
+        // ── Renderiza verificações de um nó ──
+        function renderVerifNo(verifList) {
+          if (!verifList.length) return '';
+          return `<div style="margin-top:7px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#f59e0b;margin-bottom:4px;font-weight:700;display:flex;align-items:center;gap:3px;">
+              <i class="fa-solid fa-clipboard-check"></i>VERIFICAÇÕES
+            </div>
+            ${verifList.map(v => `
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:5px;padding:3px 0;border-bottom:1px solid rgba(245,158,11,.1);">
+                <div style="font-size:12px;color:#fcd34d;flex:1;line-height:1.4;">• ${esc(v.verificacao)}</div>
+                <div style="display:flex;gap:3px;flex-shrink:0;">
+                  ${btnArqHtml('verificacao', v.id, v.verificacao)}
+                  <button class="ce-btn-edit-verif" data-id="${v.id}" data-texto="${esc(v.verificacao)}" type="button"
+                    style="padding:2px 5px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);border-radius:4px;color:#60a5fa;cursor:pointer;font-size:10px;">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button class="ce-btn-del-verif" data-id="${v.id}" type="button"
+                    style="padding:2px 5px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:4px;color:#f87171;cursor:pointer;font-size:10px;">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </div>
+              </div>`).join('')}
+          </div>`;
+        }
+
+        // ── Renderiza soluções de um nó ──
+        function renderSolNo(solucoes) {
+          if (!solucoes.length) return '';
+          return `<div style="margin-top:7px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#22c55e;margin-bottom:4px;font-weight:700;display:flex;align-items:center;gap:3px;">
+              <i class="fa-solid fa-check-circle"></i>SOLUÇÃO
+            </div>
+            ${solucoes.map(s => `
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:5px;padding:3px 0;border-bottom:1px solid rgba(34,197,94,.08);">
+                <div style="font-size:12px;color:#86efac;flex:1;line-height:1.4;white-space:pre-wrap;">${esc(s.solucao_problema)}</div>
+                ${btnArqHtml('solucao', s.id, s.solucao_problema)}
+              </div>`).join('')}
+          </div>`;
+        }
+
+        // ── Renderiza sub-análises recursivamente ──
+        function renderFilhos(filhos) {
+          return filhos.map(no => {
+            const verifNo = verificacoes.filter(v => v.codigo_analise_id === no.id);
+            return `
+            <div style="border-left:2px solid rgba(245,158,11,.3);padding-left:10px;margin-top:11px;">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">
+                <div style="font-size:12px;color:#cbd5e1;font-weight:600;flex:1;line-height:1.4;white-space:pre-wrap;">${esc(no.texto)}</div>
+                <div style="display:flex;gap:3px;flex-shrink:0;">
+                  ${btnArqHtml('analise', no.id, no.texto)}
+                  <button class="ce-btn-edit-analise" data-analise-id="${no.id}" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button"
+                    style="padding:2px 5px;background:rgba(30,41,59,.9);border:1px solid #334155;border-radius:4px;color:#64748b;cursor:pointer;font-size:10px;">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                </div>
+              </div>
+              ${renderVerifNo(verifNo)}
+              ${renderSolNo(no.solucoes)}
+              ${no.filhos.length ? renderFilhos(no.filhos) : ''}
+            </div>`;
+          }).join('');
+        }
+
+        // ── Grid: um card por análise raiz ──
+        html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-bottom:28px;">`;
+
+        tree.forEach(root => {
+          const verifRaiz = verificacoes.filter(v => v.codigo_analise_id === root.id);
+          const totalVerif = verifRaiz.length + root.filhos.reduce((s, f) => s + verificacoes.filter(v => v.codigo_analise_id === f.id).length, 0);
+          const totalSol   = root.solucoes.length + root.filhos.reduce((s, f) => s + f.solucoes.length, 0);
+
+          html += `
+          <div class="ce-grid-card" data-analise-id="${root.id}" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}"
+            style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;">
+
+            <!-- Header do card (sem badge de código — já aparece no cabeçalho) -->
+            <div style="padding:8px 12px;background:rgba(15,23,42,.65);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+              ${totalVerif ? `<span style="font-size:10px;background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3);padding:1px 7px;border-radius:20px;display:inline-flex;align-items:center;gap:3px;"><i class="fa-solid fa-clipboard-check"></i>${totalVerif}</span>` : ''}
+              ${totalSol   ? `<span style="font-size:10px;background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.25);padding:1px 7px;border-radius:20px;display:inline-flex;align-items:center;gap:3px;"><i class="fa-solid fa-check"></i>${totalSol}</span>` : ''}
+              <span style="flex:1;"></span>
+              ${btnArqHtml('analise', root.id, root.texto)}
+              <button class="ce-btn-edit-analise" data-analise-id="${root.id}" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}" type="button" title="Editar análise"
+                style="padding:3px 7px;background:rgba(30,41,59,.9);border:1px solid #334155;border-radius:5px;color:#64748b;cursor:pointer;font-size:11px;">
+                <i class="fa-solid fa-pen"></i>
+              </button>
+            </div>
+
+            <!-- Body do card -->
+            <div style="padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:2px;">
+
+              <!-- Análise raiz -->
+              <div>
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:4px;font-weight:700;">Análise</div>
+                <div style="font-size:13px;color:var(--content-color);line-height:1.5;white-space:pre-wrap;">${esc(root.texto)}</div>
+              </div>
+
+              ${renderVerifNo(verifRaiz)}
+              ${renderSolNo(root.solucoes)}
+              ${root.filhos.length ? renderFilhos(root.filhos) : ''}
+            </div>
+          </div>`;
+        });
+
+        html += `</div>`;
+
+        // Card de verificações gerais (sem análise vinculada)
+        const verifGeral = verificacoes.filter(v => !v.codigo_analise_id);
+        if (verifGeral.length) {
+          html += `
+          <div class="ce-grid-card" data-codigo-id="${r.id}" data-codigo="${esc(r.codigo)}"
+            style="background:rgba(245,158,11,.04);border:1px solid rgba(245,158,11,.22);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;margin-bottom:14px;">
+            <div style="padding:8px 12px;background:rgba(245,158,11,.08);border-bottom:1px solid rgba(245,158,11,.15);display:flex;align-items:center;gap:6px;">
+              <span style="flex:1;font-size:11px;color:#92400e;display:flex;align-items:center;gap:4px;"><i class="fa-solid fa-clipboard-check"></i>Verificações gerais</span>
+            </div>
+            <div style="padding:12px 14px;display:flex;flex-direction:column;gap:4px;">
+              ${verifGeral.map(v => `
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:5px;padding:4px 0;border-bottom:1px solid rgba(245,158,11,.1);">
+                  <div style="font-size:12px;color:#fcd34d;flex:1;line-height:1.4;">• ${esc(v.verificacao)}</div>
+                  <div style="display:flex;gap:3px;flex-shrink:0;padding-top:1px;">
+                    ${btnArqHtml('verificacao', v.id, v.verificacao)}
+                    <button class="ce-btn-edit-verif" data-id="${v.id}" data-texto="${esc(v.verificacao)}" type="button"
+                      style="padding:2px 6px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);border-radius:5px;color:#60a5fa;cursor:pointer;font-size:10px;">
+                      <i class="fa-solid fa-pen"></i>
+                    </button>
+                    <button class="ce-btn-del-verif" data-id="${v.id}" type="button"
+                      style="padding:2px 6px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:5px;color:#f87171;cursor:pointer;font-size:10px;">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </div>
+                </div>`).join('')}
+            </div>
+          </div>`;
+        }
+      });
+
+      return html;
     }
 
-    // ── busca ─────────────────────────────────────────────────────────────
+    // ── Busca ─────────────────────────────────────────────────────────────
     async function buscarCodigo() {
       const codigo = (inputBusca?.value || '').trim();
       if (!codigo) { statusEl.textContent = 'Digite um código para pesquisar.'; return; }
@@ -59929,40 +60239,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
         const registros = Array.isArray(data.registros) ? data.registros : [];
         if (!registros.length) { statusEl.textContent = `Nenhum resultado para "${codigo}".`; return; }
-
         const totalAnalises = registros.reduce((s, r) => s + (r.analises?.length || 0), 0);
         statusEl.textContent = `${registros.length} código(s) — ${totalAnalises} análise(s).`;
-        registros.forEach(r => {
-          analisesCache[r.id] = r.analises || [];
-          delete arquivosCache[r.id];
-          delete verificacoesCache[r.id];
-        });
-
-        const [arquivosLista, verificacoesLista] = await Promise.all([
-          Promise.all(registros.map(r => carregarArquivos(r.id))),
-          Promise.all(registros.map(r => carregarVerificacoes(r.id)))
-        ]);
-
+        registros.forEach(r => { analisesCache[r.id] = r.analises || []; delete verificacoesCache[r.id]; });
+        const verificacoesLista = await Promise.all(registros.map(r => carregarVerificacoes(r.id)));
         resultadosEl.style.display = 'block';
-        resultadosEl.innerHTML = registros.map((r, i) => renderCard(r, arquivosLista[i], verificacoesLista[i])).join('');
-        bindCardEvents();
+        resultadosEl.innerHTML = renderGrid(registros, verificacoesLista);
+        bindCardEvents(resultadosEl);
       } catch (err) {
         statusEl.textContent = `Erro: ${err.message}`;
       }
     }
 
-    function bindCardEvents() {
-      // Botão "Verificações / Anexos"
-      resultadosEl.querySelectorAll('.ce-btn-editar').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalVerificacoesAnexos(Number(btn.dataset.id), btn.dataset.codigo));
+    function bindCardEvents(container) {
+      container.querySelectorAll('.ce-btn-editar').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalVerificacoes(Number(btn.dataset.id), btn.dataset.codigo));
       });
-      // Botão editar análise (lápis)
-      resultadosEl.querySelectorAll('.ce-btn-edit-analise').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalAnalise(
-          Number(btn.dataset.analiseId),
-          Number(btn.dataset.codigoId),
-          btn.dataset.codigo
-        ));
+      container.querySelectorAll('.ce-btn-edit-analise').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalAnalise(Number(btn.dataset.analiseId), Number(btn.dataset.codigoId), btn.dataset.codigo));
+      });
+      container.querySelectorAll('.ce-btn-arq-entidade').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalArquivosEntidade(btn.dataset.tipo, Number(btn.dataset.id), btn.dataset.texto));
+      });
+      container.querySelectorAll('.ce-btn-edit-verif').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalEditarVerificacao(Number(btn.dataset.id), btn.dataset.texto));
+      });
+      container.querySelectorAll('.ce-btn-del-verif').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Excluir esta verificação?')) return;
+          try {
+            const r = await fetch(`/api/engenharia/codigo-verificacoes/${Number(btn.dataset.id)}`, { method: 'DELETE', credentials: 'include' });
+            const d = await r.json();
+            if (!d.ok) throw new Error(d.error);
+            buscarCodigo();
+          } catch (e) { alert(`Erro: ${e.message}`); }
+        });
       });
     }
 
@@ -59977,32 +60288,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) fecharModal(); });
     function fecharModal() { if (overlay) overlay.style.display = 'none'; }
 
-    // Atualiza card na página sem re-buscar tudo
-    async function refreshCardInPlace(codigoErroId) {
-      const cardEl = resultadosEl?.querySelector(`[data-card-id="${codigoErroId}"]`);
-      if (!cardEl) return;
-      delete verificacoesCache[codigoErroId];
-      const novasVerif = await carregarVerificacoes(codigoErroId);
-      const analises   = analisesCache[codigoErroId] || [];
-      const arquivos   = arquivosCache[codigoErroId] || {};
-      const codigoTexto = cardEl.querySelector('span[style*="f59e0b"]')?.textContent?.trim() || '';
-      const novoHtml = renderCard({ id: codigoErroId, codigo: codigoTexto, analises }, arquivos, novasVerif);
-      const temp = document.createElement('div');
-      temp.innerHTML = novoHtml;
-      const novoCard = temp.firstElementChild;
-      cardEl.parentNode.replaceChild(novoCard, cardEl);
-      // Re-bind
-      novoCard.querySelectorAll('.ce-btn-editar').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalVerificacoesAnexos(Number(btn.dataset.id), btn.dataset.codigo));
-      });
-      novoCard.querySelectorAll('.ce-btn-edit-analise').forEach(btn => {
-        btn.addEventListener('click', () => abrirModalAnalise(Number(btn.dataset.analiseId), Number(btn.dataset.codigoId), btn.dataset.codigo));
-      });
-    }
-
-    // ── Modal: Verificações + Anexos ──────────────────────────────────────
-    // (só registra novas verificações — a lista fica no card da página)
-    async function abrirModalVerificacoesAnexos(codigoErroId, codigoTexto) {
+    // ── Modal: Registrar verificação ──────────────────────────────────────
+    async function abrirModalVerificacoes(codigoErroId, codigoTexto) {
       if (!overlay || !conteudo) return;
       conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
       overlay.style.display = 'block';
@@ -60011,85 +60298,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!analises && codigoTexto) {
           const r = await fetch(`/api/engenharia/codigos-erro?codigo=${encodeURIComponent(codigoTexto)}`, { credentials: 'include' });
           const d = await r.json().catch(() => ({}));
-          const reg = (d.registros || []).find(x => x.id === codigoErroId);
-          analises = reg?.analises || [];
+          analises = (d.registros || []).find(x => x.id === codigoErroId)?.analises || [];
           analisesCache[codigoErroId] = analises;
         }
-        analises = analises || [];
-        const arquivos = await fetch(`/api/engenharia/codigos-erro/${codigoErroId}/arquivos`, { credentials: 'include' })
-          .then(r => r.json()).then(d => d.arquivos || {}).catch(() => ({}));
-        arquivosCache[codigoErroId] = arquivos;
-        renderModalVerificacoesAnexos(codigoErroId, codigoTexto, analises, arquivos);
+        renderModalVerificacoes(codigoErroId, codigoTexto, analises || []);
       } catch (e) {
         conteudo.innerHTML = `<div style="color:#ef4444;padding:20px;">Erro: ${esc(e.message)}</div>`;
       }
     }
 
-    function renderModalVerificacoesAnexos(id, codigoTexto, analises, arquivos) {
+    function renderModalVerificacoes(id, codigoTexto, analises) {
       const tree = buildTree(analises);
-
-      const secaoArquivos = ['Documento', 'Fotos', 'Videos'].map(pasta => {
-        const iconesPasta = { Documento: 'fa-file-lines', Fotos: 'fa-images', Videos: 'fa-film' };
-        const itens = (arquivos[pasta] || []).map(f => {
-          const preview = ehImagem(f.nome)
-            ? `<img src="${esc(f.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
-            : ehVideo(f.nome)
-            ? `<video src="${esc(f.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
-            : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(f.nome)}</div>`;
-          return `<div style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;">
-            <a href="${esc(f.url)}" target="_blank">${preview}</a>
-            <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.nome)}</div></div>
-            <button class="ce-btn-del-arquivo" data-path="${esc(f.path)}" data-pasta="${esc(pasta)}" type="button"
-              style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
-              <i class="fa-solid fa-trash"></i>
-            </button>
-          </div>`;
-        }).join('');
-        return `<div style="margin-bottom:16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <div style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:6px;"><i class="fa-solid ${iconesPasta[pasta]}"></i>${pasta}</div>
-            <label style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#1e3a5f;border:1px solid #2563eb;border-radius:7px;color:#93c5fd;font-size:11px;cursor:pointer;">
-              <i class="fa-solid fa-upload"></i>Enviar
-              <input type="file" class="ce-input-arquivo" data-pasta="${pasta}" data-codigo-id="${id}" style="display:none;" multiple accept="${pasta === 'Fotos' ? 'image/*' : pasta === 'Videos' ? 'video/*' : '*/*'}"/>
-            </label>
-          </div>
-          <div class="ce-lista-arquivos" data-pasta="${pasta}" style="display:flex;flex-direction:column;gap:6px;">${itens || '<div style="font-size:12px;color:#4b5563;">Nenhum arquivo.</div>'}</div>
-        </div>`;
-      }).join('');
-
       conteudo.innerHTML = `
         <div style="margin-bottom:20px;padding-right:36px;">
           <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:15px;padding:6px 18px;border-radius:20px;">${esc(codigoTexto)}</span>
         </div>
-
-        <div style="margin-bottom:24px;">
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:12px;">
-            <i class="fa-solid fa-clipboard-check" style="color:#f59e0b;margin-right:4px;"></i>Registrar verificação
-          </div>
-          <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Selecione a análise relacionada (opcional):</div>
-          <div id="ce-cascata" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
-            ${tree.length === 0 ? '<div style="font-size:12px;color:#4b5563;">Nenhuma análise cadastrada.</div>' : ''}
-          </div>
-          <textarea id="ce-verif-texto"
-            style="width:100%;box-sizing:border-box;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:60px;margin-bottom:10px;"
-            placeholder="Verificação / questionamento a registrar..."></textarea>
-          <div style="display:flex;justify-content:flex-end;">
-            <button id="ce-btn-salvar-verif" type="button" disabled
-              style="padding:7px 18px;background:#1e3a5f;border:1px solid #2563eb;border-radius:8px;color:#93c5fd;font-size:13px;cursor:pointer;opacity:.5;display:inline-flex;align-items:center;gap:6px;">
-              <i class="fa-solid fa-floppy-disk"></i>Salvar verificação
-            </button>
-          </div>
-          <div id="ce-verif-form-status" style="font-size:12px;min-height:16px;margin-top:6px;text-align:right;"></div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:12px;">
+          <i class="fa-solid fa-clipboard-check" style="color:#f59e0b;margin-right:4px;"></i>Registrar verificação
         </div>
-
-        <div>
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:10px;">Documentos, fotos e vídeos</div>
-          ${secaoArquivos}
+        <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Análise relacionada (opcional):</div>
+        <div id="ce-cascata" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
+          ${tree.length === 0 ? '<div style="font-size:12px;color:#4b5563;">Nenhuma análise cadastrada.</div>' : ''}
         </div>
-        <div id="ce-modal-status" style="margin-top:8px;font-size:12px;color:#94a3b8;text-align:right;min-height:16px;"></div>
+        <textarea id="ce-verif-texto"
+          style="width:100%;box-sizing:border-box;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:70px;margin-bottom:10px;"
+          placeholder="Verificação / questionamento a registrar..."></textarea>
+        <div style="display:flex;justify-content:flex-end;">
+          <button id="ce-btn-salvar-verif" type="button" disabled
+            style="padding:7px 18px;background:#1e3a5f;border:1px solid #2563eb;border-radius:8px;color:#93c5fd;font-size:13px;cursor:pointer;opacity:.5;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-floppy-disk"></i>Salvar verificação
+          </button>
+        </div>
+        <div id="ce-verif-form-status" style="font-size:12px;min-height:16px;margin-top:6px;text-align:right;"></div>
       `;
 
-      // Cascata
       const cascataEl  = conteudo.querySelector('#ce-cascata');
       const btnSalvar  = conteudo.querySelector('#ce-btn-salvar-verif');
       const textoEl    = conteudo.querySelector('#ce-verif-texto');
@@ -60098,14 +60340,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       textoEl.addEventListener('input', () => {
         if (textoEl.value.trim()) { btnSalvar.disabled = false; btnSalvar.style.opacity = '1'; }
-        else if (!selectedAnaliseId) { btnSalvar.disabled = true; btnSalvar.style.opacity = '.5'; }
+        else { btnSalvar.disabled = true; btnSalvar.style.opacity = '.5'; }
       });
 
       function addNivel(nos, nivelIdx) {
         cascataEl.querySelectorAll('[data-nivel]').forEach(el => { if (Number(el.dataset.nivel) >= nivelIdx) el.remove(); });
         if (!nos.length) return;
-        const wrap = document.createElement('div');
-        wrap.dataset.nivel = nivelIdx;
+        const wrap = document.createElement('div'); wrap.dataset.nivel = nivelIdx;
         const lbl = document.createElement('div');
         lbl.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#64748b;margin-bottom:4px;';
         lbl.textContent = nivelIdx === 0 ? 'Nível principal' : `Sub-nível ${nivelIdx}`;
@@ -60122,7 +60363,6 @@ document.addEventListener('DOMContentLoaded', () => {
           const noSel = nos.find(n => String(n.id) === sel.value);
           if (!noSel) { selectedAnaliseId = null; return; }
           selectedAnaliseId = noSel.id;
-          btnSalvar.disabled = false; btnSalvar.style.opacity = '1';
           if (noSel.filhos?.length) addNivel(noSel.filhos, nivelIdx + 1);
           else cascataEl.querySelectorAll('[data-nivel]').forEach(el => { if (Number(el.dataset.nivel) > nivelIdx) el.remove(); });
         });
@@ -60133,7 +60373,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       btnSalvar.addEventListener('click', async () => {
         const verificacao = textoEl.value.trim();
-        if (!verificacao) { formStatus.style.color = '#ef4444'; formStatus.textContent = 'Digite o texto da verificação.'; return; }
+        if (!verificacao) { formStatus.style.color = '#ef4444'; formStatus.textContent = 'Digite o texto.'; return; }
         btnSalvar.disabled = true;
         formStatus.style.color = '#94a3b8'; formStatus.textContent = 'Salvando...';
         try {
@@ -60144,36 +60384,264 @@ document.addEventListener('DOMContentLoaded', () => {
           });
           const d = await r.json();
           if (!d.ok) throw new Error(d.error);
-          formStatus.style.color = '#22c55e'; formStatus.textContent = 'Salvo! Verificação adicionada no resultado da busca.';
+          formStatus.style.color = '#22c55e'; formStatus.textContent = 'Salvo!';
           textoEl.value = ''; selectedAnaliseId = null;
           btnSalvar.disabled = true; btnSalvar.style.opacity = '.5';
-          // Reseta cascata
           cascataEl.innerHTML = tree.length === 0 ? '<div style="font-size:12px;color:#4b5563;">Nenhuma análise cadastrada.</div>' : '';
           if (tree.length) addNivel(tree, 0);
-          // Atualiza card na página em background
-          refreshCardInPlace(id);
-          setTimeout(() => { formStatus.textContent = ''; }, 4000);
+          delete verificacoesCache[id];
+          buscarCodigo();
+          setTimeout(() => { fecharModal(); }, 800);
         } catch (e) {
           formStatus.style.color = '#ef4444'; formStatus.textContent = `Erro: ${e.message}`;
           btnSalvar.disabled = false;
         }
       });
-
-      bindModalArquivosEvents(id);
     }
 
-    // ── Modal: Editar Análise ─────────────────────────────────────────────
+    // ── Modal: Arquivos por entidade ──────────────────────────────────────
+    const TIPO_LABEL = { analise: 'Análise', solucao: 'Solução', verificacao: 'Verificação' };
+    const TIPO_ROTA  = { analise: 'codigo-analise', solucao: 'codigo-solucao', verificacao: 'codigo-verificacoes' };
+    const TIPO_BODY  = {
+      analise:     t => ({ analise: t }),
+      solucao:     t => ({ solucao_problema: t }),
+      verificacao: t => ({ verificacao: t })
+    };
+
+    async function abrirModalArquivosEntidade(tipo, id, texto) {
+      if (!overlay || !conteudo) return;
+      conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+      overlay.style.display = 'block';
+      try {
+        const r = await fetch(`/api/engenharia/${TIPO_ROTA[tipo]}/${id}/arquivos`, { credentials: 'include' });
+        const d = await r.json().catch(() => ({}));
+        renderModalArquivosEntidade(tipo, id, texto, d.arquivos || {});
+      } catch (e) {
+        conteudo.innerHTML = `<div style="color:#ef4444;padding:20px;">Erro: ${esc(e.message)}</div>`;
+      }
+    }
+
+    function renderModalArquivosEntidade(tipo, id, textoOriginal, arquivos) {
+      const ICONES_PASTA = { Documento: 'fa-file-lines', Fotos: 'fa-images', Videos: 'fa-film' };
+      const ACEITAR      = { Documento: '*/*', Fotos: 'image/*', Videos: 'video/*' };
+
+      const secoes = ['Documento', 'Fotos', 'Videos'].map(pasta => {
+        const itens = (arquivos[pasta] || []).map(f => {
+          const preview = ehImagem(f.nome)
+            ? `<img src="${esc(f.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
+            : ehVideo(f.nome)
+            ? `<video src="${esc(f.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
+            : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(f.nome)}</div>`;
+          return `<div class="ce-arq-item" style="display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;">
+            <a href="${esc(f.url)}" target="_blank">${preview}</a>
+            <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.nome)}</div></div>
+            <button class="ce-btn-del-arq-ent" data-path="${esc(f.path)}" type="button"
+              style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>`;
+        }).join('');
+
+        return `<div style="margin-bottom:18px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:6px;">
+              <i class="fa-solid ${ICONES_PASTA[pasta]}"></i>${pasta}
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#1e3a5f;border:1px solid #2563eb;border-radius:7px;color:#93c5fd;font-size:11px;cursor:pointer;">
+              <i class="fa-solid fa-upload"></i>Enviar
+              <input type="file" class="ce-input-arq-ent" data-pasta="${pasta}" style="display:none;" multiple accept="${ACEITAR[pasta]}"/>
+            </label>
+          </div>
+          <div class="ce-lista-arq-ent" data-pasta="${pasta}" style="display:flex;flex-direction:column;gap:6px;">
+            ${itens || '<div class="ce-arq-vazio" style="font-size:12px;color:#4b5563;">Nenhum arquivo.</div>'}
+          </div>
+        </div>`;
+      }).join('');
+
+      conteudo.innerHTML = `
+        <div style="margin-bottom:8px;padding-right:36px;">
+          <span style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#6366f1;background:rgba(99,102,241,.15);padding:3px 12px;border-radius:20px;border:1px solid rgba(99,102,241,.3);">
+            <i class="fa-solid fa-paperclip" style="margin-right:4px;"></i>${esc(TIPO_LABEL[tipo] || tipo)}
+          </span>
+        </div>
+
+        <div id="ce-ent-texto-wrap" style="margin-bottom:20px;">
+          <div style="display:flex;align-items:flex-start;gap:8px;">
+            <div id="ce-ent-texto-view" style="flex:1;font-size:13px;color:#e2e8f0;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px;white-space:pre-wrap;min-height:40px;">${esc(textoOriginal)}</div>
+            <button id="ce-ent-btn-editar" type="button" title="Editar texto"
+              style="padding:6px 10px;background:#1e293b;border:1px solid #334155;border-radius:7px;color:#64748b;cursor:pointer;font-size:12px;flex-shrink:0;">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+          </div>
+          <div id="ce-ent-edit-area" style="display:none;margin-top:8px;">
+            <textarea id="ce-ent-textarea"
+              style="width:100%;box-sizing:border-box;padding:9px 11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:60px;">${esc(textoOriginal)}</textarea>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+              <button id="ce-ent-btn-cancelar" type="button"
+                style="padding:6px 14px;background:#1e293b;border:1px solid #334155;border-radius:7px;color:#94a3b8;font-size:12px;cursor:pointer;">Cancelar</button>
+              <button id="ce-ent-btn-salvar" type="button"
+                style="padding:6px 16px;background:#16a34a;border:none;border-radius:7px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">
+                <i class="fa-solid fa-floppy-disk"></i>Salvar</button>
+            </div>
+            <div id="ce-ent-edit-status" style="font-size:12px;min-height:14px;text-align:right;color:#94a3b8;margin-top:4px;"></div>
+          </div>
+        </div>
+
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:14px;">
+          <i class="fa-solid fa-folder-open" style="margin-right:4px;"></i>Documentos, Fotos e Vídeos
+        </div>
+        ${secoes}
+        <div id="ce-arq-ent-status" style="margin-top:4px;font-size:12px;min-height:16px;text-align:right;color:#94a3b8;"></div>
+      `;
+
+      let textoAtual = textoOriginal;
+      const btnEd      = conteudo.querySelector('#ce-ent-btn-editar');
+      const editArea   = conteudo.querySelector('#ce-ent-edit-area');
+      const textoView  = conteudo.querySelector('#ce-ent-texto-view');
+      const textarea   = conteudo.querySelector('#ce-ent-textarea');
+      const btnCancel  = conteudo.querySelector('#ce-ent-btn-cancelar');
+      const btnSaveEd  = conteudo.querySelector('#ce-ent-btn-salvar');
+      const editStatus = conteudo.querySelector('#ce-ent-edit-status');
+
+      btnEd?.addEventListener('click', () => { editArea.style.display = 'block'; textarea.focus(); });
+      btnCancel?.addEventListener('click', () => { editArea.style.display = 'none'; textarea.value = textoAtual; });
+      btnSaveEd?.addEventListener('click', async () => {
+        const novoTexto = textarea.value.trim();
+        if (!novoTexto) { editStatus.style.color = '#ef4444'; editStatus.textContent = 'Texto obrigatório.'; return; }
+        editStatus.style.color = '#94a3b8'; editStatus.textContent = 'Salvando...';
+        try {
+          const r = await fetch(`/api/engenharia/${TIPO_ROTA[tipo]}/${id}`, {
+            method: 'PUT', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(TIPO_BODY[tipo](novoTexto))
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          editStatus.style.color = '#22c55e'; editStatus.textContent = 'Salvo!';
+          textoView.textContent = novoTexto;
+          textoAtual = novoTexto;
+          editArea.style.display = 'none';
+          setTimeout(() => { editStatus.textContent = ''; }, 3000);
+        } catch (e) { editStatus.style.color = '#ef4444'; editStatus.textContent = `Erro: ${e.message}`; }
+      });
+
+      const arqStatus = conteudo.querySelector('#ce-arq-ent-status');
+      conteudo.querySelectorAll('.ce-input-arq-ent').forEach(input => {
+        input.addEventListener('change', async () => {
+          const pasta = input.dataset.pasta;
+          const files = Array.from(input.files || []);
+          if (!files.length) return;
+          arqStatus.style.color = '#f59e0b'; arqStatus.textContent = `Enviando ${files.length} arquivo(s)...`;
+          for (const file of files) {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('bucket', 'Engenharia');
+            fd.append('path', `codigos-erro/${tipo}/${id}/${pasta}/${Date.now()}_${file.name}`);
+            try {
+              const r = await fetch('/api/upload/supabase', { method: 'POST', credentials: 'include', body: fd });
+              const d = await r.json();
+              if (!d.ok) throw new Error(d.error);
+              const lista = conteudo.querySelector(`.ce-lista-arq-ent[data-pasta="${pasta}"]`);
+              if (lista) {
+                lista.querySelector('.ce-arq-vazio')?.remove();
+                const preview = ehImagem(file.name)
+                  ? `<img src="${esc(d.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
+                  : ehVideo(file.name)
+                  ? `<video src="${esc(d.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
+                  : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(file.name)}</div>`;
+                const div = document.createElement('div');
+                div.className = 'ce-arq-item';
+                div.style.cssText = 'display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;';
+                div.innerHTML = `
+                  <a href="${esc(d.url)}" target="_blank">${preview}</a>
+                  <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(file.name)}</div></div>
+                  <button class="ce-btn-del-arq-ent" data-path="${esc(d.path)}" type="button"
+                    style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>`;
+                lista.appendChild(div);
+                div.querySelector('.ce-btn-del-arq-ent').addEventListener('click', function () { bindDelArqEnt(this); });
+              }
+            } catch (e) { arqStatus.style.color = '#ef4444'; arqStatus.textContent = `Erro: ${e.message}`; }
+          }
+          input.value = '';
+          arqStatus.style.color = '#22c55e'; arqStatus.textContent = 'Upload concluído!';
+          setTimeout(() => { arqStatus.textContent = ''; }, 3000);
+        });
+      });
+
+      conteudo.querySelectorAll('.ce-btn-del-arq-ent').forEach(btn => bindDelArqEnt(btn));
+    }
+
+    function bindDelArqEnt(btn) {
+      btn.addEventListener('click', async function () {
+        const filePath = this.dataset.path;
+        if (!confirm(`Remover "${filePath.split('/').pop()}"?`)) return;
+        try {
+          const r = await fetch('/api/engenharia/entidade-arquivo', {
+            method: 'DELETE', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filePath })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          this.closest('.ce-arq-item')?.remove();
+        } catch (e) { alert(`Erro: ${e.message}`); }
+      });
+    }
+
+    // ── Modal: Editar verificação ─────────────────────────────────────────
+    function abrirModalEditarVerificacao(id, textoAtual) {
+      if (!overlay || !conteudo) return;
+      overlay.style.display = 'block';
+      conteudo.innerHTML = `
+        <div style="margin-bottom:20px;padding-right:36px;">
+          <span style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#f59e0b;background:rgba(245,158,11,.15);padding:3px 12px;border-radius:20px;border:1px solid rgba(245,158,11,.3);">
+            <i class="fa-solid fa-clipboard-check" style="margin-right:4px;"></i>Editar Verificação
+          </span>
+        </div>
+        <textarea id="ce-edit-verif-text"
+          style="width:100%;box-sizing:border-box;padding:9px 11px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:80px;margin-bottom:12px;">${esc(textoAtual)}</textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button id="ce-edit-verif-cancel" type="button"
+            style="padding:7px 16px;background:#1e293b;border:1px solid #334155;border-radius:7px;color:#94a3b8;font-size:13px;cursor:pointer;">Cancelar</button>
+          <button id="ce-edit-verif-salvar" type="button"
+            style="padding:7px 20px;background:#16a34a;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+            <i class="fa-solid fa-floppy-disk"></i>Salvar</button>
+        </div>
+        <div id="ce-edit-verif-status" style="font-size:12px;min-height:14px;margin-top:6px;text-align:right;color:#94a3b8;"></div>
+      `;
+      const ta = conteudo.querySelector('#ce-edit-verif-text');
+      const statusEl2 = conteudo.querySelector('#ce-edit-verif-status');
+      conteudo.querySelector('#ce-edit-verif-cancel')?.addEventListener('click', fecharModal);
+      conteudo.querySelector('#ce-edit-verif-salvar')?.addEventListener('click', async () => {
+        const novoTexto = ta.value.trim();
+        if (!novoTexto) { statusEl2.style.color = '#ef4444'; statusEl2.textContent = 'Texto obrigatório.'; return; }
+        statusEl2.style.color = '#94a3b8'; statusEl2.textContent = 'Salvando...';
+        try {
+          const r = await fetch(`/api/engenharia/codigo-verificacoes/${id}`, {
+            method: 'PUT', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ verificacao: novoTexto })
+          });
+          const d = await r.json();
+          if (!d.ok) throw new Error(d.error);
+          statusEl2.style.color = '#22c55e'; statusEl2.textContent = 'Salvo!';
+          setTimeout(() => { fecharModal(); buscarCodigo(); }, 600);
+        } catch (e) { statusEl2.style.color = '#ef4444'; statusEl2.textContent = `Erro: ${e.message}`; }
+      });
+    }
+
+    // ── Modal: Editar análise ─────────────────────────────────────────────
     async function abrirModalAnalise(analiseId, codigoErroId, codigoTexto) {
       if (!overlay || !conteudo) return;
       conteudo.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
       overlay.style.display = 'block';
-
       let analises = analisesCache[codigoErroId] || [];
       if (!analises.length && codigoTexto) {
         const r = await fetch(`/api/engenharia/codigos-erro?codigo=${encodeURIComponent(codigoTexto)}`, { credentials: 'include' });
         const d = await r.json().catch(() => ({}));
-        const reg = (d.registros || []).find(x => x.id === codigoErroId);
-        analises = reg?.analises || [];
+        analises = (d.registros || []).find(x => x.id === codigoErroId)?.analises || [];
         analisesCache[codigoErroId] = analises;
       }
       const analise = analises.find(a => a.id === analiseId);
@@ -60187,10 +60655,16 @@ document.addEventListener('DOMContentLoaded', () => {
         `<div class="ce-sol-row" data-sol-id="${s.id}" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;">
           <textarea class="ce-sol-text" data-sol-id="${s.id}"
             style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:44px;">${esc(s.solucao_problema)}</textarea>
-          <button class="ce-btn-del-sol-modal" data-sol-id="${s.id}" type="button" title="Remover solução"
-            style="padding:6px 9px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;flex-shrink:0;">
-            <i class="fa-solid fa-trash"></i>
-          </button>
+          <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+            <button class="ce-btn-arq-sol-modal" data-tipo="solucao" data-id="${s.id}" data-texto="${esc(s.solucao_problema)}" type="button" title="Arquivos"
+              style="padding:5px 8px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.35);border-radius:6px;color:#818cf8;cursor:pointer;font-size:12px;">
+              <i class="fa-solid fa-paperclip"></i>
+            </button>
+            <button class="ce-btn-del-sol-modal" data-sol-id="${s.id}" type="button"
+              style="padding:5px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </div>
         </div>`).join('');
 
       conteudo.innerHTML = `
@@ -60198,13 +60672,11 @@ document.addEventListener('DOMContentLoaded', () => {
           <span style="background:#f59e0b;color:#1f2937;font-weight:700;font-size:15px;padding:6px 18px;border-radius:20px;">${esc(codigoTexto)}</span>
           <span style="font-size:12px;color:#64748b;">— Editar análise</span>
         </div>
-
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:6px;">Texto da análise</div>
           <textarea id="ce-analise-modal-text"
             style="width:100%;box-sizing:border-box;padding:8px 10px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:60px;">${esc(analise.analise)}</textarea>
         </div>
-
         <div style="margin-bottom:16px;">
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:8px;">Soluções</div>
           <div id="ce-modal-sol-lista">
@@ -60215,7 +60687,6 @@ document.addEventListener('DOMContentLoaded', () => {
             <i class="fa-solid fa-plus"></i>Adicionar solução
           </button>
         </div>
-
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #1e293b;flex-wrap:wrap;">
           <button id="ce-modal-btn-del-analise" type="button"
             style="padding:8px 16px;background:#7f1d1d;border:none;border-radius:8px;color:#fca5a5;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
@@ -60229,21 +60700,22 @@ document.addEventListener('DOMContentLoaded', () => {
         <div id="ce-modal-analise-status" style="margin-top:8px;font-size:12px;color:#94a3b8;text-align:right;min-height:16px;"></div>
       `;
 
-      const statusEl2 = conteudo.querySelector('#ce-modal-analise-status');
-      function setStatus2(msg, cor) { if (statusEl2) { statusEl2.textContent = msg; statusEl2.style.color = cor || '#94a3b8'; } }
+      const statusEl3 = conteudo.querySelector('#ce-modal-analise-status');
+      function setStatus3(msg, cor) { if (statusEl3) { statusEl3.textContent = msg; statusEl3.style.color = cor || '#94a3b8'; } }
 
-      // Salvar análise + soluções existentes
+      conteudo.querySelectorAll('.ce-btn-arq-sol-modal').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalArquivosEntidade('solucao', Number(btn.dataset.id), btn.dataset.texto));
+      });
+
       conteudo.querySelector('#ce-modal-btn-salvar')?.addEventListener('click', async () => {
-        setStatus2('Salvando...', '#94a3b8');
+        setStatus3('Salvando...', '#94a3b8');
         try {
           const novoTexto = conteudo.querySelector('#ce-analise-modal-text')?.value || '';
-          const ps = [
-            fetch(`/api/engenharia/codigo-analise/${analise.id}`, {
-              method: 'PUT', credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ analise: novoTexto })
-            })
-          ];
+          const ps = [fetch(`/api/engenharia/codigo-analise/${analise.id}`, {
+            method: 'PUT', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ analise: novoTexto })
+          })];
           conteudo.querySelectorAll('.ce-sol-text').forEach(ta => {
             ps.push(fetch(`/api/engenharia/codigo-solucao/${ta.dataset.solId}`, {
               method: 'PUT', credentials: 'include',
@@ -60252,13 +60724,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
           });
           await Promise.all(ps);
-          setStatus2('Salvo!', '#22c55e');
+          setStatus3('Salvo!', '#22c55e');
           delete analisesCache[codigoErroId];
           setTimeout(() => { fecharModal(); buscarCodigo(); }, 700);
-        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+        } catch (e) { setStatus3(`Erro: ${e.message}`, '#ef4444'); }
       });
 
-      // Excluir análise inteira
       conteudo.querySelector('#ce-modal-btn-del-analise')?.addEventListener('click', async () => {
         if (!confirm('Excluir esta análise e todas as suas soluções?')) return;
         try {
@@ -60267,10 +60738,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!d.ok) throw new Error(d.error);
           delete analisesCache[codigoErroId];
           fecharModal(); buscarCodigo();
-        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+        } catch (e) { setStatus3(`Erro: ${e.message}`, '#ef4444'); }
       });
 
-      // Adicionar nova solução
       conteudo.querySelector('#ce-modal-btn-add-sol')?.addEventListener('click', async () => {
         try {
           const r = await fetch('/api/engenharia/codigo-solucao', {
@@ -60290,11 +60760,20 @@ document.addEventListener('DOMContentLoaded', () => {
             div.innerHTML = `
               <textarea class="ce-sol-text" data-sol-id="${d.id}"
                 style="flex:1;padding:8px 10px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:13px;resize:vertical;min-height:44px;"></textarea>
-              <button class="ce-btn-del-sol-modal" data-sol-id="${d.id}" type="button"
-                style="padding:6px 9px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;flex-shrink:0;">
-                <i class="fa-solid fa-trash"></i>
-              </button>`;
+              <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+                <button class="ce-btn-arq-sol-modal" data-tipo="solucao" data-id="${d.id}" data-texto="" type="button"
+                  style="padding:5px 8px;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.35);border-radius:6px;color:#818cf8;cursor:pointer;font-size:12px;">
+                  <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <button class="ce-btn-del-sol-modal" data-sol-id="${d.id}" type="button"
+                  style="padding:5px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:12px;">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </div>`;
             lista.appendChild(div);
+            div.querySelector('.ce-btn-arq-sol-modal').addEventListener('click', function () {
+              abrirModalArquivosEntidade('solucao', Number(this.dataset.id), this.dataset.texto);
+            });
             div.querySelector('.ce-btn-del-sol-modal').addEventListener('click', function () {
               const solId = Number(this.dataset.solId);
               if (!confirm('Remover esta solução?')) return;
@@ -60302,10 +60781,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(r => r.json()).then(d => { if (d.ok) div.remove(); });
             });
           }
-        } catch (e) { setStatus2(`Erro: ${e.message}`, '#ef4444'); }
+        } catch (e) { setStatus3(`Erro: ${e.message}`, '#ef4444'); }
       });
 
-      // Deletar soluções existentes
       conteudo.querySelectorAll('.ce-btn-del-sol-modal').forEach(btn => {
         btn.addEventListener('click', function () {
           const solId = Number(this.dataset.solId);
@@ -60317,79 +60795,380 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    // ── Upload/delete de arquivos no modal ────────────────────────────────
-    function bindModalArquivosEvents(codigoErroId) {
-      const modalStatus = document.getElementById('ce-modal-status');
-      function setStatus(msg, cor) { if (modalStatus) { modalStatus.textContent = msg; modalStatus.style.color = cor || '#94a3b8'; } }
-
-      document.querySelectorAll('#ceModalConteudo .ce-input-arquivo').forEach(input => {
-        input.addEventListener('change', async () => {
-          const pasta = input.dataset.pasta;
-          const cId   = input.dataset.codigoId;
-          const files = Array.from(input.files || []);
-          if (!files.length) return;
-          setStatus(`Enviando ${files.length} arquivo(s)...`, '#f59e0b');
-          for (const file of files) {
-            const fd = new FormData();
-            fd.append('file', file);
-            fd.append('bucket', 'Engenharia');
-            fd.append('path', `codigos-erro/${cId}/${pasta}/${Date.now()}_${file.name}`);
-            try {
-              const r = await fetch('/api/upload/supabase', { method: 'POST', credentials: 'include', body: fd });
-              const d = await r.json();
-              if (!d.ok) throw new Error(d.error);
-              const lista = document.querySelector(`.ce-lista-arquivos[data-pasta="${pasta}"]`);
-              if (lista) {
-                const div = document.createElement('div');
-                div.style.cssText = 'display:flex;align-items:center;gap:8px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:8px 10px;';
-                const preview = ehImagem(file.name)
-                  ? `<img src="${esc(d.url)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #334155;">`
-                  : ehVideo(file.name)
-                  ? `<video src="${esc(d.url)}" style="width:80px;height:50px;border-radius:6px;background:#000;"></video>`
-                  : `<div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;font-size:20px;">${iconeArquivo(file.name)}</div>`;
-                div.innerHTML = `
-                  <a href="${esc(d.url)}" target="_blank">${preview}</a>
-                  <div style="flex:1;min-width:0;"><div style="font-size:12px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(file.name)}</div></div>
-                  <button class="ce-btn-del-arquivo" data-path="${esc(d.path)}" data-pasta="${esc(pasta)}" type="button"
-                    style="padding:4px 8px;background:#7f1d1d;border:none;border-radius:6px;color:#fca5a5;cursor:pointer;font-size:11px;flex-shrink:0;">
-                    <i class="fa-solid fa-trash"></i>
-                  </button>`;
-                const vazio = lista.querySelector('div:not([style*="display:flex"])');
-                if (vazio && vazio.textContent.trim() === 'Nenhum arquivo.') vazio.remove();
-                lista.appendChild(div);
-                bindDelArquivo(div.querySelector('.ce-btn-del-arquivo'), cId);
-              }
-              delete arquivosCache[Number(cId)];
-            } catch (e) { setStatus(`Erro no upload: ${e.message}`, '#ef4444'); }
-          }
-          input.value = '';
-          setStatus('Upload concluído!', '#22c55e');
-        });
-      });
-
-      document.querySelectorAll('#ceModalConteudo .ce-btn-del-arquivo').forEach(btn => {
-        bindDelArquivo(btn, codigoErroId);
-      });
-    }
-
-    function bindDelArquivo(btn, codigoErroId) {
-      if (!btn) return;
-      btn.addEventListener('click', async function () {
-        const filePath = this.dataset.path;
-        if (!confirm(`Remover "${filePath.split('/').pop()}"?`)) return;
-        try {
-          const r = await fetch('/api/engenharia/codigos-erro/arquivo', {
-            method: 'DELETE', credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: filePath })
-          });
-          const d = await r.json();
-          if (!d.ok) throw new Error(d.error);
-          this.closest('div[style*="display:flex"]')?.remove();
-          delete arquivosCache[Number(codigoErroId)];
-        } catch (e) { alert(`Erro: ${e.message}`); }
-      });
-    }
-
   }); // DOMContentLoaded
+})();
+
+// ── Mapa de Vendas por Estado (Leaflet choropleth + timeline) ─────────────────
+window._iniciarMapaVendasPagina = (() => {
+  let _iniciado = false;
+  let _dadosBrutos = [];      // todos os rows da API
+  let _mesesDisponiveis = []; // ex: ['2026-01','2026-02',...]
+  let _mesesSelecionados = []; // subconjunto filtrado pelo período
+  let _idxAtual = 0;          // índice do mês corrente na timeline
+  let _mapaInst = null;
+  let _geoLayer = null;
+  let _geojsonData = null;
+  let _playTimer = null;
+  let _periodoAtual = 3;
+
+  // Mapa de sigla→nome do estado (para tooltip)
+  const _nomeEstado = {
+    AC:'Acre',AL:'Alagoas',AP:'Amapá',AM:'Amazonas',BA:'Bahia',CE:'Ceará',
+    DF:'Distrito Federal',ES:'Espírito Santo',GO:'Goiás',MA:'Maranhão',
+    MT:'Mato Grosso',MS:'Mato Grosso do Sul',MG:'Minas Gerais',PA:'Pará',
+    PB:'Paraíba',PR:'Paraná',PE:'Pernambuco',PI:'Piauí',RJ:'Rio de Janeiro',
+    RN:'Rio Grande do Norte',RS:'Rio Grande do Sul',RO:'Rondônia',RR:'Roraima',
+    SC:'Santa Catarina',SP:'São Paulo',SE:'Sergipe',TO:'Tocantins'
+  };
+
+  function _nomeMes(yyyymm) {
+    const [y, m] = yyyymm.split('-');
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    return `${nomes[parseInt(m, 10) - 1]}/${y}`;
+  }
+
+  function _moeda(v) {
+    return Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+
+  // Retorna os N meses antes do mês atual
+  function _calcularMeses(n) {
+    const hoje = new Date();
+    const meses = [];
+    for (let i = n; i >= 1; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      meses.push(key);
+    }
+    return meses;
+  }
+
+  function _filtrarPeriodo(per) {
+    _periodoAtual = per;
+    const todos = [...new Set(_dadosBrutos.map(r => r.mes).filter(Boolean))].sort();
+    if (per === 0) {
+      _mesesSelecionados = todos;
+    } else {
+      const limite = _calcularMeses(per);
+      // Pega os meses da API que estão no período calculado OU os últimos N se não bater exato
+      _mesesSelecionados = todos.filter(m => limite.includes(m));
+      if (_mesesSelecionados.length === 0) {
+        // Fallback: usa os últimos N meses disponíveis
+        _mesesSelecionados = todos.slice(-per);
+      }
+    }
+    _idxAtual = 0;
+  }
+
+  function _somaAteMes(idx) {
+    // Acumula valores dos meses 0..idx
+    const mesesInclusos = _mesesSelecionados.slice(0, idx + 1);
+    const mapa = {};
+    for (const row of _dadosBrutos) {
+      if (!mesesInclusos.includes(row.mes)) continue;
+      const uf = (row.estado || 'N/D').toUpperCase();
+      mapa[uf] = (mapa[uf] || 0) + parseFloat(row.valor_total || 0);
+    }
+    return mapa;
+  }
+
+  function _escalasCor(maxVal) {
+    if (maxVal <= 0) return () => '#1e293b';
+    // Escala azul: 5 faixas
+    const faixas = [
+      { limite: maxVal * 0.80, cor: '#1e40af' },
+      { limite: maxVal * 0.60, cor: '#2563eb' },
+      { limite: maxVal * 0.40, cor: '#3b82f6' },
+      { limite: maxVal * 0.20, cor: '#93c5fd' },
+      { limite: 0,             cor: '#dbeafe' },
+    ];
+    return (val) => {
+      if (!val || val <= 0) return '#1e293b';
+      for (const f of faixas) {
+        if (val >= f.limite) return f.cor;
+      }
+      return '#dbeafe';
+    };
+  }
+
+  function _renderizarMapa(idx) {
+    if (!_mapaInst || !_geoLayer) return;
+    const valores = _somaAteMes(idx);
+    const maxVal = Math.max(...Object.values(valores), 1);
+    const getCor = _escalasCor(maxVal);
+    const mesesStr = _mesesSelecionados.slice(0, idx + 1).map(_nomeMes).join(', ');
+
+    // Atualizar slider e label
+    const slider = document.getElementById('vendasMapaSlider');
+    const label  = document.getElementById('vendasMapaMesLabel');
+    const mesesEl = document.getElementById('vendasMapaMesesSelecionados');
+    if (slider) slider.value = idx;
+    if (label) label.textContent = _nomeMes(_mesesSelecionados[idx]);
+    if (mesesEl) mesesEl.textContent = mesesStr;
+
+    // Atualizar camada GeoJSON
+    _geoLayer.setStyle((feature) => {
+      const sigla = (feature.properties.sigla || feature.properties.UF_05 || '').toUpperCase();
+      const val = valores[sigla] || 0;
+      return {
+        fillColor: getCor(val),
+        fillOpacity: val > 0 ? 0.85 : 0.18,
+        color: '#334155',
+        weight: 1,
+      };
+    });
+
+    // Atualizar tooltips
+    _geoLayer.eachLayer((layer) => {
+      const sigla = (layer.feature.properties.sigla || layer.feature.properties.UF_05 || '').toUpperCase();
+      const val = valores[sigla] || 0;
+      const nome = _nomeEstado[sigla] || sigla;
+      layer.bindTooltip(
+        `<div style="font-family:sans-serif;font-size:13px;">
+          <strong>${nome} (${sigla})</strong><br>
+          Vendas: <b>${_moeda(val)}</b>
+        </div>`,
+        { sticky: true }
+      );
+    });
+
+    _renderizarLegenda(maxVal, getCor);
+    _renderizarRanking(valores);
+  }
+
+  function _renderizarLegenda(maxVal, getCor) {
+    const wrap = document.getElementById('vendasMapaLegendaWrap');
+    const el   = document.getElementById('vendasMapaLegendaItens');
+    if (!wrap || !el) return;
+    wrap.style.display = 'block';
+    const faixas = [
+      { label: `≥ ${_moeda(maxVal * 0.80)}`,  cor: '#1e40af' },
+      { label: `≥ ${_moeda(maxVal * 0.60)}`,  cor: '#2563eb' },
+      { label: `≥ ${_moeda(maxVal * 0.40)}`,  cor: '#3b82f6' },
+      { label: `≥ ${_moeda(maxVal * 0.20)}`,  cor: '#93c5fd' },
+      { label: `> R$ 0`,                       cor: '#dbeafe' },
+      { label: 'Sem vendas',                   cor: '#1e293b' },
+    ];
+    el.innerHTML = faixas.map(f =>
+      `<div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:18px;height:14px;border-radius:3px;background:${f.cor};border:1px solid #334155;flex-shrink:0;"></div>
+        <span style="font-size:11px;color:#94a3b8;">${f.label}</span>
+      </div>`
+    ).join('');
+  }
+
+  function _renderizarRanking(valores) {
+    const wrap = document.getElementById('vendasMapaRankingWrap');
+    const el   = document.getElementById('vendasMapaRankingItens');
+    if (!wrap || !el) return;
+    const top = Object.entries(valores)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    if (top.length === 0) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    el.innerHTML = top.map(([sigla, val], i) =>
+      `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:11px;color:#475569;min-width:16px;text-align:right;">${i + 1}.</span>
+        <span style="font-size:12px;font-weight:700;color:#38bdf8;min-width:28px;">${sigla}</span>
+        <div style="flex:1;height:6px;border-radius:3px;background:#1e293b;">
+          <div style="height:100%;border-radius:3px;background:#3b82f6;width:${Math.round((val / top[0][1]) * 100)}%;"></div>
+        </div>
+        <span style="font-size:11px;color:#94a3b8;white-space:nowrap;">${_moeda(val)}</span>
+      </div>`
+    ).join('');
+  }
+
+  function _atualizarBotoeresPeriodo() {
+    document.querySelectorAll('.vendas-mapa-periodo-btn').forEach(btn => {
+      const ativo = parseInt(btn.dataset.per, 10) === _periodoAtual;
+      btn.style.borderColor = ativo ? '#0ea5e9' : '#374151';
+      btn.style.background  = ativo ? 'rgba(14,165,233,.22)' : 'rgba(255,255,255,.04)';
+      btn.style.color       = ativo ? '#7dd3fc' : '#9ca3af';
+    });
+  }
+
+  function _pararPlay() {
+    if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
+    const icon = document.getElementById('vendasMapaPlayIcon');
+    const lbl  = document.getElementById('vendasMapaPlayLabel');
+    if (icon) { icon.className = 'fa-solid fa-play'; }
+    if (lbl) lbl.textContent = 'Play';
+  }
+
+  function _iniciarPlay() {
+    if (_mesesSelecionados.length === 0) return;
+    const vel = parseInt(document.getElementById('vendasMapaVelocidade')?.value || '800', 10);
+    const icon = document.getElementById('vendasMapaPlayIcon');
+    const lbl  = document.getElementById('vendasMapaPlayLabel');
+    if (icon) { icon.className = 'fa-solid fa-pause'; }
+    if (lbl) lbl.textContent = 'Pausar';
+    _playTimer = setInterval(() => {
+      if (_idxAtual >= _mesesSelecionados.length - 1) {
+        _pararPlay();
+        return;
+      }
+      _idxAtual++;
+      _renderizarMapa(_idxAtual);
+    }, vel);
+  }
+
+  async function _carregarLeaflet() {
+    if (window.L) return;
+    if (!document.querySelector('link[href*="leaflet"]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _carregarGeoJSON() {
+    if (_geojsonData) return _geojsonData;
+    // GeoJSON dos estados brasileiros com propriedade "sigla" (UF)
+    const url = 'https://raw.githubusercontent.com/giuliano-macedo/geodata-br-states/main/geojson/br_states.json';
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Falha ao carregar GeoJSON');
+    _geojsonData = await r.json();
+    return _geojsonData;
+  }
+
+  async function _inicializar(forcarRecarga) {
+    const statusEl = document.getElementById('vendasMapaStatus');
+    const timelineWrap = document.getElementById('vendasMapaTimelineWrap');
+
+    if (forcarRecarga || _dadosBrutos.length === 0) {
+      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Carregando dados...'; }
+      const resp = await fetch('/api/sac/vendas/graficos/valor-estado-mes', { credentials: 'include' });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Erro na API');
+      _dadosBrutos = json.rows || [];
+    }
+
+    if (_dadosBrutos.length === 0) {
+      if (statusEl) statusEl.textContent = 'Sem dados de vendas por estado.';
+      return;
+    }
+
+    _filtrarPeriodo(_periodoAtual);
+    _atualizarBotoeresPeriodo();
+
+    // Configurar slider
+    const slider = document.getElementById('vendasMapaSlider');
+    if (slider) {
+      slider.max  = _mesesSelecionados.length - 1;
+      slider.min  = 0;
+      slider.value = _idxAtual;
+    }
+    if (timelineWrap) timelineWrap.style.display = _mesesSelecionados.length > 1 ? '' : 'none';
+
+    if (statusEl) { statusEl.style.display = 'none'; }
+
+    // Inicializar Leaflet se necessário
+    await _carregarLeaflet();
+
+    const mapaDiv = document.getElementById('vendasMapaLeaflet');
+    if (!mapaDiv) return;
+
+    if (!_mapaInst) {
+      _mapaInst = window.L.map(mapaDiv, { zoomControl: true, attributionControl: false })
+        .setView([-14.24, -51.93], 4);
+      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 10, minZoom: 3
+      }).addTo(_mapaInst);
+    }
+
+    // Carregar e renderizar GeoJSON
+    const geoData = await _carregarGeoJSON();
+    if (_geoLayer) { _mapaInst.removeLayer(_geoLayer); }
+    _geoLayer = window.L.geoJSON(geoData, {
+      style: { fillColor: '#1e293b', fillOpacity: 0.18, color: '#334155', weight: 1 },
+    }).addTo(_mapaInst);
+
+    _renderizarMapa(_idxAtual);
+  }
+
+  return async function iniciar(forcarRecarga = false) {
+    if (_iniciado && !forcarRecarga) {
+      // Só re-renderiza
+      _renderizarMapa(_idxAtual);
+      return;
+    }
+    _iniciado = true;
+
+    try {
+      await _inicializar(forcarRecarga);
+    } catch (err) {
+      console.error('[MapaVendas] erro:', err);
+      const s = document.getElementById('vendasMapaStatus');
+      if (s) { s.style.display = ''; s.textContent = `Erro: ${err.message}`; }
+    }
+
+    // Eventos — botões de período
+    document.querySelectorAll('.vendas-mapa-periodo-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _pararPlay();
+        _filtrarPeriodo(parseInt(btn.dataset.per, 10));
+        _atualizarBotoeresPeriodo();
+        const slider = document.getElementById('vendasMapaSlider');
+        if (slider) { slider.max = _mesesSelecionados.length - 1; slider.value = 0; }
+        const tl = document.getElementById('vendasMapaTimelineWrap');
+        if (tl) tl.style.display = _mesesSelecionados.length > 1 ? '' : 'none';
+        _renderizarMapa(_idxAtual);
+      });
+    });
+
+    // Refresh
+    const refreshBtn = document.getElementById('vendasMapaRefreshBtn');
+    if (refreshBtn && !refreshBtn._vmBound) {
+      refreshBtn._vmBound = true;
+      refreshBtn.addEventListener('click', () => {
+        _pararPlay();
+        _dadosBrutos = [];
+        _iniciado = false;
+        window._iniciarMapaVendasPagina(true);
+      });
+    }
+
+    // Play/Pause
+    const playBtn = document.getElementById('vendasMapaPlayBtn');
+    if (playBtn && !playBtn._vmBound) {
+      playBtn._vmBound = true;
+      playBtn.addEventListener('click', () => {
+        if (_playTimer) { _pararPlay(); }
+        else {
+          if (_idxAtual >= _mesesSelecionados.length - 1) _idxAtual = 0;
+          _iniciarPlay();
+        }
+      });
+    }
+
+    // Reset
+    const resetBtn = document.getElementById('vendasMapaResetBtn');
+    if (resetBtn && !resetBtn._vmBound) {
+      resetBtn._vmBound = true;
+      resetBtn.addEventListener('click', () => {
+        _pararPlay();
+        _idxAtual = 0;
+        _renderizarMapa(_idxAtual);
+      });
+    }
+
+    // Slider manual
+    const slider = document.getElementById('vendasMapaSlider');
+    if (slider && !slider._vmBound) {
+      slider._vmBound = true;
+      slider.addEventListener('input', () => {
+        _pararPlay();
+        _idxAtual = parseInt(slider.value, 10);
+        _renderizarMapa(_idxAtual);
+      });
+    }
+  };
 })();
