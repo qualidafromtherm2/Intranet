@@ -19477,6 +19477,25 @@ async function ensureComprasSchema() {
       )
     `);
 
+    // Garante a categoria operacional usada no fluxo curto de compras.
+    await pool.query(`
+      INSERT INTO configuracoes.categoria_compra (
+        codigo,
+        descricao,
+        conta_despesa,
+        conta_inativa,
+        categoria_superior,
+        updated_at
+      )
+      VALUES ('2.01.93', 'Embalagem Dos Produtos', 'S', 'N', '2.01', NOW())
+      ON CONFLICT (codigo) DO UPDATE SET
+        descricao = EXCLUDED.descricao,
+        conta_despesa = EXCLUDED.conta_despesa,
+        conta_inativa = EXCLUDED.conta_inativa,
+        categoria_superior = EXCLUDED.categoria_superior,
+        updated_at = NOW()
+    `);
+
     // Insere departamentos padrão se não existirem
     await pool.query(`
       INSERT INTO configuracoes.departamento (nome) 
@@ -19502,6 +19521,7 @@ async function ensureComprasSchema() {
       INSERT INTO configuracoes.centro_custo (nome)
       VALUES
         ('Materia prima'),
+        ('Embalagem dos produtos'),
         ('Investimento na produção'),
         ('Maquinas e equipamentos'),
         ('Manutenção'),
